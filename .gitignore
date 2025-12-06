@@ -1,0 +1,31 @@
+# Binário compilado
+bentoo
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Arquivos de teste e cobertura
+*.test
+coverage.out
+coverage.html
+*.prof
+
+# Dependências vendorizadas
+vendor/
+
+# Kiro
+.kiro/
+
+# Arquivos de IDE/editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Arquivos de sistema
+.DS_Store
+
+# Variáveis de ambiente
+.env
+.env.local
