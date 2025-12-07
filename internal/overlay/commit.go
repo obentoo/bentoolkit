@@ -4,9 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/common/ebuild"
-	"github.com/lucascouts/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/ebuild"
+	"github.com/obentoo/bentoo-tools/internal/common/git"
 )
 
 // ChangeType represents the type of change detected

@@ -3,7 +3,7 @@ package overlay
 import (
 	"testing"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
 )
 
 // TestPushWithInvalidConfig tests Push with invalid configuration

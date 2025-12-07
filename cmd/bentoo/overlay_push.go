@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/overlay"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
+)
+
+var (
+	pushDryRun bool
 )
 
 var pushCmd = &cobra.Command{
@@ -17,6 +21,7 @@ var pushCmd = &cobra.Command{
 }
 
 func init() {
+	pushCmd.Flags().BoolVarP(&pushDryRun, "dry-run", "n", false, "Show what would be pushed without pushing")
 	overlayCmd.AddCommand(pushCmd)
 }
 
@@ -25,6 +30,17 @@ func runPush(cmd *cobra.Command, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	if pushDryRun {
+		result, err := overlay.PushDryRun(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Dry-run mode - would push:")
+		fmt.Println(result)
+		return
 	}
 
 	result, err := overlay.Push(cfg)

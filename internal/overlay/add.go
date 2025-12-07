@@ -1,8 +1,8 @@
 package overlay
 
 import (
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/git"
 )
 
 // AddResult contains the result of an Add operation

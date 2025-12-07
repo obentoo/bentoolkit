@@ -6,14 +6,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/common/git"
-	"github.com/lucascouts/bentoo-tools/internal/overlay"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
 )
 
 var (
 	commitMessage string
+	commitDryRun  bool
 )
 
 var commitCmd = &cobra.Command{
@@ -27,6 +28,7 @@ based on the ebuild changes and a confirmation prompt is shown.`,
 
 func init() {
 	commitCmd.Flags().StringVarP(&commitMessage, "message", "m", "", "Custom commit message (bypasses auto-generation)")
+	commitCmd.Flags().BoolVarP(&commitDryRun, "dry-run", "n", false, "Show what would be committed without committing")
 	overlayCmd.AddCommand(commitCmd)
 }
 
@@ -88,6 +90,17 @@ func runCommit(cmd *cobra.Command, args []string) {
 	// Analyze changes and generate message
 	changes := overlay.AnalyzeChanges(stagedEntries)
 	generatedMessage := overlay.GenerateMessage(changes)
+
+	// Dry-run mode: just show what would be committed
+	if commitDryRun {
+		fmt.Println("Dry-run mode - would commit with message:")
+		fmt.Printf("  %s\n\n", generatedMessage)
+		fmt.Println("Staged files:")
+		for _, e := range stagedEntries {
+			fmt.Printf("  [%s] %s\n", e.Status, e.FilePath)
+		}
+		return
+	}
 
 	// Show preview and prompt
 	fmt.Println("Generated commit message:")

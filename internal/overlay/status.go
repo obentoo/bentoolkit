@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/git"
 )
 
 // FileType represents the type of file in an overlay

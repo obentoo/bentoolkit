@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/overlay"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
 )
 

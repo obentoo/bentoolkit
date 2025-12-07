@@ -185,3 +185,15 @@ func (g *GitRunner) Push() error {
 	_, _, err := g.runCommand("push")
 	return err
 }
+
+// PushDryRun shows what would be pushed without actually pushing
+func (g *GitRunner) PushDryRun() (string, error) {
+	stdout, _, err := g.runCommand("push", "--dry-run", "-v")
+	if err != nil {
+		return "", err
+	}
+	if stdout == "" {
+		return "Nothing to push (up-to-date with remote)", nil
+	}
+	return strings.TrimSpace(stdout), nil
+}

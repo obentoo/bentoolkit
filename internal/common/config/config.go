@@ -34,18 +34,59 @@ type GitConfig struct {
 	Email string `yaml:"email"`
 }
 
-// DefaultConfigPath returns the default config file path
-func DefaultConfigPath() (string, error) {
+// ConfigPaths returns all possible config file paths in priority order
+// 1. ~/.config/bentoo/config.yaml (XDG standard - priority)
+// 2. ~/.bentoo/config.yaml (legacy fallback)
+func ConfigPaths() ([]string, error) {
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check XDG_CONFIG_HOME first, fallback to ~/.config
+	xdgConfig := os.Getenv("XDG_CONFIG_HOME")
+	if xdgConfig == "" {
+		xdgConfig = filepath.Join(home, ".config")
+	}
+
+	return []string{
+		filepath.Join(xdgConfig, "bentoo", "config.yaml"),
+		filepath.Join(home, ".bentoo", "config.yaml"),
+	}, nil
+}
+
+// DefaultConfigPath returns the default config file path (XDG standard)
+func DefaultConfigPath() (string, error) {
+	paths, err := ConfigPaths()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "bentoo", "config.yaml"), nil
+	return paths[0], nil
 }
 
-// Load reads configuration from the default config file
+// FindConfigPath returns the first existing config file path
+// Returns the default path if no config file exists yet
+func FindConfigPath() (string, error) {
+	paths, err := ConfigPaths()
+	if err != nil {
+		return "", err
+	}
+
+	// Return first existing config file
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	// No config exists, return default (XDG) path for creation
+	return paths[0], nil
+}
+
+// Load reads configuration from the first available config file
+// Priority: ~/.config/bentoo/config.yaml > ~/.bentoo/config.yaml
 func Load() (*Config, error) {
-	configPath, err := DefaultConfigPath()
+	configPath, err := FindConfigPath()
 	if err != nil {
 		return nil, err
 	}

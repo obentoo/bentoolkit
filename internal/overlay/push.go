@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/lucascouts/bentoo-tools/internal/common/config"
-	"github.com/lucascouts/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/git"
 )
 
 var (
@@ -17,6 +17,17 @@ var (
 type PushResult struct {
 	UpToDate bool   // True if nothing was pushed (already up-to-date)
 	Message  string // Status message from git
+}
+
+// PushDryRun shows what would be pushed without actually pushing
+func PushDryRun(cfg *config.Config) (string, error) {
+	overlayPath, err := cfg.GetOverlayPath()
+	if err != nil {
+		return "", err
+	}
+
+	runner := git.NewGitRunner(overlayPath)
+	return runner.PushDryRun()
 }
 
 // Push pushes committed changes to the remote repository

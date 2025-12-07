@@ -2,10 +2,12 @@
 # Build, test, and install targets for bentoo CLI
 
 BINARY_NAME := bentoo
-MODULE := github.com/lucascouts/bentoo-tools
+MODULE := github.com/obentoo/bentoo-tools
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
-LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+VERSION_PKG := $(MODULE)/internal/common/version
+LDFLAGS := -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME)"
 
 # Directories
 BUILD_DIR := build
