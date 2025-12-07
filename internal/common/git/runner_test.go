@@ -49,7 +49,8 @@ func TestParseStatusOutput(t *testing.T) {
 			name:  "renamed file",
 			input: "R  old-name.txt -> new-name.txt\n",
 			expected: []StatusEntry{
-				{Status: "R", FilePath: "new-name.txt"},
+				{Status: "D", FilePath: "old-name.txt"},
+				{Status: "A", FilePath: "new-name.txt"},
 			},
 		},
 		{

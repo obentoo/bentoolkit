@@ -90,10 +90,23 @@ func ParseStatusOutput(output string) []StatusEntry {
 		filePath := line[3:]
 
 		// Handle renamed files: R  old -> new
+		// Convert rename to delete + add for proper version bump detection
 		if strings.HasPrefix(status, "R") {
 			parts := strings.Split(filePath, " -> ")
 			if len(parts) == 2 {
-				filePath = parts[1]
+				oldPath := strings.TrimSpace(parts[0])
+				newPath := strings.TrimSpace(parts[1])
+				// Add delete entry for old file
+				entries = append(entries, StatusEntry{
+					Status:   "D",
+					FilePath: oldPath,
+				})
+				// Add entry for new file
+				entries = append(entries, StatusEntry{
+					Status:   "A",
+					FilePath: newPath,
+				})
+				continue
 			}
 		}
 
