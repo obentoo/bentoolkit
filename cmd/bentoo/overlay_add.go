@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/logger"
 	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -24,19 +24,19 @@ func init() {
 func runAdd(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		logger.Error("loading config: %v", err)
 		os.Exit(1)
 	}
 
 	result, err := overlay.AddFiles(cfg, args...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 
 	// Display errors for individual files
 	for _, e := range result.Errors {
-		fmt.Fprintf(os.Stderr, "%v\n", e)
+		logger.Error("%v", e)
 	}
 
 	// Display success message if any files were added
@@ -44,10 +44,10 @@ func runAdd(cmd *cobra.Command, args []string) {
 		// Get and display status after adding
 		statuses, err := overlay.Status(cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting status: %v\n", err)
+			logger.Error("getting status: %v", err)
 			os.Exit(1)
 		}
-		fmt.Println(overlay.FormatStatus(statuses))
+		logger.Info("%s", overlay.FormatStatus(statuses))
 	}
 
 	// Exit with error if there were any failures

@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -253,5 +254,208 @@ func TestFormatStatusOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "(manifest)") {
 		t.Error("Output should contain file type '(manifest)'")
+	}
+}
+
+
+// Tests for Status() using MockGitRunner
+// _Requirements: 8.3_
+
+// TestStatusWithMockGitRunner tests the Status function with mock git runner
+func TestStatusWithMockGitRunner(t *testing.T) {
+	t.Run("successful status with multiple entries", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			return []git.StatusEntry{
+				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+				{Status: "M", FilePath: "app-misc/hello/Manifest"},
+				{Status: "A", FilePath: "sys-apps/world/world-2.0.ebuild"},
+			}, nil
+		}
+
+		statuses, err := StatusWithExecutor(mock)
+		if err != nil {
+			t.Errorf("StatusWithExecutor() error = %v, want nil", err)
+		}
+
+		// Should have 2 package groups
+		if len(statuses) != 2 {
+			t.Fatalf("Expected 2 package groups, got %d", len(statuses))
+		}
+
+		// Check first package (sorted alphabetically)
+		if statuses[0].Category != "app-misc" || statuses[0].Package != "hello" {
+			t.Errorf("First package = %s/%s, want app-misc/hello", statuses[0].Category, statuses[0].Package)
+		}
+		if len(statuses[0].Changes) != 2 {
+			t.Errorf("app-misc/hello changes = %d, want 2", len(statuses[0].Changes))
+		}
+
+		// Check second package
+		if statuses[1].Category != "sys-apps" || statuses[1].Package != "world" {
+			t.Errorf("Second package = %s/%s, want sys-apps/world", statuses[1].Category, statuses[1].Package)
+		}
+	})
+
+	t.Run("empty status", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			return []git.StatusEntry{}, nil
+		}
+
+		statuses, err := StatusWithExecutor(mock)
+		if err != nil {
+			t.Errorf("StatusWithExecutor() error = %v, want nil", err)
+		}
+
+		if len(statuses) != 0 {
+			t.Errorf("Expected 0 package groups, got %d", len(statuses))
+		}
+	})
+
+	t.Run("status with error", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			return nil, errors.New("git status failed: not a git repository")
+		}
+
+		_, err := StatusWithExecutor(mock)
+		if err == nil {
+			t.Error("StatusWithExecutor() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "not a git repository") {
+			t.Errorf("Error should contain 'not a git repository', got: %v", err)
+		}
+	})
+}
+
+// TestStatusGroupingWithMock tests status grouping behavior with mock
+// _Requirements: 8.3_
+func TestStatusGroupingWithMock(t *testing.T) {
+	testCases := []struct {
+		name           string
+		entries        []git.StatusEntry
+		expectedGroups int
+		checkFunc      func(t *testing.T, statuses []PackageStatus)
+	}{
+		{
+			name: "group by category/package",
+			entries: []git.StatusEntry{
+				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+				{Status: "M", FilePath: "app-misc/hello/Manifest"},
+				{Status: "A", FilePath: "app-misc/hello/metadata.xml"},
+			},
+			expectedGroups: 1,
+			checkFunc: func(t *testing.T, statuses []PackageStatus) {
+				if len(statuses[0].Changes) != 3 {
+					t.Errorf("Expected 3 changes in group, got %d", len(statuses[0].Changes))
+				}
+			},
+		},
+		{
+			name: "separate packages in same category",
+			entries: []git.StatusEntry{
+				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+				{Status: "A", FilePath: "app-misc/world/world-1.0.ebuild"},
+			},
+			expectedGroups: 2,
+			checkFunc: func(t *testing.T, statuses []PackageStatus) {
+				if statuses[0].Package != "hello" {
+					t.Errorf("First package = %s, want hello", statuses[0].Package)
+				}
+				if statuses[1].Package != "world" {
+					t.Errorf("Second package = %s, want world", statuses[1].Package)
+				}
+			},
+		},
+		{
+			name: "different file types",
+			entries: []git.StatusEntry{
+				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+				{Status: "M", FilePath: "app-misc/hello/Manifest"},
+				{Status: "A", FilePath: "app-misc/hello/metadata.xml"},
+				{Status: "A", FilePath: "app-misc/hello/files/patch.patch"},
+			},
+			expectedGroups: 1,
+			checkFunc: func(t *testing.T, statuses []PackageStatus) {
+				fileTypes := make(map[FileType]bool)
+				for _, change := range statuses[0].Changes {
+					fileTypes[change.Type] = true
+				}
+				if !fileTypes[FileTypeEbuild] {
+					t.Error("Expected ebuild file type")
+				}
+				if !fileTypes[FileTypeManifest] {
+					t.Error("Expected manifest file type")
+				}
+				if !fileTypes[FileTypeMetadata] {
+					t.Error("Expected metadata file type")
+				}
+				if !fileTypes[FileTypeFiles] {
+					t.Error("Expected files file type")
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := git.NewMockGitRunner("/test/overlay")
+			mock.StatusFunc = func() ([]git.StatusEntry, error) {
+				return tc.entries, nil
+			}
+
+			statuses, err := StatusWithExecutor(mock)
+			if err != nil {
+				t.Errorf("StatusWithExecutor() error = %v", err)
+			}
+
+			if len(statuses) != tc.expectedGroups {
+				t.Errorf("Expected %d groups, got %d", tc.expectedGroups, len(statuses))
+			}
+
+			if tc.checkFunc != nil {
+				tc.checkFunc(t, statuses)
+			}
+		})
+	}
+}
+
+// TestStatusLabelMappingWithMock tests that status labels are correctly mapped
+// _Requirements: 8.3_
+func TestStatusLabelMappingWithMock(t *testing.T) {
+	testCases := []struct {
+		gitStatus     string
+		expectedLabel string
+	}{
+		{"A", "Added"},
+		{"M", "Modified"},
+		{"D", "Deleted"},
+		{"R", "Renamed"},
+		{"??", "Untracked"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.gitStatus, func(t *testing.T) {
+			mock := git.NewMockGitRunner("/test/overlay")
+			mock.StatusFunc = func() ([]git.StatusEntry, error) {
+				return []git.StatusEntry{
+					{Status: tc.gitStatus, FilePath: "app-misc/hello/hello-1.0.ebuild"},
+				}, nil
+			}
+
+			statuses, err := StatusWithExecutor(mock)
+			if err != nil {
+				t.Errorf("StatusWithExecutor() error = %v", err)
+			}
+
+			if len(statuses) != 1 || len(statuses[0].Changes) != 1 {
+				t.Fatal("Expected 1 package with 1 change")
+			}
+
+			if statuses[0].Changes[0].Status != tc.expectedLabel {
+				t.Errorf("Status label = %s, want %s", statuses[0].Changes[0].Status, tc.expectedLabel)
+			}
+		})
 	}
 }

@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrOverlayPathNotSet   = errors.New("overlay path is not configured")
-	ErrOverlayPathNotFound = errors.New("overlay path does not exist")
-	ErrGitUserNotConfigured = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
+	ErrOverlayPathNotSet      = errors.New("overlay path is not configured")
+	ErrOverlayPathNotFound    = errors.New("overlay path does not exist")
+	ErrOverlayInvalidStructure = errors.New("overlay structure is invalid")
+	ErrGitUserNotConfigured   = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
 )
 
 // Config represents the application configuration
@@ -149,6 +150,18 @@ func (c *Config) SaveTo(path string) error {
 
 // GetOverlayPath returns the validated overlay path
 func (c *Config) GetOverlayPath() (string, error) {
+	return c.getOverlayPathWithValidation(true)
+}
+
+// GetOverlayPathNoValidation returns the overlay path without structure validation.
+// Use this when you need the path but don't require a valid overlay structure
+// (e.g., for overlay init command).
+func (c *Config) GetOverlayPathNoValidation() (string, error) {
+	return c.getOverlayPathWithValidation(false)
+}
+
+// getOverlayPathWithValidation returns the overlay path with optional structure validation
+func (c *Config) getOverlayPathWithValidation(validate bool) (string, error) {
 	if c.Overlay.Path == "" {
 		return "", ErrOverlayPathNotSet
 	}
@@ -174,6 +187,17 @@ func (c *Config) GetOverlayPath() (string, error) {
 
 	if !info.IsDir() {
 		return "", ErrOverlayPathNotFound
+	}
+
+	// Validate overlay structure if requested
+	if validate {
+		result := ValidateOverlayStructure(path)
+		if !result.Valid {
+			return "", &OverlayValidationError{
+				Path:   path,
+				Errors: result.Errors,
+			}
+		}
 	}
 
 	return path, nil
@@ -270,4 +294,55 @@ func ParseGitconfigContent(r interface{ Read([]byte) (int, error) }) (user, emai
 	}
 
 	return user, email, nil
+}
+
+
+// OverlayValidationResult contains overlay validation results
+type OverlayValidationResult struct {
+	Valid    bool     // True if overlay structure is valid
+	Errors   []string // Critical issues that prevent operation
+	Warnings []string // Non-critical issues
+}
+
+// OverlayValidationError represents an overlay validation failure
+type OverlayValidationError struct {
+	Path   string
+	Errors []string
+}
+
+func (e *OverlayValidationError) Error() string {
+	msg := "overlay validation failed for " + e.Path + ":"
+	for _, err := range e.Errors {
+		msg += "\n  - " + err
+	}
+	msg += "\n\nSuggestion: run 'bentoo overlay init' or check the overlay path configuration"
+	return msg
+}
+
+// ValidateOverlayStructure checks if a path is a valid Gentoo overlay.
+// A valid overlay must have:
+// - profiles/ directory
+// - metadata/ directory
+func ValidateOverlayStructure(path string) *OverlayValidationResult {
+	result := &OverlayValidationResult{
+		Valid:    true,
+		Errors:   []string{},
+		Warnings: []string{},
+	}
+
+	// Check for profiles/ directory
+	profilesPath := filepath.Join(path, "profiles")
+	if _, err := os.Stat(profilesPath); os.IsNotExist(err) {
+		result.Valid = false
+		result.Errors = append(result.Errors, "missing profiles/ directory")
+	}
+
+	// Check for metadata/ directory
+	metadataPath := filepath.Join(path, "metadata")
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		result.Valid = false
+		result.Errors = append(result.Errors, "missing metadata/ directory")
+	}
+
+	return result
 }

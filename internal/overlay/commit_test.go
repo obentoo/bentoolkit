@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoo-tools/internal/common/config"
 	"github.com/obentoo/bentoo-tools/internal/common/ebuild"
 	"github.com/obentoo/bentoo-tools/internal/common/git"
 )
@@ -474,6 +476,162 @@ func TestNormalizeStatus(t *testing.T) {
 			result := normalizeStatus(tt.input)
 			if result != tt.expected {
 				t.Errorf("normalizeStatus(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+
+// Tests for Commit() using MockGitRunner
+// _Requirements: 8.2_
+
+// TestCommitWithMockGitRunner tests the Commit function with mock git runner
+func TestCommitWithMockGitRunner(t *testing.T) {
+	t.Run("successful commit", func(t *testing.T) {
+		var capturedMessage, capturedUser, capturedEmail string
+
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.CommitFunc = func(message, user, email string) error {
+			capturedMessage = message
+			capturedUser = user
+			capturedEmail = email
+			return nil
+		}
+
+		cfg := &config.Config{
+			Git: config.GitConfig{
+				User:  "Test User",
+				Email: "test@example.com",
+			},
+		}
+
+		err := CommitWithExecutor(cfg, "add(app-misc/hello-1.0)", mock)
+		if err != nil {
+			t.Errorf("CommitWithExecutor() error = %v, want nil", err)
+		}
+
+		if capturedMessage != "add(app-misc/hello-1.0)" {
+			t.Errorf("Commit message = %q, want %q", capturedMessage, "add(app-misc/hello-1.0)")
+		}
+		if capturedUser != "Test User" {
+			t.Errorf("Commit user = %q, want %q", capturedUser, "Test User")
+		}
+		if capturedEmail != "test@example.com" {
+			t.Errorf("Commit email = %q, want %q", capturedEmail, "test@example.com")
+		}
+	})
+
+	t.Run("commit with error", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.CommitFunc = func(message, user, email string) error {
+			return errors.New("git commit failed: nothing to commit")
+		}
+
+		cfg := &config.Config{
+			Git: config.GitConfig{
+				User:  "Test User",
+				Email: "test@example.com",
+			},
+		}
+
+		err := CommitWithExecutor(cfg, "test message", mock)
+		if err == nil {
+			t.Error("CommitWithExecutor() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "nothing to commit") {
+			t.Errorf("Error message should contain 'nothing to commit', got: %v", err)
+		}
+	})
+
+	t.Run("commit with empty user info", func(t *testing.T) {
+		var capturedUser, capturedEmail string
+
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.CommitFunc = func(message, user, email string) error {
+			capturedUser = user
+			capturedEmail = email
+			return nil
+		}
+
+		cfg := &config.Config{
+			Git: config.GitConfig{
+				User:  "",
+				Email: "",
+			},
+		}
+
+		err := CommitWithExecutor(cfg, "test message", mock)
+		if err != nil {
+			t.Errorf("CommitWithExecutor() error = %v, want nil", err)
+		}
+
+		// Empty user info should be passed through
+		if capturedUser != "" {
+			t.Errorf("Commit user = %q, want empty string", capturedUser)
+		}
+		if capturedEmail != "" {
+			t.Errorf("Commit email = %q, want empty string", capturedEmail)
+		}
+	})
+}
+
+// TestCommitMessageGeneration tests that generated messages are passed correctly to git
+// _Requirements: 8.2_
+func TestCommitMessageGeneration(t *testing.T) {
+	testCases := []struct {
+		name     string
+		changes  []Change
+		expected string
+	}{
+		{
+			name: "single add",
+			changes: []Change{
+				{Type: Add, Category: "app-misc", Package: "hello", Version: "1.0"},
+			},
+			expected: "add(app-misc/hello-1.0)",
+		},
+		{
+			name: "version bump",
+			changes: []Change{
+				{Type: Up, Category: "sys-apps", Package: "world", Version: "2.0", OldVersion: "1.0"},
+			},
+			expected: "up(sys-apps/world-1.0 -> 2.0)",
+		},
+		{
+			name: "multiple changes",
+			changes: []Change{
+				{Type: Add, Category: "app-misc", Package: "new", Version: "1.0"},
+				{Type: Del, Category: "app-misc", Package: "old", Version: "1.0"},
+			},
+			expected: "add(app-misc/new-1.0), del(app-misc/old-1.0)",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedMessage string
+
+			mock := git.NewMockGitRunner("/test/overlay")
+			mock.CommitFunc = func(message, user, email string) error {
+				capturedMessage = message
+				return nil
+			}
+
+			cfg := &config.Config{
+				Git: config.GitConfig{
+					User:  "Test User",
+					Email: "test@example.com",
+				},
+			}
+
+			message := GenerateMessage(tc.changes)
+			err := CommitWithExecutor(cfg, message, mock)
+			if err != nil {
+				t.Errorf("CommitWithExecutor() error = %v", err)
+			}
+
+			if capturedMessage != tc.expected {
+				t.Errorf("Commit message = %q, want %q", capturedMessage, tc.expected)
 			}
 		})
 	}

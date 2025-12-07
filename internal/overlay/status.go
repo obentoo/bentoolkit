@@ -7,6 +7,7 @@ import (
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
 	"github.com/obentoo/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/output"
 )
 
 // FileType represents the type of file in an overlay
@@ -162,7 +163,13 @@ func Status(cfg *config.Config) ([]PackageStatus, error) {
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	entries, err := runner.Status()
+	return StatusWithExecutor(runner)
+}
+
+// StatusWithExecutor retrieves and groups the current git status using the provided GitExecutor.
+// This function is useful for testing with mock implementations.
+func StatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
+	entries, err := executor.Status()
 	if err != nil {
 		return nil, err
 	}
@@ -170,10 +177,10 @@ func Status(cfg *config.Config) ([]PackageStatus, error) {
 	return GroupStatusEntries(entries), nil
 }
 
-// FormatStatus formats package statuses into a human-readable string
+// FormatStatus formats package statuses into a human-readable string with colors
 func FormatStatus(statuses []PackageStatus) string {
 	if len(statuses) == 0 {
-		return "No changes detected (working directory clean)"
+		return output.Sprintf(output.Dim, "No changes detected (working directory clean)")
 	}
 
 	var sb strings.Builder
@@ -183,12 +190,9 @@ func FormatStatus(statuses []PackageStatus) string {
 			sb.WriteString("\n")
 		}
 
-		// Write package header
-		if ps.Category != "" {
-			sb.WriteString(fmt.Sprintf("%s/%s:\n", ps.Category, ps.Package))
-		} else {
-			sb.WriteString(fmt.Sprintf("%s:\n", ps.Package))
-		}
+		// Write package header with color
+		sb.WriteString(output.FormatPackage(ps.Category, ps.Package))
+		sb.WriteString(":\n")
 
 		// Group changes by file type for cleaner output
 		changesByType := make(map[FileType][]FileChange)
@@ -206,7 +210,8 @@ func FormatStatus(statuses []PackageStatus) string {
 			}
 
 			for _, change := range changes {
-				sb.WriteString(fmt.Sprintf("  [%s] %s (%s)\n", change.Status, change.Name, ft))
+				statusFormatted := output.FormatStatus(change.Status)
+				sb.WriteString(fmt.Sprintf("  %s %s (%s)\n", statusFormatted, change.Name, ft))
 			}
 		}
 	}

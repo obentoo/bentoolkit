@@ -19,6 +19,16 @@ func setupTestOverlay(t *testing.T) (string, *config.Config, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
+	// Create required overlay structure (profiles/ and metadata/)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "profiles"), 0755); err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to create profiles dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "metadata"), 0755); err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to create metadata dir: %v", err)
+	}
+
 	// Initialize git repo using exec.Command
 	runner := git.NewGitRunner(tmpDir)
 	_, err = runner.Status()

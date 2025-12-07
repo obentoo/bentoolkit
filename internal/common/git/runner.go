@@ -210,3 +210,27 @@ func (g *GitRunner) PushDryRun() (string, error) {
 	}
 	return strings.TrimSpace(stdout), nil
 }
+
+// Fetch fetches changes from a remote repository
+func (g *GitRunner) Fetch(remote string) error {
+	_, _, err := g.runCommand("fetch", remote)
+	return err
+}
+
+// Merge merges a branch into the current branch.
+// If there are conflicts, the error message includes the conflict details from stdout.
+func (g *GitRunner) Merge(branch string) error {
+	stdout, stderr, err := g.runCommand("merge", branch)
+	if err != nil {
+		// Git outputs conflict information to stdout, so include it in the error
+		// for proper conflict detection
+		combinedOutput := strings.TrimSpace(stdout + "\n" + stderr)
+		if combinedOutput != "" {
+			return errors.Join(ErrGitCommand, errors.New(combinedOutput))
+		}
+	}
+	return err
+}
+
+// Ensure GitRunner implements GitExecutor interface
+var _ GitExecutor = (*GitRunner)(nil)

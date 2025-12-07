@@ -165,6 +165,14 @@ func TestValidOverlayPathReturnsPath(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Create required overlay structure
+	if err := os.MkdirAll(filepath.Join(tmpDir, "profiles"), 0755); err != nil {
+		t.Fatalf("Failed to create profiles dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "metadata"), 0755); err != nil {
+		t.Fatalf("Failed to create metadata dir: %v", err)
+	}
+
 	cfg := &Config{
 		Overlay: OverlayConfig{
 			Path: tmpDir,

@@ -1,11 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -29,13 +29,13 @@ func init() {
 func runDiff(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		logger.Error("loading config: %v", err)
 		os.Exit(1)
 	}
 
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 
@@ -56,7 +56,7 @@ func runDiff(cmd *cobra.Command, args []string) {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Error running git diff: %v\n", err)
+		logger.Error("running git diff: %v", err)
 		os.Exit(1)
 	}
 }

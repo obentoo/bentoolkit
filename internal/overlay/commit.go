@@ -412,12 +412,18 @@ func Commit(cfg *config.Config, message string) error {
 		return err
 	}
 
+	runner := git.NewGitRunner(overlayPath)
+	return CommitWithExecutor(cfg, message, runner)
+}
+
+// CommitWithExecutor executes a git commit using the provided GitExecutor.
+// This function is useful for testing with mock implementations.
+func CommitWithExecutor(cfg *config.Config, message string, executor git.GitExecutor) error {
 	// Get git user info
 	user := cfg.Git.User
 	email := cfg.Git.Email
 
-	runner := git.NewGitRunner(overlayPath)
-	return runner.Commit(message, user, email)
+	return executor.Commit(message, user, email)
 }
 
 // GetStagedChanges returns the list of changes from staged files

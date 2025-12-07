@@ -8,6 +8,8 @@ import (
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
 	"github.com/obentoo/bentoo-tools/internal/common/git"
+	"github.com/obentoo/bentoo-tools/internal/common/logger"
+	"github.com/obentoo/bentoo-tools/internal/common/output"
 	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -35,14 +37,14 @@ func init() {
 func runCommit(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		logger.Error("loading config: %v", err)
 		os.Exit(1)
 	}
 
 	// Get git user info
 	user, email, err := cfg.GetGitUser()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 	// Store in config for commit function
@@ -52,24 +54,24 @@ func runCommit(cmd *cobra.Command, args []string) {
 	// If custom message provided, use it directly
 	if commitMessage != "" {
 		if err := overlay.Commit(cfg, commitMessage); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			logger.Error("%v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Changes committed successfully.")
+		logger.Info("Changes committed successfully.")
 		return
 	}
 
 	// Get staged changes for auto-generation
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 
 	runner := git.NewGitRunner(overlayPath)
 	entries, err := runner.Status()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting status: %v\n", err)
+		logger.Error("getting status: %v", err)
 		os.Exit(1)
 	}
 
@@ -83,7 +85,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 	}
 
 	if len(stagedEntries) == 0 {
-		fmt.Println("No staged changes to commit.")
+		logger.Warn("No staged changes to commit.")
 		os.Exit(0)
 	}
 
@@ -93,24 +95,24 @@ func runCommit(cmd *cobra.Command, args []string) {
 
 	// Dry-run mode: just show what would be committed
 	if commitDryRun {
-		fmt.Println("Dry-run mode - would commit with message:")
-		fmt.Printf("  %s\n\n", generatedMessage)
-		fmt.Println("Staged files:")
+		logger.Info("Dry-run mode - would commit with message:")
+		fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
+		logger.Info("Staged files:")
 		for _, e := range stagedEntries {
-			fmt.Printf("  [%s] %s\n", e.Status, e.FilePath)
+			fmt.Printf("  %s %s\n", output.FormatStatus(overlay.StatusLabel(e.Status)), e.FilePath)
 		}
 		return
 	}
 
 	// Show preview and prompt
-	fmt.Println("Generated commit message:")
-	fmt.Printf("  %s\n\n", generatedMessage)
+	logger.Info("Generated commit message:")
+	fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
 	fmt.Print("Proceed? [y]es / [e]dit / [c]ancel: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		logger.Error("reading input: %v", err)
 		os.Exit(1)
 	}
 
@@ -120,36 +122,36 @@ func runCommit(cmd *cobra.Command, args []string) {
 	case "y", "yes", "":
 		// Proceed with generated message
 		if err := overlay.Commit(cfg, generatedMessage); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			logger.Error("%v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Changes committed successfully.")
+		logger.Info("Changes committed successfully.")
 
 	case "e", "edit":
 		// Allow user to enter custom message
 		fmt.Print("Enter commit message: ")
 		customMessage, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			logger.Error("reading input: %v", err)
 			os.Exit(1)
 		}
 		customMessage = strings.TrimSpace(customMessage)
 		if customMessage == "" {
-			fmt.Println("Commit cancelled (empty message).")
+			logger.Warn("Commit cancelled (empty message).")
 			os.Exit(0)
 		}
 		if err := overlay.Commit(cfg, customMessage); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			logger.Error("%v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Changes committed successfully.")
+		logger.Info("Changes committed successfully.")
 
 	case "c", "cancel":
-		fmt.Println("Commit cancelled.")
+		logger.Info("Commit cancelled.")
 		os.Exit(0)
 
 	default:
-		fmt.Println("Invalid option. Commit cancelled.")
+		logger.Error("Invalid option. Commit cancelled.")
 		os.Exit(1)
 	}
 }

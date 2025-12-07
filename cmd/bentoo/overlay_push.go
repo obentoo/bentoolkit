@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/logger"
 	"github.com/obentoo/bentoo-tools/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -28,26 +28,26 @@ func init() {
 func runPush(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		logger.Error("loading config: %v", err)
 		os.Exit(1)
 	}
 
 	if pushDryRun {
 		result, err := overlay.PushDryRun(cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			logger.Error("%v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Dry-run mode - would push:")
-		fmt.Println(result)
+		logger.Info("Dry-run mode - would push:")
+		logger.Info("%s", result)
 		return
 	}
 
 	result, err := overlay.Push(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 
-	fmt.Println(result.Message)
+	logger.Info("%s", result.Message)
 }

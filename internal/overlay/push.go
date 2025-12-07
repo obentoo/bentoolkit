@@ -39,7 +39,13 @@ func Push(cfg *config.Config) (*PushResult, error) {
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	err = runner.Push()
+	return PushWithExecutor(runner)
+}
+
+// PushWithExecutor pushes committed changes using the provided GitExecutor.
+// This function is useful for testing with mock implementations.
+func PushWithExecutor(executor git.GitExecutor) (*PushResult, error) {
+	err := executor.Push()
 
 	if err != nil {
 		// Check if the error indicates up-to-date status

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/obentoo/bentoo-tools/internal/common/config"
+	"github.com/obentoo/bentoo-tools/internal/common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -30,13 +31,13 @@ func init() {
 func runLog(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		logger.Error("loading config: %v", err)
 		os.Exit(1)
 	}
 
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Error("%v", err)
 		os.Exit(1)
 	}
 
@@ -54,7 +55,7 @@ func runLog(cmd *cobra.Command, args []string) {
 	gitCmd.Stderr = os.Stderr
 
 	if err := gitCmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running git log: %v\n", err)
+		logger.Error("running git log: %v", err)
 		os.Exit(1)
 	}
 }
