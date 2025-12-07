@@ -5,8 +5,6 @@ CLI tools for Bentoo Linux distribution maintainers and developers.
 ## Modules
 
 - **overlay**: Bentoo overlay commit management with automatic message generation
-- **llm**: Ebuild review and fixes via AI (planned)
-- **kernel**: Kernel configuration and build (planned)
 
 ## Installation
 
@@ -248,25 +246,6 @@ bentoo-tools/
 └── README.md
 ```
 
-## Future Modules
-
-### LLM Module (Planned)
-
-AI-powered ebuild review and fixes:
-
-```bash
-bentoo llm review app-misc/hello/hello-1.0.ebuild
-```
-
-### Kernel Module (Planned)
-
-Kernel configuration and build management:
-
-```bash
-bentoo kernel config
-bentoo kernel build
-```
-
 ## License
 
-GPL-2.0
+MIT
