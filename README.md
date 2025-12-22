@@ -74,6 +74,16 @@ overlay:
 git:
   user: your_username
   email: your_email@example.com
+
+github:
+  token: ghp_xxxxxxxxxxxx  # Optional: for higher API rate limits
+
+# Optional: custom repositories for compare command
+repositories:
+  my-overlay:
+    provider: github  # github, gitlab, or git
+    url: myuser/my-overlay
+    branch: main
 ```
 
 ### Configuration Options
@@ -83,6 +93,8 @@ git:
 | `overlay.path` | Path to your local Bentoo overlay repository | Yes |
 | `git.user` | Git username for commits (fallback if not in ~/.gitconfig) | No |
 | `git.email` | Git email for commits (fallback if not in ~/.gitconfig) | No |
+| `github.token` | GitHub personal access token for higher API rate limits | No |
+| `repositories.<name>` | Custom repository definitions for the compare command | No |
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
 
@@ -171,6 +183,132 @@ Push committed changes to the remote repository:
 bentoo overlay push
 ```
 
+#### Compare with Upstream
+
+Compare your overlay packages with upstream repositories to find outdated packages:
+
+```bash
+# Compare with official Gentoo (default)
+bentoo overlay compare
+bentoo overlay compare gentoo
+
+# Compare with GURU (Gentoo User Repository)
+bentoo overlay compare guru
+
+# Use git clone instead of API (avoids rate limits)
+bentoo overlay compare --clone
+bentoo overlay compare guru --clone
+```
+
+This command will:
+- Scan your local Bentoo overlay for all packages
+- Query the specified upstream repository (via API or git clone)
+- Compare versions using Gentoo's version comparison rules
+- **Automatically ignore live ebuilds** (versions with `9999`)
+- Display a table of outdated packages
+
+**Built-in Repositories:**
+
+| Name | Description | Provider |
+|------|-------------|----------|
+| `gentoo` | Official Gentoo repository (default) | GitHub API |
+| `guru` | Gentoo User Repository | GitHub API |
+
+Example output:
+```
+Scanning Bentoo overlay at /var/db/repos/bentoo...
+Found 142 packages in Bentoo overlay
+Comparing with gentoo using GitHub API (gentoo/gentoo)...
+
+Outdated Packages (Bentoo < Gentoo):
+┌─────────────────────────┬──────────────┬────────────────┬────────────────┐
+│ Package                 │ Category     │ Bentoo Version │ Gentoo Version │
+├─────────────────────────┼──────────────┼────────────────┼────────────────┤
+│ vscode                  │ app-editors  │ 1.107.1        │ 1.108.0        │
+│ firefox                 │ www-client   │ 128.0          │ 129.0          │
+└─────────────────────────┴──────────────┴────────────────┴────────────────┘
+
+Total: 2 outdated packages
+```
+
+**Note:** Live ebuilds (versions containing `9999`) are automatically ignored, as they represent bleeding-edge/git versions and not stable releases.
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--clone` | Use git clone instead of API | false |
+| `--cache-dir` | Directory to cache data | `~/.cache/bentoo/compare` |
+| `--no-cache` | Disable caching | false |
+| `--timeout` | HTTP request timeout (seconds) | 30 |
+| `--token` | Auth token for API provider | - |
+
+**API vs Git Clone:**
+
+| Mode | Pros | Cons |
+|------|------|------|
+| API (default) | Fast, no disk space | Rate limited (60/hour or 5000/hour with token) |
+| Clone (`--clone`) | No rate limits, always fresh | Slower first run, uses disk space |
+
+**Rate Limits (API mode):**
+- Without token: 60 requests/hour
+- With token: 5,000 requests/hour
+
+**Using a GitHub Token:**
+
+You can provide a token in three ways (priority order):
+
+1. **Command line flag:**
+   ```bash
+   bentoo overlay compare --token ghp_xxxxxxxxxxxx
+   ```
+
+2. **Environment variable:**
+   ```bash
+   export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+   bentoo overlay compare
+   ```
+
+3. **Configuration file** (`~/.config/bentoo/config.yaml`):
+   ```yaml
+   github:
+     token: ghp_xxxxxxxxxxxx
+   ```
+
+To create a token: Go to [GitHub Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens) and generate a new token. No scopes are required (public repository access only).
+
+**Custom Repositories:**
+
+You can define custom repositories in your configuration file:
+
+```yaml
+# ~/.config/bentoo/config.yaml
+repositories:
+  # GitLab repository
+  gentoo-gitlab:
+    provider: gitlab
+    url: https://gitlab.gentoo.org/repo/gentoo
+    branch: master
+
+  # Custom GitHub overlay
+  my-overlay:
+    provider: github
+    url: myuser/my-overlay
+    token: ghp_xxxxxxxxxxxx
+
+  # Generic git repository
+  local-mirror:
+    provider: git
+    url: https://git.example.com/overlay.git
+    branch: main
+```
+
+Then use them:
+```bash
+bentoo overlay compare my-overlay
+bentoo overlay compare gentoo-gitlab --clone
+```
+
 ### Workflow Example
 
 Typical workflow for adding a new package version:
@@ -230,19 +368,29 @@ go install golang.org/x/vuln/cmd/govulncheck@latest
 
 ```
 bentoolkit/
-├── cmd/bentoo/           # CLI commands
-│   ├── main.go           # Entry point
-│   ├── overlay_add.go    # overlay add command
-│   ├── overlay_commit.go # overlay commit command
-│   ├── overlay_push.go   # overlay push command
-│   └── overlay_status.go # overlay status command
+├── cmd/bentoo/            # CLI commands
+│   ├── main.go            # Entry point
+│   ├── overlay_add.go     # overlay add command
+│   ├── overlay_commit.go  # overlay commit command
+│   ├── overlay_compare.go # overlay compare command
+│   ├── overlay_push.go    # overlay push command
+│   └── overlay_status.go  # overlay status command
 ├── internal/
 │   ├── common/
-│   │   ├── config/       # Configuration loading
-│   │   ├── ebuild/       # Ebuild parsing and version comparison
-│   │   └── git/          # Git operations wrapper
-│   └── overlay/          # Overlay business logic
-├── Makefile              # Build targets
+│   │   ├── config/        # Configuration loading
+│   │   ├── ebuild/        # Ebuild parsing and version comparison
+│   │   ├── git/           # Git operations wrapper
+│   │   ├── github/        # GitHub API client (legacy)
+│   │   └── provider/      # Repository providers
+│   │       ├── interface.go   # Provider interface
+│   │       ├── factory.go     # Provider factory
+│   │       ├── github.go      # GitHub API provider
+│   │       ├── gitlab.go      # GitLab API provider
+│   │       └── gitclone.go    # Git clone provider
+│   └── overlay/           # Overlay business logic
+│       ├── compare.go     # Package comparison logic
+│       └── scanner.go     # Overlay scanning
+├── Makefile               # Build targets
 └── README.md
 ```
 

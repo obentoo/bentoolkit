@@ -19,8 +19,10 @@ var (
 
 // Config represents the application configuration
 type Config struct {
-	Overlay OverlayConfig `yaml:"overlay"`
-	Git     GitConfig     `yaml:"git"`
+	Overlay      OverlayConfig          `yaml:"overlay"`
+	Git          GitConfig              `yaml:"git"`
+	GitHub       GitHubConfig           `yaml:"github"`
+	Repositories map[string]*RepoConfig `yaml:"repositories,omitempty"`
 }
 
 // OverlayConfig holds overlay-specific settings
@@ -33,6 +35,19 @@ type OverlayConfig struct {
 type GitConfig struct {
 	User  string `yaml:"user"`
 	Email string `yaml:"email"`
+}
+
+// GitHubConfig holds GitHub API settings
+type GitHubConfig struct {
+	Token string `yaml:"token"` // Personal access token for higher rate limits
+}
+
+// RepoConfig holds configuration for a custom repository
+type RepoConfig struct {
+	Provider string `yaml:"provider"` // "github", "gitlab", or "git"
+	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab
+	Token    string `yaml:"token"`    // Optional auth token
+	Branch   string `yaml:"branch"`   // Branch to use (default: master/main)
 }
 
 // ConfigPaths returns all possible config file paths in priority order
