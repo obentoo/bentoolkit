@@ -67,7 +67,6 @@ func setupTestRepo(t *testing.T) *testRepo {
 	return repo
 }
 
-
 // setupTestRepoWithRemote creates a test repo with a bare remote for push testing.
 // _Requirements: 5.1, 5.3_
 func setupTestRepoWithRemote(t *testing.T) (*testRepo, string) {
@@ -177,7 +176,6 @@ func (r *testRepo) getLastCommitAuthor() string {
 	r.t.Helper()
 	return r.runGit("log", "-1", "--format=%an <%ae>")
 }
-
 
 // TestIntegrationCommit tests the Commit function with a real git repository.
 // It creates a repo, makes changes, commits, and verifies the result.
@@ -309,7 +307,6 @@ func TestIntegrationCommit(t *testing.T) {
 		}
 	})
 }
-
 
 // TestIntegrationPush tests the Push function with a real git repository and remote.
 // It creates a repo with a remote, commits changes, pushes, and verifies the result.

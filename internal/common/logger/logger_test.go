@@ -71,12 +71,12 @@ func TestQuietModeSuppressesInfoMessages(t *testing.T) {
 // TestLogLevelHierarchy tests that log levels work correctly
 func TestLogLevelHierarchy(t *testing.T) {
 	tests := []struct {
-		name          string
-		level         Level
-		expectDebug   bool
-		expectInfo    bool
-		expectWarn    bool
-		expectError   bool
+		name        string
+		level       Level
+		expectDebug bool
+		expectInfo  bool
+		expectWarn  bool
+		expectError bool
 	}{
 		{
 			name:        "Debug level shows all",

@@ -82,7 +82,6 @@ func genEbuildStatusEntryList() gopter.Gen {
 	}, reflect.TypeOf([]git.StatusEntry{}))
 }
 
-
 // TestVersionBumpDetection tests Property 4: Version bump detection
 // **Feature: overlay-manager, Property 4: Version bump detection**
 // **Validates: Requirements 4.5**
@@ -174,7 +173,6 @@ func TestVersionBumpDetection(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // TestCommitMessageCompleteness tests Property 6: Commit message contains all changes
 // **Feature: overlay-manager, Property 6: Commit message contains all changes**
 // **Validates: Requirements 4.1**
@@ -221,7 +219,6 @@ func TestCommitMessageCompleteness(t *testing.T) {
 
 	properties.TestingRun(t)
 }
-
 
 // Unit tests for commit message generation
 // _Requirements: 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 4.11_
@@ -480,7 +477,6 @@ func TestNormalizeStatus(t *testing.T) {
 		})
 	}
 }
-
 
 // Tests for Commit() using MockGitRunner
 // _Requirements: 8.2_

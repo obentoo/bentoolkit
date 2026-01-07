@@ -27,10 +27,10 @@ type Ebuild struct {
 func ParsePath(path string) (*Ebuild, error) {
 	// Normalize path separators
 	path = strings.ReplaceAll(path, "\\", "/")
-	
+
 	// Remove leading ./ if present
 	path = strings.TrimPrefix(path, "./")
-	
+
 	matches := ebuildPathRegex.FindStringSubmatch(path)
 	if matches == nil {
 		return nil, ErrInvalidEbuildPath

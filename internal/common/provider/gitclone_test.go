@@ -92,9 +92,9 @@ func TestGitCloneProvider_SupportsAPI(t *testing.T) {
 
 func TestGitCloneProvider_URLFormats(t *testing.T) {
 	tests := []struct {
-		name     string
-		url      string
-		wantURL  string
+		name    string
+		url     string
+		wantURL string
 	}{
 		{
 			name:    "github shorthand",
@@ -131,4 +131,3 @@ func TestGitCloneProvider_URLFormats(t *testing.T) {
 		})
 	}
 }
-

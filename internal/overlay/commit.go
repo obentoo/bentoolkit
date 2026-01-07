@@ -66,7 +66,6 @@ func AnalyzeChanges(entries []git.StatusEntry) []Change {
 		}
 	}
 
-
 	// Second pass: detect version bumps and classify changes
 	for key, versions := range packageVersions {
 		parts := strings.SplitN(key, "/", 2)
@@ -205,7 +204,6 @@ func normalizeStatus(status string) string {
 		return status[:1]
 	}
 }
-
 
 // GenerateMessage generates a commit message from a list of changes
 func GenerateMessage(changes []Change) string {
@@ -364,7 +362,6 @@ func detectVariants(changes []Change) []variantGroup {
 
 	return groups
 }
-
 
 // formatVariants formats a group of package variants with nested braces
 func formatVariants(category string, groups []variantGroup, ct ChangeType) string {

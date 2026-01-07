@@ -45,10 +45,10 @@ func TestCompare(t *testing.T) {
 	client.BaseURL = server.URL
 
 	localPackages := []PackageInfo{
-		{Category: "app-misc", Package: "hello", LatestVersion: "2.0"},           // up-to-date
-		{Category: "app-editors", Package: "vscode", LatestVersion: "1.107.1"},   // outdated
-		{Category: "www-client", Package: "firefox", LatestVersion: "128.0"},     // outdated
-		{Category: "app-misc", Package: "bentoo-only", LatestVersion: "1.0"},     // not in remote
+		{Category: "app-misc", Package: "hello", LatestVersion: "2.0"},         // up-to-date
+		{Category: "app-editors", Package: "vscode", LatestVersion: "1.107.1"}, // outdated
+		{Category: "www-client", Package: "firefox", LatestVersion: "128.0"},   // outdated
+		{Category: "app-misc", Package: "bentoo-only", LatestVersion: "1.0"},   // not in remote
 	}
 
 	opts := CompareOptions{
@@ -275,8 +275,8 @@ func TestTruncateString(t *testing.T) {
 		{"hello world", 5, "hell…"},
 		{"hi", 2, "hi"},
 		{"abc", 3, "abc"},
-		{"abcd", 3, "abc"},       // maxLen <= 3 returns truncated without ellipsis
-		{"abcdef", 5, "abcd…"},   // maxLen > 3 uses ellipsis
+		{"abcd", 3, "abc"},     // maxLen <= 3 returns truncated without ellipsis
+		{"abcdef", 5, "abcd…"}, // maxLen > 3 uses ellipsis
 	}
 
 	for _, tt := range tests {
@@ -288,4 +288,3 @@ func TestTruncateString(t *testing.T) {
 		})
 	}
 }
-

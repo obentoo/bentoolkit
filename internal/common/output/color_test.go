@@ -60,7 +60,6 @@ func TestColorOutputMatchesStatusType(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // **Feature: overlay-improvements, Property 2: No-color flag disables ANSI codes**
 // **Validates: Requirements 2.3**
 func TestNoColorFlagDisablesANSICodes(t *testing.T) {

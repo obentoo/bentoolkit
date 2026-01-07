@@ -122,4 +122,3 @@ func TestParseGitLabURL(t *testing.T) {
 		})
 	}
 }
-

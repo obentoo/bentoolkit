@@ -7,7 +7,7 @@
 
 # Arquivos de teste e cobertura
 *.test
-coverage.out
+coverage*.out
 coverage.html
 *.prof
 

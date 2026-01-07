@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	ErrFileNotFound     = errors.New("file not found")
+	ErrFileNotFound       = errors.New("file not found")
 	ErrPathOutsideOverlay = errors.New("path is outside overlay directory")
-	ErrInvalidPath      = errors.New("invalid path")
-	ErrGitCommand       = errors.New("git command failed")
+	ErrInvalidPath        = errors.New("invalid path")
+	ErrGitCommand         = errors.New("git command failed")
 )
 
 // GitRunner executes git commands in a specific working directory
@@ -55,7 +55,6 @@ func (g *GitRunner) runCommand(args ...string) (stdout, stderr string, err error
 
 	return stdout, stderr, err
 }
-
 
 // StatusEntry represents a single entry from git status --porcelain
 type StatusEntry struct {
@@ -119,7 +118,6 @@ func ParseStatusOutput(output string) []StatusEntry {
 	return entries
 }
 
-
 // Add stages files for commit with path validation
 func (g *GitRunner) Add(paths ...string) error {
 	if len(paths) == 0 {
@@ -177,7 +175,6 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-
 
 // Commit creates a git commit with the specified message and author
 func (g *GitRunner) Commit(message, user, email string) error {

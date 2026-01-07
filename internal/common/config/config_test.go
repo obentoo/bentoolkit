@@ -95,7 +95,6 @@ func TestConfigRoundTrip(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // TestMissingConfigFileCreatesDefault tests that missing config file creates default
 // _Requirements: 1.2_
 func TestMissingConfigFileCreatesDefault(t *testing.T) {
@@ -243,7 +242,6 @@ func TestGitconfigParsingRoundTrip(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // TestGitconfigParsing tests gitconfig INI parsing
 // _Requirements: 6.1_
 func TestGitconfigParsing(t *testing.T) {
@@ -341,7 +339,7 @@ func TestGetGitUserFallbackToBentooConfig(t *testing.T) {
 	// GetGitUser should fall back to bentoo config when gitconfig is missing/incomplete
 	// Note: This test assumes ~/.gitconfig doesn't have complete user info,
 	// or we need to mock the gitconfig path. For now, we test the fallback logic directly.
-	
+
 	// Test that bentoo config values are accessible
 	if cfg.Git.User != "Bentoo User" {
 		t.Errorf("Expected user 'Bentoo User', got %q", cfg.Git.User)

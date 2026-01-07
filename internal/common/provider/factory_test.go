@@ -180,4 +180,3 @@ func TestListAvailableRepositories(t *testing.T) {
 		}
 	}
 }
-

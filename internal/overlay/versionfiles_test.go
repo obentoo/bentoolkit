@@ -192,7 +192,6 @@ func genVersionFilesVersion() gopter.Gen {
 	return gen.RegexMatch(`[1-9]\.[0-9]\.[0-9]`)
 }
 
-
 // TestVersionFilesBlocking tests Property 9: Version Files Blocking
 // **Feature: ebuild-rename, Property 9: Version Files Blocking**
 // **Validates: Requirements 5.3, 5.4**
@@ -260,7 +259,6 @@ func TestVersionFilesBlocking(t *testing.T) {
 
 	properties.TestingRun(t)
 }
-
 
 // TestNoVersionFilesReturnsEmpty tests that operation proceeds without warnings
 // when no version files exist.

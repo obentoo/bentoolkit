@@ -286,4 +286,3 @@ func (p *PackageInfo) FullName() string {
 func (p *PackageInfo) String() string {
 	return p.Category + "/" + p.Package + "-" + p.LatestVersion
 }
-

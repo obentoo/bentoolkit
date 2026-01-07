@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	logCount int
+	logCount   int
 	logOneline bool
 )
 

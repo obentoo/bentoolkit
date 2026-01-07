@@ -59,7 +59,6 @@ func parseVersion(v string) ([]int, string, int, int) {
 	return nums, suffixType, suffixNum, revision
 }
 
-
 // compareIntSlices compares two slices of integers
 func compareIntSlices(a, b []int) int {
 	maxLen := len(a)

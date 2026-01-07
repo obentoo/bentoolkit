@@ -307,4 +307,3 @@ func createPackage(t *testing.T, basePath, category, pkg string, versions []stri
 		t.Fatalf("Failed to create Manifest: %v", err)
 	}
 }
-

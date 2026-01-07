@@ -92,7 +92,6 @@ func DetectFileType(filePath string) FileType {
 	return FileTypeOther
 }
 
-
 // extractPackageInfo extracts category and package name from a file path
 // Returns category, package, and whether extraction was successful
 func extractPackageInfo(filePath string) (category, pkg string, ok bool) {

@@ -47,4 +47,3 @@ func (r *RepositoryInfo) Clone() *RepositoryInfo {
 		Branch:   r.Branch,
 	}
 }
-

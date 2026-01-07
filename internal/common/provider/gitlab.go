@@ -261,4 +261,3 @@ func (p *GitLabProvider) saveToCache(category, pkg string, versions []string) {
 
 // Ensure GitLabProvider implements Provider interface
 var _ Provider = (*GitLabProvider)(nil)
-

@@ -289,9 +289,9 @@ func FormatReport(report *CompareReport) string {
 	}
 
 	// Calculate column widths
-	maxPkgLen := 7 // "Package"
-	maxCatLen := 8 // "Category"
-	maxLocalLen := 14 // "Bentoo Version"
+	maxPkgLen := 7     // "Package"
+	maxCatLen := 8     // "Category"
+	maxLocalLen := 14  // "Bentoo Version"
 	maxRemoteLen := 14 // "Gentoo Version"
 
 	for _, r := range report.Results {
@@ -404,4 +404,3 @@ func FormatSummary(report *CompareReport) string {
 
 	return sb.String()
 }
-

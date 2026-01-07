@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -86,6 +87,48 @@ func runRename(cmd *cobra.Command, args []string) {
 		Force:      renameFlags.Force,
 	}
 
+	// Preview mode: find matches first without executing
+	previewResult, err := overlay.RenamePreview(cfg, spec)
+	if err != nil {
+		logger.Error("%v", err)
+		os.Exit(1)
+	}
+
+	// No matches found
+	if len(previewResult.Matches) == 0 {
+		logger.Info("No matching ebuilds found")
+		return
+	}
+
+	// Display preview
+	logger.Info("%s", overlay.FormatRenamePreview(previewResult, spec.Category == "*"))
+
+	// Check if confirmation is needed
+	needsConfirmation := !opts.SkipPrompt
+	isGlobalSearch := spec.Category == "*"
+
+	// Global search requires confirmation even with -y, unless --force
+	if isGlobalSearch && !opts.Force {
+		needsConfirmation = true
+		if opts.SkipPrompt {
+			logger.Warn("Global search requires confirmation. Use --force to skip.")
+		}
+	}
+
+	// Dry-run mode: don't execute
+	if opts.DryRun {
+		logger.Info("Dry-run mode - no changes made")
+		return
+	}
+
+	// Prompt for confirmation if needed
+	if needsConfirmation {
+		if !promptConfirmation() {
+			logger.Info("Operation cancelled")
+			return
+		}
+	}
+
 	// Execute rename operation
 	result, err := overlay.Rename(cfg, spec, opts)
 	if err != nil {
@@ -97,6 +140,21 @@ func runRename(cmd *cobra.Command, args []string) {
 	if result != nil {
 		logger.Info("%s", overlay.FormatRenameResult(result, opts.DryRun))
 	}
+}
+
+// promptConfirmation asks the user to confirm the operation.
+// Returns true if user confirms, false otherwise.
+func promptConfirmation() bool {
+	fmt.Print("Proceed with rename? [y/N]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
 }
 
 // Errors for command parsing

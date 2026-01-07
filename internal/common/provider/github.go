@@ -295,4 +295,3 @@ func (p *GitHubProvider) GetRateLimitInfo() (remaining int, resetTime time.Time,
 
 // Ensure GitHubProvider implements Provider interface
 var _ Provider = (*GitHubProvider)(nil)
-

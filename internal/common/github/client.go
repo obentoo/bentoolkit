@@ -306,4 +306,3 @@ func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err err
 	resetTime = time.Unix(result.Resources.Core.Reset, 0)
 	return result.Resources.Core.Remaining, resetTime, nil
 }
-

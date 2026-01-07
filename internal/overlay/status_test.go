@@ -77,7 +77,6 @@ func genStatusEntryList() gopter.Gen {
 	return gen.SliceOf(genStatusEntry())
 }
 
-
 // TestStatusFormattingCompleteness tests Property 5: Status formatting completeness
 // **Feature: overlay-manager, Property 5: Status formatting completeness**
 // **Validates: Requirements 3.2, 3.3, 3.4**
@@ -256,7 +255,6 @@ func TestFormatStatusOutput(t *testing.T) {
 		t.Error("Output should contain file type '(manifest)'")
 	}
 }
-
 
 // Tests for Status() using MockGitRunner
 // _Requirements: 8.3_

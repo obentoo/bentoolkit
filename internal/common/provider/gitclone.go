@@ -211,4 +211,3 @@ func (p *GitCloneProvider) RemoveCache() error {
 
 // Ensure GitCloneProvider implements Provider interface
 var _ Provider = (*GitCloneProvider)(nil)
-

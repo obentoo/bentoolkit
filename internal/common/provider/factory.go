@@ -91,4 +91,3 @@ func ListAvailableRepositories(configRepos map[string]*RepositoryInfo) []string 
 
 	return repos
 }
-

@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrOverlayPathNotSet      = errors.New("overlay path is not configured")
-	ErrOverlayPathNotFound    = errors.New("overlay path does not exist")
+	ErrOverlayPathNotSet       = errors.New("overlay path is not configured")
+	ErrOverlayPathNotFound     = errors.New("overlay path does not exist")
 	ErrOverlayInvalidStructure = errors.New("overlay structure is invalid")
-	ErrGitUserNotConfigured   = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
+	ErrGitUserNotConfigured    = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
 )
 
 // Config represents the application configuration
@@ -310,7 +310,6 @@ func ParseGitconfigContent(r interface{ Read([]byte) (int, error) }) (user, emai
 
 	return user, email, nil
 }
-
 
 // OverlayValidationResult contains overlay validation results
 type OverlayValidationResult struct {

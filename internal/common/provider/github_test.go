@@ -222,4 +222,3 @@ func TestExtractVersionsFromEntries(t *testing.T) {
 		})
 	}
 }
-

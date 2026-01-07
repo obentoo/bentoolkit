@@ -302,4 +302,3 @@ func TestClearCache(t *testing.T) {
 		t.Error("Cache directory should be removed")
 	}
 }
-

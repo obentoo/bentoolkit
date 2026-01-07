@@ -78,7 +78,6 @@ func TestErrUpToDate(t *testing.T) {
 	}
 }
 
-
 // Tests for Push() using MockGitRunner
 // _Requirements: 8.4_
 
@@ -204,39 +203,39 @@ func TestPushWithMockGitRunner(t *testing.T) {
 // _Requirements: 8.4_
 func TestPushErrorHandling(t *testing.T) {
 	errorCases := []struct {
-		name        string
-		errorMsg    string
-		expectError bool
+		name           string
+		errorMsg       string
+		expectError    bool
 		expectUpToDate bool
 	}{
 		{
-			name:        "Everything up-to-date",
-			errorMsg:    "Everything up-to-date",
-			expectError: false,
+			name:           "Everything up-to-date",
+			errorMsg:       "Everything up-to-date",
+			expectError:    false,
 			expectUpToDate: true,
 		},
 		{
-			name:        "up to date lowercase",
-			errorMsg:    "up to date",
-			expectError: false,
+			name:           "up to date lowercase",
+			errorMsg:       "up to date",
+			expectError:    false,
 			expectUpToDate: true,
 		},
 		{
-			name:        "remote not found",
-			errorMsg:    "fatal: remote origin not found",
-			expectError: true,
+			name:           "remote not found",
+			errorMsg:       "fatal: remote origin not found",
+			expectError:    true,
 			expectUpToDate: false,
 		},
 		{
-			name:        "permission denied",
-			errorMsg:    "fatal: Could not read from remote repository. Permission denied",
-			expectError: true,
+			name:           "permission denied",
+			errorMsg:       "fatal: Could not read from remote repository. Permission denied",
+			expectError:    true,
 			expectUpToDate: false,
 		},
 		{
-			name:        "rejected non-fast-forward",
-			errorMsg:    "error: failed to push some refs: Updates were rejected because the tip of your current branch is behind",
-			expectError: true,
+			name:           "rejected non-fast-forward",
+			errorMsg:       "error: failed to push some refs: Updates were rejected because the tip of your current branch is behind",
+			expectError:    true,
 			expectUpToDate: false,
 		},
 	}

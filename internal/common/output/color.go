@@ -9,10 +9,10 @@ import (
 
 var (
 	// Status colors
-	Added    = color.New(color.FgGreen)
-	Modified = color.New(color.FgYellow)
-	Deleted  = color.New(color.FgRed)
-	Renamed  = color.New(color.FgCyan)
+	Added     = color.New(color.FgGreen)
+	Modified  = color.New(color.FgYellow)
+	Deleted   = color.New(color.FgRed)
+	Renamed   = color.New(color.FgCyan)
 	Untracked = color.New(color.FgMagenta)
 
 	// Message colors

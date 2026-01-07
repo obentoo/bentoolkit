@@ -36,7 +36,6 @@ func genVersion() gopter.Gen {
 	return gen.OneConstOf(versions...)
 }
 
-
 // genPackageName generates valid package names
 func genPackageName() gopter.Gen {
 	packages := []interface{}{
@@ -98,7 +97,6 @@ func TestPropertyEbuildRoundTrip(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // TestPropertyVersionComparisonConsistency tests Property 3: Version comparison consistency
 // **Feature: overlay-manager, Property 3: Version comparison consistency**
 // **Validates: Requirements 7.2**
@@ -128,7 +126,6 @@ func TestPropertyVersionComparisonConsistency(t *testing.T) {
 
 	properties.TestingRun(t)
 }
-
 
 // Unit tests for Ebuild edge cases
 // _Requirements: 7.1, 7.2, 7.3_
