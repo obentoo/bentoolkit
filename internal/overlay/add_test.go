@@ -1,9 +1,11 @@
 package overlay
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -115,7 +117,7 @@ func TestAddFilesWithSpecificPaths(t *testing.T) {
 }
 
 // TestAddFilesWithNonExistentFile tests AddFiles with a file that doesn't exist
-// _Requirements: 2.4_
+// _Requirements: 2.3, 2.4_
 func TestAddFilesWithNonExistentFile(t *testing.T) {
 	_, cfg, cleanup := setupTestOverlay(t)
 	defer cleanup()
@@ -134,8 +136,14 @@ func TestAddFilesWithNonExistentFile(t *testing.T) {
 		t.Errorf("AddFiles() should have 1 error, got %d", len(result.Errors))
 	}
 
-	if result.Errors[0] != git.ErrFileNotFound {
-		t.Errorf("AddFiles() should return ErrFileNotFound, got %v", result.Errors[0])
+	// Error should be wrapped with path context and contain ErrFileNotFound
+	if !errors.Is(result.Errors[0], git.ErrFileNotFound) {
+		t.Errorf("AddFiles() error should wrap ErrFileNotFound, got %v", result.Errors[0])
+	}
+
+	// Error message should include the path
+	if !strings.Contains(result.Errors[0].Error(), "nonexistent.txt") {
+		t.Errorf("AddFiles() error should include path, got %v", result.Errors[0])
 	}
 }
 
@@ -242,4 +250,35 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotFound, got %v", err)
 		}
 	})
+}
+
+// TestAddFilesWithPathOutsideOverlay tests AddFiles with a path that escapes the overlay
+// _Requirements: 2.4_
+func TestAddFilesWithPathOutsideOverlay(t *testing.T) {
+	_, cfg, cleanup := setupTestOverlay(t)
+	defer cleanup()
+
+	// Try to add a path outside the overlay using ".."
+	result, err := AddFiles(cfg, "../outside.txt")
+	if err != nil {
+		t.Fatalf("AddFiles() returned unexpected error: %v", err)
+	}
+
+	if result.IsSuccess() {
+		t.Error("AddFiles() should fail for path outside overlay")
+	}
+
+	if len(result.Errors) != 1 {
+		t.Errorf("AddFiles() should have 1 error, got %d", len(result.Errors))
+	}
+
+	// Error should be wrapped with path context and contain ErrPathOutsideOverlay
+	if !errors.Is(result.Errors[0], git.ErrPathOutsideOverlay) {
+		t.Errorf("AddFiles() error should wrap ErrPathOutsideOverlay, got %v", result.Errors[0])
+	}
+
+	// Error message should include the path
+	if !strings.Contains(result.Errors[0].Error(), "../outside.txt") {
+		t.Errorf("AddFiles() error should include path, got %v", result.Errors[0])
+	}
 }
