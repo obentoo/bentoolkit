@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -304,6 +305,7 @@ func comparePackage(pkg PackageInfo, client *github.Client) CompareResult {
 }
 
 // FormatReport formats a comparison report for terminal output
+// When synced packages are included, displays them in a separate section with status indicators
 func FormatReport(report *CompareReport) string {
 	var sb strings.Builder
 
@@ -312,13 +314,65 @@ func FormatReport(report *CompareReport) string {
 		return sb.String()
 	}
 
+	// Separate results by status
+	var outdated, synced, other []CompareResult
+	for _, r := range report.Results {
+		switch r.Status {
+		case StatusOutdated:
+			outdated = append(outdated, r)
+		case StatusUpToDate:
+			synced = append(synced, r)
+		default:
+			other = append(other, r)
+		}
+	}
+
+	// Format outdated section if any
+	if len(outdated) > 0 {
+		sb.WriteString(formatResultSection(outdated, "Outdated Packages (Bentoo < Gentoo)", output.Warning))
+	}
+
+	// Format synced section if any
+	if len(synced) > 0 {
+		sb.WriteString(formatResultSection(synced, "Up-to-Date Packages", output.Success))
+	}
+
+	// Format other results (newer, not-in-remote, errors) if any
+	if len(other) > 0 {
+		sb.WriteString(formatResultSection(other, "Other Packages", output.Info))
+	}
+
+	// Summary
+	sb.WriteString("\n")
+	if len(outdated) > 0 {
+		sb.WriteString(fmt.Sprintf("Outdated: %s | ",
+			output.Sprint(output.Warning, fmt.Sprintf("%d", len(outdated)))))
+	}
+	if len(synced) > 0 {
+		sb.WriteString(fmt.Sprintf("Up-to-date: %s | ",
+			output.Sprint(output.Success, fmt.Sprintf("%d", len(synced)))))
+	}
+	if len(other) > 0 {
+		sb.WriteString(fmt.Sprintf("Other: %s | ",
+			output.Sprint(output.Info, fmt.Sprintf("%d", len(other)))))
+	}
+	sb.WriteString(fmt.Sprintf("Total: %d\n", len(report.Results)))
+
+	return sb.String()
+}
+
+// formatResultSection formats a section of results with a header and table
+func formatResultSection(results []CompareResult, title string, headerColor *color.Color) string {
+	var sb strings.Builder
+
 	// Calculate column widths
 	maxPkgLen := 7     // "Package"
 	maxCatLen := 8     // "Category"
 	maxLocalLen := 14  // "Bentoo Version"
 	maxRemoteLen := 14 // "Gentoo Version"
+	maxStatusLen := 13 // "Status"
 
-	for _, r := range report.Results {
+	for _, r := range results {
 		if len(r.Package) > maxPkgLen {
 			maxPkgLen = len(r.Package)
 		}
@@ -331,6 +385,9 @@ func FormatReport(report *CompareReport) string {
 		if len(r.RemoteVersion) > maxRemoteLen {
 			maxRemoteLen = len(r.RemoteVersion)
 		}
+		if len(r.Status.String()) > maxStatusLen {
+			maxStatusLen = len(r.Status.String())
+		}
 	}
 
 	// Cap widths for readability
@@ -342,29 +399,87 @@ func FormatReport(report *CompareReport) string {
 	}
 
 	// Header
-	sb.WriteString(output.Sprintf(output.Header, "\nOutdated Packages (Bentoo < Gentoo):\n"))
-	sb.WriteString(formatTableLine(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, "top"))
-	sb.WriteString(formatTableRow(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen,
-		"Package", "Category", "Bentoo Version", "Gentoo Version", true))
-	sb.WriteString(formatTableLine(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, "mid"))
+	sb.WriteString(output.Sprintf(headerColor, "\n%s:\n", title))
+	sb.WriteString(formatTableLineWithStatus(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, maxStatusLen, "top"))
+	sb.WriteString(formatTableRowWithStatus(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, maxStatusLen,
+		"Package", "Category", "Bentoo Version", "Gentoo Version", "Status", true, nil))
+	sb.WriteString(formatTableLineWithStatus(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, maxStatusLen, "mid"))
 
 	// Data rows
-	for _, r := range report.Results {
+	for _, r := range results {
 		pkg := truncateString(r.Package, maxPkgLen)
 		cat := truncateString(r.Category, maxCatLen)
 		local := truncateString(r.LocalVersion, maxLocalLen)
 		remote := truncateString(r.RemoteVersion, maxRemoteLen)
-		sb.WriteString(formatTableRow(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen,
-			pkg, cat, local, remote, false))
+		status := truncateString(r.Status.String(), maxStatusLen)
+		statusColor := getStatusColor(r.Status)
+		sb.WriteString(formatTableRowWithStatus(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, maxStatusLen,
+			pkg, cat, local, remote, status, false, statusColor))
 	}
 
-	sb.WriteString(formatTableLine(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, "bottom"))
-
-	// Summary
-	sb.WriteString(fmt.Sprintf("\nTotal: %s outdated packages\n",
-		output.Sprint(output.Warning, fmt.Sprintf("%d", len(report.Results)))))
+	sb.WriteString(formatTableLineWithStatus(maxPkgLen, maxCatLen, maxLocalLen, maxRemoteLen, maxStatusLen, "bottom"))
 
 	return sb.String()
+}
+
+// getStatusColor returns the appropriate color for a CompareStatus
+func getStatusColor(status CompareStatus) *color.Color {
+	switch status {
+	case StatusUpToDate:
+		return output.Success
+	case StatusOutdated:
+		return output.Warning
+	case StatusNewer:
+		return output.Info
+	case StatusNotInRemote:
+		return output.Dim
+	case StatusError:
+		return output.Error
+	default:
+		return nil
+	}
+}
+
+// formatTableLineWithStatus creates a horizontal table line with status column
+func formatTableLineWithStatus(pkgW, catW, localW, remoteW, statusW int, position string) string {
+	var left, mid, right, horiz string
+
+	switch position {
+	case "top":
+		left, mid, right, horiz = "┌", "┬", "┐", "─"
+	case "mid":
+		left, mid, right, horiz = "├", "┼", "┤", "─"
+	case "bottom":
+		left, mid, right, horiz = "└", "┴", "┘", "─"
+	}
+
+	return fmt.Sprintf("%s%s%s%s%s%s%s%s%s%s%s\n",
+		left, strings.Repeat(horiz, pkgW+2),
+		mid, strings.Repeat(horiz, catW+2),
+		mid, strings.Repeat(horiz, localW+2),
+		mid, strings.Repeat(horiz, remoteW+2),
+		mid, strings.Repeat(horiz, statusW+2), right)
+}
+
+// formatTableRowWithStatus creates a table row with status column
+func formatTableRowWithStatus(pkgW, catW, localW, remoteW, statusW int, pkg, cat, local, remote, status string, header bool, statusColor *color.Color) string {
+	if header {
+		format := "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n"
+		row := fmt.Sprintf(format, pkgW, pkg, catW, cat, localW, local, remoteW, remote, statusW, status)
+		return output.Sprint(output.Header, row)
+	}
+
+	// Format status with color if provided
+	statusStr := status
+	if statusColor != nil {
+		statusStr = output.Sprintf(statusColor, "%-*s", statusW, status)
+	} else {
+		statusStr = fmt.Sprintf("%-*s", statusW, status)
+	}
+
+	// Build row with colored status
+	return fmt.Sprintf("│ %-*s │ %-*s │ %-*s │ %-*s │ %s │\n",
+		pkgW, pkg, catW, cat, localW, local, remoteW, remote, statusStr)
 }
 
 // formatTableLine creates a horizontal table line

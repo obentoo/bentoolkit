@@ -15,11 +15,12 @@ import (
 )
 
 var (
-	compareClone    bool
-	compareCacheDir string
-	compareNoCache  bool
-	compareTimeout  int
-	compareToken    string
+	compareClone         bool
+	compareCacheDir      string
+	compareNoCache       bool
+	compareTimeout       int
+	compareToken         string
+	compareIncludeSynced bool
 )
 
 var compareCmd = &cobra.Command{
@@ -36,11 +37,15 @@ Repositories:
 The provider (GitHub API, GitLab API, or Git) is automatically detected
 based on the repository configuration. Use --clone to force git clone.
 
+By default, only outdated packages are shown. Use --include-synced to also
+display packages that have the same version in both repositories.
+
 Examples:
-  bentoo overlay compare                # Compare with gentoo (API)
-  bentoo overlay compare guru           # Compare with GURU (API)
-  bentoo overlay compare --clone        # Compare with gentoo (git clone)
-  bentoo overlay compare guru --clone   # Compare with GURU (git clone)`,
+  bentoo overlay compare                    # Compare with gentoo (API)
+  bentoo overlay compare guru               # Compare with GURU (API)
+  bentoo overlay compare --clone            # Compare with gentoo (git clone)
+  bentoo overlay compare guru --clone       # Compare with GURU (git clone)
+  bentoo overlay compare --include-synced   # Include up-to-date packages`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runCompare,
 }
@@ -51,6 +56,7 @@ func init() {
 	compareCmd.Flags().BoolVar(&compareNoCache, "no-cache", false, "Disable caching")
 	compareCmd.Flags().IntVar(&compareTimeout, "timeout", 30, "HTTP request timeout in seconds")
 	compareCmd.Flags().StringVar(&compareToken, "token", "", "Auth token for API provider")
+	compareCmd.Flags().BoolVar(&compareIncludeSynced, "include-synced", false, "Include packages with same version in both repositories")
 	overlayCmd.AddCommand(compareCmd)
 }
 
@@ -156,7 +162,8 @@ func runCompare(cmd *cobra.Command, args []string) {
 	logger.Info("Comparing with %s using %s...", repoInfo.Name, prov.GetName())
 
 	opts := overlay.CompareOptions{
-		OnlyOutdated: true,
+		OnlyOutdated:  !compareIncludeSynced,
+		IncludeSynced: compareIncludeSynced,
 		ProgressCallback: func(current, total int, pkg string) {
 			percent := (current * 100) / total
 			fmt.Printf("\r  Checking: [%3d%%] %s", percent, truncatePkgName(pkg, 40))
@@ -180,7 +187,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	fmt.Printf("\r%s\r", "                                                                  ")
 
 	// Display results
-	if report.OutdatedCount == 0 {
+	if len(report.Results) == 0 {
 		logger.Info("%s", output.Sprintf(output.Success, "All packages are up-to-date with %s!", repoInfo.Name))
 		printComparisonSummary(report, repoInfo.Name)
 		return
