@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -17,6 +20,9 @@ var (
 	// ErrRequestTimeout is returned when a request times out
 	ErrRequestTimeout = errors.New("request timeout")
 )
+
+// envVarPattern matches ${VAR_NAME} syntax for environment variable substitution
+var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // RetryConfig holds configuration for retry behavior.
 type RetryConfig struct {
@@ -50,6 +56,10 @@ type RetryableHTTPClient struct {
 	delayFunc func(time.Duration)
 	// recordedDelays stores delays for testing purposes
 	recordedDelays []time.Duration
+	// defaultHeaders are headers applied to all requests
+	defaultHeaders map[string]string
+	// githubToken is the GitHub API token for authentication
+	githubToken string
 }
 
 // NewRetryableHTTPClient creates a new HTTP client with retry support.
@@ -233,4 +243,87 @@ func isTimeoutError(err error) bool {
 // Config returns the current retry configuration.
 func (c *RetryableHTTPClient) Config() RetryConfig {
 	return c.config
+}
+
+// SetGitHubToken sets the GitHub API token for authentication.
+// When set, requests to GitHub API will include the Authorization header.
+func (c *RetryableHTTPClient) SetGitHubToken(token string) {
+	c.githubToken = token
+}
+
+// GetGitHubToken returns the configured GitHub token.
+func (c *RetryableHTTPClient) GetGitHubToken() string {
+	return c.githubToken
+}
+
+// SetDefaultHeaders sets default headers that will be applied to all requests.
+// These headers are applied before any request-specific headers.
+func (c *RetryableHTTPClient) SetDefaultHeaders(headers map[string]string) {
+	c.defaultHeaders = headers
+}
+
+// GetDefaultHeaders returns the configured default headers.
+func (c *RetryableHTTPClient) GetDefaultHeaders() map[string]string {
+	return c.defaultHeaders
+}
+
+// GetWithHeaders performs an HTTP GET request with custom headers and retry logic.
+// Headers are processed for environment variable substitution using ${VAR_NAME} syntax.
+// If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
+func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]string) (*http.Response, error) {
+	return c.GetWithHeadersContext(context.Background(), url, headers)
+}
+
+// GetWithHeadersContext performs an HTTP GET request with custom headers, context, and retry logic.
+// Headers are processed for environment variable substitution using ${VAR_NAME} syntax.
+// If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
+func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url string, headers map[string]string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply headers to request
+	c.applyHeaders(req, url, headers)
+
+	return c.DoWithContext(ctx, req)
+}
+
+// applyHeaders applies headers to a request in the following order:
+// 1. Default headers (set via SetDefaultHeaders)
+// 2. GitHub token (if URL is GitHub API and token is configured)
+// 3. Custom headers (passed to the method)
+// All header values are processed for environment variable substitution.
+func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, customHeaders map[string]string) {
+	// Apply default headers first
+	for key, value := range c.defaultHeaders {
+		req.Header.Set(key, SubstituteEnvVars(value))
+	}
+
+	// Apply GitHub token for GitHub API requests
+	if c.githubToken != "" && isGitHubAPIURL(url) {
+		req.Header.Set("Authorization", "Bearer "+c.githubToken)
+	}
+
+	// Apply custom headers (can override defaults and GitHub token)
+	for key, value := range customHeaders {
+		req.Header.Set(key, SubstituteEnvVars(value))
+	}
+}
+
+// SubstituteEnvVars replaces ${VAR_NAME} patterns in a string with
+// the corresponding environment variable values.
+// If an environment variable is not set, the pattern is replaced with an empty string.
+func SubstituteEnvVars(value string) string {
+	return envVarPattern.ReplaceAllStringFunc(value, func(match string) string {
+		// Extract variable name from ${VAR_NAME}
+		varName := match[2 : len(match)-1]
+		return os.Getenv(varName)
+	})
+}
+
+// isGitHubAPIURL checks if a URL is a GitHub API URL.
+func isGitHubAPIURL(url string) bool {
+	return strings.HasPrefix(url, "https://api.github.com/") ||
+		strings.HasPrefix(url, "http://api.github.com/")
 }
