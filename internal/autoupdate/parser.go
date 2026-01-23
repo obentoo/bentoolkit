@@ -214,7 +214,6 @@ func toString(v interface{}) (string, bool) {
 	}
 }
 
-
 // RegexParser extracts version using a regular expression with capture group.
 // The first capture group in the pattern is used as the version.
 type RegexParser struct {
@@ -261,8 +260,9 @@ func (p *RegexParser) Parse(content []byte) (string, error) {
 }
 
 // NewParser creates a parser based on the specified type.
-// parserType must be "json" or "regex".
+// parserType must be "json", "regex", or "html".
 // pathOrPattern is the JSON path for json parser or regex pattern for regex parser.
+// For HTML parser, use NewParserFromConfig instead.
 func NewParser(parserType, pathOrPattern string) (Parser, error) {
 	switch parserType {
 	case "json":
@@ -277,8 +277,33 @@ func NewParser(parserType, pathOrPattern string) (Parser, error) {
 			return nil, ErrNoCaptureGroup
 		}
 		return &RegexParser{Pattern: pathOrPattern, compiled: re}, nil
+	case "html":
+		// HTML parser requires selector or xpath, use NewParserFromConfig
+		return nil, fmt.Errorf("%w: use NewParserFromConfig for html parser", ErrInvalidParserType)
 	default:
 		return nil, fmt.Errorf("%w: got %q", ErrInvalidParserType, parserType)
+	}
+}
+
+// NewParserFromConfig creates a parser from a PackageConfig.
+// This supports all parser types including HTML which requires additional fields.
+func NewParserFromConfig(cfg *PackageConfig) (Parser, error) {
+	switch cfg.Parser {
+	case "json":
+		return &JSONParser{Path: cfg.Path}, nil
+	case "regex":
+		re, err := regexp.Compile(cfg.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+		}
+		if re.NumSubexp() < 1 {
+			return nil, ErrNoCaptureGroup
+		}
+		return &RegexParser{Pattern: cfg.Pattern, compiled: re}, nil
+	case "html":
+		return NewHTMLParser(cfg.Selector, cfg.XPath, cfg.Pattern)
+	default:
+		return nil, fmt.Errorf("%w: got %q", ErrInvalidParserType, cfg.Parser)
 	}
 }
 
@@ -287,7 +312,7 @@ func NewParser(parserType, pathOrPattern string) (Parser, error) {
 // the first successful result.
 func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 	// Try primary parser
-	parser, err := NewParser(cfg.Parser, getPathOrPattern(cfg.Parser, cfg.Path, cfg.Pattern))
+	parser, err := NewParserFromConfig(cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create primary parser: %w", err)
 	}
@@ -301,8 +326,14 @@ func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 
 	// Try fallback parser if configured
 	if cfg.FallbackParser != "" {
-		fallbackPathOrPattern := getPathOrPattern(cfg.FallbackParser, cfg.Path, cfg.FallbackPattern)
-		fallbackParser, err := NewParser(cfg.FallbackParser, fallbackPathOrPattern)
+		fallbackCfg := &PackageConfig{
+			Parser:   cfg.FallbackParser,
+			Path:     cfg.Path,
+			Pattern:  cfg.FallbackPattern,
+			Selector: cfg.Selector,
+			XPath:    cfg.XPath,
+		}
+		fallbackParser, err := NewParserFromConfig(fallbackCfg)
 		if err != nil {
 			return "", fmt.Errorf("primary parser failed (%w), fallback parser creation failed: %v", primaryErr, err)
 		}
@@ -315,16 +346,4 @@ func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 
 	// All parsers failed
 	return "", fmt.Errorf("%w: %v", ErrNoVersionFound, primaryErr)
-}
-
-// getPathOrPattern returns the appropriate path or pattern based on parser type
-func getPathOrPattern(parserType, path, pattern string) string {
-	switch parserType {
-	case "json":
-		return path
-	case "regex":
-		return pattern
-	default:
-		return ""
-	}
 }
