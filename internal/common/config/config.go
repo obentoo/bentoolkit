@@ -22,6 +22,7 @@ type Config struct {
 	Overlay      OverlayConfig          `yaml:"overlay"`
 	Git          GitConfig              `yaml:"git"`
 	GitHub       GitHubConfig           `yaml:"github"`
+	Autoupdate   AutoupdateConfig       `yaml:"autoupdate,omitempty"`
 	Repositories map[string]*RepoConfig `yaml:"repositories,omitempty"`
 }
 
@@ -48,6 +49,26 @@ type RepoConfig struct {
 	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab
 	Token    string `yaml:"token"`    // Optional auth token
 	Branch   string `yaml:"branch"`   // Branch to use (default: master/main)
+}
+
+// AutoupdateConfig holds autoupdate-specific settings
+type AutoupdateConfig struct {
+	CacheTTL int          `yaml:"cache_ttl"` // Cache TTL in seconds (default: 3600)
+	LLM      LLMConfig    `yaml:"llm"`       // LLM provider configuration
+	Search   SearchConfig `yaml:"search"`    // Search provider configuration
+}
+
+// LLMConfig holds LLM provider configuration for autoupdate
+type LLMConfig struct {
+	Provider  string `yaml:"provider"`    // LLM provider name (e.g., "claude")
+	APIKeyEnv string `yaml:"api_key_env"` // Environment variable name for API key
+	Model     string `yaml:"model"`       // Model name to use
+}
+
+// SearchConfig holds search provider configuration for autoupdate
+type SearchConfig struct {
+	Provider  string `yaml:"provider"`    // Search provider name (e.g., "perplexity")
+	APIKeyEnv string `yaml:"api_key_env"` // Environment variable name for API key
 }
 
 // ConfigPaths returns all possible config file paths in priority order
@@ -359,4 +380,15 @@ func ValidateOverlayStructure(path string) *OverlayValidationResult {
 	}
 
 	return result
+}
+
+// DefaultCacheTTL is the default cache TTL in seconds (1 hour)
+const DefaultCacheTTL = 3600
+
+// GetCacheTTL returns the cache TTL in seconds, using the default if not configured.
+func (c *AutoupdateConfig) GetCacheTTL() int {
+	if c.CacheTTL <= 0 {
+		return DefaultCacheTTL
+	}
+	return c.CacheTTL
 }
