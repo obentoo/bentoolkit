@@ -558,6 +558,112 @@ func TestHTMLParserXPathFirstMatchNested(t *testing.T) {
 }
 
 
+// TestRegexPostProcessing tests Property 11: Regex Post-Processing
+// **Feature: autoupdate-analyzer, Property 11: Regex Post-Processing**
+// **Validates: Requirements 4.4**
+func TestRegexPostProcessing(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+	properties := gopter.NewProperties(parameters)
+
+	// Property: Regex with capture group extracts the first capture group
+	properties.Property("Regex extracts first capture group from version text", prop.ForAll(
+		func(className, prefix, version, suffix string) bool {
+			// Create HTML with version embedded in text
+			text := prefix + "v" + version + suffix
+			html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body>
+<div class="%s">%s</div>
+</body>
+</html>`, className, text)
+
+			// Parse with HTMLParser using CSS selector and regex with capture group
+			// Regex handles both 2-part (1.2) and 3-part (1.2.3) versions
+			parser := &HTMLParser{
+				Selector: "." + className,
+				Regex:    `v([0-9]+\.[0-9]+(?:\.[0-9]+)?)`,
+			}
+			result, err := parser.Parse([]byte(html))
+			if err != nil {
+				t.Logf("Parse failed: %v", err)
+				return false
+			}
+
+			// Should return the captured version (without 'v' prefix)
+			return result == version
+		},
+		genSimpleClassName(),
+		gen.OneConstOf("Version: ", "Release ", "Latest: ", ""),
+		genHTMLVersion(),
+		gen.OneConstOf(" released", "-beta", " is out", ""),
+	))
+
+	// Property: Regex with capture group works with XPath
+	properties.Property("Regex extracts first capture group with XPath", prop.ForAll(
+		func(idName, prefix, version string) bool {
+			// Create HTML with version embedded in text
+			text := prefix + version + " available"
+			html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body>
+<span id="%s">%s</span>
+</body>
+</html>`, idName, text)
+
+			// Parse with HTMLParser using XPath and regex with capture group
+			xpath := fmt.Sprintf(`//span[@id="%s"]`, idName)
+			parser := &HTMLParser{
+				XPath: xpath,
+				Regex: `([0-9]+\.[0-9]+(?:\.[0-9]+)?)`,
+			}
+			result, err := parser.Parse([]byte(html))
+			if err != nil {
+				t.Logf("Parse failed: %v", err)
+				return false
+			}
+
+			// Should return the captured version
+			return result == version
+		},
+		genSimpleClassName(),
+		gen.OneConstOf("Version ", "v", "release-", ""),
+		genHTMLVersion(),
+	))
+
+	// Property: Regex without capture group returns full match
+	properties.Property("Regex without capture group returns full match", prop.ForAll(
+		func(className, version string) bool {
+			// Create HTML with version
+			html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body>
+<div class="%s">Version %s</div>
+</body>
+</html>`, className, version)
+
+			// Parse with HTMLParser using regex without capture group
+			// Regex handles both 2-part (1.2) and 3-part (1.2.3) versions
+			parser := &HTMLParser{
+				Selector: "." + className,
+				Regex:    `[0-9]+\.[0-9]+(?:\.[0-9]+)?`,
+			}
+			result, err := parser.Parse([]byte(html))
+			if err != nil {
+				t.Logf("Parse failed: %v", err)
+				return false
+			}
+
+			// Should return the full match
+			return result == version
+		},
+		genSimpleClassName(),
+		genHTMLVersion(),
+	))
+
+	properties.TestingRun(t)
+}
+
 // =============================================================================
 // Unit Tests - Regex Post-Processing
 // =============================================================================
@@ -628,6 +734,113 @@ func TestHTMLParserInvalidRegex(t *testing.T) {
 	if !errors.Is(err, ErrInvalidRegexPattern) {
 		t.Errorf("Expected ErrInvalidRegexPattern, got: %v", err)
 	}
+}
+
+// TestNoMatchError tests Property 12: No Match Error
+// **Feature: autoupdate-analyzer, Property 12: No Match Error**
+// **Validates: Requirements 4.6**
+func TestNoMatchError(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+	properties := gopter.NewProperties(parameters)
+
+	// Property: CSS selector returns ErrNoElementFound when no elements match
+	properties.Property("CSS selector returns ErrNoElementFound for non-matching selector", prop.ForAll(
+		func(existingClass, searchClass string) bool {
+			// Ensure the classes are different
+			if existingClass == searchClass {
+				return true // Skip this case
+			}
+
+			// Create HTML with one class
+			html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body>
+<div class="%s">1.0.0</div>
+</body>
+</html>`, existingClass)
+
+			// Parse with HTMLParser using a different class selector
+			parser := &HTMLParser{Selector: "." + searchClass}
+			_, err := parser.Parse([]byte(html))
+
+			// Should return ErrNoElementFound
+			return errors.Is(err, ErrNoElementFound)
+		},
+		genSimpleClassName(),
+		genSimpleClassName(),
+	))
+
+	// Property: XPath returns ErrNoElementFound when no elements match
+	properties.Property("XPath returns ErrNoElementFound for non-matching xpath", prop.ForAll(
+		func(existingID, searchID string) bool {
+			// Ensure the IDs are different
+			if existingID == searchID {
+				return true // Skip this case
+			}
+
+			// Create HTML with one ID
+			html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body>
+<span id="%s">1.0.0</span>
+</body>
+</html>`, existingID)
+
+			// Parse with HTMLParser using a different ID in XPath
+			xpath := fmt.Sprintf(`//span[@id="%s"]`, searchID)
+			parser := &HTMLParser{XPath: xpath}
+			_, err := parser.Parse([]byte(html))
+
+			// Should return ErrNoElementFound
+			return errors.Is(err, ErrNoElementFound)
+		},
+		genSimpleClassName(),
+		genSimpleClassName(),
+	))
+
+	// Property: CSS selector returns ErrNoElementFound for empty HTML body
+	properties.Property("CSS selector returns ErrNoElementFound for empty body", prop.ForAll(
+		func(className string) bool {
+			// Create HTML with empty body
+			html := `<!DOCTYPE html>
+<html>
+<body>
+</body>
+</html>`
+
+			// Parse with HTMLParser using any class selector
+			parser := &HTMLParser{Selector: "." + className}
+			_, err := parser.Parse([]byte(html))
+
+			// Should return ErrNoElementFound
+			return errors.Is(err, ErrNoElementFound)
+		},
+		genSimpleClassName(),
+	))
+
+	// Property: XPath returns ErrNoElementFound for empty HTML body
+	properties.Property("XPath returns ErrNoElementFound for empty body", prop.ForAll(
+		func(idName string) bool {
+			// Create HTML with empty body
+			html := `<!DOCTYPE html>
+<html>
+<body>
+</body>
+</html>`
+
+			// Parse with HTMLParser using any ID in XPath
+			xpath := fmt.Sprintf(`//span[@id="%s"]`, idName)
+			parser := &HTMLParser{XPath: xpath}
+			_, err := parser.Parse([]byte(html))
+
+			// Should return ErrNoElementFound
+			return errors.Is(err, ErrNoElementFound)
+		},
+		genSimpleClassName(),
+	))
+
+	properties.TestingRun(t)
 }
 
 // =============================================================================
