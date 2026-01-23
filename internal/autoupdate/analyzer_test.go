@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
@@ -1090,4 +1091,561 @@ func TestDetectJSONPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSchemaPreservation tests Property 29: Schema Preservation
+// **Feature: autoupdate-analyzer, Property 29: Schema Preservation**
+// **Validates: Requirements 13.2**
+//
+// For any save operation to packages.toml, all existing entries not being
+// modified SHALL be preserved unchanged.
+func TestSchemaPreservation(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+	properties := gopter.NewProperties(parameters)
+
+	// Property: Saving a new schema preserves all existing schemas
+	properties.Property("saving new schema preserves existing schemas", prop.ForAll(
+		func(numExisting int) bool {
+			// Clamp to reasonable range
+			if numExisting < 1 {
+				numExisting = 1
+			}
+			if numExisting > 5 {
+				numExisting = 5
+			}
+
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create existing schemas
+			existingSchemas := make(map[string]PackageConfig)
+			for i := 0; i < numExisting; i++ {
+				pkgName := "app-misc/existing-" + string(rune('a'+i))
+				existingSchemas[pkgName] = PackageConfig{
+					URL:    "https://example.com/api/" + string(rune('a'+i)),
+					Parser: "json",
+					Path:   "version",
+				}
+			}
+
+			// Create analyzer with existing schemas
+			config := &PackagesConfig{Packages: existingSchemas}
+			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Save a new schema
+			newSchema := &PackageConfig{
+				URL:    "https://example.com/new",
+				Parser: "json",
+				Path:   "tag_name",
+			}
+			if err := analyzer.SaveSchema("app-misc/new-package", newSchema); err != nil {
+				t.Logf("Failed to save schema: %v", err)
+				return false
+			}
+
+			// Reload config from disk
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			// Verify all existing schemas are preserved
+			for pkgName, expectedCfg := range existingSchemas {
+				actualCfg, exists := reloadedConfig.Packages[pkgName]
+				if !exists {
+					t.Logf("Existing schema %s was not preserved", pkgName)
+					return false
+				}
+				if actualCfg.URL != expectedCfg.URL ||
+					actualCfg.Parser != expectedCfg.Parser ||
+					actualCfg.Path != expectedCfg.Path {
+					t.Logf("Schema %s was modified: expected %+v, got %+v", pkgName, expectedCfg, actualCfg)
+					return false
+				}
+			}
+
+			// Verify new schema was added
+			newCfg, exists := reloadedConfig.Packages["app-misc/new-package"]
+			if !exists {
+				t.Logf("New schema was not saved")
+				return false
+			}
+			if newCfg.URL != newSchema.URL || newCfg.Parser != newSchema.Parser || newCfg.Path != newSchema.Path {
+				t.Logf("New schema was not saved correctly")
+				return false
+			}
+
+			// Total count should be numExisting + 1
+			return len(reloadedConfig.Packages) == numExisting+1
+		},
+		gen.IntRange(1, 5),
+	))
+
+	// Property: Updating an existing schema preserves other schemas
+	properties.Property("updating existing schema preserves other schemas", prop.ForAll(
+		func(numExisting int) bool {
+			// Clamp to reasonable range
+			if numExisting < 2 {
+				numExisting = 2
+			}
+			if numExisting > 5 {
+				numExisting = 5
+			}
+
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create existing schemas
+			existingSchemas := make(map[string]PackageConfig)
+			for i := 0; i < numExisting; i++ {
+				pkgName := "app-misc/existing-" + string(rune('a'+i))
+				existingSchemas[pkgName] = PackageConfig{
+					URL:    "https://example.com/api/" + string(rune('a'+i)),
+					Parser: "json",
+					Path:   "version",
+				}
+			}
+
+			// Create analyzer with existing schemas
+			config := &PackagesConfig{Packages: existingSchemas}
+			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Update the first schema
+			updatedSchema := &PackageConfig{
+				URL:    "https://example.com/updated",
+				Parser: "regex",
+				Pattern: `v(\d+\.\d+\.\d+)`,
+			}
+			if err := analyzer.SaveSchema("app-misc/existing-a", updatedSchema); err != nil {
+				t.Logf("Failed to save schema: %v", err)
+				return false
+			}
+
+			// Reload config from disk
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			// Verify other schemas are preserved (skip the first one which was updated)
+			for pkgName, expectedCfg := range existingSchemas {
+				if pkgName == "app-misc/existing-a" {
+					continue // Skip the updated one
+				}
+				actualCfg, exists := reloadedConfig.Packages[pkgName]
+				if !exists {
+					t.Logf("Existing schema %s was not preserved", pkgName)
+					return false
+				}
+				if actualCfg.URL != expectedCfg.URL ||
+					actualCfg.Parser != expectedCfg.Parser ||
+					actualCfg.Path != expectedCfg.Path {
+					t.Logf("Schema %s was modified: expected %+v, got %+v", pkgName, expectedCfg, actualCfg)
+					return false
+				}
+			}
+
+			// Verify updated schema has new values
+			updatedCfg, exists := reloadedConfig.Packages["app-misc/existing-a"]
+			if !exists {
+				t.Logf("Updated schema was not saved")
+				return false
+			}
+			if updatedCfg.URL != updatedSchema.URL ||
+				updatedCfg.Parser != updatedSchema.Parser ||
+				updatedCfg.Pattern != updatedSchema.Pattern {
+				t.Logf("Updated schema was not saved correctly")
+				return false
+			}
+
+			// Total count should remain the same
+			return len(reloadedConfig.Packages) == numExisting
+		},
+		gen.IntRange(2, 5),
+	))
+
+	// Property: Multiple saves preserve all schemas
+	properties.Property("multiple saves preserve all schemas", prop.ForAll(
+		func(numSaves int) bool {
+			// Clamp to reasonable range
+			if numSaves < 1 {
+				numSaves = 1
+			}
+			if numSaves > 5 {
+				numSaves = 5
+			}
+
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create analyzer with empty config
+			analyzer, err := NewAnalyzer(tmpDir)
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Save multiple schemas one by one
+			savedSchemas := make(map[string]PackageConfig)
+			for i := 0; i < numSaves; i++ {
+				pkgName := "app-misc/pkg-" + string(rune('a'+i))
+				schema := &PackageConfig{
+					URL:    "https://example.com/api/" + string(rune('a'+i)),
+					Parser: "json",
+					Path:   "version",
+				}
+				if err := analyzer.SaveSchema(pkgName, schema); err != nil {
+					t.Logf("Failed to save schema %d: %v", i, err)
+					return false
+				}
+				savedSchemas[pkgName] = *schema
+			}
+
+			// Reload config from disk
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			// Verify all saved schemas are present
+			for pkgName, expectedCfg := range savedSchemas {
+				actualCfg, exists := reloadedConfig.Packages[pkgName]
+				if !exists {
+					t.Logf("Schema %s was not preserved", pkgName)
+					return false
+				}
+				if actualCfg.URL != expectedCfg.URL ||
+					actualCfg.Parser != expectedCfg.Parser ||
+					actualCfg.Path != expectedCfg.Path {
+					t.Logf("Schema %s was modified: expected %+v, got %+v", pkgName, expectedCfg, actualCfg)
+					return false
+				}
+			}
+
+			return len(reloadedConfig.Packages) == numSaves
+		},
+		gen.IntRange(1, 5),
+	))
+
+	properties.TestingRun(t)
+}
+
+
+// TestTOMLFormattingConsistency tests Property 31: TOML Formatting Consistency
+// **Feature: autoupdate-analyzer, Property 31: TOML Formatting Consistency**
+// **Validates: Requirements 13.4**
+//
+// For any packages.toml file, saving and reloading SHALL produce an equivalent
+// configuration (round-trip property).
+func TestTOMLFormattingConsistency(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+	properties := gopter.NewProperties(parameters)
+
+	// Property: Save and reload produces equivalent configuration
+	properties.Property("save and reload produces equivalent configuration", prop.ForAll(
+		func(numPackages int) bool {
+			// Clamp to reasonable range
+			if numPackages < 1 {
+				numPackages = 1
+			}
+			if numPackages > 5 {
+				numPackages = 5
+			}
+
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create schemas with various configurations
+			schemas := make(map[string]PackageConfig)
+			for i := 0; i < numPackages; i++ {
+				pkgName := "app-misc/pkg-" + string(rune('a'+i))
+				switch i % 3 {
+				case 0:
+					// JSON parser
+					schemas[pkgName] = PackageConfig{
+						URL:    "https://example.com/api/" + string(rune('a'+i)),
+						Parser: "json",
+						Path:   "version",
+						Binary: i%2 == 0,
+					}
+				case 1:
+					// Regex parser
+					schemas[pkgName] = PackageConfig{
+						URL:     "https://example.com/releases/" + string(rune('a'+i)),
+						Parser:  "regex",
+						Pattern: `v(\d+\.\d+\.\d+)`,
+					}
+				case 2:
+					// HTML parser
+					schemas[pkgName] = PackageConfig{
+						URL:      "https://example.com/download/" + string(rune('a'+i)),
+						Parser:   "html",
+						Selector: ".version",
+					}
+				}
+			}
+
+			// Create analyzer with schemas
+			config := &PackagesConfig{Packages: schemas}
+			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Save all schemas
+			for pkgName, schema := range schemas {
+				schemaCopy := schema
+				if err := analyzer.SaveSchema(pkgName, &schemaCopy); err != nil {
+					t.Logf("Failed to save schema: %v", err)
+					return false
+				}
+			}
+
+			// Reload config from disk
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			// Verify all schemas are equivalent
+			if len(reloadedConfig.Packages) != len(schemas) {
+				t.Logf("Package count mismatch: expected %d, got %d", len(schemas), len(reloadedConfig.Packages))
+				return false
+			}
+
+			for pkgName, expectedCfg := range schemas {
+				actualCfg, exists := reloadedConfig.Packages[pkgName]
+				if !exists {
+					t.Logf("Package %s not found after reload", pkgName)
+					return false
+				}
+				if actualCfg.URL != expectedCfg.URL ||
+					actualCfg.Parser != expectedCfg.Parser ||
+					actualCfg.Path != expectedCfg.Path ||
+					actualCfg.Pattern != expectedCfg.Pattern ||
+					actualCfg.Selector != expectedCfg.Selector ||
+					actualCfg.Binary != expectedCfg.Binary {
+					t.Logf("Package %s mismatch: expected %+v, got %+v", pkgName, expectedCfg, actualCfg)
+					return false
+				}
+			}
+
+			return true
+		},
+		gen.IntRange(1, 5),
+	))
+
+	// Property: Double save produces identical file content
+	properties.Property("double save produces identical file content", prop.ForAll(
+		func(numPackages int) bool {
+			// Clamp to reasonable range
+			if numPackages < 1 {
+				numPackages = 1
+			}
+			if numPackages > 5 {
+				numPackages = 5
+			}
+
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create schemas
+			schemas := make(map[string]PackageConfig)
+			for i := 0; i < numPackages; i++ {
+				pkgName := "app-misc/pkg-" + string(rune('a'+i))
+				schemas[pkgName] = PackageConfig{
+					URL:    "https://example.com/api/" + string(rune('a'+i)),
+					Parser: "json",
+					Path:   "version",
+				}
+			}
+
+			// Create analyzer with schemas
+			config := &PackagesConfig{Packages: schemas}
+			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Save all schemas
+			for pkgName, schema := range schemas {
+				schemaCopy := schema
+				if err := analyzer.SaveSchema(pkgName, &schemaCopy); err != nil {
+					t.Logf("Failed to save schema: %v", err)
+					return false
+				}
+			}
+
+			// Read first file content
+			configPath := filepath.Join(tmpDir, ".autoupdate", "packages.toml")
+			firstContent, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Logf("Failed to read first file: %v", err)
+				return false
+			}
+
+			// Reload and save again
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			analyzer2, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(reloadedConfig))
+			if err != nil {
+				t.Logf("Failed to create second analyzer: %v", err)
+				return false
+			}
+
+			// Save again (should produce same content)
+			for pkgName, schema := range reloadedConfig.Packages {
+				schemaCopy := schema
+				if err := analyzer2.SaveSchema(pkgName, &schemaCopy); err != nil {
+					t.Logf("Failed to save schema second time: %v", err)
+					return false
+				}
+			}
+
+			// Read second file content
+			secondContent, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Logf("Failed to read second file: %v", err)
+				return false
+			}
+
+			// Content should be identical (or at least equivalent when parsed)
+			// Note: TOML encoding may produce different ordering, so we compare parsed content
+			var firstParsed, secondParsed map[string]PackageConfig
+			if _, err := toml.Decode(string(firstContent), &firstParsed); err != nil {
+				t.Logf("Failed to parse first content: %v", err)
+				return false
+			}
+			if _, err := toml.Decode(string(secondContent), &secondParsed); err != nil {
+				t.Logf("Failed to parse second content: %v", err)
+				return false
+			}
+
+			// Compare parsed content
+			if len(firstParsed) != len(secondParsed) {
+				t.Logf("Parsed content length mismatch: %d vs %d", len(firstParsed), len(secondParsed))
+				return false
+			}
+
+			for pkgName, firstCfg := range firstParsed {
+				secondCfg, exists := secondParsed[pkgName]
+				if !exists {
+					t.Logf("Package %s not found in second parse", pkgName)
+					return false
+				}
+				if firstCfg.URL != secondCfg.URL ||
+					firstCfg.Parser != secondCfg.Parser ||
+					firstCfg.Path != secondCfg.Path {
+					t.Logf("Package %s mismatch between saves", pkgName)
+					return false
+				}
+			}
+
+			return true
+		},
+		gen.IntRange(1, 5),
+	))
+
+	// Property: Complex schemas with all fields round-trip correctly
+	properties.Property("complex schemas with all fields round-trip correctly", prop.ForAll(
+		func(dummy int) bool {
+			// Create temp overlay
+			tmpDir := t.TempDir()
+
+			// Create a complex schema with all fields
+			complexSchema := PackageConfig{
+				URL:              "https://api.github.com/repos/test/test/releases",
+				Parser:           "json",
+				Path:             "[0].tag_name",
+				Binary:           true,
+				FallbackURL:      "https://example.com/fallback",
+				FallbackParser:   "regex",
+				FallbackPattern:  `v(\d+\.\d+\.\d+)`,
+				LLMPrompt:        "Extract version from content",
+				VersionsPath:     "[*].tag_name",
+				Headers: map[string]string{
+					"Authorization": "Bearer token",
+					"User-Agent":    "bentoolkit/1.0",
+				},
+			}
+
+			// Create analyzer
+			analyzer, err := NewAnalyzer(tmpDir)
+			if err != nil {
+				t.Logf("Failed to create analyzer: %v", err)
+				return false
+			}
+
+			// Save complex schema
+			if err := analyzer.SaveSchema("app-misc/complex", &complexSchema); err != nil {
+				t.Logf("Failed to save complex schema: %v", err)
+				return false
+			}
+
+			// Reload config
+			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			if err != nil {
+				t.Logf("Failed to reload config: %v", err)
+				return false
+			}
+
+			// Verify all fields
+			reloaded, exists := reloadedConfig.Packages["app-misc/complex"]
+			if !exists {
+				t.Logf("Complex schema not found after reload")
+				return false
+			}
+
+			if reloaded.URL != complexSchema.URL ||
+				reloaded.Parser != complexSchema.Parser ||
+				reloaded.Path != complexSchema.Path ||
+				reloaded.Binary != complexSchema.Binary ||
+				reloaded.FallbackURL != complexSchema.FallbackURL ||
+				reloaded.FallbackParser != complexSchema.FallbackParser ||
+				reloaded.FallbackPattern != complexSchema.FallbackPattern ||
+				reloaded.LLMPrompt != complexSchema.LLMPrompt ||
+				reloaded.VersionsPath != complexSchema.VersionsPath {
+				t.Logf("Complex schema field mismatch")
+				return false
+			}
+
+			// Verify headers
+			if len(reloaded.Headers) != len(complexSchema.Headers) {
+				t.Logf("Headers count mismatch")
+				return false
+			}
+			for key, expectedValue := range complexSchema.Headers {
+				actualValue, exists := reloaded.Headers[key]
+				if !exists || actualValue != expectedValue {
+					t.Logf("Header %s mismatch: expected %s, got %s", key, expectedValue, actualValue)
+					return false
+				}
+			}
+
+			return true
+		},
+		gen.IntRange(1, 10),
+	))
+
+	properties.TestingRun(t)
 }

@@ -573,6 +573,7 @@ func (a *Analyzer) SaveSchema(pkg string, schema *PackageConfig) error {
 }
 
 // savePackagesConfig saves the packages configuration to disk.
+// It preserves existing entries and formats TOML consistently with sorted keys.
 func (a *Analyzer) savePackagesConfig() error {
 	configPath := filepath.Join(a.overlayPath, ".autoupdate", "packages.toml")
 
@@ -587,13 +588,14 @@ func (a *Analyzer) savePackagesConfig() error {
 		fileConfig[pkg] = cfg
 	}
 
-	// Write to temp file first
+	// Write to temp file first for atomic operation
 	tmpPath := configPath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 
+	// Use TOML encoder with consistent formatting
 	encoder := toml.NewEncoder(f)
 	if err := encoder.Encode(fileConfig); err != nil {
 		f.Close()
@@ -602,13 +604,39 @@ func (a *Analyzer) savePackagesConfig() error {
 	}
 	f.Close()
 
-	// Rename to final path
+	// Rename to final path (atomic on most filesystems)
 	if err := os.Rename(tmpPath, configPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("failed to rename config file: %w", err)
 	}
 
 	return nil
+}
+
+// LoadAndMergeSchema loads existing config, adds/updates a schema, and saves.
+// This ensures existing entries are preserved when adding new schemas.
+func (a *Analyzer) LoadAndMergeSchema(pkg string, schema *PackageConfig) error {
+	// Reload config from disk to get latest state
+	existingConfig, err := LoadPackagesConfig(a.overlayPath)
+	if err != nil && !errors.Is(err, ErrPackagesConfigNotFound) {
+		return fmt.Errorf("failed to load existing config: %w", err)
+	}
+
+	// Merge existing config with in-memory config
+	if existingConfig != nil {
+		for existingPkg, existingCfg := range existingConfig.Packages {
+			// Only add if not already in memory (preserve in-memory changes)
+			if _, exists := a.config.Packages[existingPkg]; !exists {
+				a.config.Packages[existingPkg] = existingCfg
+			}
+		}
+	}
+
+	// Add/update the new schema
+	a.config.Packages[pkg] = *schema
+
+	// Save to file
+	return a.savePackagesConfig()
 }
 
 // Config returns the packages configuration.
