@@ -1,0 +1,45 @@
+# Binário compilado
+/bentoo
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Arquivos de teste e cobertura
+*.test
+coverage*.out
+cov.out
+coverage.html
+*.prof
+
+# Build
+build/
+
+# Dependências vendorizadas
+vendor/
+
+# Epic
+.epic/
+
+# Arquivos de IDE/editor
+.idea/
+.vscode/
+.cursor/
+.windsurf/
+.codeium/
+.augment/
+.aider*
+.cline/
+.continue/
+.tabnine/
+.codiumai/
+.kiro/
+*.swp
+*.swo
+
+# Arquivos de sistema
+.DS_Store
+
+# Variáveis de ambiente
+.env
+.env.local

@@ -1,0 +1,46 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosec
+    - gocritic
+    - ineffassign
+    - misspell
+    - bodyclose
+    - contextcheck
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*github.com/fatih/color.Color).Printf
+        - (*github.com/fatih/color.Color).Println
+        - (*github.com/fatih/color.Color).Fprintf
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Printf
+        - fmt.Println
+        - (*github.com/spf13/cobra.Command).GenBashCompletion
+        - (*github.com/spf13/cobra.Command).GenZshCompletion
+        - (*github.com/spf13/cobra.Command).GenFishCompletion
+        - (*github.com/spf13/cobra.Command).GenPowerShellCompletionWithDesc
+
+    gosec:
+      excludes:
+        - G304
+        - G104
+        - G204
+        - G703
+        - G704
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
