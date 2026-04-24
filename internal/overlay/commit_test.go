@@ -663,3 +663,219 @@ func TestCommitMessageGeneration(t *testing.T) {
 		})
 	}
 }
+
+// Tests for non-ebuild file change handling (eclass, profiles, licenses, metadata, other).
+
+func TestClassifyFile(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected FileKind
+	}{
+		{"eclass/rpm.eclass", KindEclass},
+		{"profiles/package.mask", KindProfile},
+		{"profiles/use.desc", KindProfile},
+		{"licenses/MIT", KindLicense},
+		{"metadata/layout.conf", KindMetadata},
+		{"README.md", KindOther},
+		{"scripts/update.sh", KindOther},
+		{"app-misc/hello/hello-1.0.ebuild", KindOther},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := ClassifyFile(tt.path)
+			if got != tt.expected {
+				t.Errorf("ClassifyFile(%q) = %q, want %q", tt.path, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAnalyzeRepoFileChangesSkipsEbuilds(t *testing.T) {
+	entries := []git.StatusEntry{
+		{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+		{Status: "A", FilePath: "eclass/rpm.eclass"},
+	}
+
+	files := AnalyzeRepoFileChanges(entries)
+
+	if len(files) != 1 {
+		t.Fatalf("Expected 1 file change, got %d: %+v", len(files), files)
+	}
+	if files[0].Kind != KindEclass {
+		t.Errorf("Expected KindEclass, got %q", files[0].Kind)
+	}
+	if files[0].Path != "eclass/rpm.eclass" {
+		t.Errorf("Expected path eclass/rpm.eclass, got %q", files[0].Path)
+	}
+	if files[0].Type != Add {
+		t.Errorf("Expected Add, got %q", files[0].Type)
+	}
+}
+
+func TestAnalyzeRepoFileChangesAddModDel(t *testing.T) {
+	entries := []git.StatusEntry{
+		{Status: "A", FilePath: "eclass/new.eclass"},
+		{Status: "M", FilePath: "profiles/package.mask"},
+		{Status: "D", FilePath: "licenses/OldLicense"},
+	}
+
+	files := AnalyzeRepoFileChanges(entries)
+
+	if len(files) != 3 {
+		t.Fatalf("Expected 3 file changes, got %d", len(files))
+	}
+
+	byPath := make(map[string]RepoFileChange)
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+
+	if byPath["eclass/new.eclass"].Type != Add {
+		t.Errorf("Expected eclass/new.eclass to be Add, got %q", byPath["eclass/new.eclass"].Type)
+	}
+	if byPath["profiles/package.mask"].Type != Mod {
+		t.Errorf("Expected profiles/package.mask to be Mod, got %q", byPath["profiles/package.mask"].Type)
+	}
+	if byPath["licenses/OldLicense"].Type != Del {
+		t.Errorf("Expected licenses/OldLicense to be Del, got %q", byPath["licenses/OldLicense"].Type)
+	}
+}
+
+func TestGenerateCommitMessageEclassAdd(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindEclass, Path: "eclass/rpm.eclass", Name: "rpm.eclass"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "add(eclass/rpm.eclass)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageEclassGrouping(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindEclass, Path: "eclass/rpm.eclass", Name: "rpm.eclass"},
+		{Type: Add, Kind: KindEclass, Path: "eclass/sourceforge.eclass", Name: "sourceforge.eclass"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "add(eclass/{rpm.eclass, sourceforge.eclass})"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageProfileMod(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Mod, Kind: KindProfile, Path: "profiles/package.mask", Name: "package.mask"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "mod(profiles/package.mask)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageLicenseAdd(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindLicense, Path: "licenses/MIT", Name: "MIT"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "add(licenses/MIT)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageMetadataMod(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Mod, Kind: KindMetadata, Path: "metadata/layout.conf", Name: "layout.conf"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "mod(metadata/layout.conf)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageOtherFile(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Mod, Kind: KindOther, Path: "README.md", Name: "README.md"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "mod(README.md)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageOtherGrouping(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindOther, Path: "FOO.txt", Name: "FOO.txt"},
+		{Type: Add, Kind: KindOther, Path: "BAR.md", Name: "BAR.md"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "add({BAR.md, FOO.txt})"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageMixedPackagesAndFiles(t *testing.T) {
+	changes := []Change{
+		{Type: Add, Category: "app-misc", Package: "hello", Version: "1.0"},
+	}
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindEclass, Path: "eclass/rpm.eclass", Name: "rpm.eclass"},
+	}
+
+	message := GenerateCommitMessage(changes, files)
+	expected := "add(app-misc/hello-1.0), add(eclass/rpm.eclass)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageMixedKinds(t *testing.T) {
+	files := []RepoFileChange{
+		{Type: Add, Kind: KindEclass, Path: "eclass/rpm.eclass", Name: "rpm.eclass"},
+		{Type: Add, Kind: KindLicense, Path: "licenses/MIT", Name: "MIT"},
+		{Type: Mod, Kind: KindProfile, Path: "profiles/package.mask", Name: "package.mask"},
+	}
+
+	message := GenerateCommitMessage(nil, files)
+	expected := "add(eclass/rpm.eclass, licenses/MIT), mod(profiles/package.mask)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateCommitMessageEmpty(t *testing.T) {
+	message := GenerateCommitMessage(nil, nil)
+	expected := "update: package files"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+func TestGenerateMessageBackwardCompat(t *testing.T) {
+	// GenerateMessage should continue to behave exactly as before for callers
+	// that only pass package changes.
+	changes := []Change{
+		{Type: Add, Category: "app-misc", Package: "hello", Version: "1.0"},
+	}
+
+	legacy := GenerateMessage(changes)
+	modern := GenerateCommitMessage(changes, nil)
+
+	if legacy != modern {
+		t.Errorf("GenerateMessage diverged from GenerateCommitMessage(changes, nil): %q vs %q", legacy, modern)
+	}
+}

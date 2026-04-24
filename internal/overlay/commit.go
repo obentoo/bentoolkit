@@ -29,6 +29,56 @@ type Change struct {
 	OldVersion string // for up/down
 }
 
+// FileKind classifies a non-ebuild overlay file by its top-level directory.
+type FileKind string
+
+const (
+	KindEclass   FileKind = "eclass"
+	KindProfile  FileKind = "profile"
+	KindLicense  FileKind = "license"
+	KindMetadata FileKind = "metadata"
+	KindOther    FileKind = "other"
+)
+
+// kindDirectory is the top-level directory name used when rendering a FileKind.
+var kindDirectory = map[FileKind]string{
+	KindEclass:   "eclass",
+	KindProfile:  "profiles",
+	KindLicense:  "licenses",
+	KindMetadata: "metadata",
+}
+
+// RepoFileChange represents a change to a non-ebuild file in the overlay.
+type RepoFileChange struct {
+	Type ChangeType // Add, Del, Mod
+	Kind FileKind
+	Path string // path relative to overlay root (e.g. "eclass/rpm.eclass")
+	Name string // filename only (e.g. "rpm.eclass")
+}
+
+// ClassifyFile returns the FileKind for a path relative to the overlay root.
+// Classification is based solely on the top-level directory; paths that live
+// inside a category (category/pkg/...) return KindOther because ebuild-aware
+// logic handles them elsewhere.
+func ClassifyFile(filePath string) FileKind {
+	parts := strings.Split(filePath, "/")
+	if len(parts) == 0 {
+		return KindOther
+	}
+	switch parts[0] {
+	case "eclass":
+		return KindEclass
+	case "profiles":
+		return KindProfile
+	case "licenses":
+		return KindLicense
+	case "metadata":
+		return KindMetadata
+	default:
+		return KindOther
+	}
+}
+
 // versionInfo holds a version string and its git status ("A" added, "D" deleted).
 type versionInfo struct {
 	version string
@@ -187,31 +237,97 @@ func normalizeStatus(status string) string {
 	}
 }
 
-// GenerateMessage generates a commit message from a list of changes
+// AnalyzeRepoFileChanges analyzes git status entries and returns a sorted list of
+// changes to non-ebuild files (eclasses, profiles, licenses, metadata,
+// arbitrary repo files). Entries that correspond to a parseable ebuild are
+// ignored here — use AnalyzeChanges for those.
+func AnalyzeRepoFileChanges(entries []git.StatusEntry) []RepoFileChange {
+	var files []RepoFileChange
+
+	for _, entry := range entries {
+		if _, err := ebuild.ParsePath(entry.FilePath); err == nil {
+			continue
+		}
+
+		path := entry.FilePath
+		if path == "" {
+			continue
+		}
+
+		var ct ChangeType
+		switch normalizeStatus(entry.Status) {
+		case "A":
+			ct = Add
+		case "D":
+			ct = Del
+		case "M":
+			ct = Mod
+		default:
+			continue
+		}
+
+		parts := strings.Split(path, "/")
+		name := parts[len(parts)-1]
+
+		files = append(files, RepoFileChange{
+			Type: ct,
+			Kind: ClassifyFile(path),
+			Path: path,
+			Name: name,
+		})
+	}
+
+	sortRepoFileChanges(files)
+	return files
+}
+
+// sortRepoFileChanges sorts file changes deterministically by type, kind, and path.
+func sortRepoFileChanges(files []RepoFileChange) {
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Type != files[j].Type {
+			return files[i].Type < files[j].Type
+		}
+		if files[i].Kind != files[j].Kind {
+			return files[i].Kind < files[j].Kind
+		}
+		return files[i].Path < files[j].Path
+	})
+}
+
+// GenerateMessage generates a commit message from a list of package changes.
+// Kept for backward compatibility; see GenerateCommitMessage for the combined
+// form that also renders non-ebuild file changes.
 func GenerateMessage(changes []Change) string {
-	if len(changes) == 0 {
+	return GenerateCommitMessage(changes, nil)
+}
+
+// GenerateCommitMessage generates a commit message from both package (ebuild)
+// changes and non-ebuild file changes. Parts are joined with ", " in the order
+// add, del, mod, up, down — packages first within each action, then files.
+func GenerateCommitMessage(changes []Change, files []RepoFileChange) string {
+	if len(changes) == 0 && len(files) == 0 {
 		return "update: package files"
 	}
 
-	// Group changes by type
 	byType := make(map[ChangeType][]Change)
 	for _, c := range changes {
 		byType[c.Type] = append(byType[c.Type], c)
 	}
 
-	// Build message parts in order: add, del, mod, up, down
+	filesByType := make(map[ChangeType][]RepoFileChange)
+	for _, f := range files {
+		filesByType[f.Type] = append(filesByType[f.Type], f)
+	}
+
 	typeOrder := []ChangeType{Add, Del, Mod, Up, Down}
 	var parts []string
 
 	for _, ct := range typeOrder {
-		typeChanges, ok := byType[ct]
-		if !ok || len(typeChanges) == 0 {
-			continue
+		if pkgPart := formatChangeGroup(ct, byType[ct]); pkgPart != "" {
+			parts = append(parts, pkgPart)
 		}
-
-		part := formatChangeGroup(ct, typeChanges)
-		if part != "" {
-			parts = append(parts, part)
+		if filePart := formatRepoFileChangeGroup(ct, filesByType[ct]); filePart != "" {
+			parts = append(parts, filePart)
 		}
 	}
 
@@ -220,6 +336,69 @@ func GenerateMessage(changes []Change) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// formatRepoFileChangeGroup formats a group of non-ebuild file changes of the same
+// action type into a string like "add(eclass/rpm.eclass)" or
+// "add(eclass/{rpm.eclass, sourceforge.eclass})".
+func formatRepoFileChangeGroup(ct ChangeType, files []RepoFileChange) string {
+	if len(files) == 0 {
+		return ""
+	}
+
+	byKind := make(map[FileKind][]RepoFileChange)
+	for _, f := range files {
+		byKind[f.Kind] = append(byKind[f.Kind], f)
+	}
+
+	kindOrder := []FileKind{KindEclass, KindProfile, KindLicense, KindMetadata, KindOther}
+
+	var kindParts []string
+	for _, kind := range kindOrder {
+		group, ok := byKind[kind]
+		if !ok || len(group) == 0 {
+			continue
+		}
+		kindParts = append(kindParts, formatFileKindGroup(kind, group))
+	}
+
+	return string(ct) + "(" + strings.Join(kindParts, ", ") + ")"
+}
+
+// formatFileKindGroup formats a group of file changes sharing the same kind.
+// Known kinds render as "dir/name" or "dir/{name1, name2}"; unknown files
+// (KindOther) render using their full relative path.
+func formatFileKindGroup(kind FileKind, files []RepoFileChange) string {
+	dir, hasDir := kindDirectory[kind]
+
+	if !hasDir {
+		paths := make([]string, 0, len(files))
+		for _, f := range files {
+			paths = append(paths, f.Path)
+		}
+		sort.Strings(paths)
+		if len(paths) == 1 {
+			return paths[0]
+		}
+		return "{" + strings.Join(paths, ", ") + "}"
+	}
+
+	names := make([]string, 0, len(files))
+	seen := make(map[string]bool)
+	for _, f := range files {
+		rel := strings.TrimPrefix(f.Path, dir+"/")
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		names = append(names, rel)
+	}
+	sort.Strings(names)
+
+	if len(names) == 1 {
+		return dir + "/" + names[0]
+	}
+	return dir + "/{" + strings.Join(names, ", ") + "}"
 }
 
 // formatChangeGroup formats a group of changes of the same type

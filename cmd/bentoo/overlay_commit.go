@@ -88,9 +88,11 @@ func runCommit(cmd *cobra.Command, args []string) {
 		osExit(0)
 	}
 
-	// Analyze changes and generate message
+	// Analyze changes and generate message (includes both ebuild packages and
+	// non-ebuild files such as eclasses, profiles, licenses, and metadata).
 	changes := overlay.AnalyzeChanges(stagedEntries)
-	generatedMessage := overlay.GenerateMessage(changes)
+	fileChanges := overlay.AnalyzeRepoFileChanges(stagedEntries)
+	generatedMessage := overlay.GenerateCommitMessage(changes, fileChanges)
 
 	// Dry-run mode: just show what would be committed
 	if commitDryRun {
