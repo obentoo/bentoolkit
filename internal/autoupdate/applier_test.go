@@ -27,6 +27,12 @@ func TestEbuildCopyVersioning(t *testing.T) {
 	// Property: Destination ebuild filename is {package}-{newVersion}.ebuild
 	properties.Property("Ebuild copy creates correct destination filename", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
+			// Real upgrades always have distinct versions; skip the degenerate
+			// case where gopter happens to generate equal inputs.
+			if oldVersion == newVersion {
+				return true
+			}
+
 			tmpDir := t.TempDir()
 			overlayDir := filepath.Join(tmpDir, "overlay")
 			configDir := filepath.Join(tmpDir, "config")
@@ -96,6 +102,12 @@ func TestEbuildCopyVersioning(t *testing.T) {
 	// Property: Source ebuild filename is {package}-{oldVersion}.ebuild
 	properties.Property("Ebuild copy reads from correct source filename", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
+			// Real upgrades always have distinct versions; skip the degenerate
+			// case where gopter happens to generate equal inputs.
+			if oldVersion == newVersion {
+				return true
+			}
+
 			tmpDir := t.TempDir()
 			overlayDir := filepath.Join(tmpDir, "overlay")
 			configDir := filepath.Join(tmpDir, "config")

@@ -195,6 +195,13 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	category := parts[0]
 	pkgName := parts[1]
 
+	// Reject same-version copy: srcPath and dstPath would coincide, and
+	// os.Create truncates the destination before io.Copy reads, silently
+	// zeroing the source ebuild.
+	if oldVersion == newVersion {
+		return fmt.Errorf("source and destination versions are equal: %s", newVersion)
+	}
+
 	// Build paths
 	pkgDir := filepath.Join(a.overlayPath, category, pkgName)
 	srcPath := filepath.Join(pkgDir, fmt.Sprintf("%s-%s.ebuild", pkgName, oldVersion))
