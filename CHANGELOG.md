@@ -18,6 +18,10 @@ _No changes yet._
   guard in `copyEbuild` and a degenerate-case skip in the
   `TestEbuildCopyVersioning` property tests that intermittently broke CI.
 
+### Changed
+- `.gitignore` now excludes `.tab/` and `.epic/` local plugin state so
+  TAB (tech-advisory-board) and Epic plugin data never gets committed.
+
 ## [0.1.1] - 2026-04-24
 
 ### Fixed
