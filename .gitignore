@@ -43,3 +43,5 @@ vendor/
 # Variáveis de ambiente
 .env
 .env.local
+.tab/
+.epic/
