@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.5] - 2026-04-28
+
+### Changed
+- Bumped indirect dependencies to their latest patch/minor releases:
+  `golang.org/x/net` v0.52.0 → v0.53.0,
+  `golang.org/x/sys` v0.42.0 → v0.43.0,
+  `golang.org/x/text` v0.35.0 → v0.36.0,
+  `github.com/mattn/go-isatty` v0.0.20 → v0.0.22, and
+  `github.com/golang/groupcache` to the 2024-11-29 snapshot. Pulls in
+  routine upstream fixes (no API changes); `govulncheck` reports zero
+  known vulnerabilities against the resulting module graph.
+
 ## [0.1.4] - 2026-04-28
 
 ### Changed
@@ -69,7 +81,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/obentoo/bentoolkit/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/obentoo/bentoolkit/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/obentoo/bentoolkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/obentoo/bentoolkit/compare/v0.1.1...v0.1.2
