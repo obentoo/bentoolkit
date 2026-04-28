@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -294,14 +293,12 @@ func Rename(cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameR
 	return result, nil
 }
 
-// updateManifests updates Manifest files for renamed packages using pkgdev.
-// Returns a slice of ManifestUpdate with the results.
+// updateManifests updates Manifest files for renamed packages using the
+// shared regeneration helper. Duplicate (category, package) pairs are
+// collapsed so each package is processed once.
 func updateManifests(renamed []RenameMatch, overlayPath string) []ManifestUpdate {
-	var updates []ManifestUpdate
-
-	// Track processed packages to avoid duplicate updates
 	processed := make(map[string]bool)
-	var uniqueMatches []RenameMatch
+	var targets []ManifestUpdate
 
 	for _, match := range renamed {
 		key := match.Category + "/" + match.Package
@@ -309,59 +306,19 @@ func updateManifests(renamed []RenameMatch, overlayPath string) []ManifestUpdate
 			continue
 		}
 		processed[key] = true
-		uniqueMatches = append(uniqueMatches, match)
-
-		updates = append(updates, ManifestUpdate{
+		targets = append(targets, ManifestUpdate{
 			Category: match.Category,
 			Package:  match.Package,
 		})
 	}
 
-	if len(uniqueMatches) == 0 {
-		return updates
+	if len(targets) == 0 {
+		return targets
 	}
 
-	// Check if pkgdev is available
-	if _, err := exec.LookPath("pkgdev"); err != nil {
-		for i := range updates {
-			updates[i].Success = false
-			updates[i].Error = "pkgdev not found; install dev-util/pkgdev"
-		}
-		return updates
-	}
-
-	// Create temporary distdir to avoid permission issues
-	tmpDistdir, err := os.MkdirTemp("", "bentoo-distfiles-")
-	if err != nil {
-		for i := range updates {
-			updates[i].Success = false
-			updates[i].Error = fmt.Sprintf("failed to create temp distdir: %v", err)
-		}
-		return updates
-	}
-	defer os.RemoveAll(tmpDistdir) //nolint:errcheck
-
-	// Process each package
-	for i, match := range uniqueMatches {
-		pkgPath := fmt.Sprintf("%s/%s/%s", overlayPath, match.Category, match.Package)
-
-		cmd := exec.Command("pkgdev", "manifest", "--distdir", tmpDistdir)
-		cmd.Dir = pkgPath
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		fmt.Printf(">>> Updating Manifest for %s/%s (pkgdev)\n", match.Category, match.Package)
-
-		err := cmd.Run()
-		if err != nil {
-			updates[i].Success = false
-			updates[i].Error = err.Error()
-		} else {
-			updates[i].Success = true
-		}
-	}
-
-	return updates
+	// Rename flow keeps the existing Manifest (Keep=true): the new ebuild's
+	// SRC_URI may share filenames with the old one and pkgdev will reconcile.
+	return RegenerateManifests(overlayPath, targets, &ManifestOptions{Keep: true})
 }
 
 // FormatRenameResult formats the rename result for display.

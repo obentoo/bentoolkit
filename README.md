@@ -213,6 +213,32 @@ Example:
 bentoo overlay rename app-misc:hello:1.0 => 2.0
 ```
 
+#### Regenerate Manifests
+
+Regenerate `Manifest` files for one or more packages. By default the
+existing `Manifest` is moved aside before `pkgdev` runs (clean regen),
+and restored automatically if `pkgdev` fails. Runs as the current user —
+no `sudo` required.
+
+```bash
+# Whole overlay
+bentoo overlay manifest
+
+# All packages in a category
+bentoo overlay manifest app-editors
+
+# Single package
+bentoo overlay manifest app-editors/zed
+
+# Preview only
+bentoo overlay manifest --dry-run app-editors
+
+# Skip the clean step (let pkgdev reconcile in place)
+bentoo overlay manifest --keep app-editors/zed
+```
+
+Requires `dev-util/pkgdev`.
+
 #### Show Diff
 
 Show the diff of uncommitted or staged changes:
@@ -553,6 +579,7 @@ bentoolkit/
 │   ├── overlay_diff.go         # overlay diff command
 │   ├── overlay_init.go         # overlay init command
 │   ├── overlay_log.go          # overlay log command
+│   ├── overlay_manifest.go     # overlay manifest command
 │   ├── overlay_push.go         # overlay push command
 │   ├── overlay_rename.go       # overlay rename command
 │   ├── overlay_status.go       # overlay status command

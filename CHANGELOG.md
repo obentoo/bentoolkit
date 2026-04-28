@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.3] - 2026-04-28
+
+### Added
+- `overlay manifest` subcommand: regenerate `Manifest` files for the
+  whole overlay, a single category, or a single package
+  (`bentoo overlay manifest [<category> | <category>/<package>]`).
+  Default behaviour does a clean regeneration — the existing `Manifest`
+  is moved aside, `pkgdev manifest` runs against a per-invocation
+  `--distdir` under `os.TempDir()`, and the backup is restored on
+  failure. Use `--keep` to preserve the existing `Manifest` (soft
+  reconcile) or `--dry-run` (`-n`) to list targets without invoking
+  pkgdev. Runs unprivileged; no sudo required.
+
+### Changed
+- Rename flow (`overlay rename`) now reuses the shared
+  `RegenerateManifests` helper in `internal/overlay/manifest.go`
+  instead of carrying its own pkgdev wrapper. Behaviour is preserved
+  (`Keep: true` mode), eliminating duplicated logic.
+
 ## [0.1.2] - 2026-04-24
 
 ### Fixed
@@ -37,7 +56,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/obentoo/bentoolkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/obentoo/bentoolkit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/obentoo/bentoolkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/obentoo/bentoolkit/releases/tag/v0.1.0

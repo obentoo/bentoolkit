@@ -1,0 +1,105 @@
+package main
+
+import (
+	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/overlay"
+	"github.com/spf13/cobra"
+)
+
+// ManifestFlags holds command-line flags for the manifest regeneration command.
+type ManifestFlags struct {
+	Keep   bool // --keep: do not remove existing Manifest before pkgdev runs
+	DryRun bool // --dry-run: list packages without invoking pkgdev
+}
+
+var manifestFlags ManifestFlags
+
+var manifestCmd = &cobra.Command{
+	Use:   "manifest [<category> | <category>/<package>]",
+	Short: "Regenerate Manifest files for overlay packages",
+	Long: `Regenerate Manifest files for one or more packages in the overlay.
+
+By default, the existing Manifest is moved aside before pkgdev runs so a
+fresh file is produced (clean regeneration). The backup is restored
+automatically if pkgdev fails. Use --keep to skip the clean step and let
+pkgdev reconcile the existing Manifest.
+
+Scope is selected by the optional argument:
+  (no argument)            All packages in the overlay
+  <category>               All packages in the given category
+  <category>/<package>     Only the given package
+
+The command runs as the current user — pkgdev is invoked with a temporary
+distdir, so no sudo is required.
+
+Examples:
+  # Regenerate every Manifest in the overlay
+  bentoo overlay manifest
+
+  # Regenerate every package in app-editors
+  bentoo overlay manifest app-editors
+
+  # Regenerate a single package
+  bentoo overlay manifest app-editors/zed
+
+  # Preview without running pkgdev
+  bentoo overlay manifest --dry-run app-editors
+
+  # Skip the clean-regen step (keep existing Manifest in place)
+  bentoo overlay manifest --keep app-editors/zed`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runManifest,
+}
+
+func init() {
+	manifestCmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
+	manifestCmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
+	overlayCmd.AddCommand(manifestCmd)
+}
+
+func runManifest(cmd *cobra.Command, args []string) {
+	arg := ""
+	if len(args) == 1 {
+		arg = args[0]
+	}
+
+	scope, err := overlay.ParseManifestScope(arg)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+	}
+
+	ctx, err := loadAppContext()
+	if err != nil {
+		logger.Error("loading config: %v", err)
+		osExit(1)
+	}
+
+	targets, err := overlay.ResolveManifestTargets(ctx.OverlayPath, scope)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+	}
+
+	opts := &overlay.ManifestOptions{
+		Keep:   manifestFlags.Keep,
+		DryRun: manifestFlags.DryRun,
+	}
+
+	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
+
+	updates := overlay.RegenerateManifests(ctx.OverlayPath, targets, opts)
+	result := &overlay.ManifestResult{Updates: updates}
+
+	logger.Info("%s", overlay.FormatManifestResult(result, opts.DryRun))
+
+	if opts.DryRun {
+		return
+	}
+	for _, u := range updates {
+		if !u.Success {
+			osExit(1)
+			return
+		}
+	}
+}
