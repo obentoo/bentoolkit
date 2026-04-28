@@ -713,6 +713,66 @@ func TestAnalyzeRepoFileChangesSkipsEbuilds(t *testing.T) {
 	}
 }
 
+// TestAnalyzeRepoFileChangesSkipsInPackageFiles verifies that non-ebuild files
+// living inside a category/package directory (Manifest, metadata.xml,
+// files/*, patches) are intentionally dropped from the generated message.
+func TestAnalyzeRepoFileChangesSkipsInPackageFiles(t *testing.T) {
+	entries := []git.StatusEntry{
+		{Status: "M", FilePath: "app-misc/hello/Manifest"},
+		{Status: "D", FilePath: "app-misc/hello/metadata.xml"},
+		{Status: "A", FilePath: "app-misc/hello/files/fix.patch"},
+		{Status: "M", FilePath: "README.md"},
+	}
+
+	files := AnalyzeRepoFileChanges(entries)
+
+	if len(files) != 1 {
+		t.Fatalf("Expected 1 file change (only README.md), got %d: %+v", len(files), files)
+	}
+	if files[0].Path != "README.md" {
+		t.Errorf("Expected README.md to survive filtering, got %q", files[0].Path)
+	}
+}
+
+// TestGenerateCommitMessageOnlyInPackageFiles verifies that a commit touching
+// only package-internal support files falls back to the generic message.
+func TestGenerateCommitMessageOnlyInPackageFiles(t *testing.T) {
+	entries := []git.StatusEntry{
+		{Status: "M", FilePath: "app-misc/hello/Manifest"},
+		{Status: "M", FilePath: "app-misc/hello/metadata.xml"},
+	}
+
+	changes := AnalyzeChanges(entries)
+	files := AnalyzeRepoFileChanges(entries)
+	message := GenerateCommitMessage(changes, files)
+
+	expected := "update: package files"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
+// TestGenerateCommitMessageEbuildWithSupportFiles verifies that ebuild
+// deletion alongside Manifest/metadata.xml deletion only renders the ebuild
+// part — package-internal files are hidden.
+func TestGenerateCommitMessageEbuildWithSupportFiles(t *testing.T) {
+	entries := []git.StatusEntry{
+		{Status: "D", FilePath: "dev-util/claude-code/claude-code-2.1.120.ebuild"},
+		{Status: "D", FilePath: "dev-util/claude-code/Manifest"},
+		{Status: "D", FilePath: "dev-util/claude-code/metadata.xml"},
+		{Status: "D", FilePath: "dev-util/claude-code/files/managed-settings.json"},
+	}
+
+	changes := AnalyzeChanges(entries)
+	files := AnalyzeRepoFileChanges(entries)
+	message := GenerateCommitMessage(changes, files)
+
+	expected := "del(dev-util/claude-code-2.1.120)"
+	if message != expected {
+		t.Errorf("Expected %q, got %q", expected, message)
+	}
+}
+
 func TestAnalyzeRepoFileChangesAddModDel(t *testing.T) {
 	entries := []git.StatusEntry{
 		{Status: "A", FilePath: "eclass/new.eclass"},

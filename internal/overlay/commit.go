@@ -240,7 +240,10 @@ func normalizeStatus(status string) string {
 // AnalyzeRepoFileChanges analyzes git status entries and returns a sorted list of
 // changes to non-ebuild files (eclasses, profiles, licenses, metadata,
 // arbitrary repo files). Entries that correspond to a parseable ebuild are
-// ignored here — use AnalyzeChanges for those.
+// ignored here — use AnalyzeChanges for those. Non-ebuild files that live
+// inside a package directory (Manifest, metadata.xml, files/*, patches) are
+// also dropped: they are implementation details of the surrounding ebuild
+// changes and would clutter every commit message.
 func AnalyzeRepoFileChanges(entries []git.StatusEntry) []RepoFileChange {
 	var files []RepoFileChange
 
@@ -251,6 +254,11 @@ func AnalyzeRepoFileChanges(entries []git.StatusEntry) []RepoFileChange {
 
 		path := entry.FilePath
 		if path == "" {
+			continue
+		}
+
+		kind := ClassifyFile(path)
+		if isInsidePackageDir(path, kind) {
 			continue
 		}
 
@@ -271,7 +279,7 @@ func AnalyzeRepoFileChanges(entries []git.StatusEntry) []RepoFileChange {
 
 		files = append(files, RepoFileChange{
 			Type: ct,
-			Kind: ClassifyFile(path),
+			Kind: kind,
 			Path: path,
 			Name: name,
 		})
@@ -279,6 +287,17 @@ func AnalyzeRepoFileChanges(entries []git.StatusEntry) []RepoFileChange {
 
 	sortRepoFileChanges(files)
 	return files
+}
+
+// isInsidePackageDir reports whether a non-ebuild path lives inside a
+// category/package directory (e.g. "app-misc/hello/Manifest" or
+// "app-misc/hello/files/foo.patch"). Such files are package-local artifacts
+// and are intentionally hidden from generated commit messages.
+func isInsidePackageDir(path string, kind FileKind) bool {
+	if kind != KindOther {
+		return false
+	}
+	return strings.Count(path, "/") >= 2
 }
 
 // sortRepoFileChanges sorts file changes deterministically by type, kind, and path.
