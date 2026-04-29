@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.8] - 2026-04-29
+
+### Fixed
+- CI lint pipeline (`golangci-lint`) is green again. Two `fmt.Fprintln`
+  calls in the manifest reporters were swapped for `fmt.Fprintf` with
+  an explicit `\n`, since the project's `errcheck` exclusion list
+  covers `Fprint`/`Fprintf` but not `Fprintln`. The pkgdev distfiles
+  cache directory is now created with mode `0o750` instead of `0o755`
+  to satisfy `gosec` G301 (per-user cache; group-only access is
+  sufficient). No behaviour change.
+
 ## [0.1.7] - 2026-04-29
 
 ### Added
@@ -118,7 +129,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/obentoo/bentoolkit/compare/v0.1.4...v0.1.5
