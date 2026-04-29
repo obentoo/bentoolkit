@@ -400,7 +400,7 @@ func resolveDistdir(userDir string) (string, func(), error) {
 	if err != nil {
 		return "", noop, fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return "", noop, fmt.Errorf("failed to create distdir %q: %w", abs, err)
 	}
 	return abs, noop, nil

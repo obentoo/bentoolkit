@@ -58,7 +58,7 @@ func (r *LogReporter) Done(_ int, _ int, t ManifestUpdate, ok bool, errMsg, outp
 	}
 	fmt.Fprintf(r.w, ">>> FAIL   %s/%s: %s  (%d/%d)\n", t.Category, t.Package, errMsg, r.done, r.total)
 	if strings.TrimSpace(output) != "" {
-		fmt.Fprintln(r.w, indent(output, "    "))
+		fmt.Fprintf(r.w, "%s\n", indent(output, "    "))
 	}
 }
 
@@ -207,7 +207,7 @@ func (r *TUIReporter) printHistoryLine(t ManifestUpdate, ok bool, errMsg, output
 	}
 	fmt.Fprintf(r.w, "%s %s  %s\n", color.RedString("✗"), label, errMsg)
 	if s := strings.TrimSpace(output); s != "" {
-		fmt.Fprintln(r.w, indent(s, "    "))
+		fmt.Fprintf(r.w, "%s\n", indent(s, "    "))
 	}
 }
 
