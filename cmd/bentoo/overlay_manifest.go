@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -11,6 +17,7 @@ type ManifestFlags struct {
 	Keep    bool   // --keep: do not remove existing Manifest before pkgdev runs
 	DryRun  bool   // --dry-run: list packages without invoking pkgdev
 	Distdir string // --distdir: pkgdev distfiles directory (persistent when set)
+	Jobs    int    // --jobs: maximum number of parallel pkgdev workers
 }
 
 var manifestFlags ManifestFlags
@@ -25,6 +32,12 @@ fresh file is produced (clean regeneration). The backup is restored
 automatically if pkgdev fails. Use --keep to skip the clean step and let
 pkgdev reconcile the existing Manifest.
 
+Workers are dispatched in parallel up to --jobs (default 10), so larger
+overlays regenerate much faster. When stdout is a terminal, a live block
+shows one slot per active worker plus a global progress bar; finished
+packages scroll above as ✓/✗ history. Outside a TTY (CI, pipes), output
+falls back to plain start/finish log lines.
+
 Scope is selected by the optional argument:
   (no argument)            All packages in the overlay
   <category>               All packages in the given category
@@ -36,7 +49,7 @@ Pass --distdir to use a persistent path instead (created if missing); this
 acts as a download cache reused across runs.
 
 Examples:
-  # Regenerate every Manifest in the overlay
+  # Regenerate every Manifest in the overlay (10 in parallel)
   bentoo overlay manifest
 
   # Regenerate every package in app-editors
@@ -44,6 +57,9 @@ Examples:
 
   # Regenerate a single package
   bentoo overlay manifest app-editors/zed
+
+  # Limit parallelism (e.g. for low-bandwidth links)
+  bentoo overlay manifest --jobs 2
 
   # Preview without running pkgdev
   bentoo overlay manifest --dry-run app-editors
@@ -61,6 +77,7 @@ func init() {
 	manifestCmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
 	manifestCmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
 	manifestCmd.Flags().StringVar(&manifestFlags.Distdir, "distdir", "", "Distfiles directory used by pkgdev (default: temporary directory removed after run)")
+	manifestCmd.Flags().IntVarP(&manifestFlags.Jobs, "jobs", "j", overlay.DefaultManifestJobs, "Maximum parallel pkgdev workers")
 	overlayCmd.AddCommand(manifestCmd)
 }
 
@@ -88,10 +105,18 @@ func runManifest(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
+	// Wire SIGINT/SIGTERM to a context so an in-flight run cancels cleanly:
+	// pkgdev sub-processes inherit the cancellation through exec.CommandContext.
+	runCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	opts := &overlay.ManifestOptions{
-		Keep:    manifestFlags.Keep,
-		DryRun:  manifestFlags.DryRun,
-		Distdir: manifestFlags.Distdir,
+		Keep:     manifestFlags.Keep,
+		DryRun:   manifestFlags.DryRun,
+		Distdir:  manifestFlags.Distdir,
+		Jobs:     manifestFlags.Jobs,
+		Reporter: chooseManifestReporter(manifestFlags.DryRun),
+		Ctx:      runCtx,
 	}
 
 	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
@@ -110,4 +135,17 @@ func runManifest(cmd *cobra.Command, args []string) {
 			return
 		}
 	}
+}
+
+// chooseManifestReporter picks the right ProgressReporter for the current
+// stdout: TUI when interactive, log lines otherwise. Dry-run skips the
+// reporter entirely since there are no pkgdev invocations to track.
+func chooseManifestReporter(dryRun bool) overlay.ProgressReporter {
+	if dryRun {
+		return nil
+	}
+	if output.IsTerminal() {
+		return overlay.NewTUIReporter(os.Stdout)
+	}
+	return overlay.NewLogReporter(os.Stdout)
 }

@@ -2,6 +2,8 @@
 package overlay
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
@@ -19,6 +22,10 @@ var (
 	ErrManifestNoTargets    = errors.New("no packages found to update")
 	ErrManifestInvalidScope = errors.New("invalid manifest scope")
 )
+
+// DefaultManifestJobs is the default number of pkgdev workers run in parallel
+// when ManifestOptions.Jobs is not set (or set to a non-positive value).
+const DefaultManifestJobs = 10
 
 // ManifestScope identifies one or more packages to regenerate Manifests for.
 //
@@ -46,6 +53,37 @@ type ManifestOptions struct {
 	// a temporary directory is created under os.TempDir() and removed
 	// when the run completes.
 	Distdir string
+	// Jobs is the maximum number of pkgdev invocations to run in parallel.
+	// Values <= 0 fall back to DefaultManifestJobs. Internally clamped to
+	// the number of targets so we never spin idle workers.
+	Jobs int
+	// Reporter receives lifecycle events as workers process targets.
+	// Nil means silent (no progress output). The CLI typically wires a
+	// TUI or log reporter here.
+	Reporter ProgressReporter
+	// Ctx, when non-nil, is propagated to the pkgdev sub-processes via
+	// exec.CommandContext so callers can cancel an in-flight run (e.g.
+	// on SIGINT). Nil is treated as context.Background().
+	Ctx context.Context
+}
+
+// ProgressReporter receives manifest-regeneration lifecycle events.
+//
+// Implementations must be safe to call from multiple goroutines. Workers
+// invoke Start/Done concurrently as they pick up and finish targets.
+type ProgressReporter interface {
+	// Total announces the total number of targets and the desired worker
+	// concurrency. Called once before any Start.
+	Total(n, jobs int)
+	// Start signals that worker `worker` (0-indexed) has picked up
+	// targets[i] and is about to invoke pkgdev for it.
+	Start(i, worker int, target ManifestUpdate)
+	// Done signals that targets[i] finished. ok==false carries the failure
+	// reason (errMsg) and the captured pkgdev output (output) for display.
+	Done(i, worker int, target ManifestUpdate, ok bool, errMsg, output string)
+	// Finish is called once after all targets have completed, regardless
+	// of individual outcomes.
+	Finish()
 }
 
 // ManifestResult collects per-package results of a regeneration run.
@@ -130,17 +168,20 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 }
 
 // RegenerateManifests regenerates Manifest files for the given packages using
-// pkgdev. By default it removes (backs up) the existing Manifest before
-// running pkgdev and restores it on failure. Pass opts.Keep=true to skip the
-// backup/clean step.
+// pkgdev. Workers are dispatched in parallel up to opts.Jobs (default
+// DefaultManifestJobs); each pkgdev process runs against its own package
+// directory and shares the resolved distdir as a download cache.
 //
-// By default, pkgdev is invoked with a dedicated --distdir under os.TempDir()
-// so the command never requires sudo and never touches /var/cache/distfiles.
-// Pass opts.Distdir to use a persistent directory instead — it is created
-// if missing and preserved between runs (useful as a download cache).
+// By default, the existing Manifest is moved aside before pkgdev runs so a
+// fresh file is produced (clean regeneration). The backup is restored on
+// failure. opts.Keep skips this step.
 //
-// Each call processes packages sequentially. Results are returned in the same
-// order as the input.
+// pkgdev output is captured per job and surfaced through opts.Reporter,
+// which receives Start/Done events. If Reporter is nil, the call is silent
+// — only the returned []ManifestUpdate carries success/error information.
+//
+// The returned slice preserves the order of the input targets, even when
+// workers complete out of order.
 func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *ManifestOptions) []ManifestUpdate {
 	if opts == nil {
 		opts = &ManifestOptions{}
@@ -175,50 +216,101 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 	}
 	defer cleanup()
 
-	for i, u := range updates {
-		pkgPath := filepath.Join(overlayPath, u.Category, u.Package)
-		manifestPath := filepath.Join(pkgPath, "Manifest")
-
-		// Clean regen: move Manifest aside so pkgdev produces a fresh one.
-		// Restored only on failure, removed on success.
-		var backupPath string
-		if !opts.Keep {
-			if _, statErr := os.Stat(manifestPath); statErr == nil {
-				backupPath = manifestPath + ".bak"
-				if mvErr := os.Rename(manifestPath, backupPath); mvErr != nil {
-					updates[i].Success = false
-					updates[i].Error = fmt.Sprintf("failed to back up Manifest: %v", mvErr)
-					continue
-				}
-			}
-		}
-
-		fmt.Printf(">>> Regenerating Manifest for %s/%s (pkgdev, distdir=%s)\n", u.Category, u.Package, distdir)
-
-		cmd := exec.Command("pkgdev", "manifest", "--distdir", distdir)
-		cmd.Dir = pkgPath
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		runErr := cmd.Run()
-		if runErr != nil {
-			updates[i].Success = false
-			updates[i].Error = runErr.Error()
-			if backupPath != "" {
-				if rbErr := os.Rename(backupPath, manifestPath); rbErr != nil {
-					updates[i].Error = fmt.Sprintf("%s; rollback failed: %v", updates[i].Error, rbErr)
-				}
-			}
-			continue
-		}
-
-		if backupPath != "" {
-			_ = os.Remove(backupPath)
-		}
-		updates[i].Success = true
+	jobs := opts.Jobs
+	if jobs <= 0 {
+		jobs = DefaultManifestJobs
+	}
+	if jobs > len(updates) {
+		jobs = len(updates)
 	}
 
+	ctx := opts.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if opts.Reporter != nil {
+		opts.Reporter.Total(len(updates), jobs)
+		defer opts.Reporter.Finish()
+	}
+
+	queue := make(chan int, len(updates))
+	for i := range updates {
+		queue <- i
+	}
+	close(queue)
+
+	var wg sync.WaitGroup
+	for w := 0; w < jobs; w++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := range queue {
+				runOneManifest(ctx, overlayPath, distdir, &updates[i], i, worker, opts)
+			}
+		}(w)
+	}
+	wg.Wait()
+
 	return updates
+}
+
+// runOneManifest performs the backup/regenerate/rollback dance for a single
+// target and writes the outcome back into *u. It is invoked from a worker
+// goroutine; concurrent calls write to distinct slice indices so no lock is
+// required for the result. The reporter, if any, is responsible for being
+// goroutine-safe.
+func runOneManifest(ctx context.Context, overlayPath, distdir string, u *ManifestUpdate, i, worker int, opts *ManifestOptions) {
+	if opts.Reporter != nil {
+		opts.Reporter.Start(i, worker, *u)
+	}
+
+	pkgPath := filepath.Join(overlayPath, u.Category, u.Package)
+	manifestPath := filepath.Join(pkgPath, "Manifest")
+
+	var backupPath string
+	if !opts.Keep {
+		if _, statErr := os.Stat(manifestPath); statErr == nil {
+			backupPath = manifestPath + ".bak"
+			if mvErr := os.Rename(manifestPath, backupPath); mvErr != nil {
+				u.Success = false
+				u.Error = fmt.Sprintf("failed to back up Manifest: %v", mvErr)
+				if opts.Reporter != nil {
+					opts.Reporter.Done(i, worker, *u, false, u.Error, "")
+				}
+				return
+			}
+		}
+	}
+
+	var combined bytes.Buffer
+	cmd := exec.CommandContext(ctx, "pkgdev", "manifest", "--distdir", distdir)
+	cmd.Dir = pkgPath
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
+
+	runErr := cmd.Run()
+	if runErr != nil {
+		u.Success = false
+		u.Error = runErr.Error()
+		if backupPath != "" {
+			if rbErr := os.Rename(backupPath, manifestPath); rbErr != nil {
+				u.Error = fmt.Sprintf("%s; rollback failed: %v", u.Error, rbErr)
+			}
+		}
+		if opts.Reporter != nil {
+			opts.Reporter.Done(i, worker, *u, false, u.Error, combined.String())
+		}
+		return
+	}
+
+	if backupPath != "" {
+		_ = os.Remove(backupPath)
+	}
+	u.Success = true
+	if opts.Reporter != nil {
+		opts.Reporter.Done(i, worker, *u, true, "", combined.String())
+	}
 }
 
 // RegenerateManifestsForScope is a convenience wrapper that resolves a scope

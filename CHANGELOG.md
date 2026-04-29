@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.7] - 2026-04-29
+
+### Added
+- `overlay manifest` now regenerates packages in parallel with a worker
+  pool (default 10 simultaneous `pkgdev` invocations, configurable via
+  `--jobs`/`-j`). Dramatically faster on overlays with many packages.
+  Per-target ordering of the returned results is preserved regardless
+  of completion order, and `pkgdev` sub-processes are wired through
+  `exec.CommandContext` so SIGINT/SIGTERM cancels an in-flight run
+  cleanly.
+- Live terminal UI for `overlay manifest`: when stdout is a TTY, a
+  fixed block at the bottom shows one slot per active worker plus a
+  `[done/total] ████░░░░ NN%` global progress bar; finished packages
+  scroll above the block as `✓` / `✗` history lines. Outside a TTY
+  (CI logs, pipes), output falls back to plain `START / OK / FAIL`
+  log lines — concurrent-safe via an internal mutex. No new
+  dependencies; the TUI is built on raw ANSI escapes.
+
+### Changed
+- `RegenerateManifests` (internal API) gained `Jobs`, `Reporter` and
+  `Ctx` fields on `ManifestOptions`, plus a new `ProgressReporter`
+  interface (`Total`/`Start`/`Done`/`Finish`) for lifecycle events.
+  `pkgdev` output is now captured per-job into a buffer and surfaced
+  to the reporter on failure rather than streamed straight to the
+  shared stdout, so parallel runs no longer interleave their logs.
+
 ## [0.1.6] - 2026-04-28
 
 ### Added
@@ -92,7 +118,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/obentoo/bentoolkit/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/obentoo/bentoolkit/compare/v0.1.3...v0.1.4

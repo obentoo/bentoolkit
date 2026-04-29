@@ -36,6 +36,7 @@ func TestManifestCommandFlags(t *testing.T) {
 	}{
 		{"keep", "", "bool", "false"},
 		{"dry-run", "n", "bool", "false"},
+		{"jobs", "j", "int", "10"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.flagName, func(t *testing.T) {
