@@ -40,6 +40,12 @@ type ManifestOptions struct {
 	// DryRun, if true, lists the packages that would be processed without
 	// running pkgdev or touching files.
 	DryRun bool
+	// Distdir, when non-empty, is used as pkgdev's --distdir. The path is
+	// expanded (~ and relative paths) and created if missing, and is
+	// preserved across runs as a persistent download cache. When empty,
+	// a temporary directory is created under os.TempDir() and removed
+	// when the run completes.
+	Distdir string
 }
 
 // ManifestResult collects per-package results of a regeneration run.
@@ -128,8 +134,10 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 // running pkgdev and restores it on failure. Pass opts.Keep=true to skip the
 // backup/clean step.
 //
-// pkgdev is invoked with a dedicated --distdir under os.TempDir() so the
-// command never requires sudo and never touches /var/cache/distfiles.
+// By default, pkgdev is invoked with a dedicated --distdir under os.TempDir()
+// so the command never requires sudo and never touches /var/cache/distfiles.
+// Pass opts.Distdir to use a persistent directory instead — it is created
+// if missing and preserved between runs (useful as a download cache).
 //
 // Each call processes packages sequentially. Results are returned in the same
 // order as the input.
@@ -157,15 +165,15 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		return updates
 	}
 
-	tmpDistdir, err := os.MkdirTemp("", "bentoo-distfiles-")
+	distdir, cleanup, err := resolveDistdir(opts.Distdir)
 	if err != nil {
 		for i := range updates {
 			updates[i].Success = false
-			updates[i].Error = fmt.Sprintf("failed to create temp distdir: %v", err)
+			updates[i].Error = err.Error()
 		}
 		return updates
 	}
-	defer os.RemoveAll(tmpDistdir) //nolint:errcheck
+	defer cleanup()
 
 	for i, u := range updates {
 		pkgPath := filepath.Join(overlayPath, u.Category, u.Package)
@@ -185,9 +193,9 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 			}
 		}
 
-		fmt.Printf(">>> Regenerating Manifest for %s/%s (pkgdev)\n", u.Category, u.Package)
+		fmt.Printf(">>> Regenerating Manifest for %s/%s (pkgdev, distdir=%s)\n", u.Category, u.Package, distdir)
 
-		cmd := exec.Command("pkgdev", "manifest", "--distdir", tmpDistdir)
+		cmd := exec.Command("pkgdev", "manifest", "--distdir", distdir)
 		cmd.Dir = pkgPath
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -270,6 +278,40 @@ func FormatManifestResult(result *ManifestResult, dryRun bool) string {
 	}
 
 	return sb.String()
+}
+
+// resolveDistdir returns the directory pkgdev should use for downloads,
+// alongside a cleanup function. When userDir is empty, a temporary directory
+// is created and the cleanup removes it. When userDir is set, it is expanded
+// (~ and absolute path) and created if missing; the cleanup is a no-op so the
+// directory persists across runs.
+func resolveDistdir(userDir string) (string, func(), error) {
+	noop := func() {}
+
+	if userDir == "" {
+		tmp, err := os.MkdirTemp("", "bentoo-distfiles-")
+		if err != nil {
+			return "", noop, fmt.Errorf("failed to create temp distdir: %w", err)
+		}
+		return tmp, func() { _ = os.RemoveAll(tmp) }, nil
+	}
+
+	expanded := userDir
+	if strings.HasPrefix(expanded, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", noop, fmt.Errorf("failed to expand %q: %w", userDir, err)
+		}
+		expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
+	}
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return "", noop, fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return "", noop, fmt.Errorf("failed to create distdir %q: %w", abs, err)
+	}
+	return abs, noop, nil
 }
 
 // isPackageDir reports whether the path looks like a valid package directory

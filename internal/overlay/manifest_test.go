@@ -206,6 +206,64 @@ func TestRegenerateManifests_RestoresBackupOnFailure(t *testing.T) {
 	}
 }
 
+func TestResolveDistdir_EmptyCreatesTempAndCleansUp(t *testing.T) {
+	dir, cleanup, err := resolveDistdir("")
+	if err != nil {
+		t.Fatalf("resolveDistdir(\"\") error = %v", err)
+	}
+	if dir == "" {
+		t.Fatal("resolveDistdir(\"\") returned empty path")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("temp distdir not created: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("temp distdir should be removed after cleanup, stat err = %v", err)
+	}
+}
+
+func TestResolveDistdir_PersistentCreatesAndPreserves(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "nested", "distfiles")
+
+	dir, cleanup, err := resolveDistdir(target)
+	if err != nil {
+		t.Fatalf("resolveDistdir(%q) error = %v", target, err)
+	}
+	if dir != target {
+		t.Errorf("resolveDistdir() dir = %q, want %q", dir, target)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("persistent distdir not created: stat err = %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("persistent distdir must survive cleanup, stat err = %v", err)
+	}
+}
+
+func TestResolveDistdir_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("UserHomeDir unavailable: %v", err)
+	}
+
+	rel := filepath.Join(".cache", "bentoo-test-distdir-resolve")
+	input := "~/" + rel
+	expected := filepath.Join(home, rel)
+	t.Cleanup(func() { _ = os.RemoveAll(expected) })
+
+	dir, cleanup, err := resolveDistdir(input)
+	if err != nil {
+		t.Fatalf("resolveDistdir(%q) error = %v", input, err)
+	}
+	defer cleanup()
+	if dir != expected {
+		t.Errorf("resolveDistdir(%q) = %q, want %q", input, dir, expected)
+	}
+}
+
 func TestRegenerateManifests_NoTargets(t *testing.T) {
 	got := RegenerateManifests("/anywhere", nil, nil)
 	if len(got) != 0 {

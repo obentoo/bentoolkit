@@ -8,8 +8,9 @@ import (
 
 // ManifestFlags holds command-line flags for the manifest regeneration command.
 type ManifestFlags struct {
-	Keep   bool // --keep: do not remove existing Manifest before pkgdev runs
-	DryRun bool // --dry-run: list packages without invoking pkgdev
+	Keep    bool   // --keep: do not remove existing Manifest before pkgdev runs
+	DryRun  bool   // --dry-run: list packages without invoking pkgdev
+	Distdir string // --distdir: pkgdev distfiles directory (persistent when set)
 }
 
 var manifestFlags ManifestFlags
@@ -29,8 +30,10 @@ Scope is selected by the optional argument:
   <category>               All packages in the given category
   <category>/<package>     Only the given package
 
-The command runs as the current user — pkgdev is invoked with a temporary
-distdir, so no sudo is required.
+The command runs as the current user — by default pkgdev is invoked with a
+temporary distdir that is discarded after the run, so no sudo is required.
+Pass --distdir to use a persistent path instead (created if missing); this
+acts as a download cache reused across runs.
 
 Examples:
   # Regenerate every Manifest in the overlay
@@ -46,7 +49,10 @@ Examples:
   bentoo overlay manifest --dry-run app-editors
 
   # Skip the clean-regen step (keep existing Manifest in place)
-  bentoo overlay manifest --keep app-editors/zed`,
+  bentoo overlay manifest --keep app-editors/zed
+
+  # Cache distfiles in a persistent directory
+  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runManifest,
 }
@@ -54,6 +60,7 @@ Examples:
 func init() {
 	manifestCmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
 	manifestCmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
+	manifestCmd.Flags().StringVar(&manifestFlags.Distdir, "distdir", "", "Distfiles directory used by pkgdev (default: temporary directory removed after run)")
 	overlayCmd.AddCommand(manifestCmd)
 }
 
@@ -82,8 +89,9 @@ func runManifest(cmd *cobra.Command, args []string) {
 	}
 
 	opts := &overlay.ManifestOptions{
-		Keep:   manifestFlags.Keep,
-		DryRun: manifestFlags.DryRun,
+		Keep:    manifestFlags.Keep,
+		DryRun:  manifestFlags.DryRun,
+		Distdir: manifestFlags.Distdir,
 	}
 
 	logger.Info("Regenerating Manifest for %d package(s)", len(targets))

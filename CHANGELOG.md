@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.6] - 2026-04-28
+
+### Added
+- `overlay manifest` now accepts `--distdir <path>` to choose where
+  `pkgdev` writes the distfiles it fetches. When set, the directory is
+  expanded (`~` and relative paths), created if missing, and preserved
+  between runs as a persistent download cache. Default behaviour is
+  unchanged: a temporary directory under `os.TempDir()` is created and
+  removed at the end of the run. The pkgdev progress line now logs the
+  resolved `distdir` so it is visible at a glance.
+
 ## [0.1.5] - 2026-04-28
 
 ### Changed
@@ -81,7 +92,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/obentoo/bentoolkit/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/obentoo/bentoolkit/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/obentoo/bentoolkit/compare/v0.1.2...v0.1.3
