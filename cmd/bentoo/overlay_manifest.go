@@ -14,10 +14,11 @@ import (
 
 // ManifestFlags holds command-line flags for the manifest regeneration command.
 type ManifestFlags struct {
-	Keep    bool   // --keep: do not remove existing Manifest before pkgdev runs
-	DryRun  bool   // --dry-run: list packages without invoking pkgdev
-	Distdir string // --distdir: pkgdev distfiles directory (persistent when set)
-	Jobs    int    // --jobs: maximum number of parallel pkgdev workers
+	Keep           bool   // --keep: do not remove existing Manifest before pkgdev runs
+	DryRun         bool   // --dry-run: list packages without invoking pkgdev
+	Distdir        string // --distdir: pkgdev distfiles directory (persistent when set)
+	Jobs           int    // --jobs: maximum number of parallel pkgdev workers
+	DistfilesCache string // --distfiles-cache: read-only cache consulted before downloads ("" disables)
 }
 
 var manifestFlags ManifestFlags
@@ -48,6 +49,12 @@ temporary distdir that is discarded after the run, so no sudo is required.
 Pass --distdir to use a persistent path instead (created if missing); this
 acts as a download cache reused across runs.
 
+Before each package is processed, distfiles already present in
+--distfiles-cache (default /var/cache/distfiles) are symlinked into the
+working distdir so pkgdev can validate them locally instead of downloading
+again. The cache is opened read-only — nothing is ever written back. Pass
+--distfiles-cache "" to disable, or point to another directory.
+
 Examples:
   # Regenerate every Manifest in the overlay (10 in parallel)
   bentoo overlay manifest
@@ -68,7 +75,10 @@ Examples:
   bentoo overlay manifest --keep app-editors/zed
 
   # Cache distfiles in a persistent directory
-  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles`,
+  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles
+
+  # Disable the system distfiles cache lookup
+  bentoo overlay manifest --distfiles-cache ""`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runManifest,
 }
@@ -78,6 +88,7 @@ func init() {
 	manifestCmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
 	manifestCmd.Flags().StringVar(&manifestFlags.Distdir, "distdir", "", "Distfiles directory used by pkgdev (default: temporary directory removed after run)")
 	manifestCmd.Flags().IntVarP(&manifestFlags.Jobs, "jobs", "j", overlay.DefaultManifestJobs, "Maximum parallel pkgdev workers")
+	manifestCmd.Flags().StringVar(&manifestFlags.DistfilesCache, "distfiles-cache", overlay.DefaultDistfilesCache, "Read-only distfiles cache consulted before download (\"\" disables)")
 	overlayCmd.AddCommand(manifestCmd)
 }
 
@@ -111,12 +122,13 @@ func runManifest(cmd *cobra.Command, args []string) {
 	defer cancel()
 
 	opts := &overlay.ManifestOptions{
-		Keep:     manifestFlags.Keep,
-		DryRun:   manifestFlags.DryRun,
-		Distdir:  manifestFlags.Distdir,
-		Jobs:     manifestFlags.Jobs,
-		Reporter: chooseManifestReporter(manifestFlags.DryRun),
-		Ctx:      runCtx,
+		Keep:           manifestFlags.Keep,
+		DryRun:         manifestFlags.DryRun,
+		Distdir:        manifestFlags.Distdir,
+		Jobs:           manifestFlags.Jobs,
+		DistfilesCache: manifestFlags.DistfilesCache,
+		Reporter:       chooseManifestReporter(manifestFlags.DryRun),
+		Ctx:            runCtx,
 	}
 
 	logger.Info("Regenerating Manifest for %d package(s)", len(targets))

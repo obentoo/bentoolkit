@@ -27,6 +27,11 @@ var (
 // when ManifestOptions.Jobs is not set (or set to a non-positive value).
 const DefaultManifestJobs = 10
 
+// DefaultDistfilesCache is the system path queried, when readable, to skip
+// re-downloading distfiles already present in the portage cache. Used as the
+// default for ManifestOptions.DistfilesCache.
+const DefaultDistfilesCache = "/var/cache/distfiles"
+
 // ManifestScope identifies one or more packages to regenerate Manifests for.
 //
 // Resolution rules:
@@ -57,6 +62,14 @@ type ManifestOptions struct {
 	// Values <= 0 fall back to DefaultManifestJobs. Internally clamped to
 	// the number of targets so we never spin idle workers.
 	Jobs int
+	// DistfilesCache, when non-empty, points to a read-only distfiles cache
+	// (typically /var/cache/distfiles) that is consulted before each pkgdev
+	// invocation. For every DIST entry listed in the package's existing
+	// Manifest, if a file with the same name exists in this cache, a symlink
+	// is created in the working distdir so pkgdev can reuse it instead of
+	// downloading. Empty string disables the optimization entirely. The
+	// cache is never written to.
+	DistfilesCache string
 	// Reporter receives lifecycle events as workers process targets.
 	// Nil means silent (no progress output). The CLI typically wires a
 	// TUI or log reporter here.
@@ -216,6 +229,11 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 	}
 	defer cleanup()
 
+	// Resolve the distfiles cache once: a missing or unreadable directory
+	// silently disables the optimization for the whole run, so workers don't
+	// repeatedly stat a path that doesn't exist.
+	cacheDir := resolveDistfilesCache(opts.DistfilesCache, distdir)
+
 	jobs := opts.Jobs
 	if jobs <= 0 {
 		jobs = DefaultManifestJobs
@@ -246,7 +264,7 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		go func(worker int) {
 			defer wg.Done()
 			for i := range queue {
-				runOneManifest(ctx, overlayPath, distdir, &updates[i], i, worker, opts)
+				runOneManifest(ctx, overlayPath, distdir, cacheDir, &updates[i], i, worker, opts)
 			}
 		}(w)
 	}
@@ -260,13 +278,22 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 // goroutine; concurrent calls write to distinct slice indices so no lock is
 // required for the result. The reporter, if any, is responsible for being
 // goroutine-safe.
-func runOneManifest(ctx context.Context, overlayPath, distdir string, u *ManifestUpdate, i, worker int, opts *ManifestOptions) {
+func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, u *ManifestUpdate, i, worker int, opts *ManifestOptions) {
 	if opts.Reporter != nil {
 		opts.Reporter.Start(i, worker, *u)
 	}
 
 	pkgPath := filepath.Join(overlayPath, u.Category, u.Package)
 	manifestPath := filepath.Join(pkgPath, "Manifest")
+
+	// Snapshot DIST filenames from the existing Manifest before any backup
+	// move, so prepopulation works under both --keep and the default flow.
+	// On error or missing Manifest, the slice is empty and prepopulation
+	// degrades to a no-op.
+	var distNames []string
+	if cacheDir != "" {
+		distNames = parseManifestDistFilenames(manifestPath)
+	}
 
 	var backupPath string
 	if !opts.Keep {
@@ -284,6 +311,13 @@ func runOneManifest(ctx context.Context, overlayPath, distdir string, u *Manifes
 	}
 
 	var combined bytes.Buffer
+	if cacheDir != "" && len(distNames) > 0 {
+		reused := prepopulateFromCache(distdir, cacheDir, distNames)
+		u.Reused = reused
+		if reused > 0 {
+			fmt.Fprintf(&combined, "[bentoo] reused %d distfile(s) from %s\n", reused, cacheDir)
+		}
+	}
 	cmd := exec.CommandContext(ctx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgPath
 	cmd.Stdout = &combined
@@ -404,6 +438,86 @@ func resolveDistdir(userDir string) (string, func(), error) {
 		return "", noop, fmt.Errorf("failed to create distdir %q: %w", abs, err)
 	}
 	return abs, noop, nil
+}
+
+// resolveDistfilesCache validates the configured cache directory once per run.
+// Returns the absolute path when the directory exists and is a real directory
+// distinct from distdir, or "" when prepopulation should be skipped (cache
+// disabled, missing, unreadable, or pointing at the same path as distdir).
+func resolveDistfilesCache(userDir, distdir string) string {
+	if userDir == "" {
+		return ""
+	}
+	expanded := userDir
+	if strings.HasPrefix(expanded, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
+		}
+	}
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	if distAbs, err := filepath.Abs(distdir); err == nil && distAbs == abs {
+		// Cache and working distdir are the same path — pkgdev already
+		// reuses files in place, no symlinks needed.
+		return ""
+	}
+	return abs
+}
+
+// parseManifestDistFilenames extracts the filenames listed on `DIST <name> ...`
+// lines of a Gentoo Manifest. Missing files, read errors, or malformed lines
+// yield an empty slice — prepopulation treats this as "nothing to reuse".
+func parseManifestDistFilenames(manifestPath string) []string {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "DIST" {
+			continue
+		}
+		name := fields[1]
+		// Reject path traversal: filenames in Manifest are basenames by
+		// spec — anything else means the file is malformed (or hostile).
+		if name == "" || strings.ContainsAny(name, "/\\") {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// prepopulateFromCache symlinks each cached distfile into distdir so pkgdev
+// can validate it locally instead of re-downloading. Returns the count of
+// successfully linked files. Files already present in distdir, missing from
+// the cache, or causing symlink errors are silently skipped — pkgdev will
+// download them as a fallback.
+func prepopulateFromCache(distdir, cacheDir string, names []string) int {
+	reused := 0
+	for _, name := range names {
+		src := filepath.Join(cacheDir, name)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(distdir, name)
+		if _, err := os.Lstat(dst); err == nil {
+			// Already present (concurrent worker, or persistent distdir).
+			continue
+		}
+		if err := os.Symlink(src, dst); err != nil {
+			continue
+		}
+		reused++
+	}
+	return reused
 }
 
 // isPackageDir reports whether the path looks like a valid package directory

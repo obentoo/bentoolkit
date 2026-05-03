@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.9] - 2026-05-03
+
+### Added
+- `overlay manifest` now reuses distfiles already present in the system
+  Portage cache instead of re-downloading them. Before each `pkgdev`
+  invocation, every `DIST` entry listed in the package's existing
+  `Manifest` is looked up in `--distfiles-cache` (default
+  `/var/cache/distfiles`) and, when found, symlinked into the working
+  distdir. The cache is opened read-only — nothing is ever written
+  back. Pass `--distfiles-cache ""` to disable, or point the flag to
+  a custom directory. Cache misses fall through to pkgdev's normal
+  download path, so the optimization is transparent.
+- `LogReporter` now appends `[reused N]` to the per-package OK line
+  when at least one distfile was satisfied from the cache, and
+  `ManifestUpdate` exposes a new `Reused` field for downstream callers.
+
 ## [0.1.8] - 2026-04-29
 
 ### Fixed
@@ -129,7 +145,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/obentoo/bentoolkit/compare/v0.1.5...v0.1.6

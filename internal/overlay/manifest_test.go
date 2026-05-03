@@ -309,6 +309,131 @@ func TestRegenerateManifestsForScope_NoConfig(t *testing.T) {
 	}
 }
 
+func TestParseManifestDistFilenames(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "Manifest")
+	content := "" +
+		"DIST hello-1.0.0.tar.gz 12345 BLAKE2B abc SHA512 def\n" +
+		"DIST world-2.tar.xz 99 BLAKE2B aa SHA512 bb\n" +
+		"\n" +
+		"# comment line\n" +
+		"EBUILD hello-1.0.0.ebuild 0 BLAKE2B 0 SHA512 0\n" +
+		"DIST\n" + // malformed: no name
+		"DIST ../etc/passwd 0 BLAKE2B 0 SHA512 0\n" // path traversal: must be skipped
+	if err := os.WriteFile(manifestPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+
+	got := parseManifestDistFilenames(manifestPath)
+	want := []string{"hello-1.0.0.tar.gz", "world-2.tar.xz"}
+	if len(got) != len(want) {
+		t.Fatalf("parseManifestDistFilenames() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseManifestDistFilenames_MissingFile(t *testing.T) {
+	got := parseManifestDistFilenames(filepath.Join(t.TempDir(), "no-such-Manifest"))
+	if got != nil {
+		t.Errorf("parseManifestDistFilenames(missing) = %v, want nil", got)
+	}
+}
+
+func TestPrepopulateFromCache_LinksHits(t *testing.T) {
+	cache := t.TempDir()
+	dist := t.TempDir()
+
+	// Two of three names exist in the cache.
+	if err := os.WriteFile(filepath.Join(cache, "hello-1.0.0.tar.gz"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "world-2.tar.xz"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	names := []string{"hello-1.0.0.tar.gz", "world-2.tar.xz", "ghost.tar.gz"}
+	got := prepopulateFromCache(dist, cache, names)
+	if got != 2 {
+		t.Fatalf("prepopulateFromCache() = %d, want 2", got)
+	}
+
+	for _, n := range []string{"hello-1.0.0.tar.gz", "world-2.tar.xz"} {
+		linkPath := filepath.Join(dist, n)
+		fi, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected symlink %s: %v", n, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink, mode=%v", n, fi.Mode())
+		}
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", n, err)
+		}
+		if target != filepath.Join(cache, n) {
+			t.Errorf("symlink target = %q, want %q", target, filepath.Join(cache, n))
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dist, "ghost.tar.gz")); !os.IsNotExist(err) {
+		t.Errorf("ghost.tar.gz must not be linked, lstat err = %v", err)
+	}
+}
+
+func TestPrepopulateFromCache_SkipsExistingDestination(t *testing.T) {
+	cache := t.TempDir()
+	dist := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(cache, "hello.tar.gz"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing entry in distdir (e.g. from a concurrent worker).
+	if err := os.WriteFile(filepath.Join(dist, "hello.tar.gz"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := prepopulateFromCache(dist, cache, []string{"hello.tar.gz"})
+	if got != 0 {
+		t.Errorf("prepopulateFromCache() = %d, want 0 (file already in distdir)", got)
+	}
+	// Original content must remain untouched.
+	data, err := os.ReadFile(filepath.Join(dist, "hello.tar.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "local" {
+		t.Errorf("existing distdir file overwritten: %q", data)
+	}
+}
+
+func TestResolveDistfilesCache(t *testing.T) {
+	existing := t.TempDir()
+	dist := t.TempDir()
+
+	tests := []struct {
+		name    string
+		userDir string
+		distdir string
+		want    string
+	}{
+		{"empty disables", "", dist, ""},
+		{"missing dir", filepath.Join(t.TempDir(), "nope"), dist, ""},
+		{"valid dir", existing, dist, existing},
+		{"same as distdir", dist, dist, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveDistfilesCache(tt.userDir, tt.distdir)
+			if got != tt.want {
+				t.Errorf("resolveDistfilesCache(%q, %q) = %q, want %q", tt.userDir, tt.distdir, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRegenerateManifestsForScope_DryRun(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
 	defer os.RemoveAll(overlayPath)

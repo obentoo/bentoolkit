@@ -106,6 +106,11 @@ type ManifestUpdate struct {
 	Package  string
 	Success  bool
 	Error    string
+	// Reused is the number of distfiles symlinked from the distfiles cache
+	// (e.g. /var/cache/distfiles) into the working distdir, sparing pkgdev
+	// from re-downloading them. Zero when no cache is configured or no
+	// matching files were found.
+	Reused int
 }
 
 // ShouldBlockForVersionFiles determines if the operation should be blocked

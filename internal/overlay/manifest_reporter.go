@@ -53,6 +53,10 @@ func (r *LogReporter) Done(_ int, _ int, t ManifestUpdate, ok bool, errMsg, outp
 	defer r.mu.Unlock()
 	r.done++
 	if ok {
+		if t.Reused > 0 {
+			fmt.Fprintf(r.w, ">>> OK     %s/%s  (%d/%d)  [reused %d]\n", t.Category, t.Package, r.done, r.total, t.Reused)
+			return
+		}
 		fmt.Fprintf(r.w, ">>> OK     %s/%s  (%d/%d)\n", t.Category, t.Package, r.done, r.total)
 		return
 	}
