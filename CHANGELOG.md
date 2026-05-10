@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.10] - 2026-05-10
+
+### Changed
+- Bumped indirect dependencies to their latest patch/minor releases:
+  `golang.org/x/net` v0.53.0 → v0.54.0,
+  `golang.org/x/sys` v0.43.0 → v0.44.0, and
+  `golang.org/x/text` v0.36.0 → v0.37.0. The `go` directive in
+  `go.mod` was also bumped from `1.25.9` to `1.25.10` to track the
+  latest 1.25.x toolchain. No API changes; routine upstream fixes.
+  Validated with `go build`, `go vet`, `gofmt`, `go mod verify`,
+  `go test -race`, `govulncheck` (0 vulnerabilities) and
+  `golangci-lint` (0 issues) against the project's 10-linter config.
+
 ## [0.1.9] - 2026-05-03
 
 ### Added
@@ -145,7 +158,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/obentoo/bentoolkit/compare/v0.1.6...v0.1.7
