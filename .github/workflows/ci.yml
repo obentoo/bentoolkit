@@ -86,11 +86,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: google/osv-scanner-action/osv-scanner-action@v2.0.2
+      - uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --recursive
-            --skip-git
             ./
 
   build:
