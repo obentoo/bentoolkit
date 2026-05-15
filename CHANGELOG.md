@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.1.11] - 2026-05-15
+
+### Changed
+- CI: bumped `actions/checkout` v4 → v6.0.2 and `actions/setup-go` v5 →
+  v6.4.0 to run on Node 24 ahead of GitHub's Node 20 removal
+  (scheduled 2026-09-16); both actions are now pinned to their commit
+  SHAs (with the version tag in a trailing comment) for supply-chain
+  hardening. `google/osv-scanner-action` was likewise bumped v2.0.2 →
+  v2.3.8 and SHA-pinned, and the removed `--skip-git` flag was dropped
+  (not scanning the git root is the v2.x default).
+- CI: Go toolchain version is now sourced from `go.mod`
+  (`go-version-file: go.mod`) instead of the fuzzy `'1.25'` input, so
+  the runner always matches the module's stated `go` directive.
+
+### Fixed
+- CI: green again after the `actions/setup-go@v6` upgrade flipped
+  `GOTOOLCHAIN`'s default from `auto` to `local`, which made the fuzzy
+  `'1.25'` input resolve to 1.25.9 on the runner while `go.mod`
+  requires `>= 1.25.10`. Sourcing from `go.mod` keeps the two in
+  lockstep and removes the manual bump treadmill.
+
 ## [0.1.10] - 2026-05-10
 
 ### Changed
@@ -158,7 +179,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/obentoo/bentoolkit/compare/v0.1.7...v0.1.8
