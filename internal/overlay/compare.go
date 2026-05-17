@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -67,6 +68,10 @@ type CompareOptions struct {
 	IncludeNotInRemote bool
 	// ProgressCallback is called for each package processed
 	ProgressCallback func(current, total int, pkg string)
+	// Ctx is the parent context for the comparison. It originates in cmd/
+	// (signal.NotifyContext), so cancelling it aborts an in-flight comparison.
+	// When nil it is treated as context.Background() by the consumer.
+	Ctx context.Context
 }
 
 // CompareReport contains the full comparison report
@@ -111,14 +116,28 @@ func Compare(localPackages []PackageInfo, client *github.Client, opts CompareOpt
 	return CompareWithProvider(localPackages, &githubProviderAdapter{client: client}, opts)
 }
 
-// CompareWithProvider compares local packages against an upstream repository using any Provider
+// CompareWithProvider compares local packages against an upstream repository using any Provider.
+// When opts.Ctx is cancelled, the comparison stops early and returns the partial
+// report together with the context error, so a SIGINT aborts a long scan.
 func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
 	report := &CompareReport{
 		TotalPackages: len(localPackages),
 		Results:       []CompareResult{},
 	}
 
+	// A nil opts.Ctx is treated as context.Background() (additive field, R3.3).
+	ctx := opts.Ctx
+	if ctx == nil {
+		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
+	}
+
 	for i, pkg := range localPackages {
+		// Stop early if the caller's context was cancelled (e.g. SIGINT).
+		if err := ctx.Err(); err != nil {
+			sortCompareResults(report.Results)
+			return report, err
+		}
+
 		// Progress callback
 		if opts.ProgressCallback != nil {
 			opts.ProgressCallback(i+1, len(localPackages), pkg.FullName())
@@ -163,14 +182,19 @@ func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, op
 	}
 
 	// Sort results by category/package
-	sort.Slice(report.Results, func(i, j int) bool {
-		if report.Results[i].Category != report.Results[j].Category {
-			return report.Results[i].Category < report.Results[j].Category
-		}
-		return report.Results[i].Package < report.Results[j].Package
-	})
+	sortCompareResults(report.Results)
 
 	return report, nil
+}
+
+// sortCompareResults sorts compare results in place by category then package.
+func sortCompareResults(results []CompareResult) {
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Category != results[j].Category {
+			return results[i].Category < results[j].Category
+		}
+		return results[i].Package < results[j].Package
+	})
 }
 
 // comparePackageWithProvider compares a single package using a Provider

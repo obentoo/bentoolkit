@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // OllamaClient implements LLMProvider for local Ollama API.
@@ -16,6 +17,10 @@ type OllamaClient struct {
 	config     LLMConfig
 	httpClient *http.Client
 	baseURL    string
+	// maxBodyBytes caps how many bytes are read from an API response body.
+	// It defaults to httputil.MaxBodyBytes and can be overridden via
+	// WithMaxBodyBytes (R11.2).
+	maxBodyBytes int64
 }
 
 // ollamaRequest represents the request body for Ollama Generate API
@@ -86,8 +91,21 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second, // Longer timeout for local inference
 		},
-		baseURL: baseURL,
+		baseURL:      baseURL,
+		maxBodyBytes: httputil.MaxBodyBytes,
 	}, nil
+}
+
+// WithMaxBodyBytes overrides the maximum number of bytes read from an Ollama API
+// response body and returns the client for chaining. Values <= 0 are ignored so
+// the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. A local Ollama
+// instance can emit JSON larger than the default cap, so a higher limit can be
+// supplied here (R11.2).
+func (c *OllamaClient) WithMaxBodyBytes(n int64) *OllamaClient {
+	if n > 0 {
+		c.maxBodyBytes = n
+	}
+	return c
 }
 
 // GetModel returns the model name being used by this Ollama client.
@@ -133,8 +151,8 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body, capped at c.maxBodyBytes (R11.2)
+	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -207,8 +225,8 @@ func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body, capped at c.maxBodyBytes (R11.2)
+	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

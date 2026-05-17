@@ -1,9 +1,123 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// writeExitTestEbuild writes a minimal ebuild for pkg ("category/name") at the
+// given version under overlayDir.
+func writeExitTestEbuild(t *testing.T, overlayDir, pkg, version string) {
+	t.Helper()
+	parts := strings.SplitN(pkg, "/", 2)
+	if len(parts) != 2 {
+		t.Fatalf("invalid package name %q", pkg)
+	}
+	pkgDir := filepath.Join(overlayDir, parts[0], parts[1])
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", pkgDir, err)
+	}
+	content := "EAPI=8\nDESCRIPTION=\"t\"\nHOMEPAGE=\"https://example.com\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\n"
+	ebuildPath := filepath.Join(pkgDir, parts[1]+"-"+version+".ebuild")
+	if err := os.WriteFile(ebuildPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write ebuild %s: %v", ebuildPath, err)
+	}
+}
+
+// writeExitTestPackagesConfig writes a packages.toml under <overlayDir>/.autoupdate
+// mapping each package name to a JSON-parser schema pointed at serverURL.
+func writeExitTestPackagesConfig(t *testing.T, overlayDir, serverURL string, pkgs []string) {
+	t.Helper()
+	cfgDir := filepath.Join(overlayDir, ".autoupdate")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", cfgDir, err)
+	}
+	var b strings.Builder
+	for _, pkg := range pkgs {
+		b.WriteString("[\"" + pkg + "\"]\n")
+		b.WriteString("url = \"" + serverURL + "\"\n")
+		b.WriteString("parser = \"json\"\n")
+		b.WriteString("path = \"version\"\n\n")
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "packages.toml"), []byte(b.String()), 0644); err != nil {
+		t.Fatalf("write packages.toml: %v", err)
+	}
+}
+
+// TestCLI_ExitCodes exercises the documented exit-code contract of the
+// autoupdate --check path: 0 when every package succeeds, 1 on partial
+// failure, 2 on total failure. A package fails deterministically (without any
+// HTTP retry latency) when its ebuild is absent from the overlay, which makes
+// CheckPackage return ErrNoEbuildFound. The exit code is captured via the
+// shared withExitIntercept/exitSentinel harness.
+func TestCLI_ExitCodes(t *testing.T) {
+	// Local server returns a valid version payload so packages with an
+	// on-disk ebuild succeed on the first HTTP try (no retries needed).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name string
+		// pkgs are all package names declared in packages.toml.
+		pkgs []string
+		// withEbuild are the packages that also get an on-disk ebuild;
+		// any pkg not listed here fails with ErrNoEbuildFound.
+		withEbuild []string
+		wantExit   int
+	}{
+		{
+			name:       "all packages succeed -> exit 0",
+			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			withEbuild: []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			wantExit:   0,
+		},
+		{
+			name:       "partial failure -> exit 1",
+			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			withEbuild: []string{"cat-a/pkg1", "cat-b/pkg2"},
+			wantExit:   1,
+		},
+		{
+			name:       "total failure -> exit 2",
+			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			withEbuild: nil,
+			wantExit:   2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlayDir := t.TempDir()
+			configDir := t.TempDir()
+
+			writeExitTestPackagesConfig(t, overlayDir, server.URL, tt.pkgs)
+			for _, pkg := range tt.withEbuild {
+				writeExitTestEbuild(t, overlayDir, pkg, "0.9.0")
+			}
+
+			// Force = true bypasses the cache so every package performs a
+			// real check; args nil selects the check-all path.
+			origForce := autoupdateForce
+			autoupdateForce = true
+			defer func() { autoupdateForce = origForce }()
+
+			code := withExitIntercept(func() {
+				runCheck(overlayDir, configDir, nil)
+			})
+			if code != tt.wantExit {
+				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)
+			}
+		})
+	}
+}
 
 // TestAutoupdateCommandExists tests that the autoupdate command is registered
 func TestAutoupdateCommandExists(t *testing.T) {

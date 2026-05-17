@@ -128,6 +128,10 @@ type AnalyzeResult struct {
 	FromCache bool
 }
 
+// DefaultLLMTimeout is the default per-operation timeout applied to a single
+// LLM analysis call when no explicit timeout is configured on the Analyzer.
+const DefaultLLMTimeout = 60 * time.Second
+
 // Analyzer handles package analysis and schema generation.
 // It coordinates between ebuild metadata extraction, data source discovery,
 // LLM analysis, and schema validation.
@@ -146,6 +150,17 @@ type Analyzer struct {
 	rateLimiter *RateLimiter
 	// configDir is the directory for storing cache files
 	configDir string
+	// ctx is the parent context for all outbound HTTP/LLM calls. It is set via
+	// WithAnalyzerContext and originates in cmd/ (signal.NotifyContext), so a
+	// SIGINT or deadline cancels every in-flight request. Defaults to
+	// context.Background().
+	ctx context.Context
+	// opTimeout bounds a single outbound HTTP operation. Defaults to
+	// DefaultOpTimeout.
+	opTimeout time.Duration
+	// llmTimeout bounds a single LLM analysis operation. Defaults to
+	// DefaultLLMTimeout.
+	llmTimeout time.Duration
 }
 
 // AnalyzerOption is a functional option for configuring Analyzer.
@@ -199,6 +214,44 @@ func WithAnalyzerPackagesConfig(config *PackagesConfig) AnalyzerOption {
 	}
 }
 
+// WithAnalyzerContext sets the parent context for the analyzer. The context
+// threads through every outbound HTTP and LLM call, so cancelling it (e.g. on
+// SIGINT or a deadline) aborts all in-flight requests. A nil context is
+// rejected.
+func WithAnalyzerContext(ctx context.Context) AnalyzerOption {
+	return func(a *Analyzer) error {
+		if ctx == nil {
+			return errors.New("analyzer context must not be nil")
+		}
+		a.ctx = ctx
+		return nil
+	}
+}
+
+// WithAnalyzerOpTimeout sets the per-operation timeout used to derive a child
+// context for each outbound HTTP fetch. A non-positive duration is rejected.
+func WithAnalyzerOpTimeout(d time.Duration) AnalyzerOption {
+	return func(a *Analyzer) error {
+		if d <= 0 {
+			return fmt.Errorf("analyzer op timeout must be positive, got %v", d)
+		}
+		a.opTimeout = d
+		return nil
+	}
+}
+
+// WithAnalyzerLLMTimeout sets the per-operation timeout used to derive a child
+// context for each LLM analysis call. A non-positive duration is rejected.
+func WithAnalyzerLLMTimeout(d time.Duration) AnalyzerOption {
+	return func(a *Analyzer) error {
+		if d <= 0 {
+			return fmt.Errorf("analyzer LLM timeout must be positive, got %v", d)
+		}
+		a.llmTimeout = d
+		return nil
+	}
+}
+
 // NewAnalyzer creates a new analyzer instance for the given overlay.
 func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) {
 	// Determine config directory
@@ -207,6 +260,9 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 	analyzer := &Analyzer{
 		overlayPath: overlayPath,
 		configDir:   configDir,
+		ctx:         context.Background(), // SAFE: default parent; replaced by WithAnalyzerContext when cmd/ wires signal.NotifyContext
+		opTimeout:   DefaultOpTimeout,
+		llmTimeout:  DefaultLLMTimeout,
 	}
 
 	// Apply options first to allow overriding configDir
@@ -373,8 +429,10 @@ func (a *Analyzer) validateResult(result *AnalyzeResult, opts AnalyzeOptions) (*
 }
 
 // fetchContent fetches content from a data source with rate limiting.
+// The rate-limit wait is bounded by a child of the Analyzer's parent context
+// (set via WithAnalyzerContext), so a cancelled parent aborts the wait.
 func (a *Analyzer) fetchContent(source DataSource) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, a.opTimeout)
 	defer cancel()
 
 	// Apply rate limiting
@@ -385,9 +443,12 @@ func (a *Analyzer) fetchContent(source DataSource) ([]byte, error) {
 	return a.fetchContentFromURL(source.URL)
 }
 
-// fetchContentFromURL fetches content from a URL.
+// fetchContentFromURL fetches content from a URL. The request is bounded by a
+// child of the Analyzer's parent context (set via WithAnalyzerContext) with the
+// configured per-operation timeout, so a cancelled parent context or an expired
+// deadline aborts the in-flight HTTP call.
 func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, a.opTimeout)
 	defer cancel()
 
 	resp, err := a.httpClient.GetWithContext(ctx, url)
@@ -402,7 +463,9 @@ func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
 
 	content, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		// Translate an http.MaxBytesReader overflow into ErrResponseTooLarge
+		// (R11.3); GetWithContext caps the body at httputil.MaxBodyBytes.
+		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
 	}
 
 	return content, nil
@@ -412,7 +475,7 @@ func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
 func (a *Analyzer) analyzeContent(content []byte, meta *EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
 	// If LLM client is available, use it for analysis
 	if a.llmClient != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(a.ctx, a.llmTimeout)
 		defer cancel()
 
 		// Apply LLM rate limiting
@@ -536,46 +599,65 @@ func detectJSONPath(content []byte) string {
 
 // AnalyzeAll analyzes all packages without schemas.
 // It processes packages in parallel with a maximum of 3 concurrent analyses.
-func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) ([]AnalyzeResult, error) {
+//
+// It returns a BatchResult: successfully analyzed packages land in Items, while
+// a per-package failure is recorded in Failures keyed by the package name and
+// the batch continues with the remaining packages. A failure to enumerate the
+// packages is surfaced as a single synthetic Failures entry, which yields a
+// total-failure exit code. The returned BatchResult is fully populated only
+// after every worker goroutine has joined (wg.Wait), so callers may safely
+// invoke its methods (ExitCode, FormatFailures) on the returned value.
+func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
+	batch := BatchResult[AnalyzeResult]{
+		Items:    []AnalyzeResult{},
+		Failures: make(map[string]error),
+	}
+
 	// Find packages without schemas
 	packagesToAnalyze, err := a.findPackagesWithoutSchemas()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find packages: %w", err)
+		// Enumeration failure: no per-package processing happened. Record it
+		// as a synthetic failure so ExitCode reports a total failure (2).
+		batch.Failures[""] = fmt.Errorf("failed to find packages: %w", err)
+		return batch
 	}
 
 	if len(packagesToAnalyze) == 0 {
-		return []AnalyzeResult{}, nil
+		return batch
 	}
 
 	// Process packages in parallel with max 3 concurrent
 	const maxConcurrent = 3
-	results := make([]AnalyzeResult, len(packagesToAnalyze))
 	sem := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	resultIdx := 0
 
 	for _, pkg := range packagesToAnalyze {
 		wg.Add(1)
-		go func(pkg string, idx int) {
+		go func(pkg string) {
 			defer wg.Done()
 
 			// Acquire semaphore
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result, _ := a.Analyze(pkg, opts) //nolint:errcheck // batch mode continues on individual failures
+			result, err := a.Analyze(pkg, opts)
 
 			mu.Lock()
-			results[idx] = *result
+			if err != nil {
+				batch.Failures[pkg] = err
+			} else {
+				batch.Items = append(batch.Items, *result)
+			}
 			mu.Unlock()
-		}(pkg, resultIdx)
-		resultIdx++
+		}(pkg)
 	}
 
+	// Join every worker before returning so the BatchResult is fully
+	// populated and its methods are safe to call.
 	wg.Wait()
 
-	return results, nil
+	return batch
 }
 
 // findPackagesWithoutSchemas finds all packages in the overlay that don't have schemas.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 	"github.com/sony/gobreaker"
 )
 
@@ -273,12 +274,42 @@ func (c *RetryableHTTPClient) Get(url string) (*http.Response, error) {
 }
 
 // GetWithContext performs an HTTP GET request with retry logic and context support.
+//
+// The returned response body is wrapped in an http.MaxBytesReader bounded by
+// httputil.MaxBodyBytes (10 MiB). A subsequent read that exceeds the cap yields
+// an *http.MaxBytesError; callers should pass such read errors through
+// classifyBodyReadError so the overflow surfaces as ErrResponseTooLarge.
 func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return c.DoWithContext(ctx, req)
+	resp, err := c.DoWithContext(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if resp != nil && resp.Body != nil {
+		// Cap the body so an oversized or malicious response cannot exhaust
+		// memory when a caller reads it (R11.1, AD-12).
+		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	}
+	return resp, nil
+}
+
+// classifyBodyReadError maps an error returned while reading an HTTP response
+// body to a domain error. When the read tripped an http.MaxBytesReader cap the
+// standard library yields an *http.MaxBytesError; this is translated into an
+// error wrapping ErrResponseTooLarge (R11.3). Any other non-nil error is
+// returned unchanged, and a nil error yields nil.
+func classifyBodyReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
+	}
+	return err
 }
 
 // calculateDelay calculates the delay for a given retry attempt.
@@ -364,8 +395,13 @@ func (c *RetryableHTTPClient) GetDefaultHeaders() map[string]string {
 // GetWithHeaders performs an HTTP GET request with custom headers and retry logic.
 // Headers are processed for environment variable substitution using ${VAR_NAME} syntax.
 // If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
+//
+// Callers that need cancellation should use GetWithHeadersContext directly.
 func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]string) (*http.Response, error) {
-	return c.GetWithHeadersContext(context.Background(), url, headers)
+	// This convenience wrapper is intentionally non-cancellable; the Checker and
+	// Analyzer context spine (R3) uses GetWithContext / GetWithHeadersContext,
+	// which context-aware callers must use instead.
+	return c.GetWithHeadersContext(context.Background(), url, headers) // SAFE: non-cancellable convenience wrapper (R3)
 }
 
 // GetWithHeadersContext performs an HTTP GET request with custom headers, context, and retry logic.

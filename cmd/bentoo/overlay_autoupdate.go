@@ -89,8 +89,6 @@ func runCheck(overlayPath, configDir string, args []string) {
 		osExit(1)
 	}
 
-	var results []autoupdate.CheckResult
-
 	if len(args) > 0 {
 		// Check specific package
 		pkg := args[0]
@@ -99,18 +97,25 @@ func runCheck(overlayPath, configDir string, args []string) {
 			logger.Error("failed to check package %s: %v", pkg, err)
 			osExit(1)
 		}
-		results = []autoupdate.CheckResult{*result}
-	} else {
-		// Check all packages
-		results, err = checker.CheckAll(autoupdateForce)
-		if err != nil {
-			logger.Error("failed to check packages: %v", err)
-			osExit(1)
-		}
+		displayCheckResults([]autoupdate.CheckResult{*result})
+		return
 	}
 
-	// Display results
-	displayCheckResults(results)
+	// Check all packages. CheckAll never returns a fatal error: every
+	// per-package failure is captured in the BatchResult.
+	result := checker.CheckAll(autoupdateForce)
+
+	// Display the successfully checked packages.
+	displayCheckResults(result.Items)
+
+	// Emit one stderr line per per-package failure. FormatFailures is called
+	// only after CheckAll has fully completed, so the output is deterministic.
+	if result.HasFailures() {
+		result.FormatFailures(os.Stderr)
+	}
+
+	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
+	osExit(result.ExitCode())
 }
 
 // displayCheckResults formats and displays check results

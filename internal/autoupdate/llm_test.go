@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // =============================================================================
@@ -621,6 +624,75 @@ func TestExtractVersionWithVersionPrefix(t *testing.T) {
 	}
 	if version != "1.2.3" {
 		t.Errorf("Expected version '1.2.3' (without prefix), got %q", version)
+	}
+}
+
+// writeOversizedBody writes n bytes of filler to w in chunks. It is shared by
+// the LLM body-cap tests to simulate a response that exceeds the per-client
+// maxBodyBytes limit.
+func writeOversizedBody(w http.ResponseWriter, n int) {
+	buf := make([]byte, 32*1024)
+	for i := range buf {
+		buf[i] = ' '
+	}
+	written := 0
+	for written < n {
+		chunk := len(buf)
+		if n-written < chunk {
+			chunk = n - written
+		}
+		if _, err := w.Write(buf[:chunk]); err != nil {
+			return
+		}
+		written += chunk
+	}
+}
+
+// TestClaudeClient_WithCustomMaxBody verifies that WithMaxBodyBytes lowers the
+// Claude response-body cap and that exceeding it surfaces ErrResponseTooLarge.
+// It also asserts the default (no option) equals httputil.MaxBodyBytes (R11.2).
+func TestClaudeClient_WithCustomMaxBody(t *testing.T) {
+	t.Setenv("TEST_CLAUDE_MAXBODY_KEY", "test-key")
+
+	// Default cap (no option) must equal httputil.MaxBodyBytes.
+	defaultClient, err := NewClaudeClient(LLMConfig{
+		Provider:  "claude",
+		APIKeyEnv: "TEST_CLAUDE_MAXBODY_KEY",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if defaultClient.maxBodyBytes != httputil.MaxBodyBytes {
+		t.Errorf("default maxBodyBytes = %d, want %d (httputil.MaxBodyBytes)",
+			defaultClient.maxBodyBytes, httputil.MaxBodyBytes)
+	}
+
+	const limit = 1024 // 1 KiB cap for the test
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		writeOversizedBody(w, limit*4) // 4 KiB > 1 KiB cap
+	}))
+	defer server.Close()
+
+	client, err := NewClaudeClient(LLMConfig{
+		Provider:  "claude",
+		APIKeyEnv: "TEST_CLAUDE_MAXBODY_KEY",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	client.WithMaxBodyBytes(limit)
+	if client.maxBodyBytes != limit {
+		t.Fatalf("WithMaxBodyBytes(%d) did not apply: maxBodyBytes = %d", limit, client.maxBodyBytes)
+	}
+	client.SetHTTPClient(&http.Client{Transport: &mockTransport{server: server}})
+
+	_, err = client.ExtractVersion([]byte("content"), "")
+	if err == nil {
+		t.Fatal("expected an error for an oversized response body, got nil")
+	}
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Errorf("expected ErrResponseTooLarge, got: %v", err)
 	}
 }
 

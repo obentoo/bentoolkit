@@ -41,6 +41,10 @@ type CheckResult struct {
 	FromCache bool
 }
 
+// DefaultOpTimeout is the default per-operation timeout applied to a single
+// outbound HTTP fetch when no explicit timeout is configured on the Checker.
+const DefaultOpTimeout = 30 * time.Second
+
 // Checker handles version checking operations for packages.
 // It coordinates between configuration, cache, pending list, and upstream sources.
 type Checker struct {
@@ -58,6 +62,13 @@ type Checker struct {
 	httpClient *RetryableHTTPClient
 	// configDir is the directory for storing cache and pending files
 	configDir string
+	// ctx is the parent context for all outbound HTTP/LLM calls. It is set via
+	// WithContext and originates in cmd/ (signal.NotifyContext), so a SIGINT or
+	// deadline cancels every in-flight request. Defaults to context.Background().
+	ctx context.Context
+	// opTimeout bounds a single outbound operation. Each fetch derives a child
+	// context via context.WithTimeout(ctx, opTimeout). Defaults to DefaultOpTimeout.
+	opTimeout time.Duration
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -111,6 +122,31 @@ func WithPackagesConfig(config *PackagesConfig) CheckerOption {
 	}
 }
 
+// WithContext sets the parent context for the checker. The context threads
+// through every outbound HTTP and LLM call, so cancelling it (e.g. on SIGINT or
+// a deadline) aborts all in-flight requests. A nil context is rejected.
+func WithContext(ctx context.Context) CheckerOption {
+	return func(c *Checker) error {
+		if ctx == nil {
+			return errors.New("checker context must not be nil")
+		}
+		c.ctx = ctx
+		return nil
+	}
+}
+
+// WithOpTimeout sets the per-operation timeout used to derive a child context
+// for each outbound fetch. A non-positive duration is rejected.
+func WithOpTimeout(d time.Duration) CheckerOption {
+	return func(c *Checker) error {
+		if d <= 0 {
+			return fmt.Errorf("checker op timeout must be positive, got %v", d)
+		}
+		c.opTimeout = d
+		return nil
+	}
+}
+
 // NewChecker creates a new checker instance for the given overlay.
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
@@ -120,6 +156,8 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	checker := &Checker{
 		overlayPath: overlayPath,
 		configDir:   configDir,
+		ctx:         context.Background(), // SAFE: default parent; replaced by WithContext when cmd/ wires signal.NotifyContext
+		opTimeout:   DefaultOpTimeout,
 	}
 
 	// Apply options first to allow overriding configDir
@@ -381,8 +419,11 @@ func (c *Checker) fetchAndParse(url, parserType, path, pattern string) (string, 
 }
 
 // fetchContent fetches content from a URL using the HTTP client with retry logic.
+// The request is bounded by a child of the Checker's parent context (set via
+// WithContext) with the configured per-operation timeout, so a cancelled parent
+// context or an expired deadline aborts the in-flight HTTP call.
 func (c *Checker) fetchContent(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
 	defer cancel()
 
 	resp, err := c.httpClient.GetWithContext(ctx, url)
@@ -397,7 +438,9 @@ func (c *Checker) fetchContent(url string) ([]byte, error) {
 
 	content, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		// Translate an http.MaxBytesReader overflow into ErrResponseTooLarge
+		// (R11.3); GetWithContext caps the body at httputil.MaxBodyBytes.
+		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
 	}
 
 	return content, nil
@@ -405,15 +448,29 @@ func (c *Checker) fetchContent(url string) ([]byte, error) {
 
 // CheckAll checks all packages in the configuration for updates.
 // If force is true, the cache is bypassed for all packages.
-func (c *Checker) CheckAll(force bool) ([]CheckResult, error) {
-	results := make([]CheckResult, 0, len(c.config.Packages))
-
-	for pkg := range c.config.Packages {
-		result, _ := c.CheckPackage(pkg, force) //nolint:errcheck // batch mode continues on individual failures
-		results = append(results, *result)
+//
+// It returns a BatchResult: successfully checked packages land in Items, while
+// a per-package failure is recorded in Failures keyed by the package name and
+// the batch continues with the next package. The loop is sequential here;
+// full parallelization is handled by a later task. The returned BatchResult is
+// fully populated before it is returned, so callers may invoke its methods
+// (ExitCode, FormatFailures) directly.
+func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
+	batch := BatchResult[CheckResult]{
+		Items:    make([]CheckResult, 0, len(c.config.Packages)),
+		Failures: make(map[string]error),
 	}
 
-	return results, nil
+	for pkg := range c.config.Packages {
+		result, err := c.CheckPackage(pkg, force)
+		if err != nil {
+			batch.Failures[pkg] = err
+			continue
+		}
+		batch.Items = append(batch.Items, *result)
+	}
+
+	return batch
 }
 
 // Config returns the packages configuration.

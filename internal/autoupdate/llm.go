@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 const (
@@ -89,11 +91,37 @@ type LLMConfig struct {
 	BaseURL string
 }
 
+// readCappedBody reads an HTTP response body while enforcing a maximum size.
+// The body is wrapped in an http.MaxBytesReader bounded by maxBodyBytes; if the
+// payload exceeds the cap the standard library yields an *http.MaxBytesError,
+// which is translated into an error wrapping ErrResponseTooLarge (R11.2, R11.3).
+// A non-positive maxBodyBytes falls back to httputil.MaxBodyBytes so a
+// zero-valued client field can never disable the cap.
+func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
+	limit := maxBodyBytes
+	if limit <= 0 {
+		limit = httputil.MaxBodyBytes
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(nil, body, limit))
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return nil, fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
 // ClaudeClient implements LLMProvider for Anthropic's Claude API.
 type ClaudeClient struct {
 	config     LLMConfig
 	httpClient *http.Client
 	apiKey     string
+	// maxBodyBytes caps how many bytes are read from an API response body.
+	// It defaults to httputil.MaxBodyBytes and can be overridden via
+	// WithMaxBodyBytes (R11.2).
+	maxBodyBytes int64
 }
 
 // claudeRequest represents the request body for Claude Messages API
@@ -196,8 +224,21 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 		httpClient: &http.Client{
 			Timeout: DefaultRequestTimeout,
 		},
-		apiKey: apiKey,
+		apiKey:       apiKey,
+		maxBodyBytes: httputil.MaxBodyBytes,
 	}, nil
+}
+
+// WithMaxBodyBytes overrides the maximum number of bytes read from a Claude API
+// response body and returns the client for chaining. Values <= 0 are ignored so
+// the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
+// may legitimately exceed the default cap, so a larger limit can be supplied
+// here (R11.2).
+func (c *ClaudeClient) WithMaxBodyBytes(n int64) *ClaudeClient {
+	if n > 0 {
+		c.maxBodyBytes = n
+	}
+	return c
 }
 
 // GetModel returns the model name being used by this Claude client.
@@ -246,8 +287,8 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body, capped at c.maxBodyBytes (R11.2)
+	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -323,8 +364,8 @@ func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body, capped at c.maxBodyBytes (R11.2)
+	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

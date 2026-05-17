@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 func TestOpenAIExtractVersionSuccess(t *testing.T) {
@@ -148,5 +150,47 @@ func TestOpenAIExtractVersionEmptyResponse(t *testing.T) {
 	}
 	if !errors.Is(err, ErrLLMEmptyResponse) {
 		t.Errorf("expected ErrLLMEmptyResponse, got: %v", err)
+	}
+}
+
+// TestOpenAIClient_WithCustomMaxBody verifies that WithMaxBodyBytes lowers the
+// OpenAI response-body cap and that exceeding it surfaces ErrResponseTooLarge.
+// It also asserts the default (no option) equals httputil.MaxBodyBytes (R11.2).
+func TestOpenAIClient_WithCustomMaxBody(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
+	// Default cap (no option) must equal httputil.MaxBodyBytes.
+	defaultClient, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if defaultClient.maxBodyBytes != httputil.MaxBodyBytes {
+		t.Errorf("default maxBodyBytes = %d, want %d (httputil.MaxBodyBytes)",
+			defaultClient.maxBodyBytes, httputil.MaxBodyBytes)
+	}
+
+	const limit = 1024 // 1 KiB cap for the test
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		writeOversizedBody(w, limit*4) // 4 KiB > 1 KiB cap
+	}))
+	defer server.Close()
+
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	client.SetBaseURL(server.URL)
+	client.WithMaxBodyBytes(limit)
+	if client.maxBodyBytes != limit {
+		t.Fatalf("WithMaxBodyBytes(%d) did not apply: maxBodyBytes = %d", limit, client.maxBodyBytes)
+	}
+
+	_, err = client.ExtractVersion([]byte("some content"), "")
+	if err == nil {
+		t.Fatal("expected an error for an oversized response body, got nil")
+	}
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Errorf("expected ErrResponseTooLarge, got: %v", err)
 	}
 }

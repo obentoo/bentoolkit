@@ -324,25 +324,25 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE existing `_test.go` files.
 
 **Sub-tasks**:
-- [ ] 9.1 Add `ctx context.Context` and `opTimeout time.Duration` to `Checker`; default `context.Background()` and `30 * time.Second`. Add `WithContext(ctx) CheckerOption` and `WithOpTimeout(d) CheckerOption`.
+- [x] 9.1 Add `ctx context.Context` and `opTimeout time.Duration` to `Checker`; default `context.Background()` and `30 * time.Second`. Add `WithContext(ctx) CheckerOption` and `WithOpTimeout(d) CheckerOption`.
   - Requirements: R3.2
   - Validation: compile-time + `TestChecker_WithContextOption` smoke.
-- [ ] 9.2 Replace internal `context.Background()` calls (`checker.go:385`, `analyzer.go:311/324/349`). Each remaining `context.Background()` line carries `// SAFE: <reason>` comment.
+- [x] 9.2 Replace internal `context.Background()` calls (`checker.go:385`, `analyzer.go:311/324/349`). Each remaining `context.Background()` line carries `// SAFE: <reason>` comment.
   - Requirements: R3.3
   - Validation: `make audit-ctx` exits 0 (after T16 lands target); meanwhile manual `grep -rn "context.Background()" internal/autoupdate internal/overlay` should yield only commented occurrences.
-- [ ] 9.3 Add `WithApplierContext(ctx) ApplierOption` (non-error per Applier convention) and thread to all `exec.Command` calls.
+- [x] 9.3 Add `WithApplierContext(ctx) ApplierOption` (non-error per Applier convention) and thread to all `exec.Command` calls.
   - Requirements: R3.2
   - Validation: `TestApplier_WithContextOption` smoke.
-- [ ] 9.4 Add `CompareOptions.Ctx` (additive; default `context.Background()`).
+- [x] 9.4 Add `CompareOptions.Ctx` (additive; default `context.Background()`).
   - Requirements: R3.2
   - Validation: `TestCompare_ContextField` smoke.
-- [ ] 9.5 Write cancellation test: `TestChecker_ContextCancelled` against slow `httptest` server; cancel ctx; assert ≤ 100 ms.
+- [x] 9.5 Write cancellation test: `TestChecker_ContextCancelled` against slow `httptest` server; cancel ctx; assert ≤ 100 ms.
   - Requirements: R3.1
   - Validation: test passes under `-race -count=10`.
-- [ ] 9.6 Write deadline-expiry test: `TestChecker_ContextDeadlineExceeded` waits for natural deadline; asserts `errors.Is(err, context.DeadlineExceeded)` (Test Advisor gap #5).
+- [x] 9.6 Write deadline-expiry test: `TestChecker_ContextDeadlineExceeded` waits for natural deadline; asserts `errors.Is(err, context.DeadlineExceeded)` (Test Advisor gap #5).
   - Requirements: R3.1
   - Validation: test passes.
-- [ ] 9.7 Add `go.uber.org/goleak` `VerifyTestMain` to `TestMain` of `internal/autoupdate` and `internal/overlay` packages (Test Advisor gap #5).
+- [x] 9.7 Add `go.uber.org/goleak` `VerifyTestMain` to `TestMain` of `internal/autoupdate` and `internal/overlay` packages (Test Advisor gap #5).
   - Requirements: R3.1
   - Validation: `go test ./internal/autoupdate/... ./internal/overlay/...` reports no leaks; new go.mod entry recorded.
 
@@ -361,16 +361,16 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/autoupdate/applier_test.go`.
 
 **Sub-tasks**:
-- [ ] 10.1 After successful `copyEbuild`, register a `defer` that conditionally removes `dstPath` when the resulting error is non-nil (closure-captured named return).
+- [x] 10.1 After successful `copyEbuild`, register a `defer` that conditionally removes `dstPath` when the resulting error is non-nil (closure-captured named return).
   - Requirements: R5.1
   - Validation: `TestApply_RollbackOnManifestFailure` forces manifest fail; `os.Stat(dstPath)` returns `os.ErrNotExist`.
-- [ ] 10.2 If `os.Remove` fails AND not `os.ErrNotExist`, log `Warn`; preserve original error.
+- [x] 10.2 If `os.Remove` fails AND not `os.ErrNotExist`, log `Warn`; preserve original error.
   - Requirements: R5.2
   - Validation: `TestApply_RollbackPreservesOriginalError` makes both fail; returned error wraps `ErrManifestFailed`, not `os.ErrXxx`.
-- [ ] 10.3 Wrap `a.execCommand` for `ebuild manifest` to use `exec.CommandContext` with `context.WithTimeout(a.ctx, 5 * time.Minute)`.
+- [x] 10.3 Wrap `a.execCommand` for `ebuild manifest` to use `exec.CommandContext` with `context.WithTimeout(a.ctx, 5 * time.Minute)`.
   - Requirements: R5.3
   - Validation: `TestApply_ManifestTimeoutHonored` mock returns blocking process; ctx timeout=100 ms (test override); assert error within ~200 ms.
-- [ ] 10.4 Add `TestApply_RollbackOnManifestWriteFailure` (Test Advisor gap #6): use `t.TempDir` with overlay dir chmod 0500 post-copyEbuild; manifest command succeeds but write fails; assert rollback removes orphan.
+- [x] 10.4 Add `TestApply_RollbackOnManifestWriteFailure` (Test Advisor gap #6): use `t.TempDir` with overlay dir chmod 0500 post-copyEbuild; manifest command succeeds but write fails; assert rollback removes orphan.
   - Requirements: R5.1
   - Validation: test passes.
 
@@ -390,19 +390,19 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `cmd/bentoo/overlay_autoupdate.go`, `cmd/bentoo/overlay_analyze.go`.
 
 **Sub-tasks**:
-- [ ] 11.1 Update `CheckAll` return type; remove `//nolint:errcheck`; build `BatchResult`. Per-item error capture only (full parallelization in T15).
+- [x] 11.1 Update `CheckAll` return type; remove `//nolint:errcheck`; build `BatchResult`. Per-item error capture only (full parallelization in T15).
   - Requirements: R7.1
   - Validation: `TestCheckAll_ReturnsBatchResult` 3 packages, 1 fail; assert shape.
-- [ ] 11.2 Update `AnalyzeAll` similarly.
+- [x] 11.2 Update `AnalyzeAll` similarly.
   - Requirements: R7.1
   - Validation: `TestAnalyzeAll_ReturnsBatchResult`.
-- [ ] 11.3 In CLI, replace `os.Exit(0)` on success path with `osExit(result.ExitCode())`. Use injected `osExit` from existing harness.
+- [x] 11.3 In CLI, replace `os.Exit(0)` on success path with `osExit(result.ExitCode())`. Use injected `osExit` from existing harness.
   - Requirements: R7.2, R7.3, R7.4
   - Validation: `TestCLI_ExitCodes` matrix via `cmd/bentoo/run_functions_test.go` harness (`exitSentinel`).
-- [ ] 11.4 Print `result.FormatFailures(os.Stderr)` before exit. `FormatFailures` must be invoked **after** all goroutines join (post-T15 ordering concern; Test Advisor gap #7).
+- [x] 11.4 Print `result.FormatFailures(os.Stderr)` before exit. `FormatFailures` must be invoked **after** all goroutines join (post-T15 ordering concern; Test Advisor gap #7).
   - Requirements: R7.1
   - Validation: `TestCheckAll_ErrorsOnStderr` runs with `-race -count=20`; asserts deterministic lexical ordering.
-- [ ] 11.5 Update display helpers consuming old shape (search `BatchResult` consumers post-rename).
+- [x] 11.5 Update display helpers consuming old shape (search `BatchResult` consumers post-rename).
   - Requirements: R7.1
   - Validation: build passes.
 
@@ -421,13 +421,13 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/autoupdate/llm.go`, `openai.go`, `ollama.go`.
 
 **Sub-tasks**:
-- [ ] 12.1 Wrap body in `GetWithContext` with `http.MaxBytesReader(nil, body, httputil.MaxBodyBytes)`. On `*http.MaxBytesError` from a subsequent read, wrap with `ErrResponseTooLarge`.
+- [x] 12.1 Wrap body in `GetWithContext` with `http.MaxBytesReader(nil, body, httputil.MaxBodyBytes)`. On `*http.MaxBytesError` from a subsequent read, wrap with `ErrResponseTooLarge`.
   - Requirements: R11.1, R11.3
   - Validation: `TestGetWithContext_BodyCap` server returns 11 MiB; read returns error wrapping `ErrResponseTooLarge`.
-- [ ] 12.2 For each LLM client (`ClaudeClient`, `OpenAIClient`, `OllamaClient`), add `maxBodyBytes int64` field + `WithMaxBodyBytes(int64)` option. Default = `httputil.MaxBodyBytes`.
+- [x] 12.2 For each LLM client (`ClaudeClient`, `OpenAIClient`, `OllamaClient`), add `maxBodyBytes int64` field + `WithMaxBodyBytes(int64)` option. Default = `httputil.MaxBodyBytes`.
   - Requirements: R11.2
   - Validation: `TestClaudeClient_WithCustomMaxBody`, `TestOpenAIClient_WithCustomMaxBody`, `TestOllamaClient_WithCustomMaxBody` (Test Advisor gap on R11.2 LLM coverage).
-- [ ] 12.3 Document defaults in package godoc.
+- [x] 12.3 Document defaults in package godoc.
   - Requirements: R11.1, R11.2
   - Validation: `go doc ./internal/autoupdate` mentions cap.
 

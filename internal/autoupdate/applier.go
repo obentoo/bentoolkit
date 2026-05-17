@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,14 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
+
+// manifestTimeout bounds a single `ebuild manifest` invocation. The manifest
+// step touches the network (fetching SRC_URI distfiles to digest), so it gets a
+// generous-but-finite budget; without it a stalled fetch would hang Apply
+// indefinitely.
+const manifestTimeout = 5 * time.Minute
 
 // Error variables for applier errors
 var (
@@ -56,8 +64,15 @@ type Applier struct {
 	logsDir string
 	// confirmFunc is a function to prompt for user confirmation (injectable for testing)
 	confirmFunc func(prompt string) bool
-	// execCommand is a function to create exec.Cmd (injectable for testing)
-	execCommand func(name string, arg ...string) *exec.Cmd
+	// execCommand is a function to create exec.Cmd bound to a context
+	// (injectable for testing). It defaults to exec.CommandContext so a
+	// cancelled context kills the spawned manifest/compile process.
+	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// ctx is the parent context for all spawned external commands. It is set
+	// via WithApplierContext and originates in cmd/ (signal.NotifyContext), so a
+	// SIGINT or deadline kills in-flight ebuild/compile processes. Defaults to
+	// context.Background().
+	ctx context.Context
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -84,10 +99,24 @@ func WithConfirmFunc(fn func(prompt string) bool) ApplierOption {
 	}
 }
 
-// WithExecCommand sets a custom exec.Command function for testing
-func WithExecCommand(fn func(name string, arg ...string) *exec.Cmd) ApplierOption {
+// WithExecCommand sets a custom context-aware exec.Command function for testing.
+// The function mirrors exec.CommandContext so injected commands also observe
+// context cancellation.
+func WithExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ApplierOption {
 	return func(a *Applier) {
 		a.execCommand = fn
+	}
+}
+
+// WithApplierContext sets the parent context for the applier. The context is
+// threaded into every spawned external command (ebuild manifest, compile test),
+// so cancelling it (e.g. on SIGINT or a deadline) kills in-flight processes.
+// A nil context is ignored, leaving the default context.Background().
+func WithApplierContext(ctx context.Context) ApplierOption {
+	return func(a *Applier) {
+		if ctx != nil {
+			a.ctx = ctx
+		}
 	}
 }
 
@@ -100,7 +129,8 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		overlayPath: overlayPath,
 		logsDir:     logsDir,
 		confirmFunc: defaultConfirmFunc,
-		execCommand: exec.Command,
+		execCommand: exec.CommandContext,
+		ctx:         context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
 	}
 
 	// Apply options first
@@ -128,8 +158,12 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 // Apply applies a pending update for a package.
 // It copies the ebuild to the new version and runs the manifest command.
 // If compile is true, it also runs a compile test with elevated privileges.
-func (a *Applier) Apply(pkg string, compile bool) (*ApplyResult, error) {
-	result := &ApplyResult{
+//
+// The result is returned via a named value so a single deferred cleanup can
+// observe whichever error the function ultimately surfaces (result.Error is
+// kept in lockstep with the returned error on every path).
+func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error) {
+	result = &ApplyResult{
 		Package: pkg,
 	}
 
@@ -152,6 +186,26 @@ func (a *Applier) Apply(pkg string, compile bool) (*ApplyResult, error) {
 		}
 		return result, result.Error
 	}
+
+	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any
+	// later step (manifest, status update, compile) fails, that file is an
+	// orphan and must be removed so the overlay is not left half-applied.
+	// The cleanup keyed on result.Error so it only fires on failure, and it
+	// must never replace the original error with a removal error.
+	dstPath := a.EbuildPath(pkg, update.NewVersion)
+	defer func() {
+		if result == nil || result.Error == nil {
+			return
+		}
+		if err := os.Remove(dstPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			// Rollback failed: keep the original error, just record the
+			// cleanup miss so the orphan ebuild can be found and removed.
+			logger.Warn(
+				"failed to roll back orphan ebuild %s for %s (%s) after apply failure: %v "+
+					"(original apply error preserved: %v)",
+				dstPath, pkg, update.NewVersion, err, result.Error)
+		}
+	}()
 
 	// Run manifest command
 	if err := a.runManifest(pkg, update.NewVersion); err != nil {
@@ -255,8 +309,15 @@ func (a *Applier) runManifest(pkg, version string) error {
 	// Build ebuild path
 	ebuildPath := filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
 
-	// Run ebuild manifest command
-	cmd := a.execCommand("ebuild", ebuildPath, "manifest")
+	// Bound the manifest invocation: derive a child context from the applier's
+	// parent context with a finite deadline so a stalled distfile fetch cannot
+	// hang Apply forever. Cancelling either the parent (SIGINT) or this child
+	// (timeout) kills the spawned process via exec.CommandContext.
+	ctx, cancel := context.WithTimeout(a.ctx, manifestTimeout)
+	defer cancel()
+
+	// Run ebuild manifest command.
+	cmd := a.execCommand(ctx, "ebuild", ebuildPath, "manifest")
 	cmd.Dir = a.overlayPath
 
 	output, err := cmd.CombinedOutput()
@@ -294,8 +355,10 @@ func (a *Applier) runCompile(pkg, version string) (string, error) {
 	// Build ebuild path
 	ebuildPath := filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
 
-	// Run compile test: sudo/doas ebuild <path> clean compile
-	cmd := a.execCommand(privTool, "ebuild", ebuildPath, "clean", "compile")
+	// Run compile test: sudo/doas ebuild <path> clean compile. The command is
+	// bound to the applier's parent context so a SIGINT or deadline kills the
+	// spawned process.
+	cmd := a.execCommand(a.ctx, privTool, "ebuild", ebuildPath, "clean", "compile")
 	cmd.Dir = a.overlayPath
 
 	output, err := cmd.CombinedOutput()

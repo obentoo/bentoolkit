@@ -148,27 +148,34 @@ func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate
 func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions) {
 	output.Info.Println("Analyzing all packages without schema...")
 
-	results, err := analyzer.AnalyzeAll(opts)
-	if err != nil {
-		logger.Error("failed to analyze packages: %v", err)
-		osExit(1)
+	// AnalyzeAll never returns a fatal error: enumeration and per-package
+	// failures are all captured in the BatchResult.
+	result := analyzer.AnalyzeAll(opts)
+
+	// Emit one stderr line per failure. FormatFailures is called only after
+	// every AnalyzeAll worker goroutine has joined, so the output is
+	// deterministic regardless of completion order.
+	if result.HasFailures() {
+		result.FormatFailures(os.Stderr)
 	}
 
-	if len(results) == 0 {
+	if len(result.Items) == 0 && !result.HasFailures() {
 		output.Success.Println("All packages already have schemas configured")
+		osExit(result.ExitCode())
 		return
 	}
 
-	displayBatchResults(results)
+	displayBatchResults(result.Items)
 
-	// If dry-run, don't save
+	// If dry-run, don't save; still report the batch outcome.
 	if opts.DryRun {
+		osExit(result.ExitCode())
 		return
 	}
 
 	// Count successful analyses
 	var successful int
-	for _, r := range results {
+	for _, r := range result.Items {
 		if r.SuggestedSchema != nil && r.Error == nil {
 			successful++
 		}
@@ -176,6 +183,7 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 
 	if successful == 0 {
 		output.Warning.Println("No schemas were generated successfully")
+		osExit(result.ExitCode())
 		return
 	}
 
@@ -183,12 +191,13 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 	output.Info.Printf("\n%d schema(s) ready to save\n", successful)
 	if !confirmAction("Save all successful schemas?") {
 		logger.Info("Schemas not saved")
+		osExit(result.ExitCode())
 		return
 	}
 
 	// Save all successful schemas
 	var saved int
-	for _, r := range results {
+	for _, r := range result.Items {
 		if r.SuggestedSchema != nil && r.Error == nil {
 			if err := analyzer.SaveSchema(r.Package, r.SuggestedSchema); err != nil {
 				output.Error.Printf("Failed to save schema for %s: %v\n", r.Package, err)
@@ -199,6 +208,9 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 	}
 
 	output.Success.Printf("\n✓ Saved %d schema(s) to packages.toml\n", saved)
+
+	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
+	osExit(result.ExitCode())
 }
 
 // displayAnalyzeResult formats and displays a single analysis result

@@ -1,11 +1,14 @@
 package autoupdate
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,15 +71,13 @@ func TestCheckPackageFiltering(t *testing.T) {
 			}
 
 			// Check all packages
-			results, err := checker.CheckAll(false)
-			if err != nil {
-				t.Logf("CheckAll failed: %v", err)
-				return false
-			}
+			batch := checker.CheckAll(false)
 
-			// Verify we got exactly N results
-			if len(results) != numPackages {
-				t.Logf("Expected %d results, got %d", numPackages, len(results))
+			// Verify we got exactly N results across Items and Failures.
+			total := len(batch.Items) + len(batch.Failures)
+			if total != numPackages {
+				t.Logf("Expected %d results, got %d (Items=%d, Failures=%d)",
+					numPackages, total, len(batch.Items), len(batch.Failures))
 				return false
 			}
 
@@ -734,14 +735,186 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	results, err := checker.CheckAll(true)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+	batch := checker.CheckAll(true)
+
+	total := len(batch.Items) + len(batch.Failures)
+	if total != 3 {
+		t.Errorf("Expected 3 results, got %d (Items=%d, Failures=%d)",
+			total, len(batch.Items), len(batch.Failures))
+	}
+}
+
+// TestCheckAll_ReturnsBatchResult verifies CheckAll returns a BatchResult that
+// separates successfully checked packages from per-package failures. Three
+// packages are configured; one is pointed at a URL that always returns HTTP
+// 500, so it must land in Failures keyed by its package name while the other
+// two succeed.
+func TestCheckAll_ReturnsBatchResult(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	// okServer always returns a valid version JSON payload.
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
+	}))
+	defer okServer.Close()
+
+	// failServer always returns HTTP 500, forcing ErrFetchFailed.
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failServer.Close()
+
+	const failingPkg = "cat3/pkg3"
+	packages := map[string]PackageConfig{
+		"cat1/pkg1": {URL: okServer.URL, Parser: "json", Path: "version"},
+		"cat2/pkg2": {URL: okServer.URL, Parser: "json", Path: "version"},
+		failingPkg:  {URL: failServer.URL, Parser: "json", Path: "version"},
 	}
 
-	if len(results) != 3 {
-		t.Errorf("Expected 3 results, got %d", len(results))
+	for pkgName := range packages {
+		createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 	}
+
+	// Disable HTTP retries so the failing package fails fast.
+	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+		MaxRetries: 0,
+		Timeout:    5 * time.Second,
+	})
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithHTTPClient(httpClient),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	batch := checker.CheckAll(true)
+
+	if len(batch.Items) != 2 {
+		t.Errorf("expected 2 successful items, got %d", len(batch.Items))
+	}
+	if len(batch.Failures) != 1 {
+		t.Errorf("expected 1 failure, got %d", len(batch.Failures))
+	}
+	if _, ok := batch.Failures[failingPkg]; !ok {
+		t.Errorf("expected failure keyed by %q, got keys %v", failingPkg, failureKeys(batch.Failures))
+	}
+	// Successes must not include the failing package.
+	for _, item := range batch.Items {
+		if item.Package == failingPkg {
+			t.Errorf("failing package %q leaked into Items", failingPkg)
+		}
+	}
+	// Partial failure: ExitCode must be 1.
+	if got := batch.ExitCode(); got != 1 {
+		t.Errorf("expected ExitCode 1 (partial), got %d", got)
+	}
+}
+
+// TestCheckAll_ErrorsOnStderr verifies that the failures recorded by CheckAll
+// are emitted by FormatFailures in deterministic lexical order regardless of
+// the map iteration order. Run under -race to catch any data race in the
+// sequential capture path.
+func TestCheckAll_ErrorsOnStderr(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	// failServer always returns HTTP 500 so every package fails.
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failServer.Close()
+
+	// Package names deliberately not in sorted order.
+	pkgNames := []string{"cat-z/zeta", "cat-a/alpha", "cat-m/mike"}
+	packages := make(map[string]PackageConfig, len(pkgNames))
+	for _, pkgName := range pkgNames {
+		packages[pkgName] = PackageConfig{URL: failServer.URL, Parser: "json", Path: "version"}
+		createTestEbuild(t, overlayDir, pkgName, "0.9.0")
+	}
+
+	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+		MaxRetries: 0,
+		Timeout:    5 * time.Second,
+	})
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithHTTPClient(httpClient),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	batch := checker.CheckAll(true)
+
+	if len(batch.Failures) != 3 {
+		t.Fatalf("expected 3 failures, got %d", len(batch.Failures))
+	}
+	// Total failure: no item succeeded.
+	if got := batch.ExitCode(); got != 2 {
+		t.Errorf("expected ExitCode 2 (total failure), got %d", got)
+	}
+
+	var buf bytes.Buffer
+	batch.FormatFailures(&buf)
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 stderr lines, got %d: %q", len(lines), buf.String())
+	}
+
+	// Each line must start with "ERROR <pkg>: " and the package order must be
+	// lexically sorted.
+	gotPkgs := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "ERROR ") {
+			t.Errorf("line missing ERROR prefix: %q", line)
+			continue
+		}
+		rest := strings.TrimPrefix(line, "ERROR ")
+		idx := strings.Index(rest, ": ")
+		if idx < 0 {
+			t.Errorf("line missing ': ' separator: %q", line)
+			continue
+		}
+		gotPkgs = append(gotPkgs, rest[:idx])
+	}
+
+	wantPkgs := append([]string(nil), pkgNames...)
+	sort.Strings(wantPkgs)
+	if !equalStringSlices(gotPkgs, wantPkgs) {
+		t.Errorf("stderr package order = %v, want sorted %v", gotPkgs, wantPkgs)
+	}
+}
+
+// failureKeys returns the sorted keys of a Failures map for diagnostics.
+func failureKeys(failures map[string]error) []string {
+	keys := make([]string, 0, len(failures))
+	for k := range failures {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// equalStringSlices reports whether two string slices are element-wise equal.
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestCheckPackageAddsToPending tests that updates are added to pending list

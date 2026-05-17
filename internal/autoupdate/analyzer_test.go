@@ -834,7 +834,7 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			_, _ = analyzer.AnalyzeAll(opts)
+			_ = analyzer.AnalyzeAll(opts)
 
 			// Max concurrent should be at most 3
 			return maxConcurrent <= 3
@@ -953,15 +953,17 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			results, err := analyzer.AnalyzeAll(opts)
-			if err != nil {
-				return false
-			}
+			batch := analyzer.AnalyzeAll(opts)
 
-			// Mark processed packages
-			for _, result := range results {
+			// Mark processed packages: both successes (Items) and failures.
+			for _, result := range batch.Items {
 				mu.Lock()
 				processedPackages[result.Package] = true
+				mu.Unlock()
+			}
+			for pkg := range batch.Failures {
+				mu.Lock()
+				processedPackages[pkg] = true
 				mu.Unlock()
 			}
 
@@ -972,7 +974,7 @@ HOMEPAGE="`+server.URL+`"
 				}
 			}
 
-			return len(results) == numPackages
+			return len(batch.Items)+len(batch.Failures) == numPackages
 		},
 		gen.IntRange(1, 8),
 	))
@@ -1045,7 +1047,7 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			_, _ = analyzer.AnalyzeAll(opts)
+			_ = analyzer.AnalyzeAll(opts)
 
 			// Max observed should be exactly 3 (the limit)
 			// With 6 packages and 100ms delay, we should hit the limit
@@ -1055,6 +1057,91 @@ HOMEPAGE="`+server.URL+`"
 	))
 
 	properties.TestingRun(t)
+}
+
+// TestAnalyzeAll_ReturnsBatchResult verifies AnalyzeAll returns a BatchResult
+// that separates successfully analyzed packages from per-package failures.
+// Three schema-less packages are created; one points its HOMEPAGE at a server
+// that always returns HTTP 500, so every data source fetch for that package
+// fails and it must land in Failures keyed by its package name while the other
+// two succeed via the default-schema fallback.
+func TestAnalyzeAll_ReturnsBatchResult(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// okServer returns a valid JSON payload so the default schema validates.
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
+	}))
+	defer okServer.Close()
+
+	// failServer always returns HTTP 500, so every data source fetch fails.
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failServer.Close()
+
+	// Two packages point at okServer, one (the failing one) at failServer.
+	type pkgSpec struct {
+		name string
+		url  string
+	}
+	const failingPkg = "app-misc/pkg-fail"
+	specs := []pkgSpec{
+		{"app-misc/pkg-ok-a", okServer.URL},
+		{"app-misc/pkg-ok-b", okServer.URL},
+		{failingPkg, failServer.URL},
+	}
+	for _, s := range specs {
+		parts := strings.SplitN(s.name, "/", 2)
+		pkgDir := filepath.Join(tmpDir, parts[0], parts[1])
+		if err := os.MkdirAll(pkgDir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", pkgDir, err)
+		}
+		ebuild := "EAPI=8\nHOMEPAGE=\"" + s.url + "\"\n"
+		ebuildPath := filepath.Join(pkgDir, parts[1]+"-1.0.0.ebuild")
+		if err := os.WriteFile(ebuildPath, []byte(ebuild), 0644); err != nil {
+			t.Fatalf("write ebuild %s: %v", ebuildPath, err)
+		}
+	}
+
+	// Fast rate limiter + no-retry HTTP client so failures are fast.
+	rateLimiter := createFastRateLimiter()
+	setFastHTTPLimit(rateLimiter, okServer.URL)
+	setFastHTTPLimit(rateLimiter, failServer.URL)
+	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+		MaxRetries: 0,
+		Timeout:    5 * time.Second,
+	})
+
+	analyzer, err := NewAnalyzer(tmpDir,
+		WithAnalyzerRateLimiter(rateLimiter),
+		WithAnalyzerHTTPClient(httpClient),
+	)
+	if err != nil {
+		t.Fatalf("NewAnalyzer: %v", err)
+	}
+
+	batch := analyzer.AnalyzeAll(AnalyzeOptions{NoCache: true})
+
+	if len(batch.Items) != 2 {
+		t.Errorf("expected 2 successful items, got %d", len(batch.Items))
+	}
+	if len(batch.Failures) != 1 {
+		t.Errorf("expected 1 failure, got %d (keys %v)", len(batch.Failures), failureKeys(batch.Failures))
+	}
+	if _, ok := batch.Failures[failingPkg]; !ok {
+		t.Errorf("expected failure keyed by %q, got keys %v", failingPkg, failureKeys(batch.Failures))
+	}
+	for _, item := range batch.Items {
+		if item.Package == failingPkg {
+			t.Errorf("failing package %q leaked into Items", failingPkg)
+		}
+	}
+	// Partial failure: ExitCode must be 1.
+	if got := batch.ExitCode(); got != 1 {
+		t.Errorf("expected ExitCode 1 (partial), got %d", got)
+	}
 }
 
 // TestDetectJSONPath tests JSON path detection

@@ -1,11 +1,14 @@
 package autoupdate
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
@@ -366,14 +369,47 @@ func createTestEbuildFileWithContent(t *testing.T, overlayDir, pkg, version, con
 	}
 }
 
-// mockExecCommandSuccess returns a mock exec.Cmd that always succeeds
-func mockExecCommandSuccess(name string, arg ...string) *exec.Cmd {
-	return exec.Command("true")
+// mockExecCommandSuccess returns a mock exec.Cmd that always succeeds.
+// It is context-aware so cancellation propagates to the spawned process.
+func mockExecCommandSuccess(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "true")
 }
 
-// mockExecCommandFailure returns a mock exec.Cmd that always fails
-func mockExecCommandFailure(name string, arg ...string) *exec.Cmd {
-	return exec.Command("false")
+// mockExecCommandFailure returns a mock exec.Cmd that always fails.
+// It is context-aware so cancellation propagates to the spawned process.
+func mockExecCommandFailure(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "false")
+}
+
+// mockExecCommandBlocking returns a mock exec.Cmd that blocks for an effectively
+// unbounded time. Because it is created with exec.CommandContext, cancelling
+// (or timing out) the supplied context kills the process, letting tests assert
+// that the manifest timeout is honored.
+func mockExecCommandBlocking(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "sleep", "3600")
+}
+
+// mockExecCommandWriteInto returns a mock exec.Cmd factory whose command tries
+// to create a file inside dir and exits non-zero when it cannot. Pointing dir
+// at a read-only directory makes the manifest step fail with a genuine
+// filesystem write error rather than a synthetic non-zero exit.
+func mockExecCommandWriteInto(dir string) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		// `set -e` ensures the failed redirection aborts with a non-zero status.
+		return exec.CommandContext(ctx, "sh", "-c", "set -e; : > \""+dir+"/Manifest\"")
+	}
+}
+
+// mockExecCommandFailAndLockDir returns a mock exec.Cmd factory whose command
+// makes dir read-only (0500) and then exits non-zero. It runs only after
+// copyEbuild has already placed the orphan ebuild (with dir still writable),
+// so the subsequent rollback os.Remove inside dir fails with EACCES. This lets
+// tests exercise the R5.2 path where the manifest step AND the cleanup both
+// fail.
+func mockExecCommandFailAndLockDir(dir string) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "chmod 0500 \""+dir+"\"; exit 1")
+	}
 }
 
 // =============================================================================
@@ -797,5 +833,264 @@ func TestSaveCompileLog_FinalModeIs0600(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("compile log mode = %#o, want %#o", got, 0o600)
+	}
+}
+
+// =============================================================================
+// R5: Applier rollback on manifest failure + exec timeout
+// =============================================================================
+
+// TestApply_RollbackOnManifestFailure verifies that when runManifest fails, the
+// orphan .ebuild that copyEbuild placed in the overlay is removed so the
+// overlay is not left half-applied. (R5.1)
+func TestApply_RollbackOnManifestFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	// mockExecCommandFailure makes runManifest fail (non-zero exit).
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandFailure),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr == nil {
+		t.Fatal("expected Apply to fail when manifest fails")
+	}
+	if result.Success {
+		t.Error("expected result.Success to be false")
+	}
+
+	// The freshly copied ebuild must have been rolled back.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild was not rolled back: os.Stat(%q) error = %v, want os.ErrNotExist",
+			dstPath, statErr)
+	}
+
+	// The source ebuild must remain untouched.
+	srcPath := applier.EbuildPath(pkg, oldVersion)
+	if _, statErr := os.Stat(srcPath); statErr != nil {
+		t.Errorf("source ebuild should still exist: os.Stat(%q) error = %v", srcPath, statErr)
+	}
+}
+
+// TestApply_RollbackPreservesOriginalError verifies that when BOTH the manifest
+// step and the rollback removal fail, Apply still surfaces the original
+// ErrManifestFailed error and never substitutes the os.Remove error. (R5.2)
+func TestApply_RollbackPreservesOriginalError(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	// The ebuild's package directory. copyEbuild needs it writable to create
+	// the destination file, so it cannot be chmod'd read-only before Apply
+	// runs (that would fail copyEbuild and never create an orphan). Instead the
+	// mocked manifest command makes the directory read-only and THEN exits
+	// non-zero: copyEbuild has already succeeded, so the deferred rollback
+	// os.Remove inside the now-read-only directory fails with EACCES. Restore
+	// the mode afterwards so t.TempDir cleanup can delete the tree.
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandFailAndLockDir(pkgDir)),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr == nil {
+		t.Fatal("expected Apply to fail when manifest fails")
+	}
+	if result.Success {
+		t.Error("expected result.Success to be false")
+	}
+
+	// The returned error must wrap the ORIGINAL manifest failure, not the
+	// cleanup os.Remove error.
+	if !errors.Is(applyErr, ErrManifestFailed) {
+		t.Errorf("Apply error = %v, want it to wrap ErrManifestFailed", applyErr)
+	}
+	if !errors.Is(result.Error, ErrManifestFailed) {
+		t.Errorf("result.Error = %v, want it to wrap ErrManifestFailed", result.Error)
+	}
+	// A permission-denied removal error must not have leaked into the result.
+	if errors.Is(applyErr, os.ErrPermission) {
+		t.Errorf("Apply error leaked the cleanup os.Remove error: %v", applyErr)
+	}
+}
+
+// TestApply_ManifestTimeoutHonored verifies that the manifest invocation is
+// bounded: with a blocking manifest process and a short parent-context
+// deadline, Apply aborts promptly instead of hanging. The 5-minute manifest
+// timeout derives a child from a.ctx, so a shorter parent deadline is
+// inherited and wins. (R5.3)
+func TestApply_ManifestTimeoutHonored(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	// Parent context with a ~100ms deadline. context.WithTimeout(a.ctx,
+	// manifestTimeout) inside runManifest inherits this shorter deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandBlocking),
+		WithApplierContext(ctx),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, applyErr := applier.Apply(pkg, false)
+		done <- applyErr
+	}()
+
+	select {
+	case applyErr := <-done:
+		elapsed := time.Since(start)
+		if applyErr == nil {
+			t.Fatal("expected Apply to fail when the manifest exec times out")
+		}
+		if !errors.Is(applyErr, ErrManifestFailed) {
+			t.Errorf("Apply error = %v, want it to wrap ErrManifestFailed", applyErr)
+		}
+		if elapsed > 2*time.Second {
+			t.Errorf("Apply took %v, want it to abort promptly after the ~100ms deadline", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Apply did not return: manifest exec timeout was not honored")
+	}
+
+	// The orphan ebuild must still have been rolled back on this failure path.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild was not rolled back after timeout: os.Stat(%q) error = %v, want os.ErrNotExist",
+			dstPath, statErr)
+	}
+}
+
+// TestApply_RollbackOnManifestWriteFailure verifies the rollback when the
+// manifest step fails because of a filesystem write error (rather than a plain
+// non-zero exit). The injected manifest command writes a Manifest file into a
+// read-only sibling directory; that write fails, so the manifest step fails,
+// and the orphan ebuild must be rolled back. The ebuild's OWN directory stays
+// writable, so this exercises R5.1 (successful rollback) and not R5.2.
+//
+// Approach (sub-task 10.4): the design suggested chmod'ing a directory 0500
+// after copyEbuild. Making the ebuild's own package directory read-only would
+// also block the rollback os.Remove and turn this into an R5.2 test, so
+// instead a separate sub-path (<pkgDir>/ro) is made read-only and the manifest
+// command is pointed at it. The package directory keeps mode 0755 so the
+// rollback os.Remove of the orphan ebuild still succeeds.
+func TestApply_RollbackOnManifestWriteFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	// Create a read-only sibling directory; the mocked manifest command will
+	// try (and fail) to write into it. Restore the mode for t.TempDir cleanup.
+	roDir := filepath.Join(overlayDir, "test-cat", "test-pkg", "ro")
+	if mkErr := os.MkdirAll(roDir, 0o755); mkErr != nil {
+		t.Fatalf("failed to create read-only dir: %v", mkErr)
+	}
+	if chErr := os.Chmod(roDir, 0o500); chErr != nil {
+		t.Fatalf("failed to chmod read-only dir: %v", chErr)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandWriteInto(roDir)),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr == nil {
+		t.Fatal("expected Apply to fail when the manifest write fails")
+	}
+	if result.Success {
+		t.Error("expected result.Success to be false")
+	}
+	if !errors.Is(applyErr, ErrManifestFailed) {
+		t.Errorf("Apply error = %v, want it to wrap ErrManifestFailed", applyErr)
+	}
+
+	// The ebuild's package directory is still writable, so the orphan ebuild
+	// must have been removed.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild was not rolled back: os.Stat(%q) error = %v, want os.ErrNotExist",
+			dstPath, statErr)
 	}
 }

@@ -2,7 +2,9 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,8 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 	"github.com/sony/gobreaker"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // =============================================================================
@@ -1655,4 +1659,110 @@ func FuzzSubstituteEnvVars(f *testing.F) {
 				headerName, value, result)
 		}
 	})
+}
+
+// =============================================================================
+// Response Body Size Cap Tests (Task T12 / R11)
+// =============================================================================
+
+// TestGetWithContext_BodyCap verifies that a response body larger than
+// httputil.MaxBodyBytes (10 MiB) cannot be fully read through the body returned
+// by GetWithContext: the read trips the http.MaxBytesReader cap and the error
+// classifies as ErrResponseTooLarge (R11.1, R11.3).
+func TestGetWithContext_BodyCap(t *testing.T) {
+	// 11 MiB payload, one byte over the 10 MiB cap.
+	const oversized = 11 * 1024 * 1024
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, 64*1024)
+		written := 0
+		for written < oversized {
+			n := len(buf)
+			if oversized-written < n {
+				n = oversized - written
+			}
+			if _, err := w.Write(buf[:n]); err != nil {
+				return
+			}
+			written += n
+		}
+	}))
+	defer server.Close()
+
+	client := NewRetryableHTTPClient()
+	client.SetHTTPClient(server.Client())
+	client.SetDelayFunc(func(time.Duration) {})
+
+	resp, err := client.GetWithContext(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("GetWithContext returned an unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Reading the capped body must fail once the 10 MiB limit is exceeded.
+	_, readErr := io.ReadAll(resp.Body)
+	if readErr == nil {
+		t.Fatal("expected an error reading an oversized body, got nil")
+	}
+
+	// The raw io.ReadAll error is an *http.MaxBytesError; classifyBodyReadError
+	// (used by the production read sites) must turn it into ErrResponseTooLarge.
+	classified := classifyBodyReadError(readErr)
+	if !errors.Is(classified, ErrResponseTooLarge) {
+		t.Errorf("expected classified error to satisfy errors.Is(ErrResponseTooLarge), got: %v", classified)
+	}
+
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(readErr, &maxBytesErr) {
+		t.Errorf("expected the raw read error to be an *http.MaxBytesError, got: %v", readErr)
+	}
+}
+
+// TestGetWithContext_BodyCapAllowsSmallBody verifies that a body well under the
+// 10 MiB cap is still fully readable through GetWithContext.
+func TestGetWithContext_BodyCapAllowsSmallBody(t *testing.T) {
+	payload := []byte("a small, well-behaved response body")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(payload) //nolint:errcheck // test server
+	}))
+	defer server.Close()
+
+	client := NewRetryableHTTPClient()
+	client.SetHTTPClient(server.Client())
+	client.SetDelayFunc(func(time.Duration) {})
+
+	resp, err := client.GetWithContext(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("GetWithContext returned an unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading a small body must not error, got: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("body mismatch: got %q, want %q", got, payload)
+	}
+}
+
+// TestClassifyBodyReadError covers the error-classification helper directly.
+func TestClassifyBodyReadError(t *testing.T) {
+	if got := classifyBodyReadError(nil); got != nil {
+		t.Errorf("classifyBodyReadError(nil) = %v, want nil", got)
+	}
+
+	plain := errors.New("some other read failure")
+	if got := classifyBodyReadError(plain); !errors.Is(got, plain) {
+		t.Errorf("classifyBodyReadError must pass a non-MaxBytes error through, got: %v", got)
+	}
+
+	maxBytes := &http.MaxBytesError{Limit: httputil.MaxBodyBytes}
+	got := classifyBodyReadError(maxBytes)
+	if !errors.Is(got, ErrResponseTooLarge) {
+		t.Errorf("classifyBodyReadError(*http.MaxBytesError) must wrap ErrResponseTooLarge, got: %v", got)
+	}
 }

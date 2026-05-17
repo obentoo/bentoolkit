@@ -244,7 +244,7 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 
 	ctx := opts.Ctx
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
 	}
 
 	if opts.Reporter != nil {
