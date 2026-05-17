@@ -2,10 +2,12 @@ package autoupdate
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -910,9 +912,13 @@ func TestGitHubTokenIntegration(t *testing.T) {
 
 // TestHeaderTemplateSubstitution tests Property 21: Header Template Substitution
 // **Feature: autoupdate-analyzer, Property 21: Header Template Substitution**
-// **Validates: Requirements 8.4**
-// For any header value containing ${VAR_NAME} syntax, the analyzer SHALL
-// substitute the value of the corresponding environment variable.
+// **Validates: Requirements 8.4, R1.1, R1.3**
+// For any allow-listed header value containing ${VAR_NAME} syntax referencing
+// an allow-listed environment variable, the analyzer SHALL substitute the value
+// of the corresponding environment variable. Generated variable names are
+// prefixed with allowedHeaderEnvPrefix (BENTOO_) so they pass the env-var
+// allow-list; the canonical allow-listed header name "Authorization" is passed
+// to SubstituteEnvVars.
 func TestHeaderTemplateSubstitution(t *testing.T) {
 	parameters := gopter.DefaultTestParameters()
 	parameters.MinSuccessfulTests = 100
@@ -920,11 +926,14 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 	// Property: Environment variables are substituted in header values
 	properties.Property("Environment variables are substituted in header values", prop.ForAll(
-		func(varName, varValue string) bool {
-			// Skip empty or invalid variable names
-			if varName == "" || !isValidEnvVarName(varName) {
+		func(varSuffix, varValue string) bool {
+			// Skip empty or invalid variable names; non-empty values only so
+			// the (allow-listed but empty) literal-passthrough rule does not apply.
+			if varSuffix == "" || !isValidEnvVarName(varSuffix) || varValue == "" {
 				return true
 			}
+
+			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Set environment variable
 			os.Setenv(varName, varValue)
@@ -932,7 +941,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 			// Test substitution
 			template := "Bearer ${" + varName + "}"
-			result := SubstituteEnvVars(template)
+			result := SubstituteEnvVars(template, "Authorization")
 			expected := "Bearer " + varValue
 
 			if result != expected {
@@ -943,19 +952,26 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			return true
 		},
 		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && isValidEnvVarName(s) }),
-		gen.AlphaString(),
+		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 }),
 	))
 
 	// Property: Multiple environment variables are substituted
 	properties.Property("Multiple environment variables are substituted", prop.ForAll(
-		func(var1Name, var1Value, var2Name, var2Value string) bool {
-			// Skip empty or invalid variable names
-			if var1Name == "" || var2Name == "" || var1Name == var2Name {
+		func(var1Suffix, var1Value, var2Suffix, var2Value string) bool {
+			// Skip empty or invalid variable names.
+			if var1Suffix == "" || var2Suffix == "" || var1Suffix == var2Suffix {
 				return true
 			}
-			if !isValidEnvVarName(var1Name) || !isValidEnvVarName(var2Name) {
+			if !isValidEnvVarName(var1Suffix) || !isValidEnvVarName(var2Suffix) {
 				return true
 			}
+			// Non-empty values only (empty allow-listed vars pass through literally).
+			if var1Value == "" || var2Value == "" {
+				return true
+			}
+
+			var1Name := allowedHeaderEnvPrefix + var1Suffix
+			var2Name := allowedHeaderEnvPrefix + var2Suffix
 
 			// Set environment variables
 			os.Setenv(var1Name, var1Value)
@@ -965,7 +981,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 			// Test substitution with multiple variables
 			template := "${" + var1Name + "}-${" + var2Name + "}"
-			result := SubstituteEnvVars(template)
+			result := SubstituteEnvVars(template, "Authorization")
 			expected := var1Value + "-" + var2Value
 
 			if result != expected {
@@ -976,26 +992,28 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			return true
 		},
 		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && isValidEnvVarName(s) }),
-		gen.AlphaString(),
+		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 }),
 		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && isValidEnvVarName(s) }),
-		gen.AlphaString(),
+		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 }),
 	))
 
-	// Property: Unset environment variables are replaced with empty string
-	properties.Property("Unset environment variables are replaced with empty string", prop.ForAll(
-		func(varName string) bool {
+	// Property: Unset allow-listed variables pass the literal ${VAR} through (R1.3)
+	properties.Property("Unset allow-listed variables pass the literal through", prop.ForAll(
+		func(varSuffix string) bool {
 			// Skip empty or invalid variable names
-			if varName == "" || !isValidEnvVarName(varName) {
+			if varSuffix == "" || !isValidEnvVarName(varSuffix) {
 				return true
 			}
+
+			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Ensure variable is not set
 			os.Unsetenv(varName)
 
-			// Test substitution
+			// Test substitution: unset allow-listed var -> literal passthrough.
 			template := "prefix-${" + varName + "}-suffix"
-			result := SubstituteEnvVars(template)
-			expected := "prefix--suffix"
+			result := SubstituteEnvVars(template, "Authorization")
+			expected := "prefix-${" + varName + "}-suffix"
 
 			if result != expected {
 				t.Logf("Expected %s, got %s", expected, result)
@@ -1015,7 +1033,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 				return true
 			}
 
-			result := SubstituteEnvVars(text)
+			result := SubstituteEnvVars(text, "Authorization")
 			if result != text {
 				t.Logf("Expected unchanged text %s, got %s", text, result)
 				return false
@@ -1028,11 +1046,15 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 	// Property: Substituted headers are applied to HTTP requests
 	properties.Property("Substituted headers are applied to HTTP requests", prop.ForAll(
-		func(varName, varValue, headerKey string) bool {
-			// Skip empty or invalid inputs
-			if varName == "" || headerKey == "" || !isValidEnvVarName(varName) {
+		func(varSuffix, varValue string) bool {
+			// Skip empty or invalid inputs; non-empty values only.
+			if varSuffix == "" || !isValidEnvVarName(varSuffix) || varValue == "" {
 				return true
 			}
+
+			varName := allowedHeaderEnvPrefix + varSuffix
+			// X-Api-Key is an allow-listed expansion header.
+			const headerKey = "X-Api-Key"
 
 			// Set environment variable
 			os.Setenv(varName, varValue)
@@ -1069,7 +1091,6 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			return true
 		},
 		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && isValidEnvVarName(s) }),
-		gen.AlphaString(),
 		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 }),
 	))
 
@@ -1326,5 +1347,312 @@ func newBreakerWithTimeout(timeout time.Duration) *gobreaker.CircuitBreaker {
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.ConsecutiveFailures >= DefaultBreakerMaxFailures
 		},
+	})
+}
+
+// =============================================================================
+// Header Env-Var Expansion Allow-List Tests (Task T5 / R1)
+// =============================================================================
+
+// logCapture records Warn-level lines emitted via the package-private warnLogf
+// sink. It is safe for concurrent use by the -race detector.
+type logCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (lc *logCapture) record(format string, args ...interface{}) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.lines = append(lc.lines, fmt.Sprintf(format, args...))
+}
+
+func (lc *logCapture) count() int {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return len(lc.lines)
+}
+
+func (lc *logCapture) all() []string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	out := make([]string, len(lc.lines))
+	copy(out, lc.lines)
+	return out
+}
+
+// captureWarnLogs swaps the package-private warnLogf sink with a recorder for
+// the duration of the test and restores it on cleanup.
+func captureWarnLogs(t *testing.T) *logCapture {
+	t.Helper()
+	lc := &logCapture{}
+	orig := warnLogf
+	warnLogf = lc.record
+	t.Cleanup(func() { warnLogf = orig })
+	return lc
+}
+
+// TestAllowedExpansionHeaders_HasExpectedSet enumerates the header allow-list.
+func TestAllowedExpansionHeaders_HasExpectedSet(t *testing.T) {
+	want := []string{"Authorization", "X-Api-Key", "X-Auth-Token", "Private-Token"}
+
+	if len(allowedExpansionHeaders) != len(want) {
+		t.Fatalf("allowedExpansionHeaders has %d entries, want %d: %v",
+			len(allowedExpansionHeaders), len(want), allowedExpansionHeaders)
+	}
+	for _, name := range want {
+		if _, ok := allowedExpansionHeaders[name]; !ok {
+			t.Errorf("allowedExpansionHeaders missing expected entry %q", name)
+		}
+	}
+}
+
+// TestAllowedEnvVars_HasExpectedSet enumerates the env-var allow-list and prefix.
+func TestAllowedEnvVars_HasExpectedSet(t *testing.T) {
+	want := []string{"GITHUB_TOKEN", "GITLAB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
+
+	if len(allowedHeaderEnvAllowList) != len(want) {
+		t.Fatalf("allowedHeaderEnvAllowList has %d entries, want %d: %v",
+			len(allowedHeaderEnvAllowList), len(want), allowedHeaderEnvAllowList)
+	}
+	for _, name := range want {
+		if _, ok := allowedHeaderEnvAllowList[name]; !ok {
+			t.Errorf("allowedHeaderEnvAllowList missing expected entry %q", name)
+		}
+	}
+
+	if allowedHeaderEnvPrefix != "BENTOO_" {
+		t.Errorf("allowedHeaderEnvPrefix = %q, want %q", allowedHeaderEnvPrefix, "BENTOO_")
+	}
+}
+
+// TestIsAllowedHeaderName checks case-insensitivity, whitespace trimming, and
+// rejection of non-allow-listed names, the empty string, and CRLF names.
+func TestIsAllowedHeaderName(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"exact canonical", "Authorization", true},
+		{"lower case", "authorization", true},
+		{"surrounding whitespace", " Authorization ", true},
+		{"upper case", "AUTHORIZATION", true},
+		{"x-api-key canonical", "X-Api-Key", true},
+		{"x-api-key lower", "x-api-key", true},
+		{"private-token", "private-token", true},
+		{"x-auth-token", "x-auth-token", true},
+		{"non allow-listed", "X-Custom", false},
+		{"empty string", "", false},
+		{"crlf injected", "Authorization\r\nInjected", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAllowedHeaderName(tc.input); got != tc.want {
+				t.Errorf("isAllowedHeaderName(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsAllowedHeaderName_RejectsCRLF asserts a CRLF-bearing header name is
+// rejected even though its leading token is an allow-listed header.
+func TestIsAllowedHeaderName_RejectsCRLF(t *testing.T) {
+	if isAllowedHeaderName("Authorization\r\nInjected") {
+		t.Error("isAllowedHeaderName must reject a name containing CRLF")
+	}
+	if isAllowedHeaderName("Authorization\rInjected") {
+		t.Error("isAllowedHeaderName must reject a name containing a bare CR")
+	}
+	if isAllowedHeaderName("Authorization\nInjected") {
+		t.Error("isAllowedHeaderName must reject a name containing a bare LF")
+	}
+}
+
+// TestIsAllowedEnvVar covers prefix matches, allow-list matches, and denials.
+func TestIsAllowedEnvVar(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"prefix match", "BENTOO_TOKEN", true},
+		{"prefix only", "BENTOO_", true},
+		{"prefix with suffix", "BENTOO_PRIVATE_TOKEN", true},
+		{"allow-list github", "GITHUB_TOKEN", true},
+		{"allow-list gitlab", "GITLAB_TOKEN", true},
+		{"allow-list openai", "OPENAI_API_KEY", true},
+		{"allow-list anthropic", "ANTHROPIC_API_KEY", true},
+		{"denied arbitrary", "ANTHROPIC_API_KEY_EVIL", false},
+		{"denied path", "PATH", false},
+		{"denied home", "HOME", false},
+		{"denied empty", "", false},
+		{"denied lowercase prefix", "bentoo_token", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAllowedEnvVar(tc.input); got != tc.want {
+				t.Errorf("isAllowedEnvVar(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubstituteEnvVars_NoRecursiveExpansion asserts that a substituted value
+// which itself contains ${OTHER} is NOT re-expanded (single-pass; Test Advisor
+// gap #1). This is the core anti-exfiltration guarantee.
+func TestSubstituteEnvVars_NoRecursiveExpansion(t *testing.T) {
+	// BENTOO_TOKEN is allow-listed and its value contains another reference.
+	t.Setenv("BENTOO_TOKEN", "${EVIL}")
+	// EVIL is set to a secret-like value; it must never be reached.
+	t.Setenv("EVIL", "super-secret-leaked")
+
+	result := SubstituteEnvVars("${BENTOO_TOKEN}", "Authorization")
+
+	if result != "${EVIL}" {
+		t.Errorf("expected literal %q (single-pass), got %q", "${EVIL}", result)
+	}
+	if strings.Contains(result, "super-secret-leaked") {
+		t.Errorf("recursive expansion leaked secret value: %q", result)
+	}
+}
+
+// TestSubstituteEnvVars_DeniedHeaderWarn asserts exactly one Warn line is
+// emitted and the literal ${VAR} passes through when the header is not
+// allow-listed.
+func TestSubstituteEnvVars_DeniedHeaderWarn(t *testing.T) {
+	lc := captureWarnLogs(t)
+	t.Setenv("BENTOO_TOKEN", "value")
+
+	result := SubstituteEnvVars("${BENTOO_TOKEN}", "X-Custom-Header")
+
+	if result != "${BENTOO_TOKEN}" {
+		t.Errorf("expected literal passthrough %q, got %q", "${BENTOO_TOKEN}", result)
+	}
+	if c := lc.count(); c != 1 {
+		t.Fatalf("expected exactly 1 Warn line, got %d: %v", c, lc.all())
+	}
+	line := lc.all()[0]
+	if !strings.Contains(line, "X-Custom-Header") || !strings.Contains(line, "BENTOO_TOKEN") {
+		t.Errorf("Warn line should name header and variable, got: %q", line)
+	}
+}
+
+// TestSubstituteEnvVars_DeniedEnvVarWarn asserts exactly one Warn line is
+// emitted and the literal ${VAR} passes through when the variable is not
+// allow-listed (even with an allow-listed header).
+func TestSubstituteEnvVars_DeniedEnvVarWarn(t *testing.T) {
+	lc := captureWarnLogs(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+
+	// EVIL_VAR is not allow-listed; ANTHROPIC_API_KEY is, but we reference the
+	// non-allow-listed one to confirm the denial path.
+	result := SubstituteEnvVars("${EVIL_VAR}", "Authorization")
+
+	if result != "${EVIL_VAR}" {
+		t.Errorf("expected literal passthrough %q, got %q", "${EVIL_VAR}", result)
+	}
+	if c := lc.count(); c != 1 {
+		t.Fatalf("expected exactly 1 Warn line, got %d: %v", c, lc.all())
+	}
+	line := lc.all()[0]
+	if !strings.Contains(line, "EVIL_VAR") || !strings.Contains(line, "Authorization") {
+		t.Errorf("Warn line should name variable and header, got: %q", line)
+	}
+}
+
+// TestSubstituteEnvVars_EmptyVarWarn asserts exactly one Warn line is emitted
+// and the literal ${VAR} passes through when an allow-listed variable is set
+// but empty (R1.3).
+func TestSubstituteEnvVars_EmptyVarWarn(t *testing.T) {
+	lc := captureWarnLogs(t)
+	// Allow-listed variable, set to the empty string.
+	t.Setenv("BENTOO_TOKEN", "")
+
+	result := SubstituteEnvVars("${BENTOO_TOKEN}", "Authorization")
+
+	if result != "${BENTOO_TOKEN}" {
+		t.Errorf("expected literal passthrough %q, got %q", "${BENTOO_TOKEN}", result)
+	}
+	if c := lc.count(); c != 1 {
+		t.Fatalf("expected exactly 1 Warn line, got %d: %v", c, lc.all())
+	}
+	line := lc.all()[0]
+	if !strings.Contains(line, "BENTOO_TOKEN") || !strings.Contains(line, "Authorization") {
+		t.Errorf("Warn line should name variable and header, got: %q", line)
+	}
+}
+
+// TestSubstituteEnvVars_AllowedNoWarn asserts a fully allow-listed expansion
+// succeeds and emits NO Warn line.
+func TestSubstituteEnvVars_AllowedNoWarn(t *testing.T) {
+	lc := captureWarnLogs(t)
+	t.Setenv("BENTOO_TOKEN", "resolved-value")
+
+	result := SubstituteEnvVars("Bearer ${BENTOO_TOKEN}", "Authorization")
+
+	if result != "Bearer resolved-value" {
+		t.Errorf("expected %q, got %q", "Bearer resolved-value", result)
+	}
+	if c := lc.count(); c != 0 {
+		t.Errorf("expected 0 Warn lines for an allowed expansion, got %d: %v", c, lc.all())
+	}
+}
+
+// TestApplyHeaders_RejectsCRLFHeader is a smoke test that a custom header whose
+// name contains CRLF is skipped (and never reaches the server).
+func TestApplyHeaders_RejectsCRLFHeader(t *testing.T) {
+	lc := captureWarnLogs(t)
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	client := NewRetryableHTTPClient()
+	client.applyHeaders(req, "https://example.com/", map[string]string{
+		"X-Evil\r\nInjected": "value",
+	})
+
+	// The malicious header name must not have been set in any form.
+	if got := req.Header.Get("X-Evil"); got != "" {
+		t.Errorf("expected CRLF header to be skipped, but X-Evil = %q", got)
+	}
+	if len(req.Header) != 0 {
+		t.Errorf("expected no headers to be set, got: %v", req.Header)
+	}
+	if c := lc.count(); c != 1 {
+		t.Errorf("expected exactly 1 Warn line for the rejected header, got %d: %v", c, lc.all())
+	}
+}
+
+// FuzzSubstituteEnvVars exercises SubstituteEnvVars with malformed ${VAR}
+// references. The seed corpus runs under the normal `go test` pass; the body
+// asserts the function never panics and that no denied expansion leaks an
+// environment value.
+func FuzzSubstituteEnvVars(f *testing.F) {
+	// Malformed references.
+	f.Add("${", "Authorization")
+	f.Add("${}", "Authorization")
+	f.Add("${A${B}}", "Authorization")
+	f.Add("${UNCLOSED", "Authorization")
+	f.Add("}${", "Authorization")
+	f.Add("${${}}", "X-Api-Key")
+	// Valid references and a non-allow-listed header.
+	f.Add("Bearer ${BENTOO_TOKEN}", "Authorization")
+	f.Add("${GITHUB_TOKEN}", "X-Custom")
+
+	f.Fuzz(func(t *testing.T, value, headerName string) {
+		// Must never panic on arbitrary input.
+		result := SubstituteEnvVars(value, headerName)
+
+		// If the header is not allow-listed, the value must be returned
+		// verbatim (no expansion can happen at all).
+		if !isAllowedHeaderName(headerName) && result != value {
+			t.Errorf("non-allow-listed header %q mutated value: %q -> %q",
+				headerName, value, result)
+		}
 	})
 }

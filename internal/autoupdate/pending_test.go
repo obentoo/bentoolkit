@@ -794,3 +794,34 @@ func TestPendingListAddInvalidStatus(t *testing.T) {
 		t.Errorf("Expected status to default to 'pending', got %q", retrieved.Status)
 	}
 }
+
+// TestPendingWrite_FinalModeIs0600 verifies that the pending file persisted by
+// PendingList.Add ends up with owner-only (0600) permissions end-to-end. The
+// save path writes a temp file then renames it, so the final mode depends on
+// the post-rename SafeChmod call repairing any umask-widened bits.
+func TestPendingWrite_FinalModeIs0600(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	pending, err := NewPendingList(tmpDir)
+	if err != nil {
+		t.Fatalf("NewPendingList failed: %v", err)
+	}
+
+	update := PendingUpdate{
+		Package:        "test/pkg",
+		CurrentVersion: "1.0.0",
+		NewVersion:     "2.0.0",
+		Status:         StatusPending,
+	}
+	if err := pending.Add(update); err != nil {
+		t.Fatalf("PendingList.Add failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(tmpDir, "pending.json"))
+	if err != nil {
+		t.Fatalf("os.Stat on pending file failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("pending file mode = %#o, want %#o", got, 0o600)
+	}
+}

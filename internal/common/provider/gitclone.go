@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,11 @@ import (
 // operation before it is cancelled.
 const DefaultGitCloneTimeout = 2 * time.Minute
 
+// execCommand is an indirection over exec.CommandContext so the git clone
+// invocation can be replaced in tests (e.g. the timeout test). Production code
+// always uses exec.CommandContext.
+var execCommand = exec.CommandContext
+
 // GitCloneProvider fetches package versions by cloning a git repository
 type GitCloneProvider struct {
 	RepoURL   string
@@ -24,13 +30,31 @@ type GitCloneProvider struct {
 	UpdateInterval time.Duration
 }
 
-// NewGitCloneProvider creates a new git clone provider
+// NewGitCloneProvider creates a new git clone provider.
+//
+// The resolved repository URL and branch name are validated before any work is
+// done: a malicious scheme (e.g. file://, javascript:) or a branch name that
+// enables git flag-injection causes an early error wrapping ErrInvalidRepoURL
+// or ErrInvalidBranch respectively. (R2.1, R2.2)
 func NewGitCloneProvider(repoInfo *RepositoryInfo) (*GitCloneProvider, error) {
 	// Determine the git URL
 	gitURL := repoInfo.URL
 	if !strings.Contains(gitURL, "://") && !strings.Contains(gitURL, "@") {
 		// Assume GitHub if just org/repo format
 		gitURL = fmt.Sprintf("https://github.com/%s.git", repoInfo.URL)
+	}
+
+	branch := repoInfo.Branch
+	if branch == "" {
+		branch = "master"
+	}
+
+	// Reject malicious repo URLs and branch names before doing any work.
+	if err := ValidateRepoURL(gitURL); err != nil {
+		return nil, err
+	}
+	if err := ValidateBranch(branch); err != nil {
+		return nil, err
 	}
 
 	// Setup cache directory
@@ -41,11 +65,6 @@ func NewGitCloneProvider(repoInfo *RepositoryInfo) (*GitCloneProvider, error) {
 
 	safeName := strings.ReplaceAll(repoInfo.Name, "/", "_")
 	localPath := filepath.Join(home, ".cache", "bentoo", "repos", safeName)
-
-	branch := repoInfo.Branch
-	if branch == "" {
-		branch = "master"
-	}
 
 	return &GitCloneProvider{
 		RepoURL:        gitURL,
@@ -125,17 +144,31 @@ func (p *GitCloneProvider) cloneRepo() error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Clone with depth 1 for faster clone (we only need latest files)
-	cmd := exec.Command("git", "clone",
+	// Bound the clone with a timeout so a hung or slow remote cannot block
+	// indefinitely. T9 will thread a caller-supplied parent context here;
+	// until then context.Background() is the parent.
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultGitCloneTimeout) // SAFE: pre-T9, parent context will be threaded by T9 (R3)
+	defer cancel()
+
+	// Clone with depth 1 for faster clone (we only need latest files).
+	// The literal "--" end-of-options separator ensures git can never
+	// interpret the positional URL/path as an option, even if it begins
+	// with "-" (defense-in-depth against flag-injection; AD-9). The
+	// documented syntax is: git clone [<options>] [--] <repo> [<dir>].
+	cmd := execCommand(ctx, "git", "clone",
 		"--depth", "1",
 		"--single-branch",
 		"--branch", p.Branch,
+		"--",
 		p.RepoURL,
 		p.LocalPath,
 	)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w: %v: %s", ErrCloneFailed, ctx.Err(), string(output))
+		}
 		return fmt.Errorf("%w: %s: %s", ErrCloneFailed, err.Error(), string(output))
 	}
 

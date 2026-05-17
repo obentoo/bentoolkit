@@ -9,7 +9,21 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
+
+// warnLogger adapts the package-level logger.Warn function to the
+// fileutil.Logger interface, which expects a value with a Warn method.
+// It is shared by the cache/pending/analysis-cache write-sites so that
+// fileutil.SafeChmod can emit warnings through the standard logger.
+type warnLogger struct{}
+
+// Warn forwards to the package-level logger.Warn.
+func (warnLogger) Warn(format string, args ...interface{}) {
+	logger.Warn(format, args...)
+}
 
 // Error variables for cache errors
 var (
@@ -197,9 +211,10 @@ func (c *Cache) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
-	// Write to temp file first, then rename for atomicity
+	// Write to temp file first, then rename for atomicity. Cache files use
+	// 0600 (owner-only) because they may hold sensitive upstream metadata.
 	tmpPath := c.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil { //nolint:gosec // cache files use 0644 for readability
+	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 
@@ -207,6 +222,12 @@ func (c *Cache) saveUnsafe() error {
 		// Clean up temp file on rename failure
 		os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("failed to rename cache file: %w", err)
+	}
+
+	// os.Rename keeps the temp file's mode, which umask may have widened.
+	// Re-apply the restrictive mode; tolerate filesystems without chmod.
+	if err := fileutil.SafeChmod(c.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
+		return fmt.Errorf("failed to set cache file permissions: %w", err)
 	}
 
 	return nil

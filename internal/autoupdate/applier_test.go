@@ -771,3 +771,31 @@ func TestSaveCompileLog(t *testing.T) {
 		t.Errorf("Log content mismatch: expected %q, got %q", string(output), string(content))
 	}
 }
+
+// TestSaveCompileLog_FinalModeIs0600 verifies that a compile log written by
+// Applier.saveCompileLog ends up with owner-only (0600) permissions. The log
+// is written via os.WriteFile, which applies the mode directly on creation.
+func TestSaveCompileLog_FinalModeIs0600(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	applier, err := NewApplier(overlayDir, configDir)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	output := []byte("compile output\nError: build failed")
+	logPath := applier.saveCompileLog("test-cat/test-pkg", "1.0.0", output)
+	if logPath == "" {
+		t.Fatal("expected a non-empty log path")
+	}
+
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("os.Stat on compile log failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("compile log mode = %#o, want %#o", got, 0o600)
+	}
+}

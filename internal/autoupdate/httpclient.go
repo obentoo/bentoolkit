@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"os"
 	"regexp"
 	"strings"
@@ -387,10 +388,14 @@ func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url str
 // 2. GitHub token (if URL is GitHub API and token is configured)
 // 3. Custom headers (passed to the method)
 // All header values are processed for environment variable substitution.
+//
+// Any header whose name contains a CR or LF byte is rejected and skipped as a
+// defence against header/CRLF injection. The canonical header name is passed to
+// SubstituteEnvVars so that ${VAR} expansion is gated by the header allow-list.
 func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, customHeaders map[string]string) {
 	// Apply default headers first
 	for key, value := range c.defaultHeaders {
-		req.Header.Set(key, SubstituteEnvVars(value))
+		c.setHeader(req, key, value)
 	}
 
 	// Apply GitHub token for GitHub API requests
@@ -400,18 +405,71 @@ func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, custom
 
 	// Apply custom headers (can override defaults and GitHub token)
 	for key, value := range customHeaders {
-		req.Header.Set(key, SubstituteEnvVars(value))
+		c.setHeader(req, key, value)
 	}
 }
 
-// SubstituteEnvVars replaces ${VAR_NAME} patterns in a string with
-// the corresponding environment variable values.
-// If an environment variable is not set, the pattern is replaced with an empty string.
-func SubstituteEnvVars(value string) string {
+// setHeader sets a single header on req after rejecting names that contain CR
+// or LF (header/CRLF injection) and substituting allow-listed environment
+// variables in the value. The canonical header name is used both for the
+// allow-list lookup performed by SubstituteEnvVars and as the header key.
+func (c *RetryableHTTPClient) setHeader(req *http.Request, name, value string) {
+	if containsCRLF(name) {
+		warnLogf("rejecting header with CR/LF in its name (possible header injection)")
+		return
+	}
+	canonical := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name))
+	req.Header.Set(canonical, SubstituteEnvVars(value, canonical))
+}
+
+// SubstituteEnvVars replaces ${VAR_NAME} patterns in a header value with the
+// corresponding environment variable values, subject to a strict allow-list
+// (R1, AD-8).
+//
+// A ${VAR} reference is expanded ONLY when BOTH of the following hold:
+//   - headerName is an allow-listed header (see isAllowedHeaderName), AND
+//   - VAR is an allow-listed environment variable (see isAllowedEnvVar).
+//
+// Substitution is single-pass: a value produced by expanding one ${VAR} is
+// never re-scanned, so a secret whose own value contains ${OTHER} cannot
+// trigger a second expansion.
+//
+// On any denial — header not allow-listed, variable not allow-listed, or an
+// allow-listed variable that is unset/empty — the literal ${VAR} text is passed
+// through unchanged and a Warn-level line is emitted identifying the header and
+// variable.
+func SubstituteEnvVars(value, headerName string) string {
+	headerAllowed := isAllowedHeaderName(headerName)
+	canonicalHeader := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(headerName))
+
+	// envVarPattern.ReplaceAllStringFunc walks each ${...} match exactly once;
+	// the replacement text it returns is not re-scanned, which gives the
+	// required single-pass (non-recursive) behaviour.
 	return envVarPattern.ReplaceAllStringFunc(value, func(match string) string {
-		// Extract variable name from ${VAR_NAME}
+		// Extract variable name from ${VAR_NAME}.
 		varName := match[2 : len(match)-1]
-		return os.Getenv(varName)
+
+		if !headerAllowed {
+			warnLogf("env-var expansion denied: header %q is not in the expansion allow-list; "+
+				"passing ${%s} through literally", headerName, varName)
+			return match
+		}
+
+		if !isAllowedEnvVar(varName) {
+			warnLogf("env-var expansion denied: variable %q is not allow-listed for header %q; "+
+				"passing ${%s} through literally (rename it to %s* to allow)",
+				varName, canonicalHeader, varName, allowedHeaderEnvPrefix)
+			return match
+		}
+
+		resolved, ok := os.LookupEnv(varName)
+		if !ok || resolved == "" {
+			warnLogf("env-var expansion skipped: allow-listed variable %q is unset or empty "+
+				"for header %q; passing ${%s} through literally", varName, canonicalHeader, varName)
+			return match
+		}
+
+		return resolved
 	})
 }
 

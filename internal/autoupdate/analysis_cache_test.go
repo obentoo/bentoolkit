@@ -528,3 +528,29 @@ func TestAnalysisCacheCorruptedFile(t *testing.T) {
 		t.Errorf("Expected empty cache after corruption, got Len=%d", cache.Len())
 	}
 }
+
+// TestAnalysisCacheWrite_FinalModeIs0600 verifies that the analysis cache file
+// persisted by AnalysisCache.Set ends up with owner-only (0600) permissions
+// end-to-end. The save path writes a temp file then renames it, so the final
+// mode depends on the post-rename SafeChmod call repairing umask-widened bits.
+func TestAnalysisCacheWrite_FinalModeIs0600(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cache, err := NewAnalysisCache(tmpDir)
+	if err != nil {
+		t.Fatalf("NewAnalysisCache failed: %v", err)
+	}
+
+	schema := &PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
+	if err := cache.Set("app-misc/hello", schema, "https://example.com"); err != nil {
+		t.Fatalf("AnalysisCache.Set failed: %v", err)
+	}
+
+	info, err := os.Stat(tmpDir + "/analysis_cache.json")
+	if err != nil {
+		t.Fatalf("os.Stat on analysis cache file failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("analysis cache file mode = %#o, want %#o", got, 0o600)
+	}
+}

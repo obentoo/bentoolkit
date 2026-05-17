@@ -179,31 +179,31 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/autoupdate/httpclient_test.go`.
 
 **Sub-tasks**:
-- [ ] 5.1 Define package-private `allowedExpansionHeaders` (canonical names: `Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`).
+- [x] 5.1 Define package-private `allowedExpansionHeaders` (canonical names: `Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`).
   - Requirements: R1.1
   - Validation: `TestAllowedExpansionHeaders_HasExpectedSet` enumerates.
-- [ ] 5.2 Define `allowedHeaderEnvAllowList` (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and prefix `allowedHeaderEnvPrefix = "BENTOO_"`.
+- [x] 5.2 Define `allowedHeaderEnvAllowList` (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and prefix `allowedHeaderEnvPrefix = "BENTOO_"`.
   - Requirements: R1.1
   - Validation: `TestAllowedEnvVars_HasExpectedSet`.
-- [ ] 5.3 Implement `isAllowedHeaderName(name string) bool` using `strings.TrimSpace` + `textproto.CanonicalMIMEHeaderKey` before map lookup (handles case + whitespace; Test Advisor gap #2).
+- [x] 5.3 Implement `isAllowedHeaderName(name string) bool` using `strings.TrimSpace` + `textproto.CanonicalMIMEHeaderKey` before map lookup (handles case + whitespace; Test Advisor gap #2).
   - Requirements: R1.1
   - Validation: `TestIsAllowedHeaderName` cases: `Authorization`, `authorization`, ` Authorization `, `AUTHORIZATION` all true; `X-Custom`, empty, CRLF-containing all false.
-- [ ] 5.4 Reject header names containing CR/LF (`\r`, `\n`) at validation time (defense against CRLF injection; Test Advisor gap #2).
+- [x] 5.4 Reject header names containing CR/LF (`\r`, `\n`) at validation time (defense against CRLF injection; Test Advisor gap #2).
   - Requirements: R1.1
   - Validation: `TestIsAllowedHeaderName_RejectsCRLF` with `"Authorization\r\nInjected"`.
-- [ ] 5.5 Implement `isAllowedEnvVar(name string) bool` (prefix OR set membership).
+- [x] 5.5 Implement `isAllowedEnvVar(name string) bool` (prefix OR set membership).
   - Requirements: R1.1
   - Validation: `TestIsAllowedEnvVar` table-driven.
-- [ ] 5.6 Rewrite `SubstituteEnvVars(value, headerName string) string`: gated by both checks; **single-pass** substitution (no recursion: a substituted value containing `${OTHER}` is returned literal; Test Advisor gap #1).
+- [x] 5.6 Rewrite `SubstituteEnvVars(value, headerName string) string`: gated by both checks; **single-pass** substitution (no recursion: a substituted value containing `${OTHER}` is returned literal; Test Advisor gap #1).
   - Requirements: R1.1, R1.2
   - Validation: `TestSubstituteEnvVars_NoRecursiveExpansion` sets `BENTOO_TOKEN="${EVIL}"` and asserts literal output.
-- [ ] 5.7 On any denial or empty value, emit `Warn` log identifying header+var; return literal `${VAR}` string.
+- [x] 5.7 On any denial or empty value, emit `Warn` log identifying header+var; return literal `${VAR}` string.
   - Requirements: R1.2, R1.3
   - Validation: `TestSubstituteEnvVars_*Warn` captures log output via injected logger; asserts one warn per denial.
-- [ ] 5.8 Update `applyHeaders` to pass canonical header name into substitution; reject + skip headers with invalid (CRLF) names.
+- [x] 5.8 Update `applyHeaders` to pass canonical header name into substitution; reject + skip headers with invalid (CRLF) names.
   - Requirements: R1.1
   - Validation: `TestApplyHeaders_RejectsCRLFHeader` smoke.
-- [ ] 5.9 Add fuzz target `FuzzSubstituteEnvVars` with corpus of malformed env-var refs (`${`, `${}`, `${A${B}}`).
+- [x] 5.9 Add fuzz target `FuzzSubstituteEnvVars` with corpus of malformed env-var refs (`${`, `${}`, `${A${B}}`).
   - Requirements: R1.1
   - Validation: `go test -fuzz=FuzzSubstituteEnvVars -fuzztime=10s` (CI-skipped, manual run target).
 
@@ -224,19 +224,19 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/common/provider/gitclone_validators_pbt_test.go`
 
 **Sub-tasks**:
-- [ ] 6.1 Implement `ValidateRepoURL(raw string) error`: parse via `net/url`; normalize scheme via `strings.ToLower(u.Scheme)` (Test Advisor gap #3); reject if scheme ∉ `{http, https, git, ssh}` or empty host. Return `ErrInvalidRepoURL`.
+- [x] 6.1 Implement `ValidateRepoURL(raw string) error`: parse via `net/url`; normalize scheme via `strings.ToLower(u.Scheme)` (Test Advisor gap #3); reject if scheme ∉ `{http, https, git, ssh}` or empty host. Return `ErrInvalidRepoURL`.
   - Requirements: R2.1
   - Validation: `TestValidateRepoURL` table: `https://x.io` ok; `HTTPS://x.io` ok (case-insensitive); `file:///etc/passwd` reject; `javascript:alert(1)` reject; empty host reject.
-- [ ] 6.2 Implement `ValidateBranch(b string) error`: reject empty; reject if contains whitespace, control chars, `..`, `@{`, leading `-`, or any of `~^:?*[\\`; reject any unicode RTL override (`U+202E`) or NULL byte (Test Advisor gap #3).
+- [x] 6.2 Implement `ValidateBranch(b string) error`: reject empty; reject if contains whitespace, control chars, `..`, `@{`, leading `-`, or any of `~^:?*[\\`; reject any unicode RTL override (`U+202E`) or NULL byte (Test Advisor gap #3).
   - Requirements: R2.2
   - Validation: `TestValidateBranch` table: `release/1.x`, `feature/foo+bar`, `v1.2.3`, `bug.fix` ok; `--upload-pack=evil`, ` `, `..`, `feat@{1}`, `foo\x00bar`, `evil‮yo` reject.
-- [ ] 6.3 Add gopter PBT `TestValidateBranch_PBT` with generator producing arbitrary unicode (including controls + RTL); for every accepted input, assert it passes `git check-ref-format --branch <input>` when run as a parallel cross-check (skip if git missing).
+- [x] 6.3 Add gopter PBT `TestValidateBranch_PBT` with generator producing arbitrary unicode (including controls + RTL); for every accepted input, assert it passes `git check-ref-format --branch <input>` when run as a parallel cross-check (skip if git missing).
   - Requirements: R2.2
   - Validation: `go test -run TestValidateBranch_PBT ./internal/common/provider/` exits 0.
-- [ ] 6.4 Call validators inside `NewGitCloneProvider`; return wrapped sentinel early.
+- [x] 6.4 Call validators inside `NewGitCloneProvider`; return wrapped sentinel early.
   - Requirements: R2.1, R2.2
   - Validation: `TestNewGitCloneProvider_RejectsBadInputs`.
-- [ ] 6.5 In `Update()` / clone path, replace `exec.Command(...)` with `exec.CommandContext(ctx, ...)`; `ctx = context.WithTimeout(parent, DefaultGitCloneTimeout)`. `parent` from `WithContext` injection (T9) or `context.Background()` with `// SAFE: pre-T9, will be threaded` comment until T9 lands.
+- [x] 6.5 In `Update()` / clone path, replace `exec.Command(...)` with `exec.CommandContext(ctx, ...)`; `ctx = context.WithTimeout(parent, DefaultGitCloneTimeout)`. `parent` from `WithContext` injection (T9) or `context.Background()` with `// SAFE: pre-T9, will be threaded` comment until T9 lands.
   - Requirements: R2.3
   - Validation: `TestGitCloneProvider_TimeoutHonored` injects mock `execCommand` returning slow process; assert ctx error within ~150 ms when timeout=100 ms (test override).
 
@@ -257,22 +257,22 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/autoupdate/analyzer_pattern_pbt_test.go`.
 
 **Sub-tasks**:
-- [ ] 7.1 Implement `validatePattern(p string) error`: empty → nil; else `len(p) ≤ MaxPatternLen` AND `regexp.Compile(p)` ok. Reject `\1`–`\9` backreferences explicitly with `ErrInvalidPattern: backreferences not supported`.
+- [x] 7.1 Implement `validatePattern(p string) error`: empty → nil; else `len(p) ≤ MaxPatternLen` AND `regexp.Compile(p)` ok. Reject `\1`–`\9` backreferences explicitly with `ErrInvalidPattern: backreferences not supported`.
   - Requirements: R8.1
   - Validation: `TestValidatePattern_AcceptsValid` table; `TestValidatePattern_RejectsOversize` 513 chars; `TestValidatePattern_RejectsUncompilable` `(a`; `TestValidatePattern_RejectsBackrefs` `(a)\1`.
-- [ ] 7.2 Add ReDoS smoke test: `TestValidatePattern_RuntimeSafety` runs `regexp.MatchString("^(a+)+$", strings.Repeat("a", 50))` under a 50 ms timeout (Test Advisor gap #4). RE2 is linear so test should always pass; sentinel-style assertion to fail if someone swaps for PCRE later.
+- [x] 7.2 Add ReDoS smoke test: `TestValidatePattern_RuntimeSafety` runs `regexp.MatchString("^(a+)+$", strings.Repeat("a", 50))` under a 50 ms timeout (Test Advisor gap #4). RE2 is linear so test should always pass; sentinel-style assertion to fail if someone swaps for PCRE later.
   - Requirements: R8.1
   - Validation: test runs in ≤ 50 ms wall-clock.
-- [ ] 7.3 Implement `validateXPath(x string) error`: empty → nil; else parse via `github.com/antchfx/xpath` `Compile`. Return `ErrInvalidXPath` on failure.
+- [x] 7.3 Implement `validateXPath(x string) error`: empty → nil; else parse via `github.com/antchfx/xpath` `Compile`. Return `ErrInvalidXPath` on failure.
   - Requirements: R8.2
   - Validation: `TestValidateXPath` table.
-- [ ] 7.4 In analyzer save path (`analyzer.go:369-391`), call both validators; on failure return wrapped sentinel; cache write skipped.
+- [x] 7.4 In analyzer save path (`analyzer.go:369-391`), call both validators; on failure return wrapped sentinel; cache write skipped.
   - Requirements: R8.3
   - Validation: `TestAnalyzer_RejectsInvalidLLMOutput` mocks LLM returning invalid pattern; asserts no file written.
-- [ ] 7.5 In `analysis_cache.Get`, after unmarshal, run both validators; on failure call `Delete` and return cache-miss (no error to caller; cache-miss is normal).
+- [x] 7.5 In `analysis_cache.Get`, after unmarshal, run both validators; on failure call `Delete` and return cache-miss (no error to caller; cache-miss is normal).
   - Requirements: R8.4
   - Validation: `TestAnalysisCache_LazyRevalidation` pre-populates cache with invalid regex; `Get` returns miss; file inspection shows entry removed.
-- [ ] 7.6 Log `Info`-level line on invalidation: `analysis cache entry for %s invalidated: %v`.
+- [x] 7.6 Log `Info`-level line on invalidation: `analysis cache entry for %s invalidated: %v`.
   - Requirements: R8.4
   - Validation: log capture asserts line emitted.
 
@@ -294,13 +294,13 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - `internal/autoupdate/applier.go` (line ~334).
 
 **Sub-tasks**:
-- [ ] 8.1 Replace each literal `0644` with `fileutil.CacheFileMode`.
+- [x] 8.1 Replace each literal `0644` with `fileutil.CacheFileMode`.
   - Requirements: R9.1, R9.3
   - Validation: `grep -rn "0644" internal/` returns zero matches in production code post-task.
-- [ ] 8.2 After successful `os.Rename`, call `fileutil.SafeChmod(path, fileutil.CacheFileMode, c.logger)` to repair mode on filesystems where umask widened it.
+- [x] 8.2 After successful `os.Rename`, call `fileutil.SafeChmod(path, fileutil.CacheFileMode, c.logger)` to repair mode on filesystems where umask widened it.
   - Requirements: R9.2
   - Validation: `TestCacheWrite_FinalModeIs0600` end-to-end uses `t.TempDir`; `os.Stat(file).Mode().Perm() == 0600`.
-- [ ] 8.3 Add one test per write-site asserting final mode.
+- [x] 8.3 Add one test per write-site asserting final mode.
   - Requirements: R9.1
   - Validation: 5 new test functions, all assert mode.
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -355,5 +356,51 @@ func TestGitLabProvider_RateLimitWithRetryAfterHeader(t *testing.T) {
 	}
 	if !errors.Is(err, ErrRateLimit) {
 		t.Errorf("Expected ErrRateLimit, got %v", err)
+	}
+}
+
+// TestGitLabProvider_SaveToCacheFileMode verifies that GitLabProvider writes
+// its cache file with the restrictive owner-only mode (0600), not a
+// world-readable 0644. Cache files may hold sensitive upstream metadata.
+// (R9.1, R9.3)
+func TestGitLabProvider_SaveToCacheFileMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("path") == "app-misc/hello" {
+			entries := []GitLabTreeEntry{
+				{Name: "hello-1.0.ebuild", Type: "blob", Path: "app-misc/hello/hello-1.0.ebuild"},
+			}
+			if err := json.NewEncoder(w).Encode(entries); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	repoInfo := &RepositoryInfo{
+		Name:     "test",
+		Provider: "gitlab",
+		URL:      "test/repo",
+	}
+	prov, err := NewGitLabProvider(repoInfo)
+	if err != nil {
+		t.Fatalf("NewGitLabProvider failed: %v", err)
+	}
+	prov.BaseURL = server.URL
+	prov.CacheDir = t.TempDir()
+
+	if _, err := prov.GetPackageVersions("app-misc", "hello"); err != nil {
+		t.Fatalf("GetPackageVersions returned error: %v", err)
+	}
+
+	cacheFile := prov.cacheFilePath("app-misc", "hello")
+	info, err := os.Stat(cacheFile)
+	if err != nil {
+		t.Fatalf("cache file was not written: %v", err)
+	}
+
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("cache file mode = %#o, want %#o", got, 0o600)
 	}
 }

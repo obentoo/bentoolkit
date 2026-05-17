@@ -372,3 +372,28 @@ func TestGitHubProvider_GetRateLimitInfoInvalidJSON(t *testing.T) {
 		t.Fatal("Expected parse error, got nil")
 	}
 }
+
+// TestGitHubProvider_SaveToCache_FinalModeIs0600 verifies that a cache file
+// written by saveToCache ends up with owner-only (0600) permissions. The cache
+// is written via os.WriteFile, which applies the mode directly on creation.
+func TestGitHubProvider_SaveToCache_FinalModeIs0600(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	repoInfo := &RepositoryInfo{Name: "test", URL: "test/repo"}
+	prov, err := NewGitHubProvider(repoInfo)
+	if err != nil {
+		t.Fatalf("NewGitHubProvider failed: %v", err)
+	}
+	prov.CacheDir = cacheDir
+
+	prov.saveToCache("app-misc", "hello", []string{"1.0", "2.0"})
+
+	cacheFile := prov.cacheFilePath("app-misc", "hello")
+	info, err := os.Stat(cacheFile)
+	if err != nil {
+		t.Fatalf("os.Stat on cache file failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("cache file mode = %#o, want %#o", got, 0o600)
+	}
+}

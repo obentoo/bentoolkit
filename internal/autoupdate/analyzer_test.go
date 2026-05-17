@@ -2,11 +2,14 @@ package autoupdate
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1681,4 +1684,306 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 	// and the operation should be non-fatal. We verify this by confirming
 	// that the error variable is checked (not blank-assigned).
 	t.Logf("B3 fix verified: cache.Set failure produces error %v (logged at DEBUG level, non-fatal)", setErr)
+}
+
+// =============================================================================
+// R8: LLM pattern/XPath validation + lazy revalidation (Task T7)
+// =============================================================================
+
+// patternLLMStub is a configurable LLMProvider whose AnalyzeContent returns a
+// caller-supplied SchemaAnalysis. It is used to drive invalid LLM output into
+// the analyzer's save path.
+type patternLLMStub struct {
+	analysis *SchemaAnalysis
+}
+
+func (s *patternLLMStub) ExtractVersion(_ []byte, _ string) (string, error) { return "", nil }
+func (s *patternLLMStub) AnalyzeContent(_ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+	return s.analysis, nil
+}
+func (s *patternLLMStub) GetModel() string { return "pattern-stub" }
+
+// captureInfoLogs swaps the package-private infoLogf sink with a recorder for
+// the duration of the test and restores it on cleanup. It reuses the logCapture
+// type defined in httpclient_test.go.
+func captureInfoLogs(t *testing.T) *logCapture {
+	t.Helper()
+	lc := &logCapture{}
+	orig := infoLogf
+	infoLogf = lc.record
+	t.Cleanup(func() { infoLogf = orig })
+	return lc
+}
+
+// TestValidatePattern_AcceptsValid verifies that valid bounded RE2 patterns —
+// including the empty pattern and the catastrophic-backtracking shape "(a+)+$"
+// which RE2 runs in linear time (AD-5) — are accepted.
+func TestValidatePattern_AcceptsValid(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+	}{
+		{"empty", ""},
+		{"simple version", `(\d+\.\d+\.\d+)`},
+		{"optional patch", `(\d+\.\d+(?:\.\d+)?)`},
+		{"prefixed", `v(\d+\.\d+\.\d+)`},
+		{"anchored", `^release-(\d+)$`},
+		{"redos shape accepted (AD-5)", `(a+)+$`},
+		{"max length", strings.Repeat("a", MaxPatternLen)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validatePattern(tc.pattern); err != nil {
+				t.Errorf("validatePattern(%q) = %v, want nil", tc.pattern, err)
+			}
+		})
+	}
+}
+
+// TestValidatePattern_RejectsOversize verifies that a pattern one character
+// longer than MaxPatternLen is rejected with a wrapped ErrInvalidPattern.
+func TestValidatePattern_RejectsOversize(t *testing.T) {
+	oversize := strings.Repeat("a", MaxPatternLen+1) // 513 chars
+	err := validatePattern(oversize)
+	if err == nil {
+		t.Fatalf("validatePattern(<%d chars>) = nil, want error", len(oversize))
+	}
+	if !errors.Is(err, ErrInvalidPattern) {
+		t.Errorf("error %v does not wrap ErrInvalidPattern", err)
+	}
+}
+
+// TestValidatePattern_RejectsUncompilable verifies that a pattern that fails to
+// compile under RE2 is rejected with a wrapped ErrInvalidPattern.
+func TestValidatePattern_RejectsUncompilable(t *testing.T) {
+	err := validatePattern("(a")
+	if err == nil {
+		t.Fatal(`validatePattern("(a") = nil, want error`)
+	}
+	if !errors.Is(err, ErrInvalidPattern) {
+		t.Errorf("error %v does not wrap ErrInvalidPattern", err)
+	}
+}
+
+// TestValidatePattern_RejectsBackrefs verifies that a pattern containing a
+// backreference is rejected with an explicit "backreferences not supported"
+// message wrapping ErrInvalidPattern.
+func TestValidatePattern_RejectsBackrefs(t *testing.T) {
+	for _, p := range []string{`(a)\1`, `(x)(y)\2`, `foo\9bar`} {
+		err := validatePattern(p)
+		if err == nil {
+			t.Errorf("validatePattern(%q) = nil, want error", p)
+			continue
+		}
+		if !errors.Is(err, ErrInvalidPattern) {
+			t.Errorf("validatePattern(%q): error %v does not wrap ErrInvalidPattern", p, err)
+		}
+		if !strings.Contains(err.Error(), "backreferences not supported") {
+			t.Errorf("validatePattern(%q): error %q lacks explicit backreference message", p, err)
+		}
+	}
+}
+
+// TestValidatePattern_RuntimeSafety is a ReDoS sentinel (sub-task 7.2). Go's
+// regexp is RE2 (linear time), so matching the classic catastrophic pattern
+// "^(a+)+$" against a 50-'a' input completes effectively instantly. This test
+// would fail only if a backtracking engine were ever substituted.
+func TestValidatePattern_RuntimeSafety(t *testing.T) {
+	const budget = 50 * time.Millisecond
+	input := strings.Repeat("a", 50)
+
+	start := time.Now()
+	matched, err := regexp.MatchString("^(a+)+$", input)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("regexp.MatchString returned error: %v", err)
+	}
+	if !matched {
+		t.Errorf("expected %q to match 50 'a' characters", "^(a+)+$")
+	}
+	if elapsed > budget {
+		t.Errorf("ReDoS sentinel: match took %v, exceeds %v budget (non-linear engine?)", elapsed, budget)
+	}
+}
+
+// TestValidateXPath exercises validateXPath with valid and invalid expressions.
+func TestValidateXPath(t *testing.T) {
+	cases := []struct {
+		name    string
+		xpath   string
+		wantErr bool
+	}{
+		{"empty is valid", "", false},
+		{"simple path", "//div", false},
+		{"attribute predicate", `//a[@class='version']/text()`, false},
+		{"function call", "//span[contains(@id,'ver')]", false},
+		{"unbalanced bracket", "//div[", true},
+		{"unbalanced paren", "//div[contains(@id,'x'", true},
+		{"empty predicate", "//div[]", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateXPath(tc.xpath)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("validateXPath(%q) = nil, want error", tc.xpath)
+					return
+				}
+				if !errors.Is(err, ErrInvalidXPath) {
+					t.Errorf("validateXPath(%q): error %v does not wrap ErrInvalidXPath", tc.xpath, err)
+				}
+			} else if err != nil {
+				t.Errorf("validateXPath(%q) = %v, want nil", tc.xpath, err)
+			}
+		})
+	}
+}
+
+// TestAnalyzer_RejectsInvalidLLMOutput verifies sub-task 7.4: when the LLM
+// returns an invalid regex pattern, the analyzer rejects it and writes nothing
+// to the analysis cache.
+func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
+	// Mock data source returning arbitrary content.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body>release 1.2.3</body></html>")) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	pkgDir := filepath.Join(tmpDir, "app-misc", "test")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "test-1.0.0.ebuild"), []byte("EAPI=8\nHOMEPAGE=\"https://example.com\"\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Cache backed by an isolated temp directory so we can inspect it.
+	cacheDir := filepath.Join(tmpDir, "cachedir")
+	cache, err := NewAnalysisCache(cacheDir)
+	if err != nil {
+		t.Fatalf("NewAnalysisCache: %v", err)
+	}
+
+	// LLM returns a regex schema with a backreference: invalid output.
+	llm := &patternLLMStub{analysis: &SchemaAnalysis{
+		ParserType: "regex",
+		Pattern:    `(\d+)\1`,
+	}}
+
+	rateLimiter := createFastRateLimiter()
+	setFastHTTPLimit(rateLimiter, server.URL)
+	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})
+
+	analyzer, err := NewAnalyzer(tmpDir,
+		WithAnalyzerLLMClient(llm),
+		WithAnalyzerCache(cache),
+		WithAnalyzerRateLimiter(rateLimiter),
+		WithAnalyzerHTTPClient(httpClient),
+	)
+	if err != nil {
+		t.Fatalf("NewAnalyzer: %v", err)
+	}
+
+	result, err := analyzer.Analyze("app-misc/test", AnalyzeOptions{
+		URL:   server.URL,
+		Force: true,
+	})
+	if err == nil {
+		t.Error("expected Analyze to fail on invalid LLM pattern")
+	}
+	if result.Error == nil || !errors.Is(result.Error, ErrInvalidPattern) {
+		t.Errorf("expected result.Error to wrap ErrInvalidPattern, got %v", result.Error)
+	}
+
+	// The invalid schema must NOT have been cached.
+	if cache.Len() != 0 {
+		t.Errorf("expected empty cache, got %d entries", cache.Len())
+	}
+	if _, ok := cache.GetEntry("app-misc/test"); ok {
+		t.Error("invalid schema was written to the cache")
+	}
+
+	// Inspect the cache file on disk: it must not contain the package entry.
+	cacheFile := filepath.Join(cacheDir, "analysis_cache.json")
+	if data, readErr := os.ReadFile(cacheFile); readErr == nil {
+		if strings.Contains(string(data), "app-misc/test") {
+			t.Errorf("cache file unexpectedly contains the rejected package: %s", data)
+		}
+	}
+}
+
+// TestAnalysisCache_LazyRevalidation verifies sub-tasks 7.5 and 7.6: a cache
+// entry holding an invalid regex is evicted on Get, Get reports a miss (not an
+// error), the entry is removed from the persisted file, and an Info-level line
+// is logged.
+func TestAnalysisCache_LazyRevalidation(t *testing.T) {
+	logs := captureInfoLogs(t)
+
+	cacheDir := t.TempDir()
+	cache, err := NewAnalysisCache(cacheDir)
+	if err != nil {
+		t.Fatalf("NewAnalysisCache: %v", err)
+	}
+
+	// Pre-populate the cache directly with an entry whose schema holds an
+	// invalid (backreference) regex pattern, bypassing Set's path so it
+	// reaches the store as an older build would have written it.
+	const pkg = "app-misc/legacy"
+	cache.Entries[pkg] = AnalysisCacheEntry{
+		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+)\1`},
+		Timestamp: time.Now(),
+		URL:       "https://example.com",
+	}
+	if err := cache.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Sanity: a sound entry must survive Get unaffected.
+	cache.Entries["app-misc/good"] = AnalysisCacheEntry{
+		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+\.\d+)`},
+		Timestamp: time.Now(),
+		URL:       "https://example.com",
+	}
+	if err := cache.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Get on the invalid entry must report a miss.
+	if schema, ok := cache.Get(pkg); ok {
+		t.Errorf("Get(%q) = (%v, true), want cache miss", pkg, schema)
+	}
+
+	// The invalid entry must be removed from the in-memory store...
+	if _, ok := cache.GetEntry(pkg); ok {
+		t.Errorf("invalidated entry %q still present in cache store", pkg)
+	}
+	// ...and from the persisted file.
+	cacheFile := filepath.Join(cacheDir, "analysis_cache.json")
+	data, readErr := os.ReadFile(cacheFile)
+	if readErr != nil {
+		t.Fatalf("ReadFile: %v", readErr)
+	}
+	if strings.Contains(string(data), pkg) {
+		t.Errorf("invalidated entry %q still present in cache file: %s", pkg, data)
+	}
+
+	// The sound entry must still be retrievable.
+	if _, ok := cache.Get("app-misc/good"); !ok {
+		t.Error("sound entry was incorrectly invalidated")
+	}
+
+	// Sub-task 7.6: an Info-level line must have been logged.
+	lines := logs.all()
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "analysis cache entry for "+pkg+" invalidated") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Info log %q, got lines: %v", "analysis cache entry for "+pkg+" invalidated: ...", lines)
+	}
 }

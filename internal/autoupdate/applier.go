@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // Error variables for applier errors
@@ -330,8 +332,9 @@ func (a *Applier) saveCompileLog(pkg, version string, output []byte) string {
 	logName := fmt.Sprintf("%s-%s-%s.log", safePkg, version, timestamp)
 	logPath := filepath.Join(a.logsDir, logName)
 
-	// Write log file
-	if err := os.WriteFile(logPath, output, 0644); err != nil { //nolint:gosec // log files use 0644 for readability
+	// Write log file. Compile logs use 0600 (owner-only): they may contain
+	// sensitive build details. os.WriteFile applies the mode on creation.
+	if err := os.WriteFile(logPath, output, fileutil.CacheFileMode); err != nil {
 		// If we can't write the log, return empty path
 		return ""
 	}

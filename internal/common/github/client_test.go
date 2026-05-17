@@ -504,3 +504,38 @@ func TestGetPackageVersionsInvalidJSON(t *testing.T) {
 		t.Fatal("Expected parse error, got nil")
 	}
 }
+
+// TestSaveToCacheFileMode verifies that the GitHub client writes its cache
+// file with the restrictive owner-only mode (0600), not a world-readable
+// 0644. Cache files may hold sensitive upstream metadata. (R9.1, R9.3)
+func TestSaveToCacheFileMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		entries := []ContentEntry{
+			{Name: "hello-1.0.ebuild", Type: "file", Path: "app-misc/hello/hello-1.0.ebuild"},
+		}
+		if err := json.NewEncoder(w).Encode(entries); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	cacheDir := t.TempDir()
+	client := NewClient()
+	client.BaseURL = server.URL
+	client.CacheDir = cacheDir
+
+	if _, err := client.GetPackageVersions("app-misc", "hello"); err != nil {
+		t.Fatalf("GetPackageVersions returned error: %v", err)
+	}
+
+	cacheFile := client.cacheFilePath("app-misc", "hello")
+	info, err := os.Stat(cacheFile)
+	if err != nil {
+		t.Fatalf("cache file was not written: %v", err)
+	}
+
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("cache file mode = %#o, want %#o", got, 0o600)
+	}
+}

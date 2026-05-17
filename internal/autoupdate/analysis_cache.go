@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // Error variables for analysis cache errors
@@ -129,21 +132,49 @@ func (c *AnalysisCache) load() error {
 
 // Get retrieves a cached schema if it exists and is not expired.
 // Returns the schema and true if found and valid, nil and false otherwise.
+//
+// Get also performs lazy revalidation: a cached schema whose regex pattern or
+// XPath expression no longer passes validation (e.g. it was written by an
+// older, less strict build) is evicted via Delete and reported as a cache
+// miss. A miss — not an error — is the normal signal that prompts the caller
+// to re-run analysis.
 func (c *AnalysisCache) Get(pkg string) (*PackageConfig, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	entry, exists := c.Entries[pkg]
-	if !exists {
+	expired := exists && c.isExpired(entry)
+	c.mu.RUnlock()
+
+	if !exists || expired {
 		return nil, false
 	}
 
-	// Check if entry is expired
-	if c.isExpired(entry) {
+	// Lazy revalidation: an entry persisted by an older build may hold a
+	// pattern/XPath that current validation rejects. Evict it and report a
+	// miss so the caller re-runs analysis. The read lock is released above
+	// before Delete (which acquires the write lock) to avoid a deadlock.
+	if err := c.validateEntry(entry); err != nil {
+		infoLogf("analysis cache entry for %s invalidated: %v", pkg, err)
+		if delErr := c.Delete(pkg); delErr != nil {
+			logger.Debug("failed to delete invalidated cache entry for %s: %v", pkg, delErr)
+		}
 		return nil, false
 	}
 
 	return entry.Schema, true
+}
+
+// validateEntry runs the LLM-output validators against a cache entry's schema.
+// It returns the first validation failure, or nil when the entry is sound. A
+// nil schema is treated as sound: TTL/existence handling already covers that
+// case and there is nothing to revalidate.
+func (c *AnalysisCache) validateEntry(entry AnalysisCacheEntry) error {
+	if entry.Schema == nil {
+		return nil
+	}
+	if err := validatePattern(entry.Schema.Pattern); err != nil {
+		return err
+	}
+	return validateXPath(entry.Schema.XPath)
 }
 
 // isExpired checks if an analysis cache entry has expired based on TTL
@@ -188,9 +219,10 @@ func (c *AnalysisCache) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal analysis cache: %w", err)
 	}
 
-	// Write to temp file first, then rename for atomicity
+	// Write to temp file first, then rename for atomicity. Cache files use
+	// 0600 (owner-only) because they may hold sensitive upstream metadata.
 	tmpPath := c.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil { //nolint:gosec // cache files use 0644 for readability
+	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
 		return fmt.Errorf("failed to write analysis cache file: %w", err)
 	}
 
@@ -198,6 +230,12 @@ func (c *AnalysisCache) saveUnsafe() error {
 		// Clean up temp file on rename failure
 		os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("failed to rename analysis cache file: %w", err)
+	}
+
+	// os.Rename keeps the temp file's mode, which umask may have widened.
+	// Re-apply the restrictive mode; tolerate filesystems without chmod.
+	if err := fileutil.SafeChmod(c.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
+		return fmt.Errorf("failed to set analysis cache file permissions: %w", err)
 	}
 
 	return nil

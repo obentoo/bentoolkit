@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // Error variables for pending list errors
@@ -259,9 +261,10 @@ func (p *PendingList) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal pending list: %w", err)
 	}
 
-	// Write to temp file first, then rename for atomicity
+	// Write to temp file first, then rename for atomicity. Pending files use
+	// 0600 (owner-only) because they may hold sensitive upstream metadata.
 	tmpPath := p.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil { //nolint:gosec // pending files use 0644 for readability
+	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
 		return fmt.Errorf("failed to write pending file: %w", err)
 	}
 
@@ -269,6 +272,12 @@ func (p *PendingList) saveUnsafe() error {
 		// Clean up temp file on rename failure
 		os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("failed to rename pending file: %w", err)
+	}
+
+	// os.Rename keeps the temp file's mode, which umask may have widened.
+	// Re-apply the restrictive mode; tolerate filesystems without chmod.
+	if err := fileutil.SafeChmod(p.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
+		return fmt.Errorf("failed to set pending file permissions: %w", err)
 	}
 
 	return nil

@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/antchfx/htmlquery v1.3.6
+	github.com/antchfx/xpath v1.3.6
 	github.com/fatih/color v1.19.0
 	github.com/leanovate/gopter v0.2.11
 	github.com/sony/gobreaker v1.0.0
@@ -16,7 +17,6 @@ require (
 
 require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/antchfx/xpath v1.3.6 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // GitHubProvider fetches package versions from GitHub API
@@ -247,7 +249,9 @@ func (p *GitHubProvider) saveToCache(category, pkg string, versions []string) {
 	}
 
 	cacheFile := p.cacheFilePath(category, pkg)
-	_ = os.WriteFile(cacheFile, data, 0644) //nolint:errcheck,gosec // cache write is best-effort, 0644 readable by other tools
+	// Cache files use 0600 (owner-only): they may hold sensitive upstream
+	// metadata. os.WriteFile applies the mode on file creation directly.
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
 }
 
 // GetRateLimitInfo returns current rate limit status

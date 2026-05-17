@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // GitLabProvider fetches package versions from GitLab API
@@ -256,7 +258,9 @@ func (p *GitLabProvider) saveToCache(category, pkg string, versions []string) {
 	}
 
 	cacheFile := p.cacheFilePath(category, pkg)
-	_ = os.WriteFile(cacheFile, data, 0644) //nolint:errcheck,gosec // cache write is best-effort, 0644 readable by other tools
+	// Cache files use fileutil.CacheFileMode (0600, owner-only) because they
+	// may hold sensitive upstream metadata. (R9.1, R9.3)
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
 }
 
 // Ensure GitLabProvider implements Provider interface

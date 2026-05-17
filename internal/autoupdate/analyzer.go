@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/antchfx/xpath"
 
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
@@ -36,6 +39,60 @@ var (
 // LLM-generated regex pattern. Patterns longer than this are rejected as a
 // basic ReDoS prophylaxis.
 const MaxPatternLen = 512
+
+// backrefPattern matches a regex backreference (\1 .. \9). RE2 (Go's regexp
+// engine) does not support backreferences, so a pattern containing one always
+// fails to compile; this expression lets validatePattern emit an explicit,
+// actionable diagnostic instead of an opaque compiler error.
+var backrefPattern = regexp.MustCompile(`\\[1-9]`)
+
+// infoLogf is the sink used to emit Info-level diagnostics from the cache
+// revalidation path. It defaults to the shared logger and is a package-private
+// variable so tests can capture the emitted lines. Its signature mirrors
+// logger.Info exactly.
+var infoLogf = logger.Info
+
+// validatePattern checks that an LLM-generated regex pattern is safe to persist
+// and later compile. An empty pattern is valid (the parser simply does not use
+// regex post-processing). A non-empty pattern is rejected, with a wrapped
+// ErrInvalidPattern, when it:
+//   - exceeds MaxPatternLen characters (basic ReDoS prophylaxis), or
+//   - contains a backreference (\1 .. \9), which RE2 does not support, or
+//   - fails to compile under Go's regexp engine.
+//
+// Note (AD-5): catastrophic-backtracking shapes such as "(a+)+$" are NOT
+// rejected. Go's regexp is RE2, which executes every pattern in time linear in
+// the input length, so such shapes are safe and remain valid.
+func validatePattern(p string) error {
+	if p == "" {
+		return nil
+	}
+	if len(p) > MaxPatternLen {
+		return fmt.Errorf("%w: pattern length %d exceeds maximum %d", ErrInvalidPattern, len(p), MaxPatternLen)
+	}
+	if backrefPattern.MatchString(p) {
+		return fmt.Errorf("%w: backreferences not supported", ErrInvalidPattern)
+	}
+	if _, err := regexp.Compile(p); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidPattern, err)
+	}
+	return nil
+}
+
+// validateXPath checks that an LLM-generated XPath expression is safe to
+// persist. An empty expression is valid (the parser uses a CSS selector or no
+// XPath at all). A non-empty expression that fails to compile is rejected with
+// a wrapped ErrInvalidXPath. Compilation uses xpath.Compile, the same engine
+// htmlquery uses internally when HTMLParser evaluates an XPath query.
+func validateXPath(x string) error {
+	if x == "" {
+		return nil
+	}
+	if _, err := xpath.Compile(x); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidXPath, err)
+	}
+	return nil
+}
 
 // AnalyzeOptions configures the analysis behavior.
 type AnalyzeOptions struct {
@@ -397,6 +454,16 @@ func (a *Analyzer) schemaFromAnalysis(analysis *SchemaAnalysis, source *DataSour
 		if analysis.Pattern != "" {
 			schema.Pattern = analysis.Pattern
 		}
+	}
+
+	// Validate LLM-generated pattern/XPath before the schema can be persisted
+	// or cached. On failure the wrapped sentinel propagates to the caller,
+	// which treats the analysis as failed and skips the cache write.
+	if err := validatePattern(schema.Pattern); err != nil {
+		return nil, err
+	}
+	if err := validateXPath(schema.XPath); err != nil {
+		return nil, err
 	}
 
 	// Set fallback if provided by LLM analysis

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 var (
@@ -252,7 +254,9 @@ func (c *Client) saveToCache(category, pkg string, versions []string) {
 	}
 
 	cacheFile := c.cacheFilePath(category, pkg)
-	_ = os.WriteFile(cacheFile, data, 0644) //nolint:errcheck,gosec // cache write is best-effort, 0644 readable by other tools
+	// Cache files use fileutil.CacheFileMode (0600, owner-only) because they
+	// may hold sensitive upstream metadata. (R9.1, R9.3)
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
 }
 
 // ClearCache removes all cached data

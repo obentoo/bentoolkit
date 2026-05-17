@@ -637,3 +637,28 @@ func TestCacheAtomicWrite(t *testing.T) {
 		}
 	}
 }
+
+// TestCacheWrite_FinalModeIs0600 verifies that the cache file persisted by
+// Cache.Set ends up with owner-only (0600) permissions end-to-end. The save
+// path writes a temp file then renames it, so the final mode depends on the
+// post-rename SafeChmod call repairing any umask-widened bits.
+func TestCacheWrite_FinalModeIs0600(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cache, err := NewCache(tmpDir)
+	if err != nil {
+		t.Fatalf("NewCache failed: %v", err)
+	}
+
+	if err := cache.Set("test/pkg", "1.0.0", "https://example.com"); err != nil {
+		t.Fatalf("Cache.Set failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(tmpDir, "cache.json"))
+	if err != nil {
+		t.Fatalf("os.Stat on cache file failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("cache file mode = %#o, want %#o", got, 0o600)
+	}
+}
