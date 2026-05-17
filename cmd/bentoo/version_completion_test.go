@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"strings"
 	"testing"
@@ -174,31 +173,36 @@ func TestCompletionScriptGeneration(t *testing.T) {
 
 	for _, tt := range shells {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture os.Stdout since completion.go writes there directly
+			// completion.go writes to os.Stdout directly, so os.Stdout must be
+			// redirected to capture the generated script. A temp file is used
+			// rather than an os.Pipe: a pipe's write blocks once its ~64 KiB
+			// kernel buffer fills with no concurrent reader, which made this
+			// test deadlock intermittently. A regular file never blocks.
 			oldStdout := os.Stdout
-			r, w, err := os.Pipe()
+			tmp, err := os.CreateTemp(t.TempDir(), "completion-*")
 			if err != nil {
-				t.Fatalf("failed to create pipe: %v", err)
+				t.Fatalf("failed to create temp file: %v", err)
 			}
-			os.Stdout = w
+			os.Stdout = tmp
 
 			// Reset args and run completion command
 			rootCmd.SetArgs([]string{"completion", tt.name})
 			runErr := rootCmd.Execute()
 
-			w.Close()
 			os.Stdout = oldStdout
-
-			buf := new(bytes.Buffer)
-			if _, copyErr := buf.ReadFrom(r); copyErr != nil {
-				t.Fatalf("failed to read pipe: %v", copyErr)
+			if closeErr := tmp.Close(); closeErr != nil {
+				t.Fatalf("failed to close temp file: %v", closeErr)
 			}
-			r.Close()
+
+			out, readErr := os.ReadFile(tmp.Name())
+			if readErr != nil {
+				t.Fatalf("failed to read temp file: %v", readErr)
+			}
 
 			if runErr != nil {
 				t.Errorf("completion %s returned error: %v", tt.name, runErr)
 			}
-			if buf.Len() == 0 {
+			if len(out) == 0 {
 				t.Errorf("completion %s produced no output", tt.name)
 			}
 		})
