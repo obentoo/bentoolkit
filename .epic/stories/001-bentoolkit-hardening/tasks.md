@@ -629,4 +629,4 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - [x] `bash scripts/validate-story.sh .epic/stories/001-bentoolkit-hardening` exits 0.
 - [x] `bash scripts/cross-reference.sh .epic/stories/001-bentoolkit-hardening` exits 0.
 - [x] `TestBenchmarkSpeedup` reports ≥ 4× improvement. (9.95×)
-- [ ] Release commit + tag `v0.2.0`. (deferred — awaiting user review per D4)
+- [x] Release commit + tag `v0.2.0`. (150bf30 carries the `[0.2.0]` CHANGELOG; tag `v0.2.0` and `main` pushed to origin)
