@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // GitHubProvider fetches package versions from GitHub API
@@ -47,7 +48,8 @@ func NewGitHubProvider(repoInfo *RepositoryInfo) (*GitHubProvider, error) {
 		UserAgent:  "bentoolkit/1.0",
 		Token:      repoInfo.Token,
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: httputil.BuildTransport(),
 		},
 		CacheTTL: 24 * time.Hour,
 	}

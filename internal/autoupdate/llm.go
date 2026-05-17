@@ -222,7 +222,8 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 			BaseURL:   endpoint,
 		},
 		httpClient: &http.Client{
-			Timeout: DefaultRequestTimeout,
+			Timeout:   DefaultRequestTimeout,
+			Transport: httputil.BuildTransport(),
 		},
 		apiKey:       apiKey,
 		maxBodyBytes: httputil.MaxBodyBytes,

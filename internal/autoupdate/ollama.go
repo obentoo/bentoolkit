@@ -89,7 +89,8 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 			BaseURL:  baseURL,
 		},
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Longer timeout for local inference
+			Timeout:   120 * time.Second, // Longer timeout for local inference
+			Transport: httputil.BuildTransport(),
 		},
 		baseURL:      baseURL,
 		maxBodyBytes: httputil.MaxBodyBytes,

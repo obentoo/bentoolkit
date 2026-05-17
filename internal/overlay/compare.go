@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -12,6 +14,10 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
+
+// DefaultCompareConcurrency is the number of packages CompareWithProvider
+// processes in parallel when CompareOptions.Concurrency is not set (<= 0).
+const DefaultCompareConcurrency = 10
 
 // CompareResult represents the result of comparing a package between overlays
 type CompareResult struct {
@@ -66,8 +72,17 @@ type CompareOptions struct {
 	IncludeSynced bool
 	// IncludeNotInRemote includes packages that don't exist in remote
 	IncludeNotInRemote bool
-	// ProgressCallback is called for each package processed
-	ProgressCallback func(current, total int, pkg string)
+	// ProgressCallback, when non-nil, is invoked once per package as that
+	// package's comparison completes. done is the cumulative count of packages
+	// finished so far and total is the number of packages in the batch.
+	// Because CompareWithProvider runs packages concurrently, the callback may
+	// fire from multiple goroutines and the per-invocation order is not
+	// deterministic; done is sourced from an atomic counter, so the value
+	// observed by any single invocation is monotone non-decreasing.
+	ProgressCallback func(done, total uint64)
+	// Concurrency bounds the number of packages CompareWithProvider processes
+	// in parallel. A value <= 0 is treated as DefaultCompareConcurrency.
+	Concurrency int
 	// Ctx is the parent context for the comparison. It originates in cmd/
 	// (signal.NotifyContext), so cancelling it aborts an in-flight comparison.
 	// When nil it is treated as context.Background() by the consumer.
@@ -117,8 +132,15 @@ func Compare(localPackages []PackageInfo, client *github.Client, opts CompareOpt
 }
 
 // CompareWithProvider compares local packages against an upstream repository using any Provider.
-// When opts.Ctx is cancelled, the comparison stops early and returns the partial
-// report together with the context error, so a SIGINT aborts a long scan.
+//
+// Packages are compared concurrently, bounded by opts.Concurrency (a value <= 0
+// is treated as DefaultCompareConcurrency). The semaphore is acquired with a
+// context-cancellable select: when opts.Ctx is cancelled the remaining packages
+// are not dispatched and the comparison returns the partial report together
+// with the context error, so a SIGINT aborts a long scan. All writes to the
+// shared report are mutex-guarded, and results are sorted by category/package
+// before returning so the output is deterministic regardless of completion
+// order.
 func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
 	report := &CompareReport{
 		TotalPackages: len(localPackages),
@@ -131,59 +153,101 @@ func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, op
 		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
 	}
 
-	for i, pkg := range localPackages {
-		// Stop early if the caller's context was cancelled (e.g. SIGINT).
-		if err := ctx.Err(); err != nil {
-			sortCompareResults(report.Results)
-			return report, err
-		}
-
-		// Progress callback
-		if opts.ProgressCallback != nil {
-			opts.ProgressCallback(i+1, len(localPackages), pkg.FullName())
-		}
-
-		result := comparePackageWithProvider(pkg, prov)
-		report.ComparedPackages++
-
-		// Update counters
-		switch result.Status {
-		case StatusOutdated:
-			report.OutdatedCount++
-		case StatusNewer:
-			report.NewerCount++
-		case StatusUpToDate:
-			report.UpToDateCount++
-		case StatusNotInRemote:
-			report.NotInRemoteCount++
-		case StatusError:
-			report.ErrorCount++
-		}
-
-		// Filter based on options using switch for clarity
-		include := false
-		switch result.Status {
-		case StatusOutdated:
-			include = true // Always include outdated (primary use case)
-		case StatusUpToDate:
-			include = opts.IncludeSynced
-		case StatusNewer:
-			include = !opts.OnlyOutdated // Include if not filtering to outdated only
-		case StatusNotInRemote:
-			include = opts.IncludeNotInRemote
-		case StatusError:
-			include = true // Always include errors for visibility
-		}
-		if !include {
-			continue
-		}
-
-		report.Results = append(report.Results, result)
+	// Sanitize the concurrency limit: a non-positive value means "use the
+	// default" so a zero-valued CompareOptions still behaves sensibly.
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = DefaultCompareConcurrency
 	}
 
-	// Sort results by category/package
+	var (
+		sem      = make(chan struct{}, concurrency)
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		progress atomic.Uint64
+		total    = uint64(len(localPackages))
+		// cancelled records whether the context fired while packages were
+		// still being dispatched, so the partial report is returned with the
+		// context error (preserving the T9 early-cancellation contract).
+		cancelled bool
+	)
+
+	for _, pkg := range localPackages {
+		// A select with both cases ready picks at random, so check the context
+		// deterministically first: a context cancelled before (or during) the
+		// call must stop dispatch on EVERY iteration, not just roughly half.
+		if ctx.Err() != nil {
+			cancelled = true
+			break
+		}
+		// Cancellable semaphore acquisition: also stop dispatching if the
+		// caller's context is cancelled while waiting for a free slot.
+		select {
+		case <-ctx.Done():
+			cancelled = true
+		case sem <- struct{}{}:
+		}
+		if cancelled {
+			break
+		}
+
+		wg.Add(1)
+		go func(p PackageInfo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result := comparePackageWithProvider(p, prov)
+
+			// Filter based on options using switch for clarity.
+			include := false
+			switch result.Status {
+			case StatusOutdated:
+				include = true // Always include outdated (primary use case)
+			case StatusUpToDate:
+				include = opts.IncludeSynced
+			case StatusNewer:
+				include = !opts.OnlyOutdated // Include if not filtering to outdated only
+			case StatusNotInRemote:
+				include = opts.IncludeNotInRemote
+			case StatusError:
+				include = true // Always include errors for visibility
+			}
+
+			mu.Lock()
+			report.ComparedPackages++
+			switch result.Status {
+			case StatusOutdated:
+				report.OutdatedCount++
+			case StatusNewer:
+				report.NewerCount++
+			case StatusUpToDate:
+				report.UpToDateCount++
+			case StatusNotInRemote:
+				report.NotInRemoteCount++
+			case StatusError:
+				report.ErrorCount++
+			}
+			if include {
+				report.Results = append(report.Results, result)
+			}
+			mu.Unlock()
+
+			if opts.ProgressCallback != nil {
+				opts.ProgressCallback(progress.Add(1), total)
+			}
+		}(pkg)
+	}
+
+	// Join every worker before touching the shared report so it is fully
+	// populated and safe to read.
+	wg.Wait()
+
+	// Sort results by category/package for deterministic output.
 	sortCompareResults(report.Results)
 
+	if cancelled {
+		return report, ctx.Err()
+	}
 	return report, nil
 }
 

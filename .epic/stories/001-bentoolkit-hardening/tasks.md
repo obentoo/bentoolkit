@@ -452,13 +452,13 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/autoupdate/ollama.go` HTTP client construction.
 
 **Sub-tasks**:
-- [ ] 13.1 Replace each `&http.Client{Timeout: …}` with `&http.Client{Timeout: …, Transport: httputil.BuildTransport()}` at constructor entry only (never overwrite a pre-injected Transport).
+- [x] 13.1 Replace each `&http.Client{Timeout: …}` with `&http.Client{Timeout: …, Transport: httputil.BuildTransport()}` at constructor entry only (never overwrite a pre-injected Transport).
   - Requirements: R6.1, R6.3
   - Validation: build passes; per-constructor unit test checks `client.Transport != nil`.
-- [ ] 13.2 Add unified reflective test `TestAllHTTPClients_UseTunedTransport`: explicit list of constructors → assert `*http.Transport` field tuning matches `httputil.BuildTransport()` output.
+- [x] 13.2 Add unified reflective test `TestAllHTTPClients_UseTunedTransport`: explicit list of constructors → assert `*http.Transport` field tuning matches `httputil.BuildTransport()` output.
   - Requirements: R6.1
   - Validation: test passes.
-- [ ] 13.3 Add `TestAllHTTPClients_HTTP2OptOut`: with `BENTOO_DISABLE_HTTP2=1`, every reconstructed client gets a Transport with `ForceAttemptHTTP2=false`.
+- [x] 13.3 Add `TestAllHTTPClients_HTTP2OptOut`: with `BENTOO_DISABLE_HTTP2=1`, every reconstructed client gets a Transport with `ForceAttemptHTTP2=false`.
   - Requirements: R6.2
   - Validation: test passes.
 
@@ -476,19 +476,19 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/autoupdate/checker.go` — `WithRateLimiter` option + default init + hot-path call.
 
 **Sub-tasks**:
-- [ ] 14.1 Add `rateLimiter *RateLimiter` field + `WithRateLimiter(*RateLimiter) CheckerOption`.
+- [x] 14.1 Add `rateLimiter *RateLimiter` field + `WithRateLimiter(*RateLimiter) CheckerOption`.
   - Requirements: R10.3
   - Validation: `TestChecker_WithRateLimiterOption` smoke.
-- [ ] 14.2 Default `NewRateLimiter()` with 1 req/s/host, burst 5 (matching `rate_limiter.go` defaults).
+- [x] 14.2 Default `NewRateLimiter()` with 1 req/s/host, burst 5 (matching `rate_limiter.go` defaults).
   - Requirements: R10.3
   - Validation: `TestChecker_DefaultRateLimiter` asserts non-nil after `NewChecker` without option.
-- [ ] 14.3 In `fetchContent`, extract host via `url.Parse(u).Host`. On parse failure: log `Warn`, fail-open (proceed without rate-limit wait).
+- [x] 14.3 In `fetchContent`, extract host via `url.Parse(u).Host`. On parse failure: log `Warn`, fail-open (proceed without rate-limit wait).
   - Requirements: R10.1
   - Validation: `TestFetchContent_ParseHostFailure_FailsOpen` passes `:bad-url:`; assert HTTP attempted and warn line.
-- [ ] 14.4 Call `c.rateLimiter.WaitHTTP(c.ctx, host)`. On ctx-cancellation while waiting, return ctx error without HTTP.
+- [x] 14.4 Call `c.rateLimiter.WaitHTTP(c.ctx, host)`. On ctx-cancellation while waiting, return ctx error without HTTP.
   - Requirements: R10.1, R10.2
   - Validation: `TestFetchContent_CallsWaitHTTP` injects mock limiter recording host; `TestFetchContent_RateLimitContextCancelled` blocks limiter, cancels ctx, asserts no HTTP request (`httptest` counter == 0).
-- [ ] 14.5 Add `TestRateLimiter_LRUEvictionUnderLoad` (Test Advisor gap #8): hit `WaitHTTP` with 35 distinct hosts; assert oldest evicted, no deadlock, all counters consistent.
+- [x] 14.5 Add `TestRateLimiter_LRUEvictionUnderLoad` (Test Advisor gap #8): hit `WaitHTTP` with 35 distinct hosts; assert oldest evicted, no deadlock, all counters consistent.
   - Requirements: R10.3
   - Validation: test passes under `-race -count=10`.
 
@@ -508,28 +508,28 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/autoupdate/checker_bench_test.go`.
 
 **Sub-tasks**:
-- [ ] 15.1 Add `concurrency int` field; `WithConcurrency(n int) CheckerOption` with `1 ≤ n ≤ 100` validation; `DefaultConcurrency = 10`.
+- [x] 15.1 Add `concurrency int` field; `WithConcurrency(n int) CheckerOption` with `1 ≤ n ≤ 100` validation; `DefaultConcurrency = 10`.
   - Requirements: R4.1
   - Validation: `TestChecker_WithConcurrencyOption` table; out-of-range returns error.
-- [ ] 15.2 Add `Concurrency int` to `overlay.CompareOptions`; sanitize ≤0 → 10.
+- [x] 15.2 Add `Concurrency int` to `overlay.CompareOptions`; sanitize ≤0 → 10.
   - Requirements: R4.1
   - Validation: `TestCompareOptions_DefaultConcurrency`.
-- [ ] 15.3 Reimplement `CheckAll` using semaphore + WaitGroup with cancellable acquisition: `select { case sem<-struct{}{}: case <-c.ctx.Done(): }`. Aggregate to `BatchResult[CheckResult]`. **Recover from per-goroutine panics**: each worker `defer recover()` and records `fmt.Errorf("panic: %v", r)` in `Failures` (Test Advisor gap #9).
+- [x] 15.3 Reimplement `CheckAll` using semaphore + WaitGroup with cancellable acquisition: `select { case sem<-struct{}{}: case <-c.ctx.Done(): }`. Aggregate to `BatchResult[CheckResult]`. **Recover from per-goroutine panics**: each worker `defer recover()` and records `fmt.Errorf("panic: %v", r)` in `Failures` (Test Advisor gap #9).
   - Requirements: R4.1, R4.3
   - Validation: `TestCheckAll_Parallel_RespectsLimit` (atomic in-flight counter); `TestCheckAll_PanicRecovery` injects panicking package handler; assert process survives, failure recorded.
-- [ ] 15.4 Reimplement `CompareWithProvider` loop similarly.
+- [x] 15.4 Reimplement `CompareWithProvider` loop similarly.
   - Requirements: R4.1
   - Validation: `TestCompareWithProvider_Parallel` analogous.
-- [ ] 15.5 Update `ProgressCallback` signature to `func(done, total uint64)` using `atomic.Uint64`. Expose via `WithProgressCallback`.
+- [x] 15.5 Update `ProgressCallback` signature to `func(done, total uint64)` using `atomic.Uint64`. Expose via `WithProgressCallback`.
   - Requirements: R4.4
   - Validation: `TestProgressCallback_Monotonic` under `-race -count=20`; record callback values; assert non-decreasing.
-- [ ] 15.6 Sort `Items` lexically by package name before return.
+- [x] 15.6 Sort `Items` lexically by package name before return.
   - Requirements: R4.5
   - Validation: `TestCheckAll_ResultsSorted` with shuffled inputs.
-- [ ] 15.7 Add cancel-mid-flight test: 100 packages, cancel after 50 ms; assert ≤ concurrency goroutines finished, rest reported ctx error.
+- [x] 15.7 Add cancel-mid-flight test: 100 packages, cancel after 50 ms; assert ≤ concurrency goroutines finished, rest reported ctx error.
   - Requirements: R4.1
   - Validation: `TestCheckAll_ContextCancelMidFlight`.
-- [ ] 15.8 Add `BenchmarkCheckAll_Speedup` and a hard `TestBenchmarkSpeedup` (Test Advisor gap #9 → deterministic CI gate). Handler injects `time.Sleep(100ms)`; baseline `concurrency=1`, parallel `concurrency=10`; assert `speedup ≥ 4.0` via `t.Fatalf`. Use `b.ResetTimer()` after setup; wall-clock measurement only.
+- [x] 15.8 Add `BenchmarkCheckAll_Speedup` and a hard `TestBenchmarkSpeedup` (Test Advisor gap #9 → deterministic CI gate). Handler injects `time.Sleep(100ms)`; baseline `concurrency=1`, parallel `concurrency=10`; assert `speedup ≥ 4.0` via `t.Fatalf`. Use `b.ResetTimer()` after setup; wall-clock measurement only.
   - Requirements: R4.1, DoD #10
   - Validation: test exits 0 in CI; bench printed for record.
 

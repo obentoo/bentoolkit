@@ -1943,7 +1943,13 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "test-1.0.0.ebuild"), []byte("EAPI=8\nHOMEPAGE=\"https://example.com\"\n"), 0644); err != nil {
+	// HOMEPAGE points at the local mock server: DiscoverDataSources turns the
+	// ebuild HOMEPAGE into a data source, and after T13 the analyzer's HTTP
+	// client uses an HTTP/2-capable tuned transport. A live external homepage
+	// would leave a persistent HTTP/2 connection open past the test and trip
+	// goleak; the mock keeps all egress in-process.
+	ebuild := []byte("EAPI=8\nHOMEPAGE=\"" + server.URL + "\"\n")
+	if err := os.WriteFile(filepath.Join(pkgDir, "test-1.0.0.ebuild"), ebuild, 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

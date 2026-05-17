@@ -1,13 +1,19 @@
 package overlay
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/github"
+	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
 func TestCompare(t *testing.T) {
@@ -184,10 +190,13 @@ func TestCompareProgressCallback(t *testing.T) {
 		{Category: "app-misc", Package: "world", LatestVersion: "1.0"},
 	}
 
-	callbackCount := 0
+	// The callback may fire concurrently from worker goroutines, so the
+	// counter must be atomic. ProgressCallback's new signature is
+	// func(done, total uint64).
+	var callbackCount atomic.Int64
 	opts := CompareOptions{
-		ProgressCallback: func(current, total int, pkg string) {
-			callbackCount++
+		ProgressCallback: func(done, total uint64) {
+			callbackCount.Add(1)
 		},
 	}
 
@@ -196,8 +205,8 @@ func TestCompareProgressCallback(t *testing.T) {
 		t.Fatalf("Compare failed: %v", err)
 	}
 
-	if callbackCount != 2 {
-		t.Errorf("Expected 2 callback calls, got %d", callbackCount)
+	if got := callbackCount.Load(); got != 2 {
+		t.Errorf("Expected 2 callback calls, got %d", got)
 	}
 }
 
@@ -435,5 +444,228 @@ func TestFormatSummaryZeroCounts(t *testing.T) {
 	}
 	if strings.Contains(result, "Newer in Bentoo: 0") {
 		t.Error("summary should not show zero newer count")
+	}
+}
+
+// =============================================================================
+// Task T15 / R4 — Parallel CompareWithProvider
+// =============================================================================
+
+// fakeProvider is a concurrency-safe test double for provider.Provider. Each
+// GetPackageVersions call sleeps for delay (so a parallel run is measurably
+// faster than a serial one), tracks the in-flight count, and returns versions
+// from a per-package table.
+type fakeProvider struct {
+	delay    time.Duration
+	versions map[string][]string // keyed by "category/pkg"
+
+	inFlight    atomic.Int64
+	maxInFlight atomic.Int64
+	callCount   atomic.Int64
+}
+
+func (f *fakeProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+	f.callCount.Add(1)
+	cur := f.inFlight.Add(1)
+	defer f.inFlight.Add(-1)
+	// Record the high-water mark of concurrent calls.
+	for {
+		prev := f.maxInFlight.Load()
+		if cur <= prev || f.maxInFlight.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	v, ok := f.versions[category+"/"+pkg]
+	if !ok {
+		return nil, provider.ErrNotFound
+	}
+	return v, nil
+}
+
+func (f *fakeProvider) GetName() string   { return "fake" }
+func (f *fakeProvider) SupportsAPI() bool { return true }
+func (f *fakeProvider) Close() error      { return nil }
+
+// TestCompareOptions_DefaultConcurrency verifies that a non-positive
+// Concurrency on CompareOptions is sanitized to DefaultCompareConcurrency:
+// a zero-valued CompareOptions still drives a working parallel comparison.
+func TestCompareOptions_DefaultConcurrency(t *testing.T) {
+	const numPkgs = 30
+	prov := &fakeProvider{
+		delay:    20 * time.Millisecond,
+		versions: map[string][]string{},
+	}
+	pkgs := make([]PackageInfo, 0, numPkgs)
+	for i := 0; i < numPkgs; i++ {
+		name := fmt.Sprintf("pkg%02d", i)
+		// Provider returns plain version strings (matching the provider.Provider
+		// contract); remote == local 1.0 -> every package is up-to-date.
+		prov.versions["cat/"+name] = []string{"1.0"}
+		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+	}
+
+	// Concurrency left at zero -> must be sanitized to the default (10).
+	opts := CompareOptions{IncludeSynced: true}
+
+	start := time.Now()
+	report, err := CompareWithProvider(pkgs, prov, opts)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("CompareWithProvider returned an error: %v", err)
+	}
+	if report.ComparedPackages != numPkgs {
+		t.Errorf("ComparedPackages = %d, want %d", report.ComparedPackages, numPkgs)
+	}
+
+	// A serial run would take >= 30*20ms = 600ms. With the default concurrency
+	// of 10 it should finish well under that; allow generous slack for CI.
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("comparison took %v; expected default concurrency to parallelize (serial would be ~600ms)", elapsed)
+	}
+	// The high-water mark must exceed 1 (proves parallelism) and never exceed
+	// the default cap.
+	if hi := prov.maxInFlight.Load(); hi <= 1 {
+		t.Errorf("maxInFlight = %d; expected > 1 (parallel execution)", hi)
+	}
+	if hi := prov.maxInFlight.Load(); hi > int64(DefaultCompareConcurrency) {
+		t.Errorf("maxInFlight = %d; exceeds default concurrency cap %d", hi, DefaultCompareConcurrency)
+	}
+}
+
+// TestCompareWithProvider_Parallel verifies that CompareWithProvider processes
+// packages in parallel, never exceeds the requested concurrency, and produces
+// a complete, correctly-counted, sorted report.
+func TestCompareWithProvider_Parallel(t *testing.T) {
+	const numPkgs = 40
+	const concurrency = 8
+
+	prov := &fakeProvider{
+		delay:    10 * time.Millisecond,
+		versions: map[string][]string{},
+	}
+	pkgs := make([]PackageInfo, 0, numPkgs)
+	for i := 0; i < numPkgs; i++ {
+		name := fmt.Sprintf("pkg%02d", i)
+		// Remote has version 2.0 -> every local 1.0 package is outdated.
+		prov.versions["cat/"+name] = []string{"2.0"}
+		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+	}
+
+	var progressCalls atomic.Int64
+	opts := CompareOptions{
+		Concurrency:      concurrency,
+		ProgressCallback: func(done, total uint64) { progressCalls.Add(1) },
+	}
+
+	report, err := CompareWithProvider(pkgs, prov, opts)
+	if err != nil {
+		t.Fatalf("CompareWithProvider returned an error: %v", err)
+	}
+
+	if report.ComparedPackages != numPkgs {
+		t.Errorf("ComparedPackages = %d, want %d", report.ComparedPackages, numPkgs)
+	}
+	if report.OutdatedCount != numPkgs {
+		t.Errorf("OutdatedCount = %d, want %d", report.OutdatedCount, numPkgs)
+	}
+	if len(report.Results) != numPkgs {
+		t.Errorf("len(Results) = %d, want %d", len(report.Results), numPkgs)
+	}
+	if got := progressCalls.Load(); got != numPkgs {
+		t.Errorf("progress callback fired %d times, want %d", got, numPkgs)
+	}
+
+	// The in-flight high-water mark must respect the requested cap.
+	if hi := prov.maxInFlight.Load(); hi > concurrency {
+		t.Errorf("maxInFlight = %d; exceeds requested concurrency %d", hi, concurrency)
+	}
+	// And must show genuine parallelism.
+	if hi := prov.maxInFlight.Load(); hi <= 1 {
+		t.Errorf("maxInFlight = %d; expected > 1 (parallel execution)", hi)
+	}
+
+	// Results must be sorted by category then package, deterministically.
+	for i := 1; i < len(report.Results); i++ {
+		prev, cur := report.Results[i-1], report.Results[i]
+		if prev.Category > cur.Category ||
+			(prev.Category == cur.Category && prev.Package > cur.Package) {
+			t.Errorf("Results not sorted at index %d: %q/%q before %q/%q",
+				i, prev.Category, prev.Package, cur.Category, cur.Package)
+		}
+	}
+}
+
+// TestCompareWithProvider_ContextCancel verifies the T9 cancellation contract
+// is preserved under the parallel implementation: cancelling opts.Ctx stops
+// dispatch and the partial report is returned together with the context error.
+func TestCompareWithProvider_ContextCancel(t *testing.T) {
+	const numPkgs = 200
+	prov := &fakeProvider{
+		delay:    30 * time.Millisecond,
+		versions: map[string][]string{},
+	}
+	pkgs := make([]PackageInfo, 0, numPkgs)
+	for i := 0; i < numPkgs; i++ {
+		name := fmt.Sprintf("pkg%03d", i)
+		prov.versions["cat/"+name] = []string{"1.0"}
+		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const concurrency = 5
+	opts := CompareOptions{Concurrency: concurrency, IncludeSynced: true, Ctx: ctx}
+
+	// Cancel shortly after dispatch begins.
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		cancel()
+	}()
+
+	report, err := CompareWithProvider(pkgs, prov, opts)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	// The partial report must contain strictly fewer than all packages: the
+	// cancellation stopped dispatch before every package was compared.
+	if report.ComparedPackages >= numPkgs {
+		t.Errorf("ComparedPackages = %d; expected a partial result (< %d)", report.ComparedPackages, numPkgs)
+	}
+	// Results stay sorted even on the cancellation path.
+	for i := 1; i < len(report.Results); i++ {
+		prev, cur := report.Results[i-1], report.Results[i]
+		if prev.Category > cur.Category ||
+			(prev.Category == cur.Category && prev.Package > cur.Package) {
+			t.Errorf("partial Results not sorted at index %d", i)
+		}
+	}
+}
+
+// TestCompareWithProvider_ContextCancelledUpfront verifies that a context
+// cancelled before CompareWithProvider is called dispatches no work at all.
+func TestCompareWithProvider_ContextCancelledUpfront(t *testing.T) {
+	prov := &fakeProvider{versions: map[string][]string{}}
+	pkgs := []PackageInfo{
+		{Category: "cat", Package: "a", LatestVersion: "1.0"},
+		{Category: "cat", Package: "b", LatestVersion: "1.0"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the call
+
+	report, err := CompareWithProvider(pkgs, prov, CompareOptions{Ctx: ctx})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if report.ComparedPackages != 0 {
+		t.Errorf("ComparedPackages = %d; expected 0 (no dispatch on pre-cancelled ctx)", report.ComparedPackages)
+	}
+	if got := prov.callCount.Load(); got != 0 {
+		t.Errorf("provider was called %d time(s); expected 0", got)
 	}
 }

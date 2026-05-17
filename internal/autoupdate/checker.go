@@ -7,13 +7,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
+
+// httpRateLimiter is the minimal surface fetchContent needs from a rate
+// limiter: block until a per-host token is available or the context is
+// cancelled. The concrete *RateLimiter satisfies it; defining the interface
+// here (rather than depending on the concrete type) keeps fetchContent
+// testable with a recording/blocking fake without touching rate_limiter.go.
+type httpRateLimiter interface {
+	WaitHTTP(ctx context.Context, domain string) error
+}
 
 // Error variables for checker errors
 var (
@@ -45,6 +58,27 @@ type CheckResult struct {
 // outbound HTTP fetch when no explicit timeout is configured on the Checker.
 const DefaultOpTimeout = 30 * time.Second
 
+// DefaultConcurrency is the default number of packages CheckAll processes in
+// parallel when no explicit concurrency is configured on the Checker.
+const DefaultConcurrency = 10
+
+// maxConcurrency is the upper bound accepted by WithConcurrency. It caps the
+// number of in-flight per-package goroutines (and therefore the burst of
+// outbound HTTP requests) to a sane ceiling regardless of caller input.
+const maxConcurrency = 100
+
+// ProgressCallback reports batch progress as a check proceeds. It is invoked
+// once per package as that package's work completes, with done being the
+// cumulative count of packages finished so far and total the number of
+// packages in the batch.
+//
+// Because CheckAll runs packages concurrently, the callback may fire from
+// multiple goroutines and the per-invocation order is not deterministic.
+// However done is sourced from an atomic counter, so the value observed by any
+// single invocation is monotone non-decreasing: each callback sees a strictly
+// larger done than every callback that ran before it.
+type ProgressCallback func(done, total uint64)
+
 // Checker handles version checking operations for packages.
 // It coordinates between configuration, cache, pending list, and upstream sources.
 type Checker struct {
@@ -69,6 +103,19 @@ type Checker struct {
 	// opTimeout bounds a single outbound operation. Each fetch derives a child
 	// context via context.WithTimeout(ctx, opTimeout). Defaults to DefaultOpTimeout.
 	opTimeout time.Duration
+	// rateLimiter gates the HTTP hot path: fetchContent waits on it (per host)
+	// before every outbound request so parallel checks do not hammer a single
+	// host. It is injectable via WithRateLimiter and is never nil after
+	// NewChecker (a default 1-req/6s-per-host limiter is created when absent).
+	rateLimiter httpRateLimiter
+	// concurrency bounds the number of packages CheckAll processes in parallel.
+	// It is set via WithConcurrency (validated to 1..maxConcurrency) and
+	// defaults to DefaultConcurrency.
+	concurrency int
+	// progressCallback, when non-nil, is invoked once per package as CheckAll
+	// completes that package's work. It is set via WithProgressCallback. It may
+	// be called concurrently from worker goroutines; see ProgressCallback.
+	progressCallback ProgressCallback
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -102,6 +149,20 @@ func WithLLMClient(llm *LLMClient) CheckerOption {
 func WithHTTPClient(client *RetryableHTTPClient) CheckerOption {
 	return func(c *Checker) error {
 		c.httpClient = client
+		return nil
+	}
+}
+
+// WithRateLimiter sets a custom HTTP rate limiter for the checker. The limiter
+// is consulted (per host) before every outbound fetch. A nil limiter is
+// rejected; when this option is not supplied NewChecker installs a default
+// limiter, so the Checker's rateLimiter is never nil after construction.
+func WithRateLimiter(limiter httpRateLimiter) CheckerOption {
+	return func(c *Checker) error {
+		if limiter == nil {
+			return errors.New("checker rate limiter must not be nil")
+		}
+		c.rateLimiter = limiter
 		return nil
 	}
 }
@@ -147,6 +208,30 @@ func WithOpTimeout(d time.Duration) CheckerOption {
 	}
 }
 
+// WithConcurrency sets the maximum number of packages CheckAll processes in
+// parallel. n must be in the inclusive range [1, maxConcurrency]; a value
+// outside that range is rejected. When this option is not supplied the Checker
+// uses DefaultConcurrency.
+func WithConcurrency(n int) CheckerOption {
+	return func(c *Checker) error {
+		if n < 1 || n > maxConcurrency {
+			return fmt.Errorf("checker concurrency must be in range [1, %d], got %d", maxConcurrency, n)
+		}
+		c.concurrency = n
+		return nil
+	}
+}
+
+// WithProgressCallback sets a callback invoked once per package as CheckAll
+// completes that package's work. A nil callback disables progress reporting.
+// See ProgressCallback for the concurrency contract.
+func WithProgressCallback(cb ProgressCallback) CheckerOption {
+	return func(c *Checker) error {
+		c.progressCallback = cb
+		return nil
+	}
+}
+
 // NewChecker creates a new checker instance for the given overlay.
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
@@ -158,6 +243,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		configDir:   configDir,
 		ctx:         context.Background(), // SAFE: default parent; replaced by WithContext when cmd/ wires signal.NotifyContext
 		opTimeout:   DefaultOpTimeout,
+		concurrency: DefaultConcurrency,
 	}
 
 	// Apply options first to allow overriding configDir
@@ -197,6 +283,12 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Initialize HTTP client if not provided
 	if checker.httpClient == nil {
 		checker.httpClient = NewRetryableHTTPClient()
+	}
+
+	// Initialize the HTTP rate limiter if not injected. A Checker must never
+	// have a nil rateLimiter: fetchContent unconditionally waits on it (R10.3).
+	if checker.rateLimiter == nil {
+		checker.rateLimiter = NewRateLimiter()
 	}
 
 	return checker, nil
@@ -422,11 +514,38 @@ func (c *Checker) fetchAndParse(url, parserType, path, pattern string) (string, 
 // The request is bounded by a child of the Checker's parent context (set via
 // WithContext) with the configured per-operation timeout, so a cancelled parent
 // context or an expired deadline aborts the in-flight HTTP call.
-func (c *Checker) fetchContent(url string) ([]byte, error) {
+//
+// Before issuing the request, fetchContent gates on the per-host rate limiter
+// (R10.1): the host is parsed from the URL and c.rateLimiter.WaitHTTP blocks
+// until a token is available. If the wait is cancelled by the context the
+// context error is returned and no HTTP request is made (R10.2). A URL that
+// fails to parse fails open (R10.1): a Warn line is logged and the fetch
+// proceeds without a rate-limit wait rather than aborting.
+func (c *Checker) fetchContent(rawURL string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
 	defer cancel()
 
-	resp, err := c.httpClient.GetWithContext(ctx, url)
+	// Parse the host for per-host rate limiting. Fail open on a parse error:
+	// an unparseable URL still gets a (rate-limit-free) attempt rather than
+	// silently dropping the fetch.
+	if parsed, err := url.Parse(rawURL); err != nil {
+		warnLogf("rate limiter: could not parse URL %q for host extraction (%v); "+
+			"proceeding without a rate-limit wait", rawURL, err)
+	} else if waitErr := c.rateLimiter.WaitHTTP(ctx, parsed.Host); waitErr != nil {
+		// The wait did not yield a token. If the context is done the wait was
+		// cancelled (parent cancelled or deadline exceeded): return the
+		// context error WITHOUT issuing the HTTP request (R10.2). Prefer the
+		// raw context error so callers' errors.Is(err, context.Canceled /
+		// .DeadlineExceeded) checks hold regardless of how the limiter wraps it.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("rate limiter wait cancelled: %w", ctxErr)
+		}
+		// A non-context wait failure (e.g. the request can never satisfy the
+		// limiter's burst): surface it rather than issuing a doomed request.
+		return nil, fmt.Errorf("rate limiter wait failed: %w", waitErr)
+	}
+
+	resp, err := c.httpClient.GetWithContext(ctx, rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -450,27 +569,95 @@ func (c *Checker) fetchContent(url string) ([]byte, error) {
 // If force is true, the cache is bypassed for all packages.
 //
 // It returns a BatchResult: successfully checked packages land in Items, while
-// a per-package failure is recorded in Failures keyed by the package name and
-// the batch continues with the next package. The loop is sequential here;
-// full parallelization is handled by a later task. The returned BatchResult is
-// fully populated before it is returned, so callers may invoke its methods
-// (ExitCode, FormatFailures) directly.
+// a per-package failure is recorded in Failures keyed by the package name.
+//
+// Packages are processed concurrently, bounded by the Checker's concurrency
+// limit (see WithConcurrency). The semaphore is acquired with a
+// context-cancellable select: if the Checker's parent context (WithContext) is
+// already cancelled, the remaining packages are not dispatched — each is
+// recorded in Failures with the context error instead — so a SIGINT mid-scan
+// stops the batch promptly. Every worker recovers panics raised by
+// CheckPackage and records them as a failure, so a single misbehaving package
+// cannot crash the process. All writes to the shared result maps are
+// mutex-guarded.
+//
+// Items are sorted lexically by package name before the BatchResult is
+// returned, so the output is deterministic regardless of completion order. The
+// returned BatchResult is fully populated only after every worker goroutine
+// has joined (wg.Wait), so callers may invoke its methods (ExitCode,
+// FormatFailures) directly.
 func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
-	batch := BatchResult[CheckResult]{
-		Items:    make([]CheckResult, 0, len(c.config.Packages)),
-		Failures: make(map[string]error),
-	}
+	var (
+		sem      = make(chan struct{}, c.concurrency)
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		results  = make([]CheckResult, 0, len(c.config.Packages))
+		failures = make(map[string]error)
+		progress atomic.Uint64
+		total    = uint64(len(c.config.Packages))
+	)
 
-	for pkg := range c.config.Packages {
-		result, err := c.CheckPackage(pkg, force)
-		if err != nil {
-			batch.Failures[pkg] = err
+	for name, pkg := range c.config.Packages {
+		// A select with both cases ready picks at random, so check the context
+		// deterministically first: an already-cancelled context must mark
+		// EVERY remaining package as a failure, not just roughly half of them.
+		if err := c.ctx.Err(); err != nil {
+			mu.Lock()
+			failures[name] = err
+			mu.Unlock()
 			continue
 		}
-		batch.Items = append(batch.Items, *result)
+		// Cancellable semaphore acquisition: also record a context failure if
+		// the parent context is cancelled while waiting for a free slot.
+		select {
+		case <-c.ctx.Done():
+			mu.Lock()
+			failures[name] = c.ctx.Err()
+			mu.Unlock()
+			continue
+		case sem <- struct{}{}:
+		}
+
+		wg.Add(1)
+		go func(n string, p PackageConfig) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			// A panic in CheckPackage (or anything it calls) must not crash
+			// the process: recover it and record a per-package failure.
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					failures[n] = fmt.Errorf("panic: %v", r)
+					mu.Unlock()
+				}
+			}()
+
+			result, err := c.CheckPackage(n, force)
+
+			mu.Lock()
+			if err != nil {
+				failures[n] = err
+			} else {
+				results = append(results, *result)
+			}
+			mu.Unlock()
+
+			if c.progressCallback != nil {
+				c.progressCallback(progress.Add(1), total)
+			}
+		}(name, pkg)
 	}
 
-	return batch
+	// Join every worker before touching the shared state so the BatchResult is
+	// fully populated and safe to return.
+	wg.Wait()
+
+	// Deterministic final ordering, independent of completion order.
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Package < results[j].Package
+	})
+
+	return BatchResult[CheckResult]{Items: results, Failures: failures}
 }
 
 // Config returns the packages configuration.

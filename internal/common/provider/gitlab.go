@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // GitLabProvider fetches package versions from GitLab API
@@ -48,7 +49,8 @@ func NewGitLabProvider(repoInfo *RepositoryInfo) (*GitLabProvider, error) {
 		Token:     repoInfo.Token,
 		UserAgent: "bentoolkit/1.0",
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: httputil.BuildTransport(),
 		},
 		CacheTTL: 24 * time.Hour,
 	}

@@ -111,7 +111,8 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 			BaseURL:   baseURL,
 		},
 		httpClient: &http.Client{
-			Timeout: DefaultHTTPTimeout,
+			Timeout:   DefaultHTTPTimeout,
+			Transport: httputil.BuildTransport(),
 		},
 		apiKey:       apiKey,
 		baseURL:      baseURL,

@@ -205,9 +205,12 @@ func runCompare(cmd *cobra.Command, args []string) {
 	opts := overlay.CompareOptions{
 		OnlyOutdated:  compareOnlyOutdated,
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
-		ProgressCallback: func(current, total int, pkg string) {
-			percent := (current * 100) / total
-			fmt.Printf("\r  Checking: [%3d%%] %s", percent, truncatePkgName(pkg, 40))
+		ProgressCallback: func(done, total uint64) {
+			percent := uint64(0)
+			if total > 0 {
+				percent = (done * 100) / total
+			}
+			fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
 		},
 	}
 

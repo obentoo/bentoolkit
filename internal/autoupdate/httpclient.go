@@ -114,7 +114,8 @@ func NewRetryableHTTPClient() *RetryableHTTPClient {
 func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 	return &RetryableHTTPClient{
 		client: &http.Client{
-			Timeout: config.Timeout,
+			Timeout:   config.Timeout,
+			Transport: httputil.BuildTransport(),
 		},
 		config:    config,
 		breaker:   newDefaultBreaker(),

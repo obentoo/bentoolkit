@@ -64,6 +64,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 			checker, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
 				WithPackagesConfig(config),
+				WithRateLimiter(unlimitedRateLimiter()),
 			)
 			if err != nil {
 				t.Logf("Failed to create checker: %v", err)
@@ -123,6 +124,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 			checker, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
 				WithPackagesConfig(config),
+				WithRateLimiter(unlimitedRateLimiter()),
 			)
 			if err != nil {
 				t.Logf("Failed to create checker: %v", err)
@@ -194,6 +196,7 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			checker, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
 				WithPackagesConfig(config),
+				WithRateLimiter(unlimitedRateLimiter()),
 			)
 			if err != nil {
 				t.Logf("Failed to create checker: %v", err)
@@ -271,6 +274,7 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			checker, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
 				WithPackagesConfig(config),
+				WithRateLimiter(unlimitedRateLimiter()),
 			)
 			if err != nil {
 				t.Logf("Failed to create checker: %v", err)
@@ -362,6 +366,14 @@ func splitPackageName(pkg string) []string {
 	}
 	return nil
 }
+
+// unlimitedRateLimiter returns an httpRateLimiter that never blocks and never
+// errors. NewChecker installs a real default limiter (1 req / 6s per host,
+// R10.3) when WithRateLimiter is absent; unit tests below issue several
+// requests to the same host in quick succession and would otherwise stall on
+// the 6s-per-token wait. Injecting this no-op limiter keeps these tests fast
+// without weakening the production default.
+func unlimitedRateLimiter() httpRateLimiter { return &recordingRateLimiter{} }
 
 // =============================================================================
 // Unit Tests
@@ -467,6 +479,7 @@ func TestCheckPackageNotFound(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -499,6 +512,7 @@ func TestCheckPackageNoEbuild(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -540,6 +554,7 @@ func TestCheckPackageUsesCache(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
 		WithCache(cache),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -593,6 +608,7 @@ func TestCheckPackageBypassesCache(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
 		WithCache(cache),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -640,6 +656,7 @@ func TestCheckPackageDetectsUpdate(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -688,6 +705,7 @@ func TestCheckPackageNoUpdate(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -730,6 +748,7 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -787,6 +806,7 @@ func TestCheckAll_ReturnsBatchResult(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(&PackagesConfig{Packages: packages}),
 		WithHTTPClient(httpClient),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -847,6 +867,7 @@ func TestCheckAll_ErrorsOnStderr(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(&PackagesConfig{Packages: packages}),
 		WithHTTPClient(httpClient),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -945,6 +966,7 @@ func TestCheckPackageAddsToPending(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -998,6 +1020,7 @@ func TestCheckPackageUpdatesCache(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -1040,6 +1063,7 @@ func TestGetCurrentVersionHighest(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -1076,6 +1100,7 @@ func TestGetCurrentVersionSkipsLive(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -1122,6 +1147,7 @@ func TestFetchUpstreamVersionFallback(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
