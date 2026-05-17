@@ -11,6 +11,13 @@ var (
 	ErrAPIError = errors.New("API error")
 	// ErrCloneFailed indicates git clone operation failed
 	ErrCloneFailed = errors.New("git clone failed")
+	// ErrInvalidRepoURL indicates the repository URL has a scheme outside the
+	// allowed set {http, https, git, ssh}, or an empty host.
+	ErrInvalidRepoURL = errors.New("invalid repository URL")
+	// ErrInvalidBranch indicates the git branch name fails git check-ref-format
+	// style validation (control chars, "..", "@{", a leading "-", shell
+	// metacharacters, and similar unsafe constructs).
+	ErrInvalidBranch = errors.New("invalid git branch name")
 )
 
 // Provider is the interface for fetching package versions from a repository

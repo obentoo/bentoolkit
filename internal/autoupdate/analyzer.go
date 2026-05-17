@@ -26,7 +26,16 @@ var (
 	ErrNoDataSources = errors.New("no data sources found for package")
 	// ErrAnalysisFailed is returned when LLM analysis fails
 	ErrAnalysisFailed = errors.New("LLM analysis failed")
+	// ErrInvalidPattern is returned when an LLM-generated regex pattern is
+	// invalid: it fails to compile, exceeds MaxPatternLen, or uses
+	// backreferences (which RE2 does not support).
+	ErrInvalidPattern = errors.New("invalid regex pattern")
 )
+
+// MaxPatternLen is the maximum allowed length, in characters, of an
+// LLM-generated regex pattern. Patterns longer than this are rejected as a
+// basic ReDoS prophylaxis.
+const MaxPatternLen = 512
 
 // AnalyzeOptions configures the analysis behavior.
 type AnalyzeOptions struct {

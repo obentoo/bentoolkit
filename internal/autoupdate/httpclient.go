@@ -21,6 +21,9 @@ var (
 	ErrMaxRetriesExceeded = errors.New("max retries exceeded")
 	// ErrRequestTimeout is returned when a request times out
 	ErrRequestTimeout = errors.New("request timeout")
+	// ErrResponseTooLarge is returned when an HTTP response body exceeds the
+	// MaxBodyBytes cap.
+	ErrResponseTooLarge = errors.New("response body too large")
 )
 
 // envVarPattern matches ${VAR_NAME} syntax for environment variable substitution

@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// DefaultGitCloneTimeout is the default timeout applied to a git clone
+// operation before it is cancelled.
+const DefaultGitCloneTimeout = 2 * time.Minute
+
 // GitCloneProvider fetches package versions by cloning a git repository
 type GitCloneProvider struct {
 	RepoURL   string

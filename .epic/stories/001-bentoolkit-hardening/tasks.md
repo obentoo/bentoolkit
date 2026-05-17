@@ -62,19 +62,19 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/common/httputil/doc.go`
 
 **Sub-tasks**:
-- [ ] 1.1 Create package with godoc summarizing purpose ("centralized outbound HTTP transport tuning").
+- [x] 1.1 Create package with godoc summarizing purpose ("centralized outbound HTTP transport tuning").
   - Requirements: R6.3
   - Validation: `go doc ./internal/common/httputil` renders package summary; `go vet ./...` clean.
-- [ ] 1.2 Implement `BuildTransport() *http.Transport` with `MaxIdleConnsPerHost=16`, `MaxConnsPerHost=32`, `IdleConnTimeout=90*time.Second`, `TLSHandshakeTimeout=10*time.Second`, `ExpectContinueTimeout=1*time.Second`, `ForceAttemptHTTP2=true`.
+- [x] 1.2 Implement `BuildTransport() *http.Transport` with `MaxIdleConnsPerHost=16`, `MaxConnsPerHost=32`, `IdleConnTimeout=90*time.Second`, `TLSHandshakeTimeout=10*time.Second`, `ExpectContinueTimeout=1*time.Second`, `ForceAttemptHTTP2=true`.
   - Requirements: R6.1
   - Validation: `TestBuildTransport_DefaultsTuned` table-driven asserts each field.
-- [ ] 1.3 Honor `BENTOO_DISABLE_HTTP2=1`: when set, override `ForceAttemptHTTP2=false` AND set `TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}` (stdlib disable idiom).
+- [x] 1.3 Honor `BENTOO_DISABLE_HTTP2=1`: when set, override `ForceAttemptHTTP2=false` AND set `TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}` (stdlib disable idiom).
   - Requirements: R6.2
   - Validation: `TestBuildTransport_HTTP2Disabled` uses `t.Setenv`, asserts `ForceAttemptHTTP2==false` and `len(TLSNextProto)==0`.
-- [ ] 1.4 Export constants: `MaxBodyBytes int64 = 10 * 1024 * 1024` and `EnvDisableHTTP2 = "BENTOO_DISABLE_HTTP2"`.
+- [x] 1.4 Export constants: `MaxBodyBytes int64 = 10 * 1024 * 1024` and `EnvDisableHTTP2 = "BENTOO_DISABLE_HTTP2"`.
   - Requirements: R11.1
   - Validation: `TestMaxBodyBytes_Value` asserts `MaxBodyBytes == 10485760`.
-- [ ] 1.5 Confirm package adds no third-party imports beyond stdlib + `golang.org/x/net/http2` if needed.
+- [x] 1.5 Confirm package adds no third-party imports beyond stdlib + `golang.org/x/net/http2` if needed.
   - Requirements: (architectural)
   - Validation: `go list -m all` diff shows zero new modules.
 
@@ -93,13 +93,13 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/common/fileutil/mode_test.go`
 
 **Sub-tasks**:
-- [ ] 2.1 Define `const CacheFileMode os.FileMode = 0600` with godoc explaining rationale.
+- [x] 2.1 Define `const CacheFileMode os.FileMode = 0600` with godoc explaining rationale.
   - Requirements: R9.3
   - Validation: `TestCacheFileMode_IsRestrictive` asserts `CacheFileMode == 0600`.
-- [ ] 2.2 Implement `SafeChmod(path string, mode os.FileMode, log Logger) error` swallowing `EOPNOTSUPP`/`EPERM`/`EROFS` with `Warn` log; other errors returned as-is.
+- [x] 2.2 Implement `SafeChmod(path string, mode os.FileMode, log Logger) error` swallowing `EOPNOTSUPP`/`EPERM`/`EROFS` with `Warn` log; other errors returned as-is.
   - Requirements: R9.2
   - Validation: `TestSafeChmod_NormalFS` chmods real file in `t.TempDir`; `TestSafeChmod_UnsupportedFS` uses mock logger and injected `chmodFunc` returning `syscall.EOPNOTSUPP`; assert `nil` return and one warn line.
-- [ ] 2.3 Use a small `Logger` interface (`Warn(msg string, args ...any)`) rather than depending on `internal/common/logger` directly, to avoid import cycle if `logger` ever imports `fileutil`.
+- [x] 2.3 Use a small `Logger` interface (`Warn(msg string, args ...any)`) rather than depending on `internal/common/logger` directly, to avoid import cycle if `logger` ever imports `fileutil`.
   - Requirements: (architectural)
   - Validation: `go list -deps ./internal/common/fileutil/...` shows no `logger` import.
 
@@ -118,19 +118,19 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `internal/autoupdate/batch_result_test.go`
 
 **Sub-tasks**:
-- [ ] 3.1 Define `BatchResult[T any]` with fields `Items []T` and `Failures map[string]error`.
+- [x] 3.1 Define `BatchResult[T any]` with fields `Items []T` and `Failures map[string]error`.
   - Requirements: R4.3
   - Validation: `TestBatchResult_FieldsExported` compile-time test.
-- [ ] 3.2 Implement `ExitCode() int` per AD-4 contract (0 / 1 / 2).
+- [x] 3.2 Implement `ExitCode() int` per AD-4 contract (0 / 1 / 2).
   - Requirements: R7.2, R7.3, R7.4
   - Validation: `TestBatchResult_ExitCode_AllOk` / `_Partial` / `_TotalFail` / `_Empty`.
-- [ ] 3.3 Implement `HasFailures() bool`.
+- [x] 3.3 Implement `HasFailures() bool`.
   - Requirements: R7.1
   - Validation: `TestBatchResult_HasFailures` two-case.
-- [ ] 3.4 Implement `FormatFailures(w io.Writer)` emitting `ERROR <pkg>: <err>` lines, one per failure, sorted by package name. Multi-line errors flattened: replace `\n` with `\n  ` (continuation indent) so each error remains parseable.
+- [x] 3.4 Implement `FormatFailures(w io.Writer)` emitting `ERROR <pkg>: <err>` lines, one per failure, sorted by package name. Multi-line errors flattened: replace `\n` with `\n  ` (continuation indent) so each error remains parseable.
   - Requirements: R7.1
   - Validation: `TestBatchResult_FormatFailures_SortedDeterministic` with 3 failures; `TestBatchResult_FormatFailures_MultilineErrors` ensures continuation indent (Test Advisor recommendation).
-- [ ] 3.5 Ensure `BatchResult.FormatFailures` is goroutine-safe by NOT calling it before all goroutines have joined (caller responsibility documented in godoc).
+- [x] 3.5 Ensure `BatchResult.FormatFailures` is goroutine-safe by NOT calling it before all goroutines have joined (caller responsibility documented in godoc).
   - Requirements: R7.1
   - Validation: package godoc explicitly states "call after Wait()".
 
@@ -151,13 +151,13 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `internal/common/provider/gitclone.go` — add `const DefaultGitCloneTimeout = 2 * time.Minute`.
 
 **Sub-tasks**:
-- [ ] 4.1 Declare each sentinel with godoc explaining trigger condition.
+- [x] 4.1 Declare each sentinel with godoc explaining trigger condition.
   - Requirements: R2.1, R2.2, R8.3, R11.3
   - Validation: `go doc <each-symbol>` shows description; `errors.Is(returnedErr, ErrXxx)` works in unit tests.
-- [ ] 4.2 Add `MaxPatternLen` constant = 512.
+- [x] 4.2 Add `MaxPatternLen` constant = 512.
   - Requirements: R8.1
   - Validation: compile-time reference in T7 tests.
-- [ ] 4.3 Add `DefaultGitCloneTimeout` constant = 2 min.
+- [x] 4.3 Add `DefaultGitCloneTimeout` constant = 2 min.
   - Requirements: R2.3
   - Validation: compile-time reference in T6 tests.
 
