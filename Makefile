@@ -57,9 +57,24 @@ coverage:
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
+# Audit the context spine: no naked context.Background() may appear in
+# internal/autoupdate or internal/overlay outside of test files. The naive
+# grep yields false positives — doc-comment lines that merely mention the
+# string context.Background() in prose, and the GetWithHeaders convenience
+# wrapper which carries an explicit "// SAFE:" justification. The chained
+# filters drop, in order: test files, "// SAFE:"-annotated lines, and any
+# line whose match is inside a pure comment (the grep -vE ':<lineno>:<ws>//'
+# filter). A surviving hit is a genuine naked context.Background().
+.PHONY: audit-ctx
+audit-ctx:
+	@! grep -rn "context\.Background()" internal/autoupdate internal/overlay --include='*.go' \
+		| grep -v "_test.go" | grep -v "// SAFE:" | grep -vE ':[0-9]+:[[:space:]]*//' \
+		| grep . || (echo "audit-ctx: naked context.Background() found" && exit 1)
+	@echo "audit-ctx: no naked context.Background() in internal/autoupdate or internal/overlay"
+
 # Security audit
 .PHONY: audit
-audit:
+audit: audit-ctx
 	$(GOMOD) verify
 	@echo "Module verification passed"
 	@if command -v govulncheck >/dev/null 2>&1; then \
@@ -131,7 +146,8 @@ help:
 	@echo "  uninstall       Remove from $(INSTALL_DIR)"
 	@echo "  test            Run tests"
 	@echo "  coverage        Run tests with coverage report"
-	@echo "  audit           Run security audit (go mod verify + govulncheck)"
+	@echo "  audit-ctx       Verify no naked context.Background() in internal/autoupdate, internal/overlay"
+	@echo "  audit           Run security audit (audit-ctx + go mod verify + govulncheck)"
 	@echo "  clean           Remove build artifacts"
 	@echo "  build-all       Cross-compile for linux amd64 and arm64"
 	@echo "  build-linux-amd64  Build for Linux amd64"

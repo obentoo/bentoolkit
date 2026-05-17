@@ -553,25 +553,25 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - NEW `cmd/bentoo/overlay_autoupdate_signal_test.go`.
 
 **Sub-tasks**:
-- [ ] 16.1 Add `Flags().IntVar(&opts.Concurrency, "concurrency", autoupdate.DefaultConcurrency, …)`; validate `1 ≤ n ≤ 100` in `runAutoupdate` before any work.
+- [x] 16.1 Add `Flags().IntVar(&opts.Concurrency, "concurrency", autoupdate.DefaultConcurrency, …)`; validate `1 ≤ n ≤ 100` in `runAutoupdate` before any work.
   - Requirements: R4.2
   - Validation: `TestAutoupdate_FlagValidation` table: `-1`, `0`, `101`, `1000` reject; `1`, `10`, `100` accept (Test Advisor gap #10 + recommendation: include negative ints).
-- [ ] 16.2 In `runAutoupdate`, verify `cmd.Context()` already provides signal cancellation (OQ-1 verification). If not, wrap with `signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)`. Document choice with comment.
+- [x] 16.2 In `runAutoupdate`, verify `cmd.Context()` already provides signal cancellation (OQ-1 verification). If not, wrap with `signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)`. Document choice with comment.
   - Requirements: R3.1
   - Validation: code review + child-process test (16.7).
-- [ ] 16.3 Repeat 16.1 / 16.2 in `overlay_compare.go`.
+- [x] 16.3 Repeat 16.1 / 16.2 in `overlay_compare.go`.
   - Requirements: R3.1, R4.2
   - Validation: `TestCompare_FlagValidation`.
-- [ ] 16.4 Add `audit-ctx` Makefile target: `grep -rn "context\.Background()" internal/autoupdate internal/overlay | grep -v "_test.go" | grep -v "// SAFE:" | (! grep .)`. Wire into `make audit` aggregate target.
+- [x] 16.4 Add `audit-ctx` Makefile target: `grep -rn "context\.Background()" internal/autoupdate internal/overlay | grep -v "_test.go" | grep -v "// SAFE:" | (! grep .)`. Wire into `make audit` aggregate target.
   - Requirements: IP-1
   - Validation: `make audit-ctx` exits 0 on the new tree; `TestAuditCtxTarget_RejectsNakedBackground` creates a temp fixture file with `context.Background()` (no SAFE comment) and asserts the target exits non-zero (Test Advisor IP-1 negative test).
-- [ ] 16.5 Edit `.golangci.yml`: remove `G204` from gosec excludes. Document rationale in YAML comment.
+- [x] 16.5 Edit `.golangci.yml`: remove `G204` from gosec excludes. Document rationale in YAML comment.
   - Requirements: (security follow-through)
   - Validation: `golangci-lint run ./...` exits 0 with G204 enabled.
-- [ ] 16.6 Add CI step calling `make audit-ctx` after `make lint`.
+- [x] 16.6 Add CI step calling `make audit-ctx` after `make lint`.
   - Requirements: IP-1
   - Validation: CI YAML lints; manual workflow trigger green.
-- [ ] 16.7 Write signal test: prefer direct in-process approach (call `runAutoupdate` in goroutine; send `process.Signal` via `findProcess`) over child-process build to keep CI portable (Test Advisor gap #10). Skip on Windows.
+- [x] 16.7 Write signal test: prefer direct in-process approach (call `runAutoupdate` in goroutine; send `process.Signal` via `findProcess`) over child-process build to keep CI portable (Test Advisor gap #10). Skip on Windows.
   - Requirements: R3.1
   - Validation: `TestAutoupdate_SignalInterrupt` exits ≤ 2 s.
 
@@ -590,25 +590,25 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 - CHANGE `CHANGELOG.md`.
 
 **Sub-tasks**:
-- [ ] 17.1 Add `README.md` section "Exit codes" documenting the 0/1/2 contract.
+- [x] 17.1 Add `README.md` section "Exit codes" documenting the 0/1/2 contract.
   - Requirements: R7.5
   - Validation: section heading present; `TestREADME_DocumentsExitCodes` greps for required keywords.
-- [ ] 17.2 Add `README.md` section "Concurrency" documenting `--concurrency` flag, default 10, range [1,100].
+- [x] 17.2 Add `README.md` section "Concurrency" documenting `--concurrency` flag, default 10, range [1,100].
   - Requirements: R4.2
   - Validation: grep test.
-- [ ] 17.3 Add `README.md` section "Headers and environment variables" documenting the allow-list (4 named vars + `BENTOO_*` prefix) and the 4 allowed header names. Include migration example: `${MY_TOKEN}` → `${BENTOO_MY_TOKEN}`.
+- [x] 17.3 Add `README.md` section "Headers and environment variables" documenting the allow-list (4 named vars + `BENTOO_*` prefix) and the 4 allowed header names. Include migration example: `${MY_TOKEN}` → `${BENTOO_MY_TOKEN}`.
   - Requirements: R1.1
   - Validation: grep test for keywords (BENTOO_, allow-list, Authorization).
-- [ ] 17.4 Add `README.md` section "HTTP/2" documenting `BENTOO_DISABLE_HTTP2=1` opt-out.
+- [x] 17.4 Add `README.md` section "HTTP/2" documenting `BENTOO_DISABLE_HTTP2=1` opt-out.
   - Requirements: R6.2
   - Validation: grep test.
-- [ ] 17.5 Add `README.md` section "Filesystem assumptions" documenting `0600` cache mode and FAT32 fallback.
+- [x] 17.5 Add `README.md` section "Filesystem assumptions" documenting `0600` cache mode and FAT32 fallback.
   - Requirements: R9.1, R9.2
   - Validation: grep test.
-- [ ] 17.6 Update old `${ENV_VAR}` example (README:469) to reflect allow-list rules.
+- [x] 17.6 Update old `${ENV_VAR}` example (README:469) to reflect allow-list rules.
   - Requirements: R1.1
   - Validation: line-diff inspection.
-- [ ] 17.7 Write `CHANGELOG.md` `[0.2.0]` block with `### Added`, `### Changed`, `### Security`, `### Fixed`. End with validation list: `go test -race`, `golangci-lint`, `govulncheck`, `make audit-ctx`.
+- [x] 17.7 Write `CHANGELOG.md` `[0.2.0]` block with `### Added`, `### Changed`, `### Security`, `### Fixed`. End with validation list: `go test -race`, `golangci-lint`, `govulncheck`, `make audit-ctx`.
   - Requirements: R7.5, DoD #7
   - Validation: `grep -q "## \[0.2.0\]" CHANGELOG.md` exits 0.
 
@@ -619,14 +619,14 @@ A failed gate means rework or rollback; never `--skip-tests` or `--no-verify`.
 
 ## Definition of Done — final checklist
 
-- [ ] All 17 tasks marked complete.
-- [ ] `go test -race ./...` green.
-- [ ] `go test -cover ./...` aggregate ≥ 80%.
-- [ ] `golangci-lint run` green (with G204 enabled).
-- [ ] `govulncheck ./...` no findings outside documented exclusions.
-- [ ] `make audit-ctx` exits 0.
-- [ ] `goleak` reports zero leaks across `internal/autoupdate` and `internal/overlay`.
-- [ ] `bash scripts/validate-story.sh .epic/stories/001-bentoolkit-hardening` exits 0.
-- [ ] `bash scripts/cross-reference.sh .epic/stories/001-bentoolkit-hardening` exits 0.
-- [ ] `TestBenchmarkSpeedup` reports ≥ 4× improvement.
-- [ ] Release commit + tag `v0.2.0`.
+- [x] All 17 tasks marked complete.
+- [x] `go test -race ./...` green.
+- [x] `go test -cover ./...` aggregate ≥ 80%. (84.5%)
+- [x] `golangci-lint run` green (with G204 enabled). (v2.1.6, 0 issues)
+- [x] `govulncheck ./...` no findings outside documented exclusions.
+- [x] `make audit-ctx` exits 0.
+- [x] `goleak` reports zero leaks across `internal/autoupdate` and `internal/overlay`.
+- [x] `bash scripts/validate-story.sh .epic/stories/001-bentoolkit-hardening` exits 0.
+- [x] `bash scripts/cross-reference.sh .epic/stories/001-bentoolkit-hardening` exits 0.
+- [x] `TestBenchmarkSpeedup` reports ≥ 4× improvement. (9.95×)
+- [ ] Release commit + tag `v0.2.0`. (deferred — awaiting user review per D4)

@@ -466,7 +466,7 @@ selector = "a.release-tag"
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
 | `llm_prompt` | Custom prompt for LLM-assisted extraction |
-| `headers` | Custom HTTP headers (supports `${ENV_VAR}` substitution) |
+| `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
 
 #### Supported LLM Providers
@@ -510,6 +510,104 @@ bentoo overlay add www-client/myapp/
 bentoo overlay commit
 # → "up(www-client/myapp-1.0 -> 1.1)"
 ```
+
+### Exit codes
+
+`bentoo overlay autoupdate` reports its outcome through the process exit code so
+it can be wired into scripts and CI:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every package was processed successfully. |
+| `1` | Partial failure — at least one package failed **and** at least one succeeded. |
+| `2` | Total failure — no package was processed (or the configuration is invalid). |
+
+A non-zero exit code is therefore distinguishable: `1` means "some work
+landed", `2` means "nothing landed". The per-package errors that caused a `1`
+or `2` are also printed so the failing packages can be retried individually.
+
+### Concurrency
+
+`overlay autoupdate` and `overlay compare` process packages in parallel. The
+`--concurrency=N` flag bounds the number of packages worked on at once:
+
+```bash
+bentoo overlay autoupdate --concurrency=4
+bentoo overlay compare --concurrency=20
+```
+
+| Property | Value |
+|----------|-------|
+| Default | `10` |
+| Valid range | `[1, 100]` (inclusive) |
+
+A value outside the valid range **fails fast** with a clear error *before any
+package work begins* — so a typo in the flag never starts a partial run.
+
+### Headers and environment variables
+
+A `packages.toml` entry can declare custom HTTP `headers`. A `${VAR}` reference
+in a header *value* is expanded from the process environment **only** when both
+of the following hold (this is an allow-list — there is intentionally no escape
+hatch):
+
+1. The header **name** (matched case-insensitively) is one of:
+   `Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`.
+2. The environment **variable** is either prefixed with `BENTOO_` **or** is one
+   of: `GITHUB_TOKEN`, `GITLAB_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+
+This prevents a malicious or mistaken `packages.toml` from exfiltrating
+arbitrary process secrets (e.g. a cloud credential) through a non-auth header
+or an arbitrary variable name. A `${VAR}` that does not satisfy both rules is
+**passed through literally** (the header value keeps the raw `${VAR}` text) and
+a `Warn` is logged.
+
+```toml
+[app-misc/hello]
+url = "https://api.example.com/releases/latest"
+parser = "json"
+path = "tag_name"
+
+[app-misc/hello.headers]
+# Expanded: allow-listed header + BENTOO_-prefixed variable.
+Authorization = "Bearer ${BENTOO_MY_TOKEN}"
+# Expanded: allow-listed header + allow-listed variable.
+X-Api-Key = "${GITHUB_TOKEN}"
+```
+
+**Migration (BREAKING):** before this release any `${VAR}` in any header was
+expanded. A previously-working header such as `Authorization = "Bearer
+${MY_TOKEN}"` now has a non-allow-listed variable and will be passed through
+literally with a `Warn`. Rename the variable to add the `BENTOO_` prefix:
+
+```diff
+-Authorization = "Bearer ${MY_TOKEN}"
++Authorization = "Bearer ${BENTOO_MY_TOKEN}"
+```
+
+and export it under the new name (`export BENTOO_MY_TOKEN=...`).
+
+### HTTP/2
+
+The shared HTTP transport negotiates **HTTP/2 by default**. If an HTTP/2-aware
+proxy or middlebox in your environment misbehaves, opt out by setting:
+
+```bash
+export BENTOO_DISABLE_HTTP2=1
+```
+
+With `BENTOO_DISABLE_HTTP2=1` the transport falls back to HTTP/1.1 only.
+
+### Filesystem assumptions
+
+Cache files and the apply-log are written with mode `0600` (owner read/write
+only), since they may contain tokens echoed from request headers or upstream
+responses.
+
+On filesystems that cannot represent Unix permission bits — notably FAT32 and
+exFAT — the `chmod` to `0600` fails. In that case the tool emits a `Warn` and
+**continues**; the file is still written, just without the restrictive mode.
+Keep caches on a permission-capable filesystem when storing sensitive data.
 
 ### Typical Overlay Workflow
 

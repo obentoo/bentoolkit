@@ -24,6 +24,9 @@ jobs:
       - name: Run golangci-lint
         run: golangci-lint run ./...
 
+      - name: Audit context spine
+        run: make audit-ctx
+
   test:
     name: Test
     runs-on: ubuntu-latest

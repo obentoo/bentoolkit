@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
 
 // writeExitTestEbuild writes a minimal ebuild for pkg ("category/name") at the
@@ -109,8 +112,14 @@ func TestCLI_ExitCodes(t *testing.T) {
 			autoupdateForce = true
 			defer func() { autoupdateForce = origForce }()
 
+			// runCheck reads autoupdateConcurrency via WithConcurrency, which
+			// rejects values outside [1, 100]; pin a valid value for the test.
+			origConc := autoupdateConcurrency
+			autoupdateConcurrency = autoupdate.DefaultConcurrency
+			defer func() { autoupdateConcurrency = origConc }()
+
 			code := withExitIntercept(func() {
-				runCheck(overlayDir, configDir, nil)
+				runCheck(context.Background(), overlayDir, configDir, nil)
 			})
 			if code != tt.wantExit {
 				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)

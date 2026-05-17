@@ -45,7 +45,11 @@ func runLog(cmd *cobra.Command, args []string) {
 		gitArgs = append(gitArgs, "--pretty=format:%C(yellow)%h%C(reset) %C(green)%ad%C(reset) %C(blue)%an%C(reset)%n  %s%n", "--date=short")
 	}
 
-	gitCmd := exec.Command("git", gitArgs...)
+	// G204: command name is the fixed literal "git"; gitArgs is built only
+	// from internal literals ("log", a numeric -N, "--color=always",
+	// "--oneline"/"--pretty=format:..."/"--date=short") — no user-supplied
+	// input reaches the argument vector.
+	gitCmd := exec.Command("git", gitArgs...) //nolint:gosec // G204: fixed "git" command + internal literal args only
 	gitCmd.Dir = overlayPath
 	gitCmd.Stdout = os.Stdout
 	gitCmd.Stderr = os.Stderr

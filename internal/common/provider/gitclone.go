@@ -175,18 +175,25 @@ func (p *GitCloneProvider) cloneRepo() error {
 	return nil
 }
 
-// updateRepo updates the repository
+// updateRepo updates the repository.
+//
+// G204 (gosec) is suppressed on the three exec sites below: the command name
+// is always the fixed literal "git"; p.LocalPath is a process-controlled cache
+// path (filepath.Join of ~/.cache with a "/"-sanitized repo name set in
+// NewGitCloneProvider, never user input); and p.Branch was validated by
+// ValidateBranch in NewGitCloneProvider, so it cannot inject a git flag even
+// when concatenated into "origin/"+p.Branch.
 func (p *GitCloneProvider) updateRepo() error {
-	cmd := exec.Command("git", "-C", p.LocalPath, "pull", "--ff-only")
+	cmd := exec.Command("git", "-C", p.LocalPath, "pull", "--ff-only") //nolint:gosec // G204: fixed "git" command; LocalPath is a controlled cache path
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// If pull fails, try a fetch + reset
-		fetchCmd := exec.Command("git", "-C", p.LocalPath, "fetch", "origin", p.Branch)
+		fetchCmd := exec.Command("git", "-C", p.LocalPath, "fetch", "origin", p.Branch) //nolint:gosec // G204: fixed "git" command; LocalPath controlled, Branch validated by ValidateBranch
 		if fetchErr := fetchCmd.Run(); fetchErr != nil {
 			return fmt.Errorf("failed to update repository: %s: %s", err.Error(), string(output))
 		}
 
-		resetCmd := exec.Command("git", "-C", p.LocalPath, "reset", "--hard", "origin/"+p.Branch)
+		resetCmd := exec.Command("git", "-C", p.LocalPath, "reset", "--hard", "origin/"+p.Branch) //nolint:gosec // G204: fixed "git" command; LocalPath controlled, Branch validated by ValidateBranch
 		if resetErr := resetCmd.Run(); resetErr != nil {
 			return fmt.Errorf("failed to reset repository: %v", resetErr)
 		}

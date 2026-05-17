@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.2.0] - 2026-05-17
+
+### Added
+- `--concurrency=N` flag on `overlay autoupdate` and `overlay compare` bounds
+  the number of packages processed in parallel. Default `10`, valid range
+  `[1, 100]`; a value outside the range fails fast with a clear error before
+  any package work begins.
+- Shared, tuned HTTP transport (`httputil.BuildTransport`) with connection
+  pooling, replacing per-request ad-hoc transports across the autoupdate and
+  provider HTTP paths.
+- `BENTOO_DISABLE_HTTP2=1` environment variable opts the shared transport out
+  of HTTP/2 (HTTP/1.1 only) for environments where an HTTP/2 proxy misbehaves.
+- Git clone URL and branch validators, and LLM regex/XPath validation, run
+  before the corresponding external invocation.
+- Documented process exit codes for `overlay autoupdate`: `0` success, `1`
+  partial failure, `2` total failure / invalid configuration.
+- `goleak`-based goroutine-leak detection in the test suite.
+
+### Changed
+- **BREAKING:** `${VAR}` expansion in `packages.toml` header values is now
+  allow-listed. It applies only when the header name (case-insensitive) is one
+  of `Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token` **and** the
+  variable is prefixed `BENTOO_` or is one of `GITHUB_TOKEN`, `GITLAB_TOKEN`,
+  `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`. A non-allow-listed `${VAR}` is now
+  passed through literally with a `Warn` instead of being expanded — rename
+  such variables to add the `BENTOO_` prefix.
+- **BREAKING:** `overlay autoupdate` now exits `1` on partial failure (at least
+  one package failed and at least one succeeded); previously it exited `0`.
+- **BREAKING:** the `ProgressCallback` signature is now
+  `func(done, total uint64)`.
+- **BREAKING:** `CheckAll` / `AnalyzeAll` now return a `BatchResult`, separating
+  successful items from per-package failures.
+- Cache files and the apply-log are now written with mode `0600` (was `0644`).
+- HTTP/2 is now enabled by default on the shared transport.
+
+### Security
+- Env-var header-expansion allow-list prevents a malicious or mistaken
+  `packages.toml` from exfiltrating arbitrary process secrets through a
+  non-auth header or an arbitrary variable name.
+- Git clone URL and branch validation rejects unsafe inputs such as `file://`
+  URLs and argument/flag injection.
+- HTTP response bodies are capped at 10 MiB; an oversized body now fails with
+  `ErrResponseTooLarge` instead of being read unbounded.
+
+### Fixed
+- An orphan `.ebuild` left behind when `ebuild manifest` fails is now rolled
+  back.
+- Per-package errors in batch operations are no longer silently swallowed; the
+  `//nolint:errcheck` directive that hid them was removed.
+- The rate limiter is now actually invoked on the HTTP hot path.
+- `git clone` and `ebuild manifest` invocations now run under a timeout.
+- `SIGINT`/`SIGTERM` now cancels in-flight HTTP requests and child processes.
+
+Validated with `go test -race ./...`, `golangci-lint run`,
+`govulncheck ./...`, and `make audit-ctx`.
+
 ## [0.1.11] - 2026-05-15
 
 ### Changed
@@ -179,7 +235,8 @@ _No changes yet._
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...v0.2.0
 [0.1.11]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/obentoo/bentoolkit/compare/v0.1.8...v0.1.9

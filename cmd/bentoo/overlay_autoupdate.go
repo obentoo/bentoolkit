@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,8 @@ var (
 	autoupdateForce bool
 	// autoupdateCompile runs compile test after apply
 	autoupdateCompile bool
+	// autoupdateConcurrency bounds parallel version checks (range [1,100])
+	autoupdateConcurrency int
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -46,31 +49,50 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
+	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
 
 func runAutoupdate(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContextNoValidation()
+	// Validate --concurrency BEFORE any package work so a bad value fails fast
+	// with a clear message and a non-zero exit (R4.2). The accepted range
+	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
+	if autoupdateConcurrency < 1 || autoupdateConcurrency > 100 {
+		logger.Error("--concurrency must be in range [1, 100], got %d", autoupdateConcurrency)
+		osExit(1)
+		return
+	}
+
+	appCtx, err := loadAppContextNoValidation()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
+		return
 	}
 
-	overlayPath := ctx.OverlayPath
+	overlayPath := appCtx.OverlayPath
 
 	// Determine config directory for autoupdate
 	home, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("failed to get home directory: %v", err)
 		osExit(1)
+		return
 	}
 	configDir := filepath.Join(home, ".config", "bentoo", "autoupdate")
+
+	// Wire SIGINT/SIGTERM into a context so an in-flight check cancels cleanly.
+	// The Checker threads this context through every outbound HTTP/LLM call, so
+	// the run aborts within ~2 s of a signal (R3.1). See signalContext for the
+	// OQ-1 note on why cmd.Context() alone is not signal-aware.
+	runCtx, stop := signalContext(cmd.Context())
+	defer stop()
 
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(overlayPath, configDir, args)
+		runCheck(runCtx, overlayPath, configDir, args)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply != "":
@@ -82,28 +104,37 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 }
 
 // runCheck handles the --check flag
-func runCheck(overlayPath, configDir string, args []string) {
-	checker, err := autoupdate.NewChecker(overlayPath, autoupdate.WithConfigDir(configDir))
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string) {
+	checker, err := autoupdate.NewChecker(overlayPath,
+		autoupdate.WithConfigDir(configDir),
+		autoupdate.WithContext(ctx),
+		autoupdate.WithConcurrency(autoupdateConcurrency),
+	)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
+		return
 	}
 
 	if len(args) > 0 {
 		// Check specific package
 		pkg := args[0]
-		result, err := checker.CheckPackage(pkg, autoupdateForce)
+		// ctx is threaded into the Checker via WithContext above, so every
+		// outbound request observes it; CheckPackage takes no ctx parameter.
+		result, err := checker.CheckPackage(pkg, autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
 		if err != nil {
 			logger.Error("failed to check package %s: %v", pkg, err)
 			osExit(1)
+			return
 		}
 		displayCheckResults([]autoupdate.CheckResult{*result})
 		return
 	}
 
 	// Check all packages. CheckAll never returns a fatal error: every
-	// per-package failure is captured in the BatchResult.
-	result := checker.CheckAll(autoupdateForce)
+	// per-package failure is captured in the BatchResult. ctx is threaded
+	// into the Checker via WithContext above; CheckAll takes no ctx parameter.
+	result := checker.CheckAll(autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
 
 	// Display the successfully checked packages.
 	displayCheckResults(result.Items)

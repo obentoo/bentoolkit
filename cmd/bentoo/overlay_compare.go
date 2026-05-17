@@ -22,6 +22,8 @@ var (
 	compareToken        string
 	compareOnlyOutdated bool
 	compareSync         bool
+	// compareConcurrency bounds parallel upstream comparisons (range [1,100])
+	compareConcurrency int
 )
 
 var compareCmd = &cobra.Command{
@@ -62,18 +64,35 @@ func init() {
 	compareCmd.Flags().StringVar(&compareToken, "token", "", "Auth token for API provider")
 	compareCmd.Flags().BoolVar(&compareOnlyOutdated, "only-outdated", false, "Show only outdated packages (Bentoo < Gentoo)")
 	compareCmd.Flags().BoolVar(&compareSync, "sync", false, "Force refresh of repository list")
+	compareCmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
 	overlayCmd.AddCommand(compareCmd)
 }
 
 func runCompare(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	// Validate --concurrency BEFORE any package work so a bad value fails fast
+	// with a clear message and a non-zero exit (R4.2).
+	if compareConcurrency < 1 || compareConcurrency > 100 {
+		logger.Error("--concurrency must be in range [1, 100], got %d", compareConcurrency)
+		osExit(1)
+		return
+	}
+
+	// Wire SIGINT/SIGTERM into a context so an in-flight comparison cancels
+	// cleanly: CompareWithProvider threads it through every upstream lookup and
+	// aborts within ~2 s of a signal (R3.1). See signalContext for the OQ-1
+	// note on why cmd.Context() alone is not signal-aware.
+	runCtx, stop := signalContext(cmd.Context())
+	defer stop()
+
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
+		return
 	}
 
-	overlayPath := ctx.OverlayPath
-	cfg := ctx.Config
+	overlayPath := appCtx.OverlayPath
+	cfg := appCtx.Config
 
 	// Determine repository name (default: gentoo)
 	repoName := "gentoo"
@@ -205,6 +224,8 @@ func runCompare(cmd *cobra.Command, args []string) {
 	opts := overlay.CompareOptions{
 		OnlyOutdated:  compareOnlyOutdated,
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
+		Concurrency:   compareConcurrency,
+		Ctx:           runCtx,
 		ProgressCallback: func(done, total uint64) {
 			percent := uint64(0)
 			if total > 0 {

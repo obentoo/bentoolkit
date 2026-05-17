@@ -31,10 +31,13 @@ linters:
         - (*github.com/spf13/cobra.Command).GenPowerShellCompletionWithDesc
 
     gosec:
+      # G204 (subprocess launched with variable) is intentionally NOT excluded:
+      # T6 added ValidateRepoURL/ValidateBranch so every git invocation now runs
+      # against validated inputs, and the remaining call sites carry inline
+      # //nolint:gosec justifications documenting why each is safe.
       excludes:
         - G304
         - G104
-        - G204
         - G703
         - G704
 
