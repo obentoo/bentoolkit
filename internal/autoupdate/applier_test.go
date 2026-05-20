@@ -183,8 +183,11 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 	parameters.MinSuccessfulTests = 100
 	properties := gopter.NewProperties(parameters)
 
-	// Property: Successful apply (manifest returns 0) sets status to validated
-	properties.Property("Successful apply sets status to validated", prop.ForAll(
+	// Property: Successful apply removes the pending entry (R3.1).
+	// Predecessor: pre-R3.1, a successful apply left the entry with
+	// StatusValidated. After R3.1 (story 002), the entry is deleted so
+	// `--list` no longer shows successfully applied packages.
+	properties.Property("Successful apply removes pending entry", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
 			tmpDir := t.TempDir()
 			overlayDir := filepath.Join(tmpDir, "overlay")
@@ -230,15 +233,9 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 				return false
 			}
 
-			// Verify status is validated
-			update, found := pending.Get(pkg)
-			if !found {
-				t.Log("Pending entry not found after apply")
-				return false
-			}
-
-			if update.Status != StatusValidated {
-				t.Logf("Expected status 'validated', got %q", update.Status)
+			// R3.1: pending entry is removed on successful apply.
+			if pending.Has(pkg) {
+				t.Logf("Pending entry for %s still present after successful apply (R3.1 violation)", pkg)
 				return false
 			}
 
@@ -1021,6 +1018,424 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("orphan ebuild was not rolled back after timeout: os.Stat(%q) error = %v, want os.ErrNotExist",
 			dstPath, statErr)
+	}
+}
+
+// mockExecCommandHybrid returns a factory whose behavior depends on the
+// invoked command. "ebuild" calls (manifest) succeed instantly via /bin/true;
+// any other call (e.g. sudo/doas for the compile path) blocks under sleep, so
+// only the compile step is cancellable by context. This lets a single test
+// exercise context cancellation during the compile step without interference
+// from the manifest step.
+func mockExecCommandHybrid(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	if name == "ebuild" {
+		return exec.CommandContext(ctx, "true")
+	}
+	return exec.CommandContext(ctx, "sleep", "3600")
+}
+
+// TestApply_CancelsOnContextCancellation_Manifest verifies R1.1, R1.3:
+// cancelling the WithApplierContext parent while runManifest is blocked in the
+// spawned process aborts Apply within ~2 s, surfaces a context-derived error
+// in result.Error, and rolls back the orphan ebuild placed by copyEbuild.
+func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandBlocking),
+		WithApplierContext(ctx),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	resCh := make(chan *ApplyResult, 1)
+	go func() {
+		r, applyErr := applier.Apply(pkg, false)
+		resCh <- r
+		done <- applyErr
+	}()
+
+	// Give the spawned `sleep 3600` a beat to actually start under runManifest.
+	time.Sleep(100 * time.Millisecond)
+	cancelAt := time.Now()
+	cancel()
+
+	select {
+	case applyErr := <-done:
+		elapsed := time.Since(cancelAt)
+		if applyErr == nil {
+			t.Fatal("expected Apply to fail when parent context is cancelled")
+		}
+		if elapsed > 2*time.Second {
+			t.Errorf("Apply returned %v after cancel; want <= 2s (R1.1)", elapsed)
+		}
+		result := <-resCh
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+		if result.Error == nil {
+			t.Error("expected result.Error to be set after cancellation")
+		}
+		// The underlying failure must be reachable as ErrManifestFailed or a
+		// context error — proves the cancellation propagated through
+		// exec.CommandContext (not e.g. a panic).
+		if !errors.Is(applyErr, ErrManifestFailed) &&
+			!errors.Is(applyErr, context.Canceled) {
+			t.Errorf("Apply error = %v, want ErrManifestFailed or context.Canceled", applyErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Apply did not return within 5s of cancel; context cancellation is not propagating")
+	}
+
+	// The orphan ebuild must have been rolled back (R1.3).
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild not rolled back after cancellation: os.Stat(%q) error = %v, want os.ErrNotExist",
+			dstPath, statErr)
+	}
+}
+
+// TestApply_CancelsOnContextCancellation_Compile verifies R1.2, R1.3:
+// cancelling the WithApplierContext parent while runCompile is blocked in the
+// elevated child aborts Apply within ~2 s and the orphan ebuild is rolled
+// back. Manifest succeeds fast; only the compile step blocks under the cancel.
+//
+// Skipped when neither sudo nor doas is on PATH (e.g. minimal CI images), since
+// runCompile fails fast with ErrNoPrivilegeEscalation before any cancellation
+// can be observed.
+func TestApply_CancelsOnContextCancellation_Compile(t *testing.T) {
+	if _, err := exec.LookPath("sudo"); err != nil {
+		if _, err := exec.LookPath("doas"); err != nil {
+			t.Skip("neither sudo nor doas on PATH; cannot exercise compile cancellation")
+		}
+	}
+
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandHybrid),
+		WithApplierContext(ctx),
+		WithConfirmFunc(func(prompt string) bool { return true }),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier failed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	resCh := make(chan *ApplyResult, 1)
+	go func() {
+		r, applyErr := applier.Apply(pkg, true) // compile=true
+		resCh <- r
+		done <- applyErr
+	}()
+
+	// Wait for manifest to complete and compile to start blocking.
+	time.Sleep(200 * time.Millisecond)
+	cancelAt := time.Now()
+	cancel()
+
+	select {
+	case applyErr := <-done:
+		elapsed := time.Since(cancelAt)
+		if applyErr == nil {
+			t.Fatal("expected Apply to fail when parent context is cancelled during compile")
+		}
+		if elapsed > 2*time.Second {
+			t.Errorf("Apply returned %v after cancel; want <= 2s (R1.2)", elapsed)
+		}
+		result := <-resCh
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+		if result.Error == nil {
+			t.Error("expected result.Error to be set after cancellation")
+		}
+		if !errors.Is(applyErr, ErrCompileFailed) &&
+			!errors.Is(applyErr, context.Canceled) {
+			t.Errorf("Apply error = %v, want ErrCompileFailed or context.Canceled", applyErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Apply did not return within 5s of cancel; compile cancellation is not propagating")
+	}
+
+	// On compile failure, runCompile returns an error and the deferred
+	// rollback fires keyed on result.Error != nil, so the orphan must be gone.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild not rolled back after compile cancellation: os.Stat(%q) error = %v, want os.ErrNotExist",
+			dstPath, statErr)
+	}
+}
+
+// =============================================================================
+// R3: pending list lifecycle after --apply (T3.1)
+// =============================================================================
+
+// TestApply_DeletesPendingOnSuccess verifies R3.1: a successful Apply removes
+// the package from pending.json so `--list` no longer shows it.
+func TestApply_DeletesPendingOnSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	if err := pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	}); err != nil {
+		t.Fatalf("pending.Add: %v", err)
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Apply.Success = false, want true (result.Error = %v)", result.Error)
+	}
+
+	if pending.Has(pkg) {
+		t.Errorf("pending still contains %s after successful Apply; want it removed (R3.1)", pkg)
+	}
+}
+
+// TestApply_RetainsPendingOnManifestFailure verifies R3.2: a failed manifest
+// leaves the pending entry in place (status=failed, error set) so the user
+// can retry. Also re-asserts R1.3 rollback to keep the contract explicit.
+func TestApply_RetainsPendingOnManifestFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	if err := pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	}); err != nil {
+		t.Fatalf("pending.Add: %v", err)
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandFailure),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, _ := applier.Apply(pkg, false)
+	if result.Success {
+		t.Fatal("Apply.Success = true, want false on manifest failure")
+	}
+
+	if !pending.Has(pkg) {
+		t.Errorf("pending lost %s after manifest failure; want it retained (R3.2)", pkg)
+	}
+	update, _ := pending.Get(pkg)
+	if update.Status != StatusFailed {
+		t.Errorf("pending status = %q, want %q (R3.2)", update.Status, StatusFailed)
+	}
+	if update.Error == "" {
+		t.Error("pending entry Error string empty after failure (R3.2)")
+	}
+	if _, statErr := os.Stat(applier.EbuildPath(pkg, newVersion)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild not rolled back on manifest failure (R1.3)")
+	}
+}
+
+// TestApply_RetainsPendingOnCompileFailure verifies R3.2 for the compile path:
+// manifest succeeds, compile fails — the pending entry stays with status=failed.
+// Skipped when neither sudo nor doas is on PATH.
+func TestApply_RetainsPendingOnCompileFailure(t *testing.T) {
+	if _, err := exec.LookPath("sudo"); err != nil {
+		if _, err := exec.LookPath("doas"); err != nil {
+			t.Skip("neither sudo nor doas on PATH; cannot exercise compile path")
+		}
+	}
+
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	if err := pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	}); err != nil {
+		t.Fatalf("pending.Add: %v", err)
+	}
+
+	// ebuild → success (manifest); anything else (sudo/doas → compile) → failure.
+	hybridManifestOKCompileFail := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "ebuild" {
+			return exec.CommandContext(ctx, "true")
+		}
+		return exec.CommandContext(ctx, "false")
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(hybridManifestOKCompileFail),
+		WithConfirmFunc(func(prompt string) bool { return true }),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, _ := applier.Apply(pkg, true) // compile=true
+	if result.Success {
+		t.Fatal("Apply.Success = true, want false on compile failure")
+	}
+
+	if !pending.Has(pkg) {
+		t.Errorf("pending lost %s after compile failure; want it retained (R3.2)", pkg)
+	}
+	update, _ := pending.Get(pkg)
+	if update.Status != StatusFailed {
+		t.Errorf("pending status = %q, want %q (R3.2)", update.Status, StatusFailed)
+	}
+}
+
+// TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds verifies R3.4: if
+// the final pending.Delete call returns an error AFTER the apply itself
+// succeeded, the result keeps Success=true and a Warn line is emitted via the
+// package warnLogf sink — the exit-code path must not flip on a bookkeeping
+// failure that does not undo the actual update.
+func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	if err := pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	}); err != nil {
+		t.Fatalf("pending.Add: %v", err)
+	}
+
+	wantErr := errors.New("synthetic delete failure")
+	deleteCalled := 0
+	deleteFn := func(p string) error {
+		deleteCalled++
+		if p != pkg {
+			t.Errorf("delete called with %q, want %q", p, pkg)
+		}
+		return wantErr
+	}
+
+	logs := captureWarnLogs(t)
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierPendingDeleteFunc(deleteFn),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("Apply unexpected error: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("Apply.Success = false, want true even when delete fails (R3.4); result.Error = %v", result.Error)
+	}
+	if result.Error != nil {
+		t.Errorf("result.Error = %v, want nil (R3.4)", result.Error)
+	}
+	if deleteCalled != 1 {
+		t.Errorf("delete called %d times, want 1", deleteCalled)
+	}
+	if logs.count() == 0 {
+		t.Errorf("no Warn emitted via warnLogf after delete failure (R3.4)")
+	}
+	joined := strings.Join(logs.all(), "\n")
+	if !strings.Contains(joined, pkg) {
+		t.Errorf("Warn lines do not mention package %q: %v", pkg, logs.all())
 	}
 }
 

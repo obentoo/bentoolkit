@@ -116,6 +116,12 @@ type Checker struct {
 	// completes that package's work. It is set via WithProgressCallback. It may
 	// be called concurrently from worker goroutines; see ProgressCallback.
 	progressCallback ProgressCallback
+	// cacheTTL, when positive, is passed to the default Cache construction so
+	// the user-configured TTL from ~/.config/bentoo/config.yaml reaches Cache.TTL
+	// (R2.1, R2.2). Set via WithCacheTTL. Zero (the absence sentinel) keeps the
+	// default 1-hour TTL. It is ignored when a Cache is injected via WithCache,
+	// since that injected Cache carries its own TTL.
+	cacheTTL time.Duration
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -232,6 +238,22 @@ func WithProgressCallback(cb ProgressCallback) CheckerOption {
 	}
 }
 
+// WithCacheTTL sets the TTL applied to the default Cache constructed by
+// NewChecker when no Cache is injected via WithCache. It enables
+// `autoupdate.cache_ttl` from ~/.config/bentoo/config.yaml to reach Cache.TTL
+// (R2.1). A non-positive duration is rejected at construction time (R2.2),
+// mirroring WithOpTimeout's validation; the CLI guards the value upstream via
+// AutoupdateConfig.GetCacheTTL, so this is defence-in-depth for direct callers.
+func WithCacheTTL(d time.Duration) CheckerOption {
+	return func(c *Checker) error {
+		if d <= 0 {
+			return fmt.Errorf("checker cache TTL must be positive, got %v", d)
+		}
+		c.cacheTTL = d
+		return nil
+	}
+}
+
 // NewChecker creates a new checker instance for the given overlay.
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
@@ -262,9 +284,16 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		checker.config = config
 	}
 
-	// Initialize cache if not provided
+	// Initialize cache if not provided. When WithCacheTTL set cacheTTL to a
+	// positive value, thread it through to the underlying Cache via WithTTL so
+	// the user-configured `autoupdate.cache_ttl` is honoured (R2.1). When the
+	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
 	if checker.cache == nil {
-		cache, err := NewCache(checker.configDir)
+		cacheOpts := []CacheOption{}
+		if checker.cacheTTL > 0 {
+			cacheOpts = append(cacheOpts, WithTTL(checker.cacheTTL))
+		}
+		cache, err := NewCache(checker.configDir, cacheOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize cache: %w", err)
 		}
@@ -289,6 +318,27 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// have a nil rateLimiter: fetchContent unconditionally waits on it (R10.3).
 	if checker.rateLimiter == nil {
 		checker.rateLimiter = NewRateLimiter()
+	}
+
+	// R4.2: a non-empty llm_prompt has no effect on --check today (the LLM
+	// is only invoked when llmClient is non-nil, which the CLI never wires).
+	// Emit a Warn for each affected package so users discover the gap before
+	// debugging a silent no-op. Sorted iteration keeps the diagnostic order
+	// deterministic. De-duplication is per-Checker (the lifetime of one
+	// `bentoo overlay autoupdate --check` run), not process-wide.
+	if checker.llmClient == nil && checker.config != nil {
+		names := make([]string, 0, len(checker.config.Packages))
+		for name, pkgCfg := range checker.config.Packages {
+			if pkgCfg.LLMPrompt != "" {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			warnLogf("package %q sets llm_prompt but no LLM is wired into "+
+				"the check path; this field is consumed only by "+
+				"'bentoo overlay analyze' (see README)", name)
+		}
 	}
 
 	return checker, nil

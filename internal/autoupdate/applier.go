@@ -73,6 +73,12 @@ type Applier struct {
 	// SIGINT or deadline kills in-flight ebuild/compile processes. Defaults to
 	// context.Background().
 	ctx context.Context
+	// pendingDeleteFn is the function Apply invokes to remove a package from
+	// pending.json after the full success path (R3.1). It defaults to
+	// a.pending.Delete and is overridable via WithApplierPendingDeleteFunc
+	// purely for tests that need to simulate a Delete failure (R3.4).
+	// Production callers never supply this option.
+	pendingDeleteFn func(pkg string) error
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -120,6 +126,18 @@ func WithApplierContext(ctx context.Context) ApplierOption {
 	}
 }
 
+// WithApplierPendingDeleteFunc overrides the function Apply invokes to remove
+// a package from pending.json after a successful apply (R3.1). The default is
+// a.pending.Delete. This option exists for tests that need to simulate a
+// Delete failure (R3.4); a nil fn is ignored.
+func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
+	return func(a *Applier) {
+		if fn != nil {
+			a.pendingDeleteFn = fn
+		}
+	}
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -145,6 +163,13 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 			return nil, fmt.Errorf("failed to initialize pending list: %w", err)
 		}
 		applier.pending = pending
+	}
+
+	// Resolve the pending-delete sink: tests can inject a failing variant via
+	// WithApplierPendingDeleteFunc; production defaults to the live pending
+	// list's Delete method. Bound only after applier.pending is initialised.
+	if applier.pendingDeleteFn == nil {
+		applier.pendingDeleteFn = applier.pending.Delete
 	}
 
 	// Ensure logs directory exists
@@ -236,6 +261,18 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 
 	result.Success = true
+
+	// R3.1: remove the now-applied package from pending.json so `--list` no
+	// longer surfaces it. R3.4: a Delete failure is a bookkeeping miss, not
+	// an apply failure — log a Warn (via the package warnLogf sink so tests
+	// can capture it) but keep result.Success == true and result.Error == nil
+	// so the deferred orphan-rollback (keyed on result.Error == nil) does not
+	// undo the successful apply.
+	if err := a.pendingDeleteFn(pkg); err != nil {
+		warnLogf("pending: failed to remove %s after successful apply: %v "+
+			"(apply itself succeeded; entry can be cleared manually)", pkg, err)
+	}
+
 	return result, nil
 }
 

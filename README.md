@@ -465,13 +465,13 @@ selector = "a.release-tag"
 | `fallback_url` | Secondary URL to try if the primary fails |
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
-| `llm_prompt` | Custom prompt for LLM-assisted extraction |
+| `llm_prompt` | Consumed by `bentoo overlay analyze` only. Has no effect on `bentoo overlay autoupdate --check`. A package with this field set during `--check` triggers a Warn. |
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
 
 #### Supported LLM Providers
 
-The `analyze` and `autoupdate` commands can use an LLM for version extraction when parsers are insufficient.
+The `analyze` command uses an LLM for schema generation. `bentoo overlay autoupdate --check` does not currently invoke an LLM; the `llm_prompt` field in `packages.toml` is consumed only by `analyze`.
 
 | Provider | Config value | API key env var | Notes |
 |----------|-------------|-----------------|-------|

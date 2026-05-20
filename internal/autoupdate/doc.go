@@ -5,7 +5,10 @@
 //   - Package configuration management via TOML files
 //   - Version parsing from upstream sources (JSON, regex, LLM)
 //   - Cache management for version query results
-//   - Pending updates tracking and application
+//   - Pending updates tracking and application. pending.json retains only
+//     items awaiting work (Pending) or post-mortem retry (Failed); a package
+//     that completes the full Apply success path is removed from
+//     pending.json so `--list` does not surface already-applied entries.
 //
 // Configuration is read from overlay/.autoupdate/packages.toml which defines
 // how to check upstream versions for each package. Local state is maintained

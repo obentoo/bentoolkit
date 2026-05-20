@@ -1195,3 +1195,156 @@ func createTestPackagesConfig(t *testing.T, overlayDir string, packages map[stri
 		t.Fatalf("Failed to write packages.toml: %v", err)
 	}
 }
+
+// =============================================================================
+// R2: cache_ttl honours user configuration
+// =============================================================================
+
+// TestWithCacheTTL_Custom verifies R2.1: a positive WithCacheTTL value reaches
+// the underlying Cache.TTL field, overriding the default 1-hour TTL.
+func TestWithCacheTTL_Custom(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	custom := 5 * time.Minute
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithCacheTTL(custom),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker failed: %v", err)
+	}
+
+	if got := checker.Cache().TTL; got != custom {
+		t.Errorf("Cache().TTL = %v, want %v (R2.1)", got, custom)
+	}
+}
+
+// TestWithCacheTTL_DefaultWhenAbsent verifies R2.2: when WithCacheTTL is not
+// supplied, the Cache keeps its DefaultCacheTTL of 1 hour.
+func TestWithCacheTTL_DefaultWhenAbsent(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker failed: %v", err)
+	}
+
+	if got := checker.Cache().TTL; got != DefaultCacheTTL {
+		t.Errorf("Cache().TTL = %v, want default %v (R2.2)", got, DefaultCacheTTL)
+	}
+}
+
+// TestWithCacheTTL_RejectsNonPositive verifies R2.2: WithCacheTTL rejects zero
+// and negative durations at construction time, mirroring WithOpTimeout's
+// validation. The CLI guards positive values upstream via GetCacheTTL, so this
+// is defence-in-depth for direct API callers.
+func TestWithCacheTTL_RejectsNonPositive(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	for _, d := range []time.Duration{0, -1, -1 * time.Second} {
+		t.Run(d.String(), func(t *testing.T) {
+			_, err := NewChecker(overlayDir,
+				WithConfigDir(configDir),
+				WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+				WithCacheTTL(d),
+			)
+			if err == nil {
+				t.Errorf("NewChecker with WithCacheTTL(%v) succeeded; want construction error (R2.2)", d)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// R4: llm_prompt is documented as analyze-only; --check emits a Warn (T4.1)
+// =============================================================================
+
+// TestNewChecker_WarnsOnUnusedLLMPrompt verifies R4.2: building a Checker
+// without an LLM emits exactly one Warn per package whose LLMPrompt is set,
+// identifying the package and stating that the LLM is not wired into the
+// check path. R4.3 is exercised by passing PackageConfigs that carry the
+// field — they must not be rejected at construction time.
+func TestNewChecker_WarnsOnUnusedLLMPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+		"cat-a/pkg-one":   {URL: "https://example.com/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
+		"cat-b/pkg-two":   {URL: "https://example.com/b", Parser: "json", Path: "v", LLMPrompt: "find latest"},
+		"cat-c/pkg-three": {URL: "https://example.com/c", Parser: "json", Path: "v"}, // no llm_prompt
+	}}
+
+	logs := captureWarnLogs(t)
+
+	_, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(cfg),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker failed: %v", err)
+	}
+
+	// Filter the captured Warns down to ones that mention this story's
+	// dedicated phrase so unrelated Warns (from other init paths) don't
+	// poison the count.
+	want := []string{"cat-a/pkg-one", "cat-b/pkg-two"}
+	llmWarns := llmPromptWarnsFor(logs.all(), want)
+	if len(llmWarns) != len(want) {
+		t.Errorf("got %d llm_prompt Warns, want %d (R4.2): %v",
+			len(llmWarns), len(want), llmWarns)
+	}
+
+	// The package without an llm_prompt must NOT appear in any llm_prompt Warn.
+	for _, line := range llmWarns {
+		if strings.Contains(line, "cat-c/pkg-three") {
+			t.Errorf("Warn unexpectedly mentions package without llm_prompt: %q", line)
+		}
+	}
+
+	// Build a SECOND Checker from the same config: de-dup is per Checker
+	// instance, so the Warns must repeat (R4.2).
+	logs2 := captureWarnLogs(t)
+	_, err = NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(cfg),
+	)
+	if err != nil {
+		t.Fatalf("second NewChecker failed: %v", err)
+	}
+	llmWarns2 := llmPromptWarnsFor(logs2.all(), want)
+	if len(llmWarns2) != len(want) {
+		t.Errorf("second Checker produced %d llm_prompt Warns, want %d (R4.2 per-instance dedup): %v",
+			len(llmWarns2), len(want), llmWarns2)
+	}
+}
+
+// llmPromptWarnsFor returns the subset of Warn lines that name one of the
+// expected packages and identify the llm_prompt+check gap (R4.2).
+func llmPromptWarnsFor(lines []string, pkgs []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.Contains(line, "llm_prompt") {
+			continue
+		}
+		for _, p := range pkgs {
+			if strings.Contains(line, p) {
+				out = append(out, line)
+				break
+			}
+		}
+	}
+	// Sort for stable comparison/printing.
+	sort.Strings(out)
+	return out
+}

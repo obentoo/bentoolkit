@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No changes yet._
+### Fixed
+- **`overlay autoupdate --apply` now honours SIGINT/SIGTERM.** The signal-derived
+  context built by `runAutoupdate` is now threaded into `NewApplier` via
+  `WithApplierContext`, so a Ctrl-C during `ebuild manifest` or the elevated
+  compile step terminates the spawned child within ~2 s and triggers the
+  existing orphan-rollback path. This closes the gap left by 0.2.0, whose
+  CHANGELOG claimed SIGINT/SIGTERM cancelled in-flight HTTP requests and child
+  processes — the claim now holds for both `--check` and `--apply`.
+- **`autoupdate.cache_ttl` from `~/.config/bentoo/config.yaml` is now applied.**
+  A new `WithCacheTTL` checker option carries the user-configured TTL through
+  to `Cache.TTL`; previously the value was loaded into config but ignored, so
+  cache entries always expired at the hardcoded 1-hour default.
+- **`pending.json` clears after a successful `--apply`.** A package that
+  completes the full apply path (copy + manifest, plus compile when
+  `--compile`) is removed from `pending.json`, so `bentoo overlay autoupdate
+  --list` no longer surfaces already-applied entries. Failures keep the entry
+  for retry. A delete-after-success bookkeeping failure emits a Warn but does
+  not flip `result.Success`.
+
+### Changed
+- **`llm_prompt` is documented as `analyze`-only; `--check` emits a Warn when
+  the field is set.** The README previously implied `llm_prompt` worked under
+  `--check`, but the live LLM branch in `Checker.fetchUpstreamVersion` is gated
+  on a non-nil `llmClient` that the CLI has never wired. `NewChecker` now logs
+  one Warn per package whose `llm_prompt` is set, identifying the package and
+  pointing the user at `bentoo overlay analyze`. The struct field is retained
+  so existing `packages.toml` files load unchanged.
 
 ## [0.2.0] - 2026-05-17
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -89,27 +90,41 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	runCtx, stop := signalContext(cmd.Context())
 	defer stop()
 
+	// Compute the autoupdate cache TTL from config (R2.1, R2.2). GetCacheTTL
+	// returns the user-configured value when positive, otherwise the
+	// 3600-second default — so the duration here is always positive and safe
+	// to pass to WithCacheTTL inside runCheck.
+	cacheTTL := time.Duration(appCtx.Config.Autoupdate.GetCacheTTL()) * time.Second
+
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args)
+		runCheck(runCtx, overlayPath, configDir, args, cacheTTL)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply != "":
-		runApply(overlayPath, configDir, autoupdateApply)
+		runApply(runCtx, overlayPath, configDir, autoupdateApply)
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
 	}
 }
 
-// runCheck handles the --check flag
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string) {
-	checker, err := autoupdate.NewChecker(overlayPath,
+// runCheck handles the --check flag. cacheTTL must be a positive duration —
+// the caller resolves it from AutoupdateConfig.GetCacheTTL, which guarantees a
+// positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
+// Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
+// rejects non-positive values at construction time.
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration) {
+	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
-	)
+	}
+	if cacheTTL > 0 {
+		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
+	}
+	checker, err := autoupdate.NewChecker(overlayPath, opts...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
@@ -253,9 +268,14 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 	}
 }
 
-// runApply handles the --apply flag
-func runApply(overlayPath, configDir, pkg string) {
-	applier, err := autoupdate.NewApplier(overlayPath, configDir)
+// runApply handles the --apply flag. ctx is threaded into the Applier via
+// WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `ebuild manifest`
+// or compile child process within ~2 s (R1.1, R1.2). The existing orphan
+// rollback path then removes the half-applied .ebuild (R1.3).
+func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
+	applier, err := autoupdate.NewApplier(overlayPath, configDir,
+		autoupdate.WithApplierContext(ctx),
+	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
 		osExit(1)
