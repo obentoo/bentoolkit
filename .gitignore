@@ -19,8 +19,7 @@ build/
 vendor/
 
 # Epic — versiona stories, ignora drafts e archive
-.epic/**/.draft/
-.epic/archive/
+.epic/
 
 # Arquivos de IDE/editor
 .idea/
