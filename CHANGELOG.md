@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-22
+
+### Changed
+- Bumped indirect dependencies to their latest patch/minor releases:
+  `golang.org/x/net` v0.54.0 → v0.55.0,
+  `golang.org/x/sys` v0.44.0 → v0.45.0, and
+  `golang.org/x/crypto` v0.51.0 → v0.52.0. No API changes; routine
+  upstream fixes. `govulncheck` reports zero known vulnerabilities
+  against the resulting module graph.
+- `.gitignore` now ignores the entire `.epic/` directory; previously only
+  `.epic/**/.draft/` and `.epic/archive/` were excluded. Epic plugin state
+  is no longer versioned.
+- **`llm_prompt` is documented as `analyze`-only; `--check` emits a Warn when
+  the field is set.** The README previously implied `llm_prompt` worked under
+  `--check`, but the live LLM branch in `Checker.fetchUpstreamVersion` is gated
+  on a non-nil `llmClient` that the CLI has never wired. `NewChecker` now logs
+  one Warn per package whose `llm_prompt` is set, identifying the package and
+  pointing the user at `bentoo overlay analyze`. The struct field is retained
+  so existing `packages.toml` files load unchanged.
+
 ### Fixed
 - **`overlay autoupdate --apply` now honours SIGINT/SIGTERM.** The signal-derived
   context built by `runAutoupdate` is now threaded into `NewApplier` via
@@ -26,14 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for retry. A delete-after-success bookkeeping failure emits a Warn but does
   not flip `result.Success`.
 
-### Changed
-- **`llm_prompt` is documented as `analyze`-only; `--check` emits a Warn when
-  the field is set.** The README previously implied `llm_prompt` worked under
-  `--check`, but the live LLM branch in `Checker.fetchUpstreamVersion` is gated
-  on a non-nil `llmClient` that the CLI has never wired. `NewChecker` now logs
-  one Warn per package whose `llm_prompt` is set, identifying the package and
-  pointing the user at `bentoo overlay analyze`. The struct field is retained
-  so existing `packages.toml` files load unchanged.
+Validated with `go build`, `go vet`, `go test ./...`, and `govulncheck`
+(0 vulnerabilities).
 
 ## [0.2.0] - 2026-05-17
 
@@ -261,7 +275,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...v0.2.0
 [0.1.11]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/obentoo/bentoolkit/compare/v0.1.9...v0.1.10
