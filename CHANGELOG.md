@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --list` no longer surfaces already-applied entries. Failures keep the entry
   for retry. A delete-after-success bookkeeping failure emits a Warn but does
   not flip `result.Success`.
+- CI: silenced a `contextcheck` false positive on the `applier.Apply` call in
+  `runApply`. The signal-derived context is propagated into the applier's
+  spawned processes via `WithApplierContext` (`a.ctx`), not a `ctx` parameter,
+  so the lint warning is annotated with an inline `//nolint:contextcheck`
+  justification rather than altering `Apply`'s signature.
 
 Validated with `go build`, `go vet`, `go test ./...`, and `govulncheck`
 (0 vulnerabilities).

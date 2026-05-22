@@ -283,6 +283,9 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 
 	output.Info.Printf("Applying update for %s...\n", pkg)
 
+	//nolint:contextcheck // ctx is propagated into Apply's spawned processes
+	// via WithApplierContext (a.ctx) — the deliberate single-source wiring from
+	// signal.NotifyContext in runApply. Apply takes no ctx param by design.
 	result, err := applier.Apply(pkg, autoupdateCompile)
 	if err != nil {
 		displayApplyResult(result)
