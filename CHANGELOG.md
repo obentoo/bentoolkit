@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-01
+
 ### Fixed
 - **`overlay autoupdate --check` now actually supports the `html` parser.**
   `Checker.fetchAndParse` built its parser with `NewParser`, which rejects
@@ -311,7 +313,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...v0.2.0
 [0.1.11]: https://github.com/obentoo/bentoolkit/compare/v0.1.10...v0.1.11
