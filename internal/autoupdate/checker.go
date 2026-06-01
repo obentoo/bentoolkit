@@ -591,39 +591,52 @@ func (c *Checker) fetchAndParse(url, parserType, path, pattern, selector, xpath 
 }
 
 // fetchContent fetches content from a URL using the HTTP client with retry logic.
-// The request is bounded by a child of the Checker's parent context (set via
-// WithContext) with the configured per-operation timeout, so a cancelled parent
-// context or an expired deadline aborts the in-flight HTTP call.
 //
-// Before issuing the request, fetchContent gates on the per-host rate limiter
-// (R10.1): the host is parsed from the URL and c.rateLimiter.WaitHTTP blocks
-// until a token is available. If the wait is cancelled by the context the
-// context error is returned and no HTTP request is made (R10.2). A URL that
-// fails to parse fails open (R10.1): a Warn line is logged and the fetch
-// proceeds without a rate-limit wait rather than aborting.
+// It first gates on the per-host rate limiter (R10.1), waiting on the Checker's
+// parent context (set via WithContext) so the wait is signal-cancellable but
+// NOT bounded by the per-operation timeout. The host is parsed from the URL and
+// c.rateLimiter.WaitHTTP blocks until a token is available; if the wait is
+// cancelled by the parent context the context error is returned and no HTTP
+// request is made (R10.2). A URL that fails to parse fails open (R10.1): a Warn
+// line is logged and the fetch proceeds without a rate-limit wait.
+//
+// Only after a token is acquired does the per-operation timeout start: the HTTP
+// request is bounded by a child of the parent context with that timeout, so a
+// cancelled parent or an expired deadline aborts the in-flight call. This keeps
+// time spent queued behind the rate limiter from being charged against the HTTP
+// deadline, which previously made packages sharing a host fail spuriously.
 func (c *Checker) fetchContent(rawURL string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
-	defer cancel()
-
-	// Parse the host for per-host rate limiting. Fail open on a parse error:
-	// an unparseable URL still gets a (rate-limit-free) attempt rather than
-	// silently dropping the fetch.
+	// Gate on the per-host rate limiter FIRST, waiting on the parent context
+	// rather than an opTimeout-bounded one. The wait must not be charged against
+	// the per-request HTTP deadline: when many packages share a host, a queued
+	// package can wait several limiter intervals, and folding that into
+	// opTimeout made late packages fail with "context deadline exceeded" before
+	// any request was issued. The parent context still carries SIGINT/SIGTERM,
+	// so a cancelled wait aborts without issuing the request (R10.2).
+	//
+	// Fail open on a parse error: an unparseable URL still gets a
+	// (rate-limit-free) attempt rather than silently dropping the fetch.
 	if parsed, err := url.Parse(rawURL); err != nil {
 		warnLogf("rate limiter: could not parse URL %q for host extraction (%v); "+
 			"proceeding without a rate-limit wait", rawURL, err)
-	} else if waitErr := c.rateLimiter.WaitHTTP(ctx, parsed.Host); waitErr != nil {
-		// The wait did not yield a token. If the context is done the wait was
-		// cancelled (parent cancelled or deadline exceeded): return the
-		// context error WITHOUT issuing the HTTP request (R10.2). Prefer the
-		// raw context error so callers' errors.Is(err, context.Canceled /
+	} else if waitErr := c.rateLimiter.WaitHTTP(c.ctx, parsed.Host); waitErr != nil {
+		// The wait did not yield a token. If the parent context is done the wait
+		// was cancelled (parent cancelled or deadline exceeded): return the
+		// context error WITHOUT issuing the HTTP request (R10.2). Prefer the raw
+		// context error so callers' errors.Is(err, context.Canceled /
 		// .DeadlineExceeded) checks hold regardless of how the limiter wraps it.
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := c.ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("rate limiter wait cancelled: %w", ctxErr)
 		}
 		// A non-context wait failure (e.g. the request can never satisfy the
 		// limiter's burst): surface it rather than issuing a doomed request.
 		return nil, fmt.Errorf("rate limiter wait failed: %w", waitErr)
 	}
+
+	// The per-operation timeout bounds only the HTTP round-trip; its deadline
+	// starts now, after the rate-limit token has been acquired.
+	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
+	defer cancel()
 
 	resp, err := c.httpClient.GetWithContext(ctx, rawURL)
 	if err != nil {
