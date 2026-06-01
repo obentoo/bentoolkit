@@ -291,3 +291,35 @@ func TestCompareVersions_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"simple", "1.0", true},
+		{"three parts", "1.4.4", true},
+		{"four parts", "26.2.4.1", true},
+		{"with revision", "1.0-r1", true},
+		{"letter suffix", "1.0a", true},
+		{"rc suffix", "1.0_rc1", true},
+		{"beta with revision", "1.0_beta2-r1", true},
+		{"patch suffix", "1.0_p1", true},
+		{"with surrounding space", "  6.6.91  ", true},
+		{"leading v not stripped here", "v6.6.91", false},
+		{"upstream tag name", "INKSCAPE_1_4_4", false},
+		{"esr build suffix", "140.11.0esr-bb23", false},
+		{"word", "latest", false},
+		{"empty", "", false},
+		{"trailing junk", "1.0.0-foo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidVersion(tt.version); got != tt.want {
+				t.Errorf("IsValidVersion(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}

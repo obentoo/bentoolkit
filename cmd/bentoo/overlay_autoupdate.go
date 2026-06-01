@@ -173,6 +173,7 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 
 	var updatesFound int
 	var errorsFound int
+	var warningsFound int
 
 	fmt.Println()
 	output.Header.Println("Version Check Results")
@@ -182,6 +183,13 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 		if r.Error != nil {
 			errorsFound++
 			output.Error.Printf("  %s: %v\n", r.Package, r.Error)
+			continue
+		}
+
+		if r.NotComparable {
+			warningsFound++
+			output.Warning.Printf("  %s: %q not comparable to current %s (check parser config)\n",
+				r.Package, r.UpstreamVersion, r.CurrentVersion)
 			continue
 		}
 
@@ -202,8 +210,12 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 	if updatesFound > 0 {
 		output.Info.Printf("Found %d update(s) available\n", updatesFound)
 		output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
-	} else {
+	} else if warningsFound == 0 && errorsFound == 0 {
 		output.Success.Println("All packages are up to date")
+	}
+
+	if warningsFound > 0 {
+		output.Warning.Printf("%d package(s) had non-comparable upstream versions\n", warningsFound)
 	}
 
 	if errorsFound > 0 {

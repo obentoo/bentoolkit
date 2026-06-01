@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`overlay autoupdate --check` now actually supports the `html` parser.**
+  `Checker.fetchAndParse` built its parser with `NewParser`, which rejects
+  `html` outright (`use NewParserFromConfig for html parser`) and has no way to
+  carry the `selector`/`xpath` fields — so every package configured with
+  `parser = "html"` failed at fetch time even though the parser, the config
+  fields, and the README all advertised it. `fetchAndParse` now builds the
+  parser via `NewParserFromConfig` and threads `selector`/`xpath` (plus the
+  optional regex post-processing in `pattern`) through for both the primary and
+  fallback URLs. This makes HTML scraping work end to end, including extracting
+  a version from an element attribute via an XPath such as
+  `(//a[contains(@href, '/linux-x64/cursor/')]/@href)[1]` with
+  `pattern = "cursor/([0-9.]+)"`.
+- **`overlay autoupdate --check` no longer silently reports "up to date" for a
+  non-comparable upstream version.** `Checker.compareVersions` previously passed
+  the raw upstream value straight to `ebuild.CompareVersions`, whose lenient
+  `parseVersion` coerces any unparseable component to `0` — so an upstream tag
+  like `INKSCAPE_1_4_4`, or even a `v`-prefixed `v7.0.0`, parsed to a near-zero
+  version and compared as *older* than the current ebuild, masking real updates.
+  `compareVersions` now normalizes both sides (trims whitespace, strips a
+  leading `v`/`version-`/etc. prefix) and validates them with the new
+  `ebuild.IsValidVersion`. When either side is not a well-formed Gentoo-style
+  version, the result is flagged `CheckResult.NotComparable`: it is surfaced as a
+  warning, excluded from the pending list, and never counted as "up to date".
+
+### Added
+- **`ebuild.IsValidVersion`** reports whether a string is a well-formed
+  Gentoo-style version that `CompareVersions` can order meaningfully, so callers
+  can reject junk (`latest`, upstream tag names) instead of comparing against a
+  silently-zeroed version.
+
 ## [0.2.1] - 2026-05-22
 
 ### Changed

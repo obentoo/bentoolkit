@@ -721,6 +721,170 @@ func TestCheckPackageNoUpdate(t *testing.T) {
 	}
 }
 
+// TestCheckPackageNotComparable verifies that an upstream value that is not a
+// well-formed version (e.g. an upstream tag like "INKSCAPE_1_4_4") is surfaced
+// as NotComparable instead of being silently coerced to a near-zero version and
+// reported as "up to date" — which would mask a real update.
+func TestCheckPackageNotComparable(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "test-cat/test-pkg"
+	currentVersion := "1.4.4"
+	upstreamVersion := "INKSCAPE_1_4_4"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"version": upstreamVersion})
+	}))
+	defer server.Close()
+
+	createTestEbuild(t, overlayDir, pkgName, currentVersion)
+
+	config := &PackagesConfig{
+		Packages: map[string]PackageConfig{
+			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
+		},
+	}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !result.NotComparable {
+		t.Error("Expected NotComparable to be true for an unparseable upstream version")
+	}
+	if result.HasUpdate {
+		t.Error("Expected HasUpdate to be false when the upstream version is not comparable")
+	}
+
+	// A non-comparable result must never leak into the pending list.
+	if _, ok := checker.pending.Get(pkgName); ok {
+		t.Error("Expected non-comparable package NOT to be added to the pending list")
+	}
+}
+
+// TestCheckPackageStripsVPrefix verifies that a leading "v" on the upstream
+// version is normalized before comparison, so a "v"-tagged upstream is compared
+// against the bare ebuild version correctly (no false "up to date" / no false
+// downgrade).
+func TestCheckPackageStripsVPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "test-cat/test-pkg"
+	currentVersion := "6.6.91"
+	upstreamVersion := "v7.0.0"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"version": upstreamVersion})
+	}))
+	defer server.Close()
+
+	createTestEbuild(t, overlayDir, pkgName, currentVersion)
+
+	config := &PackagesConfig{
+		Packages: map[string]PackageConfig{
+			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
+		},
+	}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if result.NotComparable {
+		t.Error("Expected a v-prefixed version to be comparable")
+	}
+	if !result.HasUpdate {
+		t.Error("Expected HasUpdate to be true (v7.0.0 > 6.6.91)")
+	}
+}
+
+// TestCheckPackageHTMLParser verifies that a package configured with the "html"
+// parser is actually usable from --check. It is a regression guard: the fetch
+// path used to build parsers via NewParser, which rejects "html" outright
+// ("use NewParserFromConfig for html parser"), so every html-configured package
+// failed. Here the version lives in an href attribute, extracted via an XPath
+// onto the attribute plus a regex post-processing step (carried in pattern).
+func TestCheckPackageHTMLParser(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "test-cat/test-pkg"
+	currentVersion := "3.5.33"
+
+	const page = `<html><body>
+<a href="https://example.com/download/linux-x64/app/3.6">Linux AppImage (x64)</a>
+<a href="https://example.com/download/win32-x64/app/3.6">Windows</a>
+</body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer server.Close()
+
+	createTestEbuild(t, overlayDir, pkgName, currentVersion)
+
+	config := &PackagesConfig{
+		Packages: map[string]PackageConfig{
+			pkgName: {
+				URL:     server.URL,
+				Parser:  "html",
+				XPath:   "(//a[contains(@href, '/linux-x64/app/')]/@href)[1]",
+				Pattern: `app/([0-9.]+)`,
+			},
+		},
+	}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if result.Error != nil {
+		t.Fatalf("Expected no error, got %v", result.Error)
+	}
+	if result.UpstreamVersion != "3.6" {
+		t.Errorf("Expected upstream version %q, got %q", "3.6", result.UpstreamVersion)
+	}
+	if !result.HasUpdate {
+		t.Error("Expected HasUpdate to be true (3.6 > 3.5.33)")
+	}
+}
+
 // TestCheckAllReturnsAllResults tests that CheckAll returns results for all packages
 func TestCheckAllReturnsAllResults(t *testing.T) {
 	tmpDir := t.TempDir()

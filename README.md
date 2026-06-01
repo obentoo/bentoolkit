@@ -458,6 +458,22 @@ selector = "a.release-tag"
 | `regex` | `pattern` | Regex with one capture group matching the version |
 | `html` | `selector` or `xpath` | CSS selector or XPath to the element containing the version |
 
+> **Regex parser caveat:** `regex` returns the **first** match in the response
+> body, not the highest version. On a page that lists several releases (e.g. a
+> directory listing), an unanchored pattern can capture an *older* version and
+> cause the check to silently report "up to date". Prefer a JSON API endpoint
+> that exposes the latest version directly, or anchor the pattern tightly to the
+> single element that always holds the newest release.
+
+> **Non-comparable versions:** before comparing, the extracted value is
+> normalized (whitespace trimmed, a leading `v`/`version-`/etc. prefix
+> stripped). If the result is still not a well-formed Gentoo-style version
+> (e.g. an upstream tag like `INKSCAPE_1_4_4`, or `latest`), the check reports a
+> **warning** and skips the package instead of treating it as "up to date" —
+> this prevents a bad parser config from silently masking a real update. Fix the
+> schema so it extracts a bare version string (e.g. add a `regex` that captures
+> the digits, or point `path` at a cleaner field).
+
 **Optional fields:**
 
 | Field | Description |

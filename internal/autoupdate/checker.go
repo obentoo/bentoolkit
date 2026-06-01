@@ -48,6 +48,12 @@ type CheckResult struct {
 	UpstreamVersion string
 	// HasUpdate is true if upstream version is newer than current
 	HasUpdate bool
+	// NotComparable is true when the upstream value could not be ordered against
+	// the current version (e.g. a tag like "INKSCAPE_1_4_4" or an unparseable
+	// string). When set, HasUpdate is false and the package was NOT added to the
+	// pending list: the result is surfaced as a warning so a silent false
+	// "up to date" never masks a real update behind a bad parser config.
+	NotComparable bool
 	// Error contains any error that occurred during checking
 	Error error
 	// FromCache is true if the upstream version was retrieved from cache
@@ -371,7 +377,9 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		if cachedVersion, ok := c.cache.Get(pkg); ok {
 			result.UpstreamVersion = cachedVersion
 			result.FromCache = true
-			result.HasUpdate = c.compareVersions(cachedVersion, currentVersion)
+			hasUpdate, comparable := c.compareVersions(cachedVersion, currentVersion)
+			result.HasUpdate = hasUpdate
+			result.NotComparable = !comparable
 
 			// Add to pending if update available
 			if result.HasUpdate {
@@ -400,7 +408,9 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	}
 
 	// Compare versions
-	result.HasUpdate = c.compareVersions(upstreamVersion, currentVersion)
+	hasUpdate, comparable := c.compareVersions(upstreamVersion, currentVersion)
+	result.HasUpdate = hasUpdate
+	result.NotComparable = !comparable
 
 	// Add to pending if update available
 	if result.HasUpdate {
@@ -475,10 +485,23 @@ func (c *Checker) getCurrentVersion(pkg string) (string, error) {
 	return highestVersion, nil
 }
 
-// compareVersions compares upstream and current versions.
-// Returns true if upstream is newer than current.
-func (c *Checker) compareVersions(upstream, current string) bool {
-	return ebuild.CompareVersions(upstream, current) > 0
+// compareVersions compares upstream and current versions. Both sides are
+// normalized (whitespace trimmed, a leading "v"/"version-"/etc. prefix
+// stripped) before the Gentoo-style comparison so a tag like "v6.6.91" is
+// compared against an ebuild "6.6.91" correctly.
+//
+// hasUpdate is true only when upstream is strictly newer than current.
+// comparable is false when either side is not a well-formed version that can be
+// ordered; in that case hasUpdate is always false and the caller MUST treat the
+// result as a warning rather than "up to date" (parseVersion would otherwise
+// coerce junk to 0.0.0 and silently report no update — see ebuild.IsValidVersion).
+func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparable bool) {
+	u := stripVersionPrefix(strings.TrimSpace(upstream))
+	cur := stripVersionPrefix(strings.TrimSpace(current))
+	if !ebuild.IsValidVersion(u) || !ebuild.IsValidVersion(cur) {
+		return false, false
+	}
+	return ebuild.CompareVersions(u, cur) > 0, true
 }
 
 // addToPending adds an update to the pending list.
@@ -497,7 +520,7 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion string) error {
 // It tries the primary URL/parser first, then fallback if configured, then LLM if available.
 func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, error) {
 	// Try primary URL
-	version, err := c.fetchAndParse(cfg.URL, cfg.Parser, cfg.Path, cfg.Pattern)
+	version, err := c.fetchAndParse(cfg.URL, cfg.Parser, cfg.Path, cfg.Pattern, cfg.Selector, cfg.XPath)
 	if err == nil {
 		return version, nil
 	}
@@ -510,7 +533,7 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 			fallbackPattern = cfg.Path // Use primary path for JSON fallback
 		}
 
-		version, err = c.fetchAndParse(cfg.FallbackURL, cfg.FallbackParser, cfg.Path, fallbackPattern)
+		version, err = c.fetchAndParse(cfg.FallbackURL, cfg.FallbackParser, cfg.Path, fallbackPattern, cfg.Selector, cfg.XPath)
 		if err == nil {
 			return version, nil
 		}
@@ -533,20 +556,27 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 }
 
 // fetchAndParse fetches content from a URL and parses it to extract version.
-func (c *Checker) fetchAndParse(url, parserType, path, pattern string) (string, error) {
+// It builds the parser via NewParserFromConfig so every configured parser type
+// is supported — including "html", whose selector/xpath fields NewParser cannot
+// express. Passing selector/xpath through is what lets a check scrape a version
+// out of an HTML page (e.g. an XPath onto an href attribute).
+func (c *Checker) fetchAndParse(url, parserType, path, pattern, selector, xpath string) (string, error) {
 	// Fetch content
 	content, err := c.fetchContent(url)
 	if err != nil {
 		return "", err
 	}
 
-	// Create parser
-	pathOrPattern := path
-	if parserType == "regex" {
-		pathOrPattern = pattern
-	}
-
-	parser, err := NewParser(parserType, pathOrPattern)
+	// Create parser. NewParserFromConfig handles json/regex/html uniformly and,
+	// for html, wires selector/xpath plus the optional regex post-processing
+	// (carried in pattern).
+	parser, err := NewParserFromConfig(&PackageConfig{
+		Parser:   parserType,
+		Path:     path,
+		Pattern:  pattern,
+		Selector: selector,
+		XPath:    xpath,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create parser: %w", err)
 	}
