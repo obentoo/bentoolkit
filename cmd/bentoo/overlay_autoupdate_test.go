@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
 // writeExitTestEbuild writes a minimal ebuild for pkg ("category/name") at the
@@ -123,7 +124,9 @@ func TestCLI_ExitCodes(t *testing.T) {
 				// cacheTTL = 0 → runCheck skips WithCacheTTL and the Checker
 				// uses its default 1-hour TTL (R2.2). This test does not
 				// exercise cache freshness; force=true bypasses the cache.
-				runCheck(context.Background(), overlayDir, configDir, nil, 0)
+				// Zero config.LLMConfig{} (Provider == "") → no LLM provider is
+				// wired and the exit-code contract is unaffected.
+				runCheck(context.Background(), overlayDir, configDir, nil, 0, config.LLMConfig{})
 			})
 			if code != tt.wantExit {
 				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)

@@ -1562,3 +1562,256 @@ func llmPromptWarnsFor(lines []string, pkgs []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// =============================================================================
+// R5 / R8.1: Checker is programmed to the LLMProvider interface (AD2)
+// =============================================================================
+
+// fakeLLMProvider is a non-claude LLMProvider used to prove the Checker now
+// accepts ANY provider via WithLLMClient (AD2), not just the legacy claude
+// *LLMClient. It records the content/prompt of the last ExtractVersion call so
+// a test can assert the LLM fallback path was actually taken, and returns a
+// caller-supplied version (or err). It deliberately does NOT embed *LLMClient.
+type fakeLLMProvider struct {
+	version string
+	err     error
+
+	called     bool
+	gotContent []byte
+	gotPrompt  string
+}
+
+func (f *fakeLLMProvider) ExtractVersion(content []byte, prompt string) (string, error) {
+	f.called = true
+	f.gotContent = content
+	f.gotPrompt = prompt
+	return f.version, f.err
+}
+
+func (f *fakeLLMProvider) AnalyzeContent(_ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+	return &SchemaAnalysis{ParserType: "json"}, nil
+}
+
+func (f *fakeLLMProvider) GetModel() string { return "fake-model" }
+
+// TestWithLLMClient_AcceptsFakeProvider verifies the AD2 refactor: WithLLMClient
+// now takes an LLMProvider, so a non-claude provider — which the pre-refactor
+// `*LLMClient` parameter could not express and the legacy NewLLMClient rejects
+// outright — is accepted and stored. This is the regression-vs-old-rejection
+// guard for R5/R8.1.
+func TestWithLLMClient_AcceptsFakeProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	fake := &fakeLLMProvider{version: "9.9.9"}
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	checker, err := NewChecker(tmpDir,
+		WithConfigDir(filepath.Join(tmpDir, "config")),
+		WithPackagesConfig(cfg),
+		WithLLMClient(fake),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+	if checker.llmClient != fake {
+		t.Error("Expected llmClient to be the injected fake LLMProvider (AD2: any provider is accepted)")
+	}
+}
+
+// TestWithLLMClient_NilLeavesFieldNil verifies the WithLLMClient nil-guard: a
+// nil provider is ignored and llmClient stays an UNTYPED nil. This is the
+// defence-in-depth that keeps the typed-nil from a failed CLI constructor out
+// of the field, so the `== nil` warn gate and the `!= nil` fetch gate behave.
+func TestWithLLMClient_NilLeavesFieldNil(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	checker, err := NewChecker(tmpDir,
+		WithConfigDir(filepath.Join(tmpDir, "config")),
+		WithPackagesConfig(cfg),
+		WithLLMClient(nil),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+	if checker.llmClient != nil {
+		t.Error("Expected llmClient to remain nil after WithLLMClient(nil)")
+	}
+}
+
+// TestFetchUpstreamVersion_UsesProviderWhenParseFails verifies R5.2: when the
+// primary (and fallback) parse fails and the package sets llm_prompt, the
+// configured LLMProvider's ExtractVersion supplies the version. The server
+// returns plain text with no extractable JSON "version", so the json parser
+// fails and the LLM fallback is exercised. The fake provider both returns the
+// upstream version AND records that it was actually called with the fetched
+// page content.
+func TestFetchUpstreamVersion_UsesProviderWhenParseFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "test-cat/test-pkg"
+	currentVersion := "1.0.0"
+	const page = "no version key here, just prose about a release"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(page))
+	}))
+	defer server.Close()
+
+	createTestEbuild(t, overlayDir, pkgName, currentVersion)
+
+	config := &PackagesConfig{
+		Packages: map[string]PackageConfig{
+			// json parser on non-JSON content fails, so the LLM fallback runs.
+			pkgName: {URL: server.URL, Parser: "json", Path: "version", LLMPrompt: "extract the version"},
+		},
+	}
+
+	fake := &fakeLLMProvider{version: "2.0.0"}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(config),
+		WithRateLimiter(unlimitedRateLimiter()),
+		WithLLMClient(fake),
+		WithLLMProviderConfigured(true),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("CheckPackage: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected result error: %v", result.Error)
+	}
+
+	if !fake.called {
+		t.Fatal("expected the LLM provider's ExtractVersion to be invoked on parse failure (R5.2)")
+	}
+	if fake.gotPrompt != "extract the version" {
+		t.Errorf("provider got prompt %q, want %q", fake.gotPrompt, "extract the version")
+	}
+	if string(fake.gotContent) != page {
+		t.Errorf("provider got content %q, want the fetched page %q", string(fake.gotContent), page)
+	}
+	if result.UpstreamVersion != "2.0.0" {
+		t.Errorf("UpstreamVersion = %q, want %q (from the LLM provider)", result.UpstreamVersion, "2.0.0")
+	}
+	if !result.HasUpdate {
+		t.Error("expected HasUpdate true (2.0.0 > 1.0.0)")
+	}
+}
+
+// TestNewChecker_NoProviderConfigured_WarnsAndSkipsLLM verifies R5.3: when no
+// provider is configured (WithLLMProviderConfigured(false), llmClient nil) and
+// a package sets llm_prompt, NewChecker emits the unused-llm_prompt Warn AND a
+// subsequent check skips LLM extraction without crashing (the nil llmClient
+// gate in fetchUpstreamVersion is respected — no nil dereference). The parse
+// itself succeeds here, so the check completes normally.
+func TestNewChecker_NoProviderConfigured_WarnsAndSkipsLLM(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "cat-a/pkg-one"
+	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.0.0"})
+	}))
+	defer server.Close()
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+		pkgName: {URL: server.URL, Parser: "json", Path: "version", LLMPrompt: "extract version"},
+	}}
+
+	logs := captureWarnLogs(t)
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(cfg),
+		WithRateLimiter(unlimitedRateLimiter()),
+		WithLLMProviderConfigured(false), // no provider configured
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	// R5.3: the unused-llm_prompt Warn fired for the package.
+	warns := llmPromptWarnsFor(logs.all(), []string{pkgName})
+	if len(warns) != 1 {
+		t.Fatalf("got %d unused-llm_prompt Warns, want 1 (R5.3): %v", len(warns), warns)
+	}
+
+	// The check must not crash on the nil llmClient and should succeed via the
+	// normal json parse (LLM extraction skipped).
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("CheckPackage: %v", err)
+	}
+	if result.UpstreamVersion != "2.0.0" {
+		t.Errorf("UpstreamVersion = %q, want %q (normal parse; LLM skipped)", result.UpstreamVersion, "2.0.0")
+	}
+}
+
+// TestNewChecker_ProviderConfigured_SuppressesUnusedWarn verifies R5.3's
+// suppression half: the unused-llm_prompt Warn must NOT fire when a provider was
+// configured for the run. It covers BOTH wirings the CLI can produce:
+//   - configured AND wired (llmClient != nil, llmProviderConfigured true);
+//   - configured but FAILED to build (llmClient nil, llmProviderConfigured
+//     true) — runCheck logs its own failure Warn, so this construction Warn is
+//     suppressed to avoid a double-warn.
+func TestNewChecker_ProviderConfigured_SuppressesUnusedWarn(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+
+	pkgName := "cat-a/pkg-one"
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+		pkgName: {URL: "https://example.com/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
+	}}
+
+	cases := []struct {
+		name string
+		opts []CheckerOption
+	}{
+		{
+			name: "configured and wired",
+			opts: []CheckerOption{
+				WithLLMClient(&fakeLLMProvider{version: "9.9.9"}),
+				WithLLMProviderConfigured(true),
+			},
+		},
+		{
+			name: "configured but construction failed (nil provider)",
+			opts: []CheckerOption{
+				// llmClient stays nil (no WithLLMClient), but the run DID
+				// configure a provider — mirrors runCheck's failure branch.
+				WithLLMProviderConfigured(true),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureWarnLogs(t)
+
+			opts := append([]CheckerOption{
+				WithConfigDir(filepath.Join(tmpDir, tc.name)),
+				WithPackagesConfig(cfg),
+				WithRateLimiter(unlimitedRateLimiter()),
+			}, tc.opts...)
+
+			if _, err := NewChecker(overlayDir, opts...); err != nil {
+				t.Fatalf("NewChecker: %v", err)
+			}
+
+			if warns := llmPromptWarnsFor(logs.all(), []string{pkgName}); len(warns) != 0 {
+				t.Errorf("unused-llm_prompt Warn fired despite a configured provider (R5.3): %v", warns)
+			}
+		})
+	}
+}

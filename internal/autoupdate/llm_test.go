@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -694,6 +695,68 @@ func TestClaudeClient_WithCustomMaxBody(t *testing.T) {
 	if !errors.Is(err, ErrResponseTooLarge) {
 		t.Errorf("expected ErrResponseTooLarge, got: %v", err)
 	}
+}
+
+// TestNewLLMProvider_ClaudeCode verifies that NewLLMProvider routes the
+// "claude-code" provider to a *ClaudeCodeClient that satisfies LLMProvider
+// (R1.1, R8). claudeAvailable() consults the package-level lookPath seam, so
+// the test stubs lookPath to "find" the binary and restores exec.LookPath via
+// t.Cleanup, making the result independent of the host PATH.
+func TestNewLLMProvider_ClaudeCode(t *testing.T) {
+	lookPath = func(string) (string, error) { return "/usr/bin/claude", nil }
+	t.Cleanup(func() { lookPath = exec.LookPath })
+
+	provider, err := NewLLMProvider(LLMConfig{Provider: "claude-code"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+	cc, ok := provider.(*ClaudeCodeClient)
+	if !ok {
+		t.Fatalf("expected *ClaudeCodeClient, got %T", provider)
+	}
+	if cc == nil {
+		t.Fatal("expected non-nil *ClaudeCodeClient")
+	}
+}
+
+// TestNewLLMProvider_ExistingProvidersUnaffected asserts that adding the
+// claude-code case is additive: the pre-existing routing for "claude", the
+// unconfigured ("") case, and an unknown provider all behave as before
+// (R8, R8.1).
+func TestNewLLMProvider_ExistingProvidersUnaffected(t *testing.T) {
+	// "claude" still constructs a *ClaudeClient when its API key is populated.
+	t.Run("claude still works", func(t *testing.T) {
+		t.Setenv("TEST_CLAUDE_FACTORY_KEY", "test-key")
+		provider, err := NewLLMProvider(LLMConfig{
+			Provider:  "claude",
+			APIKeyEnv: "TEST_CLAUDE_FACTORY_KEY",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := provider.(*ClaudeClient); !ok {
+			t.Fatalf("expected *ClaudeClient, got %T", provider)
+		}
+	})
+
+	// Empty provider remains ErrLLMNotConfigured.
+	t.Run("empty provider not configured", func(t *testing.T) {
+		_, err := NewLLMProvider(LLMConfig{Provider: ""})
+		if !errors.Is(err, ErrLLMNotConfigured) {
+			t.Fatalf("expected ErrLLMNotConfigured, got: %v", err)
+		}
+	})
+
+	// Unknown provider still wraps ErrLLMUnsupportedProvider.
+	t.Run("unknown provider unsupported", func(t *testing.T) {
+		_, err := NewLLMProvider(LLMConfig{Provider: "bogus"})
+		if !errors.Is(err, ErrLLMUnsupportedProvider) {
+			t.Fatalf("expected ErrLLMUnsupportedProvider, got: %v", err)
+		}
+	})
 }
 
 // containsString checks if a string contains a substring

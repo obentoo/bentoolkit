@@ -83,8 +83,20 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
+	// Build analyzer options, conditionally injecting an LLM provider. When a
+	// provider is configured but cannot be constructed (e.g. the `claude` CLI is
+	// absent or not authenticated), we log a Warn and fall back to the heuristic
+	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
+	analyzerOpts := []autoupdate.AnalyzerOption{autoupdate.WithAnalyzerConfigDir(configDir)}
+	llmCfg := ctx.Config.Autoupdate.LLM
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
+	} else if p != nil {
+		analyzerOpts = append(analyzerOpts, autoupdate.WithAnalyzerLLMClient(p))
+	}
+
 	// Create analyzer
-	analyzer, err := autoupdate.NewAnalyzer(overlayPath, autoupdate.WithAnalyzerConfigDir(configDir))
+	analyzer, err := autoupdate.NewAnalyzer(overlayPath, analyzerOpts...)
 	if err != nil {
 		logger.Error("failed to initialize analyzer: %v", err)
 		osExit(1)

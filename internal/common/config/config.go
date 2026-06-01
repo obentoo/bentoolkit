@@ -60,9 +60,11 @@ type AutoupdateConfig struct {
 
 // LLMConfig holds LLM provider configuration for autoupdate
 type LLMConfig struct {
-	Provider  string `yaml:"provider"`    // LLM provider name (e.g., "claude")
-	APIKeyEnv string `yaml:"api_key_env"` // Environment variable name for API key
-	Model     string `yaml:"model"`       // Model name to use
+	Provider     string  `yaml:"provider"`                 // LLM provider name (e.g., "claude")
+	APIKeyEnv    string  `yaml:"api_key_env"`              // Environment variable name for API key
+	Model        string  `yaml:"model"`                    // Model name to use
+	Bare         string  `yaml:"bare,omitempty"`           // CLI bare-mode selector: "auto" (default), "true", or "false"
+	MaxBudgetUSD float64 `yaml:"max_budget_usd,omitempty"` // Optional spend cap passed to the CLI provider via --max-budget-usd
 }
 
 // SearchConfig holds search provider configuration for autoupdate
@@ -156,7 +158,27 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.Autoupdate.LLM.normalize()
+
 	return &cfg, nil
+}
+
+// normalize fills in defaults and coerces invalid values for the LLM config.
+//
+// The `bare` field accepts only "auto", "true", or "false". An unset value
+// resolves to "auto". Any other value is leniently coerced to "auto" rather
+// than rejected: this project treats config normalization as best-effort and
+// never hard-errors on a stray value here, keeping a typo from aborting a
+// whole autoupdate run (a downstream feature, the bare-mode flag, can still
+// surface a clearer signal if needed).
+func (c *LLMConfig) normalize() {
+	switch c.Bare {
+	case "auto", "true", "false":
+		// Valid value — preserve verbatim.
+	default:
+		// Empty or unrecognized — default/coerce to "auto" (lenient).
+		c.Bare = "auto"
+	}
 }
 
 // Save writes configuration to the default config file

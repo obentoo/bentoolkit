@@ -89,6 +89,10 @@ type LLMConfig struct {
 	Model string
 	// BaseURL is the base URL for the API (used by Ollama)
 	BaseURL string
+	// Bare selects the CLI bare-mode behavior: "auto" (default), "true", or "false"
+	Bare string
+	// MaxBudgetUSD is an optional spend cap passed to a CLI provider via --max-budget-usd
+	MaxBudgetUSD float64
 }
 
 // readCappedBody reads an HTTP response body while enforcing a maximum size.
@@ -180,6 +184,11 @@ func NewLLMProvider(cfg LLMConfig) (LLMProvider, error) {
 		return NewOpenAIClient(cfg)
 	case "ollama":
 		return NewOllamaClient(cfg)
+	case "claude-code":
+		// NewClaudeCodeClient returns (*ClaudeCodeClient, error); since
+		// *ClaudeCodeClient implements LLMProvider, the pair satisfies the
+		// (LLMProvider, error) return signature directly (R1.1, R8, R8.1).
+		return NewClaudeCodeClient(cfg)
 	case "":
 		return nil, ErrLLMNotConfigured
 	default:
@@ -603,9 +612,30 @@ func NewLLMClientWithHTTPClient(cfg LLMConfig, httpClient *http.Client) (*LLMCli
 	return client, nil
 }
 
+// Compile-time assertion that *LLMClient satisfies LLMProvider. The legacy
+// wrapper must remain a valid LLMProvider so it stays accepted by
+// WithLLMClient after the Checker was reprogrammed to the interface (AD2): it
+// delegates every interface method to its embedded provider below.
+var _ LLMProvider = (*LLMClient)(nil)
+
 // ExtractVersion uses the LLM to extract a version string from content.
 func (c *LLMClient) ExtractVersion(content []byte, prompt string) (string, error) {
 	return c.provider.ExtractVersion(content, prompt)
+}
+
+// AnalyzeContent delegates schema analysis to the embedded provider so
+// *LLMClient satisfies the full LLMProvider interface (AD2). The legacy API
+// historically exposed only ExtractVersion; this method exists purely to keep
+// *LLMClient a valid WithLLMClient argument now that the option takes an
+// LLMProvider.
+func (c *LLMClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+	return c.provider.AnalyzeContent(content, meta, hint)
+}
+
+// GetModel delegates to the embedded provider so *LLMClient satisfies
+// LLMProvider (AD2).
+func (c *LLMClient) GetModel() string {
+	return c.provider.GetModel()
 }
 
 // SetHTTPClient sets a custom HTTP client (useful for testing)

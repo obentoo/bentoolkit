@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`claude-code` LLM provider + LLM wiring for `analyze` and `--check`.** A new
+  `llm.provider: claude-code` drives the locally-installed `claude` CLI (Claude
+  Code) headlessly (`claude -p … --output-format json`, page content on stdin)
+  instead of the HTTP API, reusing your existing Claude Code login or an API key.
+  Authentication is hybrid via the new `llm.bare` config (`auto`/`true`/`false`):
+  `--bare` + `ANTHROPIC_API_KEY` (the cheap path) or the CLI's login/subscription
+  session. The new `llm.max_budget_usd` caps per-call spend (`claude
+  --max-budget-usd`). The provider defaults to the `sonnet` model alias and runs
+  via `exec.CommandContext`, so SIGINT or the timeout kills the child process;
+  page content is passed on stdin (never argv) and the API key never reaches argv,
+  logs, or errors. `bentoo overlay analyze` now builds the configured provider for
+  schema proposal, and `bentoo overlay autoupdate --check` now uses it to extract a
+  version for packages that set `llm_prompt` (tried after the primary/fallback
+  parsers). Both commands degrade gracefully: when the `claude` CLI is missing or
+  unauthenticated they log a Warn and fall back (heuristic schema / skip
+  extraction) rather than failing. Internally, the `Checker`'s LLM hook was
+  refactored to accept the `LLMProvider` interface (previously Claude-HTTP-only),
+  so any provider can be injected; the existing `claude`/`openai`/`ollama`
+  providers are unchanged.
+
 ### Fixed
 - **`overlay autoupdate --check` no longer fails packages that queue behind
   others on the same host.** `fetchContent` derived a single

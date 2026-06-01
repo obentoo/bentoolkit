@@ -87,9 +87,12 @@ repositories:
 
 # Optional: LLM provider configuration for autoupdate
 llm:
-  provider: claude        # claude, openai, or ollama
+  provider: claude        # claude, claude-code, openai, or ollama
   api_key_env: ANTHROPIC_API_KEY
   model: claude-3-haiku-20240307
+  # claude-code only (drives the local `claude` CLI):
+  bare: auto              # auto (default) | true | false
+  max_budget_usd: 0.50    # optional per-call spend cap
 ```
 
 ### Configuration Options
@@ -101,9 +104,11 @@ llm:
 | `git.email` | Git email for commits (fallback if not in ~/.gitconfig) | No |
 | `github.token` | GitHub personal access token for higher API rate limits | No |
 | `repositories.<name>` | Custom repository definitions for the compare command | No |
-| `llm.provider` | LLM provider for autoupdate: `claude`, `openai`, or `ollama` | No |
+| `llm.provider` | LLM provider for autoupdate: `claude`, `claude-code`, `openai`, or `ollama` | No |
 | `llm.api_key_env` | Environment variable name containing the API key | No |
-| `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`) | No |
+| `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
+| `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when the key env is set, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
+| `llm.max_budget_usd` | `claude-code` only: optional per-call spend cap passed to `claude --max-budget-usd` (unset = no cap) | No |
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
 
@@ -481,17 +486,18 @@ selector = "a.release-tag"
 | `fallback_url` | Secondary URL to try if the primary fails |
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
-| `llm_prompt` | Consumed by `bentoo overlay analyze` only. Has no effect on `bentoo overlay autoupdate --check`. A package with this field set during `--check` triggers a Warn. |
+| `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
 
 #### Supported LLM Providers
 
-The `analyze` command uses an LLM for schema generation. `bentoo overlay autoupdate --check` does not currently invoke an LLM; the `llm_prompt` field in `packages.toml` is consumed only by `analyze`.
+The `analyze` command uses an LLM for schema generation. `bentoo overlay autoupdate --check` also uses the LLM to extract a version when an `llm.provider` is configured and a package sets `llm_prompt` (tried after the primary and fallback parsers); with no provider configured it logs a Warn and skips LLM extraction.
 
 | Provider | Config value | API key env var | Notes |
 |----------|-------------|-----------------|-------|
-| Anthropic Claude | `claude` | `ANTHROPIC_API_KEY` | Default model: `claude-3-haiku-20240307` |
+| Anthropic Claude (HTTP API) | `claude` | `ANTHROPIC_API_KEY` | Default model: `claude-3-haiku-20240307` |
+| Claude Code (local CLI) | `claude-code` | `ANTHROPIC_API_KEY` (bare mode) | Drives the local `claude` CLI headlessly. Default model: `sonnet` alias. Hybrid auth via `llm.bare`; honors `llm.max_budget_usd`. Degrades to a Warn + fallback when the CLI is missing or unauthenticated. |
 | OpenAI | `openai` | `OPENAI_API_KEY` | Default model: `gpt-4o-mini` |
 | Ollama (local) | `ollama` | *(none)* | Default model: `llama3`, runs locally |
 
@@ -505,6 +511,26 @@ llm:
 ```
 
 The Claude endpoint can be overridden via `CLAUDE_API_ENDPOINT` environment variable (useful for testing or proxies).
+
+##### `claude-code` provider (local CLI)
+
+The `claude-code` provider drives your locally-installed `claude` CLI (Claude Code) headlessly instead of calling the HTTP API, reusing your existing Claude Code login or an API key:
+
+```yaml
+llm:
+  provider: claude-code
+  api_key_env: ANTHROPIC_API_KEY   # used in bare mode
+  model: sonnet                    # optional; defaults to the `sonnet` alias (latest Sonnet)
+  bare: auto                       # auto | true | false
+  max_budget_usd: 0.50             # optional per-call spend cap
+```
+
+Authentication is hybrid, selected by `llm.bare`:
+
+- `auto` (default): use `claude --bare` with `ANTHROPIC_API_KEY` when `api_key_env` is set and that variable is non-empty; otherwise use the CLI's logged-in session (subscription).
+- `true` / `false`: force bare (`--bare` + key) or login/subscription mode respectively, regardless of key presence.
+
+> **Cost note.** `sonnet` in login/subscription mode is billed per call (a large page context of ~74k tokens is roughly $0.09+/call). The cheap path is `--bare` + an API key. Set a conservative `max_budget_usd` when running `--check` across many packages. If the `claude` CLI is missing or not authenticated, both `analyze` and `--check` log a Warn and fall back (heuristic schema / skip extraction) — they never fail because of the LLM.
 
 #### Example Autoupdate Workflow
 

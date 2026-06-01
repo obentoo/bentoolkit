@@ -9,6 +9,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
@@ -99,7 +100,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args, cacheTTL)
+		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config.Autoupdate.LLM)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply != "":
@@ -115,7 +116,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration) {
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, llmCfg config.LLMConfig) {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
@@ -124,6 +125,24 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
 	}
+
+	// Wire an LLM provider into the check path (R5.2). newConfiguredLLMProvider
+	// returns (nil, nil) when no provider is configured, (provider, nil) on
+	// success, and (typed-nil, err) on a construction failure. The error must be
+	// the PRIMARY guard: a failed constructor boxes a nil concrete pointer into a
+	// NON-nil interface, so we wire WithLLMClient only on err==nil AND p!=nil —
+	// never a typed-nil (which would make fetchUpstreamVersion dereference a nil
+	// receiver). On failure we Warn and continue; --check still runs, skipping LLM
+	// extraction. WithLLMProviderConfigured records that a provider WAS requested
+	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
+	// (R5.3) and we avoid a double-warn with the failure line just below.
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
+	} else if p != nil {
+		opts = append(opts, autoupdate.WithLLMClient(p))
+	}
+	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
+
 	checker, err := autoupdate.NewChecker(overlayPath, opts...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)

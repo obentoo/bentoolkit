@@ -49,6 +49,12 @@ func genConfig() gopter.Gen {
 				User:  values[2].(string),
 				Email: values[3].(string),
 			},
+			// LoadFrom normalizes an unset llm.bare to "auto", so the generated
+			// (pre-save) config must already carry the normalized value for the
+			// save->load identity round-trip to hold.
+			Autoupdate: AutoupdateConfig{
+				LLM: LLMConfig{Bare: "auto"},
+			},
 		}
 	})
 }
@@ -442,6 +448,17 @@ func genModel() gopter.Gen {
 	return gen.RegexMatch(`^[a-z][a-z0-9-]{2,30}$`)
 }
 
+// genLLMBare generates valid `bare` field values (the only values that survive
+// normalize() unchanged, so the round-trip property holds).
+func genLLMBare() gopter.Gen {
+	return gen.OneConstOf("auto", "true", "false")
+}
+
+// genMaxBudgetUSD generates valid non-negative budget caps.
+func genMaxBudgetUSD() gopter.Gen {
+	return gen.Float64Range(0, 1000)
+}
+
 // genAutoupdateConfig generates valid AutoupdateConfig structs
 func genAutoupdateConfig() gopter.Gen {
 	return gopter.CombineGens(
@@ -451,13 +468,17 @@ func genAutoupdateConfig() gopter.Gen {
 		genModel(),
 		genLLMProvider(), // reuse for search provider
 		genAPIKeyEnv(),   // reuse for search api key env
+		genLLMBare(),
+		genMaxBudgetUSD(),
 	).Map(func(values []interface{}) AutoupdateConfig {
 		return AutoupdateConfig{
 			CacheTTL: values[0].(int),
 			LLM: LLMConfig{
-				Provider:  values[1].(string),
-				APIKeyEnv: values[2].(string),
-				Model:     values[3].(string),
+				Provider:     values[1].(string),
+				APIKeyEnv:    values[2].(string),
+				Model:        values[3].(string),
+				Bare:         values[6].(string),
+				MaxBudgetUSD: values[7].(float64),
 			},
 			Search: SearchConfig{
 				Provider:  values[4].(string),
@@ -1877,5 +1898,124 @@ func TestSaveToFilePermissions(t *testing.T) {
 	perm := info.Mode().Perm()
 	if perm != 0600 {
 		t.Errorf("expected file permissions 0600, got %04o", perm)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LLMConfig.Bare normalization + MaxBudgetUSD parsing (R8.2, R7.2)
+// ---------------------------------------------------------------------------
+
+// writeConfigYAML writes the given YAML body to a temp config file and returns its path.
+func writeConfigYAML(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// TestLLMBareNormalization verifies that the `bare` field defaults to "auto"
+// when unset, is preserved verbatim for valid values, and is leniently coerced
+// to "auto" for invalid values (no hard error). _Requirements: R8.2_
+func TestLLMBareNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		bareLine string // YAML line under llm:, or "" to omit entirely
+		expected string
+	}{
+		{
+			name:     "unset resolves to auto",
+			bareLine: "",
+			expected: "auto",
+		},
+		{
+			name:     "true preserved",
+			bareLine: "    bare: \"true\"\n",
+			expected: "true",
+		},
+		{
+			name:     "false preserved",
+			bareLine: "    bare: \"false\"\n",
+			expected: "false",
+		},
+		{
+			name:     "auto preserved",
+			bareLine: "    bare: auto\n",
+			expected: "auto",
+		},
+		{
+			name:     "garbage coerced to auto (lenient)",
+			bareLine: "    bare: garbage\n",
+			expected: "auto",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "overlay:\n  path: /test/overlay\nautoupdate:\n  llm:\n    provider: claude\n" + tt.bareLine
+
+			cfg, err := LoadFrom(writeConfigYAML(t, body))
+			if err != nil {
+				t.Fatalf("LoadFrom: %v", err)
+			}
+
+			if got := cfg.Autoupdate.LLM.Bare; got != tt.expected {
+				t.Errorf("LLM.Bare = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestLLMMaxBudgetUSDParsing verifies that max_budget_usd is parsed when set
+// and defaults to 0 when unset. _Requirements: R7.2_
+func TestLLMMaxBudgetUSDParsing(t *testing.T) {
+	t.Run("set to 0.5", func(t *testing.T) {
+		body := "overlay:\n  path: /test/overlay\nautoupdate:\n  llm:\n    provider: claude\n    max_budget_usd: 0.5\n"
+
+		cfg, err := LoadFrom(writeConfigYAML(t, body))
+		if err != nil {
+			t.Fatalf("LoadFrom: %v", err)
+		}
+
+		if got := cfg.Autoupdate.LLM.MaxBudgetUSD; got != 0.5 {
+			t.Errorf("LLM.MaxBudgetUSD = %v, want 0.5", got)
+		}
+	})
+
+	t.Run("unset defaults to 0", func(t *testing.T) {
+		body := "overlay:\n  path: /test/overlay\nautoupdate:\n  llm:\n    provider: claude\n"
+
+		cfg, err := LoadFrom(writeConfigYAML(t, body))
+		if err != nil {
+			t.Fatalf("LoadFrom: %v", err)
+		}
+
+		if got := cfg.Autoupdate.LLM.MaxBudgetUSD; got != 0 {
+			t.Errorf("LLM.MaxBudgetUSD = %v, want 0", got)
+		}
+	})
+}
+
+// TestLLMConfigNormalizeHelper exercises the normalize() helper directly to
+// document the lenient defaulting contract independent of YAML loading.
+func TestLLMConfigNormalizeHelper(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: "auto"},
+		{in: "auto", want: "auto"},
+		{in: "true", want: "true"},
+		{in: "false", want: "false"},
+		{in: "garbage", want: "auto"},
+		{in: "TRUE", want: "auto"}, // case-sensitive: not a valid token
+	}
+	for _, tt := range tests {
+		c := LLMConfig{Bare: tt.in}
+		c.normalize()
+		if c.Bare != tt.want {
+			t.Errorf("normalize() with Bare=%q => %q, want %q", tt.in, c.Bare, tt.want)
+		}
 	}
 }

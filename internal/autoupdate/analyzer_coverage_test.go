@@ -424,7 +424,12 @@ func (m *mockClock) Sleep(d time.Duration) { m.now = m.now.Add(d) }
 // Checker options
 // =============================================================================
 
-// TestCheckerWithLLMClient tests the WithLLMClient checker option
+// TestCheckerWithLLMClient tests the WithLLMClient checker option. After the
+// AD2 refactor WithLLMClient takes an LLMProvider and checker.llmClient is that
+// interface; the legacy *LLMClient still satisfies it (it now delegates
+// AnalyzeContent/GetModel to its embedded provider), so passing one here both
+// compiles and is stored. This is the backward-compatibility guard for R8.1 —
+// an existing *LLMClient caller keeps working.
 func TestCheckerWithLLMClient(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("TEST_LLM_KEY", "test-key")
@@ -439,6 +444,7 @@ func TestCheckerWithLLMClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
+	// The interface-typed field holds the concrete *LLMClient we passed.
 	if checker.llmClient != llmClient {
 		t.Error("Expected llmClient to be set via WithLLMClient")
 	}

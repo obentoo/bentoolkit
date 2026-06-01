@@ -96,8 +96,24 @@ type Checker struct {
 	cache *Cache
 	// pending manages pending updates
 	pending *PendingList
-	// llmClient handles LLM-based version extraction (optional)
-	llmClient *LLMClient
+	// llmClient handles LLM-based version extraction (optional). It is the
+	// LLMProvider interface (AD2), so ANY configured provider — not only the
+	// legacy claude *LLMClient — can drive --check's LLM extraction path.
+	// MUST stay an UNTYPED nil when absent: the nil-guards below and in
+	// fetchUpstreamVersion rely on `== nil` / `!= nil`, which a typed-nil
+	// interface (e.g. a (*ClaudeClient)(nil) boxed by a failed constructor)
+	// would defeat. WithLLMClient therefore rejects a nil argument, and the
+	// CLI wires it only on a successful, non-nil construction.
+	llmClient LLMProvider
+	// llmProviderConfigured records that the CLI attempted to configure an LLM
+	// provider for this run (autoupdate.llm.provider was non-empty), regardless
+	// of whether construction ultimately succeeded. It gates the "unused
+	// llm_prompt" Warn: that diagnostic must fire ONLY when no provider was
+	// configured at all (R5.3). When a provider was configured but failed to
+	// build, runCheck emits its own failure Warn, so suppressing the construction
+	// Warn here avoids a confusing double-warn. Set via WithLLMProviderConfigured;
+	// defaults false so existing direct callers are unaffected.
+	llmProviderConfigured bool
 	// httpClient handles HTTP requests with retry logic
 	httpClient *RetryableHTTPClient
 	// configDir is the directory for storing cache and pending files
@@ -149,10 +165,38 @@ func WithPendingList(pending *PendingList) CheckerOption {
 	}
 }
 
-// WithLLMClient sets a custom LLM client for the checker
-func WithLLMClient(llm *LLMClient) CheckerOption {
+// WithLLMClient sets the LLM provider used by --check's version-extraction
+// fallback. It accepts any LLMProvider (AD2), so a non-claude provider — which
+// the pre-refactor *LLMClient signature could not express — is now valid; the
+// legacy *LLMClient still satisfies the interface and remains accepted.
+//
+// A nil provider is ignored (the field is left untouched, i.e. nil), mirroring
+// WithRateLimiter's nil rejection. This is defence-in-depth: the CLI must wire
+// this option only with a successfully constructed, non-nil provider, because a
+// typed-nil interface (a nil concrete pointer boxed by a failed constructor)
+// would pass `!= nil` and make fetchUpstreamVersion call ExtractVersion on a
+// nil receiver. Refusing nil here keeps llmClient an untyped nil when no usable
+// provider exists.
+func WithLLMClient(llm LLMProvider) CheckerOption {
 	return func(c *Checker) error {
-		c.llmClient = llm
+		if llm != nil {
+			c.llmClient = llm
+		}
+		return nil
+	}
+}
+
+// WithLLMProviderConfigured records whether the CLI attempted to configure an
+// LLM provider for this run (true when autoupdate.llm.provider was non-empty),
+// independent of whether the provider was successfully built and wired via
+// WithLLMClient. It exists to gate the "unused llm_prompt" Warn so that warning
+// fires only when NO provider was configured (R5.3); when a provider was
+// configured but failed to construct, runCheck logs its own failure Warn and
+// this flag suppresses the duplicate construction Warn. Defaults false, so
+// callers that omit it preserve the pre-refactor warn behaviour.
+func WithLLMProviderConfigured(configured bool) CheckerOption {
+	return func(c *Checker) error {
+		c.llmProviderConfigured = configured
 		return nil
 	}
 }
@@ -326,13 +370,20 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		checker.rateLimiter = NewRateLimiter()
 	}
 
-	// R4.2: a non-empty llm_prompt has no effect on --check today (the LLM
-	// is only invoked when llmClient is non-nil, which the CLI never wires).
-	// Emit a Warn for each affected package so users discover the gap before
-	// debugging a silent no-op. Sorted iteration keeps the diagnostic order
-	// deterministic. De-duplication is per-Checker (the lifetime of one
-	// `bentoo overlay autoupdate --check` run), not process-wide.
-	if checker.llmClient == nil && checker.config != nil {
+	// R5.3 / R4.2: a non-empty llm_prompt only drives --check when an LLM
+	// provider is wired (llmClient != nil). Warn for each affected package so
+	// users discover an UNUSED llm_prompt before debugging a silent no-op — but
+	// ONLY when no provider was configured for this run (llmProviderConfigured
+	// is false). When a provider WAS configured:
+	//   - and built successfully, llmClient != nil already suppresses this Warn
+	//     and the prompt is honoured;
+	//   - and failed to build, runCheck emits its own "provider unavailable"
+	//     Warn, so gating on llmProviderConfigured here prevents a confusing
+	//     double-warn.
+	// Sorted iteration keeps the diagnostic order deterministic. De-duplication
+	// is per-Checker (the lifetime of one `bentoo overlay autoupdate --check`
+	// run), not process-wide.
+	if checker.llmClient == nil && !checker.llmProviderConfigured && checker.config != nil {
 		names := make([]string, 0, len(checker.config.Packages))
 		for name, pkgCfg := range checker.config.Packages {
 			if pkgCfg.LLMPrompt != "" {
