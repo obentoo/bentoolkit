@@ -85,6 +85,25 @@ func compareIntSlices(a, b []int) int {
 	return 0
 }
 
+// validVersionRegex matches a well-formed Gentoo-style version: a numeric
+// component chain (1.2.3), an optional single trailing letter (1.2.3a), zero or
+// more recognized suffixes (_alpha/_beta/_pre/_rc/_p with an optional number),
+// and an optional revision (-r1).
+var validVersionRegex = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*[a-z]?(_(alpha|beta|pre|rc|p)[0-9]*)*(-r[0-9]+)?$`)
+
+// IsValidVersion reports whether v is a well-formed Gentoo-style version string
+// that CompareVersions can order meaningfully.
+//
+// This matters because parseVersion is deliberately lenient: it coerces any
+// unparseable component to 0, so strings like "INKSCAPE_1_4_4", "latest", or a
+// still-prefixed "v6.6.91" silently parse to a near-zero version and compare as
+// *older* than any real version. Callers that compare an upstream value against
+// the current ebuild version should reject non-comparable inputs up front
+// rather than treat them as "no update available".
+func IsValidVersion(v string) bool {
+	return validVersionRegex.MatchString(strings.TrimSpace(v))
+}
+
 // CompareVersions compares two Gentoo-style version strings
 // Returns: -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
 func CompareVersions(v1, v2 string) int {
