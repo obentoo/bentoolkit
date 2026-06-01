@@ -885,6 +885,56 @@ func TestCheckPackageHTMLParser(t *testing.T) {
 	}
 }
 
+// TestFetchContentRateLimitNotChargedToOpTimeout is a regression guard: time
+// spent waiting on the per-host rate limiter must NOT count against the
+// per-operation HTTP timeout. A limiter wait longer than opTimeout previously
+// made the fetch fail with "context deadline exceeded" before any request was
+// issued — so packages sharing a busy host failed spuriously. Here the limiter
+// waits 300ms while opTimeout is 100ms; the fetch must still succeed because
+// the 100ms deadline only starts after the token is acquired.
+func TestFetchContentRateLimitNotChargedToOpTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkgName := "test-cat/test-pkg"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.0.0"})
+	}))
+	defer server.Close()
+
+	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
+
+	config := &PackagesConfig{
+		Packages: map[string]PackageConfig{
+			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
+		},
+	}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(config),
+		// Limiter wait (300ms) deliberately exceeds the op timeout (100ms).
+		WithRateLimiter(sleepingRateLimiter{d: 300 * time.Millisecond}),
+		WithOpTimeout(100*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := checker.CheckPackage(pkgName, true)
+	if err != nil {
+		t.Fatalf("fetch failed despite a healthy server (rate-limit wait charged to opTimeout?): %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected result error: %v", result.Error)
+	}
+	if !result.HasUpdate {
+		t.Error("expected update 1.0.0 -> 2.0.0")
+	}
+}
+
 // TestCheckAllReturnsAllResults tests that CheckAll returns results for all packages
 func TestCheckAllReturnsAllResults(t *testing.T) {
 	tmpDir := t.TempDir()

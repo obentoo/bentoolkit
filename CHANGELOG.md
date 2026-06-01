@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`overlay autoupdate --check` no longer fails packages that queue behind
+  others on the same host.** `fetchContent` derived a single
+  `opTimeout`-bounded context and used it for *both* the per-host rate-limiter
+  wait *and* the HTTP request. A package queued behind several others on the
+  same host could therefore burn the entire per-operation deadline while still
+  waiting for a rate-limit token and fail with `context deadline exceeded`
+  before any request was issued (observed with 13 packages sharing
+  `gitlab.freedesktop.org`). The limiter wait now uses the parent
+  (signal-aware) context; the `opTimeout` starts only after a token is acquired
+  and bounds just the HTTP round-trip. SIGINT/SIGTERM still cancels the wait.
+
 ## [0.2.2] - 2026-06-01
 
 ### Fixed
