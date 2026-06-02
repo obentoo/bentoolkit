@@ -22,6 +22,7 @@ const MaxVersionHistoryLimit = 10
 //   - <0 → unlimited (used by the "select" path, which must see the full list so
 //     select="max" is not defeated by truncation of an ascending list);
 //   - >0 → that exact value.
+//
 // A returned value <= 0 means "no cap": loops gate on `lim > 0 && len >= lim`.
 func effectiveLimit(limit int) int {
 	if limit == 0 {
