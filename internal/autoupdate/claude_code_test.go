@@ -183,7 +183,7 @@ func TestNewClaudeCodeClient_IgnoresNilContextAndNonPositiveTimeout(t *testing.T
 	c, err := NewClaudeCodeClient(LLMConfig{},
 		WithClaudeCodeTimeout(0),
 		WithClaudeCodeTimeout(-1*time.Second),
-		WithClaudeCodeContext(nil),
+		WithClaudeCodeContext(nil), //nolint:staticcheck // SA1012: this test deliberately verifies nil-context handling
 	)
 	if err != nil {
 		t.Fatalf("NewClaudeCodeClient: %v", err)
@@ -527,7 +527,10 @@ func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 	const keyEnv = "TEST_CC_API_KEY_RUN_NONBARE"
 	t.Setenv(keyEnv, "should-not-be-used")
 
-	script := `if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'KEYPRESENT' 1>&2; fi; ` +
+	// If ANTHROPIC_API_KEY leaks into the child's env, the script exits non-zero
+	// with KEYINJECTED on stderr so run() surfaces it as an error; otherwise it
+	// prints the success envelope and exits zero.
+	script := `if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'KEYINJECTED' 1>&2; exit 9; fi; ` +
 		`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`
 	seam, cap := scriptedSeam(script)
 
@@ -535,22 +538,24 @@ func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 	c := newTestClient(t, LLMConfig{Bare: "false", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
 
 	out, err := c.run("instr", []byte("content"), "")
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if out != "ok" {
-		t.Errorf("result = %q, want ok", out)
-	}
+
+	// --bare must be absent from argv when not bare.
 	if argsContain(cap.args, "--bare") {
 		t.Errorf("--bare must be absent when not bare: %v", cap.args)
 	}
-	// The child must NOT have received an injected ANTHROPIC_API_KEY. Note: we do
-	// not set ANTHROPIC_API_KEY in the test's own env, so KEYPRESENT proves an
-	// injection happened. (If the host already exported ANTHROPIC_API_KEY this
-	// guard is skipped to avoid a false failure.)
+
+	// In non-bare mode run leaves cmd.Env nil, so the child inherits the test
+	// process env, which has no ANTHROPIC_API_KEY (we set keyEnv, not that). A
+	// leak would have tripped the script's exit-9/KEYINJECTED guard, turning the
+	// call into an error. Skip when the host itself exported ANTHROPIC_API_KEY,
+	// since that is legitimate inheritance rather than an injection by run.
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		// run leaves cmd.Env nil in non-bare mode, so the child inherits the test
-		// process env, which has no ANTHROPIC_API_KEY here.
+		if err != nil {
+			t.Fatalf("non-bare run failed (ANTHROPIC_API_KEY injected into child?): %v", err)
+		}
+		if out != "ok" {
+			t.Errorf("result = %q, want ok", out)
+		}
 	}
 }
 

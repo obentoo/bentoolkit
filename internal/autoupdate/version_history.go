@@ -356,11 +356,10 @@ func newSelectExtractor(cfg *PackageConfig) (VersionHistoryExtractor, error) {
 			path = "[*]"
 		case strings.HasPrefix(path, "[0]."):
 			path = "[*]." + strings.TrimPrefix(path, "[0].")
-		case strings.HasPrefix(path, "[*]"):
-			// already a wildcard path
-		default:
-			// A non-indexed path (e.g. "tags") is assumed to point at an array.
 		}
+		// A "[*]"-prefixed path is already a wildcard; a non-indexed path
+		// (e.g. "tags") is assumed to point at an array. Both pass through
+		// unchanged.
 		return &JSONVersionHistoryExtractor{VersionsPath: path, Limit: -1}, nil
 	case "regex":
 		return &RegexVersionHistoryExtractor{Pattern: cfg.Pattern, Limit: -1}, nil
