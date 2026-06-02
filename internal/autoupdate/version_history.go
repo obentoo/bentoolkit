@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -14,6 +15,20 @@ import (
 // MaxVersionHistoryLimit is the maximum number of versions to extract from history.
 // Per Requirement 9.3, version history is limited to 10 versions.
 const MaxVersionHistoryLimit = 10
+
+// effectiveLimit resolves an extractor's Limit field to a concrete cap, using the
+// convention shared by every VersionHistoryExtractor:
+//   - 0  → default to MaxVersionHistoryLimit (preserves historic behavior);
+//   - <0 → unlimited (used by the "select" path, which must see the full list so
+//     select="max" is not defeated by truncation of an ascending list);
+//   - >0 → that exact value.
+// A returned value <= 0 means "no cap": loops gate on `lim > 0 && len >= lim`.
+func effectiveLimit(limit int) int {
+	if limit == 0 {
+		return MaxVersionHistoryLimit
+	}
+	return limit
+}
 
 // VersionHistoryExtractor defines the interface for extracting version history.
 type VersionHistoryExtractor interface {
@@ -27,6 +42,9 @@ type VersionHistoryExtractor interface {
 type JSONVersionHistoryExtractor struct {
 	// VersionsPath is the JSON path to the version array (e.g., "[*].tag_name")
 	VersionsPath string
+	// Limit caps the number of versions returned. See effectiveLimit for the
+	// 0/<0/>0 convention. Zero value keeps the historic 10-version cap.
+	Limit int
 }
 
 // ExtractVersions extracts version history from JSON content using the configured path.
@@ -48,9 +66,9 @@ func (e *JSONVersionHistoryExtractor) ExtractVersions(content []byte) ([]string,
 		return nil, err
 	}
 
-	// Limit to MaxVersionHistoryLimit
-	if len(versions) > MaxVersionHistoryLimit {
-		versions = versions[:MaxVersionHistoryLimit]
+	// Apply the configured cap (0 → default 10; <0 → unlimited).
+	if lim := effectiveLimit(e.Limit); lim > 0 && len(versions) > lim {
+		versions = versions[:lim]
 	}
 
 	return versions, nil
@@ -59,6 +77,7 @@ func (e *JSONVersionHistoryExtractor) ExtractVersions(content []byte) ([]string,
 // extractVersionsFromPath extracts versions from JSON data using the configured path.
 func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) ([]string, error) {
 	path := e.VersionsPath
+	lim := effectiveLimit(e.Limit)
 
 	// Handle wildcard array path: [*].field or [*]
 	if strings.HasPrefix(path, "[*]") {
@@ -96,7 +115,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 			versions = append(versions, version)
 
 			// Stop if we have enough versions
-			if len(versions) >= MaxVersionHistoryLimit {
+			if lim > 0 && len(versions) >= lim {
 				break
 			}
 		}
@@ -129,7 +148,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 		if version != "" {
 			versions = append(versions, version)
 		}
-		if len(versions) >= MaxVersionHistoryLimit {
+		if lim > 0 && len(versions) >= lim {
 			break
 		}
 	}
@@ -148,6 +167,8 @@ type HTMLVersionHistoryExtractor struct {
 	VersionsSelector string
 	// Regex is an optional regex pattern to apply to each extracted text
 	Regex string
+	// Limit caps the number of versions returned (see effectiveLimit).
+	Limit int
 }
 
 // ExtractVersions extracts version history from HTML content using the configured selector.
@@ -169,9 +190,10 @@ func (e *HTMLVersionHistoryExtractor) ExtractVersions(content []byte) ([]string,
 		return nil, fmt.Errorf("%w: %s", ErrNoElementFound, e.VersionsSelector)
 	}
 
+	lim := effectiveLimit(e.Limit)
 	var versions []string
 	selection.Each(func(i int, s *goquery.Selection) {
-		if len(versions) >= MaxVersionHistoryLimit {
+		if lim > 0 && len(versions) >= lim {
 			return
 		}
 
@@ -208,6 +230,8 @@ type XPathVersionHistoryExtractor struct {
 	VersionsXPath string
 	// Regex is an optional regex pattern to apply to each extracted text
 	Regex string
+	// Limit caps the number of versions returned (see effectiveLimit).
+	Limit int
 }
 
 // ExtractVersions extracts version history from HTML content using the configured XPath.
@@ -233,9 +257,10 @@ func (e *XPathVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 		return nil, fmt.Errorf("%w: %s", ErrNoElementFound, e.VersionsXPath)
 	}
 
+	lim := effectiveLimit(e.Limit)
 	var versions []string
 	for _, node := range nodes {
-		if len(versions) >= MaxVersionHistoryLimit {
+		if lim > 0 && len(versions) >= lim {
 			break
 		}
 
@@ -263,6 +288,90 @@ func (e *XPathVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 	}
 
 	return versions, nil
+}
+
+// RegexVersionHistoryExtractor extracts version history using a regex pattern.
+// Every match of the first capture group becomes a candidate version. This is the
+// list-extraction counterpart of RegexParser, used by the "select" path so a
+// pattern like `gn-([0-9.]+)\.tar\.xz` yields every version on the page.
+type RegexVersionHistoryExtractor struct {
+	// Pattern is the regex pattern with at least one capture group.
+	Pattern string
+	// Limit caps the number of versions returned (see effectiveLimit).
+	Limit int
+	// compiled is the compiled regex (cached after first use).
+	compiled *regexp.Regexp
+}
+
+// ExtractVersions extracts every first-capture-group match from content.
+// It compiles the pattern lazily so the extractor is safe to use as the entry
+// point (RegexParser.Parse compiles on its own path).
+func (e *RegexVersionHistoryExtractor) ExtractVersions(content []byte) ([]string, error) {
+	if e.Pattern == "" {
+		return nil, ErrInvalidRegexPattern
+	}
+	if e.compiled == nil {
+		re, err := regexp.Compile(e.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+		}
+		if re.NumSubexp() < 1 {
+			return nil, ErrNoCaptureGroup
+		}
+		e.compiled = re
+	}
+
+	lim := effectiveLimit(e.Limit)
+	all := e.compiled.FindAllSubmatch(content, -1)
+	versions := make([]string, 0, len(all))
+	for _, m := range all {
+		if len(m) >= 2 && len(m[1]) > 0 {
+			versions = append(versions, string(m[1]))
+			if lim > 0 && len(versions) >= lim {
+				break
+			}
+		}
+	}
+
+	if len(versions) == 0 {
+		return nil, ErrRegexNoMatch
+	}
+	return versions, nil
+}
+
+// newSelectExtractor builds a list extractor for the "select" path, dispatching
+// on cfg.Parser and reusing the primary path/pattern/selector fields. The cap is
+// disabled (Limit=-1) so select="max" sees the whole list and is not defeated by
+// truncation of an ascending list. Returns (nil, nil) when the parser cannot
+// produce a list (e.g. "script"); callers then fall back to first-match behavior.
+func newSelectExtractor(cfg *PackageConfig) (VersionHistoryExtractor, error) {
+	switch cfg.Parser {
+	case "json":
+		// JSONVersionHistoryExtractor walks an array; a primary path like
+		// "[0].name" selects one element, so map it to the wildcard form
+		// "[*].name" (or bare "[*]") to collect every element's field.
+		path := cfg.Path
+		switch {
+		case path == "" || path == "[0]":
+			path = "[*]"
+		case strings.HasPrefix(path, "[0]."):
+			path = "[*]." + strings.TrimPrefix(path, "[0].")
+		case strings.HasPrefix(path, "[*]"):
+			// already a wildcard path
+		default:
+			// A non-indexed path (e.g. "tags") is assumed to point at an array.
+		}
+		return &JSONVersionHistoryExtractor{VersionsPath: path, Limit: -1}, nil
+	case "regex":
+		return &RegexVersionHistoryExtractor{Pattern: cfg.Pattern, Limit: -1}, nil
+	case "html":
+		if cfg.XPath != "" {
+			return &XPathVersionHistoryExtractor{VersionsXPath: cfg.XPath, Regex: cfg.Pattern, Limit: -1}, nil
+		}
+		return &HTMLVersionHistoryExtractor{VersionsSelector: cfg.Selector, Regex: cfg.Pattern, Limit: -1}, nil
+	default:
+		return nil, nil // not list-capable (e.g. "script")
+	}
 }
 
 // NewVersionHistoryExtractor creates a version history extractor from a PackageConfig.

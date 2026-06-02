@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/BurntSushi/toml"
 )
@@ -15,7 +16,7 @@ var (
 	// ErrPackagesConfigNotFound is returned when packages.toml is not found in the overlay
 	ErrPackagesConfigNotFound = errors.New("packages.toml not found in overlay")
 	// ErrInvalidParserType is returned when an invalid parser type is specified
-	ErrInvalidParserType = errors.New("invalid parser type: must be 'json', 'regex', or 'html'")
+	ErrInvalidParserType = errors.New("invalid parser type: must be 'json', 'regex', 'html', or 'script'")
 	// ErrMissingURL is returned when a package configuration is missing the required URL field
 	ErrMissingURL = errors.New("missing required field: url")
 	// ErrMissingParser is returned when a package configuration is missing the required parser field
@@ -26,6 +27,10 @@ var (
 	ErrMissingPattern = errors.New("missing required field: pattern (required for regex parser)")
 	// ErrMissingSelectorOrXPath is returned when an HTML parser is missing both selector and xpath fields
 	ErrMissingSelectorOrXPath = errors.New("missing required field: selector or xpath (required for html parser)")
+	// ErrMissingScript is returned when a script parser is missing the required script field
+	ErrMissingScript = errors.New("missing required field: script (required for script parser)")
+	// ErrInvalidSelect is returned when the select field has an unsupported value
+	ErrInvalidSelect = errors.New("invalid select value: must be '', 'first', 'max', or 'last'")
 )
 
 // PackageConfig represents a single package's autoupdate configuration.
@@ -65,6 +70,21 @@ type PackageConfig struct {
 	VersionsPath string `toml:"versions_path,omitempty"`
 	// VersionsSelector is the CSS selector for extracting version list
 	VersionsSelector string `toml:"versions_selector,omitempty"`
+
+	// Transform applies ordered regex substitutions to the extracted version,
+	// e.g. [["-", "."]] turns "7.1.2-24" into "7.1.2.24". Each rule is
+	// [regex, repl]; repl follows regexp.ReplaceAllString semantics ($1 etc.).
+	// Rules run in order, before selection and before the Gentoo comparison.
+	Transform [][]string `toml:"transform,omitempty"`
+	// Select chooses which match to return when several are present.
+	// "" / "first" = current behavior; "max" = highest Gentoo version;
+	// "last" = last match. Requires a parser that can extract a list
+	// (json/regex/html); ignored by the "script" parser.
+	Select string `toml:"select,omitempty"`
+	// Script is a JS expression/IIFE evaluated against the live DOM by the
+	// "script" parser; its string result is the version. Inline, or "@file.js"
+	// to load from .autoupdate/scripts/<file>.
+	Script string `toml:"script,omitempty"`
 }
 
 // PackagesConfig represents the entire packages.toml configuration file.
@@ -135,8 +155,46 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if cfg.Selector == "" && cfg.XPath == "" {
 			return fmt.Errorf("package %s: %w", pkg, ErrMissingSelectorOrXPath)
 		}
+	case "script":
+		if cfg.Script == "" {
+			return fmt.Errorf("package %s: %w", pkg, ErrMissingScript)
+		}
 	default:
 		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidParserType, cfg.Parser)
+	}
+
+	// Validate the select field. An unrecognized value is almost certainly a
+	// typo in packages.toml, so fail hard rather than silently fall back.
+	switch cfg.Select {
+	case "", "first", "max", "last":
+		// valid
+	default:
+		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidSelect, cfg.Select)
+	}
+
+	// Validate transform rules. A malformed rule (wrong arity or uncompilable
+	// regex) is warned and ignored at apply time (applyTransforms does the same),
+	// so we warn here rather than fail — a bad rule must not block the whole run.
+	for i, r := range cfg.Transform {
+		if len(r) != 2 {
+			warnLogf("package %s: transform rule #%d has %d elements, want 2 ([regex, repl]); it will be ignored", pkg, i, len(r))
+			continue
+		}
+		if _, err := regexp.Compile(r[0]); err != nil {
+			warnLogf("package %s: transform rule #%d has bad regex %q (%v); it will be ignored", pkg, i, r[0], err)
+		}
+	}
+
+	// transform/select do not apply to the script parser: that branch bypasses
+	// fetchAndParse and the JS is responsible for all normalization. Warn so the
+	// config author is not misled into thinking they take effect.
+	if cfg.Parser == "script" {
+		if len(cfg.Transform) > 0 {
+			warnLogf("package %s: transform is ignored for parser=\"script\" (the script must normalize the version itself)", pkg)
+		}
+		if cfg.Select != "" && cfg.Select != "first" {
+			warnLogf("package %s: select=%q is ignored for parser=\"script\" (the script must select the version itself)", pkg, cfg.Select)
+		}
 	}
 
 	// Validate fallback configuration if present

@@ -570,8 +570,16 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion string) error {
 // fetchUpstreamVersion fetches and parses the upstream version for a package.
 // It tries the primary URL/parser first, then fallback if configured, then LLM if available.
 func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, error) {
+	// The script parser drives a headless browser itself, so it bypasses
+	// fetchContent/fetchAndParse entirely (and therefore transform/select, which
+	// the script handles in JS — see ValidatePackageConfig). It has no fallback
+	// or LLM stage: the script is the single source of truth.
+	if cfg.Parser == "script" {
+		return c.parseLive(cfg)
+	}
+
 	// Try primary URL
-	version, err := c.fetchAndParse(cfg.URL, cfg.Parser, cfg.Path, cfg.Pattern, cfg.Selector, cfg.XPath)
+	version, err := c.fetchAndParse(cfg.URL, cfg)
 	if err == nil {
 		return version, nil
 	}
@@ -584,7 +592,19 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 			fallbackPattern = cfg.Path // Use primary path for JSON fallback
 		}
 
-		version, err = c.fetchAndParse(cfg.FallbackURL, cfg.FallbackParser, cfg.Path, fallbackPattern, cfg.Selector, cfg.XPath)
+		// Derive a config for the fallback URL: it swaps in the fallback
+		// parser/pattern but keeps the primary path/selector/xpath and the
+		// transform/select post-processing so the fallback behaves consistently.
+		fallbackCfg := &PackageConfig{
+			Parser:    cfg.FallbackParser,
+			Path:      cfg.Path,
+			Pattern:   fallbackPattern,
+			Selector:  cfg.Selector,
+			XPath:     cfg.XPath,
+			Transform: cfg.Transform,
+			Select:    cfg.Select,
+		}
+		version, err = c.fetchAndParse(cfg.FallbackURL, fallbackCfg)
 		if err == nil {
 			return version, nil
 		}
@@ -606,39 +626,112 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 	return "", fmt.Errorf("all version extraction methods failed: %w", primaryErr)
 }
 
-// fetchAndParse fetches content from a URL and parses it to extract version.
-// It builds the parser via NewParserFromConfig so every configured parser type
-// is supported — including "html", whose selector/xpath fields NewParser cannot
-// express. Passing selector/xpath through is what lets a check scrape a version
-// out of an HTML page (e.g. an XPath onto an href attribute).
-func (c *Checker) fetchAndParse(url, parserType, path, pattern, selector, xpath string) (string, error) {
+// fetchAndParse fetches content from rawURL and extracts a version from it.
+//
+// It takes the whole *PackageConfig so it can apply the post-extraction stages:
+//   - select: when cfg.Select is "max"/"last", every candidate is extracted
+//     (via newSelectExtractor, reusing the version_history.go list extractors),
+//     each is transformed, and selectVersion picks one. A parser that cannot
+//     produce a list warns and falls through to first-match.
+//   - transform: cfg.Transform regex substitutions run on the single extracted
+//     version (the select path transforms per candidate inside selectVersion).
+//
+// The parser itself is built via NewParserFromConfig so every configured parser
+// type is supported — including "html", whose selector/xpath fields wire the
+// scrape plus optional regex post-processing (carried in Pattern).
+func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, error) {
 	// Fetch content
-	content, err := c.fetchContent(url)
+	content, err := c.fetchContent(rawURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Create parser. NewParserFromConfig handles json/regex/html uniformly and,
-	// for html, wires selector/xpath plus the optional regex post-processing
-	// (carried in pattern).
-	parser, err := NewParserFromConfig(&PackageConfig{
-		Parser:   parserType,
-		Path:     path,
-		Pattern:  pattern,
-		Selector: selector,
-		XPath:    xpath,
-	})
+	// select path: collect all candidates, transform each, then pick one.
+	if cfg.Select != "" && cfg.Select != "first" {
+		extractor, exErr := newSelectExtractor(cfg)
+		if exErr != nil {
+			return "", fmt.Errorf("failed to create select extractor: %w", exErr)
+		}
+		if extractor != nil {
+			cands, cErr := extractor.ExtractVersions(content)
+			if cErr != nil {
+				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
+			}
+			best := selectVersion(cands, cfg.Transform, cfg.Select)
+			if best == "" {
+				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
+					ErrNoVersionFound, len(cands), cfg.Select)
+			}
+			return best, nil
+		}
+		// Not list-capable (e.g. parser="script"): warn and use first match.
+		warnLogf("select=%q requested but parser %q cannot extract a list; using first match",
+			cfg.Select, cfg.Parser)
+	}
+
+	// Create parser. NewParserFromConfig handles json/regex/html uniformly.
+	parser, err := NewParserFromConfig(cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create parser: %w", err)
 	}
 
-	// Parse content
+	// Parse content, then apply transform to the single extracted version.
 	version, err := parser.Parse(content)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse version: %w", err)
 	}
+	version = applyTransforms(version, cfg.Transform)
 
 	return version, nil
+}
+
+// parseLive runs a parser="script" check. It resolves the script body (inline,
+// or "@file.js" loaded from <overlay>/.autoupdate/scripts/), gates on the
+// per-host rate limiter exactly like fetchContent, then evaluates the script
+// against the rendered page under a child context bounded by opTimeout.
+//
+// The headless-browser backend is opt-in: in a binary built without the
+// `playwright` tag, newLiveEvaluator returns ErrScriptSupportNotBuilt and this
+// surfaces as the package's check error.
+//
+// A fresh evaluator is created per call and closed afterward (if it implements
+// io.Closer); reusing one browser across the batch is a future optimization, but
+// the script-package count is tiny (the LibreOffice group), so launch cost is
+// acceptable and per-call isolation avoids shared-state concurrency hazards.
+func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
+	scriptsDir := filepath.Join(c.overlayPath, ".autoupdate", "scripts")
+	body, err := resolveScript(cfg.Script, scriptsDir)
+	if err != nil {
+		return "", err
+	}
+
+	// Gate on the per-host rate limiter (same policy as fetchContent), waiting on
+	// the parent context so the wait is signal-cancellable and not charged to the
+	// per-operation timeout. Fail open on an unparseable URL.
+	if parsed, perr := url.Parse(cfg.URL); perr != nil {
+		warnLogf("rate limiter: could not parse URL %q for host extraction (%v); "+
+			"proceeding without a rate-limit wait", cfg.URL, perr)
+	} else if werr := c.rateLimiter.WaitHTTP(c.ctx, parsed.Host); werr != nil {
+		if ctxErr := c.ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("rate limiter wait cancelled: %w", ctxErr)
+		}
+		return "", fmt.Errorf("rate limiter wait failed: %w", werr)
+	}
+
+	eval, err := newLiveEvaluator(c.opTimeout)
+	if err != nil {
+		return "", err
+	}
+	if closer, ok := eval.(io.Closer); ok {
+		defer closer.Close()
+	}
+
+	// opTimeout bounds only the navigation/evaluation, starting after the token.
+	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
+	defer cancel()
+
+	parser := &ScriptParser{URL: cfg.URL, Script: body, Headers: cfg.Headers, eval: eval}
+	return parser.ParseLive(ctx)
 }
 
 // fetchContent fetches content from a URL using the HTTP client with retry logic.
