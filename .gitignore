@@ -44,3 +44,6 @@ vendor/
 .env
 .env.local
 .tab/
+
+# Claude
+.claude/
