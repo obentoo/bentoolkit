@@ -100,7 +100,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config.Autoupdate.LLM)
+		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply != "":
@@ -116,11 +116,16 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, llmCfg config.LLMConfig) {
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string) {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
+		// Authenticate api.github.com from ~/.config/bentoo/config.yaml's
+		// github.token (same source `overlay compare` uses). NewChecker lets a
+		// GITHUB_TOKEN/GH_TOKEN env override an empty value, matching compare's
+		// env > config precedence.
+		autoupdate.WithGitHubToken(githubToken),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))

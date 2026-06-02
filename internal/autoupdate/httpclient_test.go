@@ -1624,8 +1624,13 @@ func TestApplyHeaders_RejectsCRLFHeader(t *testing.T) {
 	if got := req.Header.Get("X-Evil"); got != "" {
 		t.Errorf("expected CRLF header to be skipped, but X-Evil = %q", got)
 	}
-	if len(req.Header) != 0 {
-		t.Errorf("expected no headers to be set, got: %v", req.Header)
+	// Only the default User-Agent should remain; the malicious header must be
+	// the sole rejection.
+	if got := req.Header.Get("User-Agent"); got != defaultUserAgent() {
+		t.Errorf("expected default User-Agent %q, got %q", defaultUserAgent(), got)
+	}
+	if len(req.Header) != 1 {
+		t.Errorf("expected only the default User-Agent header, got: %v", req.Header)
 	}
 	if c := lc.count(); c != 1 {
 		t.Errorf("expected exactly 1 Warn line for the rejected header, got %d: %v", c, lc.all())

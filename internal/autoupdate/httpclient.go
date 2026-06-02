@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/sony/gobreaker"
 )
 
@@ -120,7 +121,17 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 		config:    config,
 		breaker:   newDefaultBreaker(),
 		delayFunc: time.Sleep,
+		defaultHeaders: map[string]string{
+			"User-Agent": defaultUserAgent(),
+		},
 	}
+}
+
+// defaultUserAgent returns the User-Agent applied to every autoupdate HTTP
+// request. A descriptive UA avoids Go's default "Go-http-client/1.1" string,
+// which many WAF/Cloudflare-fronted upstreams reject outright with HTTP 403.
+func defaultUserAgent() string {
+	return "bentoolkit/" + version.Short()
 }
 
 // WithCircuitBreaker enables or disables the circuit breaker on this client.

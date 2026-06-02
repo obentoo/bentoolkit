@@ -79,7 +79,7 @@ func TestChecker_ContextCancelled(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, err := checker.fetchContent(server.URL)
+	_, err := checker.fetchContent(server.URL, nil)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -110,7 +110,7 @@ func TestChecker_ContextDeadlineExceeded(t *testing.T) {
 	)
 
 	start := time.Now()
-	_, err := checker.fetchContent(server.URL)
+	_, err := checker.fetchContent(server.URL, nil)
 	elapsed := time.Since(start)
 
 	if err == nil {

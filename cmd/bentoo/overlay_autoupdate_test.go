@@ -126,7 +126,7 @@ func TestCLI_ExitCodes(t *testing.T) {
 				// exercise cache freshness; force=true bypasses the cache.
 				// Zero config.LLMConfig{} (Provider == "") → no LLM provider is
 				// wired and the exit-code contract is unaffected.
-				runCheck(context.Background(), overlayDir, configDir, nil, 0, config.LLMConfig{})
+				runCheck(context.Background(), overlayDir, configDir, nil, 0, config.LLMConfig{}, "")
 			})
 			if code != tt.wantExit {
 				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)

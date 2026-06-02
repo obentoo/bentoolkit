@@ -116,6 +116,10 @@ type Checker struct {
 	llmProviderConfigured bool
 	// httpClient handles HTTP requests with retry logic
 	httpClient *RetryableHTTPClient
+	// githubToken authenticates api.github.com requests, raising the rate limit
+	// from 60 to 5000 req/h. Set via WithGitHubToken; when empty, NewChecker
+	// falls back to the GITHUB_TOKEN/GH_TOKEN environment variables.
+	githubToken string
 	// configDir is the directory for storing cache and pending files
 	configDir string
 	// ctx is the parent context for all outbound HTTP/LLM calls. It is set via
@@ -227,6 +231,16 @@ func WithRateLimiter(limiter httpRateLimiter) CheckerOption {
 func WithConfigDir(dir string) CheckerOption {
 	return func(c *Checker) error {
 		c.configDir = dir
+		return nil
+	}
+}
+
+// WithGitHubToken sets the token used to authenticate api.github.com requests,
+// raising the rate limit from 60 to 5000 req/h. An empty token is ignored, so
+// NewChecker still falls back to the GITHUB_TOKEN/GH_TOKEN environment.
+func WithGitHubToken(token string) CheckerOption {
+	return func(c *Checker) error {
+		c.githubToken = token
 		return nil
 	}
 }
@@ -364,6 +378,22 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		checker.httpClient = NewRetryableHTTPClient()
 	}
 
+	// Authenticate api.github.com requests. Anonymous GitHub API access is capped
+	// at 60 req/h per IP, which the batch checker exhausts quickly; the server
+	// then answers HTTP 403. Token precedence mirrors `overlay compare`:
+	// GITHUB_TOKEN/GH_TOKEN env > WithGitHubToken (wired by the command from
+	// ~/.config/bentoo/config.yaml's github.token). An injected client that
+	// already carries a token is left untouched.
+	if checker.httpClient.GetGitHubToken() == "" {
+		token := githubTokenFromEnv()
+		if token == "" {
+			token = checker.githubToken
+		}
+		if token != "" {
+			checker.httpClient.SetGitHubToken(token)
+		}
+	}
+
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
 	// have a nil rateLimiter: fetchContent unconditionally waits on it (R10.3).
 	if checker.rateLimiter == nil {
@@ -399,6 +429,18 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	}
 
 	return checker, nil
+}
+
+// githubTokenFromEnv returns a GitHub API token from the environment, honouring
+// GITHUB_TOKEN first and falling back to GH_TOKEN (the gh CLI convention).
+// Surrounding whitespace is trimmed; an empty result means "no token".
+func githubTokenFromEnv() string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if tok := strings.TrimSpace(os.Getenv(name)); tok != "" {
+			return tok
+		}
+	}
+	return ""
 }
 
 // CheckPackage checks a single package for updates.
@@ -613,7 +655,7 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 	// Try LLM if configured and available
 	if c.llmClient != nil && cfg.LLMPrompt != "" {
 		// Fetch content from primary URL for LLM
-		content, err := c.fetchContent(cfg.URL)
+		content, err := c.fetchContent(cfg.URL, cfg.Headers)
 		if err == nil {
 			version, err = c.llmClient.ExtractVersion(content, cfg.LLMPrompt)
 			if err == nil {
@@ -641,7 +683,7 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 // scrape plus optional regex post-processing (carried in Pattern).
 func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, error) {
 	// Fetch content
-	content, err := c.fetchContent(rawURL)
+	content, err := c.fetchContent(rawURL, cfg.Headers)
 	if err != nil {
 		return "", err
 	}
@@ -749,7 +791,13 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 // cancelled parent or an expired deadline aborts the in-flight call. This keeps
 // time spent queued behind the rate limiter from being charged against the HTTP
 // deadline, which previously made packages sharing a host fail spuriously.
-func (c *Checker) fetchContent(rawURL string) ([]byte, error) {
+//
+// headers carries the per-package custom headers from packages.toml (cfg.Headers);
+// they are merged with the client's default User-Agent and, for api.github.com
+// URLs, the configured GitHub token. Passing them through GetWithHeadersContext
+// (rather than the bare GetWithContext) is what actually puts the User-Agent,
+// the Authorization token, and any TOML-declared headers on the wire.
+func (c *Checker) fetchContent(rawURL string, headers map[string]string) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -782,7 +830,7 @@ func (c *Checker) fetchContent(rawURL string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
 	defer cancel()
 
-	resp, err := c.httpClient.GetWithContext(ctx, rawURL)
+	resp, err := c.httpClient.GetWithHeadersContext(ctx, rawURL, headers)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
