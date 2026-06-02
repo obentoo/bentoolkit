@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-02
+
 ### Added
+- **`transform`, `select`, and a `script` parser for `overlay autoupdate`.**
+  Three extensions that let packages previously skipped for parsing limitations
+  be tracked again:
+  - **`transform`** applies ordered regex substitutions to the extracted version
+    (e.g. imagemagick `7.1.2-24` → `7.1.2.24`, godot `-beta` → `_beta`),
+    per-candidate and before the Gentoo comparison, so a raw upstream string that
+    is not yet a valid version can be normalized.
+  - **`select = "max" | "last"`** chooses among multiple matches instead of the
+    first, reusing the version-history list extractors (JSON `[*]`, CSS, XPath)
+    plus a new regex list extractor. The 10-item history cap is now parameterized
+    (`-1` = unlimited) so `select="max"` is not defeated by truncation of an
+    ascending list (gn).
+  - **`parser = "script"`** evaluates JS against a live DOM for multi-step / SPA
+    cases (LibreOffice's 3-segment dir → 4-segment tarball). It is backed by
+    `playwright-go` behind the `playwright` build tag (`page.Evaluate` auto-awaits
+    Promises); the default build returns `ErrScriptSupportNotBuilt`, keeping the
+    browser dependency opt-in. `@file.js` scripts load from `.autoupdate/scripts/`
+    with path-traversal protection.
+
+  `ValidatePackageConfig` now accepts `parser="script"`, validates `select`, warns
+  and ignores malformed `transform` rules, and warns that `transform`/`select` are
+  ignored on the script path.
 - **`claude-code` LLM provider + LLM wiring for `analyze` and `--check`.** A new
   `llm.provider: claude-code` drives the locally-installed `claude` CLI (Claude
   Code) headlessly (`claude -p … --output-format json`, page content on stdin)
@@ -27,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refactored to accept the `LLMProvider` interface (previously Claude-HTTP-only),
   so any provider can be injected; the existing `claude`/`openai`/`ollama`
   providers are unchanged.
+- **Robust LLM schema parsing via `flexString`.** A field the schema types as a
+  string but a model emits in another shape no longer fails the whole parse:
+  scalars (number/bool) are kept as text, `null` becomes `""`, and an object or
+  array (returned by some models for e.g. `fallback_config`) is dropped to `""` —
+  so one malformed secondary field can't discard an otherwise-valid schema
+  proposal.
 
 ### Fixed
 - **`overlay autoupdate --check` no longer fails packages that queue behind
@@ -346,7 +376,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/obentoo/bentoolkit/compare/v0.1.11...v0.2.0
