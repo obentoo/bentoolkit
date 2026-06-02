@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-02
+
+### Security
+- **Bump `github.com/go-jose/go-jose/v3` from 3.0.4 to 3.0.5**
+  ([CVE-2026-34986](https://github.com/go-jose/go-jose/security/advisories/GHSA-78h2-9frx-2jm8),
+  High / CVSS 7.5). Decrypting a JWE that uses a key-wrapping algorithm with an
+  empty `encrypted_key` could panic, allowing a denial of service. The
+  dependency is indirect and the upgrade is a drop-in patch (the module's
+  dependency graph is unchanged). (#7)
+
+### Fixed
+- **CI `Lint` job restored to green.** Three pre-existing `staticcheck` findings
+  were failing `golangci-lint run ./...`; because the `Build` job depends on
+  `Lint`, this had been blocking release builds:
+  - `newSelectExtractor` carried no-op `switch` cases whose pure
+    `strings.HasPrefix` return values were discarded (SA4017). The redundant
+    cases were removed; `"[*]"`-prefixed and non-indexed paths still pass
+    through unchanged.
+  - the non-bare `claude-code` test's empty guard now actually asserts that
+    `ANTHROPIC_API_KEY` is not injected into the child process (SA9003): the
+    child exits non-zero with a stderr marker so any leak surfaces as an error.
+  - the deliberately nil context test case is annotated `//nolint:staticcheck`
+    (SA1012).
+
 ## [0.3.0] - 2026-06-02
 
 ### Added
