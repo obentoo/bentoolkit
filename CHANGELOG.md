@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-02
+
+### Changed
+- **Bump `github.com/mattn/go-colorable` from 0.1.14 to 0.1.15.** Routine
+  maintenance update of an indirect dependency; no functional or security
+  impact. A dependency audit (`govulncheck ./...`) reported no vulnerabilities
+  in the reachable code, and all direct dependencies are already current.
+
+### Notes
+- The proposed `github.com/deckarep/golang-set/v2` 2.8.0 → 2.9.0 bump was
+  intentionally **not** applied: 2.9.0 pulls in `go.mongodb.org/mongo-driver`
+  (unused, not reachable) with no security benefit. The package stays pinned at
+  2.8.0 (an indirect dependency of `playwright-go`).
+
+### Internal
+- Minor `gofmt` comment normalization in `internal/autoupdate/version_history.go`.
+
 ## [0.3.1] - 2026-06-02
 
 ### Security
