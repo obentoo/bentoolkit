@@ -614,6 +614,49 @@ func TestParseSchemaAnalysisInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestParseSchemaAnalysisFallbackConfigObject verifies that a fallback_config
+// emitted as an object (observed from real LLM responses) no longer fails the
+// whole parse: the primary schema is preserved and the offending field drops to "".
+func TestParseSchemaAnalysisFallbackConfigObject(t *testing.T) {
+	text := `{"parser_type":"json","path":"tag_name","fallback_config":{"path":"name"},"confidence":0.9}`
+	result, err := parseSchemaAnalysis(text)
+	if err != nil {
+		t.Fatalf("parseSchemaAnalysis: %v", err)
+	}
+	if result.ParserType != "json" || result.Path != "tag_name" {
+		t.Errorf("Expected primary schema preserved, got parser=%q path=%q", result.ParserType, result.Path)
+	}
+	if result.FallbackConfig != "" {
+		t.Errorf("Expected fallback_config dropped to empty, got %q", result.FallbackConfig)
+	}
+}
+
+// TestParseSchemaAnalysisConfidenceString verifies confidence emitted as a
+// numeric string (e.g. "0.95") is coerced to float rather than failing.
+func TestParseSchemaAnalysisConfidenceString(t *testing.T) {
+	text := `{"parser_type":"json","path":"version","confidence":"0.95"}`
+	result, err := parseSchemaAnalysis(text)
+	if err != nil {
+		t.Fatalf("parseSchemaAnalysis: %v", err)
+	}
+	if result.Confidence != 0.95 {
+		t.Errorf("Expected confidence=0.95, got %v", result.Confidence)
+	}
+}
+
+// TestParseSchemaAnalysisNullFields verifies null-valued optional string fields
+// decode to "" instead of failing.
+func TestParseSchemaAnalysisNullFields(t *testing.T) {
+	text := `{"parser_type":"regex","pattern":"v([0-9.]+)","selector":null,"xpath":null,"confidence":0.8}`
+	result, err := parseSchemaAnalysis(text)
+	if err != nil {
+		t.Fatalf("parseSchemaAnalysis: %v", err)
+	}
+	if result.ParserType != "regex" || result.Selector != "" || result.XPath != "" {
+		t.Errorf("Expected null fields empty, got selector=%q xpath=%q", result.Selector, result.XPath)
+	}
+}
+
 // TestBuildSchemaAnalysisPromptBasic tests buildSchemaAnalysisPrompt returns non-empty string
 func TestBuildSchemaAnalysisPromptBasic(t *testing.T) {
 	content := []byte(`{"version": "1.2.3"}`)

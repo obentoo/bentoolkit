@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -491,7 +492,77 @@ func buildSchemaAnalysisPrompt(content []byte, meta *EbuildMetadata, hint string
 	return sb.String()
 }
 
-// parseSchemaAnalysis parses the LLM response into a SchemaAnalysis struct
+// flexString is a JSON-decoding helper for fields that the schema expects as a
+// string but an LLM may emit as a different shape. Strings and scalar values
+// (number/bool) are preserved as text; null becomes ""; and an object or array
+// — which some models return for e.g. fallback_config — is tolerated by dropping
+// it to "" rather than failing the entire parse. This keeps a single malformed
+// secondary field from discarding an otherwise-valid primary schema.
+type flexString string
+
+func (s *flexString) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	switch data[0] {
+	case '"':
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		*s = flexString(str)
+	case '{', '[':
+		// Object/array where a string was expected: drop it.
+		*s = ""
+	default:
+		// Scalars (number/bool): keep their literal text.
+		*s = flexString(string(data))
+	}
+	return nil
+}
+
+// flexFloat is a JSON-decoding helper for a numeric field (confidence) that an
+// LLM may emit either as a JSON number or as a numeric string (e.g. "0.95").
+// null and empty decode to 0.
+type flexFloat float64
+
+func (f *flexFloat) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*f = 0
+		return nil
+	}
+	if data[0] == '"' {
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		str = strings.TrimSpace(str)
+		if str == "" {
+			*f = 0
+			return nil
+		}
+		v, err := strconv.ParseFloat(str, 64)
+		if err != nil {
+			return err
+		}
+		*f = flexFloat(v)
+		return nil
+	}
+	var v float64
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*f = flexFloat(v)
+	return nil
+}
+
+// parseSchemaAnalysis parses the LLM response into a SchemaAnalysis struct.
+// String fields use flexString and confidence uses flexFloat so that benign
+// shape variations in the model's JSON (an object where a string was expected,
+// a quoted number) do not fail an otherwise-valid analysis.
 func parseSchemaAnalysis(text string) (*SchemaAnalysis, error) {
 	// Try to find JSON in the response
 	start := strings.Index(text, "{")
@@ -504,15 +575,15 @@ func parseSchemaAnalysis(text string) (*SchemaAnalysis, error) {
 
 	// Parse the JSON
 	var raw struct {
-		ParserType     string  `json:"parser_type"`
-		Path           string  `json:"path"`
-		Pattern        string  `json:"pattern"`
-		Selector       string  `json:"selector"`
-		XPath          string  `json:"xpath"`
-		FallbackType   string  `json:"fallback_type"`
-		FallbackConfig string  `json:"fallback_config"`
-		Confidence     float64 `json:"confidence"`
-		Reasoning      string  `json:"reasoning"`
+		ParserType     flexString `json:"parser_type"`
+		Path           flexString `json:"path"`
+		Pattern        flexString `json:"pattern"`
+		Selector       flexString `json:"selector"`
+		XPath          flexString `json:"xpath"`
+		FallbackType   flexString `json:"fallback_type"`
+		FallbackConfig flexString `json:"fallback_config"`
+		Confidence     flexFloat  `json:"confidence"`
+		Reasoning      flexString `json:"reasoning"`
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
@@ -520,15 +591,15 @@ func parseSchemaAnalysis(text string) (*SchemaAnalysis, error) {
 	}
 
 	return &SchemaAnalysis{
-		ParserType:     raw.ParserType,
-		Path:           raw.Path,
-		Pattern:        raw.Pattern,
-		Selector:       raw.Selector,
-		XPath:          raw.XPath,
-		FallbackType:   raw.FallbackType,
-		FallbackConfig: raw.FallbackConfig,
-		Confidence:     raw.Confidence,
-		Reasoning:      raw.Reasoning,
+		ParserType:     string(raw.ParserType),
+		Path:           string(raw.Path),
+		Pattern:        string(raw.Pattern),
+		Selector:       string(raw.Selector),
+		XPath:          string(raw.XPath),
+		FallbackType:   string(raw.FallbackType),
+		FallbackConfig: string(raw.FallbackConfig),
+		Confidence:     float64(raw.Confidence),
+		Reasoning:      string(raw.Reasoning),
 	}, nil
 }
 
