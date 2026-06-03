@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-06-03
+
+### Added
+- **`overlay autoupdate --apply --clean` (`-c`) removes the old ebuild after a
+  successful apply.** With the flag, once the new version is created, manifested
+  and the pending entry cleared, `Apply` deletes the previous version's ebuild
+  (the one it bumped from) and regenerates the Manifest so the now-orphaned
+  distfile entries are pruned — leaving only the freshly created version, the way
+  a manual version bump ends. It is best-effort: a removal or manifest-prune
+  failure is surfaced as a `Clean:` warning on the result but never flips the
+  apply to failed, since the update itself is already done. The removed version
+  is reported as `Removed: <pkg>-<old>.ebuild`. Works with both
+  `--apply <pkg> --clean` and `--apply all --clean`.
+
 ## [0.3.6] - 2026-06-03
 
 ### Added
