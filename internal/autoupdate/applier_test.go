@@ -14,6 +14,8 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
 // =============================================================================
@@ -31,9 +33,11 @@ func TestEbuildCopyVersioning(t *testing.T) {
 	// Property: Destination ebuild filename is {package}-{newVersion}.ebuild
 	properties.Property("Ebuild copy creates correct destination filename", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
-			// Real upgrades always have distinct versions; skip the degenerate
-			// case where gopter happens to generate equal inputs.
-			if oldVersion == newVersion {
+			// These properties model a genuine upgrade. Skip when gopter
+			// generates a newVersion that is not strictly greater than
+			// oldVersion: the applier now treats that as an obsolete no-op
+			// (the entry is pruned), which the dedicated obsolete tests cover.
+			if ebuild.CompareVersions(newVersion, oldVersion) <= 0 {
 				return true
 			}
 
@@ -106,9 +110,11 @@ func TestEbuildCopyVersioning(t *testing.T) {
 	// Property: Source ebuild filename is {package}-{oldVersion}.ebuild
 	properties.Property("Ebuild copy reads from correct source filename", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
-			// Real upgrades always have distinct versions; skip the degenerate
-			// case where gopter happens to generate equal inputs.
-			if oldVersion == newVersion {
+			// These properties model a genuine upgrade. Skip when gopter
+			// generates a newVersion that is not strictly greater than
+			// oldVersion: the applier now treats that as an obsolete no-op
+			// (the entry is pruned), which the dedicated obsolete tests cover.
+			if ebuild.CompareVersions(newVersion, oldVersion) <= 0 {
 				return true
 			}
 
@@ -190,6 +196,12 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 	// `--list` no longer shows successfully applied packages.
 	properties.Property("Successful apply removes pending entry", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
+			// Genuine upgrade only; a non-strict-greater newVersion is now an
+			// obsolete no-op (pruned), covered by the dedicated obsolete tests.
+			if ebuild.CompareVersions(newVersion, oldVersion) <= 0 {
+				return true
+			}
+
 			tmpDir := t.TempDir()
 			overlayDir := filepath.Join(tmpDir, "overlay")
 			configDir := filepath.Join(tmpDir, "config")
@@ -251,6 +263,12 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 	// Property: Failed manifest sets status to failed
 	properties.Property("Failed manifest sets status to failed", prop.ForAll(
 		func(category, pkgName, oldVersion, newVersion string) bool {
+			// A non-strict-greater newVersion is pruned as obsolete before the
+			// manifest runs, so the failed-manifest path requires a real upgrade.
+			if ebuild.CompareVersions(newVersion, oldVersion) <= 0 {
+				return true
+			}
+
 			tmpDir := t.TempDir()
 			overlayDir := filepath.Join(tmpDir, "overlay")
 			configDir := filepath.Join(tmpDir, "config")
@@ -537,18 +555,108 @@ func TestApplySourceEbuildNotFound(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
+	// The recorded current_version (1.0.0) has no ebuild in the overlay, and no
+	// other ebuild exists either: the entry is stale/obsolete. Apply now prunes
+	// it rather than failing with a cryptic "source ebuild not found".
 	result, err := applier.Apply("test-cat/test-pkg", false)
-	if err == nil {
-		t.Error("Expected error for missing source ebuild")
+	if err != nil {
+		t.Errorf("Expected no error for obsolete entry, got: %v", err)
 	}
 	if result.Success {
 		t.Error("Expected result.Success to be false")
 	}
+	if !result.Obsolete {
+		t.Error("Expected result.Obsolete to be true")
+	}
 
-	// Verify status was set to failed
-	update, _ := pending.Get("test-cat/test-pkg")
-	if update.Status != StatusFailed {
-		t.Errorf("Expected status 'failed', got %q", update.Status)
+	// The obsolete entry is pruned from pending.
+	if _, found := pending.Get("test-cat/test-pkg"); found {
+		t.Error("Expected obsolete pending entry to be pruned")
+	}
+}
+
+// TestApplyObsoleteOverlayAlreadyAhead covers a pending entry whose target is
+// already met: the overlay carries a version >= the pending new_version (e.g.
+// the package was bumped further by hand since the check ran). Apply prunes it
+// as obsolete instead of attempting a pointless/downgrading copy.
+func TestApplyObsoleteOverlayAlreadyAhead(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	// Overlay is already at 0.3.16; the pending entry still targets 0.3.11.
+	createTestEbuildFile(t, overlayDir, pkg, "0.3.16")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "0.3.10",
+		NewVersion:     "0.3.11",
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir, WithApplierPendingList(pending))
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Errorf("Expected no error for obsolete entry, got: %v", err)
+	}
+	if result.Success || !result.Obsolete {
+		t.Errorf("Expected obsolete, non-success result; got Success=%v Obsolete=%v", result.Success, result.Obsolete)
+	}
+	if _, found := pending.Get(pkg); found {
+		t.Error("Expected obsolete pending entry to be pruned")
+	}
+}
+
+// TestApplyHealsStaleCurrentVersion covers a pending entry whose recorded
+// current_version is stale (its ebuild is gone) but a newer one still exists in
+// the overlay below the target. Apply re-resolves the source from the live
+// overlay version instead of failing.
+func TestApplyHealsStaleCurrentVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	// Pending says current is 1.0.0, but the overlay actually holds 1.5.0.
+	createTestEbuildFile(t, overlayDir, pkg, "1.5.0")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.0.0",
+		NewVersion:     "2.0.0",
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Expected self-healed apply to succeed, got: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("Expected Success; result.Error=%v", result.Error)
+	}
+	// OldVersion reflects the live overlay version, not the stale 1.0.0.
+	if result.OldVersion != "1.5.0" {
+		t.Errorf("Expected OldVersion resolved to 1.5.0, got %q", result.OldVersion)
+	}
+	// The new ebuild was copied from the live 1.5.0 source.
+	dstPath := filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-2.0.0.ebuild")
+	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+		t.Errorf("Expected destination ebuild %s to exist", dstPath)
 	}
 }
 

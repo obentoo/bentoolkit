@@ -40,6 +40,11 @@ var (
 	// be coerced into a well-formed Gentoo PV (e.g. it carries a tag prefix that
 	// survives normalization, or is not a version at all).
 	ErrInvalidNewVersion = errors.New("invalid new version for ebuild")
+	// ErrObsoletePending is returned (wrapped) when a pending entry no longer
+	// matches the live overlay: the package was removed, or the overlay is
+	// already at/beyond the target version. The entry is pruned and the outcome
+	// is reported as obsolete, not as a failure.
+	ErrObsoletePending = errors.New("obsolete pending entry")
 )
 
 // ApplyResult represents the result of applying an update.
@@ -63,6 +68,14 @@ type ApplyResult struct {
 	// CleanWarning records a non-fatal failure of the --clean step (the update
 	// itself still succeeded). Empty on success.
 	CleanWarning string
+	// Obsolete indicates the pending entry no longer corresponds to anything to
+	// apply: the package was removed from the overlay, or the overlay is already
+	// at/beyond the target version. The entry is pruned from pending.json and
+	// this is NOT counted as a failure (Success stays false, Error stays nil).
+	Obsolete bool
+	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
+	// obsolete. Empty unless Obsolete is true.
+	ObsoleteReason string
 }
 
 // Applier handles update application for packages.
@@ -260,8 +273,32 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 	result.NewVersion = newVersion
 
+	// Re-resolve the current version against the live overlay rather than
+	// trusting update.CurrentVersion. That field is a snapshot from check-time
+	// and drifts: the overlay may have been bumped past it, or the package
+	// removed entirely. Blind trust produced a cryptic "source ebuild not found"
+	// when the recorded version's ebuild was already gone. Re-resolution
+	// self-heals a stale current_version and lets a genuinely obsolete entry be
+	// pruned with a clear outcome instead of a hard failure.
+	currentVersion, err := a.resolveCurrentVersion(pkg)
+	if err != nil {
+		// Package no longer present in the overlay (removed/renamed). The pending
+		// entry is obsolete — prune it and report, not as a failure.
+		return a.pruneObsolete(pkg, result,
+			fmt.Errorf("%w: %s no longer in overlay (%v)", ErrObsoletePending, pkg, err))
+	}
+	result.OldVersion = currentVersion
+
+	// Overlay already at or beyond the target: the update was already applied or
+	// has been superseded by a newer bump. A copy would be pointless (or a
+	// downgrade) — prune the stale entry instead.
+	if ebuild.CompareVersions(currentVersion, newVersion) >= 0 {
+		return a.pruneObsolete(pkg, result,
+			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, newVersion))
+	}
+
 	// Copy ebuild to new version
-	if err := a.copyEbuild(pkg, update.CurrentVersion, newVersion); err != nil {
+	if err := a.copyEbuild(pkg, currentVersion, newVersion); err != nil {
 		result.Error = fmt.Errorf("failed to copy ebuild: %w", err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
 			// Log but don't override the original error
@@ -336,14 +373,72 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// best-effort — a removal or manifest-prune failure is surfaced as a warning
 	// on the result but never flips Success, because the update itself is done.
 	if a.clean {
-		if removed, err := a.cleanOldEbuild(pkg, update.CurrentVersion, newVersion); err != nil {
+		if removed, err := a.cleanOldEbuild(pkg, currentVersion, newVersion); err != nil {
 			warnLogf("clean: %v", err)
 			result.CleanWarning = err.Error()
 		} else if removed {
-			result.CleanedOldVersion = update.CurrentVersion
+			result.CleanedOldVersion = currentVersion
 		}
 	}
 
+	return result, nil
+}
+
+// resolveCurrentVersion returns the highest-version, non-live ebuild version
+// actually present in the overlay for pkg. It mirrors the checker's selection
+// (getCurrentVersion) so Apply works off the live overlay state instead of the
+// pending entry's possibly-stale current_version. Returns ErrNoEbuildFound when
+// the package directory is absent or holds no parsable, non-live ebuild.
+func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
+	parts := strings.Split(pkg, "/")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid package name format: %s", pkg)
+	}
+	pkgDir := filepath.Join(a.overlayPath, parts[0], parts[1])
+
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
+		}
+		return "", fmt.Errorf("failed to read package directory: %w", err)
+	}
+
+	var best string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".ebuild") || strings.Contains(name, "-9999.ebuild") {
+			continue
+		}
+		eb, err := ebuild.ParsePath(filepath.Join(parts[0], parts[1], name))
+		if err != nil {
+			continue // Skip invalid ebuild files
+		}
+		if best == "" || ebuild.CompareVersions(eb.Version, best) > 0 {
+			best = eb.Version
+		}
+	}
+
+	if best == "" {
+		return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
+	}
+	return best, nil
+}
+
+// pruneObsolete marks result as an obsolete pending entry, removes it from the
+// pending list (best-effort), and returns it with a nil error so callers do not
+// count it as a failure. reason is surfaced to the user verbatim via
+// ObsoleteReason.
+func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (*ApplyResult, error) {
+	result.Obsolete = true
+	result.ObsoleteReason = reason.Error()
+	if err := a.pendingDeleteFn(pkg); err != nil {
+		warnLogf("pending: failed to prune obsolete entry %s: %v "+
+			"(entry can be cleared manually)", pkg, err)
+	}
 	return result, nil
 }
 

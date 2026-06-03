@@ -486,12 +486,25 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 		displayApplyResult(result)
 	}
 
+	applied, obsolete := 0, 0
+	for _, r := range results {
+		switch {
+		case r == nil:
+		case r.Obsolete:
+			obsolete++
+		case r.Success:
+			applied++
+		}
+	}
+
 	fmt.Println()
 	output.Header.Println("Apply All Summary")
-	applied := len(results) - failures
-	output.Success.Printf("  Applied: %d\n", applied)
+	output.Success.Printf("  Applied:  %d\n", applied)
+	if obsolete > 0 {
+		output.Warning.Printf("  Obsolete: %d (pruned from pending)\n", obsolete)
+	}
 	if failures > 0 {
-		output.Error.Printf("  Failed:  %d\n", failures)
+		output.Error.Printf("  Failed:   %d\n", failures)
 	}
 	if applied > 0 {
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
@@ -510,6 +523,14 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 
 	output.Package.Printf("  %s\n", result.Package)
 	fmt.Printf("    Version: %s → %s\n", result.OldVersion, result.NewVersion)
+
+	if result.Obsolete {
+		output.Warning.Println("    Status:  Obsolete (pruned from pending)")
+		if result.ObsoleteReason != "" {
+			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
+		}
+		return
+	}
 
 	if result.Success {
 		output.Success.Println("    Status:  Success")
