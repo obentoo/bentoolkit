@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-03
+
+### Added
+- **`chromedp` backend for the `parser="script"` headless-browser path.** A new
+  `liveEvaluator` implementation in `script_evaluator_chromedp.go` (built with
+  `-tags chromedp`, mutually exclusive with `playwright` via
+  `//go:build chromedp && !playwright`) drives the system Chrome/Chromium
+  directly over the DevTools Protocol — no Node.js driver and no
+  `playwright install` step. `chromedp.Evaluate(..., WithAwaitPromise(true))`
+  reaches parity with Playwright's `page.Evaluate`, including resolving an
+  `(async () => {...})()` IIFE to its string result. The integration test
+  (`-tags chromedp -run Integration`) mirrors the Playwright one. `go mod tidy`
+  without a tag still prunes both browser deps, so `chromedp` and `playwright-go`
+  are pinned as direct requires.
+
+### Fixed
+- **`overlay autoupdate --apply` no longer produces invalid ebuild filenames for
+  upstreams whose version carries a tag prefix.** When the detected `NewVersion`
+  came from a git tag like `v9.2.0588`, `Apply` used it verbatim to build the
+  destination ebuild name (`vim-v9.2.0588.ebuild`), which Portage rejects with
+  *"does not follow correct package syntax"* — failing the manifest step for vim,
+  vim-core, bind-tools, nodejs, ollama, ollama-bin, bisq-bin, etc. `Apply` now
+  strips the prefix (`stripVersionPrefix` + trim) and validates the result with
+  `ebuild.IsValidVersion` before touching the filename, surfacing a clear
+  `ErrInvalidNewVersion` for non-versions (e.g. `latest`) instead of a cryptic
+  Portage error.
+
 ## [0.3.5] - 2026-06-02
 
 ### Added
