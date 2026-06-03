@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-06-03
+
+### Fixed
+- **CI: `TestApply_CancelsOnContextCancellation_Compile` no longer flakes on
+  slow runners.** The test slept a fixed 200ms before cancelling, assuming the
+  `Apply` goroutine had cleared the instant manifest step and was blocked in
+  compile; on a loaded CI runner it had not, so the cancel aborted the manifest
+  instead and the assertion failed. It now waits on a deterministic signal (the
+  exec factory closes a channel the first time it builds a compile command,
+  which only happens after the manifest step returns) before cancelling, so the
+  cancellation can only ever hit the compile step. Test-only change — no runtime
+  or binary behavior is affected.
+
 ## [0.3.14] - 2026-06-03
 
 ### Added
