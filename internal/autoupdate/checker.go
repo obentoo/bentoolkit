@@ -967,16 +967,19 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string) ([]byte
 // has joined (wg.Wait), so callers may invoke its methods (ExitCode,
 // FormatFailures) directly.
 func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
-	// When a type filter is active, narrow the package set up front so filtered
-	// packages incur no network fetch and are absent from progress and totals.
-	pkgs := c.config.Packages
-	if c.typeFilter != "" {
-		pkgs = make(map[string]PackageConfig, len(c.config.Packages))
-		for name, pkg := range c.config.Packages {
-			if c.resolveType(name, &pkg) == c.typeFilter {
-				pkgs[name] = pkg
-			}
+	// Narrow the package set up front so excluded packages incur no network
+	// fetch and are absent from progress and totals. Two filters apply:
+	//   - enabled = false: always skipped, silently (no log, no count);
+	//   - type filter (when active): keep only the matching bin/source class.
+	pkgs := make(map[string]PackageConfig, len(c.config.Packages))
+	for name, pkg := range c.config.Packages {
+		if !pkg.IsEnabled() {
+			continue
 		}
+		if c.typeFilter != "" && c.resolveType(name, &pkg) != c.typeFilter {
+			continue
+		}
+		pkgs[name] = pkg
 	}
 
 	var (

@@ -1057,6 +1057,63 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 	}
 }
 
+// TestCheckAll_SkipsDisabledPackages verifies that a package with
+// enabled = false is skipped silently: it incurs no fetch and is absent from
+// both Items and Failures (and thus from the run totals). The disabled package
+// points at a server that always returns HTTP 500 — if it were checked it would
+// land in Failures, so its absence proves both the skip and the no-fetch.
+func TestCheckAll_SkipsDisabledPackages(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"version": "2.0.0"})
+	}))
+	defer okServer.Close()
+
+	// Would force a failure if the disabled package were ever fetched.
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failServer.Close()
+
+	disabled := false
+	const enabledPkg = "cat1/enabled"
+	const disabledPkg = "cat2/disabled"
+	packages := map[string]PackageConfig{
+		enabledPkg:  {URL: okServer.URL, Parser: "json", Path: "version"},
+		disabledPkg: {URL: failServer.URL, Parser: "json", Path: "version", Enabled: &disabled},
+	}
+	for pkgName := range packages {
+		createTestEbuild(t, overlayDir, pkgName, "1.0.0")
+	}
+
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	batch := checker.CheckAll(true)
+
+	if total := len(batch.Items) + len(batch.Failures); total != 1 {
+		t.Errorf("Expected 1 result (disabled package skipped), got %d (Items=%d, Failures=%d)",
+			total, len(batch.Items), len(batch.Failures))
+	}
+	if _, ok := batch.Failures[disabledPkg]; ok {
+		t.Errorf("disabled package %q must not appear in Failures (it was fetched)", disabledPkg)
+	}
+	for _, item := range batch.Items {
+		if item.Package == disabledPkg {
+			t.Errorf("disabled package %q must not appear in Items", disabledPkg)
+		}
+	}
+}
+
 // TestCheckAll_ReturnsBatchResult verifies CheckAll returns a BatchResult that
 // separates successfully checked packages from per-package failures. Three
 // packages are configured; one is pointed at a URL that always returns HTTP

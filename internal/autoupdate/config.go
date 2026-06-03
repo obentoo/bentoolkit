@@ -38,6 +38,13 @@ var (
 // PackageConfig represents a single package's autoupdate configuration.
 // It defines how to check upstream versions for a specific package.
 type PackageConfig struct {
+	// Enabled toggles whether the autoupdate checker processes this package.
+	// A nil/absent value means enabled (the default), so existing entries need
+	// no migration. Set enabled = false to silently skip the package — no
+	// fetch, absent from progress and totals — without deleting its config
+	// (e.g. an orphaned entry whose ebuild was removed from the overlay).
+	// A pointer distinguishes "absent" (enabled) from an explicit false.
+	Enabled *bool `toml:"enabled,omitempty"`
 	// URL is the primary URL to query for version information
 	URL string `toml:"url"`
 	// Parser specifies the parser type: "json", "regex", or "html"
@@ -93,6 +100,14 @@ type PackageConfig struct {
 	// "script" parser; its string result is the version. Inline, or "@file.js"
 	// to load from .autoupdate/scripts/<file>.
 	Script string `toml:"script,omitempty"`
+}
+
+// IsEnabled reports whether the checker should process this package. An absent
+// (nil) enabled field counts as enabled, so the default — and every legacy
+// entry that predates the field — is processed; only an explicit
+// enabled = false skips it.
+func (c *PackageConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // PackagesConfig represents the entire packages.toml configuration file.

@@ -772,3 +772,80 @@ func TestExtendedPackageConfigRoundTrip(t *testing.T) {
 
 	properties.TestingRun(t)
 }
+
+// TestPackageConfigIsEnabled verifies the enabled gate: an absent (nil) field
+// counts as enabled (the default and the legacy case), an explicit true is
+// enabled, and only an explicit false disables the package.
+func TestPackageConfigIsEnabled(t *testing.T) {
+	enabled, disabled := true, false
+	cases := []struct {
+		name string
+		ptr  *bool
+		want bool
+	}{
+		{"absent defaults to enabled", nil, true},
+		{"explicit true", &enabled, true},
+		{"explicit false", &disabled, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := PackageConfig{Enabled: tc.ptr}
+			if got := cfg.IsEnabled(); got != tc.want {
+				t.Errorf("IsEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadPackagesConfigEnabledField verifies that enabled = false round-trips
+// through LoadPackagesConfig and that an entry omitting the field loads as
+// enabled (nil pointer), so legacy configs need no migration.
+func TestLoadPackagesConfigEnabledField(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".autoupdate")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+
+	cfgTOML := `["net-vpn/openvpn"]
+enabled = false
+url = "https://openvpn.net/community-downloads/"
+parser = "regex"
+pattern = 'OpenVPN-([0-9]+\.[0-9]+\.[0-9]+)'
+
+["app-editors/vscode"]
+url = "https://api.github.com/repos/microsoft/vscode/releases/latest"
+parser = "json"
+path = "tag_name"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "packages.toml"), []byte(cfgTOML), 0644); err != nil {
+		t.Fatalf("Failed to write TOML: %v", err)
+	}
+
+	config, err := LoadPackagesConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	openvpn, ok := config.Packages["net-vpn/openvpn"]
+	if !ok {
+		t.Fatal("Expected net-vpn/openvpn in config")
+	}
+	if openvpn.Enabled == nil || *openvpn.Enabled {
+		t.Errorf("Expected openvpn Enabled to be explicit false, got %v", openvpn.Enabled)
+	}
+	if openvpn.IsEnabled() {
+		t.Error("Expected openvpn IsEnabled() to be false")
+	}
+
+	vscode, ok := config.Packages["app-editors/vscode"]
+	if !ok {
+		t.Fatal("Expected app-editors/vscode in config")
+	}
+	if vscode.Enabled != nil {
+		t.Errorf("Expected vscode Enabled to be nil (absent), got %v", *vscode.Enabled)
+	}
+	if !vscode.IsEnabled() {
+		t.Error("Expected vscode IsEnabled() to be true (default)")
+	}
+}
