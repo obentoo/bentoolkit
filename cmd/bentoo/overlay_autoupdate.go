@@ -156,6 +156,22 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	}
 	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
 
+	// Progress feedback: CheckAll fans out concurrently and otherwise prints
+	// nothing until the final table, so show a live [pct%] done/total counter on
+	// a single self-rewriting line (mirrors `overlay compare`). The callback is
+	// driven by CheckAll's atomic counter, so the count is monotonic even though
+	// it fires from many goroutines. Suppressed under --quiet; harmless on the
+	// single-package path (CheckPackage never fires it).
+	if !quiet {
+		opts = append(opts, autoupdate.WithProgressCallback(func(done, total uint64) {
+			percent := uint64(0)
+			if total > 0 {
+				percent = (done * 100) / total
+			}
+			fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
+		}))
+	}
+
 	checker, err := autoupdate.NewChecker(overlayPath, opts...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
@@ -182,6 +198,12 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// per-package failure is captured in the BatchResult. ctx is threaded
 	// into the Checker via WithContext above; CheckAll takes no ctx parameter.
 	result := checker.CheckAll(autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+
+	// Clear the progress line before rendering results so the counter does not
+	// bleed into the table. Mirrors `overlay compare`'s clear step.
+	if !quiet {
+		fmt.Print("\r                                        \r")
+	}
 
 	// Display the successfully checked packages.
 	displayCheckResults(result.Items)
