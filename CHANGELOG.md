@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-03
+
+### Fixed
+- **`make audit-ctx` (CI) no longer fails on the chromedp backend.** The
+  `context.Background()` that roots the chromedp browser allocator in
+  `script_evaluator_chromedp.go` (added in 0.3.6) lacked the `// SAFE:`
+  justification the context-spine audit requires, so the `audit-ctx` job failed
+  with *"naked context.Background() found"*. Annotated it like the other
+  intentional root contexts (`applier.go`, `analyzer.go`, …); no behavior change.
+
 ## [0.3.7] - 2026-06-03
 
 ### Added
