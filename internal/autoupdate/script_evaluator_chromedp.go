@@ -30,7 +30,7 @@ import (
 func init() {
 	newLiveEvaluator = func(opTimeout time.Duration) (liveEvaluator, error) {
 		allocCtx, allocCancel := chromedp.NewExecAllocator(
-			context.Background(),
+			context.Background(), // SAFE: root parent for the browser allocator; no caller ctx exists at construction, and it is torn down by Close. Per-call cancellation arrives via Evaluate's ctx.
 			chromedp.DefaultExecAllocatorOptions[:]...,
 		)
 		browserCtx, browserCancel := chromedp.NewContext(allocCtx)
