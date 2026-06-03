@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-06-03
+
+### Added
+- **`overlay autoupdate` now classifies each package as binary or source and can
+  filter on it.** A new optional `type = "bin" | "source"` field in
+  `packages.toml` records a package's kind; when omitted it is auto-detected from
+  the current ebuild (`RESTRICT="bindist"`, a `-bin` suffix, or a binary
+  `SRC_URI`) via the existing `detectBinaryPackage` heuristic, so existing
+  configs need no change and only override/correction cases set it explicitly.
+  `--check` now tags every result line (`[bin]`/`[src]`) and prints a
+  `Checked N source, M bin` summary, and a new `--only=bin|source` flag restricts
+  the batch to one kind — filtered packages are skipped *before* any network
+  fetch. An unrecognized `type` value (in `packages.toml`) or `--only` value
+  fails fast rather than silently checking everything. `CheckResult` gains a
+  `Type` field; classification is metadata only and does **not** change
+  apply/compile behavior.
+
 ## [0.3.11] - 2026-06-03
 
 ### Fixed
