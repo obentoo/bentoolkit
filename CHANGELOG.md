@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-06-03
+
+### Added
+- **Per-package `enabled` toggle in `packages.toml`.** Each entry may now set
+  `enabled = false` to be skipped silently by `overlay autoupdate --check` — no
+  network fetch, and absent from progress output and the run totals — without
+  deleting its configuration. An absent/`true` value means enabled (the
+  default), so existing configs need no migration. This is the clean way to
+  park an orphaned entry (e.g. a package whose ebuild was removed from the
+  overlay but whose check config is worth keeping). `CheckAll` filters disabled
+  packages up front alongside the `--only` type filter; `CheckPackage` (an
+  explicitly named package) is intentionally unfiltered, treating an explicit
+  name as a conscious override.
+- **Authenticated distfile fetch for serial-gated packages.** Some commercial
+  packages (e.g. `net-ftp/filezilla-pro`) gate their distfile behind a
+  serial/registration key, so `pkgdev manifest` cannot fetch it from `SRC_URI`.
+  A package's free-form `[meta]` block can now drive an authenticated download:
+  before the manifest step `--apply` submits the vendor's download form (POST or
+  GET) with the serial injected, and drops the file into pkgdev's private
+  `--distdir` so it digests the local copy. The serial is **never** stored in
+  the overlay — it is resolved at runtime from an env var or
+  `~/.config/bentoo/secrets` and scrubbed from every log line and error message.
+  HTML/zero-byte responses and unsafe filenames are rejected; the download is
+  context-bounded so SIGINT cancels it. Packages without a `[meta]` fetch spec
+  (the overwhelming majority) follow the normal pkgdev-from-`SRC_URI` path
+  unchanged.
+
 ## [0.3.13] - 2026-06-03
 
 ### Changed
