@@ -700,6 +700,106 @@ func TestApplyRejectsInvalidNewVersion(t *testing.T) {
 	}
 }
 
+// TestApplyCleanRemovesOldEbuild verifies that WithApplierClean makes a
+// successful apply delete the previous version's ebuild, keep the new one, and
+// report the removed version on the result.
+func TestApplyCleanRemovesOldEbuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierClean(true),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %v", result.Error)
+	}
+	if result.CleanedOldVersion != oldVersion {
+		t.Errorf("Expected CleanedOldVersion %q, got %q", oldVersion, result.CleanedOldVersion)
+	}
+	if result.CleanWarning != "" {
+		t.Errorf("Expected no clean warning, got %q", result.CleanWarning)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	if _, err := os.Stat(filepath.Join(pkgDir, "test-pkg-2.0.0.ebuild")); os.IsNotExist(err) {
+		t.Error("Expected new ebuild test-pkg-2.0.0.ebuild to exist")
+	}
+	if _, err := os.Stat(filepath.Join(pkgDir, "test-pkg-1.0.0.ebuild")); err == nil {
+		t.Error("Expected old ebuild test-pkg-1.0.0.ebuild to be removed")
+	}
+}
+
+// TestApplyWithoutCleanKeepsOldEbuild verifies the default (clean off): both the
+// old and new ebuilds remain and CleanedOldVersion stays empty.
+func TestApplyWithoutCleanKeepsOldEbuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+	newVersion := "2.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %v", result.Error)
+	}
+	if result.CleanedOldVersion != "" {
+		t.Errorf("Expected empty CleanedOldVersion, got %q", result.CleanedOldVersion)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	if _, err := os.Stat(filepath.Join(pkgDir, "test-pkg-1.0.0.ebuild")); os.IsNotExist(err) {
+		t.Error("Expected old ebuild test-pkg-1.0.0.ebuild to be kept when clean is off")
+	}
+}
+
 // TestApplyManifestFailure tests that manifest failure sets status to failed
 func TestApplyManifestFailure(t *testing.T) {
 	tmpDir := t.TempDir()

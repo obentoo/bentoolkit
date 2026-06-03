@@ -26,6 +26,9 @@ var (
 	autoupdateForce bool
 	// autoupdateCompile runs compile test after apply
 	autoupdateCompile bool
+	// autoupdateClean removes the old ebuild after a successful apply, keeping
+	// only the newly created version
+	autoupdateClean bool
 	// autoupdateConcurrency bounds parallel version checks (range [1,100])
 	autoupdateConcurrency int
 )
@@ -42,7 +45,8 @@ Examples:
   bentoo overlay autoupdate --list               List pending updates
   bentoo overlay autoupdate --apply net-misc/foo Apply update for package
   bentoo overlay autoupdate --apply all          Apply all pending updates
-  bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test`,
+  bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test
+  bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild`,
 	Run: runAutoupdate,
 }
 
@@ -52,6 +56,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
+	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
@@ -315,6 +320,7 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
@@ -349,6 +355,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 func runApplyAll(ctx context.Context, overlayPath, configDir string) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
@@ -418,6 +425,12 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 
 	if result.Success {
 		output.Success.Println("    Status:  Success")
+		if result.CleanedOldVersion != "" {
+			fmt.Printf("    Removed: %s-%s.ebuild (old version)\n", filepath.Base(result.Package), result.CleanedOldVersion)
+		}
+		if result.CleanWarning != "" {
+			output.Warning.Printf("    Clean:   %s\n", result.CleanWarning)
+		}
 		output.Success.Println("\n✓ Update applied successfully")
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
 	} else {

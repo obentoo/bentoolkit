@@ -56,6 +56,13 @@ type ApplyResult struct {
 	Error error
 	// LogPath is the path to the compile log if compilation failed
 	LogPath string
+	// CleanedOldVersion is the previous version whose ebuild was removed when
+	// --clean is set; empty when clean was off, a no-op (same version), or the
+	// old ebuild was already absent.
+	CleanedOldVersion string
+	// CleanWarning records a non-fatal failure of the --clean step (the update
+	// itself still succeeded). Empty on success.
+	CleanWarning string
 }
 
 // Applier handles update application for packages.
@@ -84,6 +91,10 @@ type Applier struct {
 	// purely for tests that need to simulate a Delete failure (R3.4).
 	// Production callers never supply this option.
 	pendingDeleteFn func(pkg string) error
+	// clean, when true, makes a successful Apply remove the previous version's
+	// ebuild and regenerate the Manifest so only the freshly created version
+	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
+	clean bool
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -140,6 +151,15 @@ func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 		if fn != nil {
 			a.pendingDeleteFn = fn
 		}
+	}
+}
+
+// WithApplierClean enables removal of the previous version's ebuild after a
+// successful apply, leaving only the newly created version (and pruning the
+// Manifest's now-orphaned distfile entries). Mirrors the --clean / -c CLI flag.
+func WithApplierClean(clean bool) ApplierOption {
+	return func(a *Applier) {
+		a.clean = clean
 	}
 }
 
@@ -293,7 +313,44 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			"(apply itself succeeded; entry can be cleared manually)", pkg, err)
 	}
 
+	// --clean (R-clean): drop the previous version's ebuild so only the freshly
+	// applied one remains. This runs only on the full success path and is
+	// best-effort — a removal or manifest-prune failure is surfaced as a warning
+	// on the result but never flips Success, because the update itself is done.
+	if a.clean {
+		if removed, err := a.cleanOldEbuild(pkg, update.CurrentVersion, newVersion); err != nil {
+			warnLogf("clean: %v", err)
+			result.CleanWarning = err.Error()
+		} else if removed {
+			result.CleanedOldVersion = update.CurrentVersion
+		}
+	}
+
 	return result, nil
+}
+
+// cleanOldEbuild removes the previous version's ebuild and regenerates the
+// Manifest so the now-orphaned distfiles are pruned. It returns (true, nil) when
+// an ebuild was actually removed, (false, nil) when there was nothing to remove
+// (same version, or the old file is already gone), and a non-nil error when the
+// removal or the manifest regeneration fails. The new ebuild is left untouched.
+func (a *Applier) cleanOldEbuild(pkg, oldVersion, newVersion string) (bool, error) {
+	if oldVersion == newVersion {
+		return false, nil
+	}
+	oldPath := a.EbuildPath(pkg, oldVersion)
+	if err := os.Remove(oldPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to remove old ebuild %s: %w", oldPath, err)
+	}
+	// The old ebuild is gone; regenerate the Manifest against the remaining
+	// ebuild(s) so its distfile entries no longer reference the removed version.
+	if err := a.runManifest(pkg, newVersion); err != nil {
+		return true, fmt.Errorf("removed old ebuild %s but failed to regenerate manifest: %w", oldPath, err)
+	}
+	return true, nil
 }
 
 // copyEbuild copies the source ebuild to a new file with the updated version.
