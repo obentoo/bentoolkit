@@ -58,6 +58,10 @@ type CheckResult struct {
 	Error error
 	// FromCache is true if the upstream version was retrieved from cache
 	FromCache bool
+	// Type classifies the package as "bin" or "source", resolved from the
+	// config's type field or auto-detected from the ebuild. Empty only when the
+	// current ebuild could not be read.
+	Type string
 }
 
 // DefaultOpTimeout is the default per-operation timeout applied to a single
@@ -92,6 +96,10 @@ type Checker struct {
 	overlayPath string
 	// config holds the packages configuration
 	config *PackagesConfig
+	// typeFilter, when non-empty ("bin" or "source"), restricts CheckAll to
+	// packages of that resolved type. Empty checks every package. Set via
+	// WithTypeFilter.
+	typeFilter string
 	// cache manages version query caching
 	cache *Cache
 	// pending manages pending updates
@@ -292,6 +300,22 @@ func WithConcurrency(n int) CheckerOption {
 	}
 }
 
+// WithTypeFilter restricts CheckAll to packages of the given type, "bin" or
+// "source". An empty string (the default) checks every package. Type is
+// resolved from each package's configured type field, falling back to ebuild
+// auto-detection. An unrecognized value is rejected.
+func WithTypeFilter(t string) CheckerOption {
+	return func(c *Checker) error {
+		switch t {
+		case "", "bin", "source":
+			c.typeFilter = t
+			return nil
+		default:
+			return fmt.Errorf("checker type filter must be 'bin' or 'source', got %q", t)
+		}
+	}
+}
+
 // WithProgressCallback sets a callback invoked once per package as CheckAll
 // completes that package's work. A nil callback disables progress reporting.
 // See ProgressCallback for the concurrency contract.
@@ -465,6 +489,11 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	}
 	result.CurrentVersion = currentVersion
 
+	// Classify the package (bin vs source) for reporting and filtering. This is
+	// metadata only and never blocks the check, so it runs after the version is
+	// known and ignores its own errors via resolveType's "source" default.
+	result.Type = c.resolveType(pkg, &pkgConfig)
+
 	// Check cache first (unless force is true)
 	if !force {
 		if cachedVersion, ok := c.cache.Get(pkg); ok {
@@ -576,6 +605,69 @@ func (c *Checker) getCurrentVersion(pkg string) (string, error) {
 	}
 
 	return highestVersion, nil
+}
+
+// currentEbuildPath returns the absolute path of the highest-version, non-live
+// ebuild for pkg. It mirrors getCurrentVersion's selection but yields the file
+// path so callers can read the ebuild's contents (e.g. to auto-detect type).
+func (c *Checker) currentEbuildPath(pkg string) (string, error) {
+	parts := strings.Split(pkg, "/")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid package name format: %s", pkg)
+	}
+	pkgDir := filepath.Join(c.overlayPath, parts[0], parts[1])
+
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return "", err
+	}
+
+	var bestVer, bestPath string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".ebuild") || strings.Contains(name, "-9999.ebuild") {
+			continue
+		}
+		eb, err := ebuild.ParsePath(filepath.Join(parts[0], parts[1], name))
+		if err != nil {
+			continue
+		}
+		if bestVer == "" || ebuild.CompareVersions(eb.Version, bestVer) > 0 {
+			bestVer = eb.Version
+			bestPath = filepath.Join(pkgDir, name)
+		}
+	}
+
+	if bestPath == "" {
+		return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
+	}
+	return bestPath, nil
+}
+
+// resolveType classifies pkg as "bin" or "source". An explicit config type
+// wins; otherwise the current ebuild is auto-detected via detectBinaryPackage.
+// On any read error it defaults to "source", so an unreadable ebuild is never
+// silently dropped from a "source" filter (and a real fetch error surfaces
+// later through the normal check path).
+func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
+	if cfg.Type != "" {
+		return cfg.Type
+	}
+	path, err := c.currentEbuildPath(pkg)
+	if err != nil {
+		return "source"
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "source"
+	}
+	if detectBinaryPackage(content) {
+		return "bin"
+	}
+	return "source"
 }
 
 // compareVersions compares upstream and current versions. Both sides are
@@ -872,17 +964,29 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string) ([]byte
 // has joined (wg.Wait), so callers may invoke its methods (ExitCode,
 // FormatFailures) directly.
 func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
+	// When a type filter is active, narrow the package set up front so filtered
+	// packages incur no network fetch and are absent from progress and totals.
+	pkgs := c.config.Packages
+	if c.typeFilter != "" {
+		pkgs = make(map[string]PackageConfig, len(c.config.Packages))
+		for name, pkg := range c.config.Packages {
+			if c.resolveType(name, &pkg) == c.typeFilter {
+				pkgs[name] = pkg
+			}
+		}
+	}
+
 	var (
 		sem      = make(chan struct{}, c.concurrency)
 		wg       sync.WaitGroup
 		mu       sync.Mutex
-		results  = make([]CheckResult, 0, len(c.config.Packages))
+		results  = make([]CheckResult, 0, len(pkgs))
 		failures = make(map[string]error)
 		progress atomic.Uint64
-		total    = uint64(len(c.config.Packages))
+		total    = uint64(len(pkgs))
 	)
 
-	for name, pkg := range c.config.Packages {
+	for name, pkg := range pkgs {
 		// A select with both cases ready picks at random, so check the context
 		// deterministically first: an already-cancelled context must mark
 		// EVERY remaining package as a failure, not just roughly half of them.

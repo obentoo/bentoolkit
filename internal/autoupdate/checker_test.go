@@ -357,6 +357,86 @@ KEYWORDS="~amd64"
 	}
 }
 
+// createTestEbuildContent writes an ebuild with caller-supplied content, so a
+// test can shape the metadata (e.g. RESTRICT="bindist") that drives type
+// auto-detection. Mirrors createTestEbuild's directory layout.
+func createTestEbuildContent(t *testing.T, overlayDir, pkgName, version, content string) {
+	t.Helper()
+
+	parts := splitPackageName(pkgName)
+	if len(parts) != 2 {
+		t.Fatalf("Invalid package name: %s", pkgName)
+	}
+	pkgDir := filepath.Join(overlayDir, parts[0], parts[1])
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("Failed to create package dir: %v", err)
+	}
+	ebuildPath := filepath.Join(pkgDir, parts[1]+"-"+version+".ebuild")
+	if err := os.WriteFile(ebuildPath, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write ebuild: %v", err)
+	}
+}
+
+// TestWithTypeFilter verifies the option accepts "", "bin", "source" and
+// rejects anything else.
+func TestWithTypeFilter(t *testing.T) {
+	for _, v := range []string{"", "bin", "source"} {
+		c := &Checker{}
+		if err := WithTypeFilter(v)(c); err != nil {
+			t.Errorf("WithTypeFilter(%q): unexpected error: %v", v, err)
+		}
+		if c.typeFilter != v {
+			t.Errorf("typeFilter = %q, want %q", c.typeFilter, v)
+		}
+	}
+
+	c := &Checker{}
+	if err := WithTypeFilter("nonsense")(c); err == nil {
+		t.Error("WithTypeFilter(\"nonsense\"): expected error, got nil")
+	}
+}
+
+// TestResolveType covers explicit-type precedence, ebuild auto-detection for
+// both bin and source, and the "source" default when the ebuild is missing.
+func TestResolveType(t *testing.T) {
+	overlayDir := t.TempDir()
+
+	// Source package: generic ebuild, no bindist / -bin markers.
+	createTestEbuild(t, overlayDir, "dev-libs/srcpkg", "1.0.0")
+
+	// Binary package: RESTRICT="bindist" triggers detectBinaryPackage.
+	createTestEbuildContent(t, overlayDir, "app-editors/foo-bin", "2.0.0", `EAPI=8
+DESCRIPTION="Binary package"
+HOMEPAGE="https://example.com"
+SLOT="0"
+KEYWORDS="-* ~amd64"
+RESTRICT="bindist mirror strip"
+`)
+
+	c := &Checker{overlayPath: overlayDir}
+
+	tests := []struct {
+		name string
+		pkg  string
+		cfg  PackageConfig
+		want string
+	}{
+		{"explicit bin overrides source ebuild", "dev-libs/srcpkg", PackageConfig{Type: "bin"}, "bin"},
+		{"explicit source overrides bin ebuild", "app-editors/foo-bin", PackageConfig{Type: "source"}, "source"},
+		{"auto-detect source", "dev-libs/srcpkg", PackageConfig{}, "source"},
+		{"auto-detect bin", "app-editors/foo-bin", PackageConfig{}, "bin"},
+		{"missing ebuild defaults to source", "no/such-pkg", PackageConfig{}, "source"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.cfg
+			if got := c.resolveType(tt.pkg, &cfg); got != tt.want {
+				t.Errorf("resolveType(%q) = %q, want %q", tt.pkg, got, tt.want)
+			}
+		})
+	}
+}
+
 // splitPackageName splits a package name into category and name
 func splitPackageName(pkg string) []string {
 	for i, c := range pkg {

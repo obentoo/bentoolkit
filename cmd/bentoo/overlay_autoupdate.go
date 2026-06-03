@@ -31,6 +31,8 @@ var (
 	autoupdateClean bool
 	// autoupdateConcurrency bounds parallel version checks (range [1,100])
 	autoupdateConcurrency int
+	// autoupdateOnly restricts --check to a package type ("bin" or "source")
+	autoupdateOnly string
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -42,6 +44,8 @@ Examples:
   bentoo overlay autoupdate --check              Check all packages for updates
   bentoo overlay autoupdate --check net-misc/foo Check specific package
   bentoo overlay autoupdate --check --force      Check ignoring cache
+  bentoo overlay autoupdate --check --only source Check only source packages
+  bentoo overlay autoupdate --check --only bin    Check only binary packages
   bentoo overlay autoupdate --list               List pending updates
   bentoo overlay autoupdate --apply net-misc/foo Apply update for package
   bentoo overlay autoupdate --apply all          Apply all pending updates
@@ -58,6 +62,7 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
+	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -68,6 +73,17 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
 	if autoupdateConcurrency < 1 || autoupdateConcurrency > 100 {
 		logger.Error("--concurrency must be in range [1, 100], got %d", autoupdateConcurrency)
+		osExit(1)
+		return
+	}
+
+	// Validate --only up front so a typo fails fast rather than silently
+	// checking everything. Only "bin"/"source" (or unset) are accepted.
+	switch autoupdateOnly {
+	case "", "bin", "source":
+		// valid
+	default:
+		logger.Error("--only must be \"bin\" or \"source\", got %q", autoupdateOnly)
 		osExit(1)
 		return
 	}
@@ -129,6 +145,9 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
+		// Restrict the batch to a package type when --only is set; empty is a
+		// no-op (checks every package). Ignored on the single-package path.
+		autoupdate.WithTypeFilter(autoupdateOnly),
 		// Authenticate api.github.com from ~/.config/bentoo/config.yaml's
 		// github.token (same source `overlay compare` uses). NewChecker lets a
 		// GITHUB_TOKEN/GH_TOKEN env override an empty value, matching compare's
@@ -228,22 +247,32 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 	var updatesFound int
 	var errorsFound int
 	var warningsFound int
+	var srcCount int
+	var binCount int
 
 	fmt.Println()
 	output.Header.Println("Version Check Results")
 	fmt.Println()
 
 	for _, r := range results {
+		tag := typeTag(r.Type)
+		switch r.Type {
+		case "bin":
+			binCount++
+		case "source":
+			srcCount++
+		}
+
 		if r.Error != nil {
 			errorsFound++
-			output.Error.Printf("  %s: %v\n", r.Package, r.Error)
+			output.Error.Printf("  %s%s: %v\n", tag, r.Package, r.Error)
 			continue
 		}
 
 		if r.NotComparable {
 			warningsFound++
-			output.Warning.Printf("  %s: %q not comparable to current %s (check parser config)\n",
-				r.Package, r.UpstreamVersion, r.CurrentVersion)
+			output.Warning.Printf("  %s%s: %q not comparable to current %s (check parser config)\n",
+				tag, r.Package, r.UpstreamVersion, r.CurrentVersion)
 			continue
 		}
 
@@ -253,10 +282,10 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 			if r.FromCache {
 				cacheIndicator = output.Sprintf(output.Dim, " (cached)")
 			}
-			output.Success.Printf("  %s: %s → %s%s\n",
-				r.Package, r.CurrentVersion, r.UpstreamVersion, cacheIndicator)
+			output.Success.Printf("  %s%s: %s → %s%s\n",
+				tag, r.Package, r.CurrentVersion, r.UpstreamVersion, cacheIndicator)
 		} else {
-			output.Dim.Printf("  %s: %s (up to date)\n", r.Package, r.CurrentVersion)
+			output.Dim.Printf("  %s%s: %s (up to date)\n", tag, r.Package, r.CurrentVersion)
 		}
 	}
 
@@ -274,6 +303,22 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 
 	if errorsFound > 0 {
 		output.Warning.Printf("%d package(s) had errors\n", errorsFound)
+	}
+
+	output.Dim.Printf("Checked %d source, %d bin\n", srcCount, binCount)
+}
+
+// typeTag renders a short, dim prefix marking a package's resolved type for the
+// check report ("[bin] " / "[src] "). An unknown/empty type yields no tag so
+// the line layout is unchanged when classification was unavailable.
+func typeTag(t string) string {
+	switch t {
+	case "bin":
+		return output.Sprintf(output.Dim, "[bin] ")
+	case "source":
+		return output.Sprintf(output.Dim, "[src] ")
+	default:
+		return ""
 	}
 }
 

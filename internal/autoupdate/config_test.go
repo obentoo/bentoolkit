@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -325,6 +326,36 @@ func TestValidatePackageConfigInvalidParser(t *testing.T) {
 	err := ValidatePackageConfig("test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for invalid parser type")
+	}
+}
+
+// TestValidatePackageConfigType tests that the type field accepts only "",
+// "bin", or "source" and rejects anything else with ErrInvalidType.
+func TestValidatePackageConfigType(t *testing.T) {
+	for _, valid := range []string{"", "bin", "source"} {
+		cfg := &PackageConfig{
+			URL:     "https://example.com/api",
+			Parser:  "regex",
+			Pattern: `v(\d+\.\d+)`,
+			Type:    valid,
+		}
+		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+			t.Errorf("type %q: unexpected error: %v", valid, err)
+		}
+	}
+
+	cfg := &PackageConfig{
+		URL:     "https://example.com/api",
+		Parser:  "regex",
+		Pattern: `v(\d+\.\d+)`,
+		Type:    "binary", // typo: not an accepted value
+	}
+	err := ValidatePackageConfig("test/pkg", cfg)
+	if err == nil {
+		t.Fatal("Expected error for invalid type value")
+	}
+	if !errors.Is(err, ErrInvalidType) {
+		t.Errorf("Expected ErrInvalidType, got %v", err)
 	}
 }
 

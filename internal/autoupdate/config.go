@@ -31,6 +31,8 @@ var (
 	ErrMissingScript = errors.New("missing required field: script (required for script parser)")
 	// ErrInvalidSelect is returned when the select field has an unsupported value
 	ErrInvalidSelect = errors.New("invalid select value: must be '', 'first', 'max', or 'last'")
+	// ErrInvalidType is returned when the type field has an unsupported value
+	ErrInvalidType = errors.New("invalid type value: must be '', 'bin', or 'source'")
 )
 
 // PackageConfig represents a single package's autoupdate configuration.
@@ -46,6 +48,12 @@ type PackageConfig struct {
 	Pattern string `toml:"pattern,omitempty"`
 	// Binary indicates if this is a binary package (manifest-only testing)
 	Binary bool `toml:"binary,omitempty"`
+	// Type classifies the package as binary ("bin") or source-built
+	// ("source"). Empty means auto-detect from the ebuild (RESTRICT=bindist,
+	// a -bin suffix, or a binary SRC_URI). Set it only to override/correct the
+	// heuristic. Used for reporting and the --only filter; it does not change
+	// apply/compile behavior.
+	Type string `toml:"type,omitempty"`
 	// FallbackURL is an alternative URL to try if primary fails
 	FallbackURL string `toml:"fallback_url,omitempty"`
 	// FallbackParser is the parser type for the fallback URL
@@ -170,6 +178,16 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		// valid
 	default:
 		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidSelect, cfg.Select)
+	}
+
+	// Validate the type field. Like select, an unrecognized value is almost
+	// certainly a typo in packages.toml, so fail hard rather than silently
+	// auto-detecting and masking the mistake.
+	switch cfg.Type {
+	case "", "bin", "source":
+		// valid
+	default:
+		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidType, cfg.Type)
 	}
 
 	// Validate transform rules. A malformed rule (wrong arity or uncompilable
