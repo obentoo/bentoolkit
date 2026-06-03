@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-06-03
+
+### Added
+- **Live test covering the `~/.config/bentoo/secrets` serial path for
+  authenticated distfile fetch.** `TestFetchDistfileLiveFileZillaProSecretsFile`
+  blanks `FILEZILLA_PRO_KEY` so `resolveSecret` must fall back to the secrets
+  file, then runs the real FileZilla Pro POST and asserts a non-trivial binary
+  comes back — proving a user-configured serial is accepted end-to-end. Gated
+  on `FILEZILLA_SECRETS_E2E=1`, so it never runs in CI. Test-only — no runtime
+  or binary behavior changes.
+
 ## [0.3.15] - 2026-06-03
 
 ### Fixed
