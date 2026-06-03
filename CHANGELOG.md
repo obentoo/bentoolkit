@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-02
+
+### Added
+- **`overlay autoupdate --apply all` applies every pending update in one run.**
+  Previously `--apply` accepted only a single exact `category/package`; any other
+  value failed with `ErrPackageNotInPending`. The new `all` sentinel (safe because
+  real package names always contain a `/`) reuses a single `Applier` and iterates
+  over a snapshot of the pending list, applying each package independently. Each
+  outcome is printed, followed by an `Apply All Summary` (`Applied: N` / `Failed:
+  M`). Successfully applied packages leave `pending.json`; failures remain marked
+  `failed`. The process exits non-zero when any package fails, matching the
+  single-package contract. `--apply all --compile` still prompts per package.
+
 ## [0.3.4] - 2026-06-02
 
 ### Security
