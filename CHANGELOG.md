@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-06-03
+
+### Fixed
+- **`autoupdate --apply` no longer fails on stale pending entries.** The applier
+  trusted the `current_version` recorded at check-time to locate the source
+  ebuild; when the overlay had since drifted — the package bumped further by
+  hand, or removed entirely — that file was gone and Apply died with a cryptic
+  `source ebuild file not found`. Apply now re-resolves the current version
+  against the live overlay (mirroring the checker's selection): a stale-but-
+  present `current_version` self-heals to the real source, and a genuinely
+  obsolete entry (package removed, or overlay already at/beyond the target) is
+  **pruned from `pending.json`** and reported as `Obsolete (pruned)` rather than
+  counted as a failure. `--apply all` gains an `Obsolete: N` summary line and no
+  longer exits non-zero solely because of superseded entries.
+
 ## [0.3.16] - 2026-06-03
 
 ### Added
