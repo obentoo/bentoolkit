@@ -385,6 +385,20 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 	}
 }
 
+// loadPackagesConfigForApply loads the overlay's packages.toml so the applier
+// can honour any [meta] authenticated-fetch instructions. It is best-effort: a
+// missing or unparseable config is not fatal to --apply (only serial-gated
+// packages need it), so it logs a debug note and returns nil, leaving the
+// normal pkgdev-from-SRC_URI path intact for every package.
+func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
+	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		logger.Debug("apply: no usable packages.toml (%v); authenticated fetch disabled", err)
+		return nil
+	}
+	return cfg
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
@@ -393,6 +407,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
@@ -428,6 +443,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)

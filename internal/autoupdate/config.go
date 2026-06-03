@@ -80,6 +80,13 @@ type PackageConfig struct {
 	// Headers contains custom HTTP headers to send with requests
 	Headers map[string]string `toml:"headers,omitempty"`
 
+	// Meta holds free-form key/value annotations for packages with special
+	// acquisition requirements (e.g. a purchased serial, a platform selector,
+	// a download endpoint). It is documentation only — the checker ignores it
+	// when detecting versions. Never store secrets here; reference an env var
+	// instead (e.g. serial_env = "FILEZILLA_PRO_KEY").
+	Meta map[string]string `toml:"meta,omitempty"`
+
 	// New fields for version history
 	// VersionsPath is the JSON path for extracting version list
 	VersionsPath string `toml:"versions_path,omitempty"`

@@ -95,6 +95,12 @@ type Applier struct {
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
 	clean bool
+	// configs holds the per-package autoupdate configuration, keyed by
+	// "category/package". It is consulted only for the optional [meta] block
+	// that drives an authenticated distfile fetch (serial-gated downloads);
+	// packages without it follow the normal pkgdev-from-SRC_URI path. Set via
+	// WithApplierPackagesConfig; nil disables authenticated fetching entirely.
+	configs map[string]PackageConfig
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -160,6 +166,18 @@ func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 func WithApplierClean(clean bool) ApplierOption {
 	return func(a *Applier) {
 		a.clean = clean
+	}
+}
+
+// WithApplierPackagesConfig supplies the per-package autoupdate config so the
+// applier can honour a package's [meta] authenticated-fetch instructions before
+// running the manifest step. A nil config (or one without a matching package)
+// leaves the normal pkgdev-from-SRC_URI behaviour unchanged.
+func WithApplierPackagesConfig(cfg *PackagesConfig) ApplierOption {
+	return func(a *Applier) {
+		if cfg != nil {
+			a.configs = cfg.Packages
+		}
 	}
 }
 
@@ -435,6 +453,15 @@ func (a *Applier) runManifest(pkg, version string) error {
 	}
 	defer func() { _ = os.RemoveAll(distdir) }()
 
+	// Serial-gated packages: their distfile cannot be fetched by pkgdev from
+	// SRC_URI, so pre-populate the distdir by submitting the vendor's download
+	// form with the serial. pkgdev then digests the local file. A package
+	// without fetch instructions is a no-op; a configured-but-failing fetch
+	// aborts here with a clear, serial-free error.
+	if err := a.prefetchAuthDistfile(pkg, version, distdir); err != nil {
+		return err
+	}
+
 	// Bound the manifest invocation: derive a child context from the applier's
 	// parent context with a finite deadline so a stalled distfile fetch cannot
 	// hang Apply forever. Cancelling either the parent (SIGINT) or this child
@@ -451,6 +478,35 @@ func (a *Applier) runManifest(pkg, version string) error {
 		return fmt.Errorf("command failed: %w\nOutput: %s", err, string(output))
 	}
 
+	return nil
+}
+
+// prefetchAuthDistfile downloads a serial-gated distfile into distdir when the
+// package's [meta] block configures an authenticated fetch. It is a no-op for
+// packages without that config (the overwhelming majority) and when no config
+// was supplied to the applier at all. The download is bounded by the applier's
+// parent context so SIGINT cancels it, and the serial never appears in logs.
+func (a *Applier) prefetchAuthDistfile(pkg, version, distdir string) error {
+	cfg, ok := a.configs[pkg]
+	if !ok {
+		return nil
+	}
+	spec, enabled, err := parseAuthFetchSpec(cfg.Meta)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrManifestFailed, err)
+	}
+	if !enabled {
+		return nil
+	}
+
+	logger.Info("authenticated fetch: downloading %s distfile for %s (serial via $%s)",
+		pkg, version, spec.serialEnv)
+
+	dest, err := spec.fetchDistfile(a.ctx, version, distdir)
+	if err != nil {
+		return err
+	}
+	logger.Info("authenticated fetch: wrote %s", filepath.Base(dest))
 	return nil
 }
 
