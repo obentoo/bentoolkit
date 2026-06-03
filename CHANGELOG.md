@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-06-03
+
+### Changed
+- **`overlay autoupdate --check` is now dramatically faster on GitHub/GitLab-heavy
+  overlays.** The HTTP rate limiter gained per-host policies: GitHub hosts run at
+  ~10 req/s (100ms) and GitLab at ~3.3 req/s (300ms) — the two providers that
+  dominate `packages.toml` — while every other host keeps the conservative
+  1-req/6s default. Previously a single uniform 1-req/6s-per-host limit serialised
+  the ~220 GitHub/GitLab packages regardless of `--concurrency`, capping a full
+  check at ~13 min; with per-host tuning it completes in well under a minute.
+  The default `--concurrency` was raised from 10 to 20 to keep the tuned limiters
+  saturated (max remains 100). New `RateLimiter` options `WithHTTPInterval`,
+  `WithHostPolicy` and `WithTunedHostPolicies` expose the tuning; the zero-config
+  limiter keeps its uniform 6s-per-host behavior.
+
 ## [0.3.12] - 2026-06-03
 
 ### Added
