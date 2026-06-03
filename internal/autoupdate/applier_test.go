@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1225,19 +1226,6 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 	}
 }
 
-// mockExecCommandHybrid returns a factory whose behavior depends on the
-// invoked command. "pkgdev" calls (manifest) succeed instantly via /bin/true;
-// any other call (e.g. sudo/doas for the compile path) blocks under sleep, so
-// only the compile step is cancellable by context. This lets a single test
-// exercise context cancellation during the compile step without interference
-// from the manifest step.
-func mockExecCommandHybrid(ctx context.Context, name string, arg ...string) *exec.Cmd {
-	if name == "pkgdev" {
-		return exec.CommandContext(ctx, "true")
-	}
-	return exec.CommandContext(ctx, "sleep", "3600")
-}
-
 // TestApply_CancelsOnContextCancellation_Manifest verifies R1.1, R1.3:
 // cancelling the WithApplierContext parent while runManifest is blocked in the
 // spawned process aborts Apply within ~2 s, surfaces a context-derived error
@@ -1357,9 +1345,25 @@ func TestApply_CancelsOnContextCancellation_Compile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Signal deterministically when the compile step starts instead of guessing
+	// with a fixed sleep: a slow/loaded runner may not have reached the manifest
+	// step within the sleep window, so cancelling then would abort the manifest
+	// (with context canceled) rather than the compile this test targets. The
+	// factory closes compileStarted the first time it is asked for a non-pkgdev
+	// (compile) command — which only happens after runManifest has returned.
+	compileStarted := make(chan struct{})
+	var once sync.Once
+	execFn := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" {
+			return exec.CommandContext(ctx, "true") // manifest: instant success
+		}
+		once.Do(func() { close(compileStarted) })
+		return exec.CommandContext(ctx, "sleep", "3600") // compile: blocks until cancel
+	}
+
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
-		WithExecCommand(mockExecCommandHybrid),
+		WithExecCommand(execFn),
 		WithApplierContext(ctx),
 		WithConfirmFunc(func(prompt string) bool { return true }),
 	)
@@ -1375,8 +1379,13 @@ func TestApply_CancelsOnContextCancellation_Compile(t *testing.T) {
 		done <- applyErr
 	}()
 
-	// Wait for manifest to complete and compile to start blocking.
-	time.Sleep(200 * time.Millisecond)
+	// Cancel only once the compile step has actually started, guaranteeing the
+	// manifest already completed so the cancellation hits the compile.
+	select {
+	case <-compileStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("compile step did not start within 5s")
+	}
 	cancelAt := time.Now()
 	cancel()
 
