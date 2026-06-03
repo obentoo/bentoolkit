@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-02
+
+### Fixed
+- **`overlay autoupdate --check` no longer fails en masse with HTTP 403.** The
+  version-check hot path (`Checker.fetchContent`) issued requests via
+  `GetWithContext`, which bypasses `applyHeaders` — so checks never sent a
+  `User-Agent`, the configured GitHub token, or the per-package `headers` from
+  `packages.toml`. Every request went out as an anonymous `Go-http-client/1.1`,
+  and `api.github.com` (60 req/h per IP) answered `403` for the bulk of
+  GitHub-backed packages. `fetchContent` now routes through
+  `GetWithHeadersContext`, putting the User-Agent, `Authorization` token, and
+  TOML-declared headers on the wire. The full batch check dropped from 68
+  spurious 403s to 0.
+
+### Added
+- **GitHub API authentication for autoupdate.** New `WithGitHubToken` checker
+  option, wired by `overlay autoupdate` from `~/.config/bentoo/config.yaml`'s
+  `github.token`, with `GITHUB_TOKEN`/`GH_TOKEN` env taking precedence — the
+  same resolution order `overlay compare` uses. Raises the GitHub API limit from
+  60 to 5000 req/h, eliminating rate-limit 403s in the full batch check.
+- **Default `User-Agent` (`bentoolkit/<version>`)** on the autoupdate HTTP
+  client, avoiding the `Go-http-client/1.1` string that WAF-fronted upstreams
+  reject outright.
+
 ## [0.3.2] - 2026-06-02
 
 ### Changed
