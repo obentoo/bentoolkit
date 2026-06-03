@@ -1226,13 +1226,13 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 }
 
 // mockExecCommandHybrid returns a factory whose behavior depends on the
-// invoked command. "ebuild" calls (manifest) succeed instantly via /bin/true;
+// invoked command. "pkgdev" calls (manifest) succeed instantly via /bin/true;
 // any other call (e.g. sudo/doas for the compile path) blocks under sleep, so
 // only the compile step is cancellable by context. This lets a single test
 // exercise context cancellation during the compile step without interference
 // from the manifest step.
 func mockExecCommandHybrid(ctx context.Context, name string, arg ...string) *exec.Cmd {
-	if name == "ebuild" {
+	if name == "pkgdev" {
 		return exec.CommandContext(ctx, "true")
 	}
 	return exec.CommandContext(ctx, "sleep", "3600")
@@ -1543,9 +1543,9 @@ func TestApply_RetainsPendingOnCompileFailure(t *testing.T) {
 		t.Fatalf("pending.Add: %v", err)
 	}
 
-	// ebuild → success (manifest); anything else (sudo/doas → compile) → failure.
+	// pkgdev → success (manifest); anything else (sudo/doas → compile) → failure.
 	hybridManifestOKCompileFail := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
-		if name == "ebuild" {
+		if name == "pkgdev" {
 			return exec.CommandContext(ctx, "true")
 		}
 		return exec.CommandContext(ctx, "false")

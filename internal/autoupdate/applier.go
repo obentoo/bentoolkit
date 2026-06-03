@@ -18,7 +18,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
-// manifestTimeout bounds a single `ebuild manifest` invocation. The manifest
+// manifestTimeout bounds a single `pkgdev manifest` invocation. The manifest
 // step touches the network (fetching SRC_URI distfiles to digest), so it gets a
 // generous-but-finite budget; without it a stalled fetch would hang Apply
 // indefinitely.
@@ -28,8 +28,8 @@ const manifestTimeout = 5 * time.Minute
 var (
 	// ErrEbuildNotFound is returned when the source ebuild file is not found
 	ErrEbuildNotFound = errors.New("source ebuild file not found")
-	// ErrManifestFailed is returned when the ebuild manifest command fails
-	ErrManifestFailed = errors.New("ebuild manifest command failed")
+	// ErrManifestFailed is returned when the manifest command fails
+	ErrManifestFailed = errors.New("manifest command failed")
 	// ErrCompileFailed is returned when the compile test fails
 	ErrCompileFailed = errors.New("compile test failed")
 	// ErrNoPrivilegeEscalation is returned when neither sudo nor doas is available
@@ -131,7 +131,7 @@ func WithExecCommand(fn func(ctx context.Context, name string, arg ...string) *e
 }
 
 // WithApplierContext sets the parent context for the applier. The context is
-// threaded into every spawned external command (ebuild manifest, compile test),
+// threaded into every spawned external command (pkgdev manifest, compile test),
 // so cancelling it (e.g. on SIGINT or a deadline) kills in-flight processes.
 // A nil context is ignored, leaving the default context.Background().
 func WithApplierContext(ctx context.Context) ApplierOption {
@@ -229,7 +229,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// Upstream version detection can carry a leading tag prefix (e.g. the git
 	// tag "v9.2.0588"). A Gentoo ebuild filename requires a bare PV, so strip
 	// the prefix before it reaches the filename and the manifest step; otherwise
-	// `ebuild manifest` rejects it with "does not follow correct package syntax".
+	// `pkgdev manifest` rejects it with "does not follow correct package syntax".
 	// Validate up front so a non-version (or a string still invalid after
 	// stripping) fails with a clear error instead of a cryptic portage one.
 	newVersion := stripVersionPrefix(strings.TrimSpace(update.NewVersion))
@@ -409,8 +409,11 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	return nil
 }
 
-// runManifest runs the ebuild manifest command to regenerate the Manifest file.
-// Command: ebuild {category}/{package}/{package}-{version}.ebuild manifest
+// runManifest regenerates the Manifest file with pkgdev. Unlike `ebuild
+// manifest`, pkgdev neither requires root nor writes to the system DISTDIR
+// (/var/cache/distfiles): it digests against a private --distdir we own, so the
+// step works as an unprivileged user without write access to Portage's caches.
+// Command: pkgdev manifest --distdir {tmpdir}  (run from the package directory)
 func (a *Applier) runManifest(pkg, version string) error {
 	// Parse package name
 	parts := strings.Split(pkg, "/")
@@ -420,8 +423,17 @@ func (a *Applier) runManifest(pkg, version string) error {
 	category := parts[0]
 	pkgName := parts[1]
 
-	// Build ebuild path
-	ebuildPath := filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
+	// Package directory pkgdev operates in (it discovers the ebuild itself).
+	pkgDir := filepath.Join(a.overlayPath, category, pkgName)
+
+	// Writable distdir we own, so fetching/digesting never touches the system
+	// DISTDIR. Removed when the manifest step returns; distfiles for an upstream
+	// bump are new names absent from any cache, so there is nothing to persist.
+	distdir, err := os.MkdirTemp("", "bentoo-distfiles-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp distdir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(distdir) }()
 
 	// Bound the manifest invocation: derive a child context from the applier's
 	// parent context with a finite deadline so a stalled distfile fetch cannot
@@ -430,9 +442,9 @@ func (a *Applier) runManifest(pkg, version string) error {
 	ctx, cancel := context.WithTimeout(a.ctx, manifestTimeout)
 	defer cancel()
 
-	// Run ebuild manifest command.
-	cmd := a.execCommand(ctx, "ebuild", ebuildPath, "manifest")
-	cmd.Dir = a.overlayPath
+	// Run pkgdev manifest from the package directory.
+	cmd := a.execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
+	cmd.Dir = pkgDir
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -336,7 +336,7 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 }
 
 // runApply handles the --apply flag. ctx is threaded into the Applier via
-// WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `ebuild manifest`
+// WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
 func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
@@ -366,7 +366,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 // runApplyAll handles `--apply all`: it applies every pending update in turn,
 // reusing a single Applier so the pending list and logs directory are loaded
 // once. ctx is threaded into the Applier via WithApplierContext so a
-// SIGINT/SIGTERM cancels the in-flight `ebuild manifest` or compile child
+// SIGINT/SIGTERM cancels the in-flight `pkgdev manifest` or compile child
 // process (R1.1, R1.2).
 //
 // The package list is snapshotted up front: Apply mutates the underlying

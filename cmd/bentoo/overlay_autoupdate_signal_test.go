@@ -122,11 +122,11 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 
 // TestRunAutoupdate_SignalCancels_Apply verifies R1.1, R1.3 end-to-end: SIGTERM
 // during `bentoo overlay autoupdate --apply <pkg>` cancels the in-flight
-// `ebuild manifest` child process within ~2 s, and the orphan .ebuild left by
+// `pkgdev manifest` child process within ~2 s, and the orphan .ebuild left by
 // copyEbuild is rolled back. The harness mirrors TestRunAutoupdate_SignalCancels
 // but exercises the apply path instead of check.
 //
-// The injected `ebuild` is a stub script placed on PATH that exec's `sleep`,
+// The injected `pkgdev` is a stub script placed on PATH that exec's `sleep`,
 // so the spawned child is killed by exec.CommandContext as soon as runApply's
 // context is cancelled by signalContext. Without runApply threading runCtx
 // into NewApplier via WithApplierContext (T1.2), the SIGTERM would not reach
@@ -140,13 +140,13 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 		t.Skip("SIGTERM / syscall.Kill / /bin/sh stub is not portable on Windows")
 	}
 
-	// Stub `ebuild` binary on PATH: an `exec sleep 3600` blocks indefinitely,
+	// Stub `pkgdev` binary on PATH: an `exec sleep 3600` blocks indefinitely,
 	// and `exec.CommandContext` SIGKILLs it on cancellation.
 	binDir := t.TempDir()
-	stubPath := filepath.Join(binDir, "ebuild")
+	stubPath := filepath.Join(binDir, "pkgdev")
 	stubScript := "#!/bin/sh\nexec sleep 3600\n"
 	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub ebuild: %v", err)
+		t.Fatalf("write stub pkgdev: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
