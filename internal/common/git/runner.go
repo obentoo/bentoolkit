@@ -73,6 +73,66 @@ func (g *GitRunner) Status() ([]StatusEntry, error) {
 	return ParseStatusOutput(stdout), nil
 }
 
+// StagedStatus returns only the entries staged in the index, i.e. exactly what
+// a commit would include. It runs git status --porcelain and keeps entries whose
+// index column (X) is set, dropping unstaged-only and untracked files.
+func (g *GitRunner) StagedStatus() ([]StatusEntry, error) {
+	stdout, _, err := g.runCommand("status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseStagedStatusOutput(stdout), nil
+}
+
+// ParseStagedStatusOutput parses git status --porcelain output and keeps only
+// entries staged in the index. In the "XY filename" format, X is the index
+// (staged) status and Y is the worktree status; an entry is staged when X is
+// neither a space (unstaged-only) nor '?' (untracked).
+func ParseStagedStatusOutput(output string) []StatusEntry {
+	var entries []StatusEntry
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if len(line) < 3 {
+			continue
+		}
+
+		// X = index status, Y = worktree status. Keep only staged (X set).
+		indexStatus := line[0]
+		if indexStatus == ' ' || indexStatus == '?' {
+			continue
+		}
+
+		status := string(indexStatus)
+		filePath := line[3:]
+
+		// Staged rename: "R  old -> new" — split into delete + add, mirroring
+		// ParseStatusOutput so version-bump detection keeps working.
+		if status == "R" {
+			parts := strings.Split(filePath, " -> ")
+			if len(parts) == 2 {
+				entries = append(entries, StatusEntry{
+					Status:   "D",
+					FilePath: strings.TrimSpace(parts[0]),
+				})
+				entries = append(entries, StatusEntry{
+					Status:   "A",
+					FilePath: strings.TrimSpace(parts[1]),
+				})
+				continue
+			}
+		}
+
+		entries = append(entries, StatusEntry{
+			Status:   status,
+			FilePath: filePath,
+		})
+	}
+
+	return entries
+}
+
 // ParseStatusOutput parses git status --porcelain output into StatusEntry slice
 func ParseStatusOutput(output string) []StatusEntry {
 	var entries []StatusEntry

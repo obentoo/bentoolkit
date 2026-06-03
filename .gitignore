@@ -47,3 +47,5 @@ vendor/
 
 # Claude
 .claude/
+# Playwright MCP local artifacts
+.playwright-mcp/

@@ -176,6 +176,30 @@ func StatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
 	return GroupStatusEntries(entries), nil
 }
 
+// StagedStatus retrieves and groups only the changes staged in the index,
+// i.e. exactly what a commit would include. Unlike Status, it ignores files
+// that are merely modified in the worktree but not staged.
+func StagedStatus(cfg *config.Config) ([]PackageStatus, error) {
+	overlayPath, err := cfg.GetOverlayPath()
+	if err != nil {
+		return nil, err
+	}
+
+	runner := git.NewGitRunner(overlayPath)
+	return StagedStatusWithExecutor(runner)
+}
+
+// StagedStatusWithExecutor retrieves and groups the staged git status using the
+// provided GitExecutor. This function is useful for testing with mocks.
+func StagedStatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
+	entries, err := executor.StagedStatus()
+	if err != nil {
+		return nil, err
+	}
+
+	return GroupStatusEntries(entries), nil
+}
+
 // FormatStatus formats package statuses into a human-readable string with colors
 func FormatStatus(statuses []PackageStatus) string {
 	if len(statuses) == 0 {

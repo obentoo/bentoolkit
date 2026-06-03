@@ -3,14 +3,15 @@ package git
 // MockGitRunner implements GitExecutor for testing.
 // Each method can be configured with a custom function to control behavior.
 type MockGitRunner struct {
-	StatusFunc     func() ([]StatusEntry, error)
-	AddFunc        func(paths ...string) error
-	CommitFunc     func(message, user, email string) error
-	PushFunc       func() error
-	PushDryRunFunc func() (string, error)
-	FetchFunc      func(remote string) error
-	MergeFunc      func(branch string) error
-	workDir        string
+	StatusFunc       func() ([]StatusEntry, error)
+	StagedStatusFunc func() ([]StatusEntry, error)
+	AddFunc          func(paths ...string) error
+	CommitFunc       func(message, user, email string) error
+	PushFunc         func() error
+	PushDryRunFunc   func() (string, error)
+	FetchFunc        func(remote string) error
+	MergeFunc        func(branch string) error
+	workDir          string
 }
 
 // NewMockGitRunner creates a new MockGitRunner with the specified working directory
@@ -24,6 +25,14 @@ func NewMockGitRunner(workDir string) *MockGitRunner {
 func (m *MockGitRunner) Status() ([]StatusEntry, error) {
 	if m.StatusFunc != nil {
 		return m.StatusFunc()
+	}
+	return nil, nil
+}
+
+// StagedStatus returns only the entries staged in the index
+func (m *MockGitRunner) StagedStatus() ([]StatusEntry, error) {
+	if m.StagedStatusFunc != nil {
+		return m.StagedStatusFunc()
 	}
 	return nil, nil
 }

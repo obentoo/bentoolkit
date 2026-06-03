@@ -36,10 +36,11 @@ func runAdd(cmd *cobra.Command, args []string) {
 		logger.Error("%v", e)
 	}
 
-	// Display success message if any files were added
+	// Display success message if any files were added.
+	// Show only what is staged in the index — not the whole working tree — so
+	// "overlay add <pkg>" reports just the package(s) the user staged.
 	if len(result.Added) > 0 {
-		// Get and display status after adding
-		statuses, err := overlay.Status(ctx.Config)
+		statuses, err := overlay.StagedStatus(ctx.Config)
 		if err != nil {
 			logger.Error("getting status: %v", err)
 			osExit(1)

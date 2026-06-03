@@ -93,6 +93,92 @@ D  old-pkg/old-1.0.ebuild
 	}
 }
 
+func TestParseStagedStatusOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []StatusEntry
+	}{
+		{
+			name:     "empty output",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:  "staged added file",
+			input: "A  app-misc/hello/hello-1.0.ebuild\n",
+			expected: []StatusEntry{
+				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+			},
+		},
+		{
+			name:  "staged modified file",
+			input: "M  app-misc/hello/hello-1.0.ebuild\n",
+			expected: []StatusEntry{
+				{Status: "M", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+			},
+		},
+		{
+			name:     "unstaged-only modification is excluded",
+			input:    " M app-misc/hello/hello-1.0.ebuild\n",
+			expected: nil,
+		},
+		{
+			name:     "untracked file is excluded",
+			input:    "?? app-misc/new/new-1.0.ebuild\n",
+			expected: nil,
+		},
+		{
+			name:  "staged and further worktree changes counts as staged",
+			input: "MM app-misc/hello/hello-1.0.ebuild\n",
+			expected: []StatusEntry{
+				{Status: "M", FilePath: "app-misc/hello/hello-1.0.ebuild"},
+			},
+		},
+		{
+			name:  "staged rename splits into delete + add",
+			input: "R  old-name.txt -> new-name.txt\n",
+			expected: []StatusEntry{
+				{Status: "D", FilePath: "old-name.txt"},
+				{Status: "A", FilePath: "new-name.txt"},
+			},
+		},
+		{
+			name: "mixed: keep only staged entries (the bug scenario)",
+			input: `A  app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild
+ M app-office/openoffice-bin/openoffice-bin-4.1.16.ebuild
+ M media-libs/libcamera/Manifest
+?? net-proxy/snowflake/Manifest
+M  net-proxy/snowflake/snowflake-2.13.1.ebuild
+`,
+			expected: []StatusEntry{
+				{Status: "A", FilePath: "app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild"},
+				{Status: "M", FilePath: "net-proxy/snowflake/snowflake-2.13.1.ebuild"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseStagedStatusOutput(tt.input)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d entries, got %d (%v)", len(tt.expected), len(result), result)
+				return
+			}
+
+			for i, entry := range result {
+				if entry.Status != tt.expected[i].Status {
+					t.Errorf("entry %d: expected status %q, got %q", i, tt.expected[i].Status, entry.Status)
+				}
+				if entry.FilePath != tt.expected[i].FilePath {
+					t.Errorf("entry %d: expected path %q, got %q", i, tt.expected[i].FilePath, entry.FilePath)
+				}
+			}
+		})
+	}
+}
+
 func TestNewGitRunner(t *testing.T) {
 	workDir := "/tmp/test-repo"
 	runner := NewGitRunner(workDir)

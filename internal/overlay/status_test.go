@@ -327,6 +327,52 @@ func TestStatusWithMockGitRunner(t *testing.T) {
 	})
 }
 
+// TestStagedStatusWithMockGitRunner verifies StagedStatusWithExecutor reads
+// from StagedStatus (the index) rather than the full working tree, so that
+// "overlay add <pkg>" reports only what was staged.
+func TestStagedStatusWithMockGitRunner(t *testing.T) {
+	t.Run("uses StagedStatus, not full Status", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		// Status (whole worktree) would return three packages...
+		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			return []git.StatusEntry{
+				{Status: "A", FilePath: "app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild"},
+				{Status: "M", FilePath: "app-office/openoffice-bin/openoffice-bin-4.1.16.ebuild"},
+				{Status: "M", FilePath: "media-libs/libcamera/Manifest"},
+			}, nil
+		}
+		// ...but only one is actually staged in the index.
+		mock.StagedStatusFunc = func() ([]git.StatusEntry, error) {
+			return []git.StatusEntry{
+				{Status: "A", FilePath: "app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild"},
+			}, nil
+		}
+
+		statuses, err := StagedStatusWithExecutor(mock)
+		if err != nil {
+			t.Fatalf("StagedStatusWithExecutor() error = %v, want nil", err)
+		}
+
+		if len(statuses) != 1 {
+			t.Fatalf("Expected 1 staged package group, got %d: %+v", len(statuses), statuses)
+		}
+		if statuses[0].Category != "app-dicts" || statuses[0].Package != "myspell-hu" {
+			t.Errorf("Staged package = %s/%s, want app-dicts/myspell-hu", statuses[0].Category, statuses[0].Package)
+		}
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		mock := git.NewMockGitRunner("/test/overlay")
+		mock.StagedStatusFunc = func() ([]git.StatusEntry, error) {
+			return nil, errors.New("git status failed: not a git repository")
+		}
+
+		if _, err := StagedStatusWithExecutor(mock); err == nil {
+			t.Error("StagedStatusWithExecutor() error = nil, want error")
+		}
+	})
+}
+
 // TestStatusGroupingWithMock tests status grouping behavior with mock
 // _Requirements: 8.3_
 func TestStatusGroupingWithMock(t *testing.T) {

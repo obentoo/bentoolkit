@@ -6,6 +6,9 @@ type GitExecutor interface {
 	// Status returns the current git status as a list of StatusEntry
 	Status() ([]StatusEntry, error)
 
+	// StagedStatus returns only the entries staged in the index (what a commit would include)
+	StagedStatus() ([]StatusEntry, error)
+
 	// Add stages files for commit
 	Add(paths ...string) error
 
