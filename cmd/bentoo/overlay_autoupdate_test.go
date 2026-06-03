@@ -323,6 +323,11 @@ func TestAutoupdateUsageContainsExamples(t *testing.T) {
 			t.Errorf("autoupdate long description should contain example with %s", example)
 		}
 	}
+
+	// The bulk-apply form must be documented so users discover it.
+	if !strings.Contains(autoupdateCmd.Long, "--apply all") {
+		t.Error("autoupdate long description should document '--apply all'")
+	}
 }
 
 // TestRunAutoupdate_OverlayPathBoundsCheck tests Property 4: Bounds-Safe Tilde Check

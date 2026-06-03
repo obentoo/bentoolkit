@@ -41,6 +41,7 @@ Examples:
   bentoo overlay autoupdate --check --force      Check ignoring cache
   bentoo overlay autoupdate --list               List pending updates
   bentoo overlay autoupdate --apply net-misc/foo Apply update for package
+  bentoo overlay autoupdate --apply all          Apply all pending updates
   bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test`,
 	Run: runAutoupdate,
 }
@@ -48,7 +49,7 @@ Examples:
 func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateCheck, "check", false, "Check for updates")
 	autoupdateCmd.Flags().BoolVar(&autoupdateList, "list", false, "List pending updates")
-	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package")
+	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
@@ -103,6 +104,8 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	case autoupdateList:
 		runList(configDir)
+	case autoupdateApply == "all":
+		runApplyAll(runCtx, overlayPath, configDir)
 	case autoupdateApply != "":
 		runApply(runCtx, overlayPath, configDir, autoupdateApply)
 	default:
@@ -286,6 +289,7 @@ func displayPendingUpdates(updates []autoupdate.PendingUpdate) {
 
 	output.Info.Printf("Total: %d pending update(s)\n", len(updates))
 	output.Info.Println("Use 'bentoo overlay autoupdate --apply <package>' to apply an update")
+	output.Info.Println("Or 'bentoo overlay autoupdate --apply all' to apply every pending update")
 }
 
 // getStatusColor returns the appropriate color for an update status
@@ -329,6 +333,74 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 	}
 
 	displayApplyResult(result)
+}
+
+// runApplyAll handles `--apply all`: it applies every pending update in turn,
+// reusing a single Applier so the pending list and logs directory are loaded
+// once. ctx is threaded into the Applier via WithApplierContext so a
+// SIGINT/SIGTERM cancels the in-flight `ebuild manifest` or compile child
+// process (R1.1, R1.2).
+//
+// The package list is snapshotted up front: Apply mutates the underlying
+// pending list (a successful apply deletes its entry), so iterating over the
+// live map would be unsafe. Each Apply is independent — a failure on one
+// package never aborts the others — and the process exits non-zero when any
+// package failed, matching the single-package --apply contract.
+func runApplyAll(ctx context.Context, overlayPath, configDir string) {
+	applier, err := autoupdate.NewApplier(overlayPath, configDir,
+		autoupdate.WithApplierContext(ctx),
+	)
+	if err != nil {
+		logger.Error("failed to initialize applier: %v", err)
+		osExit(1)
+		return
+	}
+
+	updates := applier.Pending().List()
+	if len(updates) == 0 {
+		logger.Info("No pending updates to apply")
+		return
+	}
+
+	results := make([]*autoupdate.ApplyResult, 0, len(updates))
+	failures := 0
+	for _, u := range updates {
+		output.Info.Printf("Applying update for %s...\n", u.Package)
+
+		//nolint:contextcheck // ctx is propagated into Apply's spawned processes
+		// via WithApplierContext (a.ctx) — the deliberate single-source wiring from
+		// signal.NotifyContext in the caller. Apply takes no ctx param by design.
+		result, err := applier.Apply(u.Package, autoupdateCompile)
+		if err != nil {
+			failures++
+		}
+		results = append(results, result)
+	}
+
+	displayApplyAllResults(results, failures)
+
+	if failures > 0 {
+		osExit(1)
+	}
+}
+
+// displayApplyAllResults renders the per-package outcomes of `--apply all`
+// followed by an aggregate summary line.
+func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
+	for _, result := range results {
+		displayApplyResult(result)
+	}
+
+	fmt.Println()
+	output.Header.Println("Apply All Summary")
+	applied := len(results) - failures
+	output.Success.Printf("  Applied: %d\n", applied)
+	if failures > 0 {
+		output.Error.Printf("  Failed:  %d\n", failures)
+	}
+	if applied > 0 {
+		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+	}
 }
 
 // displayApplyResult formats and displays apply result
