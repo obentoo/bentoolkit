@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-06-03
+
+### Added
+- **`overlay autoupdate --check` now shows live progress.** The check fans out
+  concurrently and previously printed nothing until the final results table,
+  leaving the terminal silent through the whole network/LLM phase. `runCheck`
+  now wires the Checker's existing `WithProgressCallback` (until now never
+  connected) to a self-rewriting `Checking: [pct%] done/total` line, mirroring
+  `overlay compare`. The counter is driven by `CheckAll`'s atomic counter, so it
+  stays monotonic despite the concurrent workers; the line is cleared before the
+  results table and suppressed under `--quiet`.
+
 ## [0.3.8] - 2026-06-03
 
 ### Fixed
