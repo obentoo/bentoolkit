@@ -596,6 +596,110 @@ func TestApplyCopiesEbuild(t *testing.T) {
 	}
 }
 
+// TestApplyStripsVersionPrefix verifies that a detected upstream version
+// carrying a leading tag prefix (e.g. the git tag "v2.0.0") is normalized to a
+// bare Gentoo PV before it reaches the ebuild filename. Without this, `ebuild
+// manifest` rejects "test-pkg-v2.0.0.ebuild" with "does not follow correct
+// package syntax".
+func TestApplyStripsVersionPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     "v2.0.0", // upstream git tag prefix
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %v", result.Error)
+	}
+
+	// Result reflects the normalized (bare) version.
+	if result.NewVersion != "2.0.0" {
+		t.Errorf("Expected result.NewVersion %q, got %q", "2.0.0", result.NewVersion)
+	}
+
+	// The ebuild is written without the "v" prefix.
+	dstPath := filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-2.0.0.ebuild")
+	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+		t.Error("Expected destination ebuild test-pkg-2.0.0.ebuild to exist")
+	}
+	if _, err := os.Stat(filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-v2.0.0.ebuild")); err == nil {
+		t.Error("Did not expect a prefixed ebuild test-pkg-v2.0.0.ebuild to be created")
+	}
+}
+
+// TestApplyRejectsInvalidNewVersion verifies that a NewVersion that is not a
+// well-formed Gentoo version even after prefix stripping fails fast with
+// ErrInvalidNewVersion instead of producing a broken ebuild filename.
+func TestApplyRejectsInvalidNewVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/test-pkg"
+	oldVersion := "1.0.0"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     "latest", // not a version
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("Expected error for invalid new version, got nil")
+	}
+	if !errors.Is(err, ErrInvalidNewVersion) {
+		t.Errorf("Expected ErrInvalidNewVersion, got %v", err)
+	}
+	if result.Success {
+		t.Error("Expected failure for invalid new version")
+	}
+
+	// No ebuild should have been written, and status must be failed.
+	if _, statErr := os.Stat(filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-latest.ebuild")); statErr == nil {
+		t.Error("Did not expect an ebuild to be created for an invalid version")
+	}
+	update, _ := pending.Get(pkg)
+	if update.Status != StatusFailed {
+		t.Errorf("Expected status 'failed', got %q", update.Status)
+	}
+}
+
 // TestApplyManifestFailure tests that manifest failure sets status to failed
 func TestApplyManifestFailure(t *testing.T) {
 	tmpDir := t.TempDir()

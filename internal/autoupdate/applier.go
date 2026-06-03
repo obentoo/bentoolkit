@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
@@ -35,6 +36,10 @@ var (
 	ErrNoPrivilegeEscalation = errors.New("no privilege escalation tool available (sudo or doas)")
 	// ErrUserDeclined is returned when user declines the compile confirmation
 	ErrUserDeclined = errors.New("user declined compile test")
+	// ErrInvalidNewVersion is returned when the detected upstream version cannot
+	// be coerced into a well-formed Gentoo PV (e.g. it carries a tag prefix that
+	// survives normalization, or is not a version at all).
+	ErrInvalidNewVersion = errors.New("invalid new version for ebuild")
 )
 
 // ApplyResult represents the result of applying an update.
@@ -200,10 +205,25 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 
 	result.OldVersion = update.CurrentVersion
-	result.NewVersion = update.NewVersion
+
+	// Upstream version detection can carry a leading tag prefix (e.g. the git
+	// tag "v9.2.0588"). A Gentoo ebuild filename requires a bare PV, so strip
+	// the prefix before it reaches the filename and the manifest step; otherwise
+	// `ebuild manifest` rejects it with "does not follow correct package syntax".
+	// Validate up front so a non-version (or a string still invalid after
+	// stripping) fails with a clear error instead of a cryptic portage one.
+	newVersion := stripVersionPrefix(strings.TrimSpace(update.NewVersion))
+	if !ebuild.IsValidVersion(newVersion) {
+		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
+		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+		}
+		return result, result.Error
+	}
+	result.NewVersion = newVersion
 
 	// Copy ebuild to new version
-	if err := a.copyEbuild(pkg, update.CurrentVersion, update.NewVersion); err != nil {
+	if err := a.copyEbuild(pkg, update.CurrentVersion, newVersion); err != nil {
 		result.Error = fmt.Errorf("failed to copy ebuild: %w", err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
 			// Log but don't override the original error
@@ -217,7 +237,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// orphan and must be removed so the overlay is not left half-applied.
 	// The cleanup keyed on result.Error so it only fires on failure, and it
 	// must never replace the original error with a removal error.
-	dstPath := a.EbuildPath(pkg, update.NewVersion)
+	dstPath := a.EbuildPath(pkg, newVersion)
 	defer func() {
 		if result == nil || result.Error == nil {
 			return
@@ -228,12 +248,12 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			logger.Warn(
 				"failed to roll back orphan ebuild %s for %s (%s) after apply failure: %v "+
 					"(original apply error preserved: %v)",
-				dstPath, pkg, update.NewVersion, err, result.Error)
+				dstPath, pkg, newVersion, err, result.Error)
 		}
 	}()
 
 	// Run manifest command
-	if err := a.runManifest(pkg, update.NewVersion); err != nil {
+	if err := a.runManifest(pkg, newVersion); err != nil {
 		result.Error = fmt.Errorf("%w: %v", ErrManifestFailed, err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
 			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
@@ -249,7 +269,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 
 	// Run compile test if requested
 	if compile {
-		logPath, err := a.runCompile(pkg, update.NewVersion)
+		logPath, err := a.runCompile(pkg, newVersion)
 		if err != nil {
 			result.Error = err
 			result.LogPath = logPath
