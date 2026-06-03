@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-06-03
+
+### Fixed
+- **`overlay add <pkg>` now reports only what it staged, not the whole working
+  tree.** After staging, the command printed `overlay.Status()` — a full
+  `git status --porcelain` of the working tree — so every modified package in the
+  overlay appeared in the output, making it look like `add <pkg>` had staged
+  everything. The index was actually correct (only the chosen paths were staged,
+  and `overlay commit` uses `git commit` with no `-a`, so only staged changes are
+  committed); the feedback was the only thing misleading. Root cause: the status
+  parser collapsed the porcelain `XY` columns with `TrimSpace`, discarding the
+  staged-vs-unstaged distinction. Added `GitRunner.StagedStatus()` /
+  `ParseStagedStatusOutput` (keyed on the index column `X`; untracked and
+  worktree-only entries are dropped and staged renames are split into delete+add,
+  matching the existing parser) and a matching `overlay.StagedStatus`; `runAdd`
+  now displays that. The no-argument `overlay add` (equivalent to `git add .`)
+  still lists everything, since there everything truly is staged.
+
 ## [0.3.9] - 2026-06-03
 
 ### Added
