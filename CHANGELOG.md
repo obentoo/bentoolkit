@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-02
+
+### Security
+- **Bump the `go` directive to 1.25.11.** The Go 1.25.10 standard library is
+  affected by [GO-2026-5037](https://osv.dev/GO-2026-5037) and
+  [GO-2026-5039](https://osv.dev/GO-2026-5039), both fixed in 1.25.11. The
+  `go.mod` directive drives the toolchain CI installs (via setup-go's
+  `go-version-file`), so the bump clears the osv-scanner findings. No source
+  changes; build and vet stay green.
+
 ## [0.3.3] - 2026-06-02
 
 ### Fixed
