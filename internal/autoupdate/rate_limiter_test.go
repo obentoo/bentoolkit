@@ -16,6 +16,74 @@ import (
 // Unit Tests
 // =============================================================================
 
+// TestPerHostPolicies verifies the per-host HTTP rate-limit tuning: the built-in
+// tuned table raises GitHub/GitLab while leaving other hosts at the fallback, and
+// WithHostPolicy / WithHTTPInterval override correctly.
+func TestPerHostPolicies(t *testing.T) {
+	t.Run("zero-config keeps uniform 6s per host", func(t *testing.T) {
+		rl := NewRateLimiter()
+		for _, h := range []string{"api.github.com", "gitlab.freedesktop.org", "example.com"} {
+			if got := rl.HTTPLimit(h); got != rate.Every(6*time.Second) {
+				t.Errorf("%s: got %v, want %v", h, got, rate.Every(6*time.Second))
+			}
+		}
+	})
+
+	t.Run("tuned table raises git* hosts, others fall back", func(t *testing.T) {
+		rl := NewRateLimiter(WithTunedHostPolicies())
+		cases := map[string]rate.Limit{
+			"api.github.com":            rate.Every(100 * time.Millisecond),
+			"github.com":                rate.Every(100 * time.Millisecond),
+			"raw.githubusercontent.com": rate.Every(100 * time.Millisecond),
+			"gitlab.freedesktop.org":    rate.Every(300 * time.Millisecond),
+			"gitlab.com":                rate.Every(300 * time.Millisecond),
+			"example.com":               rate.Every(6 * time.Second), // fallback unchanged
+		}
+		for h, want := range cases {
+			if got := rl.HTTPLimit(h); got != want {
+				t.Errorf("%s: got %v, want %v", h, got, want)
+			}
+		}
+	})
+
+	t.Run("WithHostPolicy overrides a single host", func(t *testing.T) {
+		rl := NewRateLimiter(WithHostPolicy("pypi.org", 200*time.Millisecond, 3))
+		if got := rl.HTTPLimit("pypi.org"); got != rate.Every(200*time.Millisecond) {
+			t.Errorf("pypi.org: got %v, want %v", got, rate.Every(200*time.Millisecond))
+		}
+		if got := rl.HTTPLimit("example.com"); got != rate.Every(6*time.Second) {
+			t.Errorf("example.com fallback: got %v, want %v", got, rate.Every(6*time.Second))
+		}
+	})
+
+	t.Run("explicit WithHostPolicy wins over tuned built-ins", func(t *testing.T) {
+		rl := NewRateLimiter(
+			WithHostPolicy("api.github.com", 1*time.Second, 1),
+			WithTunedHostPolicies(),
+		)
+		if got := rl.HTTPLimit("api.github.com"); got != rate.Every(1*time.Second) {
+			t.Errorf("api.github.com: got %v, want %v (explicit override must win)", got, rate.Every(1*time.Second))
+		}
+	})
+
+	t.Run("WithHTTPInterval changes the fallback only", func(t *testing.T) {
+		rl := NewRateLimiter(WithHTTPInterval(2*time.Second, 1), WithTunedHostPolicies())
+		if got := rl.HTTPLimit("example.com"); got != rate.Every(2*time.Second) {
+			t.Errorf("fallback: got %v, want %v", got, rate.Every(2*time.Second))
+		}
+		if got := rl.HTTPLimit("api.github.com"); got != rate.Every(100*time.Millisecond) {
+			t.Errorf("tuned host should be unaffected: got %v", got)
+		}
+	})
+
+	t.Run("invalid values are ignored", func(t *testing.T) {
+		rl := NewRateLimiter(WithHTTPInterval(0, 0), WithHostPolicy("", -1, 0))
+		if got := rl.HTTPLimit("example.com"); got != rate.Every(6*time.Second) {
+			t.Errorf("invalid options must preserve defaults: got %v", got)
+		}
+	})
+}
+
 // TestNewRateLimiter tests that NewRateLimiter creates a valid rate limiter
 func TestNewRateLimiter(t *testing.T) {
 	rl := NewRateLimiter()

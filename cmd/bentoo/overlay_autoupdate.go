@@ -153,6 +153,11 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		// GITHUB_TOKEN/GH_TOKEN env override an empty value, matching compare's
 		// env > config precedence.
 		autoupdate.WithGitHubToken(githubToken),
+		// Tune per-host HTTP rate limits: GitHub ~10/s and GitLab ~3/s (the two
+		// hosts that dominate packages.toml), every other host at the conservative
+		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
+		// the ~220 GitHub/GitLab packages, making a large --concurrency pointless.
+		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))

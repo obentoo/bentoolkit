@@ -38,6 +38,28 @@ type domainEntry struct {
 	lastUsed time.Time
 }
 
+// hostPolicy overrides the default HTTP interval/burst for a specific host.
+type hostPolicy struct {
+	interval time.Duration
+	burst    int
+}
+
+// defaultHostPolicies tunes per-host HTTP rate limits to each provider's known
+// headroom. GitHub authenticated allows ~5000 req/h with a ~900-point/min
+// secondary cap (≈15/s), so 10/s (100ms) is safe with comfortable margin;
+// self-hosted GitLab (freedesktop) is usually unauthenticated here and more
+// abuse-sensitive, so it stays at ~3.3/s. Hosts absent from this table fall back
+// to the conservative DefaultHTTPInterval. This table is applied ONLY when
+// WithTunedHostPolicies is passed to NewRateLimiter, so the zero-config limiter
+// keeps its uniform 6s-per-host contract.
+var defaultHostPolicies = map[string]hostPolicy{
+	"api.github.com":            {interval: 100 * time.Millisecond, burst: 2},
+	"github.com":                {interval: 100 * time.Millisecond, burst: 2},
+	"raw.githubusercontent.com": {interval: 100 * time.Millisecond, burst: 2},
+	"gitlab.freedesktop.org":    {interval: 300 * time.Millisecond, burst: 1},
+	"gitlab.com":                {interval: 300 * time.Millisecond, burst: 1},
+}
+
 // RateLimiter manages request rate limiting for LLM and HTTP requests.
 // It enforces:
 // - LLM rate limiting: 5 requests per minute
@@ -55,6 +77,14 @@ type RateLimiter struct {
 	maxDomains int
 	// cleanupAge is how old an entry must be before it can be evicted by age
 	cleanupAge time.Duration
+	// httpInterval/httpBurst are the fallback per-domain HTTP limit used for any
+	// host without an entry in hostPolicies. They default to
+	// DefaultHTTPInterval/DefaultHTTPBurst, preserving the historical behaviour.
+	httpInterval time.Duration
+	httpBurst    int
+	// hostPolicies overrides httpInterval/httpBurst for specific hosts (see
+	// WithHostPolicy / WithTunedHostPolicies). Empty by default.
+	hostPolicies map[string]hostPolicy
 }
 
 // Clock interface allows mocking time for testing
@@ -93,6 +123,49 @@ func WithCleanupAge(d time.Duration) RateLimiterOption {
 	}
 }
 
+// WithHTTPInterval sets the fallback per-domain HTTP rate limit (minimum interval
+// between requests and burst size) used for any host that has no specific policy.
+// interval must be > 0 and burst >= 1; invalid values are ignored, preserving the
+// DefaultHTTPInterval/DefaultHTTPBurst defaults.
+func WithHTTPInterval(interval time.Duration, burst int) RateLimiterOption {
+	return func(r *RateLimiter) {
+		if interval > 0 {
+			r.httpInterval = interval
+		}
+		if burst >= 1 {
+			r.httpBurst = burst
+		}
+	}
+}
+
+// WithHostPolicy overrides the HTTP rate limit for a single host. It takes
+// precedence over WithHTTPInterval (and the default) for that host. interval must
+// be > 0 and burst >= 1; invalid values are ignored. A later call for the same
+// host overwrites an earlier one.
+func WithHostPolicy(host string, interval time.Duration, burst int) RateLimiterOption {
+	return func(r *RateLimiter) {
+		if host == "" || interval <= 0 || burst < 1 {
+			return
+		}
+		r.hostPolicies[host] = hostPolicy{interval: interval, burst: burst}
+	}
+}
+
+// WithTunedHostPolicies loads the built-in per-host tuning (defaultHostPolicies),
+// raising the rate limit for high-volume, high-headroom hosts (GitHub, GitLab)
+// while leaving every other host at the conservative fallback interval. Entries
+// already set by an earlier WithHostPolicy are preserved (built-ins never
+// overwrite an explicit override).
+func WithTunedHostPolicies() RateLimiterOption {
+	return func(r *RateLimiter) {
+		for host, pol := range defaultHostPolicies {
+			if _, exists := r.hostPolicies[host]; !exists {
+				r.hostPolicies[host] = pol
+			}
+		}
+	}
+}
+
 // NewRateLimiter creates a new rate limiter with default settings.
 // LLM requests are limited to 5 per minute.
 // HTTP requests are limited to 10 per minute per domain, with a maximum of
@@ -106,6 +179,9 @@ func NewRateLimiter(opts ...RateLimiterOption) *RateLimiter {
 		clock:        realClock{},
 		maxDomains:   DefaultMaxDomains,
 		cleanupAge:   DefaultCleanupAge,
+		httpInterval: DefaultHTTPInterval,
+		httpBurst:    DefaultHTTPBurst,
+		hostPolicies: make(map[string]hostPolicy),
 	}
 
 	for _, opt := range opts {
@@ -176,9 +252,15 @@ func (r *RateLimiter) getHTTPLimiter(domain string) *rate.Limiter {
 		r.evict()
 	}
 
+	// Resolve the per-host policy, falling back to the configured default.
+	interval, burst := r.httpInterval, r.httpBurst
+	if pol, ok := r.hostPolicies[domain]; ok {
+		interval, burst = pol.interval, pol.burst
+	}
+
 	// Create new entry
 	entry := &domainEntry{
-		limiter:  rate.NewLimiter(rate.Every(DefaultHTTPInterval), DefaultHTTPBurst),
+		limiter:  rate.NewLimiter(rate.Every(interval), burst),
 		lastUsed: r.clock.Now(),
 	}
 	r.httpLimiters[domain] = entry

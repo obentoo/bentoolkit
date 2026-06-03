@@ -69,8 +69,11 @@ type CheckResult struct {
 const DefaultOpTimeout = 30 * time.Second
 
 // DefaultConcurrency is the default number of packages CheckAll processes in
-// parallel when no explicit concurrency is configured on the Checker.
-const DefaultConcurrency = 10
+// parallel when no explicit concurrency is configured on the Checker. It is sized
+// to keep the tuned per-host limiters (GitHub ~10/s, GitLab ~3/s) saturated while
+// the long tail of single-request hosts fires in parallel; per-host rate limiting
+// — not this number — bounds the request rate to any single provider.
+const DefaultConcurrency = 20
 
 // maxConcurrency is the upper bound accepted by WithConcurrency. It caps the
 // number of in-flight per-package goroutines (and therefore the burst of
