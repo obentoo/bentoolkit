@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-06-03
+
+### Fixed
+- **`overlay autoupdate --apply` now regenerates the Manifest without root or
+  Portage write access.** The apply step ran `ebuild <path> manifest`, which
+  inherits the system `DISTDIR` (`/var/cache/distfiles`) and tries to *write*
+  the fetched `SRC_URI` distfiles there. As an unprivileged user this failed
+  with `No write access to '/var/cache/distfiles'`, so every apply aborted
+  before updating the Manifest (`ebuild manifest command failed`). `runManifest`
+  now mirrors the `overlay manifest` subcommand: it creates a private writable
+  distdir (`os.MkdirTemp`, removed when the step returns) and runs
+  `pkgdev manifest --distdir <tmpdir>` from the package directory. `pkgdev`
+  neither requires root nor touches the system `DISTDIR`, so the manifest step
+  works as a regular user. Timeout, context cancellation and orphan-ebuild
+  rollback are unchanged.
+
 ## [0.3.10] - 2026-06-03
 
 ### Fixed
