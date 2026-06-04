@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-06-04
+
 ### Added
 - **`autoupdate` auto-disables orphaned packages instead of erroring forever.**
   When a package's ebuild is removed from the overlay, the checker used to fail
