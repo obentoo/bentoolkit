@@ -56,13 +56,15 @@ func writeExitTestPackagesConfig(t *testing.T, overlayDir, serverURL string, pkg
 
 // TestCLI_ExitCodes exercises the documented exit-code contract of the
 // autoupdate --check path: 0 when every package succeeds, 1 on partial
-// failure, 2 on total failure. A package fails deterministically (without any
-// HTTP retry latency) when its ebuild is absent from the overlay, which makes
-// CheckPackage return ErrNoEbuildFound. The exit code is captured via the
-// shared withExitIntercept/exitSentinel harness.
+// failure, 2 on total failure. Every package has an on-disk ebuild — so none is
+// treated as an orphan (orphans are auto-disabled and excluded from the
+// exit-code contract). A package fails deterministically, without any HTTP retry
+// latency, when its config points at a missing JSON field: the fetch returns 200
+// and the failure happens at parse time, so it is a real per-package failure.
+// The exit code is captured via the shared withExitIntercept/exitSentinel harness.
 func TestCLI_ExitCodes(t *testing.T) {
-	// Local server returns a valid version payload so packages with an
-	// on-disk ebuild succeed on the first HTTP try (no retries needed).
+	// Local server returns a valid version payload so a package whose path
+	// matches ("version") succeeds on the first HTTP try (no retries needed).
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
@@ -71,30 +73,28 @@ func TestCLI_ExitCodes(t *testing.T) {
 
 	tests := []struct {
 		name string
-		// pkgs are all package names declared in packages.toml.
-		pkgs []string
-		// withEbuild are the packages that also get an on-disk ebuild;
-		// any pkg not listed here fails with ErrNoEbuildFound.
-		withEbuild []string
-		wantExit   int
+		// goodPkgs get an ebuild and a matching path ("version") → succeed.
+		goodPkgs []string
+		// badPkgs get an ebuild but a missing path ("nonexistent") → fail at
+		// JSON parse time (a real failure, no orphan, no HTTP retry).
+		badPkgs  []string
+		wantExit int
 	}{
 		{
-			name:       "all packages succeed -> exit 0",
-			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
-			withEbuild: []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
-			wantExit:   0,
+			name:     "all packages succeed -> exit 0",
+			goodPkgs: []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			wantExit: 0,
 		},
 		{
-			name:       "partial failure -> exit 1",
-			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
-			withEbuild: []string{"cat-a/pkg1", "cat-b/pkg2"},
-			wantExit:   1,
+			name:     "partial failure -> exit 1",
+			goodPkgs: []string{"cat-a/pkg1", "cat-b/pkg2"},
+			badPkgs:  []string{"cat-c/pkg3"},
+			wantExit: 1,
 		},
 		{
-			name:       "total failure -> exit 2",
-			pkgs:       []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
-			withEbuild: nil,
-			wantExit:   2,
+			name:     "total failure -> exit 2",
+			badPkgs:  []string{"cat-a/pkg1", "cat-b/pkg2", "cat-c/pkg3"},
+			wantExit: 2,
 		},
 	}
 
@@ -103,9 +103,28 @@ func TestCLI_ExitCodes(t *testing.T) {
 			overlayDir := t.TempDir()
 			configDir := t.TempDir()
 
-			writeExitTestPackagesConfig(t, overlayDir, server.URL, tt.pkgs)
-			for _, pkg := range tt.withEbuild {
+			// Write packages.toml directly so good/bad packages can carry
+			// different paths; give every package an ebuild so none orphans.
+			cfgDir := filepath.Join(overlayDir, ".autoupdate")
+			if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", cfgDir, err)
+			}
+			var b strings.Builder
+			writeEntry := func(pkg, path string) {
+				b.WriteString("[\"" + pkg + "\"]\n")
+				b.WriteString("url = \"" + server.URL + "\"\n")
+				b.WriteString("parser = \"json\"\n")
+				b.WriteString("path = \"" + path + "\"\n\n")
 				writeExitTestEbuild(t, overlayDir, pkg, "0.9.0")
+			}
+			for _, pkg := range tt.goodPkgs {
+				writeEntry(pkg, "version")
+			}
+			for _, pkg := range tt.badPkgs {
+				writeEntry(pkg, "nonexistent")
+			}
+			if err := os.WriteFile(filepath.Join(cfgDir, "packages.toml"), []byte(b.String()), 0o644); err != nil {
+				t.Fatalf("write packages.toml: %v", err)
 			}
 
 			// Force = true bypasses the cache so every package performs a
