@@ -62,6 +62,12 @@ type CheckResult struct {
 	// config's type field or auto-detected from the ebuild. Empty only when the
 	// current ebuild could not be read.
 	Type string
+	// Orphaned is true when the package no longer has any ebuild in the overlay
+	// (getCurrentVersion returned ErrNoEbuildFound). The checker auto-disables
+	// the entry (enabled = false) in packages.toml and surfaces the package as
+	// an informational result rather than a recurring hard failure. When set,
+	// all other fields except Package are zero-valued.
+	Orphaned bool
 }
 
 // DefaultOpTimeout is the default per-operation timeout applied to a single
@@ -610,6 +616,29 @@ func (c *Checker) getCurrentVersion(pkg string) (string, error) {
 	return highestVersion, nil
 }
 
+// DisableOrphans marks each package as disabled (enabled = false) both in the
+// overlay's packages.toml and in the in-memory config, so a package whose ebuild
+// was removed from the overlay stops being processed on subsequent runs. The
+// file edit is a single atomic, comment-preserving write for the whole batch.
+// A nil or empty slice is a no-op. The in-memory config is only updated after
+// the file write succeeds, so a failed write leaves both views consistent.
+func (c *Checker) DisableOrphans(pkgs []string) error {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	if err := DisablePackagesInConfig(c.overlayPath, pkgs); err != nil {
+		return err
+	}
+	disabled := false
+	for _, pkg := range pkgs {
+		if cfg, ok := c.config.Packages[pkg]; ok {
+			cfg.Enabled = &disabled
+			c.config.Packages[pkg] = cfg
+		}
+	}
+	return nil
+}
+
 // currentEbuildPath returns the absolute path of the highest-version, non-live
 // ebuild for pkg. It mirrors getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
@@ -988,6 +1017,7 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 		mu       sync.Mutex
 		results  = make([]CheckResult, 0, len(pkgs))
 		failures = make(map[string]error)
+		orphaned []string
 		progress atomic.Uint64
 		total    = uint64(len(pkgs))
 	)
@@ -1030,9 +1060,17 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 			result, err := c.CheckPackage(n, force)
 
 			mu.Lock()
-			if err != nil {
+			switch {
+			case err != nil && errors.Is(err, ErrNoEbuildFound):
+				// The ebuild was removed from the overlay. Don't record a
+				// recurring failure: queue the package for auto-disable after
+				// the run and surface it as an informational result so it does
+				// not count toward the failure exit code.
+				orphaned = append(orphaned, n)
+				results = append(results, CheckResult{Package: n, Orphaned: true})
+			case err != nil:
 				failures[n] = err
-			} else {
+			default:
 				results = append(results, *result)
 			}
 			mu.Unlock()
@@ -1046,6 +1084,16 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 	// Join every worker before touching the shared state so the BatchResult is
 	// fully populated and safe to return.
 	wg.Wait()
+
+	// Auto-disable packages whose ebuild vanished from the overlay. A single
+	// batched write keeps the hand-maintained packages.toml's comments intact;
+	// a failure here is non-fatal — the run's results still stand and the entry
+	// is simply retried (and re-reported) next time.
+	if len(orphaned) > 0 {
+		if err := c.DisableOrphans(orphaned); err != nil {
+			warnLogf("failed to auto-disable %d orphaned package(s) in packages.toml: %v", len(orphaned), err)
+		}
+	}
 
 	// Deterministic final ordering, independent of completion order.
 	sort.Slice(results, func(i, j int) bool {

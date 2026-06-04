@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -158,6 +159,130 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 	}
 
 	return config, nil
+}
+
+// tomlTableName returns the table name of a TOML section header line and true
+// when the line is a standard `[name]` header. It tolerates surrounding
+// whitespace and a trailing inline comment, strips one layer of basic (") or
+// literal (') quotes from the name, and reports false for array-of-table
+// headers (`[[name]]`), comments, array continuation lines (`["-", "."],`), and
+// anything else. The strictness — requiring only whitespace or a comment after
+// the closing bracket — keeps multi-line array values from being mistaken for
+// section headers during the surgical edit in DisablePackagesInConfig.
+func tomlTableName(line string) (string, bool) {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "[") || strings.HasPrefix(t, "[[") {
+		return "", false
+	}
+	end := strings.IndexByte(t, ']')
+	if end < 0 {
+		return "", false
+	}
+	// Whatever follows the closing bracket must be empty or a comment, else
+	// this is not a header (e.g. an array element line `["-", "."],`).
+	if rest := strings.TrimSpace(t[end+1:]); rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", false
+	}
+	inner := strings.TrimSpace(t[1:end])
+	if len(inner) >= 2 {
+		if (inner[0] == '"' && inner[len(inner)-1] == '"') ||
+			(inner[0] == '\'' && inner[len(inner)-1] == '\'') {
+			inner = inner[1 : len(inner)-1]
+		}
+	}
+	if inner == "" {
+		return "", false
+	}
+	return inner, true
+}
+
+// DisablePackagesInConfig sets `enabled = false` for each named package in the
+// overlay's packages.toml, editing the raw text so comments, ordering, and
+// formatting survive — unlike a full re-encode (toml.Encoder), which would drop
+// every comment in the hand-maintained file. For each package it locates the
+// [section] whose table name equals the package and either rewrites an existing
+// `enabled = ...` assignment or inserts `enabled = false` immediately after the
+// header. Packages whose section is absent are skipped silently. The write is
+// atomic (temp file + rename) and preserves the original file mode; an empty
+// package list, or a run that changes nothing, leaves the file untouched.
+func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
+	if len(pkgs) == 0 {
+		return nil
+	}
+
+	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read packages.toml: %w", err)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat packages.toml: %w", err)
+	}
+
+	targets := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		targets[p] = true
+	}
+
+	// Split on "\n" (not bufio.Scanner) so a file without a trailing newline is
+	// reproduced byte-for-byte by the strings.Join below.
+	lines := strings.Split(string(data), "\n")
+	enabledRe := regexp.MustCompile(`^(\s*)enabled\s*=`)
+
+	changed := false
+	out := make([]string, 0, len(lines)+len(pkgs))
+	for i := 0; i < len(lines); {
+		name, isHeader := tomlTableName(lines[i])
+		if !isHeader || !targets[name] {
+			out = append(out, lines[i])
+			i++
+			continue
+		}
+
+		// At the header of a target section: emit the header, then walk its body
+		// (up to the next header or EOF), rewriting an existing `enabled` key or
+		// inserting one right after the header when absent.
+		out = append(out, lines[i])
+		i++
+		bodyStart := len(out)
+		found := false
+		for i < len(lines) {
+			if _, nextHeader := tomlTableName(lines[i]); nextHeader {
+				break
+			}
+			if m := enabledRe.FindStringSubmatch(lines[i]); m != nil {
+				out = append(out, m[1]+"enabled = false")
+				found = true
+			} else {
+				out = append(out, lines[i])
+			}
+			i++
+		}
+		if !found {
+			inserted := make([]string, 0, len(out)+1)
+			inserted = append(inserted, out[:bodyStart]...)
+			inserted = append(inserted, "enabled = false")
+			inserted = append(inserted, out[bodyStart:]...)
+			out = inserted
+		}
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(strings.Join(out, "\n")), info.Mode().Perm()); err != nil {
+		return fmt.Errorf("failed to write temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck
+		return fmt.Errorf("failed to replace packages.toml: %w", err)
+	}
+
+	return nil
 }
 
 // ValidatePackageConfig validates a single package configuration.

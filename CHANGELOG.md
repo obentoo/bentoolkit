@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`autoupdate` auto-disables orphaned packages instead of erroring forever.**
+  When a package's ebuild is removed from the overlay, the checker used to fail
+  every run with `failed to get current version: no ebuild file found`. It now
+  detects the orphan, sets `enabled = false` for that entry in `packages.toml`,
+  and surfaces it as an informational `no ebuild in overlay — disabled` line
+  rather than a recurring failure (so it no longer pollutes the exit code).
+  Subsequent runs skip the entry silently. The edit is surgical — it inserts a
+  single `enabled = false` line into the affected section, preserving every
+  comment, ordering, and formatting in the hand-maintained file (unlike a full
+  TOML re-encode). Applies to both `--check` (batched, one atomic write) and the
+  single-package path.
+
 ## [0.3.17] - 2026-06-03
 
 ### Fixed

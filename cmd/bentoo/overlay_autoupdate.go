@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -210,6 +211,15 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		// outbound request observes it; CheckPackage takes no ctx parameter.
 		result, err := checker.CheckPackage(pkg, autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
 		if err != nil {
+			// A removed ebuild is not a hard error: auto-disable the orphaned
+			// entry and report it as info so repeated runs stay quiet.
+			if errors.Is(err, autoupdate.ErrNoEbuildFound) {
+				if derr := checker.DisableOrphans([]string{pkg}); derr != nil {
+					logger.Warn("failed to disable orphaned package %s: %v", pkg, derr)
+				}
+				logger.Info("%s has no ebuild in the overlay — disabled in packages.toml", pkg)
+				return
+			}
 			logger.Error("failed to check package %s: %v", pkg, err)
 			osExit(1)
 			return
@@ -252,6 +262,7 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 	var updatesFound int
 	var errorsFound int
 	var warningsFound int
+	var disabledFound int
 	var srcCount int
 	var binCount int
 
@@ -266,6 +277,12 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 			binCount++
 		case "source":
 			srcCount++
+		}
+
+		if r.Orphaned {
+			disabledFound++
+			output.Warning.Printf("  %s%s: no ebuild in overlay — disabled in packages.toml\n", tag, r.Package)
+			continue
 		}
 
 		if r.Error != nil {
@@ -298,8 +315,12 @@ func displayCheckResults(results []autoupdate.CheckResult) {
 	if updatesFound > 0 {
 		output.Info.Printf("Found %d update(s) available\n", updatesFound)
 		output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
-	} else if warningsFound == 0 && errorsFound == 0 {
+	} else if warningsFound == 0 && errorsFound == 0 && disabledFound == 0 {
 		output.Success.Println("All packages are up to date")
+	}
+
+	if disabledFound > 0 {
+		output.Warning.Printf("%d package(s) had no ebuild and were disabled (enabled = false)\n", disabledFound)
 	}
 
 	if warningsFound > 0 {
