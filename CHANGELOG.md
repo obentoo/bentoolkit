@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-06-05
+
+### Added
+- **Preserve the `_pre` suffix for commit-tracked snapshot packages.** A new
+  `extractSnapshotSuffix` helper detects whether the current ebuild uses `_pre`
+  (pre-release) or `_p` (post-release) and reuses it when building the new
+  version, so commit-tracked `_pre` packages keep the correct Gentoo ordering
+  (`X.Y_pre<date>` < `X.Y` < `X.Y_p<date>`). The `AllSnapshotPackages` table is
+  extended with `zed`, `mesa`, `mesa_clc` and `libqmi`.
+
+### Changed
+- **Bumped `github.com/chromedp/cdproto`** to `20260427013145`; `go mod tidy`
+  promotes it to a direct dependency. Build, vet, tests and `govulncheck` pass.
+- Minor lint cleanups in `internal/autoupdate`: write ebuilds with `0o600`
+  permissions in `substituteCommitHash` (gosec), and drop an unused `fmt`
+  import / needless `Sprintf` in the commit-track tests.
+
 ## [0.3.19] - 2026-06-05
 
 ### Added
