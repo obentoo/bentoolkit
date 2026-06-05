@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -503,6 +505,46 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	// known and ignores its own errors via resolveType's "source" default.
 	result.Type = c.resolveType(pkg, &pkgConfig)
 
+	// Commit-tracked packages always fetch fresh (no cache): the SHA must be
+	// current so the applier can substitute it in the ebuild, and caching only
+	// the date without the SHA would leave the pending entry unusable.
+	if pkgConfig.Track == "commit" {
+		info, err := c.fetchCommitInfo(&pkgConfig)
+		if err != nil {
+			result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+			return result, result.Error
+		}
+
+		base := extractSnapshotBase(currentVersion)
+		// If the commit list reveals a version bump (e.g. "Update for
+		// Vulkan-Docs 1.4.353") that is newer than the current base, adopt it.
+		if info.NewBase != "" && ebuild.CompareVersions(info.NewBase, base) > 0 {
+			base = info.NewBase
+		}
+		newVersion := base + "_p" + info.Date
+		result.UpstreamVersion = newVersion
+
+		// Write to cache so the UI can display the latest known state,
+		// even though this entry is never read back as a cache hit.
+		if err := c.cache.Set(pkg, newVersion, pkgConfig.URL); err != nil {
+			result.Error = fmt.Errorf("failed to update cache: %w", err)
+		}
+
+		hasUpdate, comparable := c.compareVersions(newVersion, currentVersion)
+		result.HasUpdate = hasUpdate
+		result.NotComparable = !comparable
+
+		if result.HasUpdate {
+			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA); err != nil {
+				if result.Error == nil {
+					result.Error = fmt.Errorf("failed to add to pending: %w", err)
+				}
+			}
+		}
+
+		return result, nil
+	}
+
 	// Check cache first (unless force is true)
 	if !force {
 		if cachedVersion, ok := c.cache.Get(pkg); ok {
@@ -514,7 +556,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 
 			// Add to pending if update available
 			if result.HasUpdate {
-				if err := c.addToPending(pkg, currentVersion, cachedVersion); err != nil {
+				if err := c.addToPending(pkg, currentVersion, cachedVersion, ""); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -545,7 +587,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 
 	// Add to pending if update available
 	if result.HasUpdate {
-		if err := c.addToPending(pkg, currentVersion, upstreamVersion); err != nil {
+		if err := c.addToPending(pkg, currentVersion, upstreamVersion, ""); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -722,15 +764,137 @@ func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparab
 }
 
 // addToPending adds an update to the pending list.
-func (c *Checker) addToPending(pkg, currentVersion, newVersion string) error {
+// commitHash is non-empty only for track="commit" packages; it is stored in
+// PendingUpdate so the applier can substitute the hash in the copied ebuild.
+func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash string) error {
 	update := PendingUpdate{
 		Package:        pkg,
 		CurrentVersion: currentVersion,
 		NewVersion:     newVersion,
+		CommitHash:     commitHash,
 		Status:         StatusPending,
 		DetectedAt:     time.Now(),
 	}
 	return c.pending.Add(update)
+}
+
+// extractSnapshotBase strips the _p<date> or _pre<date> suffix from a Gentoo
+// snapshot version so the base release version can be reused for a new bump.
+// "1.4.352_p20260526"   → "1.4.352"
+// "26.2.0_pre20260529"  → "26.2.0"
+// "3.13.99_p20260517"   → "3.13.99"
+// Returns the version unchanged when no snapshot suffix is found.
+func extractSnapshotBase(version string) string {
+	if i := strings.Index(version, "_p"); i >= 0 {
+		return version[:i]
+	}
+	return version
+}
+
+// commitInfo holds the result of a fetchCommitInfo call.
+type commitInfo struct {
+	// Date is the commit date formatted as YYYYMMDD (after cfg.Transform).
+	Date string
+	// SHA is the full 40-char hex commit hash.
+	SHA string
+	// NewBase is the base version detected in a commit title via
+	// CommitVersionPattern. Empty when no version bump was found.
+	NewBase string
+}
+
+// fetchCommitInfo fetches cfg.URL once (expected to be a JSON array of commits)
+// and extracts the date, SHA, and — when CommitVersionPattern is set — the
+// highest base version found in commit titles since the last snapshot.
+// Called only when cfg.Track == "commit".
+func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
+	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract date of the latest commit (path points to [0].commit.committer.date
+	// or [0].committed_date, etc.) then apply transforms to get YYYYMMDD.
+	dateParser := &JSONParser{Path: cfg.Path}
+	raw, err := dateParser.Parse(content)
+	if err != nil {
+		return nil, fmt.Errorf("commit date: %w", err)
+	}
+	date := applyTransforms(raw, cfg.Transform)
+	if date == "" {
+		return nil, fmt.Errorf("commit date: empty after transform (raw: %q)", raw)
+	}
+
+	// Extract SHA of the latest commit.
+	shaParser := &JSONParser{Path: cfg.CommitSHAPath}
+	sha, err := shaParser.Parse(content)
+	if err != nil {
+		return nil, fmt.Errorf("commit sha: %w", err)
+	}
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return nil, fmt.Errorf("commit sha: empty value at path %q", cfg.CommitSHAPath)
+	}
+
+	info := &commitInfo{Date: date, SHA: sha}
+
+	// Optionally scan commit titles for a version bump (e.g. "Update for
+	// Vulkan-Docs 1.4.353"). When a match is found and the detected version is
+	// newer than the current base, it becomes the new base so the generated
+	// ebuild version uses the correct release series.
+	if cfg.CommitVersionPattern != "" && cfg.CommitMessagePath != "" {
+		info.NewBase = scanCommitsForVersion(content, cfg.CommitMessagePath, cfg.CommitVersionPattern)
+	}
+
+	return info, nil
+}
+
+// scanCommitsForVersion iterates over a JSON array of commit objects and
+// returns the highest Gentoo-comparable version found in commit titles via
+// versionPattern (one capture group). messageRelPath is the JSON path
+// relative to each array element that yields the commit title string (e.g.
+// "commit.message" for GitHub, "title" for GitLab). Returns "" when no match
+// is found or when the content cannot be parsed as an array.
+func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string) string {
+	re, err := regexp.Compile(versionPattern)
+	if err != nil {
+		return ""
+	}
+
+	// Unmarshal into a generic array; non-array responses (e.g. error JSON)
+	// produce a harmless empty result rather than a hard failure.
+	var commits []json.RawMessage
+	if err := json.Unmarshal(content, &commits); err != nil {
+		return ""
+	}
+
+	var best string
+	for _, raw := range commits {
+		// Unmarshal each element into interface{} for navigateJSONPath.
+		var elem interface{}
+		if err := json.Unmarshal(raw, &elem); err != nil {
+			continue
+		}
+		val, err := navigateJSONPath(elem, messageRelPath)
+		if err != nil {
+			continue
+		}
+		msg, ok := val.(string)
+		if !ok || msg == "" {
+			continue
+		}
+		m := re.FindStringSubmatch(msg)
+		if len(m) < 2 {
+			continue
+		}
+		v := strings.TrimSpace(m[1])
+		if !ebuild.IsValidVersion(v) {
+			continue
+		}
+		if best == "" || ebuild.CompareVersions(v, best) > 0 {
+			best = v
+		}
+	}
+	return best
 }
 
 // fetchUpstreamVersion fetches and parses the upstream version for a package.

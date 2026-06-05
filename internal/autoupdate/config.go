@@ -108,6 +108,35 @@ type PackageConfig struct {
 	// "script" parser; its string result is the version. Inline, or "@file.js"
 	// to load from .autoupdate/scripts/<file>.
 	Script string `toml:"script,omitempty"`
+
+	// Track specifies the tracking mode.
+	// "" (default) = semver tag comparison.
+	// "commit"     = compare commit dates on a branch; the date extracted via
+	//                path/transform becomes the _pDATE suffix of the new version
+	//                (base version is taken from the current ebuild by stripping
+	//                the existing _p<date> suffix). CommitSHAPath must also be
+	//                set so the applier can substitute the commit hash in the ebuild.
+	Track string `toml:"track,omitempty"`
+
+	// CommitSHAPath is the JSON path to extract the commit SHA from the same
+	// response as the date (used with track = "commit"). The SHA is stored in
+	// PendingUpdate.CommitHash and substituted into the copied ebuild at apply time.
+	CommitSHAPath string `toml:"commit_sha_path,omitempty"`
+
+	// CommitMessagePath is the JSON path, relative to each commit array element,
+	// that yields the commit title/message string (used with track = "commit"
+	// and commit_version_pattern). Typical values:
+	//   "commit.message"  — GitHub commits list API
+	//   "title"           — GitLab repository/commits API
+	CommitMessagePath string `toml:"commit_message_path,omitempty"`
+
+	// CommitVersionPattern is a regex with one capture group applied to each
+	// commit title (at commit_message_path) to detect a base-version change
+	// between tags (used with track = "commit"). When a commit title matches
+	// and the captured version is newer than the current base, the new base
+	// replaces the old one in the generated ebuild version (e.g.
+	// "1.4.352_p20260515" → "1.4.353_p<today>" when the match is "1.4.353").
+	CommitVersionPattern string `toml:"commit_version_pattern,omitempty"`
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -360,6 +389,37 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if cfg.Select != "" && cfg.Select != "first" {
 			warnLogf("package %s: select=%q is ignored for parser=\"script\" (the script must select the version itself)", pkg, cfg.Select)
 		}
+	}
+
+	// Validate track field and its dependencies.
+	switch cfg.Track {
+	case "", "commit":
+		// valid
+	default:
+		return fmt.Errorf("package %s: invalid track value: must be '' or 'commit', got %q", pkg, cfg.Track)
+	}
+	if cfg.Track == "commit" {
+		if cfg.Parser != "json" {
+			return fmt.Errorf("package %s: track=\"commit\" requires parser=\"json\"", pkg)
+		}
+		if cfg.CommitSHAPath == "" {
+			return fmt.Errorf("package %s: track=\"commit\" requires commit_sha_path", pkg)
+		}
+	}
+	if cfg.CommitSHAPath != "" && cfg.Track != "commit" {
+		warnLogf("package %s: commit_sha_path is set but track!=\"commit\"; it will be ignored", pkg)
+	}
+	if cfg.CommitVersionPattern != "" {
+		if cfg.Track != "commit" {
+			warnLogf("package %s: commit_version_pattern is set but track!=\"commit\"; it will be ignored", pkg)
+		} else if cfg.CommitMessagePath == "" {
+			return fmt.Errorf("package %s: commit_version_pattern requires commit_message_path", pkg)
+		} else if _, err := regexp.Compile(cfg.CommitVersionPattern); err != nil {
+			return fmt.Errorf("package %s: invalid commit_version_pattern %q: %w", pkg, cfg.CommitVersionPattern, err)
+		}
+	}
+	if cfg.CommitMessagePath != "" && cfg.Track != "commit" {
+		warnLogf("package %s: commit_message_path is set but track!=\"commit\"; it will be ignored", pkg)
 	}
 
 	// Validate fallback configuration if present

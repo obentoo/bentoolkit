@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-06-05
+
+### Added
+- **`track = "commit"` mode for `_p` snapshot packages in `packages.toml`.**
+  Packages versioned as `X.Y.Z_p<date>` (post-release snapshots) can now be
+  tracked by commit instead of by tag. Setting `track = "commit"` on a package
+  entry makes the checker fetch the latest commit on a branch (GitHub or GitLab
+  commits list API), extract the commit date as the new `_p<YYYYMMDD>` suffix,
+  and store the commit SHA for substitution at apply time. Cache reads are
+  bypassed for commit-tracked packages so the SHA is always current.
+
+- **Automatic base-version detection from commit titles
+  (`commit_version_pattern` + `commit_message_path`).** When a snapshot
+  package declares these two fields, the checker scans all returned commit
+  titles and extracts a version from the first match. If the detected version
+  is newer than the current base (e.g. a commit titled *"Update for
+  Vulkan-Docs 1.4.353"* while the ebuild is at `1.4.352_p…`), the new version
+  is built from the detected base (`1.4.353_p<today>`) rather than the stale
+  one. The base is never downgraded: a commit mentioning an older version is
+  ignored. This covers the common Khronos pattern where a Vulkan SDK or
+  Vulkan-Docs version bump appears in the commit stream days or weeks before
+  the upstream tag is cut.
+
+- **Commit-hash substitution at apply time.** `PendingUpdate` now carries a
+  `CommitHash` field. When `--apply` runs on a commit-tracked package, a new
+  `substituteCommitHash` step rewrites the commit variable in the copied ebuild
+  before the manifest step. Handles the three variable forms used in the
+  overlay: `EGIT_COMMIT="<sha>"`, `GIT_COMMIT="<sha>"`, and `COMMIT=<sha>`
+  (bare, no quotes — used by `dev-db/sqlitebrowser`).
+
+- **22 new tests** in `checker_commit_track_test.go` covering:
+  `extractSnapshotBase` (8 cases), `scanCommitsForVersion` (6 cases including
+  GitHub and GitLab formats, invalid JSON and bad regex), `CheckPackage` commit
+  tracking (date-only bump, base-version bump via commit title, no-update,
+  SHA persistence in pending, cache-bypass guarantee), and a table-driven suite
+  with one sub-test per `_p` package (glslang, spirv-headers, spirv-tools,
+  vulkan-headers, vulkan-tools, vulkan-layers, vulkan-loader, sqlitebrowser,
+  modemmanager), plus edge-case tests for downgrade protection and the GitLab
+  `+00:00` timezone format.
+
 ## [0.3.18] - 2026-06-04
 
 ### Added
@@ -674,7 +714,9 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.3.19...HEAD
+[0.3.19]: https://github.com/obentoo/bentoolkit/compare/v0.3.18...v0.3.19
+[0.3.18]: https://github.com/obentoo/bentoolkit/compare/v0.3.17...v0.3.18
 [0.3.0]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...v0.2.1

@@ -61,6 +61,10 @@ type PendingUpdate struct {
 	CurrentVersion string `json:"current_version"`
 	// NewVersion is the upstream version detected
 	NewVersion string `json:"new_version"`
+	// CommitHash is the upstream commit SHA for snapshot packages tracked via
+	// track="commit". When non-empty, Apply substitutes the old commit variable
+	// (EGIT_COMMIT / GIT_COMMIT / COMMIT) in the copied ebuild with this hash.
+	CommitHash string `json:"commit_hash,omitempty"`
 	// Status is the current status of this update
 	Status UpdateStatus `json:"status"`
 	// DetectedAt is when this update was first detected

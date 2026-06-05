@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -307,6 +308,21 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		return result, result.Error
 	}
 
+	// For snapshot packages tracked by commit (track="commit"), substitute the
+	// commit hash variable in the copied ebuild so the SRC_URI points to the
+	// correct tarball. This must happen before pkgdev manifest, which fetches
+	// the URL built from the variable.
+	if update.CommitHash != "" {
+		dstEbuild := a.EbuildPath(pkg, newVersion)
+		if err := substituteCommitHash(dstEbuild, update.CommitHash); err != nil {
+			result.Error = fmt.Errorf("failed to substitute commit hash: %w", err)
+			if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			}
+			return result, result.Error
+		}
+	}
+
 	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any
 	// later step (manifest, status update, compile) fails, that file is an
 	// orphan and must be removed so the overlay is not left half-applied.
@@ -517,6 +533,38 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	// Sync to ensure data is written
 	if err := dst.Sync(); err != nil {
 		return fmt.Errorf("failed to sync destination ebuild: %w", err)
+	}
+
+	return nil
+}
+
+// substituteCommitHash replaces the commit-hash variable assignment in an
+// ebuild with newHash. It handles the three variable names used in the overlay:
+//
+//	EGIT_COMMIT="<sha>"   (vulkan-*, spirv-*)
+//	GIT_COMMIT="<sha>"    (glslang, modemmanager)
+//	COMMIT=<sha>          (sqlitebrowser — no quotes)
+//
+// The substitution is deliberately narrow (anchored to known variable names +
+// 40-hex-char SHA) so it cannot accidentally corrupt other content.
+func substituteCommitHash(ebuildPath, newHash string) error {
+	content, err := os.ReadFile(ebuildPath)
+	if err != nil {
+		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
+	}
+
+	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT)=")[0-9a-f]{40}(")`)
+	reBare := regexp.MustCompile(`(COMMIT=)[0-9a-f]{40}\b`)
+
+	updated := reQuoted.ReplaceAllString(string(content), "${1}"+newHash+"${2}")
+	updated = reBare.ReplaceAllString(updated, "${1}"+newHash)
+
+	if updated == string(content) {
+		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/COMMIT) found in %s", ebuildPath)
+	}
+
+	if err := os.WriteFile(ebuildPath, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("failed to write ebuild after hash substitution: %w", err)
 	}
 
 	return nil
