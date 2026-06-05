@@ -516,12 +516,13 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		}
 
 		base := extractSnapshotBase(currentVersion)
+		suffix := extractSnapshotSuffix(currentVersion)
 		// If the commit list reveals a version bump (e.g. "Update for
 		// Vulkan-Docs 1.4.353") that is newer than the current base, adopt it.
 		if info.NewBase != "" && ebuild.CompareVersions(info.NewBase, base) > 0 {
 			base = info.NewBase
 		}
-		newVersion := base + "_p" + info.Date
+		newVersion := base + suffix + info.Date
 		result.UpstreamVersion = newVersion
 
 		// Write to cache so the UI can display the latest known state,
@@ -789,6 +790,18 @@ func extractSnapshotBase(version string) string {
 		return version[:i]
 	}
 	return version
+}
+
+// extractSnapshotSuffix returns the snapshot suffix used by version: "_pre"
+// when the version contains "_pre" (pre-release snapshot, version < base in
+// Gentoo ordering), or "_p" otherwise (post-release snapshot, version > base).
+// Preserving the suffix lets commit-tracked pre-release packages keep their
+// _pre ordering so the autoupdate correctly fires when the stable tag arrives.
+func extractSnapshotSuffix(version string) string {
+	if strings.Contains(version, "_pre") {
+		return "_pre"
+	}
+	return "_p"
 }
 
 // commitInfo holds the result of a fetchCommitInfo call.

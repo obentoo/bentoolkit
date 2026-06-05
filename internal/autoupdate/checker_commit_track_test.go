@@ -88,8 +88,26 @@ func newCommitChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfi
 }
 
 // =============================================================================
-// Unit: extractSnapshotBase
+// Unit: extractSnapshotBase + extractSnapshotSuffix
 // =============================================================================
+
+func TestExtractSnapshotSuffix(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"26.2.0_pre20260529", "_pre"},
+		{"1.7.0_pre20260605", "_pre"},
+		{"1.38.1_pre20260512", "_pre"},
+		{"1.4.352_p20260515", "_p"},
+		{"3.13.99_p20260517", "_p"},
+		{"1.0.0", "_p"}, // no suffix — defaults to _p
+	}
+	for _, tt := range tests {
+		if got := extractSnapshotSuffix(tt.in); got != tt.want {
+			t.Errorf("extractSnapshotSuffix(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
 
 func TestExtractSnapshotBase(t *testing.T) {
 	tests := []struct {
@@ -553,6 +571,68 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			},
 			body:        makeGLCommits(glEntry2("2026-06-05T10:00:00.000+00:00", "mm: add device support")),
 			wantVersion: "1.25.1_p20260605",
+			wantUpdate:  true,
+		},
+		// ── _pre packages — suffix must stay _pre ──────────────────────────────
+		{
+			name:           "zed: _pre date bump on main",
+			pkg:            "app-editors/zed",
+			currentVersion: "1.7.0_pre20260605",
+			cfg: PackageConfig{
+				Track:         "commit",
+				Parser:        "json",
+				Path:          "[0].commit.committer.date",
+				CommitSHAPath: "[0].sha",
+				Transform:     [][]string{{"T.*", ""}, {"-", ""}},
+				Headers:       map[string]string{"User-Agent": "bentoo-test"},
+			},
+			body:        makeGHCommits(ghEntry("2026-06-10T12:00:00Z", "fix: some improvement")),
+			wantVersion: "1.7.0_pre20260610",
+			wantUpdate:  true,
+		},
+		{
+			name:           "mesa: _pre date bump on main (GitLab)",
+			pkg:            "media-libs/mesa",
+			currentVersion: "26.2.0_pre20260529",
+			cfg: PackageConfig{
+				Track:         "commit",
+				Parser:        "json",
+				Path:          "[0].committed_date",
+				CommitSHAPath: "[0].id",
+				Transform:     [][]string{{"T.*", ""}, {"-", ""}},
+			},
+			body:        makeGLCommits(glEntry2("2026-06-05T08:00:00.000+00:00", "mesa: some driver fix")),
+			wantVersion: "26.2.0_pre20260605",
+			wantUpdate:  true,
+		},
+		{
+			name:           "mesa_clc: _pre date bump on main (GitLab, same repo)",
+			pkg:            "dev-util/mesa_clc",
+			currentVersion: "26.2.0_pre20260529",
+			cfg: PackageConfig{
+				Track:         "commit",
+				Parser:        "json",
+				Path:          "[0].committed_date",
+				CommitSHAPath: "[0].id",
+				Transform:     [][]string{{"T.*", ""}, {"-", ""}},
+			},
+			body:        makeGLCommits(glEntry2("2026-06-05T08:00:00.000+00:00", "mesa: some driver fix")),
+			wantVersion: "26.2.0_pre20260605",
+			wantUpdate:  true,
+		},
+		{
+			name:           "libqmi: _pre date bump on main (GitLab)",
+			pkg:            "net-libs/libqmi",
+			currentVersion: "1.38.1_pre20260512",
+			cfg: PackageConfig{
+				Track:         "commit",
+				Parser:        "json",
+				Path:          "[0].committed_date",
+				CommitSHAPath: "[0].id",
+				Transform:     [][]string{{"T.*", ""}, {"-", ""}},
+			},
+			body:        makeGLCommits(glEntry2("2026-06-05T10:00:00.000+00:00", "qmi: add modem feature")),
+			wantVersion: "1.38.1_pre20260605",
 			wantUpdate:  true,
 		},
 	}
