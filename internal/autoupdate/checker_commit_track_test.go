@@ -2,7 +2,6 @@ package autoupdate
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -699,7 +698,7 @@ func TestCheckPackageCommitTrack_BaseVersionNotDowngraded(t *testing.T) {
 	}
 
 	// Base stays at 1.4.353 (not downgraded to 1.4.352).
-	wantVersion := fmt.Sprintf("1.4.353_p20260605")
+	wantVersion := "1.4.353_p20260605"
 	if result.UpstreamVersion != wantVersion {
 		t.Errorf("UpstreamVersion = %q, want %q (base must not be downgraded)", result.UpstreamVersion, wantVersion)
 	}

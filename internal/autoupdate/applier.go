@@ -563,7 +563,7 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/COMMIT) found in %s", ebuildPath)
 	}
 
-	if err := os.WriteFile(ebuildPath, []byte(updated), 0o644); err != nil {
+	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
 		return fmt.Errorf("failed to write ebuild after hash substitution: %w", err)
 	}
 
