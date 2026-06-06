@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.21] - 2026-06-05
+
+### Fixed
+- **`BUILD_ID` substitution for version-tracked packages (cursor 403).** Cursor
+  embeds a per-release `commitSha` in its `SRC_URI` via `BUILD_ID`. The
+  autoupdate bumped only `PV`, leaving `BUILD_ID` stale, so the `.deb` URL mixed
+  the old build id with the new version and returned **403 Forbidden**. A
+  version-tracked package may now set `commit_sha_path` (requires `parser="json"`);
+  the checker resolves the SHA from the same JSON response into the pending
+  update, and `substituteCommitHash` rewrites `BUILD_ID="<40hex>"` at apply time.
+  Verified end-to-end against the live cursor API (`3.6.31 → 3.7.12`): the
+  manifest fetch now succeeds where it previously 403'd.
+
 ## [0.3.20] - 2026-06-05
 
 ### Added
