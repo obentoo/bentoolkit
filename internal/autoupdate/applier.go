@@ -543,6 +543,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 //
 //	EGIT_COMMIT="<sha>"   (vulkan-*, spirv-*)
 //	GIT_COMMIT="<sha>"    (glslang, modemmanager)
+//	BUILD_ID="<sha>"      (cursor — version-tracked; SHA is part of the SRC_URI)
 //	COMMIT=<sha>          (sqlitebrowser — no quotes)
 //
 // The substitution is deliberately narrow (anchored to known variable names +
@@ -553,14 +554,14 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
 	}
 
-	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT)=")[0-9a-f]{40}(")`)
+	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID)=")[0-9a-f]{40}(")`)
 	reBare := regexp.MustCompile(`(COMMIT=)[0-9a-f]{40}\b`)
 
 	updated := reQuoted.ReplaceAllString(string(content), "${1}"+newHash+"${2}")
 	updated = reBare.ReplaceAllString(updated, "${1}"+newHash)
 
 	if updated == string(content) {
-		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/COMMIT) found in %s", ebuildPath)
+		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/BUILD_ID/COMMIT) found in %s", ebuildPath)
 	}
 
 	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {

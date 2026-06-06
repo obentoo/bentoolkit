@@ -407,7 +407,13 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		}
 	}
 	if cfg.CommitSHAPath != "" && cfg.Track != "commit" {
-		warnLogf("package %s: commit_sha_path is set but track!=\"commit\"; it will be ignored", pkg)
+		// Version-tracked package using commit_sha_path to substitute an auxiliary
+		// SHA variable in the ebuild (e.g. cursor's BUILD_ID, which is part of the
+		// download URL and changes with every release). Extracting the SHA requires
+		// a JSON response from the same URL used for version detection.
+		if cfg.Parser != "json" {
+			return fmt.Errorf("package %s: commit_sha_path requires parser=\"json\"", pkg)
+		}
 	}
 	if cfg.CommitVersionPattern != "" {
 		if cfg.Track != "commit" {

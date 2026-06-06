@@ -557,7 +557,8 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 
 			// Add to pending if update available
 			if result.HasUpdate {
-				if err := c.addToPending(pkg, currentVersion, cachedVersion, ""); err != nil {
+				sha := c.resolveAuxSHA(&pkgConfig, result)
+				if err := c.addToPending(pkg, currentVersion, cachedVersion, sha); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -588,7 +589,8 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 
 	// Add to pending if update available
 	if result.HasUpdate {
-		if err := c.addToPending(pkg, currentVersion, upstreamVersion, ""); err != nil {
+		sha := c.resolveAuxSHA(&pkgConfig, result)
+		if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -777,6 +779,35 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash strin
 		DetectedAt:     time.Now(),
 	}
 	return c.pending.Add(update)
+}
+
+// resolveAuxSHA fetches the auxiliary commit SHA for a version-tracked package
+// that declares commit_sha_path (e.g. cursor's BUILD_ID, which is part of the
+// download URL and changes with every release). It returns "" when no SHA path
+// is configured. A fetch/parse failure is recorded on result.Error but does not
+// abort the update: the apply simply skips the SHA substitution.
+//
+// Commit-tracked packages (track="commit") resolve their SHA via fetchCommitInfo
+// instead and never reach this path.
+func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string {
+	if cfg.CommitSHAPath == "" {
+		return ""
+	}
+	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	if err != nil {
+		if result.Error == nil {
+			result.Error = fmt.Errorf("failed to fetch commit sha: %w", err)
+		}
+		return ""
+	}
+	sha, err := (&JSONParser{Path: cfg.CommitSHAPath}).Parse(content)
+	if err != nil {
+		if result.Error == nil {
+			result.Error = fmt.Errorf("failed to parse commit sha at %q: %w", cfg.CommitSHAPath, err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(sha)
 }
 
 // extractSnapshotBase strips the _p<date> or _pre<date> suffix from a Gentoo
