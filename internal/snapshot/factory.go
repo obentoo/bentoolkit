@@ -43,13 +43,7 @@ func newScheduler(cfg ScheduleConfig, configPath string, run Runner) (Scheduler,
 	}
 }
 
-// newNotifier builds the notifier selected by cfg.Driver. An empty/"none" driver
-// selects the no-op default (story 004 ships no real backend; 005 adds them).
-func newNotifier(cfg NotifyConfig) (Notifier, error) {
-	switch cfg.Driver {
-	case "", "none":
-		return noopNotifier{}, nil
-	default:
-		return nil, fmt.Errorf("%w: notify driver %q", ErrInvalidDriver, cfg.Driver)
-	}
-}
+// newNotifier is defined in notify.go (story 005, T3.1): it composes one driver per
+// populated NotifyConfig sub-table and fans out behind the Notifier interface. The
+// notifier factory lives beside the drivers it builds rather than here with the
+// engine/shipper/scheduler factories.

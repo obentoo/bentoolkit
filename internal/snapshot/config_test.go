@@ -103,6 +103,88 @@ func TestLoadFrom_OmittedOptionalsAreZero(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_NotifySection(t *testing.T) {
+	const notifyTOML = `
+[engine]
+driver = "btrbk"
+
+[notify]
+on = ["failure", "success"]
+
+[notify.ntfy]
+url = "https://ntfy.sh/my-topic"
+token = "tk_secret"
+
+[notify.healthchecks]
+ping_url = "https://hc-ping.com/uuid"
+start = true
+
+[notify.webhook]
+url = "https://example.com/hook"
+headers = { X-Custom = "v", Authorization = "Bearer z" }
+`
+	cfg, err := LoadFrom(writeTemp(t, "notify.toml", notifyTOML))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	n := cfg.Notify
+	if len(n.On) != 2 || n.On[0] != "failure" || n.On[1] != "success" {
+		t.Errorf("notify.on = %v, want [failure success]", n.On)
+	}
+	if n.Ntfy.URL != "https://ntfy.sh/my-topic" || n.Ntfy.Token != "tk_secret" {
+		t.Errorf("notify.ntfy = %+v", n.Ntfy)
+	}
+	if n.Healthchecks.PingURL != "https://hc-ping.com/uuid" || !n.Healthchecks.Start {
+		t.Errorf("notify.healthchecks = %+v", n.Healthchecks)
+	}
+	if n.Webhook.URL != "https://example.com/hook" {
+		t.Errorf("notify.webhook.url = %q", n.Webhook.URL)
+	}
+	if n.Webhook.Headers["X-Custom"] != "v" || n.Webhook.Headers["Authorization"] != "Bearer z" {
+		t.Errorf("notify.webhook.headers = %v", n.Webhook.Headers)
+	}
+}
+
+func TestLoadFrom_NotifyAbsentIsZero(t *testing.T) {
+	cfg, err := LoadFrom(writeTemp(t, "min.toml", "[engine]\ndriver = \"btrbk\"\n"))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	n := cfg.Notify
+	if len(n.On) != 0 || n.Ntfy.URL != "" || n.Healthchecks.PingURL != "" || n.Webhook.URL != "" {
+		t.Errorf("absent [notify] should be zero-valued, got %+v", n)
+	}
+	if n.Healthchecks.Start || n.Webhook.Headers != nil {
+		t.Errorf("absent [notify] sub-fields should be zero, got %+v", n)
+	}
+}
+
+func TestShouldNotify(t *testing.T) {
+	cases := []struct {
+		name   string
+		on     []string
+		failed bool
+		want   bool
+	}{
+		{"failure-only on success", []string{"failure"}, false, false},
+		{"failure-only on failure", []string{"failure"}, true, true},
+		{"success-only on success", []string{"success"}, false, true},
+		{"success-only on failure", []string{"success"}, true, false},
+		{"both on failure", []string{"success", "failure"}, true, true},
+		{"both on success", []string{"success", "failure"}, false, true},
+		{"empty defaults to failure-only, on failure", nil, true, true},
+		{"empty defaults to failure-only, on success", nil, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldNotify(tc.on, tc.failed); got != tc.want {
+				t.Errorf("shouldNotify(%v, failed=%v) = %v, want %v", tc.on, tc.failed, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConfigPaths_OrderAndDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -39,11 +39,24 @@ func (s *recordingShipper) Send(_ context.Context, snap Snapshot) (ShipReport, e
 type countingNotifier struct {
 	calls int
 	last  RunResult
+	err   error // returned from Notify to exercise the best-effort path
 }
 
 func (n *countingNotifier) Notify(_ context.Context, res RunResult) error {
 	n.calls++
 	n.last = res
+	return n.err
+}
+
+// startingNotifier is a countingNotifier that also implements the starter
+// interface, to verify the Manager's best-effort pre-run Start hook (R2.3).
+type startingNotifier struct {
+	countingNotifier
+	startCalls int
+}
+
+func (n *startingNotifier) Start(_ context.Context) error {
+	n.startCalls++
 	return nil
 }
 
@@ -155,6 +168,48 @@ func TestManagerRun_CtxCancelShortCircuits(t *testing.T) {
 	}
 	if res.Err == "" {
 		t.Error("result.Err not set on cancellation")
+	}
+}
+
+func TestManagerRun_NotifierFailureDoesNotChangeExit(t *testing.T) {
+	var events []string
+	notifier := &countingNotifier{err: errors.New("notify backend down")}
+	m := &Manager{
+		engine:     &recordingEngine{events: &events},
+		shippers:   []Shipper{&recordingShipper{name: "s1", events: &events}},
+		notifier:   notifier,
+		subvolumes: []string{"/home"},
+	}
+
+	res, err := m.Run(context.Background())
+	if err != nil {
+		t.Errorf("Run = %v, want nil despite the notifier error (R5.2)", err)
+	}
+	if res.Failed() {
+		t.Error("result.Failed() = true; a notifier error must not mark the run failed (R5.2)")
+	}
+	if notifier.calls != 1 {
+		t.Errorf("notifier invoked %d times, want 1 with the final result (R5.1)", notifier.calls)
+	}
+}
+
+func TestManagerRun_InvokesPreRunStart(t *testing.T) {
+	var events []string
+	notifier := &startingNotifier{}
+	m := &Manager{
+		engine:     &recordingEngine{events: &events},
+		notifier:   notifier,
+		subvolumes: []string{"/home"},
+	}
+
+	if _, err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if notifier.startCalls != 1 {
+		t.Errorf("pre-run Start invoked %d times, want 1 (R2.3 wiring)", notifier.startCalls)
+	}
+	if notifier.calls != 1 {
+		t.Errorf("Notify invoked %d times, want 1 (R5.1)", notifier.calls)
 	}
 }
 

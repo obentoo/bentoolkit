@@ -800,6 +800,21 @@ backend = "systemd"              # only "systemd" in this release
 on_calendar = "daily"            # systemd OnCalendar=
 persistent = true                # systemd Persistent=
 randomized_delay = "5m"          # systemd RandomizedDelaySec=
+
+[notify]                         # best-effort run notifications (every part optional)
+on = ["failure"]                 # outcomes that notify: "failure" and/or "success"
+
+[notify.ntfy]
+url = "https://ntfy.sh/my-topic" # ntfy topic URL (POST the run summary)
+token = "tk_..."                 # optional; sent as a Bearer token, never logged
+
+[notify.healthchecks]
+ping_url = "https://hc-ping.com/<uuid>"   # base ping on success, /fail on failure
+start = true                     # also ping /start before the run
+
+[notify.webhook]
+url = "https://example.com/hook" # receives the RunResult as a JSON POST
+headers = { Authorization = "Bearer ..." } # optional custom headers, never logged
 ```
 
 ### Commands
@@ -823,11 +838,34 @@ bentoo snapshot status
 `RunResult` under `/var/lib/bentoo/snapshot/last-run.json`, which `status` reads
 back.
 
+### Notifications
+
+The optional `[notify]` section reports the outcome of a `bentoo snapshot run` so a
+scheduled backup surfaces failures without scraping logs. Three backends fan out
+from one config — configure any subset:
+
+- **ntfy** (`[notify.ntfy]`) — POSTs a run summary to a topic URL. Failures use an
+  elevated priority and an alert tag; successes use normal priority. An optional
+  `token` is sent as a Bearer header.
+- **healthchecks.io** (`[notify.healthchecks]`) — pings the base `ping_url` on
+  success and `ping_url/fail` on failure (a dead-man's switch). With `start = true`
+  it also pings `ping_url/start` before the run so the dashboard can time it.
+- **webhook** (`[notify.webhook]`) — POSTs the `RunResult` as JSON to your own
+  endpoint, with any custom `headers` applied — for arbitrary automation.
+
+`on` filters which outcomes notify (`["failure"]`, `["success"]`, or both); an empty
+or omitted `on` notifies on **failure only**. Notification is **best-effort**: a
+backend that errors is logged as a warning and never changes the run's exit code,
+and the remaining backends are still attempted. **Secrets** (the ntfy token, webhook
+header values) are sent only in request headers and are **never written to logs or
+error messages**.
+
 ### Scope
 
-This release is Phase 1: the config model, the `btrbk` engine + `ssh` shipper,
-systemd timer generation, dependency detection, and the four verbs. Notifications,
-cloud/restore, snapper rollback, and packaging polish land in later releases.
+This release covers the config model, the `btrbk` engine + `ssh` shipper, systemd
+timer generation, dependency detection, the four verbs, and run notifications
+(ntfy / healthchecks / webhook). Email notifications, cloud/restore, snapper
+rollback, and packaging polish land in later releases.
 
 ## License
 

@@ -63,11 +63,60 @@ type ShipConfig struct {
 	Target string `toml:"target,omitempty"`
 }
 
-// NotifyConfig is a placeholder for the notifier driver. Story 004 ships only a
-// no-op notifier; story 005 implements real backends. An empty Driver selects the
-// no-op default.
+// NotifyConfig selects and configures notification backends (story 005). On filters
+// which run outcomes notify — a subset of {"success", "failure"}; an empty On means
+// failure only (see shouldNotify). Each sub-table, when populated, activates one
+// driver; the configured drivers fan out behind the Notifier interface (R4).
 type NotifyConfig struct {
-	Driver string `toml:"driver,omitempty"`
+	On           []string           `toml:"on,omitempty"`
+	Ntfy         NtfyConfig         `toml:"ntfy,omitempty"`
+	Healthchecks HealthchecksConfig `toml:"healthchecks,omitempty"`
+	Webhook      WebhookConfig      `toml:"webhook,omitempty"`
+}
+
+// NtfyConfig configures the ntfy driver (R1). URL is the topic URL; Token, when set,
+// is sent via the Authorization header and is never logged (R1.3).
+type NtfyConfig struct {
+	URL   string `toml:"url,omitempty"`
+	Token string `toml:"token,omitempty"`
+}
+
+// HealthchecksConfig configures the healthchecks.io driver (R2). PingURL is the base
+// check URL (success → base, failure → /fail); Start optionally pings /start before
+// the run (R2.3).
+type HealthchecksConfig struct {
+	PingURL string `toml:"ping_url,omitempty"`
+	Start   bool   `toml:"start,omitempty"`
+}
+
+// WebhookConfig configures the generic webhook driver (R3). URL receives a POST with
+// the serialized RunResult; Headers are applied to the request (R3.2). Header values
+// holding secrets are never logged (R6.3).
+type WebhookConfig struct {
+	URL     string            `toml:"url,omitempty"`
+	Headers map[string]string `toml:"headers,omitempty"`
+}
+
+// shouldNotify reports whether a run with the given outcome should notify, given
+// the configured `on` filter (R4.3). The outcome is "failure" when failed, else
+// "success"; notification fires only when that outcome is listed in on. An empty on
+// defaults to notifying on failure only.
+func shouldNotify(on []string, failed bool) bool {
+	outcome := "success"
+	if failed {
+		outcome = "failure"
+	}
+
+	if len(on) == 0 {
+		on = []string{"failure"}
+	}
+
+	for _, o := range on {
+		if o == outcome {
+			return true
+		}
+	}
+	return false
 }
 
 // ScheduleConfig configures unit generation. Backend selects the scheduler driver

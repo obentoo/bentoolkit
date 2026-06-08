@@ -35,6 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Every subprocess runs via `exec.CommandContext` so a cancelled context
     (SIGINT/timeout) kills in-flight children; generated files are written
     atomically (temp + rename).
+- **Snapshot run notifications.** The Phase 1 `Notifier` hook gains real backends,
+  selected and fanned out from a `[notify]` section (`internal/snapshot/notify.go`):
+  - **ntfy** (`[notify.ntfy]`): POSTs a run summary to a topic URL — elevated
+    priority + alert tag on failure, normal priority on success; an optional `token`
+    is sent as a Bearer header.
+  - **healthchecks.io** (`[notify.healthchecks]`): pings the base `ping_url` on
+    success and `ping_url/fail` on failure, with an optional pre-run `ping_url/start`
+    ping wired through a best-effort `Manager` hook.
+  - **webhook** (`[notify.webhook]`): POSTs the serialized `RunResult` as JSON with
+    any custom `headers` applied.
+  - `on` selects which outcomes notify (`success`/`failure`; default: failure only).
+    Delivery is **best-effort** — a failing backend is logged as a warning, never
+    changes the run's exit code, and does not stop the others. Tokens and webhook
+    secrets travel only in request headers and are **never logged or put in errors**.
+    All backends share one bounded, context-aware `http.Client`
+    (`httputil.BuildTransport`, capped response body, descriptive User-Agent).
 
 ## [0.3.21] - 2026-06-05
 

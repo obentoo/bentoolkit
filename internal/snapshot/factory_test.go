@@ -47,18 +47,14 @@ func TestNewScheduler_KnownAndUnknown(t *testing.T) {
 	}
 }
 
-func TestNewNotifier_DefaultIsNoop(t *testing.T) {
-	for _, driver := range []string{"", "none"} {
-		n, err := newNotifier(NotifyConfig{Driver: driver})
-		if err != nil {
-			t.Fatalf("newNotifier %q: %v", driver, err)
-		}
-		if _, ok := n.(noopNotifier); !ok {
-			t.Errorf("newNotifier %q returned %T, want noopNotifier", driver, n)
-		}
+func TestNewNotifier_NoDriversIsNoop(t *testing.T) {
+	// Notifiers are selected by which NotifyConfig sub-tables are populated, not by
+	// a driver enum, so an empty config configures nothing and yields the no-op.
+	n, err := newNotifier(NotifyConfig{})
+	if err != nil {
+		t.Fatalf("newNotifier empty: %v", err)
 	}
-
-	if _, err := newNotifier(NotifyConfig{Driver: "desktop"}); !errors.Is(err, ErrInvalidDriver) {
-		t.Errorf("unknown notifier: err = %v, want ErrInvalidDriver", err)
+	if _, ok := n.(noopNotifier); !ok {
+		t.Errorf("newNotifier empty returned %T, want noopNotifier", n)
 	}
 }

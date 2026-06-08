@@ -62,6 +62,12 @@ func (m *Manager) Run(ctx context.Context) (RunResult, error) {
 	start := time.Now()
 	result := RunResult{StartedAt: start}
 
+	// Best-effort pre-run signal (e.g. healthchecks /start, R2.3). It is
+	// outcome-independent and never changes the run — any error is ignored.
+	if s, ok := m.notifier.(starter); ok {
+		_ = s.Start(ctx)
+	}
+
 	for _, sv := range m.subvolumes {
 		if err := ctx.Err(); err != nil {
 			result.Err = err.Error()
