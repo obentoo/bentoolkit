@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`bentoo snapshot` command group (Phase 1).** Declarative btrfs snapshot
+  management driven by a single `snapshot.toml`, orchestrating mature tools
+  rather than reimplementing them. bentoolkit renders native config and
+  coordinates the tools; it never calls `btrfs` directly.
+  - **Config model** (`internal/snapshot/config.go`): TOML parsing with
+    system-scope path resolution (`/etc/bentoo/snapshot.toml` preferred, XDG
+    fallback) and a `Validate()` that fails hard on unknown
+    `engine.driver`/`ship.type`/`schedule.backend` (`ErrInvalidDriver`) before any
+    side effect, and warns-but-continues on non-fatal issues (empty subvolumes).
+  - **Four orchestration interfaces** — `Engine`, `Shipper`, `Notifier`,
+    `Scheduler` — selected by a factory, with an injectable `Runner`/`execCommand`
+    seam so drivers are tested without a real btrbk/systemd/btrfs.
+  - **`btrbk` engine**: renders `btrbk.conf` (retention → `snapshot_preserve`/
+    `target_preserve`), and `Create`/`Prune`/`List` via `btrbk run`/`clean`/`list`.
+  - **`ssh` shipper**: contributes its `target` to the btrbk.conf so btrbk
+    performs send/receive (no bytes moved in Go).
+  - **systemd scheduler**: golden-tested `.service` (`Type=oneshot`,
+    `PrivateMounts=yes`) + `.timer` (`OnCalendar`/`Persistent`/`RandomizedDelaySec`)
+    generation, installed atomically with `daemon-reload` + `enable --now`.
+  - **Dependency detection** at validate-time: a missing driver binary yields an
+    actionable error naming the Portage package (e.g. `app-backup/btrbk`).
+  - **CLI verbs** `apply` / `run` / `list` / `status`, with a `Manager` pipeline
+    (engine → prune → ship) that accumulates a `RunResult` persisted under
+    `/var/lib/bentoo/snapshot/last-run.json`.
+  - Every subprocess runs via `exec.CommandContext` so a cancelled context
+    (SIGINT/timeout) kills in-flight children; generated files are written
+    atomically (temp + rename).
+
 ## [0.3.21] - 2026-06-05
 
 ### Fixed

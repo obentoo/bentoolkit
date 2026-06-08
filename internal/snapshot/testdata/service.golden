@@ -1,0 +1,11 @@
+[Unit]
+Description=bentoo snapshot run
+Documentation=man:btrbk(1)
+
+[Service]
+Type=oneshot
+PrivateMounts=yes
+ExecStart=bentoo snapshot run --config /etc/bentoo/snapshot.toml
+
+[Install]
+WantedBy=multi-user.target

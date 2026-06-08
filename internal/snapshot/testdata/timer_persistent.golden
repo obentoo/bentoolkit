@@ -1,0 +1,10 @@
+[Unit]
+Description=bentoo snapshot timer
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,59 @@
+package snapshot
+
+import (
+	"errors"
+	"os/exec"
+	"strings"
+	"testing"
+)
+
+// stubLookPath replaces the lookPath seam for the test's duration. present lists
+// the binaries that resolve; everything else returns exec.ErrNotFound.
+func stubLookPath(t *testing.T, present ...string) {
+	t.Helper()
+	orig := lookPath
+	t.Cleanup(func() { lookPath = orig })
+	set := make(map[string]bool, len(present))
+	for _, p := range present {
+		set[p] = true
+	}
+	lookPath = func(name string) (string, error) {
+		if set[name] {
+			return "/usr/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	}
+}
+
+func TestDetectDriver_MissingBinaryNamesPackage(t *testing.T) {
+	stubLookPath(t) // nothing present
+
+	err := detectDriver("engine", "btrbk")
+	if !errors.Is(err, ErrDriverUnavailable) {
+		t.Fatalf("err = %v, want ErrDriverUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "app-backup/btrbk") {
+		t.Errorf("error %q does not name the Portage package", err)
+	}
+}
+
+func TestDetectDriver_PresentBinary(t *testing.T) {
+	stubLookPath(t, "btrbk", "ssh", "systemctl")
+
+	for _, c := range []struct{ kind, name string }{
+		{"engine", "btrbk"},
+		{"ship", "ssh"},
+		{"schedule", "systemd"},
+	} {
+		if err := detectDriver(c.kind, c.name); err != nil {
+			t.Errorf("detectDriver(%s,%s) = %v, want nil", c.kind, c.name, err)
+		}
+	}
+}
+
+func TestDetectDriver_UnknownIsNoop(t *testing.T) {
+	stubLookPath(t) // nothing present
+	if err := detectDriver("engine", "zfs"); err != nil {
+		t.Errorf("unknown driver should be a detection no-op, got %v", err)
+	}
+}

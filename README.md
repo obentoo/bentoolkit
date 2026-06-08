@@ -5,6 +5,7 @@ CLI tools for Bentoo Linux distribution maintainers and developers.
 ## Modules
 
 - **overlay**: Bentoo overlay commit management, version comparison, and automated updates
+- **snapshot**: declarative btrfs snapshot management orchestrating `btrbk` (snapshot + ssh replication) and `systemd` timers
 
 ## Installation
 
@@ -754,6 +755,79 @@ bentoolkit/
 ├── Makefile                    # Build targets
 └── README.md
 ```
+
+## Snapshot Management
+
+`bentoo snapshot` manages btrfs snapshots declaratively from a single
+`snapshot.toml`. bentoolkit is an **orchestrator**: it renders native config for
+mature tools (`btrbk` for snapshots and ssh send/receive, `systemd` for
+scheduling) and coordinates them — it never calls `btrfs` directly.
+
+### Dependencies
+
+- `app-backup/btrbk` — the snapshot engine and ssh replication (required).
+- `systemd` — the scheduler backend.
+
+A missing binary is reported at config-validate time with an actionable error
+naming the Portage package (e.g. `engine driver "btrbk" requires
+app-backup/btrbk on PATH`).
+
+### Configuration (`snapshot.toml`)
+
+Resolved in priority order: `/etc/bentoo/snapshot.toml`, then
+`$XDG_CONFIG_HOME/bentoo/snapshot.toml`, then `~/.config/bentoo/snapshot.toml`.
+System scope (`/etc/bentoo`, system timers) is the primary target.
+
+```toml
+[engine]
+driver = "btrbk"                 # only "btrbk" in this release
+subvolumes = ["/", "/home"]      # btrfs subvolumes to snapshot
+snapshot_dir = "/.snapshots"
+
+[engine.retention]               # delegated to btrbk's preserve directives
+hourly = 24
+daily = 7
+weekly = 4
+monthly = 6
+preserve_min = "latest"
+
+[[ship]]                         # zero or more replication targets
+type = "ssh"                     # only "ssh" in this release
+target = "user@host:/backup/btrbk"
+
+[schedule]
+backend = "systemd"              # only "systemd" in this release
+on_calendar = "daily"            # systemd OnCalendar=
+persistent = true                # systemd Persistent=
+randomized_delay = "5m"          # systemd RandomizedDelaySec=
+```
+
+### Commands
+
+```bash
+# Render the native btrbk.conf and install + enable the systemd timer
+bentoo snapshot apply
+
+# Run the engine → prune → ship pipeline now (the timer target)
+bentoo snapshot run
+
+# List local snapshots per subvolume
+bentoo snapshot list
+
+# Show the last run, timer state, and free space
+bentoo snapshot status
+```
+
+`apply` is idempotent — re-running reconciles the units without duplicates.
+`--config <path>` overrides the search path on any verb. `run` persists a
+`RunResult` under `/var/lib/bentoo/snapshot/last-run.json`, which `status` reads
+back.
+
+### Scope
+
+This release is Phase 1: the config model, the `btrbk` engine + `ssh` shipper,
+systemd timer generation, dependency detection, and the four verbs. Notifications,
+cloud/restore, snapper rollback, and packaging polish land in later releases.
 
 ## License
 

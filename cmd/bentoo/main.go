@@ -49,6 +49,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
 	rootCmd.AddCommand(overlayCmd)
+	rootCmd.AddCommand(snapshotCmd)
 }
 
 func main() {
