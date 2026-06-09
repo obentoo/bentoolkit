@@ -767,10 +767,13 @@ scheduling) and coordinates them — it never calls `btrfs` directly.
 
 - `app-backup/btrbk` — the snapshot engine and ssh replication (required).
 - `systemd` — the scheduler backend.
+- `app-backup/restic` — only when a `[[ship]]` uses `type = "restic"` (cloud backup).
+- `net-misc/rclone` — only when a `[[ship]]` uses `type = "archive"` (cloud backup).
 
 A missing binary is reported at config-validate time with an actionable error
 naming the Portage package (e.g. `engine driver "btrbk" requires
-app-backup/btrbk on PATH`).
+app-backup/btrbk on PATH`, or `ship driver "restic" requires app-backup/restic
+on PATH`).
 
 ### Configuration (`snapshot.toml`)
 
@@ -792,8 +795,22 @@ monthly = 6
 preserve_min = "latest"
 
 [[ship]]                         # zero or more replication targets
-type = "ssh"                     # only "ssh" in this release
+type = "ssh"                     # local/LAN replication via btrbk
 target = "user@host:/backup/btrbk"
+
+[[ship]]                         # cloud backup — restic (recommended)
+name = "offsite"
+type = "restic"
+repo = "s3:s3.amazonaws.com/my-bucket"   # or any restic/rclone backend
+password_file = "/etc/bentoo/restic.pass" # secret PATH only, never the value
+compression = "auto"             # auto | max | off
+
+[[ship]]                         # cloud backup — portable archive object
+name = "gdrive"
+type = "archive"
+remote = "gdrive:bentoo-backups" # an rclone remote:path
+mode = "incremental"             # incremental (default) | full
+compress = "zstd"                # stream compressor
 
 [schedule]
 backend = "systemd"              # only "systemd" in this release
@@ -831,6 +848,9 @@ bentoo snapshot list
 
 # Show the last run, timer state, and free space
 bentoo snapshot status
+
+# Restore a snapshot from a cloud ship (destructive — requires confirmation)
+bentoo snapshot restore <id> --target /mnt/restore --ship offsite --yes
 ```
 
 `apply` is idempotent — re-running reconciles the units without duplicates.
@@ -860,12 +880,50 @@ and the remaining backends are still attempted. **Secrets** (the ntfy token, web
 header values) are sent only in request headers and are **never written to logs or
 error messages**.
 
+### Cloud backup & restore
+
+Two `[[ship]]` drivers push snapshots off-site, on the same schedule and config as
+local snapshots, plus a `restore` verb to bring either back.
+
+- **`restic`** (recommended) — backs up a **read-only snapshot mount** with
+  `restic backup` to S3/B2/GCS or any rclone backend: dedup, encryption,
+  compression (`auto|max|off`), and granular restore. Retention maps
+  `[engine.retention]` to `restic forget --prune`. The transient RO mount is always
+  unmounted afterward, **including on error**.
+- **`archive`** — streams `btrfs send [-p parent] | zstd | rclone rcat` into a single
+  portable object on any rclone remote (e.g. Google Drive); restore is a bit-exact
+  `rclone cat | zstd -d | btrfs receive`.
+  - **Incremental vs full:** `mode = "incremental"` (default) sends `-p <parent>` when
+    a recorded parent exists; otherwise it **warns** and falls back to a full send
+    (never silent). The parent for a `(subvolume, ship)` is recorded **only after a
+    successful ship** under `/var/lib/bentoo/snapshot/parents/`, so a failed ship
+    never breaks the chain.
+  - **Archive retention (GFS):** rclone has no retention of its own, so after a
+    successful ship bentoolkit lists the remote (`rclone lsjson`), applies a
+    grandfather-father-son policy from `[engine.retention]`, and deletes out-of-policy
+    objects — but **never the active parent**.
+
+**Restore.** `bentoo snapshot restore <id> --target <path> --ship <name>` dispatches
+by the ship's driver. An `archive` restore **validates the full + delta chain before
+applying** and refuses a broken chain *before* any `btrfs receive`. Restore is
+destructive: it requires `--yes` or an interactive `[y/N]` confirmation.
+
+**Secrets.** Only secret **paths** (`password_file`) and rclone's own config/env are
+passed — never secret **values** in argv or TOML — and passwords/tokens are never
+written to logs or error messages.
+
+**Notes.** restic re-scans the subvolume locally each run (dedup avoids re-upload but
+the scan still happens — fine for typical subvolumes). For `archive` incremental
+chains, deleting a mid-chain delta would break restorability of later snapshots;
+GFS is fully safe for `mode = "full"`, and restore-time chain validation is the
+backstop for incremental.
+
 ### Scope
 
-This release covers the config model, the `btrbk` engine + `ssh` shipper, systemd
-timer generation, dependency detection, the four verbs, and run notifications
-(ntfy / healthchecks / webhook). Email notifications, cloud/restore, snapper
-rollback, and packaging polish land in later releases.
+This release covers the config model, the `btrbk` engine + `ssh`/`restic`/`archive`
+shippers, systemd timer generation, dependency detection, run notifications
+(ntfy / healthchecks / webhook), and cloud backup + restore. snapper rollback and
+packaging polish land in later releases.
 
 ## License
 

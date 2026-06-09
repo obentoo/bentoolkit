@@ -38,16 +38,41 @@ func TestDetectDriver_MissingBinaryNamesPackage(t *testing.T) {
 }
 
 func TestDetectDriver_PresentBinary(t *testing.T) {
-	stubLookPath(t, "btrbk", "ssh", "systemctl")
+	stubLookPath(t, "btrbk", "ssh", "systemctl", "restic", "rclone")
 
 	for _, c := range []struct{ kind, name string }{
 		{"engine", "btrbk"},
 		{"ship", "ssh"},
+		{"ship", "restic"},
+		{"ship", "archive"},
 		{"schedule", "systemd"},
 	} {
 		if err := detectDriver(c.kind, c.name); err != nil {
 			t.Errorf("detectDriver(%s,%s) = %v, want nil", c.kind, c.name, err)
 		}
+	}
+}
+
+func TestDetectDriver_CloudShippersNamePackage(t *testing.T) {
+	// The ship driver is keyed on ship.Type: restic needs the restic binary,
+	// archive needs rclone. Each missing binary names its Portage package (R7.1).
+	cases := []struct {
+		name, shipType, pkg string
+	}{
+		{"restic absent", "restic", "app-backup/restic"},
+		{"rclone absent", "archive", "net-misc/rclone"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubLookPath(t) // nothing present
+			err := detectDriver("ship", tc.shipType)
+			if !errors.Is(err, ErrDriverUnavailable) {
+				t.Fatalf("err = %v, want ErrDriverUnavailable", err)
+			}
+			if !strings.Contains(err.Error(), tc.pkg) {
+				t.Errorf("error %q does not name the Portage package %q", err, tc.pkg)
+			}
+		})
 	}
 }
 

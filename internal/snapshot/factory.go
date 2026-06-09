@@ -22,13 +22,45 @@ func newEngine(cfg EngineConfig, targets []string, run Runner) (Engine, error) {
 	}
 }
 
-// newShipper builds the shipper selected by cfg.Type.
-func newShipper(cfg ShipConfig) (Shipper, error) {
+// newShipper builds the shipper selected by cfg.Type. run is the (mockable)
+// subprocess seam (nil → production execRunner) used by the restic shipper for its
+// mount/backup/forget commands; retention is the engine's policy, mapped to
+// restic's --keep-* flags during forget --prune. The ssh shipper ignores both (its
+// transfer is delegated to btrbk), matching the newEngine(cfg, targets, run)
+// precedent of carrying wiring beyond a single driver's needs.
+func newShipper(cfg ShipConfig, run Runner, retention Retention) (Shipper, error) {
+	if run == nil {
+		run = defaultRunner()
+	}
 	switch cfg.Type {
 	case "ssh":
 		return newSSHShipper(cfg)
+	case "restic":
+		return newResticShipper(cfg, run, retention), nil
+	case "archive":
+		// retention is the [engine.retention] GFS policy; the archive shipper applies
+		// it to the rclone remote after a successful ship (T5.1, R4). An all-zero
+		// policy makes the prune a no-op.
+		return newArchiveShipper(cfg, run, retention), nil
 	default:
 		return nil, fmt.Errorf("%w: ship type %q", ErrInvalidDriver, cfg.Type)
+	}
+}
+
+// newResticShipper assembles a resticShipper from cfg, the subprocess seam, and
+// the retention policy. The snapshot is exposed to restic through a transient
+// read-only mount (the default and currently only mount strategy); cfg.MountStrategy
+// is reserved for selecting alternatives (e.g. a pre-existing bind mount) in a later
+// task and is otherwise a no-op here.
+func newResticShipper(cfg ShipConfig, run Runner, retention Retention) *resticShipper {
+	return &resticShipper{
+		name:         cfg.Name,
+		repo:         cfg.Repo,
+		passwordFile: cfg.PasswordFile,
+		compression:  cfg.Compression,
+		retention:    retention,
+		run:          run,
+		mount:        &transientMounter{run: run},
 	}
 }
 

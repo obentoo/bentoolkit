@@ -56,11 +56,30 @@ type Retention struct {
 }
 
 // ShipConfig is one replication target ([[ship]] array-of-tables). Type selects
-// the shipper driver; Target is the destination (for ssh: user@host:/path).
+// the shipper driver; Target is the destination (for ssh: user@host:/path). The
+// remaining fields are driver-specific: the restic group (Repo..MountStrategy)
+// applies when type = "restic", the archive group (Remote..Compress) when
+// type = "archive".
 type ShipConfig struct {
 	Name   string `toml:"name,omitempty"`
 	Type   string `toml:"type"`
 	Target string `toml:"target,omitempty"`
+
+	// restic shipper (R1). Repo is the restic repository URL; PasswordFile is the
+	// path to the repo password (kept out of the file itself, R1.2); Compression
+	// maps to restic's --compression (R1.3); MountStrategy selects how the snapshot
+	// is exposed to the restic backup (e.g. bind vs read-only mount).
+	Repo          string `toml:"repo,omitempty"`
+	PasswordFile  string `toml:"password_file,omitempty"`
+	Compression   string `toml:"compression,omitempty"`
+	MountStrategy string `toml:"mount_strategy,omitempty"`
+
+	// archive shipper (R2). Remote is the rclone remote target (remote:path); Mode
+	// selects full vs incremental archiving; Compress selects the stream codec
+	// applied before upload.
+	Remote   string `toml:"remote,omitempty"`
+	Mode     string `toml:"mode,omitempty"`
+	Compress string `toml:"compress,omitempty"`
 }
 
 // NotifyConfig selects and configures notification backends (story 005). On filters
@@ -232,7 +251,7 @@ func (c *Config) Validate() error {
 
 	for i, sh := range c.Ship {
 		switch sh.Type {
-		case "ssh":
+		case "ssh", "restic", "archive":
 			// supported
 		default:
 			return fmt.Errorf("%w: ship[%d].type %q", ErrInvalidDriver, i, sh.Type)

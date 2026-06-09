@@ -20,7 +20,7 @@ func TestNewEngine_KnownAndUnknown(t *testing.T) {
 }
 
 func TestNewShipper_KnownAndUnknown(t *testing.T) {
-	sh, err := newShipper(ShipConfig{Type: "ssh", Target: "u@h:/p"})
+	sh, err := newShipper(ShipConfig{Type: "ssh", Target: "u@h:/p"}, &MockRunner{}, Retention{})
 	if err != nil {
 		t.Fatalf("newShipper ssh: %v", err)
 	}
@@ -28,7 +28,15 @@ func TestNewShipper_KnownAndUnknown(t *testing.T) {
 		t.Errorf("newShipper ssh returned %T", sh)
 	}
 
-	if _, err := newShipper(ShipConfig{Type: "rsync"}); !errors.Is(err, ErrInvalidDriver) {
+	rs, err := newShipper(ShipConfig{Type: "restic", Repo: "repo", PasswordFile: "/pw"}, &MockRunner{}, Retention{Daily: 7})
+	if err != nil {
+		t.Fatalf("newShipper restic: %v", err)
+	}
+	if _, ok := rs.(*resticShipper); !ok {
+		t.Errorf("newShipper restic returned %T, want *resticShipper", rs)
+	}
+
+	if _, err := newShipper(ShipConfig{Type: "rsync"}, nil, Retention{}); !errors.Is(err, ErrInvalidDriver) {
 		t.Errorf("unknown ship: err = %v, want ErrInvalidDriver", err)
 	}
 }

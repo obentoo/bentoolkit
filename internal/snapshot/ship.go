@@ -6,10 +6,11 @@ import "context"
 // actual byte transfer is delegated to btrbk during engine Create, so Delegated
 // is true and Send only records which target was (or will be) served.
 type ShipReport struct {
-	Target    string // replication destination (e.g. user@host:/path)
-	Snapshot  string // ID/path of the snapshot shipped
-	Delegated bool   // true when the transfer is performed by the engine (btrbk)
-	Note      string // human-readable detail
+	Target      string // replication destination (e.g. user@host:/path)
+	Snapshot    string // ID/path of the snapshot shipped
+	Delegated   bool   // true when the transfer is performed by the engine (btrbk)
+	Note        string // human-readable detail
+	Incremental bool   // archive: true when sent with -p (incremental)
 }
 
 // Shipper replicates a snapshot to a remote target. Drivers are selected from

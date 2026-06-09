@@ -31,8 +31,15 @@ func driverBinary(kind, name string) (driverDep, bool) {
 			return driverDep{"btrbk", "app-backup/btrbk"}, true
 		}
 	case "ship":
-		if name == "ssh" {
+		// Keyed on ship.Type (detectDriver is called as detectDriver("ship", sh.Type)).
+		switch name {
+		case "ssh":
 			return driverDep{"ssh", "net-misc/openssh"}, true
+		case "restic":
+			return driverDep{"restic", "app-backup/restic"}, true
+		case "archive":
+			// archive's external dep is rclone; btrfs-progs is already an engine base dep.
+			return driverDep{"rclone", "net-misc/rclone"}, true
 		}
 	case "schedule":
 		if name == "systemd" {

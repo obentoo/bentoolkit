@@ -32,7 +32,7 @@ func NewManager(cfg Config, configPath string, run Runner) (*Manager, error) {
 
 	shippers := make([]Shipper, 0, len(cfg.Ship))
 	for _, sh := range cfg.Ship {
-		shipper, err := newShipper(sh)
+		shipper, err := newShipper(sh, run, cfg.Engine.Retention)
 		if err != nil {
 			return nil, err
 		}

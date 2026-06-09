@@ -87,6 +87,78 @@ func TestLoadFrom_RepresentativeConfig(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_ResticAndArchiveShippers(t *testing.T) {
+	const cloudTOML = `
+[engine]
+driver = "btrbk"
+
+[[ship]]
+name = "b2"
+type = "restic"
+repo = "b2:my-bucket:snapshots"
+password_file = "/etc/bentoo/restic.pw"
+compression = "max"
+mount_strategy = "bind"
+
+[[ship]]
+name = "gdrive"
+type = "archive"
+remote = "gdrive:bentoo-backups"
+mode = "incremental"
+compress = "zstd"
+`
+	cfg, err := LoadFrom(writeTemp(t, "cloud.toml", cloudTOML))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	if len(cfg.Ship) != 2 {
+		t.Fatalf("len(ship) = %d, want 2", len(cfg.Ship))
+	}
+
+	r := cfg.Ship[0]
+	if r.Type != "restic" || r.Name != "b2" {
+		t.Errorf("ship[0] type/name = %+v", r)
+	}
+	if r.Repo != "b2:my-bucket:snapshots" {
+		t.Errorf("ship[0].repo = %q", r.Repo)
+	}
+	if r.PasswordFile != "/etc/bentoo/restic.pw" {
+		t.Errorf("ship[0].password_file = %q", r.PasswordFile)
+	}
+	if r.Compression != "max" {
+		t.Errorf("ship[0].compression = %q", r.Compression)
+	}
+	if r.MountStrategy != "bind" {
+		t.Errorf("ship[0].mount_strategy = %q", r.MountStrategy)
+	}
+
+	a := cfg.Ship[1]
+	if a.Type != "archive" || a.Name != "gdrive" {
+		t.Errorf("ship[1] type/name = %+v", a)
+	}
+	if a.Remote != "gdrive:bentoo-backups" {
+		t.Errorf("ship[1].remote = %q", a.Remote)
+	}
+	if a.Mode != "incremental" {
+		t.Errorf("ship[1].mode = %q", a.Mode)
+	}
+	if a.Compress != "zstd" {
+		t.Errorf("ship[1].compress = %q", a.Compress)
+	}
+}
+
+func TestValidate_UnknownShipTypeStillInvalidDriver(t *testing.T) {
+	// restic and archive are now supported, but any other ship.type must still
+	// fail hard with ErrInvalidDriver.
+	stubLookPath(t, "btrbk", "ssh", "systemctl")
+	cfg := validConfig()
+	cfg.Ship[0].Type = "rsync"
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidDriver) {
+		t.Errorf("err = %v, want ErrInvalidDriver", err)
+	}
+}
+
 func TestLoadFrom_OmittedOptionalsAreZero(t *testing.T) {
 	cfg, err := LoadFrom(writeTemp(t, "minimal.toml", "[engine]\ndriver = \"btrbk\"\n"))
 	if err != nil {

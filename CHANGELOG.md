@@ -51,6 +51,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     secrets travel only in request headers and are **never logged or put in errors**.
     All backends share one bounded, context-aware `http.Client`
     (`httputil.BuildTransport`, capped response body, descriptive User-Agent).
+- **Cloud backup + restore (Phase 3).** Two off-site `Shipper` drivers and a
+  `restore` verb, on the same config/schedule as local snapshots.
+  - **`restic` shipper** (`internal/snapshot/ship_restic.go`): backs up a transient
+    **read-only snapshot mount** via `restic backup --tag bentoo,<subvol>
+    --compression <auto|max|off>`, then maps `[engine.retention]` to
+    `restic forget --prune`. A `mounter` seam guarantees the RO mount is unmounted
+    even when the backup errors. Repo/password travel as `--repo`/`--password-file`
+    **paths** (the 004 `Runner` has no env), never as secret values.
+  - **`archive` shipper** (`internal/snapshot/ship_archive.go`): streams
+    `btrfs send [-p parent] | zstd | rclone rcat <remote>/<obj>` under one cancellable
+    context; any stage non-zero fails the ship. `mode = "incremental"` (default) uses
+    `-p` when a recorded parent exists, else warns and sends full (no silent fallback).
+  - **Parent tracking** (`internal/snapshot/parent.go`): persists the last
+    successfully shipped snapshot per `(subvolume, ship)` under
+    `/var/lib/bentoo/snapshot/parents/` (atomic writes) — recorded **only on success**
+    so a failed ship never breaks the incremental chain.
+  - **Archive GFS retention**: after a successful ship, `rclone lsjson` → a
+    grandfather-father-son policy from `[engine.retention]` → `rclone deletefile` the
+    losers, **never** the active parent.
+  - **`bentoo snapshot restore <id> --target <path> --ship <name> [--yes]`**
+    (`internal/snapshot/restore.go`, `cmd/bentoo/snapshot_restore.go`): dispatches by
+    driver — archive **validates the full+delta chain before** `btrfs receive` and
+    refuses a broken chain; restic does a granular `restic restore --target`.
+    Destructive restores require `--yes` or an interactive `[y/N]` confirm.
+  - Detection adds `restic` → `app-backup/restic` and `archive` → `net-misc/rclone`
+    at validate-time. All subprocesses run via `exec.CommandContext`; secrets stay
+    out of argv/logs. Drivers are covered by mock `Runner`/`mounter`/`parentStore`
+    tests (no real btrfs/restic/rclone).
 
 ## [0.3.21] - 2026-06-05
 
