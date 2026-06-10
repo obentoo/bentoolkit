@@ -17,6 +17,10 @@ func newEngine(cfg EngineConfig, targets []string, run Runner) (Engine, error) {
 	switch cfg.Driver {
 	case "btrbk":
 		return newBtrbkEngine(cfg, targets, run), nil
+	case "snapper":
+		// snapper does not use ship targets — remote transfer is the shippers'
+		// job, so the targets wiring stays btrbk-only (R6.2).
+		return newSnapperEngine(cfg, run), nil
 	default:
 		return nil, fmt.Errorf("%w: engine driver %q", ErrInvalidDriver, cfg.Driver)
 	}

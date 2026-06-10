@@ -31,10 +31,10 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) {
 	ctx, stop := signalContext(cmd.Context())
 	defer stop()
 
-	// Ensure the native btrbk.conf exists so the run is self-contained even if
-	// 'apply' was never executed.
-	if err := snapshot.WriteBtrbkConf(cfg, path); err != nil {
-		logger.Error("snapshot run: render btrbk.conf: %v", err)
+	// Ensure the engine's native config exists (btrbk.conf or the snapper
+	// configs) so the run is self-contained even if 'apply' was never executed.
+	if err := snapshot.WriteEngineConfig(cfg, path); err != nil {
+		logger.Error("snapshot run: render engine config: %v", err)
 		osExit(1)
 		return
 	}

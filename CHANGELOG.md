@@ -79,6 +79,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     at validate-time. All subprocesses run via `exec.CommandContext`; secrets stay
     out of argv/logs. Drivers are covered by mock `Runner`/`mounter`/`parentStore`
     tests (no real btrfs/restic/rclone).
+- **Snapshot rollback via snapper (Phase 4).** A second `Engine` driver for local
+  timeline snapshots and **system rollback** — the "undo a broken update" path
+  complementing btrbk's off-site replication. Selected with `engine.driver =
+  "snapper"`; the btrbk engine is untouched (additive driver).
+  - **`snapper` engine** (`internal/snapshot/engine_snapper.go`): `Create` runs
+    `snapper -c <config> create --description "bentoo snapshot"
+    --cleanup-algorithm timeline --print-number`; `List` parses the
+    pipe-separated `snapper list` table into `[]Snapshot` (skipping the header
+    and the `current` pseudo-snapshot); `Prune` delegates retention to
+    `snapper cleanup timeline` — the GFS counts live in the rendered config's
+    `TIMELINE_LIMIT_*` keys, native retention as with btrbk.
+  - **Snapper config rendering** (`internal/snapshot/snapper_config.go`):
+    `apply` ensures `/etc/snapper/configs/<name>` per managed subvolume
+    (`/` → `root`, `/home` → `home`) idempotently — managed keys (`SUBVOLUME`,
+    `TIMELINE_*`, `NUMBER_CLEANUP`) are updated in place, user settings and
+    comments are preserved, nothing is duplicated. The engine-config write is
+    now driver-aware (`WriteEngineConfig`): btrbk renders `btrbk.conf`, snapper
+    ensures its configs — `apply` and `run` dispatch accordingly.
+  - **`bentoo snapshot rollback <id>`** (`internal/snapshot/rollback.go`,
+    `cmd/bentoo/snapshot_rollback.go`): runs `snapper -c root rollback <id>`.
+    Destructive, so it requires `--yes` or an interactive `[y/N]` confirm, and
+    it is **refused with a clear error when the active engine is not snapper**
+    (the guard fires before the confirm prompt; declining is a clean exit-0
+    abort, mirroring `restore`).
+  - **Opt-in emerge hook** (`internal/snapshot/hook.go`,
+    `cmd/bentoo/snapshot_hook.go`): `bentoo snapshot hook --install` writes
+    `/etc/portage/bashrc.d/50-bentoo-snapshot.sh` — `pre_pkg_setup`/
+    `post_pkg_postinst` phase functions creating snapper **pre/post pairs** per
+    package (`--cleanup-algorithm number`, pruned by the managed
+    `NUMBER_CLEANUP="yes"`) — and wires it through a marker-delimited managed
+    block in `/etc/portage/bashrc` (user content preserved; install is
+    idempotent). `--uninstall` removes both cleanly. The hook is **never**
+    installed by `apply` (asserted by test); snapper failures never break an
+    emerge (`|| true` guards).
+  - Detection adds `snapper` → `app-backup/snapper` at validate-time (the
+    story text said `app-admin/snapper`; the real Gentoo category is
+    `app-backup`). grub-btrfs / boot-into-snapshot integration is documented as
+    a follow-up, not implemented here.
 
 ## [0.3.21] - 2026-06-05
 

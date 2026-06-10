@@ -76,6 +76,25 @@ func TestDetectDriver_CloudShippersNamePackage(t *testing.T) {
 	}
 }
 
+func TestDetectDriver_SnapperNamesPackage(t *testing.T) {
+	// Snapper absent from PATH: the validate-time error is actionable and names
+	// the real Gentoo package, app-backup/snapper (R5.1, via the lookPath seam
+	// R5.2).
+	stubLookPath(t) // nothing present
+	err := detectDriver("engine", "snapper")
+	if !errors.Is(err, ErrDriverUnavailable) {
+		t.Fatalf("err = %v, want ErrDriverUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "app-backup/snapper") {
+		t.Errorf("error %q does not name the Portage package", err)
+	}
+
+	stubLookPath(t, "snapper")
+	if err := detectDriver("engine", "snapper"); err != nil {
+		t.Errorf("detectDriver(engine, snapper) with snapper on PATH = %v, want nil", err)
+	}
+}
+
 func TestDetectDriver_UnknownIsNoop(t *testing.T) {
 	stubLookPath(t) // nothing present
 	if err := detectDriver("engine", "zfs"); err != nil {

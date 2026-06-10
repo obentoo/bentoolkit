@@ -5,7 +5,7 @@ CLI tools for Bentoo Linux distribution maintainers and developers.
 ## Modules
 
 - **overlay**: Bentoo overlay commit management, version comparison, and automated updates
-- **snapshot**: declarative btrfs snapshot management orchestrating `btrbk` (snapshot + ssh replication) and `systemd` timers
+- **snapshot**: declarative btrfs snapshot management orchestrating `btrbk` (snapshot + ssh replication), `snapper` (timeline + system rollback), and `systemd` timers
 
 ## Installation
 
@@ -765,7 +765,8 @@ scheduling) and coordinates them — it never calls `btrfs` directly.
 
 ### Dependencies
 
-- `app-backup/btrbk` — the snapshot engine and ssh replication (required).
+- `app-backup/btrbk` — the snapshot engine and ssh replication (when `engine.driver = "btrbk"`).
+- `app-backup/snapper` — only when `engine.driver = "snapper"` (timeline snapshots + rollback).
 - `systemd` — the scheduler backend.
 - `app-backup/restic` — only when a `[[ship]]` uses `type = "restic"` (cloud backup).
 - `net-misc/rclone` — only when a `[[ship]]` uses `type = "archive"` (cloud backup).
@@ -783,7 +784,7 @@ System scope (`/etc/bentoo`, system timers) is the primary target.
 
 ```toml
 [engine]
-driver = "btrbk"                 # only "btrbk" in this release
+driver = "btrbk"                 # "btrbk" (backup/replication) | "snapper" (timeline + rollback)
 subvolumes = ["/", "/home"]      # btrfs subvolumes to snapshot
 snapshot_dir = "/.snapshots"
 
@@ -851,6 +852,13 @@ bentoo snapshot status
 
 # Restore a snapshot from a cloud ship (destructive — requires confirmation)
 bentoo snapshot restore <id> --target /mnt/restore --ship offsite --yes
+
+# Roll the system back to a snapshot (snapper engine only; destructive)
+bentoo snapshot rollback <id> --yes
+
+# Install / remove the opt-in pre/post-emerge snapshot hook (snapper engine)
+bentoo snapshot hook --install
+bentoo snapshot hook --uninstall
 ```
 
 `apply` is idempotent — re-running reconciles the units without duplicates.
@@ -918,12 +926,42 @@ chains, deleting a mid-chain delta would break restorability of later snapshots;
 GFS is fully safe for `mode = "full"`, and restore-time chain validation is the
 backstop for incremental.
 
+### Rollback (snapper engine)
+
+With `engine.driver = "snapper"` the same config drives **local timeline
+snapshots and system rollback** — the "undo a broken update" path. btrbk is
+built for backup/replication; snapper is the rollback engine. The driver is
+additive: switching back to btrbk changes nothing in existing behavior.
+
+- **Configs.** `apply` renders `/etc/snapper/configs/<name>` per subvolume
+  (`/` → `root`, `/home` → `home`) idempotently: bentoo-managed keys
+  (`SUBVOLUME`, `TIMELINE_*` limits from `[engine.retention]`,
+  `NUMBER_CLEANUP`) are kept in sync while user-added settings and comments are
+  preserved.
+- **Pipeline.** `run` creates tagged timeline snapshots
+  (`snapper create --description "bentoo snapshot"`); prune delegates to
+  `snapper cleanup timeline` (native retention, as with btrbk).
+- **Rollback.** `bentoo snapshot rollback <id>` runs `snapper -c root rollback`.
+  It is destructive, so it requires `--yes` or an interactive `[y/N]` confirm —
+  and it is **refused with a clear error when the active engine is not
+  snapper** (rollback is snapper-specific; declining is a clean abort).
+- **Emerge hook (opt-in).** `bentoo snapshot hook --install` installs a Portage
+  hook (`/etc/portage/bashrc.d/50-bentoo-snapshot.sh`, sourced through a
+  managed block in `/etc/portage/bashrc`) that creates snapper **pre/post
+  snapshot pairs around each package emerge builds** — so a broken update has
+  a known-good "pre" to roll back to. `--uninstall` removes it cleanly,
+  preserving your own bashrc content. The hook is **never** installed by
+  `apply`, and a snapper failure never breaks an emerge.
+- **Boot integration.** grub-btrfs / boot-into-snapshot integration is a
+  documented follow-up, not part of this release.
+
 ### Scope
 
 This release covers the config model, the `btrbk` engine + `ssh`/`restic`/`archive`
 shippers, systemd timer generation, dependency detection, run notifications
-(ntfy / healthchecks / webhook), and cloud backup + restore. snapper rollback and
-packaging polish land in later releases.
+(ntfy / healthchecks / webhook), cloud backup + restore, and the `snapper`
+engine with system rollback + the opt-in emerge hook. Packaging polish lands in
+a later release.
 
 ## License
 

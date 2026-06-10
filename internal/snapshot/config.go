@@ -243,7 +243,7 @@ func LoadFrom(path string) (*Config, error) {
 // both happen before the command writes any file (G3).
 func (c *Config) Validate() error {
 	switch c.Engine.Driver {
-	case "btrbk":
+	case "btrbk", "snapper":
 		// supported
 	default:
 		return fmt.Errorf("%w: engine.driver %q", ErrInvalidDriver, c.Engine.Driver)

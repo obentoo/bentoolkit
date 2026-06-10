@@ -27,8 +27,13 @@ type driverDep struct {
 func driverBinary(kind, name string) (driverDep, bool) {
 	switch kind {
 	case "engine":
-		if name == "btrbk" {
+		switch name {
+		case "btrbk":
 			return driverDep{"btrbk", "app-backup/btrbk"}, true
+		case "snapper":
+			// Gentoo ships snapper in app-backup/ (verified in ::gentoo), so the
+			// actionable error names app-backup/snapper (R5.1).
+			return driverDep{"snapper", "app-backup/snapper"}, true
 		}
 	case "ship":
 		// Keyed on ship.Type (detectDriver is called as detectDriver("ship", sh.Type)).
