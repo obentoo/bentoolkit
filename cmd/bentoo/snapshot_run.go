@@ -7,6 +7,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// snapshotRunDryRun is --dry-run: print the engine/ship pipeline that would
+// run without executing it — no engine-config render, no subprocess, and no
+// RunResult persisted (008 R2.2).
+var snapshotRunDryRun bool
+
 var snapshotRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the snapshot pipeline now",
@@ -17,6 +22,8 @@ the command driven by the systemd timer.`,
 }
 
 func init() {
+	snapshotRunCmd.Flags().BoolVar(&snapshotRunDryRun, "dry-run", false,
+		"print the pipeline that would run, without executing it")
 	snapshotCmd.AddCommand(snapshotRunCmd)
 }
 
@@ -25,6 +32,14 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) {
 	if err != nil {
 		logger.Error("snapshot run: %v", err)
 		osExit(1)
+		return
+	}
+
+	if snapshotRunDryRun {
+		// 008 R2.2: preview only — print the pipeline (engine driver per
+		// subvolume, then each ship target) and return BEFORE the engine-config
+		// render, the pipeline execution, and the RunResult persistence below.
+		printDryRunPlan(snapshot.PlanRun(cfg))
 		return
 	}
 

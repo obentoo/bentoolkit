@@ -776,6 +776,21 @@ naming the Portage package (e.g. `engine driver "btrbk" requires
 app-backup/btrbk on PATH`, or `ship driver "restic" requires app-backup/restic
 on PATH`).
 
+When installing through Portage, the `app-portage/bentoolkit` ebuild maps each
+backend to a USE flag so you pull in only what your config uses:
+
+| USE flag  | Pulls in            | Enables                                  |
+|-----------|---------------------|------------------------------------------|
+| `btrbk`   | `app-backup/btrbk`  | btrbk engine (snapshots + ssh ship)      |
+| `snapper` | `app-backup/snapper`| snapper engine (timeline + rollback)     |
+| `restic`  | `app-backup/restic` | restic cloud ship                        |
+| `rclone`  | `net-misc/rclone`   | archive cloud ship                       |
+| `systemd` | `sys-apps/systemd`  | systemd timer scheduling                 |
+
+All flags are optional and default-off — the binary degrades gracefully, and
+`detect` names the exact missing package at runtime if the active config needs
+a backend that is not installed.
+
 ### Configuration (`snapshot.toml`)
 
 Resolved in priority order: `/etc/bentoo/snapshot.toml`, then
@@ -833,6 +848,17 @@ start = true                     # also ping /start before the run
 [notify.webhook]
 url = "https://example.com/hook" # receives the RunResult as a JSON POST
 headers = { Authorization = "Bearer ..." } # optional custom headers, never logged
+
+[notify.email]
+to = ["ops@example.com"]         # one or more recipients (activates the driver)
+from = "bentoo@myhost"
+# transport: local sendmail by default; configure [notify.email.smtp] to use SMTP
+
+[notify.email.smtp]              # optional — omit to send via local `sendmail -t`
+host = "smtp.example.com"
+port = 587
+user = "bentoo"                  # with password, enables SMTP AUTH (PLAIN)
+password = "..."                 # never logged, never placed in argv
 ```
 
 ### Commands
@@ -844,11 +870,17 @@ bentoo snapshot apply
 # Run the engine → prune → ship pipeline now (the timer target)
 bentoo snapshot run
 
-# List local snapshots per subvolume
+# List local snapshots per subvolume; --remote also queries btrbk targets
+# and restic repositories
 bentoo snapshot list
+bentoo snapshot list --remote
 
-# Show the last run, timer state, and free space
+# Show the last run (per stage), timer state + next scheduled run, free space
 bentoo snapshot status
+
+# Apply [engine.retention] on demand: engine-native prune + archive GFS
+bentoo snapshot prune
+bentoo snapshot prune --ship gdrive       # scope to one destination only
 
 # Restore a snapshot from a cloud ship (destructive — requires confirmation)
 bentoo snapshot restore <id> --target /mnt/restore --ship offsite --yes
@@ -866,10 +898,17 @@ bentoo snapshot hook --uninstall
 `RunResult` under `/var/lib/bentoo/snapshot/last-run.json`, which `status` reads
 back.
 
+**Dry-run everywhere.** `apply`, `run`, `restore`, `rollback`, and `prune` all
+accept `--dry-run`: the verb prints exactly what it would do (configs and
+systemd units it would write, the engine → prune → ship pipeline it would
+execute, or the destructive actions it would perform) and **guarantees zero side
+effects** — no subprocess is spawned, nothing is written, no confirmation is
+prompted. Preview any change safely before committing to it.
+
 ### Notifications
 
 The optional `[notify]` section reports the outcome of a `bentoo snapshot run` so a
-scheduled backup surfaces failures without scraping logs. Three backends fan out
+scheduled backup surfaces failures without scraping logs. Four backends fan out
 from one config — configure any subset:
 
 - **ntfy** (`[notify.ntfy]`) — POSTs a run summary to a topic URL. Failures use an
@@ -880,13 +919,17 @@ from one config — configure any subset:
   it also pings `ping_url/start` before the run so the dashboard can time it.
 - **webhook** (`[notify.webhook]`) — POSTs the `RunResult` as JSON to your own
   endpoint, with any custom `headers` applied — for arbitrary automation.
+- **email** (`[notify.email]`) — sends the run summary to the configured
+  recipients. Transport is local `sendmail -t` by default; configuring
+  `[notify.email.smtp]` switches to direct SMTP (stdlib `net/smtp`, with PLAIN
+  auth when `user`/`password` are set). The subject reflects the outcome.
 
 `on` filters which outcomes notify (`["failure"]`, `["success"]`, or both); an empty
 or omitted `on` notifies on **failure only**. Notification is **best-effort**: a
 backend that errors is logged as a warning and never changes the run's exit code,
 and the remaining backends are still attempted. **Secrets** (the ntfy token, webhook
-header values) are sent only in request headers and are **never written to logs or
-error messages**.
+header values, the SMTP password) are sent only in request headers / the SMTP
+session and are **never written to logs, argv, or error messages**.
 
 ### Cloud backup & restore
 
@@ -959,9 +1002,12 @@ additive: switching back to btrbk changes nothing in existing behavior.
 
 This release covers the config model, the `btrbk` engine + `ssh`/`restic`/`archive`
 shippers, systemd timer generation, dependency detection, run notifications
-(ntfy / healthchecks / webhook), cloud backup + restore, and the `snapper`
-engine with system rollback + the opt-in emerge hook. Packaging polish lands in
-a later release.
+(ntfy / healthchecks / webhook / email), cloud backup + restore, the `snapper`
+engine with system rollback + the opt-in emerge hook, full `--dry-run` coverage,
+the on-demand `prune` verb, remote listing (`list --remote`), per-stage `status`
+with the next scheduled run, and the Portage USE-flag mapping for every optional
+backend. grub-btrfs / boot-into-snapshot integration remains a documented
+follow-up.
 
 ## License
 

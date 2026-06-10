@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -160,6 +161,44 @@ func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 	}
 	if *called {
 		t.Error("confirm seam consulted before the engine guard; guard must fire first")
+	}
+}
+
+// TestRunSnapshotRollback_DryRunPrintsActionsZeroExec: 008 R2.3 — rollback
+// --dry-run prints the destructive action (snapper rollback to <id>) without
+// running any subprocess and without consulting the confirm gate.
+func TestRunSnapshotRollback_DryRunPrintsActionsZeroExec(t *testing.T) {
+	stubBinariesOnPath(t, "snapper")
+	writeSnapshotConfig(t, rollbackTOMLSnapper)
+	mr := &snapshot.MockRunner{}
+	snapshotRunner = mr
+
+	setRollbackFlags(t, false)
+	called := stubRollbackConfirm(t, false)
+
+	origDryRun := snapshotRollbackDryRun
+	snapshotRollbackDryRun = true
+	t.Cleanup(func() { snapshotRollbackDryRun = origDryRun })
+
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runSnapshotRollback(snapshotRollbackCmd, []string{"42"}) })
+	})
+	if exited {
+		t.Fatalf("rollback --dry-run exited with code %d, want success", code)
+	}
+
+	if len(mr.Calls) != 0 {
+		t.Errorf("rollback --dry-run ran %d subprocess(es), want 0 (008 R2.3): %+v", len(mr.Calls), mr.Calls)
+	}
+	if *called {
+		t.Error("rollback --dry-run consulted the confirm gate; a preview must not prompt (008 R2.3)")
+	}
+	for _, want := range []string{"42", "rollback"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rollback --dry-run actions missing %q (008 R2.3); output:\n%s", want, out)
+		}
 	}
 }
 

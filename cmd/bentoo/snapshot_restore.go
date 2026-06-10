@@ -19,6 +19,9 @@ var (
 	snapshotRestoreShip string
 	// snapshotRestoreYes is --yes/-y: skip the destructive-restore confirm prompt.
 	snapshotRestoreYes bool
+	// snapshotRestoreDryRun is --dry-run: print the destructive actions without
+	// performing them — no subprocess and no confirm prompt (008 R2.3).
+	snapshotRestoreDryRun bool
 	// snapshotRestoreConfirm is the confirm seam. nil (the default) makes
 	// snapshot.Restore fall back to its own stdin y/N prompt (defaultConfirmFunc);
 	// tests override it to inject a yes/no decision without terminal I/O. A plain
@@ -47,6 +50,8 @@ func init() {
 		"name of the [[ship]] entry that drives the restore (required)")
 	snapshotRestoreCmd.Flags().BoolVarP(&snapshotRestoreYes, "yes", "y", false,
 		"skip the destructive-restore confirmation prompt")
+	snapshotRestoreCmd.Flags().BoolVar(&snapshotRestoreDryRun, "dry-run", false,
+		"print the destructive restore actions without performing them")
 	_ = snapshotRestoreCmd.MarkFlagRequired("target")
 	_ = snapshotRestoreCmd.MarkFlagRequired("ship")
 	snapshotCmd.AddCommand(snapshotRestoreCmd)
@@ -68,6 +73,15 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 	if !ok {
 		logger.Error("snapshot restore: no ship entry named %q", snapshotRestoreShip)
 		osExit(1)
+		return
+	}
+
+	if snapshotRestoreDryRun {
+		// 008 R2.3: preview only — the ship is resolved (an unknown --ship still
+		// failed above), but nothing runs: no snapshot.Restore, no subprocess,
+		// and the confirm gate is never consulted.
+		output.PrintInfo("dry-run: would restore snapshot %s into %s via ship %q (%s)",
+			id, snapshotRestoreTarget, ship.Name, ship.Type)
 		return
 	}
 

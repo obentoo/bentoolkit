@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +17,9 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/version"
 )
 
-// Notifier reports a completed run. Story 004 ships only the no-op default; real
-// backends (desktop, email) arrive in story 005 (R7.3, AD9).
+// Notifier reports a completed run (R7.3, AD9). Story 004 shipped only the no-op
+// default; story 005 added the ntfy/healthchecks/webhook drivers and story 008 the
+// email driver, all composed behind multiNotifier by newNotifier.
 type Notifier interface {
 	Notify(ctx context.Context, res RunResult) error
 }
@@ -29,11 +33,11 @@ func (noopNotifier) Notify(_ context.Context, _ RunResult) error { return nil }
 var _ Notifier = noopNotifier{}
 
 // newNotifier composes the notifier for cfg: it builds one driver per populated
-// NotifyConfig sub-table (ntfy, healthchecks, webhook, in that order) and fans them
-// out behind a single Notifier (R4.2). An empty config configures nothing and yields
-// the no-op default. The (Notifier, error) signature is final — NewManager depends on
-// it; it never returns a non-nil error today, but the error return is kept for
-// signature stability.
+// NotifyConfig sub-table (ntfy, healthchecks, webhook, email, in that order) and fans
+// them out behind a single Notifier (R4.2). An empty config configures nothing and
+// yields the no-op default. The (Notifier, error) signature is final — NewManager
+// depends on it; it never returns a non-nil error today, but the error return is kept
+// for signature stability.
 func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	var notifiers []Notifier
 	if cfg.Ntfy.URL != "" {
@@ -44,6 +48,9 @@ func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	}
 	if cfg.Webhook.URL != "" {
 		notifiers = append(notifiers, webhookNotifier{url: cfg.Webhook.URL, headers: cfg.Webhook.Headers})
+	}
+	if len(cfg.Email.To) > 0 {
+		notifiers = append(notifiers, emailNotifier{cfg: cfg.Email, runner: defaultRunner()})
 	}
 
 	if len(notifiers) == 0 {
@@ -321,3 +328,83 @@ func (m multiNotifier) Start(ctx context.Context) error {
 }
 
 var _ Notifier = multiNotifier{}
+
+// --- 008 T1.1 email driver ---
+
+// smtpSendMail is the injectable SMTP transport seam. It defaults to stdlib
+// smtp.SendMail and is overridable in tests so the email driver runs without a
+// real SMTP server (008 R1.1, A1) — the net/smtp analogue of the execCommand
+// seam in runner.go.
+var smtpSendMail = smtp.SendMail
+
+// emailNotifier sends the run summary by email (008 R1). With SMTP.Host unset the
+// message is piped to the local sendmail binary through the Runner seam; a
+// populated SMTP.Host switches to direct SMTP via smtpSendMail (008 R1.1, A1).
+// SMTP credentials never appear in argv, error strings, or logs (008 R1.3).
+type emailNotifier struct {
+	cfg    EmailConfig
+	runner Runner
+}
+
+// Notify composes the RFC-822-style message for res and hands it to the selected
+// transport: SMTP when SMTP.Host is set, local sendmail otherwise (008 R1.1).
+func (n emailNotifier) Notify(ctx context.Context, res RunResult) error {
+	msg := n.message(res)
+	if n.cfg.SMTP.Host != "" {
+		return n.sendSMTP(msg)
+	}
+	return n.sendSendmail(ctx, msg)
+}
+
+// message builds the full RFC-822-style message: To/From/Subject headers, a blank
+// line, then the shared summarizeRun body (008 R1.1). The Subject reflects the
+// outcome (succeeded / FAILED) consistent with the other drivers. Multiple
+// recipients are joined with ", " in the To header; the same list doubles as the
+// SMTP envelope. Lines end in bare \n — the Unix convention sendmail expects, and
+// net/smtp's data writer normalizes \n to \r\n on the wire.
+func (n emailNotifier) message(res RunResult) []byte {
+	subject := "Snapshot run succeeded"
+	if res.Failed() {
+		subject = "Snapshot run FAILED"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "To: %s\n", strings.Join(n.cfg.To, ", "))
+	fmt.Fprintf(&b, "From: %s\n", n.cfg.From)
+	fmt.Fprintf(&b, "Subject: %s\n", subject)
+	b.WriteString("\n")
+	b.WriteString(summarizeRun(res))
+	b.WriteString("\n")
+	return []byte(b.String())
+}
+
+// sendSendmail pipes msg to the local sendmail binary via the Runner seam
+// (008 R1.1, A1). The single -t flag tells sendmail to read the recipients from
+// the message headers; the message travels on stdin, never in argv.
+func (n emailNotifier) sendSendmail(ctx context.Context, msg []byte) error {
+	if _, err := n.runner.Run(ctx, "sendmail", []string{"-t"}, msg); err != nil {
+		return fmt.Errorf("email notify: %w", err)
+	}
+	return nil
+}
+
+// sendSMTP sends msg via stdlib net/smtp through the smtpSendMail seam (008 R1.1).
+// PLAIN auth is enabled only when both User and Password are configured (nil auth
+// otherwise); the credentials live only in the smtp.Auth value and are never
+// interpolated into an error or log line (008 R1.3).
+func (n emailNotifier) sendSMTP(msg []byte) error {
+	var auth smtp.Auth
+	if n.cfg.SMTP.User != "" && n.cfg.SMTP.Password != "" {
+		auth = smtp.PlainAuth("", n.cfg.SMTP.User, n.cfg.SMTP.Password, n.cfg.SMTP.Host)
+	}
+
+	addr := net.JoinHostPort(n.cfg.SMTP.Host, strconv.Itoa(n.cfg.SMTP.Port))
+	if err := smtpSendMail(addr, auth, n.cfg.From, n.cfg.To, msg); err != nil {
+		// The password lives only in the auth value; never let it reach an
+		// error string (008 R1.3).
+		return fmt.Errorf("email notify: %w", err)
+	}
+	return nil
+}
+
+var _ Notifier = emailNotifier{}

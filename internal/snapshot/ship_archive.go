@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -336,6 +337,67 @@ func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 			warnLogf("snapshot: ship %q: rclone deletefile %q failed: %v", a.Name(), d.Name, err)
 		}
 	}
+}
+
+// PruneRemoteOnDemand applies the GFS retention policy to the rclone remote for
+// a user-invoked `snapshot prune` (008 R3.1). The mechanics mirror the post-ship
+// pruneRemote — the all-zero-retention short-circuit, `rclone lsjson`, the pure
+// gfsSelect, `rclone deletefile` per out-of-policy object — with two deliberate
+// differences:
+//
+//   - The active-parent guard comes from the parent store, not a just-uploaded
+//     snapshot: every recorded lineage head for this ship across the configured
+//     subvolumes is protected (R4.2), because the remote holds objects from all
+//     subvolumes and deleting any recorded head would break that subvolume's
+//     next incremental `-p` reference. A subvolume with no recorded parent (the
+//     normal first-run state) simply contributes nothing to protect; a store
+//     READ error aborts before any deletion.
+//   - Failures are RETURNED, never swallowed: the post-ship prune is best-effort
+//     housekeeping after a successful backup, but a manual prune is the user's
+//     primary action, so a lsjson/parse/deletefile error must surface as a
+//     failed stage in the RunResult (Manager.Prune). deletefile errors are
+//     accumulated with errors.Join so one bad object does not block pruning the
+//     rest.
+func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []string) error {
+	if a.retention.Hourly == 0 && a.retention.Daily == 0 &&
+		a.retention.Weekly == 0 && a.retention.Monthly == 0 {
+		return nil // no GFS policy configured → keep everything, skip listing entirely.
+	}
+
+	// Collect the objects to spare: each subvolume's recorded active parent for
+	// THIS ship is the base its next incremental send references with `-p` (R4.2).
+	protected := make(map[string]bool, len(subvolumes))
+	for _, sv := range subvolumes {
+		parent, ok, err := a.parents.Last(sv, a.Name())
+		if err != nil {
+			return err
+		}
+		if ok {
+			protected[archiveObjectName(parent)] = true
+		}
+	}
+
+	out, err := a.run.Run(ctx, "rclone", []string{"lsjson", a.remote}, nil)
+	if err != nil {
+		return fmt.Errorf("rclone lsjson %s: %w", a.remote, err)
+	}
+	var objs []rcloneObject
+	if err := json.Unmarshal(out, &objs); err != nil {
+		return fmt.Errorf("parse rclone lsjson output for %s: %w", a.remote, err)
+	}
+
+	_, del := gfsSelect(objs, a.retention)
+
+	var errs []error
+	for _, d := range del {
+		if protected[d.Name] {
+			continue // R4.2: an active parent is a future incremental base; spare it.
+		}
+		if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", a.remote + "/" + d.Name}, nil); err != nil {
+			errs = append(errs, fmt.Errorf("rclone deletefile %s: %w", d.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // runPipe runs stages sequentially through run, feeding each stage's stdout as the

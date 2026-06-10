@@ -12,6 +12,9 @@ import (
 var (
 	// snapshotRollbackYes is --yes/-y: skip the destructive-rollback confirm prompt.
 	snapshotRollbackYes bool
+	// snapshotRollbackDryRun is --dry-run: print the destructive action without
+	// performing it — no subprocess and no confirm prompt (008 R2.3).
+	snapshotRollbackDryRun bool
 	// snapshotRollbackConfirm is the confirm seam. nil (the default) makes
 	// snapshot.Rollback fall back to its own stdin y/N prompt (defaultConfirmFunc);
 	// tests override it to inject a yes/no decision without terminal I/O. A plain
@@ -36,6 +39,8 @@ reboot — and prompts for confirmation unless --yes is given.`,
 func init() {
 	snapshotRollbackCmd.Flags().BoolVarP(&snapshotRollbackYes, "yes", "y", false,
 		"skip the destructive-rollback confirmation prompt")
+	snapshotRollbackCmd.Flags().BoolVar(&snapshotRollbackDryRun, "dry-run", false,
+		"print the destructive rollback action without performing it")
 	snapshotCmd.AddCommand(snapshotRollbackCmd)
 }
 
@@ -48,6 +53,13 @@ func runSnapshotRollback(cmd *cobra.Command, args []string) {
 	if err != nil {
 		logger.Error("snapshot rollback: %v", err)
 		osExit(1)
+		return
+	}
+
+	if snapshotRollbackDryRun {
+		// 008 R2.3: preview only — nothing runs: no snapshot.Rollback, no
+		// subprocess, and the confirm gate is never consulted.
+		output.PrintInfo("dry-run: would run snapper rollback to snapshot %s — the system boots from it on next reboot", id)
 		return
 	}
 

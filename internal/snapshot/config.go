@@ -82,15 +82,17 @@ type ShipConfig struct {
 	Compress string `toml:"compress,omitempty"`
 }
 
-// NotifyConfig selects and configures notification backends (story 005). On filters
-// which run outcomes notify — a subset of {"success", "failure"}; an empty On means
-// failure only (see shouldNotify). Each sub-table, when populated, activates one
-// driver; the configured drivers fan out behind the Notifier interface (R4).
+// NotifyConfig selects and configures notification backends (story 005; email added
+// in story 008). On filters which run outcomes notify — a subset of {"success",
+// "failure"}; an empty On means failure only (see shouldNotify). Each sub-table, when
+// populated, activates one driver; the configured drivers fan out behind the Notifier
+// interface (R4).
 type NotifyConfig struct {
 	On           []string           `toml:"on,omitempty"`
 	Ntfy         NtfyConfig         `toml:"ntfy,omitempty"`
 	Healthchecks HealthchecksConfig `toml:"healthchecks,omitempty"`
 	Webhook      WebhookConfig      `toml:"webhook,omitempty"`
+	Email        EmailConfig        `toml:"email,omitempty"`
 }
 
 // NtfyConfig configures the ntfy driver (R1). URL is the topic URL; Token, when set,
@@ -114,6 +116,27 @@ type HealthchecksConfig struct {
 type WebhookConfig struct {
 	URL     string            `toml:"url,omitempty"`
 	Headers map[string]string `toml:"headers,omitempty"`
+}
+
+// EmailConfig configures the email driver (008 R1). A non-empty To activates the
+// driver; From is the sender header. With SMTP.Host unset the message is piped to
+// the local sendmail binary; setting SMTP.Host switches the transport to direct
+// SMTP via stdlib net/smtp (008 R1.1, A1).
+type EmailConfig struct {
+	To   []string   `toml:"to,omitempty"`
+	From string     `toml:"from,omitempty"`
+	SMTP SMTPConfig `toml:"smtp,omitempty"`
+}
+
+// SMTPConfig is the optional SMTP transport of the email driver (008 R1.1). Host
+// selects SMTP over local sendmail and is joined with Port as host:port. User and
+// Password, when both set, enable PLAIN auth; the password is never placed in
+// argv, error strings, or logs (008 R1.3).
+type SMTPConfig struct {
+	Host     string `toml:"host,omitempty"`
+	Port     int    `toml:"port,omitempty"`
+	User     string `toml:"user,omitempty"`
+	Password string `toml:"password,omitempty"`
 }
 
 // shouldNotify reports whether a run with the given outcome should notify, given

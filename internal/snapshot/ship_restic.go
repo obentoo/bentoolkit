@@ -2,9 +2,12 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // mounter mounts a snapshot read-only and returns the mount path plus a
@@ -79,6 +82,41 @@ func (r *resticShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, er
 		Delegated: false,
 		Note:      "restic backup",
 	}, nil
+}
+
+// resticSnapshotJSON mirrors the fields consumed from `restic snapshots --json`
+// (008 R5.2): the short id, creation time, and backed-up paths of one snapshot.
+// restic marshals times as RFC 3339, which time.Time decodes natively.
+type resticSnapshotJSON struct {
+	ShortID string    `json:"short_id"`
+	Time    time.Time `json:"time"`
+	Paths   []string  `json:"paths"`
+}
+
+// ListRemote enumerates the repository's snapshots via
+// `restic --repo X --password-file Y snapshots --json` (008 R5.2). The argv is
+// the shared repo locator (repoFlags — non-secret paths/URLs, R6.1) plus the
+// read-only `snapshots --json` query; the JSON array maps to Snapshot values
+// (ID = short_id, CreatedAt = time, Subvolume = the backed-up paths).
+func (r *resticShipper) ListRemote(ctx context.Context) ([]Snapshot, error) {
+	args := append(r.repoFlags(), "snapshots", "--json")
+	out, err := r.run.Run(ctx, "restic", args, nil)
+	if err != nil {
+		return nil, fmt.Errorf("restic snapshots: %w", err)
+	}
+	var raw []resticSnapshotJSON
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse restic snapshots: %w", err)
+	}
+	snaps := make([]Snapshot, 0, len(raw))
+	for _, s := range raw {
+		snaps = append(snaps, Snapshot{
+			ID:        s.ShortID,
+			Subvolume: strings.Join(s.Paths, ","),
+			CreatedAt: s.Time,
+		})
+	}
+	return snaps, nil
 }
 
 // repoFlags returns the repository locator flags shared by backup and forget.
@@ -175,8 +213,10 @@ func (m *transientMounter) Mount(ctx context.Context, snap Snapshot) (string, fu
 	return dir, cleanup, nil
 }
 
-// Compile-time assertions: transientMounter is a mounter, resticShipper a Shipper.
+// Compile-time assertions: transientMounter is a mounter; resticShipper is a
+// Shipper and contributes to `list --remote` (008 R5.2).
 var (
-	_ mounter = (*transientMounter)(nil)
-	_ Shipper = (*resticShipper)(nil)
+	_ mounter      = (*transientMounter)(nil)
+	_ Shipper      = (*resticShipper)(nil)
+	_ remoteLister = (*resticShipper)(nil)
 )

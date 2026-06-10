@@ -7,7 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// snapshotApplyDryRun stubs the full --dry-run coverage (completed in story 008).
+// snapshotApplyDryRun is --dry-run: print the apply plan (engine configs +
+// systemd units) without writing anything and without calling systemctl
+// (008 R2.1).
 var snapshotApplyDryRun bool
 
 var snapshotApplyCmd = &cobra.Command{
@@ -20,7 +22,7 @@ enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
 
 func init() {
 	snapshotApplyCmd.Flags().BoolVar(&snapshotApplyDryRun, "dry-run", false,
-		"print the actions without applying them (stub; full coverage in story 008)")
+		"print the configs and systemd units that would be written, without writing them")
 	snapshotCmd.AddCommand(snapshotApplyCmd)
 }
 
@@ -33,7 +35,9 @@ func runSnapshotApply(cmd *cobra.Command, _ []string) {
 	}
 
 	if snapshotApplyDryRun {
-		output.PrintInfo("dry-run: would render %s and install the systemd units", snapshot.BtrbkConfPath(path))
+		// 008 R2.1: preview only — print the engine config(s) and systemd units
+		// the apply would write, with zero writes and zero subprocesses.
+		printDryRunPlan(snapshot.PlanApply(cfg, path))
 		return
 	}
 

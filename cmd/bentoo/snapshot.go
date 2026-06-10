@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,16 @@ func loadSnapshotConfig() (*snapshot.Config, string, error) {
 		return nil, path, err
 	}
 	return cfg, path, nil
+}
+
+// printDryRunPlan prints a dry-run plan, one "dry-run: would ..." info line per
+// plan entry (008 R2). The plan lines come from the snapshot package's pure
+// helpers (PlanApply/PlanRun/PlanPrune); this is the single place the cmd layer
+// frames them as a dry-run preview, so the wording stays consistent across verbs.
+func printDryRunPlan(lines []string) {
+	for _, line := range lines {
+		output.PrintInfo("dry-run: %s", line)
+	}
 }
 
 // loadSnapshotConfigLenient resolves and loads the config without validation, for

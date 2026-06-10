@@ -8,11 +8,14 @@ import (
 	"time"
 )
 
-// Stage names recorded in a RunResult, in pipeline order.
+// Stage names recorded in a RunResult, in pipeline order. StageGFS is the
+// on-demand remote GFS sweep of `snapshot prune` (008 R3.1) — distinct from
+// StagePrune (the engine-local prune) so a RunResult tells the two apart.
 const (
 	StageCreate = "create"
 	StagePrune  = "prune"
 	StageShip   = "ship"
+	StageGFS    = "gfs"
 )
 
 // Stage outcome statuses.

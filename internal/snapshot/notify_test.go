@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/smtp"
 	"strings"
 	"testing"
 )
@@ -426,6 +428,148 @@ func TestMultiNotifier_StartFansOutToStartersOnly(t *testing.T) {
 	}
 	if hc.startCalls != 1 {
 		t.Errorf("starter.Start calls = %d, want 1 (R2.3 wiring)", hc.startCalls)
+	}
+}
+
+// --- 008 T1.1 email driver ---
+
+func TestEmailNotifier_SendmailReceivesSummary(t *testing.T) {
+	runner := &MockRunner{}
+	n := emailNotifier{
+		cfg:    EmailConfig{To: []string{"ops@example.com"}, From: "bentoo@example.com"},
+		runner: runner,
+	}
+
+	if err := n.Notify(context.Background(), failRun()); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if len(runner.Calls) != 1 {
+		t.Fatalf("sendmail calls = %d, want 1 (008 R1.1)", len(runner.Calls))
+	}
+
+	call := runner.Calls[0]
+	if call.Name != "sendmail" {
+		t.Errorf("transport command = %q, want sendmail (008 R1.1, A1)", call.Name)
+	}
+	if len(call.Args) == 0 || call.Args[0] != "-t" {
+		t.Errorf("sendmail args = %v, want [-t] (recipients read from message headers)", call.Args)
+	}
+
+	msg := string(call.Stdin)
+	for _, want := range []string{"To: ops@example.com", "From: bentoo@example.com", "Subject:", "FAILED"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("sendmail stdin missing %q (008 R1.1):\n%s", want, msg)
+		}
+	}
+}
+
+func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
+	var gotAddr, gotFrom string
+	var gotTo []string
+	var gotMsg []byte
+	var gotAuth smtp.Auth
+	orig := smtpSendMail
+	t.Cleanup(func() { smtpSendMail = orig })
+	smtpSendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+		gotAddr, gotAuth, gotFrom, gotTo, gotMsg = addr, a, from, to, msg
+		return nil
+	}
+
+	n := emailNotifier{
+		cfg: EmailConfig{
+			To:   []string{"ops@example.com"},
+			From: "bentoo@example.com",
+			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 587, User: "u", Password: "p"},
+		},
+	}
+	if err := n.Notify(context.Background(), okRun()); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	if gotAddr != "smtp.example.com:587" {
+		t.Errorf("SMTP addr = %q, want smtp.example.com:587 (008 R1.1)", gotAddr)
+	}
+	if gotAuth == nil {
+		t.Error("SMTP auth is nil with user/password configured (008 R1.1)")
+	}
+	if gotFrom != "bentoo@example.com" || len(gotTo) != 1 || gotTo[0] != "ops@example.com" {
+		t.Errorf("from=%q to=%v, want the configured from/to (008 R1.1)", gotFrom, gotTo)
+	}
+	if !strings.Contains(string(gotMsg), "succeeded") {
+		t.Errorf("SMTP message missing the run summary (008 R1.1):\n%s", gotMsg)
+	}
+}
+
+func TestEmailNotifier_OnFilterRespected(t *testing.T) {
+	runner := &MockRunner{}
+	em := emailNotifier{cfg: EmailConfig{To: []string{"ops@example.com"}, From: "b@e.com"}, runner: runner}
+	m := multiNotifier{notifiers: []Notifier{em}, on: []string{"failure"}}
+
+	// Success outcome with on=failure-only must not invoke the email transport
+	// (008 R1.2 — email plugs into the composite notifier and respects notify.on).
+	if err := m.Notify(context.Background(), okRun()); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if len(runner.Calls) != 0 {
+		t.Errorf("sendmail called %d time(s) for a filtered outcome, want 0 (008 R1.2)", len(runner.Calls))
+	}
+}
+
+func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
+	const secret = "smtp_supersecret_pw"
+
+	var warned strings.Builder
+	origWarn := warnLogf
+	t.Cleanup(func() { warnLogf = origWarn })
+	warnLogf = func(format string, args ...interface{}) { fmt.Fprintf(&warned, format, args...) }
+
+	orig := smtpSendMail
+	t.Cleanup(func() { smtpSendMail = orig })
+	smtpSendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+		return errors.New("535 authentication failed")
+	}
+
+	em := emailNotifier{
+		cfg: EmailConfig{
+			To:   []string{"ops@example.com"},
+			From: "b@e.com",
+			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 25, User: "u", Password: secret},
+		},
+	}
+	err := em.Notify(context.Background(), failRun())
+	if err == nil {
+		t.Fatal("want an error when the SMTP transport fails")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error string leaked the SMTP password (008 R1.3): %v", err)
+	}
+
+	// The composite notifier downgrades the error to a warning — that warning
+	// must not leak the password either (008 R1.3).
+	m := multiNotifier{notifiers: []Notifier{em}, on: []string{"failure"}}
+	_ = m.Notify(context.Background(), failRun())
+	if strings.Contains(warned.String(), secret) {
+		t.Errorf("warning log leaked the SMTP password (008 R1.3): %s", warned.String())
+	}
+}
+
+func TestNewNotifier_BuildsEmailDriver(t *testing.T) {
+	cfg := NotifyConfig{
+		Email: EmailConfig{To: []string{"ops@example.com"}, From: "b@e.com"},
+	}
+	n, err := newNotifier(cfg)
+	if err != nil {
+		t.Fatalf("newNotifier: %v", err)
+	}
+	m, ok := n.(multiNotifier)
+	if !ok {
+		t.Fatalf("newNotifier returned %T, want multiNotifier", n)
+	}
+	if len(m.notifiers) != 1 {
+		t.Errorf("built %d notifiers, want 1 (email configured, 008 R1.2)", len(m.notifiers))
+	}
+	if _, ok := m.notifiers[0].(emailNotifier); !ok {
+		t.Errorf("notifier[0] is %T, want emailNotifier (008 R1.1)", m.notifiers[0])
 	}
 }
 

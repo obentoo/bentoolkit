@@ -117,6 +117,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     story text said `app-admin/snapper`; the real Gentoo category is
     `app-backup`). grub-btrfs / boot-into-snapshot integration is documented as
     a follow-up, not implemented here.
+- **Snapshot packaging & polish (Phase 5).** Closes the snapshot feature:
+  every backend optional at install time, every verb previewable, retention
+  on demand, and full visibility into timers and remotes.
+  - **Email notifier** (`internal/snapshot/notify.go`, `[notify.email]`):
+    sends the run summary to the configured recipients via local `sendmail -t`
+    (through the `Runner` seam) or direct SMTP (stdlib `net/smtp`, PLAIN auth
+    when `user`/`password` are set, addr via `net.JoinHostPort`). Plugs into
+    the composite notifier, respects `notify.on`, and the SMTP password is
+    **never** placed in argv, logs, or error strings.
+  - **Full `--dry-run` coverage** (`internal/snapshot/plan.go`,
+    `cmd/bentoo/snapshot_*.go`): `apply` prints the engine config and systemd
+    units it would write; `run` prints the engine → prune → ship pipeline it
+    would execute; `restore`/`rollback`/`prune` print the destructive actions —
+    all with **zero side effects** (no subprocess, no writes, no state, no
+    confirm prompt), asserted by spy-based tests per verb. Plan lines come from
+    pure helpers (`PlanApply`/`PlanRun`/`PlanPrune`).
+  - **`bentoo snapshot prune [--ship NAME] [--dry-run]`**
+    (`cmd/bentoo/snapshot_prune.go`, `Manager.Prune`): applies
+    `[engine.retention]` on demand — engine-native prune (`btrbk clean` /
+    `snapper cleanup timeline`) per subvolume plus the archive GFS per archive
+    ship (`PruneRemoteOnDemand`, guarding every recorded active parent from the
+    parent store). `--ship` scopes to one destination (engine prune skipped);
+    unlike the best-effort post-ship GFS, a manual prune **reports failures**.
+  - **Status & list polish** (`cmd/bentoo/snapshot_status.go`,
+    `snapshot_list.go`): `status` now breaks the last `RunResult` down **per
+    stage** (stage, subvolume, target, outcome, error), reports the timer's
+    **next scheduled run** via `systemctl list-timers`, and free space
+    (snapshot dir + local ship targets). `list --remote` merges **btrbk target
+    backups** (`btrbk list backups`) and **restic snapshots**
+    (`restic snapshots --json`) into the listing, clearly labeled, with
+    per-source lenient errors (`Manager.ListRemote` → `[]RemoteGroup`).
+  - **Ebuild USE flags** (bentoo overlay, `app-portage/bentoolkit`):
+    `IUSE="btrbk snapper restic rclone systemd"` mapping each optional backend
+    to its conditional `RDEPEND` (`app-backup/btrbk`, `app-backup/snapper`,
+    `app-backup/restic`, `net-misc/rclone`, `sys-apps/systemd`) — mirroring
+    `internal/snapshot/detect.go` exactly — plus `metadata.xml` flag
+    descriptions (including the previously undescribed `browser` flag).
+    pkgcheck-clean; `detect` keeps naming the exact missing package at runtime.
 
 ## [0.3.21] - 2026-06-05
 

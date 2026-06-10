@@ -65,6 +65,27 @@ func (e *btrbkEngine) List(ctx context.Context, subvolume string) ([]Snapshot, e
 	return parseBtrbkList(out, subvolume), nil
 }
 
+// ListRemote lists the backups present on the btrbk targets via
+// `btrbk -c <conf> list backups` (008 R5.2). Targets are the ssh ship entries
+// folded into btrbk.conf (AD5), so target-side enumeration belongs to this
+// engine; with no targets configured there is no remote and no subprocess runs.
+// Rows are parsed with the same first-field-absolute-path logic as List. The
+// Subvolume attribution is left empty: a target holds backups of every
+// subvolume and btrbk's first column is the backup path, not the source.
+func (e *btrbkEngine) ListRemote(ctx context.Context) ([]Snapshot, error) {
+	if len(e.targets) == 0 {
+		return nil, nil
+	}
+	out, err := e.run.Run(ctx, "btrbk", []string{"-c", e.confPath, "list", "backups"}, nil)
+	if err != nil {
+		return nil, errors.Join(ErrEngineFailed, fmt.Errorf("btrbk list backups: %w", err))
+	}
+	return parseBtrbkList(out, ""), nil
+}
+
+// Compile-time assertion: the btrbk engine contributes to `list --remote`.
+var _ remoteLister = (*btrbkEngine)(nil)
+
 // parseBtrbkList extracts snapshots from `btrbk list` output. Each data line's
 // first whitespace field is the snapshot path; header/blank lines and any field
 // that is not an absolute path are skipped. The snapshot ID is the path's base

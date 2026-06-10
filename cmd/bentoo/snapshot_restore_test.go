@@ -244,6 +244,47 @@ func TestRunSnapshotRestore_MissingTargetErrors(t *testing.T) {
 	}
 }
 
+// TestRunSnapshotRestore_DryRunPrintsActionsZeroExec: 008 R2.3 — restore
+// --dry-run prints the destructive actions (id, target, ship) without running
+// any subprocess and without consulting the confirm gate.
+func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
+	stubBinariesOnPath(t, "btrbk", "restic")
+	writeSnapshotConfig(t, restoreTOMLRestic)
+	mr := &snapshot.MockRunner{}
+	snapshotRunner = mr
+
+	setRestoreFlags(t, "/mnt/r", "cloud", false)
+	confirmCalled := false
+	origConfirm := snapshotRestoreConfirm
+	snapshotRestoreConfirm = func(string) bool { confirmCalled = true; return false }
+	t.Cleanup(func() { snapshotRestoreConfirm = origConfirm })
+
+	origDryRun := snapshotRestoreDryRun
+	snapshotRestoreDryRun = true
+	t.Cleanup(func() { snapshotRestoreDryRun = origDryRun })
+
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runSnapshotRestore(snapshotRestoreCmd, []string{"9921"}) })
+	})
+	if exited {
+		t.Fatalf("restore --dry-run exited with code %d, want success", code)
+	}
+
+	if len(mr.Calls) != 0 {
+		t.Errorf("restore --dry-run ran %d subprocess(es), want 0 (008 R2.3): %+v", len(mr.Calls), mr.Calls)
+	}
+	if confirmCalled {
+		t.Error("restore --dry-run consulted the confirm gate; a preview must not prompt (008 R2.3)")
+	}
+	for _, want := range []string{"9921", "/mnt/r", "cloud"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("restore --dry-run actions missing %q (008 R2.3); output:\n%s", want, out)
+		}
+	}
+}
+
 // Compile-time check: the package-level confirm seam is a plain func(string) bool
 // assignable to snapshot.RestoreOptions.Confirm (the unexported confirmFunc type).
 var _ = func() {

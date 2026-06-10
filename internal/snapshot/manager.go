@@ -121,6 +121,98 @@ func (m *Manager) Run(ctx context.Context) (RunResult, error) {
 	return result, nil
 }
 
+// remotePruner is implemented by shippers that can apply the GFS retention
+// policy to their remote on demand (008 R3.1). Manager.Prune type-asserts it to
+// select which shippers participate — currently only the archive shipper: ssh
+// retention is delegated to btrbk's target_preserve, and restic prunes via
+// forget --prune during Send, so neither has an out-of-band remote prune.
+type remotePruner interface {
+	PruneRemoteOnDemand(ctx context.Context, subvolumes []string) error
+}
+
+// Prune applies the [engine.retention] policy on demand (008 R3.1): the
+// engine-native prune per subvolume (btrbk clean / snapper cleanup timeline),
+// then the remote GFS sweep per archive ship. A non-empty shipScope narrows the
+// prune to the named destination ONLY (008 R3.2): the engine-local prune is
+// skipped entirely and just that ship's remote is pruned; an unknown scope
+// returns an error before any stage runs. UNLIKE the post-ship best-effort
+// prune inside Send, every failure here is recorded as a failed stage — a
+// user-invoked prune must not hide errors — and, mirroring Run, a failed
+// result yields a non-nil error. A cancelled context short-circuits before the
+// next stage (R8.1).
+func (m *Manager) Prune(ctx context.Context, shipScope string) (RunResult, error) {
+	start := time.Now()
+	result := RunResult{StartedAt: start}
+
+	if shipScope != "" && !m.hasShipper(shipScope) {
+		err := fmt.Errorf("no ship entry named %q", shipScope)
+		result.Err = err.Error()
+		result.Duration = time.Since(start)
+		return result, err
+	}
+
+	// Engine-local prune per subvolume — skipped entirely under --ship scoping.
+	if shipScope == "" {
+		for _, sv := range m.subvolumes {
+			if err := ctx.Err(); err != nil {
+				result.Err = err.Error()
+				result.Duration = time.Since(start)
+				return result, err
+			}
+			prune := m.timeStage(sv, StagePrune, "", func() error {
+				_, err := m.engine.Prune(ctx, sv, m.retention)
+				return err
+			})
+			result.AddStage(prune)
+			if prune.Status == StatusFailed && result.Err == "" {
+				result.Err = fmt.Sprintf("prune %s failed: %s", sv, prune.Err)
+			}
+		}
+	}
+
+	// Remote GFS per in-scope archive ship. The stage's Subvolume is empty by
+	// design: the remote holds objects from all subvolumes, so the sweep is not
+	// attributable to one.
+	for _, shipper := range m.shippers {
+		if shipScope != "" && shipper.Name() != shipScope {
+			continue
+		}
+		rp, ok := shipper.(remotePruner)
+		if !ok {
+			continue // ssh/restic: no on-demand remote prune (see remotePruner).
+		}
+		if err := ctx.Err(); err != nil {
+			result.Err = err.Error()
+			result.Duration = time.Since(start)
+			return result, err
+		}
+		gfs := m.timeStage("", StageGFS, shipper.Name(), func() error {
+			return rp.PruneRemoteOnDemand(ctx, m.subvolumes)
+		})
+		result.AddStage(gfs)
+		if gfs.Status == StatusFailed && result.Err == "" {
+			result.Err = fmt.Sprintf("gfs %s failed: %s", shipper.Name(), gfs.Err)
+		}
+	}
+
+	result.Duration = time.Since(start)
+	if result.Failed() {
+		return result, fmt.Errorf("snapshot prune completed with failures")
+	}
+	return result, nil
+}
+
+// hasShipper reports whether a configured shipper answers to name (Shipper.Name,
+// which falls back to the ship type when unnamed).
+func (m *Manager) hasShipper(name string) bool {
+	for _, sh := range m.shippers {
+		if sh.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
 // timeStage runs fn, timing it and mapping its error to a StageResult.
 func (m *Manager) timeStage(subvolume, stage, target string, fn func() error) StageResult {
 	started := time.Now()
