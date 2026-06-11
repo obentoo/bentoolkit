@@ -285,9 +285,6 @@ func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 	}
 }
 
-// Compile-time check: the package-level confirm seam is a plain func(string) bool
-// assignable to snapshot.RestoreOptions.Confirm (the unexported confirmFunc type).
-var _ = func() {
-	var f func(string) bool = snapshotRestoreConfirm
-	_ = snapshot.RestoreOptions{Confirm: f}
-}
+// Compile-time check: the package-level confirm seam is assignable to
+// snapshot.RestoreOptions.Confirm (the unexported confirmFunc type).
+var _ = snapshot.RestoreOptions{Confirm: snapshotRestoreConfirm}

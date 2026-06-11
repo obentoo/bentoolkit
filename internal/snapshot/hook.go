@@ -107,7 +107,7 @@ func InstallEmergeHook() error {
 	script := emergeHookScriptPath()
 	// MkdirAll with the conventional /etc perms first; atomicWrite's internal
 	// MkdirAll (0o750) then no-ops on the already-existing directories.
-	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil { //nolint:gosec // /etc dir must be world-traversable (portage build user sources the hook)
 		return fmt.Errorf("create hook dir %s: %w", filepath.Dir(script), err)
 	}
 	if err := atomicWrite(script, []byte(emergeHookScript), 0o644); err != nil {

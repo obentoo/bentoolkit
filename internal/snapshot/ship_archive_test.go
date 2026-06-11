@@ -76,7 +76,7 @@ func TestArchivePipeStages_Incremental(t *testing.T) {
 	if pathIdx < 0 {
 		t.Fatalf("stage1 args %v missing snapshot path %q", s1.args, snap.Path)
 	}
-	if !(pIdx < pathIdx) {
+	if pIdx >= pathIdx {
 		t.Errorf("stage1 args %v: -p (at %d) must come before snap path (at %d)", s1.args, pIdx, pathIdx)
 	}
 }
@@ -270,7 +270,7 @@ func TestArchiveShipper_Send_Incremental(t *testing.T) {
 		t.Fatalf("stage1 args %v: want -p %q (the parent PATH, not its ID)", s1.Args, parent.Path)
 	}
 	pathIdx := slices.Index(s1.Args, snap.Path)
-	if !(pIdx < pathIdx) {
+	if pIdx >= pathIdx {
 		t.Errorf("stage1 args %v: -p (at %d) must precede snap path (at %d)", s1.Args, pIdx, pathIdx)
 	}
 

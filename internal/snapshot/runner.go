@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // execCommand is the injectable context-aware command factory. It defaults to
@@ -30,6 +31,10 @@ type execRunner struct{}
 // wrap it (e.g. with ErrEngineFailed) without losing the diagnostic.
 func (execRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
 	cmd := execCommand(ctx, name, args...)
+	// On cancel, CommandContext kills only the direct child; orphaned
+	// grandchildren (shell pipelines) can keep the stdout/stderr pipes open and
+	// stall Wait. WaitDelay forces the pipes closed shortly after cancel.
+	cmd.WaitDelay = time.Second
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

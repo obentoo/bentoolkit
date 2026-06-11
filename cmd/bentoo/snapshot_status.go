@@ -128,7 +128,10 @@ func availableSpace(path string) (uint64, bool) {
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, false
 	}
-	return st.Bavail * uint64(st.Bsize), true
+	if st.Bsize <= 0 {
+		return 0, false
+	}
+	return st.Bavail * uint64(st.Bsize), true // #nosec G115 -- Bsize validated non-negative above
 }
 
 // humanBytes renders a byte count in binary units (KiB/MiB/GiB/TiB).

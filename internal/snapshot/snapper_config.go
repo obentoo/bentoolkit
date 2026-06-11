@@ -108,7 +108,7 @@ func renderSnapperConfig(cfg EngineConfig, subvolume string, existing []byte) []
 // is idempotent: re-running over an unchanged config produces identical bytes
 // (R2.2).
 func ensureSnapperConfigs(cfg *Config) error {
-	if err := os.MkdirAll(snapperConfigsDir, 0o755); err != nil {
+	if err := os.MkdirAll(snapperConfigsDir, 0o755); err != nil { //nolint:gosec // matches snapper's own /etc/snapper/configs permissions
 		return fmt.Errorf("create snapper configs dir %s: %w", snapperConfigsDir, err)
 	}
 	for _, sv := range cfg.Engine.Subvolumes {

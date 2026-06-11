@@ -143,7 +143,7 @@ func TestRestore_Archive_ReceivesInOrder(t *testing.T) {
 
 	// Stage chaining within a link: zstd stdin == rclone cat stdout ("CAT"),
 	// btrfs receive stdin == zstd stdout ("PLAIN"). Find the first link's stages.
-	var catIdx int = -1
+	catIdx := -1
 	for i, c := range mr.Calls {
 		if c.Name == "rclone" && len(c.Args) > 0 && c.Args[0] == "cat" {
 			catIdx = i
