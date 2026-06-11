@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-11
+
+### Fixed
+- **Runner: cancelled subprocesses can no longer stall `Wait`.** `execRunner`
+  now sets `WaitDelay`, so when a context is cancelled and an orphaned
+  grandchild (e.g. a shell pipeline stage) keeps the stdout/stderr pipes open,
+  the wait is forced closed after 1s instead of blocking until the orphan
+  exits. Surfaced by `TestExecRunner_ContextCancelKills` flaking on CI.
+- **`snapshot status`: guard against negative `Bsize`** from `statfs` before
+  the `uint64` conversion in the available-space calculation (gosec G115).
+- Lint cleanups across snapshot tests (inferred types, De Morgan, simplified
+  compile-time check) and justified `//nolint:gosec` on the conventional
+  0755 `/etc` directories (portage build user must traverse `bashrc.d`).
+
+### Changed
+- Bumped indirect dependencies: `golang.org/x/net` v0.56.0, `golang.org/x/sys`
+  v0.46.0, `golang.org/x/text` v0.38.0, `cascadia` v1.3.4, `golang-set` v2.9.0,
+  `go-json-experiment/json` (2026-06 snapshot). `govulncheck` (default and
+  `playwright,chromedp` tags) reports no known vulnerabilities.
+
 ## [0.4.0] - 2026-06-10
 
 ### Added
@@ -895,7 +915,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/obentoo/bentoolkit/compare/v0.3.21...v0.4.0
 [0.3.21]: https://github.com/obentoo/bentoolkit/compare/v0.3.20...v0.3.21
 [0.3.20]: https://github.com/obentoo/bentoolkit/compare/v0.3.19...v0.3.20
