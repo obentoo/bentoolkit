@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-10
+
 ### Added
 - **`bentoo snapshot` command group (Phase 1).** Declarative btrfs snapshot
   management driven by a single `snapshot.toml`, orchestrating mature tools
@@ -893,7 +895,10 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.3.19...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/obentoo/bentoolkit/compare/v0.3.21...v0.4.0
+[0.3.21]: https://github.com/obentoo/bentoolkit/compare/v0.3.20...v0.3.21
+[0.3.20]: https://github.com/obentoo/bentoolkit/compare/v0.3.19...v0.3.20
 [0.3.19]: https://github.com/obentoo/bentoolkit/compare/v0.3.18...v0.3.19
 [0.3.18]: https://github.com/obentoo/bentoolkit/compare/v0.3.17...v0.3.18
 [0.3.0]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...v0.3.0
