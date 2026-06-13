@@ -1,0 +1,10 @@
+# gitleaks config — extends the built-in ruleset with project allowlists.
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Env var NAMES used in tests (e.g. BENTOO_T13_CLAUDE_KEY), not secret values"
+regexes = [
+  '''BENTOO_T13_[A-Z0-9_]+_KEY''',
+]
