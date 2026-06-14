@@ -278,6 +278,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// ::gentoo), reusing the checker --check already built. Read-only and
 	// best-effort — it never changes the check's exit code.
 	if autoupdateRevivable {
+		//nolint:contextcheck // ctx is already injected into checker via autoupdate.WithContext above
 		reportRevivableOrphans(checker, cfg, githubToken)
 	}
 
