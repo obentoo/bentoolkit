@@ -65,6 +65,10 @@ type PendingUpdate struct {
 	// track="commit". When non-empty, Apply substitutes the old commit variable
 	// (EGIT_COMMIT / GIT_COMMIT / COMMIT) in the copied ebuild with this hash.
 	CommitHash string `json:"commit_hash,omitempty"`
+	// AuxValue is the free-text value captured via the package's aux_pattern
+	// (e.g. "esr-bb24"). When non-empty, Apply substitutes the aux_var assignment
+	// in the copied ebuild with this value.
+	AuxValue string `json:"aux_value,omitempty"`
 	// Status is the current status of this update
 	Status UpdateStatus `json:"status"`
 	// DetectedAt is when this update was first detected
