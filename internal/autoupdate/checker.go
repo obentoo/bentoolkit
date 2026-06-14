@@ -708,8 +708,11 @@ type ReviveCandidate struct {
 // so without this report a package removed from the overlay would never surface
 // an upstream bump that ::gentoo has not yet caught up to.
 //
-// Only disabled entries are considered; an enabled entry is handled by the
-// regular check flow and is skipped here. Every network call is best-effort:
+// A candidate must be BOTH disabled AND actually absent from the overlay (a
+// true orphan): an enabled entry is handled by the regular check flow, and a
+// disabled entry whose ebuild is still present is not revivable from a ::gentoo
+// base (that would seed an older version over the newer one already shipped).
+// Every network call is best-effort:
 // a package whose upstream fetch fails, or that ::gentoo does not carry at all
 // (provider.ErrNotFound), is silently skipped rather than aborting the whole
 // scan. Other provider errors are surfaced as soft notes in the returned error
@@ -743,6 +746,20 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 			continue
 		}
 		category, pkgName := parts[0], parts[1]
+
+		// A genuinely orphaned package has NO ebuild left in the overlay. A
+		// disabled entry whose ebuild is still present (e.g. a manually-disabled
+		// package, or one re-added after being auto-disabled) is NOT revivable:
+		// seeding an older ::gentoo base over the newer overlay ebuild would be
+		// wrong. Only ErrNoEbuildFound — the package actually removed — qualifies.
+		// Checking the overlay first also skips the upstream/gentoo lookups for
+		// packages that are still present.
+		if _, err := c.getCurrentVersion(pkg); err == nil {
+			continue // ebuild still present: disabled but not orphaned, skip silently
+		} else if !errors.Is(err, ErrNoEbuildFound) {
+			notes = append(notes, fmt.Sprintf("%s: overlay lookup failed: %v", pkg, err))
+			continue
+		}
 
 		// Best-effort upstream fetch; a failure just drops this package from the
 		// report (it remains disabled, exactly as before).

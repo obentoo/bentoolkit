@@ -96,6 +96,40 @@ func TestFindRevivableOrphans_UpstreamNewer(t *testing.T) {
 	}
 }
 
+// TestFindRevivableOrphans_PresentSkipped guards the smoke-test finding: a
+// disabled entry whose ebuild is STILL PRESENT in the overlay (e.g. a manually
+// disabled package) must NOT be reported, even when upstream is newer than
+// ::gentoo. Reviving it would seed an older ::gentoo base over the newer overlay
+// ebuild. Only genuinely-removed (ErrNoEbuildFound) packages are revivable.
+func TestFindRevivableOrphans_PresentSkipped(t *testing.T) {
+	pkg := "dev-util/present"
+	srv := jsonVersionServer(t, "2.0.0") // upstream newer than both gentoo and overlay
+
+	overlayDir := t.TempDir()
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(t.TempDir()),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
+		}}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	// Disabled, but the ebuild is still in the overlay (and ahead of gentoo).
+	createTestEbuild(t, overlayDir, pkg, "1.6.0")
+	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.5.0"}}}
+
+	got, err := checker.FindRevivableOrphans(prov)
+	if err != nil {
+		t.Fatalf("FindRevivableOrphans: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 candidates (disabled but present), got %d: %+v", len(got), got)
+	}
+}
+
 // TestFindRevivableOrphans_UpstreamNotNewer covers case (b): a disabled package
 // whose upstream (1.5.0) equals the highest gentoo version is NOT a candidate
 // (upstream must be strictly newer).

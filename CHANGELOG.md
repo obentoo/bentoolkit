@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`autoupdate --revive-list` no longer flags disabled-but-present packages.**
+  `FindRevivableOrphans` only checked `enabled = false`, so a package that was
+  manually disabled (or re-added after being auto-disabled) while its ebuild was
+  still in the overlay was wrongly reported as revivable — and reviving it would
+  seed an older `::gentoo` base over the newer overlay ebuild. The scan now also
+  requires the package to be genuinely absent (`ErrNoEbuildFound`); checking the
+  overlay first also skips the upstream/`::gentoo` lookups for present packages.
+  Found by a smoke test against a real overlay (`dev-util/claude-code`, disabled
+  but present at a version ahead of `::gentoo`).
+
 ## [0.5.0] - 2026-06-14
 
 ### Added
