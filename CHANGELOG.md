@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`autoupdate --check --revivable`.** A new flag that folds the revivable-orphan
+  scan into a normal `--check` run: after checking the active packages, it also
+  reports disabled-and-absent entries whose upstream is newer than `::gentoo`
+  (the same data `--revive-list` produces), reusing the check's fetch pass. It is
+  read-only and best-effort — a `::gentoo` provider failure only warns and never
+  changes the check's exit code. `--revive-list` (standalone) and `--revive`
+  (the mutating action) are unchanged.
+
+### Changed
+- **Env-based GitHub token resolution is now consistent.** `GH_TOKEN` is honoured
+  everywhere as a fallback to `GITHUB_TOKEN` (the gh CLI convention) — previously
+  only the autoupdate checker honoured `GH_TOKEN`, while `overlay compare` and the
+  revive `::gentoo` provider read `GITHUB_TOKEN` only. A single
+  `github.TokenFromEnv()` is now the shared source of truth.
+- **Config load warns on unknown keys.** `gopkg.in/yaml.v3` silently drops keys
+  that map to no struct field (e.g. a `token` placed under `overlay:` instead of
+  `github:`), leaving requests unauthenticated with no hint. A strict re-decode
+  now surfaces such mistakes as a stderr warning; it never blocks loading.
+
 ## [0.5.1] - 2026-06-14
 
 ### Fixed

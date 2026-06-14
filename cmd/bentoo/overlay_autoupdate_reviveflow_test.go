@@ -17,7 +17,7 @@ import (
 func withFakeGentoo(t *testing.T, fake provider.Provider) {
 	t.Helper()
 	orig := resolveGentooProviderFn
-	resolveGentooProviderFn = func(*config.Config, string) provider.Provider { return fake }
+	resolveGentooProviderFn = func(*config.Config, string) (provider.Provider, error) { return fake, nil }
 	t.Cleanup(func() { resolveGentooProviderFn = orig })
 }
 
@@ -92,5 +92,41 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 	})
 	if code != -1 {
 		t.Fatalf("runReviveList exit code = %d, want no exit", code)
+	}
+}
+
+// TestRunCheck_Revivable drives the --check --revivable add-on: a --check over a
+// config whose only entry is a disabled+absent orphan (upstream newer than the
+// fake ::gentoo) runs the normal check and then the revivable-orphan report in
+// the same pass. The check has no active packages, so it exits 0; the report
+// runs via the injected fake provider (no network for the gentoo lookup).
+func TestRunCheck_Revivable(t *testing.T) {
+	pinReviveConcurrency(t)
+	origOnly, origForce, origRevivable := autoupdateOnly, autoupdateForce, autoupdateRevivable
+	autoupdateOnly, autoupdateForce, autoupdateRevivable = "", true, true
+	t.Cleanup(func() {
+		autoupdateOnly, autoupdateForce, autoupdateRevivable = origOnly, origForce, origRevivable
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("version 2.0.0\n"))
+	}))
+	defer server.Close()
+
+	overlay := setupTestOverlay(t)
+	configDir := t.TempDir()
+	writeReviveRegexConfig(t, overlay, "dev-test/foo", server.URL) // disabled, no ebuild -> orphan
+
+	fake := &fakeReviveProvider{
+		versions: map[string][]string{"dev-test/foo": {"1.0.0"}}, // gentoo older than upstream
+	}
+	withFakeGentoo(t, fake)
+
+	code := withExitIntercept(func() {
+		runCheck(context.Background(), overlay, configDir, nil, 0,
+			&config.Config{}, config.LLMConfig{}, "")
+	})
+	if code != 0 {
+		t.Fatalf("runCheck --revivable exit code = %d, want 0 (no active packages, report is read-only)", code)
 	}
 }

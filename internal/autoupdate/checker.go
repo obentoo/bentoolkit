@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -467,16 +468,11 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	return checker, nil
 }
 
-// githubTokenFromEnv returns a GitHub API token from the environment, honouring
-// GITHUB_TOKEN first and falling back to GH_TOKEN (the gh CLI convention).
-// Surrounding whitespace is trimmed; an empty result means "no token".
+// githubTokenFromEnv returns a GitHub API token from the environment. It
+// delegates to github.TokenFromEnv (the shared GITHUB_TOKEN > GH_TOKEN
+// resolution) so the checker and the cmd-layer provider wiring stay consistent.
 func githubTokenFromEnv() string {
-	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
-		if tok := strings.TrimSpace(os.Getenv(name)); tok != "" {
-			return tok
-		}
-	}
-	return ""
+	return github.TokenFromEnv()
 }
 
 // CheckPackage checks a single package for updates.
