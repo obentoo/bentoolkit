@@ -6,6 +6,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    # Release quarantine: ignore versions newer than 7 days, dodging
+    # the window when most hijacked/yanked packages are caught.
+    cooldown:
+      default-days: 7
     groups:
       golang-x:
         patterns:
@@ -21,6 +25,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     labels:
       - "dependencies"
       - "ci"
