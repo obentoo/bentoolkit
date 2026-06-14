@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Generic auxiliary-variable substitution in autoupdate.** Two new optional
+  `packages.toml` fields, `aux_var` and `aux_pattern`, keep a free-text ebuild
+  variable (e.g. `MY_BUILD="esr-bb24"`) in sync with upstream. Unlike the
+  existing `commit_sha_path` path — which is locked to `parser="json"` and a
+  40-hex SHA — this is parser-agnostic (regex/html) and carries any captured
+  value. `aux_pattern` (one capture group) is applied to the same response body
+  used for version detection; the captured value is stored on the pending update
+  and substituted into the copied ebuild at apply time, before the manifest
+  step. Unblocks recurring manual bumps such as `mail-client/betterbird-bin`
+  (`MY_BUILD` esr-bbNN tag) and nomachine's build-numbered `MY_P`. The two
+  fields are mutually required and `aux_pattern` must compile.
+
 ## [0.4.2] - 2026-06-13
 
 ### Security

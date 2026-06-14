@@ -323,6 +323,23 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		}
 	}
 
+	// For packages declaring aux_var/aux_pattern, substitute the free-text
+	// auxiliary variable (e.g. MY_BUILD="esr-bbNN") captured at check time. Like
+	// the commit-hash step above, this must precede the manifest step because the
+	// variable typically feeds the SRC_URI. The aux_var name comes from config;
+	// the value travels in the pending update.
+	if update.AuxValue != "" {
+		dstEbuild := a.EbuildPath(pkg, newVersion)
+		varName := a.configs[pkg].AuxVar
+		if err := substituteAuxVar(dstEbuild, varName, update.AuxValue); err != nil {
+			result.Error = fmt.Errorf("failed to substitute aux var: %w", err)
+			if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			}
+			return result, result.Error
+		}
+	}
+
 	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any
 	// later step (manifest, status update, compile) fails, that file is an
 	// orphan and must be removed so the overlay is not left half-applied.
@@ -566,6 +583,35 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 
 	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
 		return fmt.Errorf("failed to write ebuild after hash substitution: %w", err)
+	}
+
+	return nil
+}
+
+// substituteAuxVar replaces the quoted assignment of a free-text auxiliary
+// variable in an ebuild (e.g. MY_BUILD="esr-bb23" → MY_BUILD="esr-bb24"). It is
+// the sibling of substituteCommitHash but without the 40-hex-SHA lock, so it can
+// carry any value captured from a regex/html upstream page. The variable name is
+// anchored exactly (QuoteMeta) and the value is bounded by the surrounding double
+// quotes, so the substitution cannot bleed past the assignment.
+func substituteAuxVar(ebuildPath, varName, newValue string) error {
+	if varName == "" {
+		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
+	}
+	content, err := os.ReadFile(ebuildPath)
+	if err != nil {
+		return fmt.Errorf("failed to read ebuild for aux var substitution: %w", err)
+	}
+
+	re := regexp.MustCompile(`(` + regexp.QuoteMeta(varName) + `=")[^"]*(")`)
+	updated := re.ReplaceAllString(string(content), "${1}"+newValue+"${2}")
+
+	if updated == string(content) {
+		return fmt.Errorf("aux var %q not found in %s", varName, ebuildPath)
+	}
+
+	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+		return fmt.Errorf("failed to write ebuild after aux var substitution: %w", err)
 	}
 
 	return nil

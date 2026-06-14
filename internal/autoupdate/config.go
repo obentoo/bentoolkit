@@ -137,6 +137,20 @@ type PackageConfig struct {
 	// replaces the old one in the generated ebuild version (e.g.
 	// "1.4.352_p20260515" → "1.4.353_p<today>" when the match is "1.4.353").
 	CommitVersionPattern string `toml:"commit_version_pattern,omitempty"`
+
+	// AuxVar is the name of a free-text auxiliary variable in the ebuild to keep
+	// in sync with upstream (e.g. "MY_BUILD" for betterbird's esr-bbNN tag, or
+	// "MY_P" for nomachine's build-numbered tarball). Unlike commit_sha_path it
+	// is parser-agnostic (regex/html welcome) and the captured value is free text,
+	// not a 40-hex SHA. Set together with aux_pattern. The captured value is
+	// stored in PendingUpdate.AuxValue and substituted into the copied ebuild at
+	// apply time.
+	AuxVar string `toml:"aux_var,omitempty"`
+
+	// AuxPattern is a regex with one capture group, applied to the SAME response
+	// body used for version detection, that yields the value for AuxVar. Set
+	// together with aux_var.
+	AuxPattern string `toml:"aux_pattern,omitempty"`
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -426,6 +440,19 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	}
 	if cfg.CommitMessagePath != "" && cfg.Track != "commit" {
 		warnLogf("package %s: commit_message_path is set but track!=\"commit\"; it will be ignored", pkg)
+	}
+
+	// Validate the auxiliary free-text variable substitution. Both fields are
+	// mutually required, and aux_pattern must compile. Deliberately parser-
+	// agnostic: this is the whole point of the feature (regex/html sources whose
+	// auxiliary value is not a SHA, e.g. betterbird's MY_BUILD / nomachine's MY_P).
+	if (cfg.AuxVar != "") != (cfg.AuxPattern != "") {
+		return fmt.Errorf("package %s: aux_var and aux_pattern must be set together", pkg)
+	}
+	if cfg.AuxPattern != "" {
+		if _, err := regexp.Compile(cfg.AuxPattern); err != nil {
+			return fmt.Errorf("package %s: invalid aux_pattern %q: %w", pkg, cfg.AuxPattern, err)
+		}
 	}
 
 	// Validate fallback configuration if present

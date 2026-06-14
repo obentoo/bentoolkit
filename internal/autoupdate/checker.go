@@ -536,7 +536,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		result.NotComparable = !comparable
 
 		if result.HasUpdate {
-			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA); err != nil {
+			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, ""); err != nil {
 				if result.Error == nil {
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -558,7 +558,8 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			// Add to pending if update available
 			if result.HasUpdate {
 				sha := c.resolveAuxSHA(&pkgConfig, result)
-				if err := c.addToPending(pkg, currentVersion, cachedVersion, sha); err != nil {
+				aux := c.resolveAuxValue(&pkgConfig, result)
+				if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -590,7 +591,8 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	// Add to pending if update available
 	if result.HasUpdate {
 		sha := c.resolveAuxSHA(&pkgConfig, result)
-		if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha); err != nil {
+		aux := c.resolveAuxValue(&pkgConfig, result)
+		if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -767,14 +769,17 @@ func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparab
 }
 
 // addToPending adds an update to the pending list.
-// commitHash is non-empty only for track="commit" packages; it is stored in
-// PendingUpdate so the applier can substitute the hash in the copied ebuild.
-func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash string) error {
+// commitHash is non-empty only for track="commit" packages or version-tracked
+// packages with commit_sha_path; auxValue is non-empty only for packages with
+// aux_var/aux_pattern. Both are stored in PendingUpdate so the applier can
+// substitute the corresponding variable in the copied ebuild.
+func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxValue string) error {
 	update := PendingUpdate{
 		Package:        pkg,
 		CurrentVersion: currentVersion,
 		NewVersion:     newVersion,
 		CommitHash:     commitHash,
+		AuxValue:       auxValue,
 		Status:         StatusPending,
 		DetectedAt:     time.Now(),
 	}
@@ -808,6 +813,42 @@ func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string 
 		return ""
 	}
 	return strings.TrimSpace(sha)
+}
+
+// resolveAuxValue captures the free-text auxiliary value for a package that
+// declares aux_var/aux_pattern (e.g. betterbird's MY_BUILD="esr-bbNN" or
+// nomachine's MY_P build number). It returns "" when no aux_pattern is
+// configured. Unlike resolveAuxSHA it is parser-agnostic: the aux_pattern regex
+// is applied directly to the fetched body, so regex/html sources work. A
+// fetch/parse failure is recorded on result.Error but does not abort the
+// update; the apply simply skips the substitution.
+func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) string {
+	if cfg.AuxPattern == "" {
+		return ""
+	}
+	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	if err != nil {
+		if result.Error == nil {
+			result.Error = fmt.Errorf("failed to fetch aux value: %w", err)
+		}
+		return ""
+	}
+	re, err := regexp.Compile(cfg.AuxPattern)
+	if err != nil {
+		// Should not happen: validateConfig already compiled it. Defensive.
+		if result.Error == nil {
+			result.Error = fmt.Errorf("invalid aux_pattern %q: %w", cfg.AuxPattern, err)
+		}
+		return ""
+	}
+	m := re.FindSubmatch(content)
+	if len(m) < 2 {
+		if result.Error == nil {
+			result.Error = fmt.Errorf("aux_pattern %q matched no capture group in %s", cfg.AuxPattern, cfg.URL)
+		}
+		return ""
+	}
+	return strings.TrimSpace(string(m[1]))
 }
 
 // extractSnapshotBase strips the _p<date> or _pre<date> suffix from a Gentoo
