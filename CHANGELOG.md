@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-13
+
+### Security
+- **Secret scanning in CI.** A new `secrets` job runs the `gitleaks` binary
+  (`go install …@v8.30.1`, pinned) over the full git history on every push and
+  PR. It uses the binary rather than `gitleaks-action`, which requires a
+  `GITLEAKS_LICENSE` for GitHub organizations. A `.gitleaks.toml` adds a narrow
+  allowlist for the `BENTOO_T13_*_KEY` env-var *names* used in tests (they are
+  names, not secret values), and `.pre-commit-config.yaml` wires the same hook
+  for local scans. The full history scanned clean (0 real leaks across 179
+  commits).
+- **Dependabot release cooldown.** Both ecosystems (`gomod`, `github-actions`)
+  now quarantine freshly published versions for 7 days before opening a bump PR,
+  dodging the window when most hijacked/yanked packages are caught.
+- **Workflow static analysis (zizmor).** A new `workflow-lint` job runs
+  `zizmor` (pinned `1.25.2` via `pipx`) against the workflows to catch template
+  injection, excessive permissions, credential persistence, and unpinned
+  actions.
+- **CI least-privilege hardening.** Added a top-level `permissions:
+  contents: read` (every job now starts with the minimum) and
+  `persist-credentials: false` on every `actions/checkout` (the `GITHUB_TOKEN`
+  is no longer left behind in `.git/config`) — the findings zizmor surfaced.
+
+### Changed
+- **`govulncheck` hardened in CI.** Pinned to `@v1.3.0` (was `@latest`) and the
+  fragile `grep`-based output parsing was replaced with a `jq` filter over the
+  `-json` stream that fails the job only on *reachable* third-party
+  vulnerabilities (`stdlib`/`toolchain` issues, which need a Go update rather
+  than a dependency bump, are excluded).
+- **Bumped indirect dependency `go.mongodb.org/mongo-driver`** v1.17.4 →
+  v1.17.9. `go mod tidy` also pruned orphan `go.sum` entries and reclassified
+  `github.com/spf13/pflag` from indirect to direct (it is imported directly).
+  `govulncheck ./...` reports no known vulnerabilities; all direct dependencies
+  are current.
+
 ## [0.4.1] - 2026-06-11
 
 ### Fixed
@@ -915,7 +950,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/obentoo/bentoolkit/compare/v0.3.21...v0.4.0
 [0.3.21]: https://github.com/obentoo/bentoolkit/compare/v0.3.20...v0.3.21
