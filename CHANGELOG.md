@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-14
+
 ### Added
 - **Generic auxiliary-variable substitution in autoupdate.** Two new optional
   `packages.toml` fields, `aux_var` and `aux_pattern`, keep a free-text ebuild
