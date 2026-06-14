@@ -102,6 +102,26 @@ func (p *GitCloneProvider) GetPackageVersions(category, pkg string) ([]string, e
 	return p.scanLocalPackage(pkgPath, pkg)
 }
 
+// LocalPackagePath returns the on-disk directory for a package in the cloned
+// repository, ensuring the repo is present/up-to-date first. It returns
+// ErrNotFound if the package directory does not exist.
+func (p *GitCloneProvider) LocalPackagePath(category, pkg string) (string, error) {
+	// Ensure repo is cloned/updated
+	if err := p.ensureRepo(); err != nil {
+		return "", err
+	}
+
+	pkgPath := filepath.Join(p.LocalPath, category, pkg)
+	if _, err := os.Stat(pkgPath); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+
+	return pkgPath, nil
+}
+
 // ensureRepo ensures the repository is cloned and up-to-date
 func (p *GitCloneProvider) ensureRepo() error {
 	if p.repoExists() {
@@ -255,3 +275,6 @@ func (p *GitCloneProvider) RemoveCache() error {
 
 // Ensure GitCloneProvider implements Provider interface
 var _ Provider = (*GitCloneProvider)(nil)
+
+// Ensure GitCloneProvider implements PackageDirProvider interface
+var _ PackageDirProvider = (*GitCloneProvider)(nil)

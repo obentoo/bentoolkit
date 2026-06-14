@@ -35,6 +35,13 @@ type Provider interface {
 	Close() error
 }
 
+// PackageDirProvider is implemented by providers that expose an on-disk package
+// directory (git clone / local tree). The revive flow type-asserts to it; an
+// API-only provider simply does not implement it, which is the "API-only" signal.
+type PackageDirProvider interface {
+	LocalPackagePath(category, pkg string) (string, error)
+}
+
 // RepositoryInfo contains information about a repository to compare against
 type RepositoryInfo struct {
 	Name     string // e.g., "gentoo", "guru", "my-overlay"

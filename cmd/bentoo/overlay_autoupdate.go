@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
+	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +37,12 @@ var (
 	autoupdateConcurrency int
 	// autoupdateOnly restricts --check to a package type ("bin" or "source")
 	autoupdateOnly string
+	// autoupdateReviveList reports disabled (orphaned) entries whose upstream
+	// version is newer than ::gentoo — a passive scan, no mutation
+	autoupdateReviveList bool
+	// autoupdateRevive performs the full revive for a single "category/pkg" or
+	// "all": seed from ::gentoo, re-enable, then bump to the upstream version
+	autoupdateRevive string
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -51,7 +60,10 @@ Examples:
   bentoo overlay autoupdate --apply net-misc/foo Apply update for package
   bentoo overlay autoupdate --apply all          Apply all pending updates
   bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test
-  bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild`,
+  bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild
+  bentoo overlay autoupdate --revive-list         List orphaned packages with a newer upstream
+  bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump
+  bentoo overlay autoupdate --revive all          Revive every revivable orphan`,
 	Run: runAutoupdate,
 }
 
@@ -64,6 +76,8 @@ func init() {
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
 	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
+	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
+	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -130,6 +144,10 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		runApplyAll(runCtx, overlayPath, configDir)
 	case autoupdateApply != "":
 		runApply(runCtx, overlayPath, configDir, autoupdateApply)
+	case autoupdateReviveList:
+		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
+	case autoupdateRevive != "":
+		runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
@@ -572,4 +590,400 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
 		}
 	}
+}
+
+// reviveCheckerOptions builds the Checker option set shared by the revive modes.
+// It mirrors runCheck's option set exactly — config dir, context, concurrency,
+// type filter, GitHub token, tuned rate limiter, cache TTL, and the same LLM
+// wiring (with the err-first nil guard) — so a revived package's upstream check
+// behaves identically to a normal --check. The progress callback is omitted: the
+// revive paths drive single-package CheckPackage calls, which never fire it.
+func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string) []autoupdate.CheckerOption {
+	opts := []autoupdate.CheckerOption{
+		autoupdate.WithConfigDir(configDir),
+		autoupdate.WithContext(ctx),
+		autoupdate.WithConcurrency(autoupdateConcurrency),
+		autoupdate.WithTypeFilter(autoupdateOnly),
+		autoupdate.WithGitHubToken(githubToken),
+		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+	}
+	if cacheTTL > 0 {
+		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
+	}
+
+	// Same err-first nil guard as runCheck: a failed constructor boxes a nil
+	// concrete pointer into a NON-nil interface, so wire WithLLMClient only on
+	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
+	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
+	// "unused llm_prompt" Warn when a provider was requested.
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
+	} else if p != nil {
+		opts = append(opts, autoupdate.WithLLMClient(p))
+	}
+	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
+
+	return opts
+}
+
+// resolveGentooProviderFn is the seam runReviveList/runRevive use to obtain the
+// ::gentoo provider. It points at resolveGentooProvider in production and is
+// overridable in tests so the revive flows can be driven with an on-disk fake
+// (a provider.PackageDirProvider) instead of resolving the real gentoo repo.
+var resolveGentooProviderFn = resolveGentooProvider
+
+// resolveGentooProvider resolves the ::gentoo provider the revive flow seeds
+// from, mirroring `overlay compare`'s provider-resolution idiom: config repos >
+// registry, with the token precedence flag(absent here) > GITHUB_TOKEN env >
+// config. forceClone is false so a user-configured local/clone repo is honoured;
+// an API-only gentoo simply will not implement provider.PackageDirProvider, which
+// runRevive detects and reports. The caller owns prov.Close(). On any resolution
+// failure it logs and exits non-zero, returning nil.
+func resolveGentooProvider(cfg *config.Config, githubToken string) provider.Provider {
+	configRepos := convertConfigRepos(cfg)
+
+	registry, err := provider.NewRepositoryRegistry()
+	if err != nil {
+		logger.Error("Failed to initialize repository registry: %v", err)
+		osExit(1)
+		return nil
+	}
+
+	repoInfo, err := provider.ResolveRepository("gentoo", configRepos, registry)
+	if err != nil {
+		logger.Error("Repository 'gentoo' not found: %v", err)
+		osExit(1)
+		return nil
+	}
+
+	// Token precedence mirrors `overlay compare`: env > config (no per-command
+	// flag on this path). Only fill an empty repo token so a config-specific one
+	// wins.
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		token = githubToken
+	}
+	if token != "" && repoInfo.Token == "" {
+		repoInfo.Token = token
+	}
+
+	// forceClone=false: honour the resolved provider type so a configured local
+	// git repo (the path that yields PackageDirProvider) is used as-is.
+	prov, err := provider.NewProvider(repoInfo, false)
+	if err != nil {
+		logger.Error("Failed to create gentoo provider: %v", err)
+		osExit(1)
+		return nil
+	}
+	return prov
+}
+
+// runReviveList handles --revive-list: a passive report of disabled (orphaned)
+// packages.toml entries whose upstream release is strictly newer than the highest
+// version ::gentoo still carries. It mutates nothing — it only builds a Checker
+// (the same option set as --check) and the ::gentoo provider, then prints the
+// candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
+func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken)...)
+	if err != nil {
+		logger.Error("failed to initialize checker: %v", err)
+		osExit(1)
+		return
+	}
+
+	prov := resolveGentooProviderFn(cfg, githubToken)
+	if prov == nil {
+		return // resolveGentooProvider already logged and exited
+	}
+	defer prov.Close() //nolint:errcheck
+
+	// FindRevivableOrphans threads ctx into every upstream/gentoo lookup via the
+	// Checker (WithContext) and the provider. Soft per-package errors are returned
+	// alongside the candidates, so a partial scan still reports what it found.
+	candidates, err := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	if err != nil {
+		logger.Warn("revive scan completed with soft errors: %v", err)
+	}
+
+	displayReviveCandidates(candidates)
+}
+
+// displayReviveCandidates renders the revivable-orphan report as a fixed-width
+// PACKAGE | GENTOO | UPSTREAM table, reusing truncatePkgName for column
+// alignment (as `overlay compare` does). An empty set prints a "nothing to
+// revive" note instead of an empty table.
+func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
+	if len(candidates) == 0 {
+		output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
+		return
+	}
+
+	fmt.Println()
+	output.Header.Println("Revivable Orphans")
+	fmt.Println()
+
+	output.Dim.Printf("  %s %s %s\n",
+		truncatePkgName("PACKAGE", 40), truncatePkgName("GENTOO", 16), "UPSTREAM")
+	for _, c := range candidates {
+		output.Package.Printf("  %s ", truncatePkgName(c.Package, 40))
+		fmt.Printf("%s %s\n", truncatePkgName(c.GentooVersion, 16), c.UpstreamVersion)
+	}
+
+	fmt.Println()
+	output.Info.Printf("Found %d revivable orphan(s)\n", len(candidates))
+	output.Info.Println("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate")
+}
+
+// reviveOutcome records the result of reviving a single package so runRevive can
+// print an aggregate summary without aborting on the first failure.
+type reviveOutcome struct {
+	pkg    string
+	status string // "revived", "skipped", or "failed"
+	detail string // human-facing note (e.g. the apply error or skip reason)
+}
+
+// runRevive handles --revive <pkg|all>: it resurrects each target orphan by
+// seeding the current ::gentoo ebuild into the overlay, re-enabling the entry,
+// and bumping it to the upstream version via the normal CheckPackage+Apply flow.
+//
+// The ::gentoo provider must expose an on-disk package directory
+// (provider.PackageDirProvider); an API-only gentoo cannot seed a base ebuild, so
+// that case aborts ONCE up front with a clear, actionable error. Each package is
+// independent: a failure on one never aborts the others; outcomes are accumulated
+// and the process exits non-zero when any package failed.
+func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
+	prov := resolveGentooProviderFn(cfg, githubToken)
+	if prov == nil {
+		return // resolveGentooProvider already logged and exited
+	}
+	defer prov.Close() //nolint:errcheck
+
+	// The revive seed copies the ::gentoo package dir off disk; an API-only
+	// provider cannot do that. Detect it ONCE before the loop and bail with an
+	// actionable hint (mirrors `overlay compare`'s local-repo guidance).
+	pdp, ok := prov.(provider.PackageDirProvider)
+	if !ok {
+		logger.Error("the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.")
+		logger.Info("Configure a local gentoo repository in ~/.config/bentoo/config.yaml:")
+		logger.Info("  repositories:")
+		logger.Info("    gentoo-local:")
+		logger.Info("      provider: git")
+		logger.Info("      url: /var/db/repos/gentoo")
+		logger.Info("(or force a clone-backed provider so the package tree is available on disk)")
+		osExit(1)
+		return
+	}
+
+	// Build the initial Checker (shared option set) to resolve the target list.
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken)...)
+	if err != nil {
+		logger.Error("failed to initialize checker: %v", err)
+		osExit(1)
+		return
+	}
+
+	// Resolve the target package list: an explicit "category/pkg", or "all"
+	// (every candidate FindRevivableOrphans reports).
+	var targets []string
+	if target == "all" {
+		candidates, ferr := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+		if ferr != nil {
+			logger.Warn("revive scan completed with soft errors: %v", ferr)
+		}
+		if len(candidates) == 0 {
+			output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
+			return
+		}
+		for _, c := range candidates {
+			targets = append(targets, c.Package)
+		}
+	} else {
+		targets = []string{target}
+	}
+
+	// One shared pending list for the whole revive run. CheckPackage (which
+	// writes the pending entry) and applier.Apply (which reads it) run in the
+	// SAME process here — unlike the separate `--check` / `--apply` invocations
+	// that each reload pending.json from disk. PendingList.Get reads its in-memory
+	// map, so without a shared instance the applier (loaded before the check)
+	// would never see the freshly-written entry and Apply would fail with
+	// ErrPackageNotInPending. Injecting one instance into both makes the in-memory
+	// state the single source of truth.
+	pending, err := autoupdate.NewPendingList(configDir)
+	if err != nil {
+		logger.Error("failed to initialize pending list: %v", err)
+		osExit(1)
+		return
+	}
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir,
+		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPendingList(pending),
+	)
+	if err != nil {
+		logger.Error("failed to initialize applier: %v", err)
+		osExit(1)
+		return
+	}
+
+	outcomes := make([]reviveOutcome, 0, len(targets))
+	for _, pkg := range targets {
+		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, llmCfg, githubToken, prov, pdp, applier, pending))
+	}
+
+	failures := displayReviveSummary(outcomes)
+	if failures > 0 {
+		osExit(1)
+	}
+}
+
+// reviveOne performs the full revive for a single package and returns its
+// outcome. It never calls osExit: every failure is captured so the caller can
+// continue with the remaining targets and exit non-zero at the end.
+//
+// Steps (in order): locate the ::gentoo package dir, pick the highest ::gentoo
+// version, seed it into the overlay, re-enable the entry in packages.toml BEFORE
+// checking (so the checker won't skip it), CheckPackage(force=true) to populate
+// pending with the upstream version, then Apply (honouring --compile / --clean).
+func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
+	output.Info.Printf("Reviving %s...\n", pkg)
+
+	category, pkgName, ok := splitPackage(pkg)
+	if !ok {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("invalid package name %q (want category/package)", pkg)}
+	}
+
+	// On-disk ::gentoo package dir to seed from.
+	srcDir, err := pdp.LocalPackagePath(category, pkgName)
+	if err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo package dir lookup failed: %v", err)}
+	}
+
+	// Highest ::gentoo version is the base ebuild we copy in.
+	versions, err := prov.GetPackageVersions(category, pkgName)
+	if err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
+	}
+	gentooVersion := highestVersion(versions)
+	if gentooVersion == "" {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: "no comparable gentoo version found"}
+	}
+
+	// Seed the ::gentoo ebuild (+ metadata.xml / files/) into the overlay.
+	// SeedFromGentoo takes the full "category/package" (it splits internally).
+	if err := applier.SeedFromGentoo(pkg, srcDir, gentooVersion); err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("seed from gentoo failed: %v", err)}
+	}
+
+	// Re-enable the entry BEFORE checking: the checker skips disabled entries, so
+	// a still-disabled package would never produce a pending update.
+	if err := autoupdate.EnablePackagesInConfig(overlayPath, []string{pkg}); err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("re-enable in packages.toml failed: %v", err)}
+	}
+
+	// Build a FRESH Checker so it loads the now re-enabled packages.toml, then
+	// check the package (force=true to bypass cache) to populate the pending list
+	// with the upstream version (+ aux_var/commit values via the existing paths).
+	// It shares the applier's pending list so the entry CheckPackage writes is
+	// visible to Apply below (same in-memory map, same process).
+	checker, err := autoupdate.NewChecker(overlayPath,
+		append(reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken), autoupdate.WithPendingList(pending))...)
+	if err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
+	}
+	result, err := checker.CheckPackage(pkg, true) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	if err != nil {
+		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("check failed: %v", err)}
+	}
+	if !result.HasUpdate {
+		// Seeded base already equals upstream: nothing to bump. The base ebuild is
+		// in place and the entry re-enabled, so normal --check will track it going
+		// forward.
+		return reviveOutcome{pkg: pkg, status: "skipped", detail: fmt.Sprintf("gentoo %s already current with upstream %s", gentooVersion, result.UpstreamVersion)}
+	}
+
+	// Bump to the upstream version using the existing apply flow (honours
+	// --compile and --clean exactly as runApply does).
+	//nolint:contextcheck // ctx is propagated into Apply's spawned processes via WithApplierContext.
+	applyResult, err := applier.Apply(pkg, autoupdateCompile)
+	if err != nil {
+		detail := err.Error()
+		if applyResult != nil && applyResult.LogPath != "" {
+			detail = fmt.Sprintf("%v (log: %s)", err, applyResult.LogPath)
+		}
+		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
+	}
+	if applyResult != nil && applyResult.Obsolete {
+		return reviveOutcome{pkg: pkg, status: "skipped", detail: applyResult.ObsoleteReason}
+	}
+
+	return reviveOutcome{pkg: pkg, status: "revived", detail: fmt.Sprintf("%s → %s", gentooVersion, result.UpstreamVersion)}
+}
+
+// displayReviveSummary prints per-package revive outcomes followed by an
+// aggregate (revived / skipped / failed) and returns the failure count so the
+// caller can set the exit code.
+func displayReviveSummary(outcomes []reviveOutcome) int {
+	fmt.Println()
+	output.Header.Println("Revive Summary")
+	fmt.Println()
+
+	var revived, skipped, failed int
+	for _, o := range outcomes {
+		switch o.status {
+		case "revived":
+			revived++
+			output.Success.Printf("  ✓ %s: %s\n", o.pkg, o.detail)
+		case "skipped":
+			skipped++
+			output.Warning.Printf("  - %s: %s\n", o.pkg, o.detail)
+		default:
+			failed++
+			output.Error.Printf("  ✗ %s: %s\n", o.pkg, o.detail)
+		}
+	}
+
+	fmt.Println()
+	output.Success.Printf("  Revived: %d\n", revived)
+	if skipped > 0 {
+		output.Warning.Printf("  Skipped: %d\n", skipped)
+	}
+	if failed > 0 {
+		output.Error.Printf("  Failed:  %d\n", failed)
+	}
+	if revived > 0 {
+		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+	}
+
+	return failed
+}
+
+// splitPackage splits a "category/package" string, returning ok=false for any
+// value that is not exactly two non-empty segments. It mirrors the split+length
+// check the checker/applier helpers use.
+func splitPackage(pkg string) (category, name string, ok bool) {
+	parts := strings.Split(pkg, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// highestVersion returns the highest valid version from versions using the same
+// Gentoo-aware ordering the checker uses to pick the highest ebuild. Unparseable
+// entries are skipped; "" means no comparable version was found.
+func highestVersion(versions []string) string {
+	var best string
+	for _, v := range versions {
+		v = strings.TrimSpace(v)
+		if !ebuild.IsValidVersion(v) {
+			continue
+		}
+		if best == "" || ebuild.CompareVersions(v, best) > 0 {
+			best = v
+		}
+	}
+	return best
 }

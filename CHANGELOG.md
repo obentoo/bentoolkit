@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step. Unblocks recurring manual bumps such as `mail-client/betterbird-bin`
   (`MY_BUILD` esr-bbNN tag) and nomachine's build-numbered `MY_P`. The two
   fields are mutually required and `aux_pattern` must compile.
+- **Revive orphaned packages in autoupdate.** When a package is removed from the
+  overlay, the autoupdate checker disables its `packages.toml` entry; but upstream
+  can later move ahead of `::gentoo`, and a disabled entry is skipped forever, so
+  that bump is lost. Two new modes close the gap:
+  `bentoo overlay autoupdate --revive-list` is a passive report of disabled
+  entries whose upstream is strictly newer than the highest version `::gentoo`
+  still carries (no mutation); `--revive <pkg|all>` performs the full revive —
+  seed the current `::gentoo` ebuild (plus `metadata.xml` and `files/`) into the
+  overlay, re-enable the entry, and bump to the upstream version via the existing
+  check+apply flow (so `aux_var`/commit substitution and the manifest step come
+  for free). The `::gentoo` source is resolved exactly as `overlay compare` does
+  (config repos > registry, honouring a local/clone repo); an API-only `::gentoo`
+  cannot seed a base ebuild and aborts with an actionable hint to configure a
+  local gentoo repository. Each package is independent — one failure never aborts
+  the rest, and the run exits non-zero if any failed.
 
 ## [0.4.2] - 2026-06-13
 

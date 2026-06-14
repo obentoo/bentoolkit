@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
 // httpRateLimiter is the minimal surface fetchContent needs from a rate
@@ -684,6 +685,126 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 		}
 	}
 	return nil
+}
+
+// ReviveCandidate describes a disabled (orphaned) packages.toml entry whose
+// upstream release is strictly newer than the highest version ::gentoo still
+// carries. It is a passive report: FindRevivableOrphans never mutates the
+// config or the overlay, it only flags entries a later revive step could
+// resurrect.
+type ReviveCandidate struct {
+	// Package is the full package name (category/package).
+	Package string
+	// GentooVersion is the highest version found in ::gentoo for the package.
+	GentooVersion string
+	// UpstreamVersion is the version reported by the package's upstream source.
+	UpstreamVersion string
+}
+
+// FindRevivableOrphans scans the disabled entries in the config and reports
+// those an autoupdate could revive: the entry's upstream version is strictly
+// newer than the highest version ::gentoo still ships. The normal check path
+// skips disabled entries forever (CheckAll: `if !pkg.IsEnabled() { continue }`),
+// so without this report a package removed from the overlay would never surface
+// an upstream bump that ::gentoo has not yet caught up to.
+//
+// Only disabled entries are considered; an enabled entry is handled by the
+// regular check flow and is skipped here. Every network call is best-effort:
+// a package whose upstream fetch fails, or that ::gentoo does not carry at all
+// (provider.ErrNotFound), is silently skipped rather than aborting the whole
+// scan. Other provider errors are surfaced as soft notes in the returned error
+// without dropping the candidates gathered so far. The result is sorted by
+// package name for deterministic output.
+func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidate, error) {
+	// Iterate in sorted order so soft-error notes (and any debugging) are
+	// deterministic; the final slice is sorted again before return.
+	names := make([]string, 0, len(c.config.Packages))
+	for name := range c.config.Packages {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var (
+		candidates []ReviveCandidate
+		notes      []string
+	)
+	for _, pkg := range names {
+		cfg := c.config.Packages[pkg]
+		// Only orphaned (disabled) entries are revivable; enabled entries are
+		// handled by the normal check flow.
+		if cfg.IsEnabled() {
+			continue
+		}
+
+		// Split category/package the same way getCurrentVersion does.
+		parts := strings.Split(pkg, "/")
+		if len(parts) != 2 {
+			notes = append(notes, fmt.Sprintf("%s: invalid package name format", pkg))
+			continue
+		}
+		category, pkgName := parts[0], parts[1]
+
+		// Best-effort upstream fetch; a failure just drops this package from the
+		// report (it remains disabled, exactly as before).
+		upstream, err := c.fetchUpstreamVersion(pkg, &cfg)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s: upstream fetch failed: %v", pkg, err))
+			continue
+		}
+
+		// Highest version ::gentoo currently carries. A package ::gentoo does not
+		// have is simply not revivable from a gentoo base, so skip it silently.
+		versions, err := prov.GetPackageVersions(category, pkgName)
+		if err != nil {
+			if errors.Is(err, provider.ErrNotFound) {
+				continue
+			}
+			notes = append(notes, fmt.Sprintf("%s: gentoo lookup failed: %v", pkg, err))
+			continue
+		}
+		gentooMax := maxGentooVersion(versions)
+		if gentooMax == "" {
+			continue
+		}
+
+		// Only report when upstream is strictly newer AND the two versions are
+		// orderable; an unparseable side must never be reported as revivable.
+		hasUpdate, comparable := c.compareVersions(upstream, gentooMax)
+		if hasUpdate && comparable {
+			candidates = append(candidates, ReviveCandidate{
+				Package:         pkg,
+				GentooVersion:   gentooMax,
+				UpstreamVersion: upstream,
+			})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Package < candidates[j].Package
+	})
+
+	if len(notes) > 0 {
+		return candidates, fmt.Errorf("revive scan had %d soft error(s): %s",
+			len(notes), strings.Join(notes, "; "))
+	}
+	return candidates, nil
+}
+
+// maxGentooVersion returns the highest version from versions using the same
+// Gentoo-aware ordering getCurrentVersion uses to pick the highest ebuild.
+// Unparseable entries are skipped; "" means no comparable version was found.
+func maxGentooVersion(versions []string) string {
+	var best string
+	for _, v := range versions {
+		v = strings.TrimSpace(v)
+		if !ebuild.IsValidVersion(v) {
+			continue
+		}
+		if best == "" || ebuild.CompareVersions(v, best) > 0 {
+			best = v
+		}
+	}
+	return best
 }
 
 // currentEbuildPath returns the absolute path of the highest-version, non-live

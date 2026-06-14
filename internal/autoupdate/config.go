@@ -249,6 +249,34 @@ func tomlTableName(line string) (string, bool) {
 // atomic (temp file + rename) and preserves the original file mode; an empty
 // package list, or a run that changes nothing, leaves the file untouched.
 func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
+	return setPackagesEnabled(overlayPath, pkgs, false, true)
+}
+
+// EnablePackagesInConfig sets `enabled = true` for each named package in the
+// overlay's packages.toml, editing the raw text so comments, ordering, and
+// formatting survive — the sibling of DisablePackagesInConfig used to revive an
+// orphaned entry whose ebuild has reappeared (or whose upstream has overtaken
+// ::gentoo). For each package it locates the [section] whose table name equals
+// the package and rewrites an existing `enabled = ...` assignment to
+// `enabled = true`. Unlike disable it inserts nothing when the key is absent: a
+// package with no `enabled` field is already enabled by default (see
+// PackageConfig.IsEnabled), so adding the line would only churn the file.
+// Packages whose section is absent are skipped silently. The write is atomic
+// (temp file + rename) and preserves the original file mode; an empty package
+// list, or a run that changes nothing, leaves the file untouched.
+func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
+	return setPackagesEnabled(overlayPath, pkgs, true, false)
+}
+
+// setPackagesEnabled is the shared text-surgery behind DisablePackagesInConfig
+// (value=false, insertIfAbsent=true) and EnablePackagesInConfig (value=true,
+// insertIfAbsent=false). It rewrites each target section's `enabled = ...`
+// assignment to `enabled = <value>`, and — only when insertIfAbsent is set —
+// inserts the key immediately after the header for sections that lack it. Enable
+// leaves an absent key alone because nil already means enabled. The write is
+// atomic (temp file + rename) and preserves the original file mode; an empty
+// package list, or a run that changes nothing, leaves the file untouched.
+func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent bool) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
@@ -268,6 +296,8 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 		targets[p] = true
 	}
 
+	assign := fmt.Sprintf("enabled = %t", value)
+
 	// Split on "\n" (not bufio.Scanner) so a file without a trailing newline is
 	// reproduced byte-for-byte by the strings.Join below.
 	lines := strings.Split(string(data), "\n")
@@ -284,8 +314,8 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 		}
 
 		// At the header of a target section: emit the header, then walk its body
-		// (up to the next header or EOF), rewriting an existing `enabled` key or
-		// inserting one right after the header when absent.
+		// (up to the next header or EOF), rewriting an existing `enabled` key or —
+		// when insertIfAbsent is set — inserting one right after the header.
 		out = append(out, lines[i])
 		i++
 		bodyStart := len(out)
@@ -295,21 +325,22 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 				break
 			}
 			if m := enabledRe.FindStringSubmatch(lines[i]); m != nil {
-				out = append(out, m[1]+"enabled = false")
+				out = append(out, m[1]+assign)
 				found = true
+				changed = true
 			} else {
 				out = append(out, lines[i])
 			}
 			i++
 		}
-		if !found {
+		if !found && insertIfAbsent {
 			inserted := make([]string, 0, len(out)+1)
 			inserted = append(inserted, out[:bodyStart]...)
-			inserted = append(inserted, "enabled = false")
+			inserted = append(inserted, assign)
 			inserted = append(inserted, out[bodyStart:]...)
 			out = inserted
+			changed = true
 		}
-		changed = true
 	}
 
 	if !changed {
