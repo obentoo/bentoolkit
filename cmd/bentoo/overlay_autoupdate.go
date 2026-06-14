@@ -626,6 +626,12 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL time.D
 	return opts
 }
 
+// resolveGentooProviderFn is the seam runReviveList/runRevive use to obtain the
+// ::gentoo provider. It points at resolveGentooProvider in production and is
+// overridable in tests so the revive flows can be driven with an on-disk fake
+// (a provider.PackageDirProvider) instead of resolving the real gentoo repo.
+var resolveGentooProviderFn = resolveGentooProvider
+
 // resolveGentooProvider resolves the ::gentoo provider the revive flow seeds
 // from, mirroring `overlay compare`'s provider-resolution idiom: config repos >
 // registry, with the token precedence flag(absent here) > GITHUB_TOKEN env >
@@ -685,7 +691,7 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 		return
 	}
 
-	prov := resolveGentooProvider(cfg, githubToken)
+	prov := resolveGentooProviderFn(cfg, githubToken)
 	if prov == nil {
 		return // resolveGentooProvider already logged and exited
 	}
@@ -746,7 +752,7 @@ type reviveOutcome struct {
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
 func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
-	prov := resolveGentooProvider(cfg, githubToken)
+	prov := resolveGentooProviderFn(cfg, githubToken)
 	if prov == nil {
 		return // resolveGentooProvider already logged and exited
 	}
