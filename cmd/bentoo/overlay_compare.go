@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
@@ -134,10 +134,10 @@ func runCompare(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
-	// Apply token (priority: flag > env > config > repo-specific)
+	// Apply token (priority: flag > env (GITHUB_TOKEN > GH_TOKEN) > config > repo-specific)
 	token := compareToken
 	if token == "" {
-		token = os.Getenv("GITHUB_TOKEN")
+		token = github.TokenFromEnv()
 	}
 	if token == "" {
 		token = cfg.GitHub.Token

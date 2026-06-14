@@ -2,7 +2,9 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +158,17 @@ func LoadFrom(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+
+	// yaml.v3 silently drops keys that map to no struct field — e.g. a token
+	// placed under `overlay:` (which has no `token` field) instead of `github:`
+	// vanishes without a trace, leaving requests unauthenticated. A strict
+	// re-decode surfaces such mistakes as a warning to stderr; it never blocks
+	// loading, so the lenient cfg above stays authoritative.
+	probe := yaml.NewDecoder(bytes.NewReader(data))
+	probe.KnownFields(true)
+	if serr := probe.Decode(&Config{}); serr != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, serr)
 	}
 
 	cfg.Autoupdate.LLM.normalize()

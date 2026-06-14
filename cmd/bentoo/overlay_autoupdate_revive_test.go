@@ -414,10 +414,9 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 
 	cfg := configWithGentooGitHub()
 
-	var prov provider.Provider
-	code := withExitIntercept(func() { prov = resolveGentooProvider(cfg, "") })
-	if code != -1 {
-		t.Fatalf("resolveGentooProvider exited with code %d, want no exit", code)
+	prov, err := resolveGentooProvider(cfg, "")
+	if err != nil {
+		t.Fatalf("resolveGentooProvider: unexpected error: %v", err)
 	}
 	if prov == nil {
 		t.Fatal("resolveGentooProvider returned nil for a valid config gentoo repo")

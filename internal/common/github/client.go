@@ -310,3 +310,17 @@ func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err err
 	resetTime = time.Unix(result.Resources.Core.Reset, 0)
 	return result.Resources.Core.Remaining, resetTime, nil
 }
+
+// TokenFromEnv returns a GitHub API token from the environment, honouring
+// GITHUB_TOKEN first and falling back to GH_TOKEN (the gh CLI convention).
+// Surrounding whitespace is trimmed; an empty result means "no token". This is
+// the single source of truth for env-based token resolution shared by the
+// autoupdate checker and the overlay compare/revive provider wiring.
+func TokenFromEnv() string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if tok := strings.TrimSpace(os.Getenv(name)); tok != "" {
+			return tok
+		}
+	}
+	return ""
+}

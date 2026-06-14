@@ -13,6 +13,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
@@ -43,6 +44,10 @@ var (
 	// autoupdateRevive performs the full revive for a single "category/pkg" or
 	// "all": seed from ::gentoo, re-enable, then bump to the upstream version
 	autoupdateRevive string
+	// autoupdateRevivable, with --check, also reports revivable orphans (disabled
+	// entries absent from the overlay whose upstream is newer than ::gentoo) in
+	// the same pass — read-only, no mutation
+	autoupdateRevivable bool
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -62,6 +67,7 @@ Examples:
   bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test
   bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild
   bentoo overlay autoupdate --revive-list         List orphaned packages with a newer upstream
+  bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans
   bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump
   bentoo overlay autoupdate --revive all          Revive every revivable orphan`,
 	Run: runAutoupdate,
@@ -78,6 +84,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
+	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -137,7 +144,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
+		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply == "all":
@@ -159,7 +166,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string) {
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
@@ -266,8 +273,36 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		result.FormatFailures(os.Stderr)
 	}
 
+	// --revivable: in the same pass, also scan the disabled+absent (orphaned)
+	// entries and report those an autoupdate could revive (upstream newer than
+	// ::gentoo), reusing the checker --check already built. Read-only and
+	// best-effort — it never changes the check's exit code.
+	if autoupdateRevivable {
+		reportRevivableOrphans(checker, cfg, githubToken)
+	}
+
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	osExit(result.ExitCode())
+}
+
+// reportRevivableOrphans is the --check --revivable add-on: it resolves the
+// ::gentoo provider and appends the revivable-orphan report to a --check run. It
+// is read-only and best-effort — a provider-resolution failure warns and returns
+// without affecting the check's exit code. checker is the one --check already
+// built, so its loaded packages.toml and token wiring are reused.
+func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config, githubToken string) {
+	prov, err := resolveGentooProviderFn(cfg, githubToken)
+	if err != nil {
+		logger.Warn("revivable-orphan scan skipped: %v", err)
+		return
+	}
+	defer prov.Close() //nolint:errcheck
+
+	candidates, ferr := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	if ferr != nil {
+		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
+	}
+	displayReviveCandidates(candidates)
 }
 
 // displayCheckResults formats and displays check results
@@ -626,40 +661,36 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL time.D
 	return opts
 }
 
-// resolveGentooProviderFn is the seam runReviveList/runRevive use to obtain the
+// resolveGentooProviderFn is the seam the revive flows use to obtain the
 // ::gentoo provider. It points at resolveGentooProvider in production and is
-// overridable in tests so the revive flows can be driven with an on-disk fake
-// (a provider.PackageDirProvider) instead of resolving the real gentoo repo.
+// overridable in tests so the flows can be driven with an on-disk fake (a
+// provider.PackageDirProvider) instead of resolving the real gentoo repo.
 var resolveGentooProviderFn = resolveGentooProvider
 
 // resolveGentooProvider resolves the ::gentoo provider the revive flow seeds
 // from, mirroring `overlay compare`'s provider-resolution idiom: config repos >
-// registry, with the token precedence flag(absent here) > GITHUB_TOKEN env >
-// config. forceClone is false so a user-configured local/clone repo is honoured;
-// an API-only gentoo simply will not implement provider.PackageDirProvider, which
-// runRevive detects and reports. The caller owns prov.Close(). On any resolution
-// failure it logs and exits non-zero, returning nil.
-func resolveGentooProvider(cfg *config.Config, githubToken string) provider.Provider {
+// registry, with the token precedence env (GITHUB_TOKEN > GH_TOKEN) > config.
+// forceClone is false so a user-configured local/clone repo is honoured; an
+// API-only gentoo simply will not implement provider.PackageDirProvider, which
+// runRevive detects and reports. The caller owns prov.Close() and decides
+// whether a resolution error is fatal (runRevive/runReviveList exit non-zero;
+// the --revivable add-on to --check only warns and skips the report).
+func resolveGentooProvider(cfg *config.Config, githubToken string) (provider.Provider, error) {
 	configRepos := convertConfigRepos(cfg)
 
 	registry, err := provider.NewRepositoryRegistry()
 	if err != nil {
-		logger.Error("Failed to initialize repository registry: %v", err)
-		osExit(1)
-		return nil
+		return nil, fmt.Errorf("failed to initialize repository registry: %w", err)
 	}
 
 	repoInfo, err := provider.ResolveRepository("gentoo", configRepos, registry)
 	if err != nil {
-		logger.Error("Repository 'gentoo' not found: %v", err)
-		osExit(1)
-		return nil
+		return nil, fmt.Errorf("repository 'gentoo' not found: %w", err)
 	}
 
-	// Token precedence mirrors `overlay compare`: env > config (no per-command
-	// flag on this path). Only fill an empty repo token so a config-specific one
-	// wins.
-	token := os.Getenv("GITHUB_TOKEN")
+	// Token precedence: env (GITHUB_TOKEN > GH_TOKEN) > config. Only fill an
+	// empty repo token so a config-specific one wins.
+	token := github.TokenFromEnv()
 	if token == "" {
 		token = githubToken
 	}
@@ -671,11 +702,9 @@ func resolveGentooProvider(cfg *config.Config, githubToken string) provider.Prov
 	// git repo (the path that yields PackageDirProvider) is used as-is.
 	prov, err := provider.NewProvider(repoInfo, false)
 	if err != nil {
-		logger.Error("Failed to create gentoo provider: %v", err)
-		osExit(1)
-		return nil
+		return nil, fmt.Errorf("failed to create gentoo provider: %w", err)
 	}
-	return prov
+	return prov, nil
 }
 
 // runReviveList handles --revive-list: a passive report of disabled (orphaned)
@@ -691,9 +720,11 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 		return
 	}
 
-	prov := resolveGentooProviderFn(cfg, githubToken)
-	if prov == nil {
-		return // resolveGentooProvider already logged and exited
+	prov, err := resolveGentooProviderFn(cfg, githubToken)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+		return
 	}
 	defer prov.Close() //nolint:errcheck
 
@@ -752,9 +783,11 @@ type reviveOutcome struct {
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
 func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
-	prov := resolveGentooProviderFn(cfg, githubToken)
-	if prov == nil {
-		return // resolveGentooProvider already logged and exited
+	prov, err := resolveGentooProviderFn(cfg, githubToken)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+		return
 	}
 	defer prov.Close() //nolint:errcheck
 
