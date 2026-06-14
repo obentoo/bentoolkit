@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-14
+
 ### Added
 - **`autoupdate --check --revivable`.** A new flag that folds the revivable-orphan
   scan into a normal `--check` run: after checking the active packages, it also
