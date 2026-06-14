@@ -846,7 +846,7 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 	// The overlay package dir was likely pruned when the package was orphaned;
 	// create the full <overlayPath>/<category>/<pkg>/ path before copying.
 	dst := filepath.Join(a.overlayPath, category, pkgName)
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := os.MkdirAll(dst, 0o750); err != nil {
 		return fmt.Errorf("failed to create overlay package dir %s: %w", dst, err)
 	}
 
@@ -914,7 +914,7 @@ func copyFileContents(src, dst string) error {
 }
 
 // copyTree recursively copies the directory rooted at src into dst, preserving
-// the relative path layout. Directories are created with 0o755 and regular files
+// the relative path layout. Directories are created with 0o750 and regular files
 // are copied via copyFileContents. It is used to seed a package's files/ dir.
 func copyTree(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
@@ -927,7 +927,7 @@ func copyTree(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return fmt.Errorf("failed to create dir %s: %w", target, err)
 			}
 			return nil
