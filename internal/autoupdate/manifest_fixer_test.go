@@ -241,8 +241,12 @@ func TestFixManifest_BudgetFlag(t *testing.T) {
 }
 
 // TestFixManifest_TimeoutHonored confirms the configured timeout bounds the call.
+// The seam uses `exec sleep` so the shell replaces itself with sleep rather than
+// forking a child that would keep the stdout pipe open after the kill — otherwise
+// cmd.Wait blocks on the orphaned pipe (observed hanging for minutes under dash on
+// CI, where bash's single-command exec optimisation does not apply).
 func TestFixManifest_TimeoutHonored(t *testing.T) {
-	factory, _, _ := fixerSeam("sleep 3600")
+	factory, _, _ := fixerSeam("exec sleep 3600")
 	f := newTestFixer(t, LLMConfig{Provider: "claude-code"},
 		WithFixerExecCommand(factory), WithFixerTimeout(150*time.Millisecond))
 

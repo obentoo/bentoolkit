@@ -36,6 +36,12 @@ const DefaultManifestFixTimeout = 10 * time.Minute
 // guarantees termination without an external retry loop in the Applier.
 const manifestFixMaxTurns = 30
 
+// manifestFixWaitDelay bounds how long cmd.Wait blocks draining I/O after the
+// context is cancelled or the process exits. The agent spawns children (pkgdev,
+// wget) that may hold the stdout pipe open past a kill of `claude`; without this
+// bound Wait could hang until those children exit on their own.
+const manifestFixWaitDelay = 10 * time.Second
+
 // manifestFixAllowedTools is the scoped tool allowlist handed to the agent. Edit/
 // Read/Write let it rewrite the ebuild (under --add-dir); the Bash() patterns are
 // narrowed to the commands a manifest repair legitimately needs, so the agent can
@@ -274,6 +280,14 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// cwd = the package directory so the agent's relative paths and pkgdev runs
 	// resolve against the package it is repairing.
 	cmd.Dir = req.PkgDir
+
+	// Bound post-cancellation cleanup. The agent spawns its own children (pkgdev,
+	// wget) that can outlive a SIGKILL of `claude` while still holding the stdout
+	// pipe open, which would block cmd.Wait() far past the timeout. WaitDelay makes
+	// the runtime force-close the inherited pipes (and kill the process if still
+	// running) a bounded time after the context is cancelled or the process exits,
+	// so FixManifest always returns within timeout + manifestFixWaitDelay.
+	cmd.WaitDelay = manifestFixWaitDelay
 
 	// In bare mode inject the API key solely via the child environment so the key
 	// value never appears in argv or logs.
