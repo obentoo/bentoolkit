@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **LLM auto-fix for failed manifests in `autoupdate --apply`.** When `pkgdev
+  manifest` fails during an apply (typically a `SRC_URI` 404 because the upstream
+  URL convention changed between versions — e.g. a stable release moving from
+  `4.7_rc3` to a `4.7-stable` asset), the applier now invokes an agentic LLM fixer
+  to repair the ebuild in place and retries the manifest once. The fixer is wired
+  automatically whenever `autoupdate.llm.provider` is `claude-code` (the only
+  provider that can edit files); it runs the local `claude` CLI scoped to the
+  package directory (`--add-dir`) with a narrow tool allowlist (`Read`, `Edit`,
+  `Write`, `Bash(pkgdev *)`, `Bash(wget *)`, …) and never uses
+  `--dangerously-skip-permissions`. The success check is authoritative: bentoo
+  re-runs its own `pkgdev manifest` and only treats the apply as recovered if that
+  passes — otherwise the half-applied ebuild is rolled back as before. A recovered
+  apply is reported with a `Fixed:` line summarising the change. Spend is bounded
+  by `autoupdate.llm.max_budget_usd` and a 10-minute per-invocation timeout.
+  The agent is QA-aware: the bentoo "10 ebuild gotchas" are injected into its
+  system prompt (`--append-system-prompt`, so the guidance survives `--bare`), it
+  is offered the `/bentoo` skill when the session resolves it, and after a
+  successful fix an advisory `pkgcheck` pass runs and any findings are surfaced on
+  a `QA:` line for human review before committing (never blocking the apply).
+
 ## [0.6.0] - 2026-06-14
 
 ### Added

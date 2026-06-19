@@ -148,9 +148,9 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply == "all":
-		runApplyAll(runCtx, overlayPath, configDir)
+		runApplyAll(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate.LLM)
 	case autoupdateApply != "":
-		runApply(runCtx, overlayPath, configDir, autoupdateApply)
+		runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM)
 	case autoupdateReviveList:
 		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	case autoupdateRevive != "":
@@ -474,15 +474,35 @@ func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
 	return cfg
 }
 
+// applierFixerOption builds the optional LLM manifest-fixer option for --apply.
+// The fixer is wired automatically whenever the configured provider supports
+// agentic file editing (claude-code); for every other provider it is a no-op
+// (WithApplierFixer(nil) is ignored). A configured-but-unconstructable fixer
+// (e.g. the `claude` CLI is absent) is logged as a Warn and --apply proceeds with
+// its original fail-fast manifest behaviour.
+//
+// The fixer needs no context of its own here: the Applier threads its own
+// signal-aware context (WithApplierContext) into FixManifest, so a SIGINT/SIGTERM
+// already cancels an in-flight agent process.
+func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
+	fixer, err := newConfiguredManifestFixer(llmCfg)
+	if err != nil {
+		logger.Warn("LLM manifest fixer unavailable; --apply will not auto-fix failed manifests: %v", err)
+		return autoupdate.WithApplierFixer(nil)
+	}
+	return autoupdate.WithApplierFixer(fixer)
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
-func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
+func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		applierFixerOption(llmCfg),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
@@ -514,11 +534,12 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string) {
 // live map would be unsafe. Each Apply is independent — a failure on one
 // package never aborts the others — and the process exits non-zero when any
 // package failed, matching the single-package --apply contract.
-func runApplyAll(ctx context.Context, overlayPath, configDir string) {
+func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) {
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
 		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		applierFixerOption(llmCfg),
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
@@ -609,6 +630,12 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 
 	if result.Success {
 		output.Success.Println("    Status:  Success")
+		if result.Fixed {
+			output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
+		}
+		if result.QASummary != "" {
+			output.Warning.Printf("    QA:      pkgcheck findings after the fix — review before committing:\n%s\n", result.QASummary)
+		}
 		if result.CleanedOldVersion != "" {
 			fmt.Printf("    Removed: %s-%s.ebuild (old version)\n", filepath.Base(result.Package), result.CleanedOldVersion)
 		}

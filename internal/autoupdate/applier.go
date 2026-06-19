@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,11 @@ import (
 // generous-but-finite budget; without it a stalled fetch would hang Apply
 // indefinitely.
 const manifestTimeout = 5 * time.Minute
+
+// qaCheckTimeout bounds the advisory `pkgcheck scan` run after an LLM fix. It is
+// a local, read-only lint of a single package, so a tight budget is enough; the
+// scan is best-effort and never blocks the apply.
+const qaCheckTimeout = 2 * time.Minute
 
 // Error variables for applier errors
 var (
@@ -77,6 +83,19 @@ type ApplyResult struct {
 	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
 	// obsolete. Empty unless Obsolete is true.
 	ObsoleteReason string
+	// Fixed indicates the first manifest attempt failed and was recovered by the
+	// LLM manifest fixer (the ebuild was edited and a re-run of `pkgdev manifest`
+	// then succeeded). Only meaningful on the success path.
+	Fixed bool
+	// FixSummary is the fixer's one-line description of what it changed in the
+	// ebuild. Empty unless Fixed is true.
+	FixSummary string
+	// QASummary holds advisory `pkgcheck` output captured after an LLM fix, when
+	// pkgcheck is available. It never changes Success — the apply already passed
+	// the authoritative manifest re-run — but surfaces any QA findings the agent's
+	// edit may have introduced so a human can review before committing. Empty when
+	// pkgcheck is absent, reported nothing, or no fix was applied.
+	QASummary string
 }
 
 // Applier handles update application for packages.
@@ -115,6 +134,11 @@ type Applier struct {
 	// packages without it follow the normal pkgdev-from-SRC_URI path. Set via
 	// WithApplierPackagesConfig; nil disables authenticated fetching entirely.
 	configs map[string]PackageConfig
+	// fixer, when non-nil, is invoked when the manifest step fails: it drives an
+	// LLM agent to repair the ebuild (e.g. a SRC_URI whose URL convention changed
+	// between versions) before the Applier re-runs the manifest to confirm. Set
+	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
+	fixer ManifestFixer
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -191,6 +215,17 @@ func WithApplierPackagesConfig(cfg *PackagesConfig) ApplierOption {
 	return func(a *Applier) {
 		if cfg != nil {
 			a.configs = cfg.Packages
+		}
+	}
+}
+
+// WithApplierFixer wires an LLM manifest fixer into the applier. When the manifest
+// step fails, the applier asks the fixer to repair the ebuild and then re-runs the
+// manifest to confirm. A nil fixer is ignored, preserving the fail-fast behaviour.
+func WithApplierFixer(fixer ManifestFixer) ApplierOption {
+	return func(a *Applier) {
+		if fixer != nil {
+			a.fixer = fixer
 		}
 	}
 }
@@ -360,8 +395,10 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		}
 	}()
 
-	// Run manifest command
-	if err := a.runManifest(pkg, newVersion); err != nil {
+	// Run manifest command. When a fixer is wired, a failure here triggers a
+	// single agentic repair-and-retry before the apply is declared failed; the
+	// outcome (including whether a fix was applied) is recorded on result.
+	if err := a.runManifestWithFix(pkg, newVersion, result); err != nil {
 		result.Error = fmt.Errorf("%w: %v", ErrManifestFailed, err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
 			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
@@ -615,6 +652,118 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	}
 
 	return nil
+}
+
+// runManifestWithFix runs the manifest step and, when it fails and an LLM fixer is
+// configured, performs a single agentic repair-and-retry:
+//
+//  1. Run `pkgdev manifest`; on success, return nil (no fix needed).
+//  2. If no fixer is wired, return the original error (legacy fail-fast).
+//  3. Otherwise invoke the fixer to edit the ebuild in place, then re-run
+//     `pkgdev manifest` ONCE. That second run — bentoo's own, not the agent's
+//     self-report — is the authoritative success check:
+//     - success  → record result.Fixed/FixSummary and return nil.
+//     - failure  → return a combined error (original + post-fix) so the caller
+//     marks the apply failed; the deferred orphan-rollback in Apply removes the
+//     half-applied ebuild.
+//
+// Exactly one fix attempt is made per apply: the agent iterates internally (bounded
+// by its --max-turns), so there is no external retry loop here.
+func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) error {
+	firstErr := a.runManifest(pkg, version)
+	if firstErr == nil {
+		return nil
+	}
+	if a.fixer == nil {
+		return firstErr
+	}
+
+	parts := strings.Split(pkg, "/")
+	if len(parts) != 2 {
+		// Malformed name: nothing the fixer can scope to; surface the original error.
+		return firstErr
+	}
+	pkgDir := filepath.Join(a.overlayPath, parts[0], parts[1])
+
+	// Writable distdir the agent can pass to `pkgdev manifest --distdir` while it
+	// self-verifies, so its checks never touch the system DISTDIR.
+	distdir, err := os.MkdirTemp("", "bentoo-fix-distfiles-")
+	if err != nil {
+		// Can't give the agent a private distdir; don't attempt the fix.
+		return fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
+	}
+	defer func() { _ = os.RemoveAll(distdir) }()
+
+	logger.Info("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version)
+
+	fixRes, fixErr := a.fixer.FixManifest(a.ctx, ManifestFixRequest{
+		Package:       pkg,
+		Version:       version,
+		PkgDir:        pkgDir,
+		EbuildPath:    a.EbuildPath(pkg, version),
+		ManifestError: firstErr.Error(),
+		DistDir:       distdir,
+	})
+	if fixErr != nil {
+		return fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
+	}
+
+	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
+	// self-report.
+	if secondErr := a.runManifest(pkg, version); secondErr != nil {
+		return fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
+	}
+
+	result.Fixed = true
+	result.FixSummary = fixRes.Summary
+	logger.Info("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary)
+
+	// Advisory QA gate: the manifest re-run proves the distfile fetches and
+	// digests, but not that the agent's edit is QA-clean. Run pkgcheck (when
+	// available) on the package and attach any findings for human review. This is
+	// best-effort and never flips Success — a fixed-and-fetchable ebuild is still
+	// applied; the QA notes just travel with the result.
+	if qa := a.runQACheck(pkgDir, pkg); qa != "" {
+		result.QASummary = qa
+		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
+	}
+	return nil
+}
+
+// runQACheck runs `pkgcheck scan` against pkg as an advisory, read-only QA pass
+// after an LLM fix, returning the trimmed findings (empty when pkgcheck is absent,
+// could not run, or reported nothing). It is deliberately non-fatal: pkgcheck
+// exits non-zero whenever it finds issues, so the exit code is ignored.
+//
+// Only stdout is treated as findings: pkgcheck's reporter writes findings to
+// stdout, while diagnostics and crashes (e.g. a GitAddon traceback when the
+// overlay's git history confuses pkgcheck) go to stderr. Surfacing stderr as
+// "findings" once dumped a full Python traceback onto the result, so stderr is
+// captured separately and only logged at debug — a pkgcheck crash yields no QA
+// noise. The scan is bounded by qaCheckTimeout.
+func (a *Applier) runQACheck(pkgDir, pkg string) string {
+	if _, err := lookPath("pkgcheck"); err != nil {
+		logger.Debug("qa: pkgcheck not on PATH; skipping post-fix QA for %s", pkg)
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, qaCheckTimeout)
+	defer cancel()
+
+	// Scan the single package from its directory so pkgcheck resolves the overlay
+	// repo from cwd. Scope to repo-level checks for the one package via its atom.
+	cmd := a.execCommand(ctx, "pkgcheck", "scan", pkg)
+	cmd.Dir = pkgDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	_ = cmd.Run() // non-zero exit == findings; ignore the code, keep stdout.
+
+	if diag := strings.TrimSpace(stderr.String()); diag != "" {
+		logger.Debug("qa: pkgcheck stderr for %s (not surfaced): %s", pkg, diag)
+	}
+	return strings.TrimSpace(stdout.String())
 }
 
 // runManifest regenerates the Manifest file with pkgdev. Unlike `ebuild
