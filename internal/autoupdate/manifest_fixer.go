@@ -136,9 +136,6 @@ type ClaudeCodeFixer struct {
 	// timeout bounds a single agentic invocation. Defaults to
 	// DefaultManifestFixTimeout.
 	timeout time.Duration
-	// ctx is the parent context for spawned CLI processes; a cancelled parent (or
-	// the per-call timeout) kills the child via exec.CommandContext.
-	ctx context.Context
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
@@ -156,17 +153,6 @@ type ClaudeCodeFixerOption func(*ClaudeCodeFixer)
 func WithFixerExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ClaudeCodeFixerOption {
 	return func(f *ClaudeCodeFixer) {
 		f.execCommand = fn
-	}
-}
-
-// WithFixerContext sets the parent context threaded into every spawned CLI
-// process, so cancelling it (SIGINT/deadline) kills the in-flight `claude`
-// process. A nil context is ignored, leaving the default context.Background().
-func WithFixerContext(ctx context.Context) ClaudeCodeFixerOption {
-	return func(f *ClaudeCodeFixer) {
-		if ctx != nil {
-			f.ctx = ctx
-		}
 	}
 }
 
@@ -200,7 +186,6 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 		bareMode:     resolveBare(cfg),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
-		ctx:          context.Background(), // SAFE: default parent; replaced by WithFixerContext when a caller wires a cancellable context.
 		execCommand:  exec.CommandContext,
 	}
 
@@ -276,13 +261,10 @@ func buildFixInstruction(req ManifestFixRequest) string {
 // and returns the agent's one-line summary. The API key is injected only via the
 // child environment in bare mode and never appears in argv or returned errors.
 func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixRequest) (ManifestFixResult, error) {
-	// Prefer the per-call context when the caller supplies one; otherwise fall
-	// back to the fixer's configured parent context.
-	parent := ctx
-	if parent == nil {
-		parent = f.ctx
-	}
-	runCtx, cancel := context.WithTimeout(parent, f.timeout)
+	// Derive the per-call deadline from the caller's context so a cancelled parent
+	// (SIGINT/deadline, threaded in from the Applier) kills the in-flight `claude`
+	// process. Callers always supply a non-nil context (the Applier passes a.ctx).
+	runCtx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 
 	instruction := buildFixInstruction(req)
