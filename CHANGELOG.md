@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-18
+
+### Fixed
+- **Manifest auto-fixer no longer hangs past its timeout.** The agentic fixer
+  spawns child processes (`pkgdev`, `wget`); if the per-call timeout or a SIGINT
+  killed `claude` while a child still held the output pipe open, `FixManifest`
+  could block far past the deadline. It now bounds post-cancellation cleanup
+  (`cmd.WaitDelay`), so it always returns within the configured timeout plus a
+  short grace. The same change deflakes a CI test that reproduced the hang and
+  resolves a `contextcheck` lint nit in the fixer — no behaviour change to a
+  successful fix.
+
 ## [0.7.0] - 2026-06-18
 
 ### Added
@@ -1038,7 +1050,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/obentoo/bentoolkit/compare/v0.6.0...v0.7.0
 [0.4.2]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...v0.4.1
