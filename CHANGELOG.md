@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-18
+
 ### Added
 - **LLM auto-fix for failed manifests in `autoupdate --apply`.** When `pkgdev
   manifest` fails during an apply (typically a `SRC_URI` 404 because the upstream
@@ -1036,7 +1038,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/obentoo/bentoolkit/compare/v0.6.0...v0.7.0
 [0.4.2]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/obentoo/bentoolkit/compare/v0.3.21...v0.4.0
