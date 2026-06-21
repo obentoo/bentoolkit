@@ -95,7 +95,8 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 	// Sum the backoff delays the retry loop would sleep between attempts, mirroring
 	// calculateDelay: BaseDelay×2^(i-1), capped at MaxDelay.
 	for i := 1; i <= rc.MaxRetries; i++ {
-		delay := rc.BaseDelay * time.Duration(int64(1)<<uint(i-1))
+		multiplier := 1 << (i - 1) // 2^(i-1): 1, 2, 4, ...
+		delay := rc.BaseDelay * time.Duration(multiplier)
 		if rc.MaxDelay > 0 && delay > rc.MaxDelay {
 			delay = rc.MaxDelay
 		}
