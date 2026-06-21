@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-06-21
 
 ### Added
 - **Live TUI output for long-running subprocesses.** `overlay autoupdate --apply`
@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared Bubble Tea TUI system, so the tool now has a single terminal-UI
   implementation. Behavior with no reporter (and in non-TTY/plain mode) is
   unchanged.
+
+### Fixed
+- **Manifest auto-fixer now surfaces the real failure on a contradictory `claude`
+  exit.** When the `claude` child exited non-zero while still printing a success
+  envelope, `FixManifest` emitted an empty `(success):` message and discarded the
+  exit code, result, and stderr. All four terminal error branches now funnel
+  through a single bounded formatter that includes the process exit code (or the
+  timeout/cancellation cause), the envelope subtype/result/errors, the captured
+  stderr, and the raw stdout on a parse failure — each truncated to a diagnostics
+  budget.
 
 ## [0.9.0] - 2026-06-21
 
