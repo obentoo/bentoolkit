@@ -20,6 +20,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -772,6 +773,36 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 	return nil
 }
 
+// ReviveDisabled re-enables (enabled = true) each named package in the overlay's
+// packages.toml and in the in-memory config. It is the inverse of DisableOrphans:
+// a package that was auto-disabled when its ebuild vanished is reconciled back to
+// enabled once that ebuild is present in the overlay again, because the overlay —
+// not packages.toml — is the source of truth for whether a package exists. The
+// file edit is a single comment-preserving rewrite of the existing
+// `enabled = false` assignment (EnablePackagesInConfig inserts nothing for a
+// section that lacks the key, since absent already means enabled). A nil or empty
+// slice is a no-op. The in-memory config is updated only after the file write
+// succeeds, so a failed write leaves both views consistent.
+//
+// Callers must exclude held packages (hold = true): a hold is an explicit
+// maintainer decision that the overlay reconciliation must never flip.
+func (c *Checker) ReviveDisabled(pkgs []string) error {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	if err := EnablePackagesInConfig(c.overlayPath, pkgs); err != nil {
+		return err
+	}
+	enabled := true
+	for _, pkg := range pkgs {
+		if cfg, ok := c.config.Packages[pkg]; ok {
+			cfg.Enabled = &enabled
+			c.config.Packages[pkg] = cfg
+		}
+	}
+	return nil
+}
+
 // ReviveCandidate describes a disabled (orphaned) packages.toml entry whose
 // upstream release is strictly newer than the highest version ::gentoo still
 // carries. It is a passive report: FindRevivableOrphans never mutates the
@@ -1476,13 +1507,42 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 // has joined (wg.Wait), so callers may invoke its methods (ExitCode,
 // FormatFailures) directly.
 func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
+	// Reconcile status with the overlay BEFORE filtering: the overlay — not
+	// packages.toml — is the source of truth for whether a package exists. A
+	// package auto-disabled (enabled = false) when its ebuild vanished must not
+	// stay disabled forever once that ebuild is re-added; here it is re-enabled so
+	// the status follows the file rather than the other way around. A held package
+	// (hold = true) is left untouched: that is a deliberate maintainer decision,
+	// not stale bookkeeping. The in-memory rewrite makes the filter below pick the
+	// revived packages up in this same run.
+	var revived []string
+	for name, pkg := range c.config.Packages {
+		if pkg.IsEnabled() || pkg.IsHeld() {
+			continue
+		}
+		if _, err := c.getCurrentVersion(name); err == nil {
+			revived = append(revived, name) // ebuild present again → reconcile to enabled
+		}
+	}
+	if len(revived) > 0 {
+		sort.Strings(revived)
+		if err := c.ReviveDisabled(revived); err != nil {
+			warnLogf("failed to re-enable %d package(s) whose ebuild reappeared in the overlay: %v", len(revived), err)
+		} else {
+			for _, p := range revived {
+				logger.Info("re-enabled %q: its ebuild is present in the overlay again", p)
+			}
+		}
+	}
+
 	// Narrow the package set up front so excluded packages incur no network
-	// fetch and are absent from progress and totals. Two filters apply:
+	// fetch and are absent from progress and totals. Three filters apply:
 	//   - enabled = false: always skipped, silently (no log, no count);
+	//   - hold = true: maintainer-held, skipped silently like a disabled entry;
 	//   - type filter (when active): keep only the matching bin/source class.
 	pkgs := make(map[string]PackageConfig, len(c.config.Packages))
 	for name, pkg := range c.config.Packages {
-		if !pkg.IsEnabled() {
+		if !pkg.IsEnabled() || pkg.IsHeld() {
 			continue
 		}
 		if c.typeFilter != "" && c.resolveType(name, &pkg) != c.typeFilter {

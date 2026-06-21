@@ -46,6 +46,17 @@ type PackageConfig struct {
 	// (e.g. an orphaned entry whose ebuild was removed from the overlay).
 	// A pointer distinguishes "absent" (enabled) from an explicit false.
 	Enabled *bool `toml:"enabled,omitempty"`
+	// Hold, when true, deliberately excludes the package from autoupdate even
+	// though its ebuild IS present in the overlay. It expresses an explicit
+	// maintainer decision ("present, but do not auto-bump"), distinct from the
+	// overlay-driven enabled flag: enabled = false is bookkeeping the checker
+	// sets automatically when an ebuild vanishes and clears again when it
+	// reappears (the overlay is the source of truth), whereas hold is never
+	// auto-flipped by that reconciliation. Use it for a package whose bump needs
+	// manual work each release (e.g. sci-ml/ollama, whose llama.cpp FetchContent
+	// rearch needs a manual patchset/distfile per bump). A held package is not
+	// fetched, not added to pending, and absent from progress and totals.
+	Hold bool `toml:"hold,omitempty"`
 	// URL is the primary URL to query for version information
 	URL string `toml:"url"`
 	// Parser specifies the parser type: "json", "regex", or "html"
@@ -169,6 +180,15 @@ type PackageConfig struct {
 // enabled = false skips it.
 func (c *PackageConfig) IsEnabled() bool {
 	return c.Enabled == nil || *c.Enabled
+}
+
+// IsHeld reports whether the maintainer has explicitly held the package out of
+// autoupdate (hold = true). A held package is skipped by CheckAll exactly like a
+// disabled one, but — unlike enabled — the overlay-driven status reconciliation
+// never clears the flag: it is a deliberate "present, but do not auto-bump"
+// decision that survives the ebuild's presence in the overlay.
+func (c *PackageConfig) IsHeld() bool {
+	return c.Hold
 }
 
 // PackagesConfig represents the entire packages.toml configuration file.

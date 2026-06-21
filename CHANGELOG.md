@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-21
+
+### Added
+- **`hold` flag in `packages.toml`** for a package that is present in the overlay
+  but must not be auto-bumped (e.g. `sci-ml/ollama`, whose llama.cpp FetchContent
+  rearch needs manual patchset/distfile work per release). Unlike `enabled = false`
+  — which is now overlay-driven bookkeeping (see below) — `hold = true` is a
+  deliberate maintainer decision the status reconciliation never auto-flips. A held
+  package is skipped exactly like a disabled one (no fetch, no pending, absent from
+  progress and totals).
+
+### Fixed
+- **`autoupdate --check` now reconciles `enabled` status with the overlay.** A
+  package that was auto-disabled (`enabled = false`) when its ebuild was removed
+  stayed disabled forever even after the ebuild was re-added — so it was silently
+  skipped (observed with `sci-ml/ollama`, whose source ebuild was present yet never
+  checked while `sci-ml/ollama-bin` updated). `CheckAll` now re-enables, at the
+  start of each run, any disabled package whose ebuild is present in the overlay
+  again: the overlay is the source of truth, not `packages.toml`. The edit is
+  comment-preserving and held packages (`hold = true`) are left untouched.
+
 ## [0.8.0] - 2026-06-21
 
 ### Fixed
