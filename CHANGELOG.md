@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Live TUI output for long-running subprocesses.** `overlay autoupdate --apply`
+  / `--apply all` and `overlay manifest` now render a Bubble Tea-based live view —
+  per-package status, overall progress, and a bounded tail of the running
+  `pkgdev`/`wget` fetch — instead of a frozen line. Finished work leaves a `✓`/`✗`
+  history line in the scrollback. `Ctrl-C` cancels the in-flight operation (with
+  the existing orphan rollback) and restores the terminal; a `sudo`/`doas` compile
+  prompt is shown on the real TTY.
+- **`--no-tui` flag and `BENTOO_NO_TUI` environment variable** to force plain,
+  ANSI-free streaming output. The live UI is also disabled automatically when
+  stdout is not a TTY or when `NO_COLOR` is set; plain mode still streams the fetch
+  tail to stderr.
+
+### Changed
+- The hand-rolled ANSI progress reporter for `overlay manifest` was replaced by the
+  shared Bubble Tea TUI system, so the tool now has a single terminal-UI
+  implementation. Behavior with no reporter (and in non-TTY/plain mode) is
+  unchanged.
+
 ## [0.9.0] - 2026-06-21
 
 ### Added

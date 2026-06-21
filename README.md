@@ -570,6 +570,29 @@ A non-zero exit code is therefore distinguishable: `1` means "some work
 landed", `2` means "nothing landed". The per-package errors that caused a `1`
 or `2` are also printed so the failing packages can be retried individually.
 
+### Live output
+
+`bentoo overlay autoupdate --apply` (and `--apply all`) and `bentoo overlay
+manifest` render a live terminal UI while long subprocesses run: a per-package
+status, an overall progress indicator, and a bounded tail of the running
+`pkgdev`/`wget` fetch — so you can see what is downloading instead of a frozen
+line. When the work finishes, each package leaves a `✓`/`✗` history line in the
+scrollback.
+
+The live UI activates only on an interactive terminal. It falls back
+automatically to plain, ANSI-free streaming output (still showing the fetch tail
+on stderr) when any of the following holds:
+
+- stdout is not a TTY (e.g. piped into a file or `tee`, or run under CI);
+- the `--no-tui` flag is passed;
+- the `NO_COLOR` environment variable is set;
+- the `BENTOO_NO_TUI` environment variable is set.
+
+Pressing `Ctrl-C` during a run cancels the in-flight operation (terminating the
+child process) and restores the terminal; a half-applied ebuild is rolled back. A
+compile step that needs `sudo`/`doas` releases the terminal so the password prompt
+is shown and answered on the real terminal.
+
 ### Concurrency
 
 `overlay autoupdate` and `overlay compare` process packages in parallel. The
