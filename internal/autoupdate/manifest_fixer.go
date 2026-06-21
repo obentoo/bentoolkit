@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -236,20 +237,45 @@ func (f *ClaudeCodeFixer) buildFixArgs(instruction, pkgDir string) []string {
 // keep both ends and elide the noisy middle.
 const manifestErrorBudget = 16 * 1024
 
+// diagnosticsBudget bounds how much of any single captured diagnostic stream
+// (the envelope result, the child's stderr, or — on a parse failure — its raw
+// stdout) is embedded into a fixer error. Unlike the instruction path
+// (manifestErrorBudget, which guards execve's MAX_ARG_STRLEN because the
+// instruction travels as one argv element), these strings land in logs rather
+// than argv, so E2BIG does not apply — but log bloat from a chatty agent run
+// does. A few KiB per stream keeps the failure legible without flooding the log.
+const diagnosticsBudget = 4 * 1024
+
+// truncateMiddle bounds s to roughly budget bytes, preserving the head and tail
+// and replacing the elided middle with a marker that names label and the elided
+// byte count. It returns s unchanged when already within budget, and trims any
+// partial UTF-8 runes left at the cut boundaries so the result is always valid
+// UTF-8.
+func truncateMiddle(s string, budget int, label string) string {
+	if len(s) <= budget {
+		return s
+	}
+	head := budget / 2
+	tail := budget - head
+	elided := len(s) - head - tail
+	marker := fmt.Sprintf("\n...[%s truncated: %d bytes elided]...\n", label, elided)
+	return strings.ToValidUTF8(s[:head], "") + marker + strings.ToValidUTF8(s[len(s)-tail:], "")
+}
+
 // truncateManifestError bounds s to roughly manifestErrorBudget bytes, preserving
 // the head and tail (where the failing URL and final error lines live) and
 // replacing the elided middle with a marker. It returns s unchanged when already
 // within budget, and trims any partial UTF-8 runes left at the cut boundaries so
 // the result is always valid UTF-8.
 func truncateManifestError(s string) string {
-	if len(s) <= manifestErrorBudget {
-		return s
-	}
-	head := manifestErrorBudget / 2
-	tail := manifestErrorBudget - head
-	elided := len(s) - head - tail
-	marker := fmt.Sprintf("\n...[manifest output truncated: %d bytes elided]...\n", elided)
-	return strings.ToValidUTF8(s[:head], "") + marker + strings.ToValidUTF8(s[len(s)-tail:], "")
+	return truncateMiddle(s, manifestErrorBudget, "manifest output")
+}
+
+// truncateDiagnostic bounds a captured diagnostic stream to diagnosticsBudget,
+// mirroring truncateManifestError's head+tail+marker discipline at the smaller
+// log-oriented budget. Used for the result/stderr/stdout embedded in fixer errors.
+func truncateDiagnostic(s string) string {
+	return truncateMiddle(s, diagnosticsBudget, "diagnostic")
 }
 
 // buildFixInstruction renders the static-but-parameterized instruction handed to
@@ -286,6 +312,88 @@ func buildFixInstruction(req ManifestFixRequest) string {
 	sb.WriteString("` from the package directory and iterate until it succeeds.\n")
 	sb.WriteString("- When done, respond with ONLY a single short line describing what you changed (no prose, no markdown).")
 	return sb.String()
+}
+
+// exitCodeString renders a process exit status for an error message. It extracts
+// the numeric code from an *exec.ExitError (AD5: errors.As + ExitCode); when
+// runErr is not an ExitError (e.g. the process never started), it falls back to
+// the wrapped error text so the cause is never lost.
+func exitCodeString(runErr error) string {
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		return strconv.Itoa(exitErr.ExitCode())
+	}
+	return fmt.Sprintf("%v", runErr)
+}
+
+// formatFixerError builds the single, bounded error returned by every terminal
+// failure path of FixManifest. Funneling all four former fmt.Errorf sites through
+// one formatter guarantees each failure carries a consistent, complete set of
+// signals and removes the class of bug where one branch forgets one (the empty
+// "claude fixer failed (success): " was exactly that). It reports, in precedence
+// order:
+//
+//   - ctxErr (caller context cancelled or deadline elapsed) — AD4/R1.3, takes
+//     precedence over any exit-code framing;
+//   - a non-zero exit paired with a self-reported success envelope as an explicit
+//     contradiction ("exited N but reported success") — AD3/R1.2, never an empty
+//     tail;
+//   - a generic non-zero exit (with the parsed subtype when available) — R1.1;
+//   - an explicit error envelope (is_error) with its subtype — R1.5;
+//   - a parse failure (non-JSON stdout) — R1.4.
+//
+// It then appends, each bounded by truncateDiagnostic: the envelope errors, the
+// result text, the captured stderr, and — on a parse failure — the raw stdout
+// (R1.4). The returned error always wraps ErrLLMRequestFailed (R3.1). The API key
+// is never one of its inputs, so it can never appear in the output (R2.2).
+func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
+	var sb strings.Builder
+
+	switch {
+	case ctxErr != nil:
+		// AD4/R1.3: cancellation or deadline takes precedence over exit framing.
+		sb.WriteString(fmt.Sprintf("claude fixer aborted: %v", ctxErr))
+	case runErr != nil && jsonErr == nil && !env.IsError && env.Subtype == "success":
+		// AD3/R1.2: non-zero exit but a self-reported success envelope.
+		sb.WriteString(fmt.Sprintf("claude fixer exited %s but reported success (subtype=%s)",
+			exitCodeString(runErr), env.Subtype))
+	case runErr != nil:
+		// R1.1: generic non-zero exit (envelope may or may not have parsed).
+		sb.WriteString(fmt.Sprintf("claude fixer failed: exit %s", exitCodeString(runErr)))
+		if jsonErr == nil && env.Subtype != "" {
+			sb.WriteString(fmt.Sprintf(" (subtype=%s)", env.Subtype))
+		}
+	case env.IsError:
+		// R1.5: explicit error envelope on a zero exit.
+		sb.WriteString(fmt.Sprintf("claude fixer reported error (subtype=%s)", env.Subtype))
+	default:
+		// R1.4: zero exit but stdout did not parse as JSON.
+		sb.WriteString("claude fixer emitted non-JSON output")
+	}
+
+	if jsonErr != nil {
+		sb.WriteString(fmt.Sprintf(": parse error: %v", jsonErr))
+	}
+	if len(env.Errors) > 0 {
+		sb.WriteString("; errors: ")
+		sb.WriteString(strings.Join(env.Errors, "; "))
+	}
+	if r := strings.TrimSpace(env.Result); r != "" {
+		sb.WriteString("\nresult: ")
+		sb.WriteString(truncateDiagnostic(r))
+	}
+	if s := strings.TrimSpace(stderr); s != "" {
+		sb.WriteString("\nstderr: ")
+		sb.WriteString(truncateDiagnostic(s))
+	}
+	// On a parse failure the raw stdout is the one artifact needed to see what the
+	// CLI actually printed (R1.4).
+	if jsonErr != nil && strings.TrimSpace(stdout) != "" {
+		sb.WriteString("\nstdout: ")
+		sb.WriteString(truncateDiagnostic(stdout))
+	}
+
+	return fmt.Errorf("%w: %s", ErrLLMRequestFailed, sb.String())
 }
 
 // FixManifest drives the agentic `claude` CLI to repair the ebuild in req. It
@@ -336,25 +444,13 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 	stderrStr := strings.TrimSpace(stderr.String())
 
-	if runErr != nil {
-		if jsonErr == nil && (len(env.Errors) > 0 || env.Subtype != "") {
-			return ManifestFixResult{}, fmt.Errorf("%w: claude fixer failed (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; "))
-		}
-		if stderrStr != "" {
-			return ManifestFixResult{}, fmt.Errorf("%w: claude fixer failed: %v: %s", ErrLLMRequestFailed, runErr, stderrStr)
-		}
-		return ManifestFixResult{}, fmt.Errorf("%w: claude fixer failed: %v", ErrLLMRequestFailed, runErr)
-	}
-
-	if jsonErr != nil {
-		if stderrStr != "" {
-			return ManifestFixResult{}, fmt.Errorf("%w: claude fixer emitted non-JSON output: %v: %s", ErrLLMRequestFailed, jsonErr, stderrStr)
-		}
-		return ManifestFixResult{}, fmt.Errorf("%w: claude fixer emitted non-JSON output: %v", ErrLLMRequestFailed, jsonErr)
-	}
-
-	if env.IsError {
-		return ManifestFixResult{}, fmt.Errorf("%w: claude fixer reported error (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; "))
+	// Every terminal failure funnels through formatFixerError so each carries the
+	// full, bounded set of signals (exit code or cancellation cause, subtype,
+	// result, stderr, and raw stdout on a parse failure). The success path below
+	// is unchanged (UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
+	// and a parent cancellation (Canceled), since runCtx derives from ctx.
+	if runErr != nil || jsonErr != nil || env.IsError {
+		return ManifestFixResult{}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
 	}
 
 	return ManifestFixResult{
