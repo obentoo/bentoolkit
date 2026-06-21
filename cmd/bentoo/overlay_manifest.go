@@ -5,9 +5,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/logger"
-	"github.com/obentoo/bentoolkit/internal/common/output"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -121,20 +122,29 @@ func runManifest(cmd *cobra.Command, args []string) {
 	runCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Emit the lead-in line BEFORE building the reporter: once the live TUI
+	// program is running it owns the terminal, so direct logger writes would
+	// race with its rendering.
+	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
+
+	reporter, finishUI := chooseManifestReporter(manifestFlags.DryRun, runCtx, cancel)
+
 	opts := &overlay.ManifestOptions{
 		Keep:           manifestFlags.Keep,
 		DryRun:         manifestFlags.DryRun,
 		Distdir:        manifestFlags.Distdir,
 		Jobs:           manifestFlags.Jobs,
 		DistfilesCache: manifestFlags.DistfilesCache,
-		Reporter:       chooseManifestReporter(manifestFlags.DryRun),
+		Reporter:       reporter,
 		Ctx:            runCtx,
 	}
 
-	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
-
 	updates := overlay.RegenerateManifests(ctx.OverlayPath, targets, opts)
 	result := &overlay.ManifestResult{Updates: updates}
+
+	// Tear the UI down (stop the program, restore the terminal) before any
+	// further logging or exit so the summary is not swallowed by the TUI.
+	finishUI()
 
 	logger.Info("%s", overlay.FormatManifestResult(result, opts.DryRun))
 
@@ -149,15 +159,19 @@ func runManifest(cmd *cobra.Command, args []string) {
 	}
 }
 
-// chooseManifestReporter picks the right ProgressReporter for the current
-// stdout: TUI when interactive, log lines otherwise. Dry-run skips the
-// reporter entirely since there are no pkgdev invocations to track.
-func chooseManifestReporter(dryRun bool) overlay.ProgressReporter {
+// chooseManifestReporter picks the reporter for the current run: the live TUI
+// when interactive (AD7 gate via tui.Enabled), a plain ANSI-free reporter
+// otherwise. Dry-run skips the reporter entirely since there are no pkgdev
+// invocations to track. The returned func tears the UI down and must be called
+// before any post-run logging or exit; for the non-TUI paths it is a no-op.
+func chooseManifestReporter(dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
 	if dryRun {
-		return nil
+		return tui.Noop(), func() {}
 	}
-	if output.IsTerminal() {
-		return overlay.NewTUIReporter(os.Stdout)
+	if tui.Enabled(tui.Options{}) {
+		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
+		prog.Start()
+		return r, func() { prog.Stop(); _ = prog.Wait() }
 	}
-	return overlay.NewLogReporter(os.Stdout)
+	return tui.NewPlainReporter(os.Stderr, time.Second), func() {}
 }

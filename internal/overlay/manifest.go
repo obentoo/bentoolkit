@@ -2,7 +2,6 @@
 package overlay
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,15 @@ import (
 	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
+)
+
+// execCommand and lookPath are package-level seams over os/exec so tests can
+// stub pkgdev discovery and invocation without a real binary. Both default to
+// the real functions.
+var (
+	execCommand = exec.CommandContext
+	lookPath    = exec.LookPath
 )
 
 // Errors for manifest operations.
@@ -71,32 +79,13 @@ type ManifestOptions struct {
 	// cache is never written to.
 	DistfilesCache string
 	// Reporter receives lifecycle events as workers process targets.
-	// Nil means silent (no progress output). The CLI typically wires a
-	// TUI or log reporter here.
-	Reporter ProgressReporter
+	// Nil means silent (no progress output) — it is normalized to tui.Noop().
+	// The CLI typically wires a live TUI or plain reporter here.
+	Reporter tui.Reporter
 	// Ctx, when non-nil, is propagated to the pkgdev sub-processes via
 	// exec.CommandContext so callers can cancel an in-flight run (e.g.
 	// on SIGINT). Nil is treated as context.Background().
 	Ctx context.Context
-}
-
-// ProgressReporter receives manifest-regeneration lifecycle events.
-//
-// Implementations must be safe to call from multiple goroutines. Workers
-// invoke Start/Done concurrently as they pick up and finish targets.
-type ProgressReporter interface {
-	// Total announces the total number of targets and the desired worker
-	// concurrency. Called once before any Start.
-	Total(n, jobs int)
-	// Start signals that worker `worker` (0-indexed) has picked up
-	// targets[i] and is about to invoke pkgdev for it.
-	Start(i, worker int, target ManifestUpdate)
-	// Done signals that targets[i] finished. ok==false carries the failure
-	// reason (errMsg) and the captured pkgdev output (output) for display.
-	Done(i, worker int, target ManifestUpdate, ok bool, errMsg, output string)
-	// Finish is called once after all targets have completed, regardless
-	// of individual outcomes.
-	Finish()
 }
 
 // ManifestResult collects per-package results of a regeneration run.
@@ -189,9 +178,10 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 // fresh file is produced (clean regeneration). The backup is restored on
 // failure. opts.Keep skips this step.
 //
-// pkgdev output is captured per job and surfaced through opts.Reporter,
-// which receives Start/Done events. If Reporter is nil, the call is silent
-// — only the returned []ManifestUpdate carries success/error information.
+// pkgdev output is captured per job and surfaced through opts.Reporter as
+// TaskStart/TaskLine/TaskDone events, bracketed by BatchStart/BatchDone. If
+// Reporter is nil it is normalized to tui.Noop(), so the call is silent —
+// only the returned []ManifestUpdate carries success/error information.
 //
 // The returned slice preserves the order of the input targets, even when
 // workers complete out of order.
@@ -211,7 +201,10 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		return updates
 	}
 
-	if _, err := exec.LookPath("pkgdev"); err != nil {
+	// pkgdev discovery short-circuits BEFORE any reporter call: a missing
+	// binary marks every target failed without opening a batch, so a nil/Noop
+	// or recording reporter sees no events at all.
+	if _, err := lookPath("pkgdev"); err != nil {
 		for i := range updates {
 			updates[i].Success = false
 			updates[i].Error = ErrPkgdevNotFound.Error()
@@ -247,10 +240,13 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
 	}
 
-	if opts.Reporter != nil {
-		opts.Reporter.Total(len(updates), jobs)
-		defer opts.Reporter.Finish()
+	// Normalize the reporter once so workers can emit unconditionally. A nil
+	// reporter becomes a no-op (R3.3), matching the previous silent behavior.
+	rep := opts.Reporter
+	if rep == nil {
+		rep = tui.Noop()
 	}
+	rep.BatchStart(len(updates))
 
 	queue := make(chan int, len(updates))
 	for i := range updates {
@@ -261,14 +257,24 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 	var wg sync.WaitGroup
 	for w := 0; w < jobs; w++ {
 		wg.Add(1)
-		go func(worker int) {
+		go func() {
 			defer wg.Done()
 			for i := range queue {
-				runOneManifest(ctx, overlayPath, distdir, cacheDir, &updates[i], i, worker, opts)
+				runOneManifest(ctx, overlayPath, distdir, cacheDir, &updates[i], opts, rep)
 			}
-		}(w)
+		}()
 	}
 	wg.Wait()
+
+	okCount, failCount := 0, 0
+	for i := range updates {
+		if updates[i].Success {
+			okCount++
+		} else {
+			failCount++
+		}
+	}
+	rep.BatchDone(fmt.Sprintf("%d ok, %d failed", okCount, failCount))
 
 	return updates
 }
@@ -276,12 +282,11 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 // runOneManifest performs the backup/regenerate/rollback dance for a single
 // target and writes the outcome back into *u. It is invoked from a worker
 // goroutine; concurrent calls write to distinct slice indices so no lock is
-// required for the result. The reporter, if any, is responsible for being
-// goroutine-safe.
-func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, u *ManifestUpdate, i, worker int, opts *ManifestOptions) {
-	if opts.Reporter != nil {
-		opts.Reporter.Start(i, worker, *u)
-	}
+// required for the result. Lifecycle events are emitted through rep, which is
+// always non-nil (normalized by the caller) and goroutine-safe.
+func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, u *ManifestUpdate, opts *ManifestOptions, rep tui.Reporter) {
+	id := u.Category + "/" + u.Package
+	rep.TaskStart(id, id)
 
 	pkgPath := filepath.Join(overlayPath, u.Category, u.Package)
 	manifestPath := filepath.Join(pkgPath, "Manifest")
@@ -302,28 +307,31 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 			if mvErr := os.Rename(manifestPath, backupPath); mvErr != nil {
 				u.Success = false
 				u.Error = fmt.Sprintf("failed to back up Manifest: %v", mvErr)
-				if opts.Reporter != nil {
-					opts.Reporter.Done(i, worker, *u, false, u.Error, "")
-				}
+				rep.TaskDone(id, false, u.Error, "")
 				return
 			}
 		}
 	}
 
-	var combined bytes.Buffer
+	// Stream pkgdev output through a StreamCapture: it tails live lines to the
+	// reporter while keeping a verbatim copy for the error path (R7.1). Each
+	// worker owns its own StreamCapture but they all forward to the same rep,
+	// which is goroutine-safe (R7.4).
+	sc := tui.NewStreamCapture(rep, id, tui.StreamStdout)
 	if cacheDir != "" && len(distNames) > 0 {
 		reused := prepopulateFromCache(distdir, cacheDir, distNames)
 		u.Reused = reused
 		if reused > 0 {
-			fmt.Fprintf(&combined, "[bentoo] reused %d distfile(s) from %s\n", reused, cacheDir)
+			fmt.Fprintf(sc, "[bentoo] reused %d distfile(s) from %s\n", reused, cacheDir)
 		}
 	}
-	cmd := exec.CommandContext(ctx, "pkgdev", "manifest", "--distdir", distdir)
+	cmd := execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgPath
-	cmd.Stdout = &combined
-	cmd.Stderr = &combined
+	cmd.Stdout = sc
+	cmd.Stderr = sc
 
 	runErr := cmd.Run()
+	_ = sc.Close()
 	if runErr != nil {
 		u.Success = false
 		u.Error = runErr.Error()
@@ -332,9 +340,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 				u.Error = fmt.Sprintf("%s; rollback failed: %v", u.Error, rbErr)
 			}
 		}
-		if opts.Reporter != nil {
-			opts.Reporter.Done(i, worker, *u, false, u.Error, combined.String())
-		}
+		rep.TaskDone(id, false, u.Error, sc.Captured())
 		return
 	}
 
@@ -342,9 +348,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 		_ = os.Remove(backupPath)
 	}
 	u.Success = true
-	if opts.Reporter != nil {
-		opts.Reporter.Done(i, worker, *u, true, "", combined.String())
-	}
+	rep.TaskDone(id, true, "", sc.Captured())
 }
 
 // RegenerateManifestsForScope is a convenience wrapper that resolves a scope

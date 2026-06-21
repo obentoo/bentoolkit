@@ -2,113 +2,165 @@ package overlay
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
-// captureReporter records every event for assertion in tests. It is the
-// reporter passed to RegenerateManifests when we want to verify lifecycle
-// ordering and concurrency without running real pkgdev or printing UI.
-type captureReporter struct {
-	mu        sync.Mutex
-	totalN    int
-	totalJobs int
-	starts    []captureEvent
-	dones     []captureEvent
-	finished  bool
+// recManifestReporter records tui.Reporter events for parity assertions on the
+// migrated manifest reporting (slots = TaskStart per target, ✓/✗ history =
+// TaskDone ok, summary = BatchDone, live tail = TaskLine).
+type recManifestReporter struct {
+	mu sync.Mutex
+	ev []string
 }
 
-type captureEvent struct {
-	idx    int
-	worker int
-	target ManifestUpdate
-	ok     bool
-	errMsg string
+func (r *recManifestReporter) add(s string)                 { r.mu.Lock(); r.ev = append(r.ev, s); r.mu.Unlock() }
+func (r *recManifestReporter) BatchStart(n int)             { r.add(fmt.Sprintf("batchstart:%d", n)) }
+func (r *recManifestReporter) TaskStart(id, label string)   { r.add("start:" + id) }
+func (r *recManifestReporter) TaskStage(id, stage string)   { r.add("stage:" + id + ":" + stage) }
+func (r *recManifestReporter) TaskProgress(string, float64) {}
+func (r *recManifestReporter) TaskLine(id string, s tui.Stream, text string, eol bool) {
+	r.add("line:" + id + ":" + text)
 }
-
-func (r *captureReporter) Total(n, jobs int) {
+func (r *recManifestReporter) TaskDone(id string, ok bool, summary, captured string) {
+	r.add(fmt.Sprintf("done:%s:%t", id, ok))
+}
+func (r *recManifestReporter) Log(string, string) {}
+func (r *recManifestReporter) BatchDone(string)   { r.add("batchdone") }
+func (r *recManifestReporter) snap() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.totalN = n
-	r.totalJobs = jobs
+	return append([]string(nil), r.ev...)
 }
 
-func (r *captureReporter) Start(i, worker int, t ManifestUpdate) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.starts = append(r.starts, captureEvent{idx: i, worker: worker, target: t})
+var _ tui.Reporter = (*recManifestReporter)(nil)
+
+func mfHas(s []string, x string) bool {
+	for _, e := range s {
+		if e == x {
+			return true
+		}
+	}
+	return false
 }
 
-func (r *captureReporter) Done(i, worker int, t ManifestUpdate, ok bool, errMsg, _ string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.dones = append(r.dones, captureEvent{idx: i, worker: worker, target: t, ok: ok, errMsg: errMsg})
-}
-
-func (r *captureReporter) Finish() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.finished = true
-}
-
-func TestRegenerateManifests_ReporterNotInvokedWhenPkgdevMissing(t *testing.T) {
-	if _, err := exec.LookPath("pkgdev"); err == nil {
-		t.Skip("pkgdev installed; this test asserts the not-found path")
+// R1.3/R3.2/R6.2: the migrated manifest emits the lifecycle that the tui model
+// renders as per-target slots, ✓/✗ history, a live tail, and a summary line.
+func TestManifestEmitsParityEvents(t *testing.T) {
+	overlay := t.TempDir()
+	for _, p := range [][2]string{{"c", "a"}, {"c", "b"}} {
+		if err := os.MkdirAll(filepath.Join(overlay, p[0], p[1]), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
+	oldLook := lookPath
+	t.Cleanup(func() { lookPath = oldLook })
+	lookPath = func(string) (string, error) { return "/usr/bin/pkgdev", nil }
 
-	createRenameTestEbuild(t, overlayPath, "app-misc", "alpha", "1.0.0")
-	createRenameTestEbuild(t, overlayPath, "app-misc", "beta", "1.0.0")
-	createRenameTestEbuild(t, overlayPath, "app-misc", "gamma", "1.0.0")
-
-	// pkgdev missing causes RegenerateManifests to short-circuit before
-	// the worker pool spins up — every target is marked failed but the
-	// reporter is never touched (no Total/Start/Done/Finish fired).
-	rep := &captureReporter{}
-	targets, err := ResolveManifestTargets(overlayPath, ManifestScope{})
-	if err != nil {
-		t.Fatalf("ResolveManifestTargets: %v", err)
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	calls := 0
+	execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		calls++
+		if calls == 2 {
+			return exec.CommandContext(ctx, "sh", "-c", "printf 'FAIL-OUT\\n' 1>&2; exit 1")
+		}
+		return exec.CommandContext(ctx, "sh", "-c", "printf 'ok-line\\n'")
 	}
-	updates := RegenerateManifests(overlayPath, targets, &ManifestOptions{
-		Reporter: rep,
-		Jobs:     2,
-		Keep:     true,
-	})
-	if len(updates) != 3 {
-		t.Fatalf("got %d updates, want 3", len(updates))
+
+	rec := &recManifestReporter{}
+	targets := []ManifestUpdate{{Category: "c", Package: "a"}, {Category: "c", Package: "b"}}
+	RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rec})
+
+	ev := rec.snap()
+	if !mfHas(ev, "batchstart:2") {
+		t.Errorf("expected batchstart:2 in %v", ev)
+	}
+	if !mfHas(ev, "start:c/a") || !mfHas(ev, "done:c/a:true") {
+		t.Errorf("expected slot + ✓ history for c/a in %v", ev)
+	}
+	if !mfHas(ev, "start:c/b") || !mfHas(ev, "done:c/b:false") {
+		t.Errorf("expected slot + ✗ history for c/b in %v", ev)
+	}
+	if !mfHas(ev, "line:c/a:ok-line") {
+		t.Errorf("expected a live tail line for c/a in %v", ev)
+	}
+	if !mfHas(ev, "batchdone") {
+		t.Errorf("expected a summary (batchdone) in %v", ev)
+	}
+}
+
+// R2.2: a non-TTY plain reporter emits deterministic lines with NO ANSI.
+func TestManifestPlainNoANSI(t *testing.T) {
+	overlay := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(overlay, "c", "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLook := lookPath
+	t.Cleanup(func() { lookPath = oldLook })
+	lookPath = func(string) (string, error) { return "/usr/bin/pkgdev", nil }
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "printf 'fetched\\n'")
+	}
+
+	var buf bytes.Buffer
+	rep := tui.NewPlainReporter(&buf, 0)
+	targets := []ManifestUpdate{{Category: "c", Package: "a"}}
+	RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rep})
+
+	out := buf.String()
+	if strings.ContainsRune(out, 0x1b) {
+		t.Errorf("plain manifest output must contain no ANSI ESC:\n%q", out)
+	}
+	if !strings.Contains(out, "c/a") {
+		t.Errorf("plain output should name the package:\n%s", out)
+	}
+}
+
+// When pkgdev is absent the run short-circuits and the reporter is never touched
+// (no events) — every target is marked failed.
+func TestManifestReporterNotInvokedWhenPkgdevMissing(t *testing.T) {
+	oldLook := lookPath
+	t.Cleanup(func() { lookPath = oldLook })
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	rec := &recManifestReporter{}
+	targets := []ManifestUpdate{{Category: "c", Package: "a"}, {Category: "c", Package: "b"}}
+	updates := RegenerateManifests(t.TempDir(), targets, &ManifestOptions{Reporter: rec, Jobs: 2, Keep: true})
+
+	if len(updates) != 2 {
+		t.Fatalf("got %d updates, want 2", len(updates))
 	}
 	for _, u := range updates {
 		if u.Success {
 			t.Errorf("%s/%s: expected failure when pkgdev missing", u.Category, u.Package)
 		}
 	}
-	if rep.totalN != 0 || len(rep.starts) != 0 || len(rep.dones) != 0 || rep.finished {
-		t.Errorf("reporter should not be invoked when pkgdev is missing, got %+v", rep)
+	if got := rec.snap(); len(got) != 0 {
+		t.Errorf("reporter must not be invoked when pkgdev is missing, got %v", got)
 	}
 }
 
+// RegenerateManifests must return updates in input order even under concurrency.
 func TestWorkerPool_PreservesInputOrder(t *testing.T) {
-	// Even when workers complete out of order, RegenerateManifests must
-	// return updates in the same order as the input. We exercise this with
-	// a dry-run (no pkgdev needed) and a large enough N to make ordering
-	// non-trivial under concurrency.
 	targets := make([]ManifestUpdate, 50)
 	for i := range targets {
-		targets[i] = ManifestUpdate{
-			Category: "cat",
-			Package:  "pkg-" + sprintInt(i),
-		}
+		targets[i] = ManifestUpdate{Category: "cat", Package: fmt.Sprintf("pkg-%d", i)}
 	}
-
-	got := RegenerateManifests("/nonexistent", targets, &ManifestOptions{
-		DryRun: true,
-		Jobs:   8,
-	})
+	got := RegenerateManifests("/nonexistent", targets, &ManifestOptions{DryRun: true, Jobs: 8})
 	if len(got) != len(targets) {
 		t.Fatalf("got %d updates, want %d", len(got), len(targets))
 	}
@@ -117,103 +169,4 @@ func TestWorkerPool_PreservesInputOrder(t *testing.T) {
 			t.Errorf("index %d: got %q, want %q (order broken)", i, u.Package, targets[i].Package)
 		}
 	}
-}
-
-func TestNoopReporter_AllMethodsSafe(t *testing.T) {
-	var r ProgressReporter = NoopReporter{}
-	r.Total(0, 0)
-	r.Start(0, 0, ManifestUpdate{})
-	r.Done(0, 0, ManifestUpdate{}, true, "", "")
-	r.Finish()
-}
-
-func TestLogReporter_LinesContainPackageNames(t *testing.T) {
-	var buf bytes.Buffer
-	r := NewLogReporter(&buf)
-
-	r.Total(2, 4)
-	r.Start(0, 0, ManifestUpdate{Category: "app-misc", Package: "alpha"})
-	r.Done(0, 0, ManifestUpdate{Category: "app-misc", Package: "alpha"}, true, "", "")
-	r.Start(1, 1, ManifestUpdate{Category: "dev-libs", Package: "beta"})
-	r.Done(1, 1, ManifestUpdate{Category: "dev-libs", Package: "beta"}, false, "boom", "stderr line")
-	r.Finish()
-
-	out := buf.String()
-	for _, want := range []string{
-		"Regenerating 2 manifest(s)",
-		"START  app-misc/alpha",
-		"OK     app-misc/alpha",
-		"START  dev-libs/beta",
-		"FAIL   dev-libs/beta: boom",
-		"stderr line",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("LogReporter output missing %q\n--- got ---\n%s", want, out)
-		}
-	}
-}
-
-func TestTUIReporter_DrawsAndClearsCleanly(t *testing.T) {
-	// We don't try to validate the TUI visually — we just ensure the
-	// reporter writes *something* on each lifecycle stage and the cursor
-	// hide/show escapes appear in the output.
-	var buf bytes.Buffer
-	r := NewTUIReporter(&buf)
-
-	r.Total(2, 2)
-	r.Start(0, 0, ManifestUpdate{Category: "a", Package: "x"})
-	r.Done(0, 0, ManifestUpdate{Category: "a", Package: "x"}, true, "", "")
-	r.Start(1, 1, ManifestUpdate{Category: "b", Package: "y"})
-	r.Done(1, 1, ManifestUpdate{Category: "b", Package: "y"}, false, "boom", "")
-	r.Finish()
-
-	out := buf.String()
-	if !strings.Contains(out, "\x1b[?25l") {
-		t.Errorf("TUIReporter did not emit cursor-hide escape")
-	}
-	if !strings.Contains(out, "\x1b[?25h") {
-		t.Errorf("TUIReporter did not emit cursor-show escape on Finish")
-	}
-	if !strings.Contains(out, "Regenerating manifests") {
-		t.Errorf("TUIReporter did not render the bar header")
-	}
-	if !strings.Contains(out, "succeeded") || !strings.Contains(out, "failed") {
-		t.Errorf("TUIReporter did not render summary on Finish: %q", out)
-	}
-}
-
-func TestRenderBar_ClampsAndScales(t *testing.T) {
-	tests := []struct {
-		pct      float64
-		width    int
-		filledOK func(string) bool
-	}{
-		{0, 10, func(s string) bool { return strings.Count(s, "█") == 0 && strings.Count(s, "░") == 10 }},
-		{1, 10, func(s string) bool { return strings.Count(s, "█") == 10 && strings.Count(s, "░") == 0 }},
-		{0.5, 10, func(s string) bool { return strings.Count(s, "█") == 5 && strings.Count(s, "░") == 5 }},
-		{2, 8, func(s string) bool { return strings.Count(s, "█") == 8 }},  // clamps
-		{-1, 8, func(s string) bool { return strings.Count(s, "█") == 0 }}, // clamps
-	}
-	for _, tt := range tests {
-		got := renderBar(tt.pct, tt.width)
-		if !tt.filledOK(got) {
-			t.Errorf("renderBar(%v, %d) = %q — failed shape check", tt.pct, tt.width, got)
-		}
-	}
-}
-
-// --- small helpers used only by these tests ---
-
-func sprintInt(i int) string {
-	// avoid pulling fmt just for tests
-	if i == 0 {
-		return "0"
-	}
-	const digits = "0123456789"
-	var b []byte
-	for i > 0 {
-		b = append([]byte{digits[i%10]}, b...)
-		i /= 10
-	}
-	return string(b)
 }
