@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-21
+
+### Fixed
+- **Manifest LLM auto-fixer no longer dies with `argument list too long`.** When
+  `pkgdev manifest` failed on a large distfile, its combined output — including
+  `wget`'s progress bar, which emits one dot per ~1KB, so a multi-hundred-MB
+  download dumped hundreds of thousands of progress lines — was embedded whole into
+  the agent's `-p` instruction. That single argv element exceeded Linux's
+  `MAX_ARG_STRLEN` (128 KiB per argument), so `execve` failed with `E2BIG`
+  (`fork/exec … : argument list too long`) and the fixer never started (observed
+  bumping `net-misc/rustdesk`). The manifest output is now bounded to a head+tail
+  budget before it reaches argv, preserving the actionable diagnostic (the failing
+  URI and the final `failed fetching` lines) while eliding the noisy middle.
+- **`autoupdate --check` retries now actually run against a slow or hung host.**
+  The per-operation budget was equal to the per-request HTTP timeout (both 30s),
+  so the first slow request consumed the entire budget and the 3 configured
+  retries never fired — an intermittently slow upstream (e.g. `salsa.debian.org`,
+  `sources.debian.org`) failed outright with `context deadline exceeded`. The
+  per-operation budget is now derived to be large enough for every retry attempt
+  to run within it (`per-request × (retries+1) + backoff`), so a transient slow
+  first attempt is retried instead of failing the package. A timeout error now
+  also names the host and the per-request cap, so it is clear which endpoint was
+  slow and which knob to raise.
+
+### Added
+- **Configurable HTTP timeout for `autoupdate --check`.** The per-request timeout
+  is now resolved as `--timeout <seconds>` (flag) > `autoupdate.http_timeout`
+  (config) > `30` (default), and the per-operation budget scales from it. Raise it
+  for hosts whose single response legitimately takes longer than the default.
+- **Per-package `timeout` in `packages.toml`.** A package may set `timeout = N`
+  (seconds) to override its per-operation budget — extra retry headroom for a
+  reliably slow host without slowing the rest of the batch. Absent/`0` uses the
+  global budget. The override also applies to the `script` (headless-browser)
+  parser path.
+
 ## [0.7.1] - 2026-06-18
 
 ### Fixed
@@ -1050,7 +1085,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/obentoo/bentoolkit/compare/v0.6.0...v0.7.0
 [0.4.2]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...v0.4.2
