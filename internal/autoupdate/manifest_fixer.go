@@ -225,6 +225,33 @@ func (f *ClaudeCodeFixer) buildFixArgs(instruction, pkgDir string) []string {
 	return args
 }
 
+// manifestErrorBudget bounds how much of the raw `pkgdev manifest` failure output
+// is embedded into the agent's -p instruction. The output can balloon to many
+// megabytes: wget's progress bar emits one dot per ~1KB of a distfile, so a
+// multi-hundred-MB download dumps hundreds of thousands of progress lines. Since
+// the instruction travels as a SINGLE argv element, a bloated error exceeds Linux's
+// MAX_ARG_STRLEN (128 KiB per argument) and execve fails with E2BIG ("argument list
+// too long") before the agent ever starts. The actionable diagnostic — the failing
+// URI and the final "failed fetching" lines — lives at the head and tail, so we
+// keep both ends and elide the noisy middle.
+const manifestErrorBudget = 16 * 1024
+
+// truncateManifestError bounds s to roughly manifestErrorBudget bytes, preserving
+// the head and tail (where the failing URL and final error lines live) and
+// replacing the elided middle with a marker. It returns s unchanged when already
+// within budget, and trims any partial UTF-8 runes left at the cut boundaries so
+// the result is always valid UTF-8.
+func truncateManifestError(s string) string {
+	if len(s) <= manifestErrorBudget {
+		return s
+	}
+	head := manifestErrorBudget / 2
+	tail := manifestErrorBudget - head
+	elided := len(s) - head - tail
+	marker := fmt.Sprintf("\n...[manifest output truncated: %d bytes elided]...\n", elided)
+	return strings.ToValidUTF8(s[:head], "") + marker + strings.ToValidUTF8(s[len(s)-tail:], "")
+}
+
 // buildFixInstruction renders the static-but-parameterized instruction handed to
 // the agent in -p. It states the goal (make `pkgdev manifest` pass), the package
 // facts, the failure output, and the guardrails (preserve PN/PV; don't invent
@@ -243,7 +270,7 @@ func buildFixInstruction(req ManifestFixRequest) string {
 	sb.WriteString("\nEbuild to fix: ")
 	sb.WriteString(req.EbuildPath)
 	sb.WriteString("\n\nThe manifest step failed with:\n")
-	sb.WriteString(req.ManifestError)
+	sb.WriteString(truncateManifestError(req.ManifestError))
 	sb.WriteString("\n\nGuidelines:\n")
 	sb.WriteString("- The most common cause is a SRC_URI whose path/naming convention changed between upstream versions ")
 	sb.WriteString("(e.g. a '-stable' suffix, a renamed release asset, or a moved download host).\n")

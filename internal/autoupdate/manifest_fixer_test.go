@@ -300,3 +300,50 @@ func pkgdevFlakySeam() func(ctx context.Context, name string, arg ...string) *ex
 		return exec.CommandContext(ctx, "true")
 	}
 }
+
+// TestTruncateManifestError verifies the head+tail bounding that keeps the agent's
+// -p instruction under Linux's MAX_ARG_STRLEN.
+func TestTruncateManifestError(t *testing.T) {
+	// Short input passes through verbatim.
+	short := "404 Not Found: https://example.com/foo-1.2.tar.xz"
+	if got := truncateManifestError(short); got != short {
+		t.Errorf("short input was altered: got %q", got)
+	}
+
+	// A realistic bloated error: the failing URI at the head, a multi-megabyte
+	// wget progress dump in the middle, and the final diagnostic at the tail.
+	head := "command failed: exit status 1\nOutput: fetching https://example.com/big-1.4.8.tar.xz\n"
+	tail := "\n * failed fetching file: big-1.4.8.tar.xz\npkgdev manifest: error: failed fetching required distfiles"
+	noise := strings.Repeat("137750K .......... .......... .......... 99% 58.7M 0s\n", 100000)
+	big := head + noise + tail
+
+	got := truncateManifestError(big)
+	if len(got) > manifestErrorBudget+128 {
+		t.Errorf("truncated length %d exceeds budget %d (+marker)", len(got), manifestErrorBudget)
+	}
+	if !strings.Contains(got, "big-1.4.8.tar.xz") {
+		t.Error("truncation dropped the failing URI at the head")
+	}
+	if !strings.Contains(got, "failed fetching required distfiles") {
+		t.Error("truncation dropped the final diagnostic at the tail")
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Error("expected an elision marker in the truncated output")
+	}
+}
+
+// TestBuildFixInstruction_BoundsArgvSize is a regression guard for the E2BIG
+// ("argument list too long") failure: a manifest error bloated by a wget progress
+// dump must not push the -p instruction past the per-argument kernel limit.
+func TestBuildFixInstruction_BoundsArgvSize(t *testing.T) {
+	req := sampleFixRequest(t)
+	req.ManifestError = strings.Repeat("137750K .......... .......... 99% 58.7M 0s\n", 200000)
+
+	instruction := buildFixInstruction(req)
+
+	// MAX_ARG_STRLEN on Linux is 128 KiB per single argv element; stay well under.
+	const maxArgStrlen = 128 * 1024
+	if len(instruction) >= maxArgStrlen {
+		t.Errorf("instruction length %d would exceed MAX_ARG_STRLEN %d", len(instruction), maxArgStrlen)
+	}
+}
