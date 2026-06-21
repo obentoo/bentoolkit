@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -17,6 +21,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +56,10 @@ var (
 	// entries absent from the overlay whose upstream is newer than ::gentoo) in
 	// the same pass — read-only, no mutation
 	autoupdateRevivable bool
+	// autoupdateNoTUI opts out of the live TUI during --apply, streaming plain
+	// rate-limited output instead. It is one of the gate's opt-outs (alongside
+	// NO_COLOR and BENTOO_NO_TUI); see tuiEnabledForApply (R2.1, R2.2).
+	autoupdateNoTUI bool
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -89,8 +98,74 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
+	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
+}
+
+// tuiEnabledForApply is the apply-path gate: it defers entirely to tui.Enabled
+// (the single decision point, AD7), feeding it the --no-tui flag. Enabled also
+// honors NO_COLOR / BENTOO_NO_TUI and requires stdout to be a TTY, so a piped or
+// opted-out run selects the plain backend (R2.1, R2.2).
+func tuiEnabledForApply() bool {
+	return tui.Enabled(tui.Options{NoTUI: autoupdateNoTUI})
+}
+
+// buildApplyReporter selects the apply backend per the gate (tuiEnabledForApply)
+// and returns a tui.Reporter, the extra ApplierOptions that wire it into the
+// Applier, and a finish func to run once the applies complete.
+//
+// Plain branch (non-TTY / opt-out): a rate-limited plainReporter streams the tail
+// to stderr with NO ANSI (R2.2/R2.3); finish closes the batch.
+//
+// TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
+// cancel — cancelling the apply context, which kills the in-flight child
+// (WithApplierContext) and triggers the existing orphan rollback (R5.1/R5.2). The
+// extra options also route the in-UI y/n confirm (R4.2) and release the terminal
+// for the compile step's sudo/doas prompt while teeing the child's output to a
+// capture buffer the failure path still logs (R4.1). finish closes the batch,
+// stops the program, and waits for it to exit so the terminal is restored before
+// the summary is printed.
+func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) (tui.Reporter, []autoupdate.ApplierOption, func()) {
+	if !tuiEnabledForApply() {
+		r := tui.NewPlainReporter(os.Stderr, time.Second)
+		r.BatchStart(total)
+		return r, []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, func() { r.BatchDone("") }
+	}
+
+	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
+	prog.Start()
+	r.BatchStart(total)
+	extra := []autoupdate.ApplierOption{
+		autoupdate.WithApplierReporter(r),
+		// In-UI y/n confirmation rendered by the model instead of reading stdin
+		// behind the program (R4.2).
+		autoupdate.WithConfirmFunc(prog.Confirm),
+		// Hand the real terminal to the compile child so a sudo/doas password
+		// prompt is visible (R4.1), while teeing its stdout+stderr to a capture
+		// buffer the failure path still saves (the applier's Output: %s contract).
+		autoupdate.WithApplierRunAttached(func(cmd *exec.Cmd) ([]byte, error) {
+			var buf bytes.Buffer
+			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+			cmd.Stdin = os.Stdin
+			err := tui.RunAttached(prog, cmd)
+			return buf.Bytes(), err
+		}),
+	}
+	finish := func() {
+		r.BatchDone("")
+		prog.Stop()
+		// Wait for the program goroutine to exit so the terminal is restored
+		// before the summary prints. A context-cancel (Ctrl-C) outcome surfaces as
+		// tea.ErrProgramKilled here — the EXPECTED cancellation result, not a
+		// failure — so it is intentionally not escalated (R2.4); the manual TTY
+		// gate covers a program that never started cleanly.
+		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+			logger.Debug("apply: live TUI program exited with error: %v", err)
+		}
+	}
+	return r, extra, finish
 }
 
 func runAutoupdate(cmd *cobra.Command, args []string) {
@@ -525,26 +600,49 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
 func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) {
-	applier, err := autoupdate.NewApplier(overlayPath, configDir,
-		autoupdate.WithApplierContext(ctx),
+	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
+	// Ctrl-C (which invokes cancel) cancels the in-flight child via
+	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	applyCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
+	// the reporter value itself is not needed at this call site.
+	_, extra, finish := buildApplyReporter(applyCtx, cancel, 1)
+
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
-	)
+	}
+	opts = append(opts, extra...)
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
+		finish()
 		logger.Error("failed to initialize applier: %v", err)
 		osExit(1)
+		return
 	}
 
-	output.Info.Printf("Applying update for %s...\n", pkg)
+	// The applier's TaskStart now surfaces "applying <pkg>" through the reporter
+	// (the plain backend prints a START line; the TUI shows the task), so the
+	// previous output.Info Printf is intentionally gone.
 
-	//nolint:contextcheck // ctx is propagated into Apply's spawned processes
-	// via WithApplierContext (a.ctx) — the deliberate single-source wiring from
-	// signal.NotifyContext in runApply. Apply takes no ctx param by design.
+	//nolint:contextcheck // applyCtx is propagated into Apply's spawned processes
+	// via WithApplierContext (a.ctx) — the deliberate single-source wiring derived
+	// from signal.NotifyContext. Apply takes no ctx param by design.
 	result, err := applier.Apply(pkg, autoupdateCompile)
+
+	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
+	// history stays in scrollback and displayApplyResult prints to a clean line.
+	finish()
+
 	if err != nil {
 		displayApplyResult(result)
 		osExit(1)
+		return
 	}
 
 	displayApplyResult(result)
@@ -562,38 +660,69 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 // package never aborts the others — and the process exits non-zero when any
 // package failed, matching the single-package --apply contract.
 func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) {
-	applier, err := autoupdate.NewApplier(overlayPath, configDir,
-		autoupdate.WithApplierContext(ctx),
-		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		applierFixerOption(llmCfg),
-	)
+	// Read the pending list up front so the reporter's batch denominator (and the
+	// "nothing to do" short-circuit) are known before the TUI program starts. The
+	// applier built below loads the same pending.json, and Apply mutates it as it
+	// goes, so this snapshot is the count we iterate over (mirrors the existing
+	// snapshot rationale).
+	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
-		logger.Error("failed to initialize applier: %v", err)
+		logger.Error("failed to load pending list: %v", err)
 		osExit(1)
 		return
 	}
-
-	updates := applier.Pending().List()
+	updates := pending.List()
 	if len(updates) == 0 {
 		logger.Info("No pending updates to apply")
+		return
+	}
+
+	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
+	// Ctrl-C (which invokes cancel) cancels the in-flight child via
+	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	applyCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	_, extra, finish := buildApplyReporter(applyCtx, cancel, len(updates))
+
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(applyCtx),
+		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		// Reuse the pending list already loaded so the applier and this snapshot
+		// share one in-memory source of truth.
+		autoupdate.WithApplierPendingList(pending),
+		applierFixerOption(llmCfg),
+	}
+	opts = append(opts, extra...)
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	if err != nil {
+		finish()
+		logger.Error("failed to initialize applier: %v", err)
+		osExit(1)
 		return
 	}
 
 	results := make([]*autoupdate.ApplyResult, 0, len(updates))
 	failures := 0
 	for _, u := range updates {
-		output.Info.Printf("Applying update for %s...\n", u.Package)
+		// The applier's TaskStart now surfaces each package through the reporter,
+		// so the previous output.Info Printf per package is intentionally gone.
 
-		//nolint:contextcheck // ctx is propagated into Apply's spawned processes
-		// via WithApplierContext (a.ctx) — the deliberate single-source wiring from
-		// signal.NotifyContext in the caller. Apply takes no ctx param by design.
+		//nolint:contextcheck // applyCtx is propagated into Apply's spawned
+		// processes via WithApplierContext (a.ctx) — the deliberate single-source
+		// wiring derived from signal.NotifyContext. Apply takes no ctx param.
 		result, err := applier.Apply(u.Package, autoupdateCompile)
 		if err != nil {
 			failures++
 		}
 		results = append(results, result)
 	}
+
+	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
+	// history stays in scrollback and displayApplyAllResults prints cleanly.
+	finish()
 
 	displayApplyAllResults(results, failures)
 

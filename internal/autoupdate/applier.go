@@ -18,6 +18,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 // manifestTimeout bounds a single `pkgdev manifest` invocation. The manifest
@@ -139,6 +140,21 @@ type Applier struct {
 	// between versions) before the Applier re-runs the manifest to confirm. Set
 	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
 	fixer ManifestFixer
+	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
+	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
+	// so the silent, fully-buffered behaviour predating the TUI is preserved and
+	// every existing test stays byte-identical (R3.3).
+	reporter tui.Reporter
+	// runAttached executes the compile-test command and returns its combined
+	// output. The privileged child needs the REAL terminal for the sudo/doas
+	// password prompt (R4.1), which rules out capturing its stdout/stderr through
+	// a StreamCapture pipe the way runManifest does. The default (set in
+	// NewApplier) is exactly cmd.CombinedOutput, so the compile-log path stays
+	// byte-identical to the pre-TUI behaviour (R3.3/R7.1). The apply driver
+	// (sub-task 4.1) overrides it via WithApplierRunAttached to release the
+	// terminal for the prompt and tee the raw output to the TTY and a capture
+	// buffer. A nil override is normalized back to the CombinedOutput default.
+	runAttached func(cmd *exec.Cmd) ([]byte, error)
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -230,6 +246,35 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 	}
 }
 
+// WithApplierReporter wires a progress reporter into the applier so Apply emits
+// its lifecycle (TaskStart → TaskStage → TaskDone) to the TUI/plain sink. A nil
+// reporter is normalized to tui.Noop(), preserving the silent, fully-buffered
+// behaviour predating the TUI (R3.3).
+func WithApplierReporter(r tui.Reporter) ApplierOption {
+	return func(a *Applier) {
+		if r == nil {
+			r = tui.Noop()
+		}
+		a.reporter = r
+	}
+}
+
+// WithApplierRunAttached overrides how the compile test executes. The default
+// (cmd.CombinedOutput) buffers the child's output, which is byte-identical to the
+// pre-TUI behaviour (R3.3/R7.1) but swallows the sudo/doas password prompt. The
+// apply driver (sub-task 4.1) supplies a variant that hands the child the real
+// terminal so the prompt is visible (R4.1) while teeing its raw output to the TTY
+// and a capture buffer (the captured bytes still feed saveCompileLog on failure,
+// R7.1). A nil fn is normalized back to the CombinedOutput default.
+func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOption {
+	return func(a *Applier) {
+		if fn == nil {
+			fn = func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() }
+		}
+		a.runAttached = fn
+	}
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -241,6 +286,10 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		confirmFunc: defaultConfirmFunc,
 		execCommand: exec.CommandContext,
 		ctx:         context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
+		reporter:    tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (R3.3)
+		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
+		// path is byte-identical (R3.3/R7.1); replaced by WithApplierRunAttached.
+		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 	}
 
 	// Apply options first
@@ -283,6 +332,20 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	result = &ApplyResult{
 		Package: pkg,
 	}
+
+	// Open the task in the progress reporter and guarantee a matching TaskDone on
+	// every return path (mirrors the deferred orphan-rollback below, keyed on the
+	// same named result). The package name doubles as both the task id and its
+	// display label. Under the default Noop reporter these are no-ops, so the
+	// silent, fully-buffered behaviour is byte-identical to before (R3.3).
+	a.reporter.TaskStart(pkg, pkg)
+	defer func() {
+		if result == nil {
+			a.reporter.TaskDone(pkg, false, "", "")
+			return
+		}
+		a.reporter.TaskDone(pkg, result.Success, applySummary(result), "")
+	}()
 
 	// Get pending update
 	update, found := a.pending.Get(pkg)
@@ -398,6 +461,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// Run manifest command. When a fixer is wired, a failure here triggers a
 	// single agentic repair-and-retry before the apply is declared failed; the
 	// outcome (including whether a fix was applied) is recorded on result.
+	a.reporter.TaskStage(pkg, "manifest")
 	if err := a.runManifestWithFix(pkg, newVersion, result); err != nil {
 		result.Error = fmt.Errorf("%w: %v", ErrManifestFailed, err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
@@ -414,6 +478,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 
 	// Run compile test if requested
 	if compile {
+		a.reporter.TaskStage(pkg, "compile")
 		logPath, err := a.runCompile(pkg, newVersion)
 		if err != nil {
 			result.Error = err
@@ -452,6 +517,29 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 
 	return result, nil
+}
+
+// applySummary derives the short, one-line summary handed to the reporter's
+// TaskDone for an apply. It is purely cosmetic (the reporter only renders it):
+// on success the new version (noting an LLM fix when one happened), on an
+// obsolete prune the reason, and otherwise the failure's error text. A nil
+// result yields the empty string.
+func applySummary(result *ApplyResult) string {
+	switch {
+	case result == nil:
+		return ""
+	case result.Success:
+		if result.Fixed {
+			return result.NewVersion + " (fixed)"
+		}
+		return result.NewVersion
+	case result.Obsolete:
+		return result.ObsoleteReason
+	case result.Error != nil:
+		return result.Error.Error()
+	default:
+		return ""
+	}
 }
 
 // resolveCurrentVersion returns the highest-version, non-live ebuild version
@@ -695,6 +783,8 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	defer func() { _ = os.RemoveAll(distdir) }()
 
 	logger.Info("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version)
+	a.reporter.TaskStage(pkg, "llm-fix")
+	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
 	fixRes, fixErr := a.fixer.FixManifest(a.ctx, ManifestFixRequest{
 		Package:       pkg,
@@ -710,6 +800,7 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
 	// self-report.
+	a.reporter.TaskStage(pkg, "re-check")
 	if secondErr := a.runManifest(pkg, version); secondErr != nil {
 		return fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
 	}
@@ -717,6 +808,7 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	result.Fixed = true
 	result.FixSummary = fixRes.Summary
 	logger.Info("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary)
+	a.reporter.Log("info", fmt.Sprintf("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary))
 
 	// Advisory QA gate: the manifest re-run proves the distfile fetches and
 	// digests, but not that the agent's edit is QA-clean. Run pkgcheck (when
@@ -812,9 +904,21 @@ func (a *Applier) runManifest(pkg, version string) error {
 	cmd := a.execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgDir
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("command failed: %w\nOutput: %s", err, string(output))
+	// Stream the long manifest run (distfile download + digest) live as TaskLine
+	// events (R1.1; the StreamCapture handles in-place "\r" updates, R1.2). The
+	// task id is pkg so the lines are attributed to the same task the reporter
+	// lifecycle uses (sub-task 3.1). The SAME StreamCapture instance is used for
+	// both stdout and stderr, so exec gives the child a single pipe — the captured
+	// bytes are byte-identical to CombinedOutput's, keeping the error string and
+	// every existing failure test byte-identical (R7.1). Under the default Noop
+	// reporter the TaskLine events are discarded, so behaviour is unchanged (R3.3).
+	sc := tui.NewStreamCapture(a.reporter, pkg, tui.StreamStdout)
+	cmd.Stdout = sc
+	cmd.Stderr = sc
+	runErr := cmd.Run()
+	_ = sc.Close()
+	if runErr != nil {
+		return fmt.Errorf("command failed: %w\nOutput: %s", runErr, sc.Captured())
 	}
 
 	return nil
@@ -882,7 +986,14 @@ func (a *Applier) runCompile(pkg, version string) (string, error) {
 	cmd := a.execCommand(a.ctx, privTool, "ebuild", ebuildPath, "clean", "compile")
 	cmd.Dir = a.overlayPath
 
-	output, err := cmd.CombinedOutput()
+	// Execute through the runAttached seam rather than StreamCapture: the
+	// privileged child needs the real TTY for the sudo/doas password prompt
+	// (R4.1), which is incompatible with capturing its stdout/stderr into a
+	// StreamCapture pipe. The default seam is exactly cmd.CombinedOutput, so the
+	// compile log written below is byte-identical to the pre-TUI behaviour
+	// (R3.3/R7.1); the TUI override (sub-task 4.1) releases the terminal and tees
+	// the raw output to the TTY plus a capture buffer fed back here as output.
+	output, err := a.runAttached(cmd)
 	if err != nil {
 		// Save log to file
 		logPath := a.saveCompileLog(pkg, version, output)
