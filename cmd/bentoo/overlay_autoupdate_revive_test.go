@@ -116,14 +116,14 @@ func TestHighestVersion(t *testing.T) {
 func TestReviveCheckerOptions(t *testing.T) {
 	pinReviveConcurrency(t)
 
-	opts := reviveCheckerOptions(context.Background(), t.TempDir(), 0, config.LLMConfig{}, "")
+	opts := reviveCheckerOptions(context.Background(), t.TempDir(), 0, 0, config.LLMConfig{}, "")
 	if len(opts) == 0 {
 		t.Fatal("reviveCheckerOptions returned an empty option set")
 	}
 
 	// A positive cacheTTL appends WithCacheTTL, so the set must be at least as
 	// large as the TTL-less one.
-	withTTL := reviveCheckerOptions(context.Background(), t.TempDir(), 1, config.LLMConfig{}, "")
+	withTTL := reviveCheckerOptions(context.Background(), t.TempDir(), 1, 0, config.LLMConfig{}, "")
 	if len(withTTL) < len(opts) {
 		t.Errorf("reviveCheckerOptions with cacheTTL produced fewer options (%d) than without (%d)",
 			len(withTTL), len(opts))
@@ -256,7 +256,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "skipped" {
@@ -274,7 +274,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "noslash", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "noslash", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "failed" {
@@ -292,7 +292,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "failed" {
@@ -312,7 +312,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "failed" {
@@ -339,7 +339,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "failed" {
@@ -379,7 +379,7 @@ func TestReviveOne(t *testing.T) {
 		}
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
-		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0,
+		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
 			config.LLMConfig{}, "", fake, fake, applier, pending)
 
 		if out.status != "failed" {

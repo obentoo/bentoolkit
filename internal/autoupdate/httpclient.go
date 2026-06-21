@@ -150,6 +150,23 @@ func (c *RetryableHTTPClient) SetHTTPClient(client *http.Client) {
 	c.client = client
 }
 
+// SetRequestTimeout sets the per-request timeout (the cap on a single attempt)
+// on both the retry config and the underlying http.Client. Because the standard
+// library resets this timer on every Do call, each retry attempt gets a fresh
+// budget — so as long as the caller's per-operation deadline is larger than this
+// value, the retry loop can actually run its attempts instead of the first slow
+// request consuming the whole operation budget. A non-positive duration is
+// ignored so callers can pass an unresolved value safely.
+func (c *RetryableHTTPClient) SetRequestTimeout(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	c.config.Timeout = d
+	if c.client != nil {
+		c.client.Timeout = d
+	}
+}
+
 // SetDelayFunc sets a custom delay function (useful for testing).
 // The function receives the delay duration that would normally be slept.
 func (c *RetryableHTTPClient) SetDelayFunc(fn func(time.Duration)) {

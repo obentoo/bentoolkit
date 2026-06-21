@@ -78,6 +78,53 @@ type CheckResult struct {
 // outbound HTTP fetch when no explicit timeout is configured on the Checker.
 const DefaultOpTimeout = 30 * time.Second
 
+// deriveOpTimeout sizes the per-operation budget so that every retry attempt can
+// run within it: perReq×(MaxRetries+1) for the attempts, plus the cumulative
+// exponential backoff between them, plus one second of slack. The slack ensures
+// the per-request timeout (not the operation budget) is what fires on a slow
+// host, so the failure surfaces as the clearer "max retries exceeded" rather than
+// a premature "context deadline exceeded". rc carries the retry parameters from
+// the HTTP client; a zero/blank rc still yields a budget >= perReq.
+func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
+	attempts := rc.MaxRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	total := perReq * time.Duration(attempts)
+
+	// Sum the backoff delays the retry loop would sleep between attempts, mirroring
+	// calculateDelay: BaseDelay×2^(i-1), capped at MaxDelay.
+	for i := 1; i <= rc.MaxRetries; i++ {
+		delay := rc.BaseDelay * time.Duration(int64(1)<<uint(i-1))
+		if rc.MaxDelay > 0 && delay > rc.MaxDelay {
+			delay = rc.MaxDelay
+		}
+		total += delay
+	}
+
+	return total + time.Second
+}
+
+// operationTimeout resolves the per-operation budget for a package: the
+// per-package override (cfg.Timeout seconds) when set, otherwise the Checker's
+// global budget (c.opTimeout, derived from the configured per-request timeout).
+func (c *Checker) operationTimeout(cfg *PackageConfig) time.Duration {
+	if cfg != nil && cfg.Timeout > 0 {
+		return time.Duration(cfg.Timeout) * time.Second
+	}
+	return c.opTimeout
+}
+
+// hostForError extracts the host from a URL for diagnostic messages, falling
+// back to the raw URL when it cannot be parsed. It never returns query strings,
+// so it will not leak a credential carried as a query parameter.
+func hostForError(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
 // DefaultConcurrency is the default number of packages CheckAll processes in
 // parallel when no explicit concurrency is configured on the Checker. It is sized
 // to keep the tuned per-host limiters (GitHub ~10/s, GitLab ~3/s) saturated while
@@ -149,7 +196,18 @@ type Checker struct {
 	ctx context.Context
 	// opTimeout bounds a single outbound operation. Each fetch derives a child
 	// context via context.WithTimeout(ctx, opTimeout). Defaults to DefaultOpTimeout.
+	// When httpReqTimeout is set and WithOpTimeout was not, NewChecker replaces this
+	// with a value derived from httpReqTimeout that is large enough for every retry
+	// attempt to fit (see deriveOpTimeout).
 	opTimeout time.Duration
+	// opTimeoutExplicit records that WithOpTimeout set opTimeout directly, so
+	// NewChecker must not overwrite it with the derived budget.
+	opTimeoutExplicit bool
+	// httpReqTimeout, when positive, is the per-request HTTP timeout (the cap on a
+	// single attempt) applied to the HTTP client and used to derive the per-operation
+	// budget. Zero keeps the client's own default (DefaultHTTPTimeout). Set via
+	// WithHTTPRequestTimeout, wired by the CLI from autoupdate.http_timeout / --timeout.
+	httpReqTimeout time.Duration
 	// rateLimiter gates the HTTP hot path: fetchContent waits on it (per host)
 	// before every outbound request so parallel checks do not hammer a single
 	// host. It is injectable via WithRateLimiter and is never nil after
@@ -288,13 +346,31 @@ func WithContext(ctx context.Context) CheckerOption {
 }
 
 // WithOpTimeout sets the per-operation timeout used to derive a child context
-// for each outbound fetch. A non-positive duration is rejected.
+// for each outbound fetch. A non-positive duration is rejected. Setting it marks
+// the budget as explicit, so NewChecker will not overwrite it with the value
+// derived from WithHTTPRequestTimeout.
 func WithOpTimeout(d time.Duration) CheckerOption {
 	return func(c *Checker) error {
 		if d <= 0 {
 			return fmt.Errorf("checker op timeout must be positive, got %v", d)
 		}
 		c.opTimeout = d
+		c.opTimeoutExplicit = true
+		return nil
+	}
+}
+
+// WithHTTPRequestTimeout sets the per-request HTTP timeout — the cap on a single
+// outbound attempt. NewChecker applies it to the HTTP client and, unless
+// WithOpTimeout overrode the budget explicitly, derives the per-operation budget
+// from it so every retry attempt fits within the deadline (see deriveOpTimeout).
+// A non-positive duration is a no-op (the client keeps its default), so callers
+// that wire this option unconditionally can pass an unresolved zero safely.
+func WithHTTPRequestTimeout(d time.Duration) CheckerOption {
+	return func(c *Checker) error {
+		if d > 0 {
+			c.httpReqTimeout = d
+		}
 		return nil
 	}
 }
@@ -413,6 +489,18 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Initialize HTTP client if not provided
 	if checker.httpClient == nil {
 		checker.httpClient = NewRetryableHTTPClient()
+	}
+
+	// Apply the configured per-request HTTP timeout to the client and size the
+	// per-operation budget from it. Without this, the default per-request timeout
+	// and the per-operation budget are equal, so the first slow request consumes
+	// the whole budget and the retry attempts never run (they fail with "context
+	// deadline exceeded"). Deriving a larger budget gives the retries room to run.
+	if checker.httpReqTimeout > 0 {
+		checker.httpClient.SetRequestTimeout(checker.httpReqTimeout)
+		if !checker.opTimeoutExplicit {
+			checker.opTimeout = deriveOpTimeout(checker.httpReqTimeout, checker.httpClient.Config())
+		}
 	}
 
 	// Authenticate api.github.com requests. Anonymous GitHub API access is capped
@@ -932,7 +1020,7 @@ func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string 
 	if cfg.CommitSHAPath == "" {
 		return ""
 	}
-	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to fetch commit sha: %w", err)
@@ -960,7 +1048,7 @@ func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) strin
 	if cfg.AuxPattern == "" {
 		return ""
 	}
-	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to fetch aux value: %w", err)
@@ -1026,7 +1114,7 @@ type commitInfo struct {
 // highest base version found in commit titles since the last snapshot.
 // Called only when cfg.Track == "commit".
 func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
-	content, err := c.fetchContent(cfg.URL, cfg.Headers)
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -1162,7 +1250,7 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 	// Try LLM if configured and available
 	if c.llmClient != nil && cfg.LLMPrompt != "" {
 		// Fetch content from primary URL for LLM
-		content, err := c.fetchContent(cfg.URL, cfg.Headers)
+		content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
 		if err == nil {
 			version, err = c.llmClient.ExtractVersion(content, cfg.LLMPrompt)
 			if err == nil {
@@ -1190,7 +1278,7 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 // scrape plus optional regex post-processing (carried in Pattern).
 func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, error) {
 	// Fetch content
-	content, err := c.fetchContent(rawURL, cfg.Headers)
+	content, err := c.fetchContent(rawURL, cfg.Headers, c.operationTimeout(cfg))
 	if err != nil {
 		return "", err
 	}
@@ -1267,7 +1355,10 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 		return "", fmt.Errorf("rate limiter wait failed: %w", werr)
 	}
 
-	eval, err := newLiveEvaluator(c.opTimeout)
+	// Honour a per-package timeout for the script/browser path too, falling back
+	// to the global budget when unset.
+	opTimeout := c.operationTimeout(cfg)
+	eval, err := newLiveEvaluator(opTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -1276,7 +1367,7 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 	}
 
 	// opTimeout bounds only the navigation/evaluation, starting after the token.
-	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
+	ctx, cancel := context.WithTimeout(c.ctx, opTimeout)
 	defer cancel()
 
 	parser := &ScriptParser{URL: cfg.URL, Script: body, Headers: cfg.Headers, eval: eval}
@@ -1304,7 +1395,7 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 // URLs, the configured GitHub token. Passing them through GetWithHeadersContext
 // (rather than the bare GetWithContext) is what actually puts the User-Agent,
 // the Authorization token, and any TOML-declared headers on the wire.
-func (c *Checker) fetchContent(rawURL string, headers map[string]string) ([]byte, error) {
+func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -1333,13 +1424,18 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string) ([]byte
 	}
 
 	// The per-operation timeout bounds only the HTTP round-trip; its deadline
-	// starts now, after the rate-limit token has been acquired.
-	ctx, cancel := context.WithTimeout(c.ctx, c.opTimeout)
+	// starts now, after the rate-limit token has been acquired. opTimeout is the
+	// per-package or global budget the caller resolved via operationTimeout.
+	ctx, cancel := context.WithTimeout(c.ctx, opTimeout)
 	defer cancel()
 
 	resp, err := c.httpClient.GetWithHeadersContext(ctx, rawURL, headers)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		// Name the host and the per-request cap so a timeout points the user at
+		// the slow endpoint and the knob to raise (autoupdate.http_timeout /
+		// --timeout, or a per-package timeout in packages.toml).
+		return nil, fmt.Errorf("HTTP request to %s failed (per-request timeout %s): %w",
+			hostForError(rawURL), c.httpClient.Config().Timeout, err)
 	}
 	defer resp.Body.Close()
 

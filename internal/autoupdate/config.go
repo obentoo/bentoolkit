@@ -81,6 +81,16 @@ type PackageConfig struct {
 	// Headers contains custom HTTP headers to send with requests
 	Headers map[string]string `toml:"headers,omitempty"`
 
+	// Timeout overrides the per-operation budget (in seconds) for THIS package,
+	// i.e. the total time the checker spends fetching its version across all retry
+	// attempts. Use it for hosts that are reliably slow (e.g. salsa.debian.org,
+	// sources.debian.org) so they get extra retry headroom without slowing the
+	// whole batch. Zero/absent means use the global budget derived from
+	// autoupdate.http_timeout. The per-request cap stays the global value; if a
+	// single response itself needs longer than that cap, raise autoupdate.http_timeout
+	// (or pass --timeout) instead.
+	Timeout int `toml:"timeout,omitempty"`
+
 	// Meta holds free-form key/value annotations for packages with special
 	// acquisition requirements (e.g. a purchased serial, a platform selector,
 	// a download endpoint). It is documentation only — the checker ignores it
@@ -368,6 +378,13 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	}
 	if cfg.Parser == "" {
 		return fmt.Errorf("package %s: %w", pkg, ErrMissingParser)
+	}
+
+	// A negative per-package timeout is almost certainly a typo; reject it so the
+	// misconfiguration surfaces rather than being silently ignored. Zero means
+	// "use the global budget".
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("package %s: timeout must be >= 0 seconds, got %d", pkg, cfg.Timeout)
 	}
 
 	// Validate parser type and required fields

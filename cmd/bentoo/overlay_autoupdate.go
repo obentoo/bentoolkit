@@ -36,6 +36,9 @@ var (
 	autoupdateClean bool
 	// autoupdateConcurrency bounds parallel version checks (range [1,100])
 	autoupdateConcurrency int
+	// autoupdateTimeout overrides the per-request HTTP timeout in seconds
+	// (0 = use config autoupdate.http_timeout, default 30)
+	autoupdateTimeout int
 	// autoupdateOnly restricts --check to a package type ("bin" or "source")
 	autoupdateOnly string
 	// autoupdateReviveList reports disabled (orphaned) entries whose upstream
@@ -81,6 +84,7 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
+	autoupdateCmd.Flags().IntVar(&autoupdateTimeout, "timeout", 0, "per-request HTTP timeout in seconds for --check (0 = use config autoupdate.http_timeout, default 30)")
 	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
@@ -95,6 +99,14 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
 	if autoupdateConcurrency < 1 || autoupdateConcurrency > 100 {
 		logger.Error("--concurrency must be in range [1, 100], got %d", autoupdateConcurrency)
+		osExit(1)
+		return
+	}
+
+	// Validate --timeout up front: a negative value is a typo, and 0 is the
+	// sentinel for "use the configured/default value".
+	if autoupdateTimeout < 0 {
+		logger.Error("--timeout must be >= 0 seconds, got %d", autoupdateTimeout)
 		osExit(1)
 		return
 	}
@@ -161,6 +173,18 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	}
 }
 
+// resolveHTTPTimeout resolves the per-request HTTP timeout for --check and the
+// revive flows: the --timeout flag when positive, otherwise
+// autoupdate.http_timeout from config (which itself falls back to a 30s default).
+// The result is always a positive duration, safe to pass to WithHTTPRequestTimeout.
+func resolveHTTPTimeout(cfg *config.Config) time.Duration {
+	secs := autoupdateTimeout
+	if secs <= 0 {
+		secs = cfg.Autoupdate.GetHTTPTimeout()
+	}
+	return time.Duration(secs) * time.Second
+}
+
 // runCheck handles the --check flag. cacheTTL must be a positive duration —
 // the caller resolves it from AutoupdateConfig.GetCacheTTL, which guarantees a
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
@@ -171,6 +195,9 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
+		// Per-request HTTP timeout (flag > config > 30s default). The Checker
+		// derives the larger per-operation budget so the retry attempts fit.
+		autoupdate.WithHTTPRequestTimeout(resolveHTTPTimeout(cfg)),
 		// Restrict the batch to a package type when --only is set; empty is a
 		// no-op (checks every package). Ignored on the single-package path.
 		autoupdate.WithTypeFilter(autoupdateOnly),
@@ -661,13 +688,14 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 // wiring (with the err-first nil guard) — so a revived package's upstream check
 // behaves identically to a normal --check. The progress callback is omitted: the
 // revive paths drive single-package CheckPackage calls, which never fire it.
-func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string) []autoupdate.CheckerOption {
+func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, githubToken string) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		autoupdate.WithTypeFilter(autoupdateOnly),
 		autoupdate.WithGitHubToken(githubToken),
+		autoupdate.WithHTTPRequestTimeout(httpTimeout),
 		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
 	}
 	if cacheTTL > 0 {
@@ -741,7 +769,7 @@ func resolveGentooProvider(cfg *config.Config, githubToken string) (provider.Pro
 // (the same option set as --check) and the ::gentoo provider, then prints the
 // candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
 func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg, githubToken)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
@@ -836,7 +864,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg, githubToken)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
@@ -889,9 +917,10 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		return
 	}
 
+	httpTimeout := resolveHTTPTimeout(cfg)
 	outcomes := make([]reviveOutcome, 0, len(targets))
 	for _, pkg := range targets {
-		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, llmCfg, githubToken, prov, pdp, applier, pending))
+		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, httpTimeout, llmCfg, githubToken, prov, pdp, applier, pending))
 	}
 
 	failures := displayReviveSummary(outcomes)
@@ -908,7 +937,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 // version, seed it into the overlay, re-enable the entry in packages.toml BEFORE
 // checking (so the checker won't skip it), CheckPackage(force=true) to populate
 // pending with the upstream version, then Apply (honouring --compile / --clean).
-func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL time.Duration, llmCfg config.LLMConfig, githubToken string, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
+func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, githubToken string, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
 	output.Info.Printf("Reviving %s...\n", pkg)
 
 	category, pkgName, ok := splitPackage(pkg)
@@ -950,7 +979,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	// It shares the applier's pending list so the entry CheckPackage writes is
 	// visible to Apply below (same in-memory map, same process).
 	checker, err := autoupdate.NewChecker(overlayPath,
-		append(reviveCheckerOptions(ctx, configDir, cacheTTL, llmCfg, githubToken), autoupdate.WithPendingList(pending))...)
+		append(reviveCheckerOptions(ctx, configDir, cacheTTL, httpTimeout, llmCfg, githubToken), autoupdate.WithPendingList(pending))...)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
 	}

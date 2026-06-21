@@ -772,6 +772,30 @@ func TestGetCacheTTLDefault(t *testing.T) {
 	}
 }
 
+// TestGetHTTPTimeout tests that GetHTTPTimeout returns the default for
+// zero/negative values and the configured value otherwise.
+func TestGetHTTPTimeout(t *testing.T) {
+	tests := []struct {
+		name        string
+		httpTimeout int
+		expected    int
+	}{
+		{name: "zero value returns default", httpTimeout: 0, expected: DefaultHTTPTimeout},
+		{name: "negative value returns default", httpTimeout: -100, expected: DefaultHTTPTimeout},
+		{name: "positive value returns configured", httpTimeout: 60, expected: 60},
+		{name: "small positive value returns configured", httpTimeout: 1, expected: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := AutoupdateConfig{HTTPTimeout: tt.httpTimeout}
+			if got := cfg.GetHTTPTimeout(); got != tt.expected {
+				t.Errorf("GetHTTPTimeout() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestConfigPaths tests that ConfigPaths returns both XDG and legacy paths in priority order
 // _Requirements: 4.1_
 func TestConfigPaths(t *testing.T) {

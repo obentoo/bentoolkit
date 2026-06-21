@@ -55,9 +55,10 @@ type RepoConfig struct {
 
 // AutoupdateConfig holds autoupdate-specific settings
 type AutoupdateConfig struct {
-	CacheTTL int          `yaml:"cache_ttl"` // Cache TTL in seconds (default: 3600)
-	LLM      LLMConfig    `yaml:"llm"`       // LLM provider configuration
-	Search   SearchConfig `yaml:"search"`    // Search provider configuration
+	CacheTTL    int          `yaml:"cache_ttl"`    // Cache TTL in seconds (default: 3600)
+	HTTPTimeout int          `yaml:"http_timeout"` // Per-request HTTP timeout in seconds (default: 30)
+	LLM         LLMConfig    `yaml:"llm"`          // LLM provider configuration
+	Search      SearchConfig `yaml:"search"`       // Search provider configuration
 }
 
 // LLMConfig holds LLM provider configuration for autoupdate
@@ -421,4 +422,18 @@ func (c *AutoupdateConfig) GetCacheTTL() int {
 		return DefaultCacheTTL
 	}
 	return c.CacheTTL
+}
+
+// DefaultHTTPTimeout is the default per-request HTTP timeout in seconds.
+const DefaultHTTPTimeout = 30
+
+// GetHTTPTimeout returns the per-request HTTP timeout in seconds, using the
+// default when unset or non-positive. This is the cap on a single outbound
+// attempt; the autoupdate checker derives the overall per-operation budget from
+// it so the retry attempts fit within the deadline.
+func (c *AutoupdateConfig) GetHTTPTimeout() int {
+	if c.HTTPTimeout <= 0 {
+		return DefaultHTTPTimeout
+	}
+	return c.HTTPTimeout
 }

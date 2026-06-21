@@ -489,6 +489,7 @@ selector = "a.release-tag"
 | `fallback_pattern` | Pattern/path for the fallback parser |
 | `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
+| `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
 
 #### Supported LLM Providers
@@ -586,6 +587,42 @@ bentoo overlay compare --concurrency=20
 
 A value outside the valid range **fails fast** with a clear error *before any
 package work begins* — so a typo in the flag never starts a partial run.
+
+### Timeouts
+
+Each upstream fetch is bounded by a **per-request** timeout (the cap on a single
+HTTP attempt) and an automatically derived **per-operation** budget large enough
+for the retry attempts to run within it. Sizing the budget above the per-request
+timeout is what lets the built-in retries recover from an occasionally slow or
+hung host — otherwise the first slow request would consume the whole budget and
+fail with `context deadline exceeded` before any retry.
+
+Resolution order for the per-request timeout (in seconds):
+
+```bash
+# 1. --timeout flag (highest priority), e.g. give every request up to 60s:
+bentoo overlay autoupdate --check --timeout 60
+```
+
+```yaml
+# 2. config (~/.config/bentoo/config.yaml): applies to every --check run
+autoupdate:
+  http_timeout: 45        # default: 30
+```
+
+| Setting | Scope | Default |
+|---------|-------|---------|
+| `--timeout N` | This `--check` run | `0` (use config) |
+| `autoupdate.http_timeout` | Every run | `30` |
+| `timeout = N` (in `packages.toml`) | One package's per-operation budget | derived from the per-request timeout |
+
+A per-package `timeout` (see the schema fields below) overrides the per-operation
+budget for a single package — useful for a host that is reliably slow (e.g.
+`salsa.debian.org`, `sources.debian.org`) so it gets extra retry headroom without
+slowing the whole batch. If a *single response* itself needs longer than the
+per-request cap, raise `autoupdate.http_timeout` (or pass `--timeout`) instead.
+On a timeout the error names the host and the per-request cap so it is clear
+which endpoint was slow and which knob to raise.
 
 ### Headers and environment variables
 
