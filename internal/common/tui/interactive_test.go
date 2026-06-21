@@ -101,4 +101,8 @@ func TestModelConfirmNo(t *testing.T) {
 	default:
 		t.Errorf("no reply delivered for 'n'")
 	}
+	// after replying, the prompt is cleared
+	if strings.Contains(stripANSI(m.View()), "proceed?") {
+		t.Errorf("confirm prompt should be cleared after answering")
+	}
 }

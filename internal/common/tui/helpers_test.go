@@ -109,13 +109,3 @@ func (r *recordingReporter) taskLines() []recEvent {
 	}
 	return out
 }
-
-// kinds returns the ordered Kind of every recorded event.
-func (r *recordingReporter) kinds() []string {
-	evs := r.snapshot()
-	out := make([]string, len(evs))
-	for i, e := range evs {
-		out[i] = e.Kind
-	}
-	return out
-}
