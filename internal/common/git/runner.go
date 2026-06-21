@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 var (
@@ -20,13 +22,65 @@ var (
 // GitRunner executes git commands in a specific working directory
 type GitRunner struct {
 	workDir string
+
+	// reporter receives stage/done/tail events for mutating and streaming ops.
+	// Defaults to tui.Noop() so callers that supply no reporter behave exactly
+	// as before (R3.3).
+	reporter tui.Reporter
+	// taskID identifies this runner's task in reporter events.
+	taskID string
+	// execCommand builds the underlying *exec.Cmd; it is a seam so tests can
+	// substitute the subprocess. Defaults to exec.Command (R3.3).
+	execCommand func(name string, arg ...string) *exec.Cmd
 }
 
-// NewGitRunner creates a new GitRunner for the specified working directory
-func NewGitRunner(workDir string) *GitRunner {
-	return &GitRunner{
-		workDir: workDir,
+// GitRunnerOption configures a GitRunner at construction time.
+type GitRunnerOption func(*GitRunner)
+
+// NewGitRunner creates a new GitRunner for the specified working directory.
+// With no options it uses a no-op reporter and exec.Command, so existing
+// no-arg callers are unaffected (R3.3).
+func NewGitRunner(workDir string, opts ...GitRunnerOption) *GitRunner {
+	g := &GitRunner{
+		workDir:     workDir,
+		reporter:    tui.Noop(),
+		execCommand: exec.Command,
 	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
+}
+
+// WithGitReporter sets the reporter and task id used for stage/done/tail
+// events. A nil reporter is normalized to tui.Noop().
+func WithGitReporter(r tui.Reporter, id string) GitRunnerOption {
+	return func(g *GitRunner) {
+		if r == nil {
+			r = tui.Noop()
+		}
+		g.reporter = r
+		g.taskID = id
+	}
+}
+
+// WithGitExecCommand overrides the subprocess seam. A nil fn leaves the
+// default (exec.Command) in place.
+func WithGitExecCommand(fn func(name string, arg ...string) *exec.Cmd) GitRunnerOption {
+	return func(g *GitRunner) {
+		if fn != nil {
+			g.execCommand = fn
+		}
+	}
+}
+
+// staged runs fn between a TaskStage(op) and a TaskDone event, keeping the
+// stage/done wiring DRY across mutating ops.
+func (g *GitRunner) staged(op string, fn func() error) error {
+	g.reporter.TaskStage(g.taskID, op)
+	err := fn()
+	g.reporter.TaskDone(g.taskID, err == nil, "", "")
+	return err
 }
 
 // WorkDir returns the working directory of the GitRunner
@@ -36,7 +90,7 @@ func (g *GitRunner) WorkDir() string {
 
 // runCommand executes a git command and returns stdout, stderr, and any error
 func (g *GitRunner) runCommand(args ...string) (stdout, stderr string, err error) {
-	cmd := exec.Command("git", args...)
+	cmd := g.execCommand("git", args...)
 	cmd.Dir = g.workDir
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -181,19 +235,21 @@ func ParseStatusOutput(output string) []StatusEntry {
 
 // Add stages files for commit with path validation
 func (g *GitRunner) Add(paths ...string) error {
-	if len(paths) == 0 {
-		// Default to adding all changes
-		_, _, err := g.runCommand("add", ".")
-		return err
-	}
-
-	for _, path := range paths {
-		if err := g.validateAndAddPath(path); err != nil {
+	return g.staged("add", func() error {
+		if len(paths) == 0 {
+			// Default to adding all changes
+			_, _, err := g.runCommand("add", ".")
 			return err
 		}
-	}
 
-	return nil
+		for _, path := range paths {
+			if err := g.validateAndAddPath(path); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 // validateAndAddPath validates a single path and adds it to staging
@@ -269,22 +325,26 @@ func (g *GitRunner) validateAndAddPath(path string) error {
 
 // Commit creates a git commit with the specified message and author
 func (g *GitRunner) Commit(message, user, email string) error {
-	args := []string{"commit", "-m", message}
+	return g.staged("commit", func() error {
+		args := []string{"commit", "-m", message}
 
-	// Set author if provided
-	if user != "" && email != "" {
-		author := user + " <" + email + ">"
-		args = append(args, "--author", author)
-	}
+		// Set author if provided
+		if user != "" && email != "" {
+			author := user + " <" + email + ">"
+			args = append(args, "--author", author)
+		}
 
-	_, _, err := g.runCommand(args...)
-	return err
+		_, _, err := g.runCommand(args...)
+		return err
+	})
 }
 
 // Push pushes commits to the remote repository
 func (g *GitRunner) Push() error {
-	_, _, err := g.runCommand("push")
-	return err
+	return g.staged("push", func() error {
+		_, _, err := g.runCommand("push")
+		return err
+	})
 }
 
 // PushDryRun shows what would be pushed without actually pushing
@@ -299,25 +359,55 @@ func (g *GitRunner) PushDryRun() (string, error) {
 	return strings.TrimSpace(stdout), nil
 }
 
-// Fetch fetches changes from a remote repository
+// Fetch fetches changes from a remote repository. It is a streaming op: git's
+// progress output (which it writes to stderr) is tailed live via a
+// tui.StreamCapture and also captured verbatim, so a failing fetch preserves
+// the full output in the returned error (R7.1). Under the default Noop reporter
+// and exec.Command this is behavior-equivalent to a buffered fetch (R3.3).
 func (g *GitRunner) Fetch(remote string) error {
-	_, _, err := g.runCommand("fetch", remote)
-	return err
+	g.reporter.TaskStage(g.taskID, "fetch")
+
+	cmd := g.execCommand("git", "fetch", remote)
+	cmd.Dir = g.workDir
+
+	// One capture for both streams (combined), so git's stderr progress is tailed
+	// and preserved alongside any stdout.
+	sc := tui.NewStreamCapture(g.reporter, g.taskID, tui.StreamStdout)
+	cmd.Stdout = sc
+	cmd.Stderr = sc
+
+	runErr := cmd.Run()
+	_ = sc.Close()
+
+	g.reporter.TaskDone(g.taskID, runErr == nil, "", "")
+
+	if runErr != nil {
+		// Preserve the captured output in the error, mirroring runCommand's
+		// wrapping (R7.1).
+		captured := strings.TrimSpace(sc.Captured())
+		if captured != "" {
+			return errors.Join(ErrGitCommand, errors.New(captured))
+		}
+		return errors.Join(ErrGitCommand, runErr)
+	}
+	return nil
 }
 
 // Merge merges a branch into the current branch.
 // If there are conflicts, the error message includes the conflict details from stdout.
 func (g *GitRunner) Merge(branch string) error {
-	stdout, stderr, err := g.runCommand("merge", branch)
-	if err != nil {
-		// Git outputs conflict information to stdout, so include it in the error
-		// for proper conflict detection
-		combinedOutput := strings.TrimSpace(stdout + "\n" + stderr)
-		if combinedOutput != "" {
-			return errors.Join(ErrGitCommand, errors.New(combinedOutput))
+	return g.staged("merge", func() error {
+		stdout, stderr, err := g.runCommand("merge", branch)
+		if err != nil {
+			// Git outputs conflict information to stdout, so include it in the error
+			// for proper conflict detection
+			combinedOutput := strings.TrimSpace(stdout + "\n" + stderr)
+			if combinedOutput != "" {
+				return errors.Join(ErrGitCommand, errors.New(combinedOutput))
+			}
 		}
-	}
-	return err
+		return err
+	})
 }
 
 // Ensure GitRunner implements GitExecutor interface

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 // DefaultGitCloneTimeout is the default timeout applied to a git clone
@@ -28,6 +30,23 @@ type GitCloneProvider struct {
 
 	// UpdateInterval is how often to pull updates (default: 24h)
 	UpdateInterval time.Duration
+
+	// reporter receives stage/done/tail events for the clone. It may be nil
+	// (this struct is often built as a literal without a constructor default),
+	// so cloneRepo nil-guards it locally. (R3.3)
+	reporter tui.Reporter
+	// taskID identifies this provider's task in reporter events.
+	taskID string
+}
+
+// SetReporter wires a reporter and task id for clone stage/done/tail events. A
+// nil reporter is normalized to tui.Noop().
+func (p *GitCloneProvider) SetReporter(r tui.Reporter, id string) {
+	if r == nil {
+		r = tui.Noop()
+	}
+	p.reporter = r
+	p.taskID = id
 }
 
 // NewGitCloneProvider creates a new git clone provider.
@@ -184,12 +203,31 @@ func (p *GitCloneProvider) cloneRepo() error {
 		p.LocalPath,
 	)
 
-	output, err := cmd.CombinedOutput()
+	// Nil-guard locally: GitCloneProvider is frequently built as a struct
+	// literal with no constructor default for reporter (R3.3).
+	rep := p.reporter
+	if rep == nil {
+		rep = tui.Noop()
+	}
+	rep.TaskStage(p.taskID, "clone")
+
+	// Stream git's progress (written to stderr) live while still capturing the
+	// full combined output verbatim for the error path (R7.1). Under the default
+	// Noop reporter this is byte-identical to the previous CombinedOutput path.
+	sc := tui.NewStreamCapture(rep, p.taskID, tui.StreamStdout)
+	cmd.Stdout = sc
+	cmd.Stderr = sc
+
+	err := cmd.Run()
+	_ = sc.Close()
+
+	rep.TaskDone(p.taskID, err == nil, "", "")
+
 	if err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("%w: %v: %s", ErrCloneFailed, ctx.Err(), string(output))
+			return fmt.Errorf("%w: %v: %s", ErrCloneFailed, ctx.Err(), sc.Captured())
 		}
-		return fmt.Errorf("%w: %s: %s", ErrCloneFailed, err.Error(), string(output))
+		return fmt.Errorf("%w: %s: %s", ErrCloneFailed, err.Error(), sc.Captured())
 	}
 
 	return nil

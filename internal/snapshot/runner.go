@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 // execCommand is the injectable context-aware command factory. It defaults to
@@ -23,13 +25,28 @@ type Runner interface {
 	Run(ctx context.Context, name string, args []string, stdin []byte) (stdout []byte, err error)
 }
 
-// execRunner is the production Runner backed by execCommand.
-type execRunner struct{}
+// execRunner is the production Runner backed by execCommand. An optional reporter
+// surfaces stage/done progress for each command; a nil reporter (the default) is
+// normalized to a no-op so behavior is unchanged from before this story (R3.3).
+type execRunner struct {
+	reporter tui.Reporter
+	taskID   string
+}
 
 // Run executes name with args under ctx. When err is non-nil and the command
 // wrote to stderr, the trimmed stderr is joined onto the error so callers can
 // wrap it (e.g. with ErrEngineFailed) without losing the diagnostic.
-func (execRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
+//
+// It emits a TaskStage(taskID, name) before running and a TaskDone(taskID, ok)
+// after (R6.2: snapshot subprocess sites get stage/done events). Snapshot
+// commands do not stream meaningful progress, so no live tail is attached.
+func (e execRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
+	rep := e.reporter
+	if rep == nil {
+		rep = tui.Noop()
+	}
+	rep.TaskStage(e.taskID, name)
+
 	cmd := execCommand(ctx, name, args...)
 	// On cancel, CommandContext kills only the direct child; orphaned
 	// grandchildren (shell pipelines) can keep the stdout/stderr pipes open and
@@ -49,12 +66,24 @@ func (execRunner) Run(ctx context.Context, name string, args []string, stdin []b
 			err = errors.Join(err, errors.New(s))
 		}
 	}
+	rep.TaskDone(e.taskID, err == nil, "", "")
 	return stdout.Bytes(), err
 }
 
 // defaultRunner returns the production Runner used by the factories when no
-// Runner is injected.
+// Runner is injected. Its reporter is nil (normalized to a no-op in Run), so it
+// is byte-for-byte equivalent to the pre-story behavior (R3.3).
 func defaultRunner() Runner { return execRunner{} }
+
+// NewReportingRunner returns a production Runner that emits stage/done progress
+// events to r (keyed by id) for every command it runs. A nil reporter is
+// normalized to a no-op. Drivers wire this when a TUI/plain reporter is active.
+func NewReportingRunner(r tui.Reporter, id string) Runner {
+	if r == nil {
+		r = tui.Noop()
+	}
+	return execRunner{reporter: r, taskID: id}
+}
 
 // RunnerCall records a single invocation captured by MockRunner.
 type RunnerCall struct {
