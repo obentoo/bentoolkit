@@ -37,6 +37,32 @@ const DefaultManifestFixTimeout = 10 * time.Minute
 // guarantees termination without an external retry loop in the Applier.
 const manifestFixMaxTurns = 30
 
+// manifestFixFetchMaxTurns is the reduced tool-turn cap for a fetch-focused fix
+// (FixModeFetch). A fetch repair is a narrow task — locate the real upstream asset
+// and point SRC_URI at it — so it needs far fewer turns than the open-ended generic
+// repair (manifestFixMaxTurns), which keeps cost and latency down.
+const manifestFixFetchMaxTurns = 12
+
+// manifestFixFetchBudgetFactor scales the configured --max-budget-usd down for a
+// fetch-focused fix. Because the fetch task is narrower than the generic repair, it
+// is given a fraction of the spend cap (half) when a budget is configured.
+const manifestFixFetchBudgetFactor = 0.5
+
+// FixMode selects which instruction/argv shape buildFixInstruction and buildFixArgs
+// produce. The zero value (FixModeGeneric) is the original open-ended repair, so an
+// unset Mode preserves the pre-fetch-mode behavior byte-for-byte.
+type FixMode int
+
+const (
+	// FixModeGeneric is the original open-ended manifest repair: the agent may edit
+	// any part of the ebuild to make `pkgdev manifest` pass. It is the zero value.
+	FixModeGeneric FixMode = iota
+	// FixModeFetch narrows the agent to a fetch repair — find the real upstream
+	// distfile and point SRC_URI at it — with network tools (gh/curl) and reduced
+	// caps. It must not touch build logic.
+	FixModeFetch
+)
+
 // manifestFixWaitDelay bounds how long cmd.Wait blocks draining I/O after the
 // context is cancelled or the process exits. The agent spawns children (pkgdev,
 // wget) that may hold the stdout pipe open past a kill of `claude`; without this
@@ -99,6 +125,14 @@ type ManifestFixRequest struct {
 	// `pkgdev manifest --distdir` when self-verifying, so it never touches the
 	// system DISTDIR.
 	DistDir string
+	// Mode selects the instruction/argv shape. The zero value (FixModeGeneric)
+	// keeps the original open-ended repair; FixModeFetch narrows the agent to a
+	// fetch repair with network tools and reduced caps.
+	Mode FixMode
+	// DiscoveredURL, when non-empty and Mode == FixModeFetch, is a candidate
+	// upstream distfile URL surfaced to the agent as a hint (rendered verbatim in
+	// the instruction). It is advisory: the agent must still verify it resolves.
+	DiscoveredURL string
 }
 
 // ManifestFixResult reports the outcome of an agentic fix attempt. Summary is a
@@ -207,21 +241,42 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 // value of -p; the per-package facts (paths, error) travel inside the instruction
 // because they are bentoo-generated text, not untrusted page content. The agent is
 // scoped to pkgDir via --add-dir and constrained to manifestFixAllowedTools.
-func (f *ClaudeCodeFixer) buildFixArgs(instruction, pkgDir string) []string {
+//
+// mode selects the argv shape. FixModeGeneric (the zero value) is unchanged from
+// before fetch mode existed: the default allowlist, the default --max-turns, and
+// the full configured budget. FixModeFetch widens the allowlist with read-only
+// network tools (gh/curl) on a COPY of manifestFixAllowedTools (the shared slice is
+// never mutated — AD5) and tightens the caps (reduced turns; the budget, when
+// configured, scaled by manifestFixFetchBudgetFactor).
+func (f *ClaudeCodeFixer) buildFixArgs(instruction, pkgDir string, mode FixMode) []string {
+	allowedTools := manifestFixAllowedTools
+	maxTurns := manifestFixMaxTurns
+	budget := f.maxBudgetUSD
+
+	if mode == FixModeFetch {
+		// Copy-never-mutate (AD5): append onto a fresh slice so the package-level
+		// manifestFixAllowedTools is never extended in place.
+		allowedTools = append(append([]string{}, manifestFixAllowedTools...), "Bash(gh *)", "Bash(curl *)")
+		maxTurns = manifestFixFetchMaxTurns
+		if budget > 0 {
+			budget *= manifestFixFetchBudgetFactor
+		}
+	}
+
 	args := []string{
 		"-p", instruction,
 		"--output-format", "json",
 		"--add-dir", pkgDir,
-		"--allowedTools", strings.Join(manifestFixAllowedTools, " "),
+		"--allowedTools", strings.Join(allowedTools, " "),
 		"--append-system-prompt", bentooEbuildGuidance,
-		"--max-turns", strconv.Itoa(manifestFixMaxTurns),
+		"--max-turns", strconv.Itoa(maxTurns),
 		"--model", f.model,
 	}
 	if f.bareMode {
 		args = append(args, "--bare")
 	}
-	if f.maxBudgetUSD > 0 {
-		args = append(args, "--max-budget-usd", strconv.FormatFloat(f.maxBudgetUSD, 'f', -1, 64))
+	if budget > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(budget, 'f', -1, 64))
 	}
 	return args
 }
@@ -282,7 +337,13 @@ func truncateDiagnostic(s string) string {
 // the agent in -p. It states the goal (make `pkgdev manifest` pass), the package
 // facts, the failure output, and the guardrails (preserve PN/PV; don't invent
 // URLs; verify the real upstream release path; finish with a one-line summary).
+//
+// When req.Mode == FixModeFetch it renders the fetch-focused variant instead (see
+// buildFetchFixInstruction). The generic (zero-value) path below is unchanged.
 func buildFixInstruction(req ManifestFixRequest) string {
+	if req.Mode == FixModeFetch {
+		return buildFetchFixInstruction(req)
+	}
 	var sb strings.Builder
 	sb.WriteString("You are fixing a Gentoo ebuild whose manifest generation failed during an automated version bump. ")
 	sb.WriteString("Your goal: edit the ebuild so that `pkgdev manifest --distdir ")
@@ -311,6 +372,53 @@ func buildFixInstruction(req ManifestFixRequest) string {
 	sb.WriteString(req.DistDir)
 	sb.WriteString("` from the package directory and iterate until it succeeds.\n")
 	sb.WriteString("- When done, respond with ONLY a single short line describing what you changed (no prose, no markdown).")
+	return sb.String()
+}
+
+// buildFetchFixInstruction renders the fetch-focused variant of the agent
+// instruction (FixModeFetch). It narrows the task to a SRC_URI/fetch repair: locate
+// the real upstream distfile and point SRC_URI at it, WITHOUT touching build logic.
+// The agent is given network tools (gh/curl, via buildFixArgs) to confirm the real
+// asset, is forbidden from inventing URLs, and is told to give up with a one-line
+// report when no obtainable distfile exists (rather than hallucinate an edit). When
+// req.DiscoveredURL is set it is surfaced verbatim as a candidate hint; when empty
+// no hint line is rendered (and the literal field name never leaks).
+func buildFetchFixInstruction(req ManifestFixRequest) string {
+	var sb strings.Builder
+	sb.WriteString("You are fixing a Gentoo ebuild whose manifest generation failed because the source distfile could not be fetched, during an automated version bump. ")
+	sb.WriteString("This is a FETCH repair ONLY: make `pkgdev manifest --distdir ")
+	sb.WriteString(req.DistDir)
+	sb.WriteString("` (run from the package directory) succeed by pointing SRC_URI at the correct, real upstream distfile.\n\n")
+
+	sb.WriteString("Package: ")
+	sb.WriteString(req.Package)
+	sb.WriteString("\nTarget version (PV): ")
+	sb.WriteString(req.Version)
+	sb.WriteString("\nEbuild to fix: ")
+	sb.WriteString(req.EbuildPath)
+	sb.WriteString("\n\nThe manifest step failed with:\n")
+	sb.WriteString(truncateManifestError(req.ManifestError))
+	sb.WriteString("\n\n")
+
+	if req.DiscoveredURL != "" {
+		sb.WriteString("A candidate upstream URL was discovered for this version (verify it actually resolves before relying on it):\n")
+		sb.WriteString(req.DiscoveredURL)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("Guidelines:\n")
+	sb.WriteString("- Scope: edit ONLY SRC_URI and the helper variables that feed it (e.g. MY_PV/MY_P/MY_PN). ")
+	sb.WriteString("Do NOT edit build logic (src_prepare/src_configure/src_compile/src_install), dependencies, or the build phases — this is a fetch fix, not a build fix.\n")
+	sb.WriteString("- Do NOT change PN or the version (PV) in the ebuild filename.\n")
+	sb.WriteString("- Do NOT invent download URLs. Find the real asset from the upstream release page/assets ")
+	sb.WriteString("(use `gh` for GitHub releases or `curl` to confirm an asset name/URL resolves before using it).\n")
+	sb.WriteString("- If the `/bentoo` skill is available in this session, you may use it for the SRC_URI edit and QA; ")
+	sb.WriteString("otherwise edit the ebuild directly with the Read/Edit/Write tools. Either way, follow the ebuild QA rules in the system prompt.\n")
+	sb.WriteString("- After editing, verify by running `pkgdev manifest --distdir ")
+	sb.WriteString(req.DistDir)
+	sb.WriteString("` from the package directory and iterate until it succeeds.\n")
+	sb.WriteString("- If no obtainable distfile exists for this version anywhere upstream, do NOT guess or fabricate one: stop and report that you are giving up in a single short line explaining why (e.g. 'gave up: no upstream distfile for this version').\n")
+	sb.WriteString("- Otherwise, when done, respond with ONLY a single short line describing what you changed (no prose, no markdown).")
 	return sb.String()
 }
 
@@ -414,7 +522,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	defer cancel()
 
 	instruction := buildFixInstruction(req)
-	args := f.buildFixArgs(instruction, req.PkgDir)
+	args := f.buildFixArgs(instruction, req.PkgDir, req.Mode)
 
 	cmd := f.execCommand(runCtx, "claude", args...)
 	// cwd = the package directory so the agent's relative paths and pkgdev runs
