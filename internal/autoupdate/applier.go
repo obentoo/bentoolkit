@@ -748,6 +748,39 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	return nil
 }
 
+// rewriteSrcURI deterministically replaces a failing distfile URL (oldURL) with a
+// discovered one (newURL) inside an ebuild's SRC_URI, without consulting the LLM.
+// It is the sibling of substituteAuxVar/substituteCommitHash: the search target is
+// anchored literally via regexp.QuoteMeta so any regex-special characters in the
+// URL (e.g. ?file=foo+bar(1.0)&v=1.0) are matched as bytes, and the replacement is
+// applied literally (ReplaceAllLiteralString) so metacharacters in newURL are not
+// re-interpreted as $-expansions. Because the match is the exact oldURL string, a
+// multi-line SRC_URI with several entries has ONLY the target URL rewritten; the
+// other entries are left byte-for-byte intact.
+//
+// It returns an error if nothing changed (oldURL was absent) — that no-change error
+// is what drives the LLM fallback in the routing step. Read/write errors are wrapped
+// with %w.
+func (a *Applier) rewriteSrcURI(ebuildPath, oldURL, newURL string) error {
+	content, err := os.ReadFile(ebuildPath)
+	if err != nil {
+		return fmt.Errorf("failed to read ebuild for SRC_URI rewrite: %w", err)
+	}
+
+	re := regexp.MustCompile(regexp.QuoteMeta(oldURL))
+	updated := re.ReplaceAllLiteralString(string(content), newURL)
+
+	if updated == string(content) {
+		return fmt.Errorf("old SRC_URI %q not found in %s", oldURL, ebuildPath)
+	}
+
+	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+		return fmt.Errorf("failed to write ebuild after SRC_URI rewrite: %w", err)
+	}
+
+	return nil
+}
+
 // fetchFailureMarkers are the substrings pkgcore emits when `pkgdev manifest`
 // cannot obtain a distfile to digest (a fetch failure, as opposed to a digest
 // mismatch or an EAPI/QA error). Matching any one classifies the manifest error
