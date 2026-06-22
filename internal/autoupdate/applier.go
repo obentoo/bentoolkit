@@ -38,6 +38,12 @@ var (
 	ErrEbuildNotFound = errors.New("source ebuild file not found")
 	// ErrManifestFailed is returned when the manifest command fails
 	ErrManifestFailed = errors.New("manifest command failed")
+	// ErrFetchUnrecoverable is returned (wrapped) when a manifest failure is a
+	// pkgcore fetch failure whose distfile is judged unobtainable upstream, so the
+	// fix path is skipped entirely. It is deliberately distinct from a fix that was
+	// attempted and failed (ErrLLMRequestFailed): nothing was tried, because there
+	// is nothing fetchable to digest.
+	ErrFetchUnrecoverable = errors.New("fetch failure: no obtainable distfile upstream")
 	// ErrCompileFailed is returned when the compile test fails
 	ErrCompileFailed = errors.New("compile test failed")
 	// ErrNoPrivilegeEscalation is returned when neither sudo nor doas is available
@@ -740,6 +746,30 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	}
 
 	return nil
+}
+
+// fetchFailureMarkers are the substrings pkgcore emits when `pkgdev manifest`
+// cannot obtain a distfile to digest (a fetch failure, as opposed to a digest
+// mismatch or an EAPI/QA error). Matching any one classifies the manifest error
+// as a fetch failure, routing it through the recoverability check rather than
+// straight to the LLM fixer.
+var fetchFailureMarkers = []string{
+	"failed fetching required distfiles",
+	"failed fetching files for package",
+	"failed fetching file:",
+}
+
+// isFetchFailure reports whether rawManifestErr is a pkgcore fetch failure,
+// detected as a tolerant substring match against fetchFailureMarkers. It operates
+// on the raw, untruncated error string so a marker buried deep in a multi-MiB
+// captured Output dump is still found (middle-elision truncation would lose it).
+func isFetchFailure(rawManifestErr string) bool {
+	for _, marker := range fetchFailureMarkers {
+		if strings.Contains(rawManifestErr, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // runManifestWithFix runs the manifest step and, when it fails and an LLM fixer is
