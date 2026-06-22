@@ -52,7 +52,7 @@ live under `.draft/authored-tests/`.
     - Tests: Integration · `internal/common/github/client_test.go` — release with assets → names+URLs; tag 404 → `ErrNotFound`; 403 → `ErrRateLimit`; malformed JSON → error
     - Validation: `go test ./internal/common/github/ -run ReleaseAssets` passes
     - Requirements: Expected Behavior (discover obtainable replacement URL)
-    - Commit: "feat(github): list release assets by tag (ctx-aware)"
+    - Commit: "feat(github): list release assets by tag"
 
 - [x] 3 - Fetch classifier
   - _Complexity: Moderate | Tests: Unit + Integration | Risks: manifest-output format coupling | Dependencies: Task 2_
@@ -103,8 +103,8 @@ live under `.draft/authored-tests/`.
       - Files: `internal/autoupdate/manifest_fixer.go` (`buildFixInstruction`)
     - Objective: Branch the instruction on a new fetch mode
     - ToDo: Add `FixMode` (`FixModeGeneric`=iota, `FixModeFetch`) and `ManifestFixRequest.{Mode FixMode, DiscoveredURL string}`. In `buildFixInstruction`, `FixModeFetch` → fetch-focused text (verify upstream, correct SRC_URI/version only, never edit build logic, never invent URLs, give up with a one-line report if no distfile; include the `DiscoveredURL` hint when set); `FixModeGeneric` → byte-for-byte the current instruction.
-    - Tests: Unit · `internal/autoupdate/manifest_fixer_test.go` — fetch instruction has the fetch-focus directives + the hint when set; generic instruction unchanged
-    - Validation: `go test ./internal/autoupdate/ -run FetchInstruction` passes
+    - Tests: Unit · `internal/autoupdate/manifest_fixer_fetchmode_test.go` — fetch instruction has the fetch-focus directives + the hint when set; generic instruction unchanged
+    - Validation: `go test ./internal/autoupdate/ -run 'BuildFixInstruction_(FetchMode|GenericMode)'` passes
     - Requirements: Expected Behavior (fetch-focused instruction); Unchanged Behavior (generic path unchanged)
 
   - [x] 5.2 - Fetch-mode args (allowlist + caps)
