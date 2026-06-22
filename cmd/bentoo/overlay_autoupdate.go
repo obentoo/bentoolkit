@@ -235,9 +235,9 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply == "all":
-		runApplyAll(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate.LLM)
+		runApplyAll(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate.LLM, resolveGitHubToken(appCtx.Config.GitHub.Token))
 	case autoupdateApply != "":
-		runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM)
+		runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM, resolveGitHubToken(appCtx.Config.GitHub.Token))
 	case autoupdateReviveList:
 		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
 	case autoupdateRevive != "":
@@ -595,11 +595,62 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 	return autoupdate.WithApplierFixer(fixer)
 }
 
+// newConfiguredFetchClassifier builds the --apply fetch-failure classifier from
+// the supplied GitHub token, mirroring newConfiguredManifestFixer's
+// construct-or-degrade shape. It returns the autoupdate.FetchClassifier interface
+// so an unconfigured run returns a literal nil that compares == nil — the applier
+// checks fetchClassifier != nil (WithApplierFetchClassifier ignores nil), so a nil
+// return degrades --apply to today's exact behaviour (AD6/UB2).
+//
+// The nil/non-nil outcome is a pure function of the single token argument: a
+// non-empty token yields a non-nil classifier, an empty token yields nil. Token
+// precedence (env GITHUB_TOKEN > GH_TOKEN > config, mirroring WithGitHubToken /
+// resolveGentooProvider) is resolved by the caller and passed in, so this
+// constructor stays free of environment reads. The token is only used to populate
+// the client's Token field (Bearer auth) and is never logged.
+func newConfiguredFetchClassifier(token string) autoupdate.FetchClassifier {
+	if token == "" {
+		return nil
+	}
+	client := github.NewClient()
+	client.Token = token
+	return autoupdate.NewFetchClassifier(client)
+}
+
+// resolveGitHubToken applies the standard token precedence — env GITHUB_TOKEN >
+// GH_TOKEN (via github.TokenFromEnv) over the config value — matching the env >
+// config order WithGitHubToken and resolveGentooProvider already use. Threaded
+// into the --apply fetch-classifier wiring so an env token authenticates release
+// discovery even when config.github.token is empty. Never logs the token.
+func resolveGitHubToken(configToken string) string {
+	if envTok := github.TokenFromEnv(); envTok != "" {
+		return envTok
+	}
+	return configToken
+}
+
+// applierFetchClassifierOption builds the optional fetch-failure-classifier option
+// for --apply from the resolved GitHub token, mirroring applierFixerOption's
+// construct-or-degrade shape. A non-empty token yields a classifier that routes
+// manifest fetch failures (skip irreparable / mechanically recover / focused LLM
+// fix). With no token the classifier cannot do authenticated release discovery, so
+// it degrades to nil — WithApplierFetchClassifier(nil) is ignored, leaving every
+// failure on today's generic-fixer path — and we Warn that fetch-routing is off
+// (mirroring the Warn style applierFixerOption uses for an unconstructable fixer).
+// The token is never logged.
+func applierFetchClassifierOption(githubToken string) autoupdate.ApplierOption {
+	classifier := newConfiguredFetchClassifier(githubToken)
+	if classifier == nil {
+		logger.Warn("no GitHub token configured; --apply fetch-failure routing is disabled (failed fetches fall back to the generic manifest fixer)")
+	}
+	return autoupdate.WithApplierFetchClassifier(classifier)
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
-func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) {
+func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig, githubToken string) {
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
 	// Ctrl-C (which invokes cancel) cancels the in-flight child via
 	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
@@ -615,6 +666,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
+		applierFetchClassifierOption(githubToken),
 	}
 	opts = append(opts, extra...)
 
@@ -659,7 +711,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 // live map would be unsafe. Each Apply is independent — a failure on one
 // package never aborts the others — and the process exits non-zero when any
 // package failed, matching the single-package --apply contract.
-func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) {
+func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig, githubToken string) {
 	// Read the pending list up front so the reporter's batch denominator (and the
 	// "nothing to do" short-circuit) are known before the TUI program starts. The
 	// applier built below loads the same pending.json, and Apply mutates it as it
@@ -693,6 +745,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		// share one in-memory source of truth.
 		autoupdate.WithApplierPendingList(pending),
 		applierFixerOption(llmCfg),
+		applierFetchClassifierOption(githubToken),
 	}
 	opts = append(opts, extra...)
 

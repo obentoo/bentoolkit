@@ -258,6 +258,12 @@ func newHTTPFetchClassifier(gh *github.Client) *httpFetchClassifier {
 	return newHTTPFetchClassifierWithLister(lister)
 }
 
+// NewFetchClassifier builds a production FetchClassifier whose GitHub release
+// discovery is backed by gh. Returns a non-nil FetchClassifier. It is the
+// exported seam cmd/bentoo (package main) uses to construct a classifier without
+// reaching the unexported httpFetchClassifier/newHTTPFetchClassifier.
+func NewFetchClassifier(gh *github.Client) FetchClassifier { return newHTTPFetchClassifier(gh) }
+
 // Classify turns a manifest fetch failure into a three-state verdict. It is
 // fail-open: it returns no error, never panics, and folds every uncertain path
 // to FetchInconclusive (AD3). The decision order is:
