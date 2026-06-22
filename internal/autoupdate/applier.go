@@ -90,12 +90,18 @@ type ApplyResult struct {
 	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
 	// obsolete. Empty unless Obsolete is true.
 	ObsoleteReason string
-	// Fixed indicates the first manifest attempt failed and was recovered by the
-	// LLM manifest fixer (the ebuild was edited and a re-run of `pkgdev manifest`
-	// then succeeded). Only meaningful on the success path.
+	// Fixed indicates the first manifest attempt failed and was recovered by a fix
+	// — either a mechanical SRC_URI rewrite or the LLM manifest fixer (the ebuild
+	// was edited and a re-run of `pkgdev manifest` then succeeded). Only meaningful
+	// on the success path. FixMethod records which kind of fix it was.
 	Fixed bool
-	// FixSummary is the fixer's one-line description of what it changed in the
-	// ebuild. Empty unless Fixed is true.
+	// FixMethod records how the recovery was achieved: "" (no fix), "llm" (the LLM
+	// manifest fixer repaired the ebuild) or "mechanical" (a deterministic SRC_URI
+	// rewrite from a fetch-classifier verdict, no LLM). Only meaningful when Fixed.
+	FixMethod string
+	// FixSummary is a one-line description of what the fix changed in the ebuild —
+	// the fixer's own summary for an LLM fix, or a generated note for a mechanical
+	// rewrite. Empty unless Fixed is true.
 	FixSummary string
 	// QASummary holds advisory `pkgcheck` output captured after an LLM fix, when
 	// pkgcheck is available. It never changes Success — the apply already passed
@@ -146,6 +152,14 @@ type Applier struct {
 	// between versions) before the Applier re-runs the manifest to confirm. Set
 	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
 	fixer ManifestFixer
+	// fetchClassifier, when non-nil, is consulted on a manifest FETCH failure (one
+	// whose error carries a pkgcore fetch marker, per isFetchFailure) before the
+	// LLM fixer: it judges whether the failing distfile is irreparable (skip the
+	// fixer, fail with ErrFetchUnrecoverable), mechanically recoverable (rewrite
+	// SRC_URI and re-check, falling back to a focused LLM fix), or inconclusive
+	// (fail-open to a focused LLM fix). Set via WithApplierFetchClassifier; nil
+	// keeps every failure on today's exact path (straight to the generic fixer).
+	fetchClassifier FetchClassifier
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
@@ -248,6 +262,20 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.fixer = fixer
+		}
+	}
+}
+
+// WithApplierFetchClassifier wires a fetch-failure classifier into the applier.
+// When a manifest failure is a pkgcore fetch failure (isFetchFailure), the applier
+// asks the classifier to judge the distfile's recoverability and routes the failure
+// accordingly (skip / mechanical rewrite / focused LLM fix) before falling through
+// to the generic fixer. A nil classifier is ignored, leaving every failure on the
+// generic path. Mirrors WithApplierFixer.
+func WithApplierFetchClassifier(c FetchClassifier) ApplierOption {
+	return func(a *Applier) {
+		if c != nil {
+			a.fetchClassifier = c
 		}
 	}
 }
@@ -469,7 +497,13 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// outcome (including whether a fix was applied) is recorded on result.
 	a.reporter.TaskStage(pkg, "manifest")
 	if err := a.runManifestWithFix(pkg, newVersion, result); err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrManifestFailed, err)
+		// Double-wrap (both %w) so the failure is reachable by errors.Is via BOTH
+		// ErrManifestFailed (the outer category) AND the inner routing sentinel
+		// (ErrFetchUnrecoverable on the irreparable skip, ErrLLMRequestFailed on a
+		// failed LLM path). The rendered string is identical to the prior %v form;
+		// only the unwrap chain is preserved (Go's multi-%w), which the fetch-routing
+		// frozen tests assert and the legacy ErrManifestFailed tests still satisfy.
+		result.Error = fmt.Errorf("%w: %w", ErrManifestFailed, err)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
 			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
 		}
@@ -805,18 +839,18 @@ func isFetchFailure(rawManifestErr string) bool {
 	return false
 }
 
-// runManifestWithFix runs the manifest step and, when it fails and an LLM fixer is
-// configured, performs a single agentic repair-and-retry:
+// runManifestWithFix runs the manifest step and, when it fails, routes the failure
+// through (at most) one recovery attempt before declaring the apply failed:
 //
 //  1. Run `pkgdev manifest`; on success, return nil (no fix needed).
-//  2. If no fixer is wired, return the original error (legacy fail-fast).
-//  3. Otherwise invoke the fixer to edit the ebuild in place, then re-run
-//     `pkgdev manifest` ONCE. That second run — bentoo's own, not the agent's
-//     self-report — is the authoritative success check:
-//     - success  → record result.Fixed/FixSummary and return nil.
-//     - failure  → return a combined error (original + post-fix) so the caller
-//     marks the apply failed; the deferred orphan-rollback in Apply removes the
-//     half-applied ebuild.
+//  2. When a fetch classifier is wired AND the failure is a pkgcore FETCH failure
+//     (isFetchFailure), hand it to routeFetchFailure, which judges the distfile's
+//     recoverability and routes to a skip (ErrFetchUnrecoverable), a mechanical
+//     SRC_URI rewrite, or a focused (FixModeFetch) LLM fix. Every NON-fetch failure
+//     — and every failure when no classifier is wired — stays on today's exact
+//     path below.
+//  3. If no fixer is wired, return the original error (legacy fail-fast).
+//  4. Otherwise run the generic (FixModeGeneric) LLM repair-and-retry via runLLMFix.
 //
 // Exactly one fix attempt is made per apply: the agent iterates internally (bounded
 // by its --max-turns), so there is no external retry loop here.
@@ -825,10 +859,32 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	if firstErr == nil {
 		return nil
 	}
+	if a.fetchClassifier != nil && isFetchFailure(firstErr.Error()) {
+		return a.routeFetchFailure(pkg, version, firstErr, result)
+	}
 	if a.fixer == nil {
 		return firstErr
 	}
+	return a.runLLMFix(pkg, version, firstErr, FixModeGeneric, "", result)
+}
 
+// runLLMFix performs a single agentic repair-and-retry for a manifest failure: it
+// gives the agent a private distdir, invokes the fixer to edit the ebuild in place,
+// then re-runs `pkgdev manifest` ONCE. That second run — bentoo's own, not the
+// agent's self-report — is the authoritative success check:
+//
+//   - success → record result.Fixed/FixMethod="llm"/FixSummary, run the advisory QA
+//     gate, and return nil.
+//   - failure → return a combined error (original + post-fix) so the caller marks
+//     the apply failed; Apply's deferred orphan-rollback removes the half-applied
+//     ebuild.
+//
+// mode/discoveredURL are threaded into the ManifestFixRequest so the focused fetch
+// path (FixModeFetch, with a candidate URL hint) and the generic path share one
+// implementation. Called with (FixModeGeneric, "") this is byte-for-byte the
+// pre-routing behaviour (same stages "llm-fix"/"re-check", same %w wrapping of
+// ErrLLMRequestFailed via the fixer error, same QA gate).
+func (a *Applier) runLLMFix(pkg, version string, firstErr error, mode FixMode, discoveredURL string, result *ApplyResult) error {
 	parts := strings.Split(pkg, "/")
 	if len(parts) != 2 {
 		// Malformed name: nothing the fixer can scope to; surface the original error.
@@ -856,6 +912,8 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		EbuildPath:    a.EbuildPath(pkg, version),
 		ManifestError: firstErr.Error(),
 		DistDir:       distdir,
+		Mode:          mode,
+		DiscoveredURL: discoveredURL,
 	})
 	if fixErr != nil {
 		return fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
@@ -869,6 +927,9 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	}
 
 	result.Fixed = true
+	if result.FixMethod == "" {
+		result.FixMethod = "llm"
+	}
 	result.FixSummary = fixRes.Summary
 	logger.Info("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary)
 	a.reporter.Log("info", fmt.Sprintf("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary))
@@ -883,6 +944,65 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
 	}
 	return nil
+}
+
+// routeFetchFailure handles a manifest failure already identified as a pkgcore
+// fetch failure, when a classifier is wired. It asks the classifier to judge the
+// failing distfile and routes accordingly:
+//
+//   - FetchIrreparable → the distfile is unobtainable upstream; skip the fixer
+//     entirely and fail with ErrFetchUnrecoverable (naming the reason/package).
+//     The non-nil error makes Apply's deferred orphan-rollback remove the
+//     half-applied ebuild on its own.
+//   - FetchRecoverable → a compatible replacement URL was discovered; rewrite
+//     SRC_URI deterministically (no LLM) and re-run the manifest. If that passes,
+//     record a mechanical fix and return nil; otherwise fall back to a focused
+//     FixModeFetch LLM fix (or the original error when no fixer is wired).
+//   - FetchInconclusive (zero value; fail-open) → route to a focused FixModeFetch
+//     LLM fix (or the original error when no fixer is wired), preserving today's
+//     "attempt a fix" behaviour.
+func (a *Applier) routeFetchFailure(pkg, version string, firstErr error, result *ApplyResult) error {
+	a.reporter.TaskStage(pkg, "fetch-classify")
+	verdict := a.fetchClassifier.Classify(a.ctx, FetchClassifyRequest{
+		Package:       pkg,
+		Version:       version,
+		EbuildPath:    a.EbuildPath(pkg, version),
+		ManifestError: firstErr.Error(),
+	})
+
+	switch verdict.Kind {
+	case FetchIrreparable:
+		// Nothing fetchable to digest — skip the fixer. Distinct from an attempted-
+		// and-failed fix (ErrLLMRequestFailed): this wraps ErrFetchUnrecoverable.
+		return fmt.Errorf("%w: %s (%s)", ErrFetchUnrecoverable, verdict.Reason, pkg)
+	case FetchRecoverable:
+		// Deterministic recovery: rewrite SRC_URI to the discovered URL and let
+		// bentoo's own manifest re-run be the authoritative check.
+		a.reporter.TaskStage(pkg, "mech-fix")
+		if err := a.rewriteSrcURI(a.EbuildPath(pkg, version), verdict.CurrentURL, verdict.DiscoveredURL); err == nil {
+			if recheck := a.runManifest(pkg, version); recheck == nil {
+				result.Fixed = true
+				result.FixMethod = "mechanical"
+				result.FixSummary = fmt.Sprintf("mechanically rewrote SRC_URI to %s", verdict.DiscoveredURL)
+				logger.Info("mechanically recovered %s-%s: %s", pkg, version, result.FixSummary)
+				a.reporter.Log("info", fmt.Sprintf("mechanically recovered %s-%s: %s", pkg, version, result.FixSummary))
+				return nil
+			}
+		}
+		// The rewrite did not stick or the re-check still failed: fall back to the
+		// focused LLM fixer (carrying the discovered URL as a hint).
+		if a.fixer == nil {
+			return firstErr
+		}
+		return a.runLLMFix(pkg, version, firstErr, FixModeFetch, verdict.DiscoveredURL, result)
+	default:
+		// FetchInconclusive (fail-open): we could not confidently classify, so keep
+		// today's behaviour of attempting a fix — focused on the fetch.
+		if a.fixer == nil {
+			return firstErr
+		}
+		return a.runLLMFix(pkg, version, firstErr, FixModeFetch, verdict.DiscoveredURL, result)
+	}
 }
 
 // runQACheck runs `pkgcheck scan` against pkg as an advisory, read-only QA pass
