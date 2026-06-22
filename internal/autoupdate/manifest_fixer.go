@@ -371,7 +371,11 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		sb.WriteString("claude fixer emitted non-JSON output")
 	}
 
-	if jsonErr != nil {
+	// A cancelled/expired context leaves stdout truncated, so the consequent
+	// jsonErr (and the raw stdout below) are artifacts of the kill, not an
+	// independent cause — ctxErr already explains the failure. Suppress both on
+	// that path so the message reads "aborted: context canceled" without noise.
+	if ctxErr == nil && jsonErr != nil {
 		sb.WriteString(fmt.Sprintf(": parse error: %v", jsonErr))
 	}
 	if len(env.Errors) > 0 {
@@ -387,8 +391,9 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		sb.WriteString(truncateDiagnostic(s))
 	}
 	// On a parse failure the raw stdout is the one artifact needed to see what the
-	// CLI actually printed (R1.4).
-	if jsonErr != nil && strings.TrimSpace(stdout) != "" {
+	// CLI actually printed (R1.4) — but not when the context was cancelled, where a
+	// truncated stdout is just an artifact of the kill (see the parse-error guard).
+	if ctxErr == nil && jsonErr != nil && strings.TrimSpace(stdout) != "" {
 		sb.WriteString("\nstdout: ")
 		sb.WriteString(truncateDiagnostic(stdout))
 	}
@@ -446,10 +451,12 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 
 	// Every terminal failure funnels through formatFixerError so each carries the
 	// full, bounded set of signals (exit code or cancellation cause, subtype,
-	// result, stderr, and raw stdout on a parse failure). The success path below
-	// is unchanged (UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
-	// and a parent cancellation (Canceled), since runCtx derives from ctx.
-	if runErr != nil || jsonErr != nil || env.IsError {
+	// result, stderr, and raw stdout on a parse failure). runCtx.Err() captures
+	// both a timeout (DeadlineExceeded) and a parent cancellation (Canceled),
+	// since runCtx derives from ctx; it is gated on here too so a child that races
+	// to a clean exit 0 just as the context is cancelled is still reported as a
+	// failure (formatFixerError's ctxErr case) rather than a spurious success.
+	if runErr != nil || jsonErr != nil || env.IsError || runCtx.Err() != nil {
 		return ManifestFixResult{}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
 	}
 

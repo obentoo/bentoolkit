@@ -532,6 +532,24 @@ func TestFormatFixerError_Timeout(t *testing.T) {
 	}
 }
 
+// TestFormatFixerError_CancellationSuppressesNoise: a killed process leaves
+// truncated stdout → a parse error. On the cancellation path that parse error
+// and the raw stdout are artifacts of the kill, not causes, so they must not
+// pollute the message (which still names the cancellation).
+func TestFormatFixerError_CancellationSuppressesNoise(t *testing.T) {
+	err := formatFixerError(context.Canceled, nil, claudeCodeEnvelope{},
+		errors.New("unexpected end of JSON input"), "partial-json{", "")
+	msg := err.Error()
+	if !strings.Contains(msg, "cancel") {
+		t.Errorf("message %q should name the cancellation", msg)
+	}
+	for _, noise := range []string{"parse error", "partial-json"} {
+		if strings.Contains(msg, noise) {
+			t.Errorf("cancellation message must not surface %q: %q", noise, msg)
+		}
+	}
+}
+
 // TestFormatFixerError_IsError covers R1.5: an explicit error envelope surfaces
 // subtype, errors, result, and stderr together.
 func TestFormatFixerError_IsError(t *testing.T) {
