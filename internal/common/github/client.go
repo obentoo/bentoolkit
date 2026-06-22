@@ -43,6 +43,14 @@ type ContentEntry struct {
 	DownloadURL string `json:"download_url,omitempty"`
 }
 
+// ReleaseAsset is a single downloadable artifact attached to a GitHub release.
+// It carries the upstream asset filename and its direct download URL so a
+// classifier can match a renamed distfile against a release tag's assets.
+type ReleaseAsset struct {
+	Name        string
+	DownloadURL string
+}
+
 // CacheEntry represents a cached API response
 type CacheEntry struct {
 	Versions  []string  `json:"versions"`
@@ -172,6 +180,78 @@ func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
 	versions := extractVersionsFromEntries(entries, pkg)
 
 	return versions, nil
+}
+
+// GetReleaseAssets fetches the assets attached to a single release tag.
+//
+// It hits GET {BaseURL}/repos/{owner}/{repo}/releases/tags/{tag} and maps each
+// assets[].name → ReleaseAsset.Name and assets[].browser_download_url →
+// ReleaseAsset.DownloadURL. Error handling mirrors fetchPackageVersions exactly:
+// 403 → ErrRateLimit (wrapped with the X-RateLimit-Reset header), 404 →
+// ErrNotFound, any other non-2xx → ErrAPIError (wrapped with status + body), and
+// malformed JSON → a wrapped parse error. The request is bounded by the Client's
+// HTTPClient timeout (the package idiom uses http.NewRequest without a context).
+func (c *Client) GetReleaseAssets(owner, repo, tag string) ([]ReleaseAsset, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", c.BaseURL, owner, repo, tag)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", c.UserAgent)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	// Add authorization header if token is set
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Handle rate limiting
+	if resp.StatusCode == 403 {
+		resetHeader := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("%w: rate limit resets at %s", ErrRateLimit, resetHeader)
+	}
+
+	// Handle not found
+	if resp.StatusCode == 404 {
+		return nil, ErrNotFound
+	}
+
+	// Handle other errors (any non-2xx)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var release struct {
+		Assets []struct {
+			Name        string `json:"name"`
+			DownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(body, &release); err != nil {
+		return nil, fmt.Errorf("failed to parse GitHub release response: %w", err)
+	}
+
+	assets := make([]ReleaseAsset, 0, len(release.Assets))
+	for _, a := range release.Assets {
+		assets = append(assets, ReleaseAsset{Name: a.Name, DownloadURL: a.DownloadURL})
+	}
+
+	return assets, nil
 }
 
 // ebuildVersionRegex matches package-version.ebuild format
