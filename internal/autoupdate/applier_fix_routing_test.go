@@ -374,6 +374,14 @@ func TestRouting_Irreparable_SkipsLLM(t *testing.T) {
 	if !strings.Contains(applyErr.Error(), distfile) {
 		t.Errorf("error %v should name the unobtainable distfile %q", applyErr, distfile)
 	}
+
+	// UB (orphan rollback): the deferred cleanup in Apply must still fire on the
+	// new irreparable-skip path, so the half-applied new-version ebuild copy is
+	// removed and the overlay is never left half-applied.
+	orphan := a.EbuildPath("dev-games/godot", "4.7")
+	if _, statErr := os.Stat(orphan); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("irreparable skip must roll back the orphan ebuild %s (stat err = %v, want os.ErrNotExist)", orphan, statErr)
+	}
 }
 
 // TestRouting_Recoverable_MechanicalSuccess covers R4.2: a Recoverable verdict is
