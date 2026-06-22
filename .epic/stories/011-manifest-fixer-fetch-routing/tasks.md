@@ -26,11 +26,11 @@ live under `.draft/authored-tests/`.
 
 ## Task List
 
-- [ ] 1 - Fetch-failure detection and sentinel
+- [x] 1 - Fetch-failure detection and sentinel
   - _Complexity: Simple | Tests: Unit | Risks: None | Dependencies: None_
   - Objective: Recognize a fetch-failure manifest error and add a distinct sentinel for the skip path
 
-  - [ ] 1.1 - `isFetchFailure` detector + `ErrFetchUnrecoverable` sentinel
+  - [x] 1.1 - `isFetchFailure` detector + `ErrFetchUnrecoverable` sentinel
     - Context:
       - Files: `internal/autoupdate/applier.go` (sentinel block near `ErrManifestFailed`; `runManifestWithFix`)
     - Objective: Detect pkgcore fetch markers on the raw error and declare the skip sentinel
@@ -40,11 +40,11 @@ live under `.draft/authored-tests/`.
     - Requirements: Expected Behavior (route by recoverability); Current Behavior
     - Commit: "feat(autoupdate): detect fetch-failure manifest errors + sentinel"
 
-- [ ] 2 - GitHub release asset discovery
+- [x] 2 - GitHub release asset discovery
   - _Complexity: Simple | Tests: Integration | Risks: GitHub rate-limit | Dependencies: None_
   - Objective: List a release tag's assets so the classifier can find a renamed distfile
 
-  - [ ] 2.1 - `GetReleaseAssets(ctx, owner, repo, tag)`
+  - [x] 2.1 - `GetReleaseAssets(ctx, owner, repo, tag)`
     - Context:
       - Files: `internal/common/github/client.go` (auth/rate-limit/sentinels to reuse)
     - Objective: Return a tag's assets, threading context, reusing existing error sentinels
@@ -54,11 +54,11 @@ live under `.draft/authored-tests/`.
     - Requirements: Expected Behavior (discover obtainable replacement URL)
     - Commit: "feat(github): list release assets by tag (ctx-aware)"
 
-- [ ] 3 - Fetch classifier
+- [x] 3 - Fetch classifier
   - _Complexity: Moderate | Tests: Unit + Integration | Risks: manifest-output format coupling | Dependencies: Task 2_
   - Objective: Turn a fetch failure into an irreparable / recoverable / inconclusive verdict, fail-open by construction
 
-  - [ ] 3.1 - Verdict types + availability parser
+  - [x] 3.1 - Verdict types + availability parser
     - Context:
       - Files: `internal/autoupdate/fetch_classifier.go` (new)
     - Objective: Define the verdict surface and parse upstream availability from the manifest output
@@ -67,7 +67,7 @@ live under `.draft/authored-tests/`.
     - Validation: `go test ./internal/autoupdate/ -run Classif` passes
     - Requirements: Expected Behavior (classify into 3 states); Unchanged Behavior (fail-open never regresses today's cases)
 
-  - [ ] 3.2 - `httpFetchClassifier.Classify` (discovery → verdict)
+  - [x] 3.2 - `httpFetchClassifier.Classify` (discovery → verdict)
     - Context:
       - Files: `internal/autoupdate/fetch_classifier.go`
     - Objective: Compose availability with GitHub discovery into the final verdict
@@ -76,15 +76,15 @@ live under `.draft/authored-tests/`.
     - Validation: `go test ./internal/autoupdate/ -run Classify -race` passes
     - Requirements: Expected Behavior (recoverable/irreparable/inconclusive; cancellable probe)
 
-  - [ ] 3.3 - Commit
+  - [x] 3.3 - Commit
     - Validation: All tests from 3.1 and 3.2 pass
     - Commit: "feat(autoupdate): fetch classifier (output parse + github discovery)"
 
-- [ ] 4 - Mechanical SRC_URI rewrite
+- [x] 4 - Mechanical SRC_URI rewrite
   - _Complexity: Simple | Tests: Unit | Risks: None | Dependencies: None_
   - Objective: Repair a moved distfile deterministically, without the LLM
 
-  - [ ] 4.1 - `rewriteSrcURI`
+  - [x] 4.1 - `rewriteSrcURI`
     - Context:
       - Files: `internal/autoupdate/applier.go` (`substituteAuxVar`/`substituteCommitHash` as the pattern)
     - Objective: Replace the failing URL with the discovered one in the ebuild's SRC_URI
@@ -94,11 +94,11 @@ live under `.draft/authored-tests/`.
     - Requirements: Expected Behavior (mechanical repair); Expected Behavior (fallback when it cannot apply)
     - Commit: "feat(autoupdate): mechanical SRC_URI rewrite for recoverable fetches"
 
-- [ ] 5 - Fetch mode in the fixer
+- [x] 5 - Fetch mode in the fixer
   - _Complexity: Simple | Tests: Unit | Risks: None | Dependencies: None_
   - Objective: Give the LLM a fetch-focused instruction, network tools, and reduced caps
 
-  - [ ] 5.1 - Fetch-focused instruction
+  - [x] 5.1 - Fetch-focused instruction
     - Context:
       - Files: `internal/autoupdate/manifest_fixer.go` (`buildFixInstruction`)
     - Objective: Branch the instruction on a new fetch mode
@@ -107,7 +107,7 @@ live under `.draft/authored-tests/`.
     - Validation: `go test ./internal/autoupdate/ -run FetchInstruction` passes
     - Requirements: Expected Behavior (fetch-focused instruction); Unchanged Behavior (generic path unchanged)
 
-  - [ ] 5.2 - Fetch-mode args (allowlist + caps)
+  - [x] 5.2 - Fetch-mode args (allowlist + caps)
     - Context:
       - Files: `internal/autoupdate/manifest_fixer.go` (`buildFixArgs`; `manifestFixAllowedTools`)
     - Objective: Add network tools and reduced limits without mutating shared state
@@ -116,15 +116,15 @@ live under `.draft/authored-tests/`.
     - Validation: `go test ./internal/autoupdate/ -run FetchArgs` passes
     - Requirements: Expected Behavior (gh/curl allowlist, reduced caps); Unchanged Behavior (generic path unchanged; allowlist invariant)
 
-  - [ ] 5.3 - Commit
+  - [x] 5.3 - Commit
     - Validation: All tests from 5.1 and 5.2 pass
     - Commit: "feat(autoupdate): fetch-mode fixer (focused instruction, gh/curl, reduced caps)"
 
-- [ ] 6 - Route manifest fetch-failures in the applier
+- [x] 6 - Route manifest fetch-failures in the applier
   - _Complexity: Moderate | Tests: Integration | Risks: orphan rollback on a new pre-fixer early return | Dependencies: Task 1, Task 3, Task 4, Task 5_
   - Objective: Wire detection → classify → skip / mechanical / focused-LLM, preserving every invariant
 
-  - [ ] 6.1 - `runManifestWithFix` routing + `FixMethod`
+  - [x] 6.1 - `runManifestWithFix` routing + `FixMethod`
     - Context:
       - Files: `internal/autoupdate/applier.go` (`runManifestWithFix`, `ApplyResult`)
     - Objective: Insert the routing and record how a recovery happened
@@ -134,11 +134,11 @@ live under `.draft/authored-tests/`.
     - Requirements: Expected Behavior (route/skip/mechanical/fail-open); Unchanged Behavior (authoritative re-check, ErrLLMRequestFailed, orphan rollback, generic path)
     - Commit: "feat(autoupdate): route manifest fetch-failures by upstream recoverability"
 
-- [ ] 7 - Wire the classifier into `--apply`
+- [x] 7 - Wire the classifier into `--apply`
   - _Complexity: Simple | Tests: Unit | Risks: None | Dependencies: Task 3, Task 6_
   - Objective: Construct and inject the classifier in production, degrading safely when unavailable
 
-  - [ ] 7.1 - `newConfiguredFetchClassifier` + wiring
+  - [x] 7.1 - `newConfiguredFetchClassifier` + wiring
     - Context:
       - Files: `cmd/bentoo/overlay_autoupdate.go` (`applierFixerOption` as the pattern; `runApply`/`runApplyAll`)
     - Objective: Build the classifier from config and pass it into the applier
@@ -150,10 +150,10 @@ live under `.draft/authored-tests/`.
 
 ## Quality Gates
 
-- [ ] Bug verification test passes: an `irreparable` fetch failure skips the LLM and returns `ErrFetchUnrecoverable` (fails before the fix, passes after)
-- [ ] Recoverable path: mechanical rewrite + passing re-check yields success with `FixMethod=="mechanical"` and no LLM call
-- [ ] Fail-open path: `inconclusive`/cancellation and a failed mechanical re-check both reach the fetch-mode LLM fixer
-- [ ] Regression: no-marker failure → generic fixer unchanged; every LLM route is `errors.Is(err, ErrLLMRequestFailed)`; `errors.Is(err, ErrFetchUnrecoverable)` is distinct
-- [ ] Regression: `manifestFixAllowedTools` never mutated; no error string contains the API key; orphan rollback fires on the irreparable skip; bare-mode key invariant intact
-- [ ] `go test ./internal/autoupdate/ ./internal/common/github/ ./cmd/bentoo/ -race` green; `go vet ./...` clean; `staticcheck ./...` clean (or noted skipped)
-- [ ] Existing applier/fixer tests pass unchanged with a nil classifier (today's behavior)
+- [x] Bug verification test passes: an `irreparable` fetch failure skips the LLM and returns `ErrFetchUnrecoverable` (fails before the fix, passes after)
+- [x] Recoverable path: mechanical rewrite + passing re-check yields success with `FixMethod=="mechanical"` and no LLM call
+- [x] Fail-open path: `inconclusive`/cancellation and a failed mechanical re-check both reach the fetch-mode LLM fixer
+- [x] Regression: no-marker failure → generic fixer unchanged; every LLM route is `errors.Is(err, ErrLLMRequestFailed)`; `errors.Is(err, ErrFetchUnrecoverable)` is distinct
+- [x] Regression: `manifestFixAllowedTools` never mutated; no error string contains the API key; orphan rollback fires on the irreparable skip; bare-mode key invariant intact
+- [x] `go test ./internal/autoupdate/ ./internal/common/github/ ./cmd/bentoo/ -race` green; `go vet ./...` clean; `staticcheck ./...` clean (or noted skipped)
+- [x] Existing applier/fixer tests pass unchanged with a nil classifier (today's behavior)
