@@ -58,3 +58,19 @@ func newConfiguredManifestFixer(c config.LLMConfig) (autoupdate.ManifestFixer, e
 	}
 	return autoupdate.NewClaudeCodeFixer(llmConfigToAutoupdate(c))
 }
+
+// newConfiguredRegistryFixer builds an LLM registry fixer from the CLI config for
+// the --check repair prompt. Like newConfiguredManifestFixer it is wired ONLY for
+// provider == "claude-code": only the agentic CLI can investigate upstream and edit
+// the failed package's packages.toml entry. Every other provider — including the
+// empty/unset one and the non-agentic HTTP "claude" — returns a TRUE nil interface
+// (nil, nil), never a boxed (*ClaudeCodeRegistryFixer)(nil), so runCheck's
+// `fixer != nil` gate stays honest and the repair prompt never appears (AD9 / R7.1).
+// A configured-but-unconstructable claude-code fixer (e.g. the `claude` CLI is
+// absent) returns (nil, err) so the caller can Warn and continue with no prompt.
+func newConfiguredRegistryFixer(c config.LLMConfig) (autoupdate.RegistryFixer, error) {
+	if c.Provider != "claude-code" {
+		return nil, nil
+	}
+	return autoupdate.NewClaudeCodeRegistryFixer(llmConfigToAutoupdate(c))
+}
