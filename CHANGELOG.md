@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-06-28
+
+### Added
+- **Agentic `packages.toml` repair at the end of `autoupdate --check`.** After a
+  check run, packages that failed version detection (an outdated parser config, a
+  moved upstream URL, or a changed JSON/HTML shape) can now be repaired in place
+  by an LLM fixer (`RegistryFixer`). It is wired only when
+  `autoupdate.llm.provider` is `claude-code` (the only provider that can edit
+  files), runs the local `claude` CLI scoped with a narrow tool allowlist, and is
+  offered interactively with a keep/revert prompt so every edit is reviewed before
+  it is kept. Spend is bounded by `autoupdate.llm.max_budget_usd`. Packages
+  without a configured `claude-code` provider are unaffected.
+
 ## [0.10.0] - 2026-06-21
 
 ### Added
@@ -1135,7 +1148,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/obentoo/bentoolkit/compare/v0.10.0...v0.11.0
 [0.8.0]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/obentoo/bentoolkit/compare/v0.6.0...v0.7.0
