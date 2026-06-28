@@ -324,7 +324,15 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		}))
 	}
 
-	checker, err := autoupdate.NewChecker(overlayPath, opts...)
+	// Capture the fully-assembled option set so the story-014 registry-fix
+	// re-check can build a FRESH Checker that reloads packages.toml after an agent
+	// edit (AD4: CheckPackage reads the config cached at NewChecker time, so there
+	// is no in-place reload — a new Checker is required).
+	newChecker := func() (*autoupdate.Checker, error) {
+		return autoupdate.NewChecker(overlayPath, opts...)
+	}
+
+	checker, err := newChecker()
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
@@ -375,6 +383,24 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		result.FormatFailures(os.Stderr)
 	}
 
+	// Offer an interactive LLM registry repair for the packages that failed
+	// upstream-version extraction (story 014). Gated to a usable claude-code fixer
+	// AND an interactive stdin. newConfiguredRegistryFixer returns a TRUE nil
+	// interface for a non-claude provider; a construction error Warns and is
+	// treated as absent — never box a nil pointer (AD9). When the gate is false
+	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
+	// code below are exactly as before this story (R7.x / R10.1).
+	fixer, ferr := newConfiguredRegistryFixer(llmCfg)
+	if ferr != nil {
+		logger.Warn("LLM registry fixer unavailable; --check will not offer registry repair: %v", ferr)
+		fixer = nil
+	}
+	if fixer != nil && stdinIsTerminal() {
+		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
+			logger.Warn("registry-fix prompt ended with an error: %v", perr)
+		}
+	}
+
 	// --revivable: in the same pass, also scan the disabled+absent (orphaned)
 	// entries and report those an autoupdate could revive (upstream newer than
 	// ::gentoo), reusing the checker --check already built. Read-only and
@@ -386,6 +412,16 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	osExit(result.ExitCode())
+}
+
+// stdinIsTerminal reports whether standard input is an interactive terminal (a
+// character device) rather than a pipe, regular file, or /dev/null. The
+// story-014 registry-fix prompt is shown only when this is true, so a piped or
+// CI run of --check keeps its existing non-interactive output and exit code
+// (R7.3, AD8). output.IsTerminal probes stdout; this probes stdin specifically.
+func stdinIsTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // reportRevivableOrphans is the --check --revivable add-on: it resolves the
