@@ -18,9 +18,8 @@ build/
 # Dependências vendorizadas
 vendor/
 
-# Epic — versiona stories e docs, ignora drafts e archive
-.epic/**/.draft/
-.epic/archive/
+# Epic — artefatos de planejamento (stories/design/tasks/drafts), não versionados
+.epic/
 
 # Arquivos de IDE/editor
 .idea/
