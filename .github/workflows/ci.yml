@@ -77,13 +77,12 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
-
       - name: Run govulncheck
         run: |
           # JSON mode always exits 0; we parse the findings ourselves.
-          govulncheck -json ./... > /tmp/vulncheck.json
+          # govulncheck is pinned via the `tool` directive in go.mod (tracked by
+          # Dependabot's golang-x group); invoked here with `go tool`.
+          go tool govulncheck -json ./... > /tmp/vulncheck.json
           # Count REACHABLE vulnerabilities (trace frame with a called function)
           # in third-party modules. stdlib/toolchain issues require a Go update,
           # not a dependency bump, so they don't fail this job.
@@ -95,7 +94,7 @@ jobs:
             ] | unique | length' /tmp/vulncheck.json)
           if [ "$THIRD_PARTY" -gt 0 ]; then
             echo "::error::${THIRD_PARTY} third-party vulnerability(ies) found"
-            govulncheck ./...
+            go tool govulncheck ./...
             exit 1
           fi
           echo "No third-party vulnerabilities (stdlib-only issues require a Go update)"
