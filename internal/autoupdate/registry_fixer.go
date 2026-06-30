@@ -27,7 +27,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -307,15 +306,10 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 	// timeout + manifestFixWaitDelay.
 	cmd.WaitDelay = manifestFixWaitDelay
 
-	// In bare mode inject the API key solely via the child environment so the key
-	// value never appears in argv or logs.
-	if f.bareMode {
-		env := os.Environ()
-		if key := os.Getenv(f.apiKeyEnv); key != "" {
-			env = append(env, "ANTHROPIC_API_KEY="+key)
-		}
-		cmd.Env = env
-	}
+	// Resolve the child environment from the auth mode: bare injects the API key
+	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
+	// the CLI uses its logged-in session.
+	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-06-30
+
+### Fixed
+- **`autoupdate.llm.bare: false` now actually uses the CLI's logged-in session.**
+  In non-bare mode the spawned `claude` process inherited the parent environment
+  verbatim, so an `ANTHROPIC_API_KEY` exported in the shell (e.g. from a shell rc)
+  leaked into the child and the CLI authenticated via the paid API instead of the
+  operator's subscription session — the opposite of the documented intent. The
+  child environment is now scrubbed of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
+  and the configured `api_key_env` in non-bare mode. Bare mode is unchanged (the
+  key is still injected solely via the child env, never argv/logs).
+- **Package host detection anchored via `net/url`** so a crafted upstream string
+  can no longer bypass the host check (CodeQL finding, #20).
+
+### Security
+- Pin `govulncheck` via the `go.mod` tool directive for reproducible vulnerability
+  scans (#18).
+- Add a security policy (`SECURITY.md`, #19).
+
+### Changed
+- Bump `actions/checkout` 6.0.3 → 7.0.0 (#17) and
+  `github.com/charmbracelet/x/ansi` 0.11.6 → 0.11.7 (#15).
+
 ## [0.11.0] - 2026-06-28
 
 ### Added
