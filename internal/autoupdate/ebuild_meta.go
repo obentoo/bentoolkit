@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,14 +61,10 @@ var (
 	homepageRegex = regexp.MustCompile(`(?m)^HOMEPAGE=["']([^"']+)["']`)
 	// restrictRegex matches RESTRICT="..." or RESTRICT='...'
 	restrictRegex = regexp.MustCompile(`(?m)^RESTRICT=["']([^"']+)["']`)
-	// githubRegex matches GitHub URLs in various formats
-	githubRegex = regexp.MustCompile(`github\.com[/:]([^/]+)/([^/\s"']+)`)
-	// pypiRegex matches PyPI URLs
-	pypiRegex = regexp.MustCompile(`pypi\.(?:org|io|python\.org)`)
-	// npmRegex matches npm registry URLs
-	npmRegex = regexp.MustCompile(`(?:npmjs\.(?:org|com)|registry\.npmjs\.org)`)
-	// cratesRegex matches crates.io URLs
-	cratesRegex = regexp.MustCompile(`crates\.io`)
+	// githubSCPRegex matches scp-like git URLs (e.g. git@github.com:owner/repo).
+	// Host detection for ordinary http(s) URLs is done via net/url (see
+	// findGitHubRepo / urlMatchesHost) to avoid unanchored substring matches.
+	githubSCPRegex = regexp.MustCompile(`^(?:[\w.+-]+@)?github\.com:([^/]+)/(\S+)$`)
 	// pythonDepRegex matches Python-related dependencies
 	pythonDepRegex = regexp.MustCompile(`dev-python/|python-`)
 	// nodeDepRegex matches Node.js-related dependencies
@@ -407,22 +404,27 @@ func detectBinaryPackage(content []byte) bool {
 // It analyzes HOMEPAGE, SRC_URI, and dependencies to identify the ecosystem.
 func DetectPackageType(meta *EbuildMetadata) PackageType {
 	// Check GitHub first (most common)
-	if githubRegex.MatchString(meta.Homepage) || githubRegex.MatchString(meta.SrcURI) {
+	if _, _, ok := findGitHubRepo(meta.Homepage); ok {
+		return PackageTypeGitHub
+	}
+	if _, _, ok := findGitHubRepo(meta.SrcURI); ok {
 		return PackageTypeGitHub
 	}
 
 	// Check PyPI
-	if pypiRegex.MatchString(meta.Homepage) || pypiRegex.MatchString(meta.SrcURI) {
+	if urlMatchesHost(meta.Homepage, "pypi.org", "pypi.io", "pypi.python.org") ||
+		urlMatchesHost(meta.SrcURI, "pypi.org", "pypi.io", "pypi.python.org") {
 		return PackageTypePyPI
 	}
 
-	// Check npm
-	if npmRegex.MatchString(meta.Homepage) || npmRegex.MatchString(meta.SrcURI) {
+	// Check npm (npmjs.com / npmjs.org and their subdomains, e.g. registry.npmjs.org)
+	if urlMatchesHost(meta.Homepage, "npmjs.com", "npmjs.org") ||
+		urlMatchesHost(meta.SrcURI, "npmjs.com", "npmjs.org") {
 		return PackageTypeNPM
 	}
 
 	// Check crates.io
-	if cratesRegex.MatchString(meta.Homepage) || cratesRegex.MatchString(meta.SrcURI) {
+	if urlMatchesHost(meta.Homepage, "crates.io") || urlMatchesHost(meta.SrcURI, "crates.io") {
 		return PackageTypeCrates
 	}
 
@@ -442,16 +444,69 @@ func DetectPackageType(meta *EbuildMetadata) PackageType {
 	return PackageTypeGeneric
 }
 
+// urlMatchesHost reports whether any whitespace-separated token in s is a URL
+// whose host equals one of the given hosts or is a DNS subdomain of it.
+//
+// Parsing with net/url (instead of an unanchored substring regex) matches the
+// host at its proper boundary, so an arbitrary host cannot masquerade as a
+// known one through the path or query (e.g. https://evil.example/?x=pypi.org).
+func urlMatchesHost(s string, hosts ...string) bool {
+	for _, token := range strings.Fields(s) {
+		u, err := url.Parse(token)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if host == "" {
+			continue
+		}
+		for _, want := range hosts {
+			if host == want || strings.HasSuffix(host, "."+want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// findGitHubRepo extracts the owner and repository from the first GitHub URL in
+// s. It accepts ordinary http(s) URLs (validated via net/url) and scp-like git
+// URLs such as git@github.com:owner/repo. The host is matched at a proper
+// boundary, so only github.com and its subdomains qualify.
+func findGitHubRepo(s string) (owner, repo string, found bool) {
+	for _, token := range strings.Fields(s) {
+		// scp-like git URL: [user@]github.com:owner/repo(.git)
+		if m := githubSCPRegex.FindStringSubmatch(token); m != nil {
+			return m[1], cleanRepoName(m[2]), true
+		}
+
+		u, err := url.Parse(token)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if host != "github.com" && !strings.HasSuffix(host, ".github.com") {
+			continue
+		}
+
+		segments := strings.SplitN(strings.Trim(u.Path, "/"), "/", 3)
+		if len(segments) >= 2 && segments[0] != "" && segments[1] != "" {
+			return segments[0], cleanRepoName(segments[1]), true
+		}
+	}
+	return "", "", false
+}
+
 // ExtractGitHubInfo extracts owner and repo from GitHub URLs in metadata
 func ExtractGitHubInfo(meta *EbuildMetadata) (owner, repo string, found bool) {
 	// Try HOMEPAGE first
-	if matches := githubRegex.FindStringSubmatch(meta.Homepage); matches != nil {
-		return matches[1], cleanRepoName(matches[2]), true
+	if owner, repo, ok := findGitHubRepo(meta.Homepage); ok {
+		return owner, repo, true
 	}
 
 	// Try SRC_URI
-	if matches := githubRegex.FindStringSubmatch(meta.SrcURI); matches != nil {
-		return matches[1], cleanRepoName(matches[2]), true
+	if owner, repo, ok := findGitHubRepo(meta.SrcURI); ok {
+		return owner, repo, true
 	}
 
 	return "", "", false
