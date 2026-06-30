@@ -135,7 +135,9 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 // decision (R2.1, R2.2, R2.3).
 //
 //   - "true"  → always bare (caller must ensure auth is available).
-//   - "false" → never bare; rely on the CLI's logged-in session.
+//   - "false" → never bare; rely on the CLI's logged-in session. Any inherited
+//     API key is scrubbed from the child env (see childEnv) so it cannot override
+//     that session.
 //   - "auto"  (or any other value — config normalize already guarantees the set
 //     {auto,true,false}, but the default branch is defensive) → bare IFF an API
 //     key env var is configured AND populated in the environment.
@@ -148,6 +150,63 @@ func resolveBare(cfg LLMConfig) bool {
 	default:
 		return cfg.APIKeyEnv != "" && os.Getenv(cfg.APIKeyEnv) != ""
 	}
+}
+
+// scrubbedAuthEnvVars are the environment variables the `claude` CLI honours as
+// non-interactive API auth sources. In non-bare mode they are stripped from the
+// child environment so the CLI cannot silently prefer an inherited API key over
+// its own logged-in (subscription) session — the canonical ANTHROPIC_API_KEY and
+// ANTHROPIC_AUTH_TOKEN, plus the operator-configured key var (apiKeyEnv) which
+// may be a custom name feeding the same key.
+var scrubbedAuthEnvVars = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+
+// childEnv builds the environment for a spawned `claude` process from the
+// resolved auth mode.
+//
+//   - bare mode: the inherited environment plus an injected ANTHROPIC_API_KEY
+//     taken from apiKeyEnv (when populated), so the CLI authenticates via the key.
+//     The value travels only through the env, never argv/logs.
+//   - non-bare mode: the inherited environment with every auth source in
+//     scrubbedAuthEnvVars AND apiKeyEnv REMOVED, so an API key present in the
+//     parent env (e.g. exported from a shell rc) cannot override the operator's
+//     explicit `bare: false` choice to run on the CLI's logged-in session.
+//
+// It always returns a non-nil slice so callers assign cmd.Env unconditionally
+// (a nil cmd.Env would make the child inherit the parent env verbatim, defeating
+// the non-bare scrub).
+func childEnv(bareMode bool, apiKeyEnv string) []string {
+	if bareMode {
+		env := os.Environ()
+		if key := os.Getenv(apiKeyEnv); key != "" {
+			env = append(env, "ANTHROPIC_API_KEY="+key)
+		}
+		return env
+	}
+
+	// Non-bare: drop every auth var the CLI could read so it falls back to its
+	// own session. Build the strip set once (canonical vars + the configured
+	// name), then filter the inherited environment by KEY prefix.
+	strip := make(map[string]struct{}, len(scrubbedAuthEnvVars)+1)
+	for _, name := range scrubbedAuthEnvVars {
+		strip[name] = struct{}{}
+	}
+	if apiKeyEnv != "" {
+		strip[apiKeyEnv] = struct{}{}
+	}
+
+	parent := os.Environ()
+	env := make([]string, 0, len(parent))
+	for _, kv := range parent {
+		name := kv
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			name = kv[:eq]
+		}
+		if _, drop := strip[name]; drop {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env
 }
 
 // NewClaudeCodeClient constructs a ClaudeCodeClient from configuration (R1, R1.1,
@@ -247,16 +306,10 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	// Page content goes on stdin, never in argv (R1.2, AD8).
 	cmd.Stdin = bytes.NewReader(content)
 
-	// In bare mode inject the API key solely via the child environment. We start
-	// from the current environment and append ANTHROPIC_API_KEY so the key value
-	// never appears in argv or logs (R2.1, R2.4, G5).
-	if c.bareMode {
-		env := os.Environ()
-		if key := os.Getenv(c.apiKeyEnv); key != "" {
-			env = append(env, "ANTHROPIC_API_KEY="+key)
-		}
-		cmd.Env = env
-	}
+	// Resolve the child environment from the auth mode: bare injects the API key
+	// (only via env, never argv/logs — R2.1, R2.4, G5); non-bare scrubs any
+	// inherited API key so the CLI uses its logged-in session.
+	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

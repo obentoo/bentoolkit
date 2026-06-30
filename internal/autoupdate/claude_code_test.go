@@ -521,16 +521,22 @@ func TestRun_BareInjectsKeyViaEnv_NotArgsNorErrors(t *testing.T) {
 	}
 }
 
-// TestRun_NonBareDoesNotAddBareNorKey verifies that without bare mode neither
-// --bare appears nor is ANTHROPIC_API_KEY injected.
+// TestRun_NonBareDoesNotAddBareNorKey verifies that without bare mode --bare is
+// absent AND any inherited ANTHROPIC_API_KEY is actively scrubbed from the child
+// env, so the CLI falls back to its logged-in session even when a key is exported
+// in the parent environment (the bare:false intent).
 func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 	const keyEnv = "TEST_CC_API_KEY_RUN_NONBARE"
 	t.Setenv(keyEnv, "should-not-be-used")
+	// Simulate a key exported in the parent env (e.g. from a shell rc). Non-bare
+	// mode MUST strip it; if it leaks the script's guard trips with KEYINJECTED.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-INHERITED-SHOULD-BE-SCRUBBED")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "tok-INHERITED-SHOULD-BE-SCRUBBED")
 
-	// If ANTHROPIC_API_KEY leaks into the child's env, the script exits non-zero
+	// If either auth source leaks into the child's env, the script exits non-zero
 	// with KEYINJECTED on stderr so run() surfaces it as an error; otherwise it
 	// prints the success envelope and exits zero.
-	script := `if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'KEYINJECTED' 1>&2; exit 9; fi; ` +
+	script := `if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then printf 'KEYINJECTED' 1>&2; exit 9; fi; ` +
 		`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`
 	seam, cap := scriptedSeam(script)
 
@@ -544,18 +550,13 @@ func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 		t.Errorf("--bare must be absent when not bare: %v", cap.args)
 	}
 
-	// In non-bare mode run leaves cmd.Env nil, so the child inherits the test
-	// process env, which has no ANTHROPIC_API_KEY (we set keyEnv, not that). A
-	// leak would have tripped the script's exit-9/KEYINJECTED guard, turning the
-	// call into an error. Skip when the host itself exported ANTHROPIC_API_KEY,
-	// since that is legitimate inheritance rather than an injection by run.
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		if err != nil {
-			t.Fatalf("non-bare run failed (ANTHROPIC_API_KEY injected into child?): %v", err)
-		}
-		if out != "ok" {
-			t.Errorf("result = %q, want ok", out)
-		}
+	// The inherited auth vars must have been scrubbed: a leak trips the script's
+	// exit-9/KEYINJECTED guard, turning the call into an error.
+	if err != nil {
+		t.Fatalf("non-bare run failed (auth env not scrubbed from child?): %v", err)
+	}
+	if out != "ok" {
+		t.Errorf("result = %q, want ok", out)
 	}
 }
 
