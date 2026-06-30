@@ -767,6 +767,38 @@ func TestDetectPackageType(t *testing.T) {
 			},
 			expected: PackageTypeGeneric,
 		},
+		// Security regression (go/regex/missing-regexp-anchor): a known host
+		// appearing in the path/query of an unrelated URL, or a lookalike host,
+		// must NOT be classified by ecosystem.
+		{
+			name: "PyPI host only in query is not PyPI",
+			meta: &EbuildMetadata{
+				Homepage: "https://evil.example/?ref=pypi.org",
+			},
+			expected: PackageTypeGeneric,
+		},
+		{
+			name: "lookalike host is not crates.io",
+			meta: &EbuildMetadata{
+				SrcURI: "https://crates.io.evil.example/pkg.tar.gz",
+			},
+			expected: PackageTypeGeneric,
+		},
+		{
+			name: "lookalike host is not GitHub",
+			meta: &EbuildMetadata{
+				Homepage: "https://notgithub.com/owner/repo",
+			},
+			expected: PackageTypeGeneric,
+		},
+		// Legitimate subdomains must still be detected.
+		{
+			name: "npm registry subdomain",
+			meta: &EbuildMetadata{
+				SrcURI: "https://registry.npmjs.org/example/-/example-1.0.0.tgz",
+			},
+			expected: PackageTypeNPM,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -823,6 +855,26 @@ func TestExtractGitHubInfo(t *testing.T) {
 			expectedOwner: "",
 			expectedRepo:  "",
 			expectedFound: false,
+		},
+		// Security regression (go/regex/missing-regexp-anchor): github.com in the
+		// path of a non-GitHub host must not be mistaken for the repo source.
+		{
+			name: "GitHub host only in path is not extracted",
+			meta: &EbuildMetadata{
+				SrcURI: "https://evil.example/mirror/github.com/attacker/repo/x.tar.gz",
+			},
+			expectedOwner: "",
+			expectedRepo:  "",
+			expectedFound: false,
+		},
+		{
+			name: "SRC_URI with query string",
+			meta: &EbuildMetadata{
+				SrcURI: "https://github.com/owner/repo/archive/v1.0.0.tar.gz?foo=bar",
+			},
+			expectedOwner: "owner",
+			expectedRepo:  "repo",
+			expectedFound: true,
 		},
 	}
 
