@@ -49,3 +49,5 @@ vendor/
 .claude/
 # Playwright MCP local artifacts
 .playwright-mcp/
+# Epic local planning artifacts
+.epic/
