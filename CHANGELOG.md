@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-06-30
+
+### Added
+- **`provider: local` repositories — read an on-disk package tree in place.** A
+  repository can now point at a local directory (e.g. a synced
+  `/var/db/repos/gentoo`) with `provider: local` + `path:`, and bentoo reads it
+  directly with no clone. The destructive cache operations (`RemoveCache`,
+  `ForceUpdate`) are disabled for a local tree so the user's real repository is
+  never pulled or removed.
+
+### Fixed
+- **`overlay autoupdate --revive` always aborted with "no local package
+  directory".** Revive seeds a base ebuild off the `::gentoo` tree and so needs an
+  on-disk `PackageDirProvider`, but the provider was resolved from the registry
+  default (the GitHub API mirror, which has no on-disk tree). The only documented
+  workaround — a `git` provider with a filesystem `url:` — was mangled into
+  `https://github.com/<path>.git` and failed to clone. The new `provider: local` +
+  `path:` schema makes a local `::gentoo` tree work end-to-end, and the
+  revive/compare guidance messages now document it.
+
 ## [0.11.1] - 2026-06-30
 
 ### Fixed

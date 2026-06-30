@@ -1020,9 +1020,9 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		logger.Error("the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.")
 		logger.Info("Configure a local gentoo repository in ~/.config/bentoo/config.yaml:")
 		logger.Info("  repositories:")
-		logger.Info("    gentoo-local:")
-		logger.Info("      provider: git")
-		logger.Info("      url: /var/db/repos/gentoo")
+		logger.Info("    gentoo:")
+		logger.Info("      provider: local")
+		logger.Info("      path: /var/db/repos/gentoo")
 		logger.Info("(or force a clone-backed provider so the package tree is available on disk)")
 		osExit(1)
 		return

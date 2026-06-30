@@ -31,6 +31,9 @@ func NewProvider(repoInfo *RepositoryInfo, forceClone bool) (Provider, error) {
 		return NewGitHubProvider(repoInfo)
 	case "gitlab":
 		return NewGitLabProvider(repoInfo)
+	case "local":
+		// On-disk tree read in place (no clone). Uses repoInfo.Path.
+		return NewLocalProvider(repoInfo)
 	case "git", "":
 		// Default to git clone for generic or unspecified providers
 		return NewGitCloneProvider(repoInfo)

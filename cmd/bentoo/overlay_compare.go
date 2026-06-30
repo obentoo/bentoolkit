@@ -176,9 +176,9 @@ func runCompare(cmd *cobra.Command, args []string) {
 				logger.Info("")
 				logger.Info("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
 				logger.Info("     repositories:")
-				logger.Info("       gentoo-local:")
-				logger.Info("         provider: git")
-				logger.Info("         url: /var/db/repos/gentoo")
+				logger.Info("       gentoo:")
+				logger.Info("         provider: local")
+				logger.Info("         path: /var/db/repos/gentoo")
 				logger.Info("")
 				logger.Info("  3. Wait until %s for rate limit reset", resetTime.Format("15:04:05"))
 				osExit(1)
@@ -295,6 +295,7 @@ func convertConfigRepos(cfg *config.Config) map[string]*provider.RepositoryInfo 
 			Name:     name,
 			Provider: repo.Provider,
 			URL:      repo.URL,
+			Path:     repo.Path,
 			Token:    repo.Token,
 			Branch:   repo.Branch,
 		}

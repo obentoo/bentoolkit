@@ -82,7 +82,7 @@ github:
 # Optional: custom repositories for compare command
 repositories:
   my-overlay:
-    provider: github  # github, gitlab, or git
+    provider: github  # github, gitlab, git, or local
     url: myuser/my-overlay
     branch: main
 
@@ -390,6 +390,12 @@ repositories:
     provider: git
     url: https://git.example.com/overlay.git
     branch: main
+
+  # Local on-disk tree (read in place, no clone) — required by
+  # `overlay autoupdate --revive`, which seeds a base ebuild off ::gentoo
+  gentoo:
+    provider: local
+    path: /var/db/repos/gentoo
 ```
 
 Then use them:
