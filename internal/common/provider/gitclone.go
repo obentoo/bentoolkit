@@ -31,12 +31,48 @@ type GitCloneProvider struct {
 	// UpdateInterval is how often to pull updates (default: 24h)
 	UpdateInterval time.Duration
 
+	// local marks an on-disk tree used in place (provider "local"): LocalPath
+	// already points at an existing directory, so ensureRepo/repoExists are
+	// no-ops and the destructive cache operations (RemoveCache/ForceUpdate) are
+	// disabled to avoid touching the user's real tree (e.g. /var/db/repos/gentoo).
+	local bool
+
 	// reporter receives stage/done/tail events for the clone. It may be nil
 	// (this struct is often built as a literal without a constructor default),
 	// so cloneRepo nil-guards it locally. (R3.3)
 	reporter tui.Reporter
 	// taskID identifies this provider's task in reporter events.
 	taskID string
+}
+
+// NewLocalProvider builds a provider that reads an on-disk package tree in place
+// (provider "local"), without cloning. repoInfo.Path must be an existing
+// directory; it is resolved to an absolute path and used as LocalPath directly.
+// This is the "local tree" the revive/compare guidance documents — e.g. a
+// synced /var/db/repos/gentoo, which has no .git of its own.
+func NewLocalProvider(repoInfo *RepositoryInfo) (*GitCloneProvider, error) {
+	if strings.TrimSpace(repoInfo.Path) == "" {
+		return nil, fmt.Errorf("%w: provider \"local\" requires a non-empty 'path'", ErrInvalidRepoURL)
+	}
+
+	abs, err := filepath.Abs(repoInfo.Path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve local repository path %q: %w", repoInfo.Path, err)
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: local repository path %q: %v", ErrInvalidRepoURL, repoInfo.Path, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%w: local repository path %q is not a directory", ErrInvalidRepoURL, repoInfo.Path)
+	}
+
+	return &GitCloneProvider{
+		LocalPath: abs,
+		RepoName:  repoInfo.Name,
+		local:     true,
+	}, nil
 }
 
 // SetReporter wires a reporter and task id for clone stage/done/tail events. A
@@ -143,6 +179,12 @@ func (p *GitCloneProvider) LocalPackagePath(category, pkg string) (string, error
 
 // ensureRepo ensures the repository is cloned and up-to-date
 func (p *GitCloneProvider) ensureRepo() error {
+	// Local in-place tree: nothing to clone or update. The directory was
+	// validated to exist in NewLocalProvider and may be a non-git rsync tree.
+	if p.local {
+		return nil
+	}
+
 	if p.repoExists() {
 		// Check if we need to update
 		if p.needsUpdate() {
@@ -298,16 +340,25 @@ func (p *GitCloneProvider) scanLocalPackage(pkgPath, pkgName string) ([]string, 
 	return versions, nil
 }
 
-// ForceUpdate forces an update of the repository regardless of age
+// ForceUpdate forces an update of the repository regardless of age. It is a
+// no-op for a local in-place tree, which bentoo does not own and must not pull.
 func (p *GitCloneProvider) ForceUpdate() error {
+	if p.local {
+		return nil
+	}
 	if !p.repoExists() {
 		return p.cloneRepo()
 	}
 	return p.updateRepo()
 }
 
-// RemoveCache removes the cached repository
+// RemoveCache removes the cached repository. It is a no-op for a local in-place
+// tree: LocalPath there is the user's real tree (e.g. /var/db/repos/gentoo), not
+// a bentoo-managed cache, so os.RemoveAll must never run against it.
 func (p *GitCloneProvider) RemoveCache() error {
+	if p.local {
+		return nil
+	}
 	return os.RemoveAll(p.LocalPath)
 }
 

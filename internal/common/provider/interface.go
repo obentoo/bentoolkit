@@ -45,8 +45,9 @@ type PackageDirProvider interface {
 // RepositoryInfo contains information about a repository to compare against
 type RepositoryInfo struct {
 	Name     string // e.g., "gentoo", "guru", "my-overlay"
-	Provider string // "github", "gitlab", "git"
-	URL      string // Full URL or org/repo for GitHub/GitLab
+	Provider string // "github", "gitlab", "git", "local"
+	URL      string // Full URL or org/repo for GitHub/GitLab/git (remote)
+	Path     string // On-disk tree for provider "local" (read in place, no clone)
 	Token    string // Optional auth token
 	Branch   string // Branch to use (default: master/main)
 }
@@ -57,6 +58,7 @@ func (r *RepositoryInfo) Clone() *RepositoryInfo {
 		Name:     r.Name,
 		Provider: r.Provider,
 		URL:      r.URL,
+		Path:     r.Path,
 		Token:    r.Token,
 		Branch:   r.Branch,
 	}

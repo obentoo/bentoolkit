@@ -47,8 +47,9 @@ type GitHubConfig struct {
 
 // RepoConfig holds configuration for a custom repository
 type RepoConfig struct {
-	Provider string `yaml:"provider"` // "github", "gitlab", or "git"
-	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab
+	Provider string `yaml:"provider"` // "github", "gitlab", "git", or "local"
+	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab/git (remote)
+	Path     string `yaml:"path"`     // On-disk tree for provider "local" (read in place, no clone)
 	Token    string `yaml:"token"`    // Optional auth token
 	Branch   string `yaml:"branch"`   // Branch to use (default: master/main)
 }
