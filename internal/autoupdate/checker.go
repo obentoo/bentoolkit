@@ -127,12 +127,15 @@ func hostForError(rawURL string) string {
 	return rawURL
 }
 
-// DefaultConcurrency is the default number of packages CheckAll processes in
-// parallel when no explicit concurrency is configured on the Checker. It is sized
-// to keep the tuned per-host limiters (GitHub ~10/s, GitLab ~3/s) saturated while
-// the long tail of single-request hosts fires in parallel; per-host rate limiting
-// — not this number — bounds the request rate to any single provider.
-const DefaultConcurrency = 20
+// DefaultConcurrency is the default number of packages processed in parallel
+// when no explicit concurrency is configured. It governs both --check (CheckAll's
+// per-package HTTP fan-out) and the --apply all worker pool. For --check, per-host
+// rate limiting — not this number — bounds the request rate to any single provider
+// (GitHub ~10/s, GitLab ~3/s), so the tuned limiters stay saturated. For --apply
+// each worker runs a `pkgdev manifest` that fetches distfiles over the network and
+// bypasses those limiters, so a moderate default keeps concurrent downloads from
+// overwhelming a single host. 10 balances throughput against both.
+const DefaultConcurrency = 10
 
 // maxConcurrency is the upper bound accepted by WithConcurrency. It caps the
 // number of in-flight per-package goroutines (and therefore the burst of
