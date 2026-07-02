@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,7 +41,8 @@ var (
 	// autoupdateClean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
 	autoupdateClean bool
-	// autoupdateConcurrency bounds parallel version checks (range [1,100])
+	// autoupdateConcurrency bounds parallel version checks and the --apply all
+	// worker pool (range [1,100])
 	autoupdateConcurrency int
 	// autoupdateTimeout overrides the per-request HTTP timeout in seconds
 	// (0 = use config autoupdate.http_timeout, default 30)
@@ -92,7 +95,7 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
-	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks (1-100)")
+	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100)")
 	autoupdateCmd.Flags().IntVar(&autoupdateTimeout, "timeout", 0, "per-request HTTP timeout in seconds for --check (0 = use config autoupdate.http_timeout, default 30)")
 	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
@@ -684,17 +687,22 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	displayApplyResult(result)
 }
 
-// runApplyAll handles `--apply all`: it applies every pending update in turn,
-// reusing a single Applier so the pending list and logs directory are loaded
-// once. ctx is threaded into the Applier via WithApplierContext so a
-// SIGINT/SIGTERM cancels the in-flight `pkgdev manifest` or compile child
-// process (R1.1, R1.2).
+// runApplyAll handles `--apply all`: it applies every pending update, reusing a
+// single Applier so the pending list and logs directory are loaded once. ctx is
+// threaded into the Applier via WithApplierContext so a SIGINT/SIGTERM cancels
+// the in-flight `pkgdev manifest` or compile child process (R1.1, R1.2).
 //
 // The package list is snapshotted up front: Apply mutates the underlying
 // pending list (a successful apply deletes its entry), so iterating over the
 // live map would be unsafe. Each Apply is independent — a failure on one
 // package never aborts the others — and the process exits non-zero when any
 // package failed, matching the single-package --apply contract.
+//
+// Without --compile the applies run concurrently across a worker pool bounded by
+// --concurrency, so the slow, network-bound `pkgdev manifest` step of each
+// package overlaps instead of running one at a time. With --compile they stay
+// serial so the elevated compile step's confirmation prompt and sudo invocation
+// are not interleaved. Both paths live in applyAllPackages.
 func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) {
 	// Read the pending list up front so the reporter's batch denominator (and the
 	// "nothing to do" short-circuit) are known before the TUI program starts. The
@@ -740,21 +748,12 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		return
 	}
 
-	results := make([]*autoupdate.ApplyResult, 0, len(updates))
-	failures := 0
-	for _, u := range updates {
-		// The applier's TaskStart now surfaces each package through the reporter,
-		// so the previous output.Info Printf per package is intentionally gone.
-
-		//nolint:contextcheck // applyCtx is propagated into Apply's spawned
-		// processes via WithApplierContext (a.ctx) — the deliberate single-source
-		// wiring derived from signal.NotifyContext. Apply takes no ctx param.
-		result, err := applier.Apply(u.Package, autoupdateCompile)
-		if err != nil {
-			failures++
-		}
-		results = append(results, result)
-	}
+	// The applier's TaskStart surfaces each package through the reporter, so the
+	// previous output.Info Printf per package is intentionally gone.
+	//nolint:contextcheck // applyCtx reaches each Apply's spawned processes via
+	// WithApplierContext (a.ctx) — Apply takes no ctx param by design, so the
+	// manifest chain is cancelled through a.ctx rather than parameter propagation.
+	results, failures := applyAllPackages(applier, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyAllResults prints cleanly.
@@ -765,6 +764,75 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	if failures > 0 {
 		osExit(1)
 	}
+}
+
+// applyAllPackages applies every pending update through the shared Applier and
+// returns the per-package results in input order plus the number of hard
+// failures (an Apply returning a non-nil error). It is the concurrency seam of
+// runApplyAll.
+//
+// With compile == true the applies run serially: the compile step prompts for
+// confirmation and runs under sudo, and interleaving those across goroutines
+// would scramble the prompts. Otherwise the applies are dispatched across a
+// bounded worker pool (mirroring overlay.RegenerateManifests) so each Apply's
+// slow, network-bound `pkgdev manifest` step overlaps. concurrency caps the live
+// workers and is clamped to [1, len(updates)].
+//
+// Concurrency safety: the Applier's pending list and reporter are mutex-guarded,
+// each Apply's file work is scoped to its own package directory, and workers
+// write results to distinct slice indices — so beyond the atomic failure tally
+// no additional locking is needed.
+func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
+	results := make([]*autoupdate.ApplyResult, len(updates))
+
+	// --compile path: serial, so the confirmation prompt and sudo invocation of
+	// each compile step are not interleaved across goroutines.
+	if compile {
+		failures := 0
+		for i, u := range updates {
+			result, err := applier.Apply(u.Package, true)
+			if err != nil {
+				failures++
+			}
+			results[i] = result
+		}
+		return results, failures
+	}
+
+	// Non-compile path: a bounded worker pool over an index queue. Workers write
+	// results[i] at distinct indices (no lock) and tally failures atomically.
+	jobs := concurrency
+	if jobs < 1 {
+		jobs = 1
+	}
+	if jobs > len(updates) {
+		jobs = len(updates)
+	}
+
+	var failures int64
+	queue := make(chan int, len(updates))
+	for i := range updates {
+		queue <- i
+	}
+	close(queue)
+
+	var wg sync.WaitGroup
+	for w := 0; w < jobs; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range queue {
+				result, err := applier.Apply(updates[i].Package, false)
+				results[i] = result
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	return results, int(failures)
 }
 
 // displayApplyAllResults renders the per-package outcomes of `--apply all`
