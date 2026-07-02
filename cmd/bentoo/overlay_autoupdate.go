@@ -750,6 +750,9 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
+	//nolint:contextcheck // applyCtx reaches each Apply's spawned processes via
+	// WithApplierContext (a.ctx) — Apply takes no ctx param by design, so the
+	// manifest chain is cancelled through a.ctx rather than parameter propagation.
 	results, failures := applyAllPackages(applier, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
@@ -787,8 +790,6 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 	if compile {
 		failures := 0
 		for i, u := range updates {
-			//nolint:contextcheck // applyCtx reaches Apply's spawned processes via
-			// WithApplierContext (a.ctx), not a ctx parameter — by design.
 			result, err := applier.Apply(u.Package, true)
 			if err != nil {
 				failures++
@@ -821,8 +822,6 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				//nolint:contextcheck // applyCtx reaches Apply's spawned processes via
-				// WithApplierContext (a.ctx), not a ctx parameter — by design.
 				result, err := applier.Apply(updates[i].Package, false)
 				results[i] = result
 				if err != nil {
