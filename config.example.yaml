@@ -1,0 +1,106 @@
+# ============================================================================
+# bentoo — arquivo de configuração de exemplo
+# ============================================================================
+#
+# Copie este arquivo para um destes caminhos (ordem de prioridade de leitura):
+#
+#   1. ~/.config/bentoo/config.yaml        (padrão XDG — recomendado)
+#   2. ~/.bentoo/config.yaml               (fallback legado)
+#
+# Se $XDG_CONFIG_HOME estiver definido, o caminho 1 passa a ser
+# $XDG_CONFIG_HOME/bentoo/config.yaml.
+#
+# Instalação rápida:
+#   mkdir -p ~/.config/bentoo
+#   cp config.example.yaml ~/.config/bentoo/config.yaml
+#
+# Notas:
+#   - Chaves desconhecidas NÃO impedem o carregamento, mas geram um aviso em
+#     stderr — útil para pegar erros de digitação ou campo na seção errada.
+#   - O único campo necessário para a maioria dos comandos de overlay é
+#     overlay.path. Todo o resto tem default ou é opcional.
+#   - O bentoo grava este arquivo com permissão 0600, pois ele pode conter tokens.
+#   - A concorrência de --check/--apply NÃO é configurada aqui: é o flag de linha
+#     de comando `--concurrency N` (default: 10).
+
+# ----------------------------------------------------------------------------
+# overlay — o overlay Gentoo gerenciado pelo bentoo
+# ----------------------------------------------------------------------------
+overlay:
+  # Raiz do overlay. Aceita "~" para o home. Deve conter profiles/ e metadata/
+  # (gere a estrutura com `bentoo overlay init` se ainda não existir).
+  path: ~/overlays/meu-overlay
+  # Remote git usado por `bentoo overlay push` / `sync` (default: origin).
+  remote: origin
+
+# ----------------------------------------------------------------------------
+# git — identidade usada nos commits que o bentoo cria.
+# Se omitido, o bentoo tenta ler user.name/user.email de ~/.gitconfig.
+# ----------------------------------------------------------------------------
+git:
+  user: "Seu Nome"
+  email: "voce@example.com"
+
+# ----------------------------------------------------------------------------
+# github — token opcional para elevar o rate limit da API do GitHub durante os
+# checks de versão (`--check`). Um token de leitura pública já basta.
+# ----------------------------------------------------------------------------
+github:
+  token: ""   # ex.: "ghp_..."; vazio = requests anônimos (rate limit menor)
+
+# ----------------------------------------------------------------------------
+# autoupdate — comportamento de `bentoo overlay autoupdate`
+# ----------------------------------------------------------------------------
+autoupdate:
+  # TTL do cache de resultados de --check, em segundos (default: 3600 = 1h).
+  cache_ttl: 3600
+  # Timeout por requisição HTTP em --check, em segundos (default: 30).
+  # Também ajustável pontualmente via o flag `--timeout` na linha de comando.
+  http_timeout: 30
+
+  # --------------------------------------------------------------------------
+  # llm — provedor de IA usado pelos reparos automáticos:
+  #   * auto-fix de Manifest no --apply (SRC_URI/manifest quebrado)
+  #   * reparo de entradas de registry ao final do --check
+  #
+  # Dois provedores possíveis:
+  #
+  #   provider: claude-code   ← RECOMENDADO para os reparos automáticos.
+  #       Usa o CLI `claude` local e a SUA sessão de assinatura (não consome
+  #       créditos de API). É o ÚNICO provider que habilita os reparos agênticos
+  #       (editar o ebuild + rodar pkgdev). Requer o CLI `claude` instalado e
+  #       autenticado. NÃO use api_key_env com este provider.
+  #
+  #   provider: claude        ← provider HTTP via API Anthropic (paga por token).
+  #       Usado por fluxos de descoberta/análise, NÃO pelos reparos agênticos.
+  #       Requer api_key_env apontando para a env var que contém a chave.
+  #
+  # Deixe a seção llm inteira comentada/omitida para desabilitar todo uso de LLM.
+  # --------------------------------------------------------------------------
+  llm:
+    provider: claude-code
+    # model: ""                # modelo específico (vazio = padrão do provider)
+    bare: auto                 # bare-mode do CLI: auto | true | false
+    # max_budget_usd: 5.0      # teto de gasto opcional repassado ao CLI (--max-budget-usd)
+    # api_key_env: ANTHROPIC_API_KEY   # necessário APENAS para provider: claude (API)
+
+  # --------------------------------------------------------------------------
+  # search — provedor de busca opcional para fluxos de descoberta.
+  # --------------------------------------------------------------------------
+  # search:
+  #   provider: perplexity
+  #   api_key_env: PERPLEXITY_API_KEY
+
+# ----------------------------------------------------------------------------
+# repositories — fontes extras usadas por `revive` e comparações (opcional).
+# Chave = nome lógico; provider ∈ github | gitlab | git | local.
+# ----------------------------------------------------------------------------
+# repositories:
+#   gentoo:
+#     provider: local          # árvore em disco, lida no lugar (sem clone)
+#     path: /var/db/repos/gentoo
+#   meu-fork:
+#     provider: github
+#     url: usuario/repo         # "org/repo" ou URL completa
+#     token: ""                 # opcional
+#     branch: main              # default: master/main

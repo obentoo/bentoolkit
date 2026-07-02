@@ -15,6 +15,11 @@ BUILD_DIR := build
 CMD_DIR := cmd/bentoo
 INSTALL_DIR := /usr/local/bin
 
+# User config install (honors XDG_CONFIG_HOME, matching internal/common/config)
+CONFIG_EXAMPLE := config.example.yaml
+CONFIG_DIR := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/bentoo
+CONFIG_FILE := $(CONFIG_DIR)/config.yaml
+
 # Go commands
 GO := go
 GOTEST := $(GO) test
@@ -44,6 +49,18 @@ install: build
 .PHONY: uninstall
 uninstall:
 	rm -f $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
+
+# Install the example config into the user's config dir.
+# Never overwrites an existing config; writes 0600 (may hold tokens), matching
+# what the app itself does when it creates a config.
+.PHONY: install-config
+install-config:
+	@if [ -f "$(CONFIG_FILE)" ]; then \
+		echo "install-config: $(CONFIG_FILE) already exists, leaving it untouched"; \
+	else \
+		install -Dm600 $(CONFIG_EXAMPLE) "$(CONFIG_FILE)"; \
+		echo "install-config: wrote $(CONFIG_FILE) (edit it and set overlay.path)"; \
+	fi
 
 # Run tests
 .PHONY: test
@@ -144,6 +161,7 @@ help:
 	@echo "  build-debug     Build the binary with debug symbols"
 	@echo "  install         Install to $(INSTALL_DIR)"
 	@echo "  uninstall       Remove from $(INSTALL_DIR)"
+	@echo "  install-config  Copy config.example.yaml to the user's config dir (no overwrite)"
 	@echo "  test            Run tests"
 	@echo "  coverage        Run tests with coverage report"
 	@echo "  audit-ctx       Verify no naked context.Background() in internal/autoupdate, internal/overlay"
