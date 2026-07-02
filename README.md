@@ -55,6 +55,7 @@ sudo make install
 ```bash
 make build           # Build the binary
 make install         # Install to /usr/local/bin
+make install-config  # Copy config.example.yaml to ~/.config/bentoo/ (no overwrite)
 make test            # Run tests
 make coverage        # Run tests with coverage report
 make audit           # Run security audit (go mod verify + govulncheck)
@@ -66,7 +67,10 @@ make help            # Show all available targets
 
 ## Configuration
 
-Create the configuration file at `~/.config/bentoo/config.yaml`:
+Bentoo reads `~/.config/bentoo/config.yaml` (or `$XDG_CONFIG_HOME/bentoo/config.yaml`).
+The repository ships a fully commented [`config.example.yaml`](config.example.yaml) —
+copy it with `make install-config` (which never overwrites an existing config), or
+create the file by hand:
 
 ```yaml
 overlay:
@@ -86,14 +90,15 @@ repositories:
     url: myuser/my-overlay
     branch: main
 
-# Optional: LLM provider configuration for autoupdate
-llm:
-  provider: claude        # claude, claude-code, openai, or ollama
-  api_key_env: ANTHROPIC_API_KEY
-  model: claude-3-haiku-20240307
-  # claude-code only (drives the local `claude` CLI):
-  bare: auto              # auto (default) | true | false
-  max_budget_usd: 0.50    # optional per-call spend cap
+# Optional: autoupdate settings — the LLM provider lives under autoupdate.llm
+autoupdate:
+  llm:
+    provider: claude        # claude, claude-code, openai, or ollama
+    api_key_env: ANTHROPIC_API_KEY
+    model: claude-3-haiku-20240307
+    # claude-code only (drives the local `claude` CLI):
+    bare: auto              # auto (default) | true | false
+    max_budget_usd: 0.50    # optional per-call spend cap
 ```
 
 ### Configuration Options

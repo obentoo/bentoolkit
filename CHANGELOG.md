@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-01
+
+### Added
+- **Example configuration file and a `make install-config` target.** A fully
+  commented `config.example.yaml` documents every setting — `overlay`, `git`,
+  `github`, `autoupdate` (LLM/search), and `repositories` — and spells out the
+  difference between `provider: claude-code` (the agentic fixer that runs the
+  local `claude` CLI on your subscription session, no API spend) and
+  `provider: claude` (the HTTP API, which needs `api_key_env`).
+  `make install-config` copies it to `~/.config/bentoo/config.yaml` (honoring
+  `XDG_CONFIG_HOME`, written `0600`) and never overwrites an existing config.
+
+### Changed
+- **`overlay autoupdate --apply all` regenerates Manifests in parallel.** The
+  per-package apply — whose slow step is the network-bound `pkgdev manifest`
+  distfile fetch — is now dispatched across a worker pool bounded by
+  `--concurrency` instead of running strictly one package at a time. Results are
+  still reported in input order and one package's failure never aborts the rest.
+  With `--compile` the applies stay serial so the elevated compile step's
+  confirmation prompt and `sudo`/`doas` invocation are never interleaved.
+- **Default `--concurrency` lowered from 20 to 10.** The single value now bounds
+  both the `--check` HTTP fan-out and the new `--apply all` worker pool. Ten
+  keeps the per-host rate limiters saturated on `--check` while stopping
+  concurrent `pkgdev manifest` downloads — which bypass those limiters — from
+  overwhelming a single host on `--apply`.
+
 ## [0.12.0] - 2026-06-30
 
 ### Added
