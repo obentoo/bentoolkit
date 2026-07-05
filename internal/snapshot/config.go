@@ -178,6 +178,13 @@ type ScheduleConfig struct {
 //
 // When XDG_CONFIG_HOME is unset it defaults to ~/.config, which makes paths 2 and
 // 3 coincide; the duplicate is dropped so callers see each location once.
+
+// etcSnapshotConfig is the system-scope config location (priority 1). It is a
+// package variable rather than a const so tests can point it at an isolated,
+// nonexistent path and stay hermetic on hosts where /etc/bentoo/snapshot.toml is
+// actually installed (otherwise FindConfigPath would stat the real file).
+var etcSnapshotConfig = "/etc/bentoo/snapshot.toml"
+
 func ConfigPaths() ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -190,7 +197,7 @@ func ConfigPaths() ([]string, error) {
 	}
 
 	candidates := []string{
-		"/etc/bentoo/snapshot.toml",
+		etcSnapshotConfig,
 		filepath.Join(xdgConfig, "bentoo", "snapshot.toml"),
 		filepath.Join(home, ".config", "bentoo", "snapshot.toml"),
 	}
