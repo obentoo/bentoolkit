@@ -872,7 +872,11 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 	}
 }
 
-// displayApplyResult formats and displays apply result
+// displayApplyResult formats and displays a single apply outcome.
+// It is a no-op when result is nil. Otherwise it prints the package and
+// version transition, then reports status (obsolete, success, or failure)
+// plus any available details such as obsolete reason, LLM fix/QA summary,
+// cleaned old-version info/warnings, and failure log path.
 func displayApplyResult(result *autoupdate.ApplyResult) {
 	if result == nil {
 		return
