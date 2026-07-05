@@ -115,19 +115,21 @@ clean:
 	rm -f coverage.out coverage.html
 	rm -rf $(BUILD_DIR)
 
-# Cross-compilation targets
+# Cross-compilation targets. CGO is disabled so these build on any host without a
+# target C cross-toolchain (bentoo is pure Go); the result is a static binary,
+# which is what we want to ship.
 .PHONY: build-all
 build-all: build-linux-amd64 build-linux-arm64
 
 .PHONY: build-linux-amd64
 build-linux-amd64:
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)
 
 .PHONY: build-linux-arm64
 build-linux-arm64:
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./$(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./$(CMD_DIR)
 
 # Development helpers
 .PHONY: fmt
