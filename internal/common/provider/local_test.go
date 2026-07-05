@@ -9,7 +9,9 @@ import (
 
 // TestNewLocalProvider_ReadsInPlace verifies a "local" provider points LocalPath
 // at the configured on-disk tree (resolved to an absolute path) and reads
-// package versions directly, without cloning.
+// package versions directly, without cloning. This is important because local
+// repositories are user-managed on-disk trees (for example, /var/db/repos/gentoo)
+// that must be read in place and never cloned or modified by provider setup.
 func TestNewLocalProvider_ReadsInPlace(t *testing.T) {
 	tmpDir := t.TempDir()
 	pkgDir := filepath.Join(tmpDir, "sys-firmware", "edk2")
