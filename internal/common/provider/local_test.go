@@ -58,7 +58,7 @@ func TestNewLocalProvider_ImplementsPackageDirProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalProvider failed: %v", err)
 	}
-	if _, ok := interface{}(prov).(PackageDirProvider); !ok {
+	if _, ok := prov.(PackageDirProvider); !ok {
 		t.Fatal("local provider does not implement PackageDirProvider")
 	}
 }
