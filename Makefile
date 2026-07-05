@@ -84,9 +84,15 @@ coverage:
 # filter). A surviving hit is a genuine naked context.Background().
 .PHONY: audit-ctx
 audit-ctx:
-	@! grep -rn "context\.Background()" internal/autoupdate internal/overlay --include='*.go' \
-		| grep -v "_test.go" | grep -v "// SAFE:" | grep -vE ':[0-9]+:[[:space:]]*//' \
-		| grep . || (echo "audit-ctx: naked context.Background() found" && exit 1)
+	@set -e; \
+	raw_hits="$$(grep -rn "context\.Background()" internal/autoupdate internal/overlay --include='*.go' || true)"; \
+	no_tests="$$(printf '%s\n' "$$raw_hits" | grep -v "_test.go" || true)"; \
+	no_safe="$$(printf '%s\n' "$$no_tests" | grep -v "// SAFE:" || true)"; \
+	real_hits="$$(printf '%s\n' "$$no_safe" | grep -vE ':[0-9]+:[[:space:]]*//' || true)"; \
+	if [ -n "$$real_hits" ]; then \
+		echo "audit-ctx: naked context.Background() found"; \
+		exit 1; \
+	fi
 	@echo "audit-ctx: no naked context.Background() in internal/autoupdate or internal/overlay"
 
 # Security audit
