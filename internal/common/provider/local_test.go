@@ -63,8 +63,8 @@ func TestNewLocalProvider_ImplementsPackageDirProvider(t *testing.T) {
 	}
 }
 
-// TestNewLocalProvider_Rejects covers the two failure inputs: empty path and a
-// path that is not an existing directory.
+// TestNewLocalProvider_Rejects covers three failure inputs: empty path, a
+// missing directory, and a path that is a file.
 func TestNewLocalProvider_Rejects(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		_, err := NewLocalProvider(&RepositoryInfo{Name: "gentoo", Path: ""})
