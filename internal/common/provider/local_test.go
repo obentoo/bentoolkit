@@ -52,7 +52,8 @@ func TestNewLocalProvider_ReadsInPlace(t *testing.T) {
 }
 
 // TestNewLocalProvider_ImplementsPackageDirProvider guards the revive flow's
-// type assertion: a local provider MUST satisfy PackageDirProvider.
+// type assertion at cmd/bentoo/overlay_autoupdate.go:1018: a local provider
+// MUST satisfy PackageDirProvider for that path to work.
 func TestNewLocalProvider_ImplementsPackageDirProvider(t *testing.T) {
 	prov, err := NewLocalProvider(&RepositoryInfo{Name: "gentoo", Path: t.TempDir()})
 	if err != nil {
