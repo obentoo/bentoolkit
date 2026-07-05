@@ -45,6 +45,12 @@ type GitCloneProvider struct {
 	taskID string
 }
 
+// Compile-time guarantee that *GitCloneProvider satisfies PackageDirProvider,
+// which the revive flow's type assertion (cmd/bentoo/overlay_autoupdate.go)
+// relies on. Enforcing it here fails the build if the interface drifts, so no
+// runtime test is needed.
+var _ PackageDirProvider = (*GitCloneProvider)(nil)
+
 // NewLocalProvider builds a provider that reads an on-disk package tree in place
 // (provider "local"), without cloning. repoInfo.Path must be an existing
 // directory; it is resolved to an absolute path and used as LocalPath directly.
