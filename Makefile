@@ -33,17 +33,19 @@ all: build
 # Build the binary
 .PHONY: build
 build:
-	$(GOBUILD) $(LDFLAGS) -o $(BINARY_NAME) ./$(CMD_DIR)
+	mkdir -p $(BUILD_DIR)
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 
 # Build with debug symbols (no stripping)
 .PHONY: build-debug
 build-debug:
-	$(GOBUILD) $(LDFLAGS_DEBUG) -o $(BINARY_NAME) ./$(CMD_DIR)
+	mkdir -p $(BUILD_DIR)
+	$(GOBUILD) $(LDFLAGS_DEBUG) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 
 # Install to system
 .PHONY: install
 install: build
-	install -Dm755 $(BINARY_NAME) $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
+	install -Dm755 $(BUILD_DIR)/$(BINARY_NAME) $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
 
 # Uninstall from system
 .PHONY: uninstall
