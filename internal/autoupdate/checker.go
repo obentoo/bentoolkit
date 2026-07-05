@@ -87,15 +87,16 @@ const DefaultOpTimeout = 30 * time.Second
 // a premature "context deadline exceeded". rc carries the retry parameters from
 // the HTTP client; a zero/blank rc still yields a budget >= perReq.
 func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
-	attempts := rc.MaxRetries + 1
-	if attempts < 1 {
-		attempts = 1
+	maxRetries := rc.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
 	}
+	attempts := maxRetries + 1
 	total := perReq * time.Duration(attempts)
 
 	// Sum the backoff delays the retry loop would sleep between attempts, mirroring
 	// calculateDelay: BaseDelay×2^(i-1), capped at MaxDelay.
-	for i := 1; i <= rc.MaxRetries; i++ {
+	for i := 1; i <= maxRetries; i++ {
 		multiplier := 1 << (i - 1) // 2^(i-1): 1, 2, 4, ...
 		delay := rc.BaseDelay * time.Duration(multiplier)
 		if rc.MaxDelay > 0 && delay > rc.MaxDelay {
