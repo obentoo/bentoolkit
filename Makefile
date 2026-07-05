@@ -92,8 +92,9 @@ audit-ctx:
 	if [ -n "$$real_hits" ]; then \
 		echo "audit-ctx: naked context.Background() found"; \
 		exit 1; \
+	else \
+		echo "audit-ctx: no naked context.Background() in internal/autoupdate or internal/overlay"; \
 	fi
-	@echo "audit-ctx: no naked context.Background() in internal/autoupdate or internal/overlay"
 
 # Security audit
 .PHONY: audit
