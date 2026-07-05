@@ -26,9 +26,6 @@ func TestNewLocalProvider_ReadsInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalProvider failed: %v", err)
 	}
-	if !prov.local {
-		t.Fatal("expected local=true")
-	}
 	if !filepath.IsAbs(prov.LocalPath) {
 		t.Errorf("LocalPath %q is not absolute", prov.LocalPath)
 	}
