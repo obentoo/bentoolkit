@@ -308,6 +308,13 @@ func TestFindConfigPath_FirstExistingWins(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 
+	// Isolate the system-scope path to an in-tempdir file that does not exist,
+	// so the test stays hermetic on hosts where /etc/bentoo/snapshot.toml is
+	// actually installed (which would otherwise win priority 1).
+	origEtc := etcSnapshotConfig
+	etcSnapshotConfig = filepath.Join(home, "etc", "bentoo", "snapshot.toml")
+	t.Cleanup(func() { etcSnapshotConfig = origEtc })
+
 	// Only the ~/.config copy exists; /etc and XDG do not. FindConfigPath must
 	// return the first that exists in priority order.
 	target := filepath.Join(home, ".config", "bentoo", "snapshot.toml")
