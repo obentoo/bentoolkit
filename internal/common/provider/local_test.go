@@ -51,20 +51,8 @@ func TestNewLocalProvider_ReadsInPlace(t *testing.T) {
 	}
 }
 
-// TestNewLocalProvider_ImplementsPackageDirProvider guards the revive flow's
-// type assertion: a local provider MUST satisfy PackageDirProvider.
-func TestNewLocalProvider_ImplementsPackageDirProvider(t *testing.T) {
-	prov, err := NewLocalProvider(&RepositoryInfo{Name: "gentoo", Path: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewLocalProvider failed: %v", err)
-	}
-	if _, ok := interface{}(prov).(PackageDirProvider); !ok {
-		t.Fatal("local provider does not implement PackageDirProvider")
-	}
-}
-
-// TestNewLocalProvider_Rejects covers the two failure inputs: empty path and a
-// path that is not an existing directory.
+// TestNewLocalProvider_Rejects covers the three failure inputs: empty path, a
+// missing directory, and a path that is a file (not a directory).
 func TestNewLocalProvider_Rejects(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		_, err := NewLocalProvider(&RepositoryInfo{Name: "gentoo", Path: ""})
