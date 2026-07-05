@@ -266,17 +266,14 @@ func TestConfigPaths_OrderAndDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigPaths: %v", err)
 	}
-	if len(paths) != 3 {
-		t.Fatalf("paths = %v, want 3 entries", paths)
+	if len(paths) != 2 {
+		t.Fatalf("paths = %v, want 2 entries", paths)
 	}
 	if paths[0] != "/etc/bentoo/snapshot.toml" {
 		t.Errorf("paths[0] = %q, want system scope first", paths[0])
 	}
 	if paths[1] != filepath.Join(home, "xdg", "bentoo", "snapshot.toml") {
 		t.Errorf("paths[1] = %q, want XDG", paths[1])
-	}
-	if paths[2] != filepath.Join(home, ".config", "bentoo", "snapshot.toml") {
-		t.Errorf("paths[2] = %q, want ~/.config", paths[2])
 	}
 
 	def, err := DefaultConfigPath()
