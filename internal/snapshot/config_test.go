@@ -59,7 +59,7 @@ func TestLoadFrom_RepresentativeConfig(t *testing.T) {
 		t.Errorf("engine.subvolumes = %v, want [/home /]", got)
 	}
 	if cfg.Engine.SnapshotDir != "/.snapshots" {
-		t.Errorf("engine.snapshot_dir = %q", cfg.Engine.SnapshotDir)
+		t.Errorf("engine.snapshot_dir = %q, want /.snapshots", cfg.Engine.SnapshotDir)
 	}
 	if cfg.Engine.Retention.Hourly != 24 || cfg.Engine.Retention.Monthly != 6 {
 		t.Errorf("retention = %+v", cfg.Engine.Retention)
