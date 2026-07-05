@@ -14,6 +14,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
 
+const minimalEbuildContent = "EAPI=8\nDESCRIPTION=\"test\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\nSRC_URI=\"\"\nLICENSE=\"MIT\"\n"
+
 // writeApplyAllEbuild drops a minimal, parseable ebuild for pkg at version into
 // overlayDir so the applier's resolveCurrentVersion/copyEbuild steps have a real
 // source file to work from.
@@ -27,9 +29,8 @@ func writeApplyAllEbuild(t *testing.T, overlayDir, pkg, version string) {
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", pkgDir, err)
 	}
-	const content = "EAPI=8\nDESCRIPTION=\"test\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\nSRC_URI=\"\"\nLICENSE=\"MIT\"\n"
 	p := filepath.Join(pkgDir, parts[1]+"-"+version+".ebuild")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(minimalEbuildContent), 0o644); err != nil {
 		t.Fatalf("write ebuild %s: %v", p, err)
 	}
 }
