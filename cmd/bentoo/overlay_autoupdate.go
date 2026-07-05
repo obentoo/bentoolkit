@@ -172,11 +172,16 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 }
 
 func runAutoupdate(cmd *cobra.Command, args []string) {
+	const (
+		minConcurrency = 1
+		maxConcurrency = 100
+	)
+
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
 	// with a clear message and a non-zero exit (R4.2). The accepted range
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
-	if autoupdateConcurrency < 1 || autoupdateConcurrency > 100 {
-		logger.Error("--concurrency must be in range [1, 100], got %d", autoupdateConcurrency)
+	if autoupdateConcurrency < minConcurrency || autoupdateConcurrency > maxConcurrency {
+		logger.Error("--concurrency must be in range [%d, %d], got %d", minConcurrency, maxConcurrency, autoupdateConcurrency)
 		osExit(1)
 		return
 	}
