@@ -404,7 +404,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		fixer = nil
 	}
 	if fixer != nil && stdinIsTerminal() {
-		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
+		if perr := promptRegistryFixes(runCtx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
 			logger.Warn("registry-fix prompt ended with an error: %v", perr)
 		}
 	}
