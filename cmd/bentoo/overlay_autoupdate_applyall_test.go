@@ -16,6 +16,31 @@ import (
 
 const minimalEbuildContent = "EAPI=8\nDESCRIPTION=\"test\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\nSRC_URI=\"\"\nLICENSE=\"MIT\"\n"
 
+var (
+	concurrencyProbeMu     sync.Mutex
+	concurrencyProbeActive int
+	concurrencyProbePeak   int
+)
+
+func TestApplyAllPackagesConcurrentSuccessHelper(t *testing.T) {
+	if os.Getenv("BENTOO_TEST_HELPER_CONCURRENCY_PROBE") != "1" {
+		return
+	}
+
+	concurrencyProbeMu.Lock()
+	concurrencyProbeActive++
+	if concurrencyProbeActive > concurrencyProbePeak {
+		concurrencyProbePeak = concurrencyProbeActive
+	}
+	concurrencyProbeMu.Unlock()
+
+	time.Sleep(20 * time.Millisecond) // overlap window during actual command execution
+
+	concurrencyProbeMu.Lock()
+	concurrencyProbeActive--
+	concurrencyProbeMu.Unlock()
+}
+
 // writeApplyAllEbuild drops a minimal, parseable ebuild for pkg at version into
 // overlayDir so the applier's resolveCurrentVersion/copyEbuild steps have a real
 // source file to work from.
@@ -85,24 +110,15 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 		concurrency = 4
 	)
 
-	var (
-		mu           sync.Mutex
-		active, peak int
-	)
+	concurrencyProbeMu.Lock()
+	concurrencyProbeActive = 0
+	concurrencyProbePeak = 0
+	concurrencyProbeMu.Unlock()
+
 	factory := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
-		mu.Lock()
-		active++
-		if active > peak {
-			peak = active
-		}
-		mu.Unlock()
-
-		time.Sleep(20 * time.Millisecond) // overlap window
-
-		mu.Lock()
-		active--
-		mu.Unlock()
-		return exec.CommandContext(ctx, "true")
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestApplyAllPackagesConcurrentSuccessHelper")
+		cmd.Env = append(os.Environ(), "BENTOO_TEST_HELPER_CONCURRENCY_PROBE=1")
+		return cmd
 	}
 
 	applier, updates := setupApplyAllTest(t, n, factory)
@@ -129,9 +145,9 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 		}
 	}
 
-	mu.Lock()
-	gotPeak := peak
-	mu.Unlock()
+	concurrencyProbeMu.Lock()
+	gotPeak := concurrencyProbePeak
+	concurrencyProbeMu.Unlock()
 	if gotPeak < 2 {
 		t.Errorf("peak concurrency = %d, want >= 2 (applies ran serially — the bug)", gotPeak)
 	}
