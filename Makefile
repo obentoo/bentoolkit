@@ -113,7 +113,6 @@ audit: audit-ctx
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f $(BINARY_NAME)
 	rm -f coverage.out coverage.html
 	rm -rf $(BUILD_DIR)
 
