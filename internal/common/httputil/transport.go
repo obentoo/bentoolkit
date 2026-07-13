@@ -45,11 +45,30 @@ func BuildTransport() *http.Transport {
 	}
 
 	if os.Getenv(EnvDisableHTTP2) == "1" {
-		t.ForceAttemptHTTP2 = false
-		// A non-nil (empty) TLSNextProto map disables automatic HTTP/2 in the
-		// standard library: no ALPN protocol handlers are registered.
-		t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		disableHTTP2(t)
 	}
 
 	return t
+}
+
+// BuildTransportHTTP1 returns a transport identical to BuildTransport's except
+// that HTTP/2 is always disabled, regardless of EnvDisableHTTP2.
+//
+// Some WAF-fronted upstreams (notably Cloudflare) fingerprint the HTTP/2
+// connection preface and challenge Go's standard-library client with an HTTP
+// 403 interstitial no matter what User-Agent it sends, while serving the exact
+// same request over HTTP/1.1. This transport is the escape hatch used to retry
+// such a request; see the HTTP/1.1 fallback in the autoupdate HTTP client.
+func BuildTransportHTTP1() *http.Transport {
+	t := BuildTransport()
+	disableHTTP2(t)
+	return t
+}
+
+// disableHTTP2 opts a transport out of HTTP/2 negotiation. A non-nil (empty)
+// TLSNextProto map is the standard-library idiom for doing so: no ALPN protocol
+// handlers are registered.
+func disableHTTP2(t *http.Transport) {
+	t.ForceAttemptHTTP2 = false
+	t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 }

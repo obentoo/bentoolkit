@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-07-13
+
+### Fixed
+- **`overlay autoupdate --check` no longer fails with HTTP 403 against
+  Cloudflare-fronted upstreams.** Cloudflare fingerprints the HTTP/2 connection
+  preface and answers Go's standard-library client with a "Just a moment..."
+  403 interstitial no matter what `User-Agent` it sends, while serving the exact
+  same request over HTTP/1.1. The autoupdate HTTP client now retries a 403 that
+  arrived over HTTP/2 once over HTTP/1.1 before accepting it, which is what a
+  registry entry alone could never fix: `app-misc/claude-desktop-bin` failed its
+  version check with "all version extraction methods failed: HTTP request
+  returned status 403" against a `packages.toml` entry that was already correct.
+  The retry bypasses the retry loop and the circuit breaker — it is one extra
+  request on a path that already lost its attempt, so it neither amplifies load
+  nor trips the breaker on its own — and is skipped when the request carries a
+  body it cannot replay, or when the caller supplied its own HTTP client via
+  `SetHTTPClient` (re-enable it explicitly with `SetHTTP1FallbackClient`).
+
 ## [0.13.0] - 2026-07-01
 
 ### Added
@@ -1217,7 +1235,10 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/obentoo/bentoolkit/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/obentoo/bentoolkit/compare/v0.10.0...v0.11.0
 [0.8.0]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...v0.7.1

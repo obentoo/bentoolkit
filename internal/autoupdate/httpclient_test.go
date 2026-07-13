@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -1769,5 +1770,143 @@ func TestClassifyBodyReadError(t *testing.T) {
 	got := classifyBodyReadError(maxBytes)
 	if !errors.Is(got, ErrResponseTooLarge) {
 		t.Errorf("classifyBodyReadError(*http.MaxBytesError) must wrap ErrResponseTooLarge, got: %v", got)
+	}
+}
+
+// =============================================================================
+// HTTP/1.1 fallback on 403
+// =============================================================================
+
+// newHTTP2TestServer starts a TLS test server with HTTP/2 enabled whose handler
+// mimics a Cloudflare-style fingerprint challenge: HTTP/2 requests are answered
+// with a 403 interstitial, HTTP/1.1 requests are served normally. It returns the
+// server, a client that negotiates HTTP/2 against it, and an HTTP/1.1-only
+// client, plus a counter of the requests seen per protocol major version.
+func newHTTP2TestServer(t *testing.T) (srv *httptest.Server, h2Client, h1Client *http.Client, seen *sync.Map) {
+	t.Helper()
+
+	seen = &sync.Map{}
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count, _ := seen.LoadOrStore(r.ProtoMajor, new(atomic.Int64))
+		count.(*atomic.Int64).Add(1)
+
+		if r.ProtoMajor >= 2 {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, "<!DOCTYPE html><title>Just a moment...</title>")
+			return
+		}
+		fmt.Fprint(w, `{"version":"1.2.3"}`)
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	h2Client = srv.Client()
+
+	// Same TLS trust as the server's own client, but with HTTP/2 turned off.
+	// httptest pins NextProtos to {"h2"} on its client's TLS config; that has to
+	// be cleared too, or ALPN still negotiates h2 and the handshake disagrees
+	// with the HTTP/1.1-only transport.
+	h1Transport := h2Client.Transport.(*http.Transport).Clone()
+	h1Transport.ForceAttemptHTTP2 = false
+	h1Transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	h1Transport.TLSClientConfig.NextProtos = nil
+	h1Client = &http.Client{Transport: h1Transport}
+
+	return srv, h2Client, h1Client, seen
+}
+
+func protoCount(seen *sync.Map, major int) int64 {
+	v, ok := seen.Load(major)
+	if !ok {
+		return 0
+	}
+	return v.(*atomic.Int64).Load()
+}
+
+// TestHTTP1FallbackRecoversFrom403 covers the claude.ai case: an upstream behind
+// a WAF that 403s the Go HTTP/2 fingerprint but serves the identical request
+// over HTTP/1.1. The 403 must be transparently recovered, not surfaced.
+func TestHTTP1FallbackRecoversFrom403(t *testing.T) {
+	srv, h2Client, h1Client, seen := newHTTP2TestServer(t)
+
+	client := NewRetryableHTTPClient()
+	client.SetHTTPClient(h2Client) // also clears the fallback...
+	client.SetHTTP1FallbackClient(h1Client)
+
+	resp, err := client.GetWithContext(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("GetWithContext returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d (HTTP/1.1 fallback should have recovered the 403)",
+			resp.StatusCode, http.StatusOK)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	if want := `{"version":"1.2.3"}`; string(body) != want {
+		t.Errorf("body = %q, want %q", string(body), want)
+	}
+
+	if got := protoCount(seen, 2); got != 1 {
+		t.Errorf("HTTP/2 requests = %d, want exactly 1", got)
+	}
+	if got := protoCount(seen, 1); got != 1 {
+		t.Errorf("HTTP/1.1 requests = %d, want exactly 1 (the fallback must not retry)", got)
+	}
+}
+
+// TestHTTP1FallbackDisabledKeeps403 asserts the fallback is opt-out: with no
+// fallback client configured, a 403 is returned untouched and no second request
+// is made.
+func TestHTTP1FallbackDisabledKeeps403(t *testing.T) {
+	srv, h2Client, _, seen := newHTTP2TestServer(t)
+
+	client := NewRetryableHTTPClient()
+	client.SetHTTPClient(h2Client) // clears the fallback
+
+	resp, err := client.GetWithContext(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("GetWithContext returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if got := protoCount(seen, 1); got != 0 {
+		t.Errorf("HTTP/1.1 requests = %d, want 0 (fallback is disabled)", got)
+	}
+}
+
+// TestHTTP1FallbackNotUsedOnHTTP1_403 asserts a genuine 403 that already arrived
+// over HTTP/1.1 is not retried: HTTP/1.1 is not a new signal there, so the extra
+// request would be pure waste.
+func TestHTTP1FallbackNotUsedOnHTTP1_403(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := NewRetryableHTTPClient()
+
+	resp, err := client.GetWithContext(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("GetWithContext returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Errorf("requests = %d, want exactly 1 (an HTTP/1.1 403 must not be retried)", got)
 	}
 }

@@ -23,6 +23,16 @@ func TestApplyTransforms(t *testing.T) {
 			[][]string{{"-stable", ""}, {"-beta", "_beta"}},
 			"4.3",
 		},
+		{
+			// llama.cpp tags its builds "b9964". Mapping to a bare "9964" would
+			// make the ebuild's PV a four-digit release; the overlay instead
+			// carries it as the 0_pre<build> snapshot scheme, which the transform
+			// must be able to produce.
+			"llama.cpp build tag to 0_pre snapshot",
+			"b9964",
+			[][]string{{`^b(\d+)$`, "0_pre$1"}},
+			"0_pre9964",
+		},
 		{"rules applied in order", "a", [][]string{{"a", "b"}, {"b", "c"}}, "c"},
 		{"wrong arity rule skipped", "7-1", [][]string{{"-"}, {"-", "."}}, "7.1"},
 		{"regex replacement with group", "v1-2", [][]string{{`(\d)-(\d)`, "$1.$2"}}, "v1.2"},
@@ -95,6 +105,18 @@ func TestSelectVersion(t *testing.T) {
 			cands: []string{"v1.2", "v1.10"},
 			mode:  "max",
 			want:  "1.10",
+		},
+		{
+			// llama.cpp: the raw "b<build>" tag is not a valid Gentoo version, so
+			// selection depends on the transform mapping it to the 0_pre<build>
+			// snapshot scheme first. The winner must be the highest build, which
+			// also pins that _pre suffix numbers compare numerically (10000 > 9999,
+			// not lexically).
+			name:      "llama.cpp build tags select the highest 0_pre snapshot",
+			cands:     []string{"b9963", "b10000", "b9999"},
+			transform: [][]string{{`^b(\d+)$`, "0_pre$1"}},
+			mode:      "max",
+			want:      "0_pre10000",
 		},
 	}
 	for _, tt := range tests {
