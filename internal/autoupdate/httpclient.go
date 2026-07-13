@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/sony/gobreaker"
 )
@@ -89,6 +90,8 @@ type RetryableHTTPClient struct {
 	defaultHeaders map[string]string
 	// githubToken is the GitHub API token for authentication
 	githubToken string
+	// h1Client performs the HTTP/1.1 fallback retry (nil disables the fallback)
+	h1Client *http.Client
 }
 
 // newDefaultBreaker creates a circuit breaker with the default settings.
@@ -118,6 +121,10 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 			Timeout:   config.Timeout,
 			Transport: httputil.BuildTransport(),
 		},
+		h1Client: &http.Client{
+			Timeout:   config.Timeout,
+			Transport: httputil.BuildTransportHTTP1(),
+		},
 		config:    config,
 		breaker:   newDefaultBreaker(),
 		delayFunc: time.Sleep,
@@ -146,8 +153,21 @@ func (c *RetryableHTTPClient) WithCircuitBreaker(enabled bool) *RetryableHTTPCli
 }
 
 // SetHTTPClient sets a custom underlying HTTP client (useful for testing).
+//
+// The HTTP/1.1 fallback is disabled by this call: a caller that supplies its own
+// client (a test transport, a stub, a proxy-aware client) owns the transport
+// entirely, and silently re-issuing a request through a bentoolkit-built
+// transport would bypass it. Re-enable the fallback explicitly with
+// SetHTTP1FallbackClient if it is wanted.
 func (c *RetryableHTTPClient) SetHTTPClient(client *http.Client) {
 	c.client = client
+	c.h1Client = nil
+}
+
+// SetHTTP1FallbackClient sets the client used for the HTTP/1.1 fallback retry.
+// Passing nil disables the fallback.
+func (c *RetryableHTTPClient) SetHTTP1FallbackClient(client *http.Client) {
+	c.h1Client = client
 }
 
 // SetRequestTimeout sets the per-request timeout (the cap on a single attempt)
@@ -164,6 +184,9 @@ func (c *RetryableHTTPClient) SetRequestTimeout(d time.Duration) {
 	c.config.Timeout = d
 	if c.client != nil {
 		c.client.Timeout = d
+	}
+	if c.h1Client != nil {
+		c.h1Client.Timeout = d
 	}
 }
 
@@ -246,6 +269,15 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 			continue
 		}
 
+		// A 403 over HTTP/2 is very often a WAF fingerprint challenge rather than
+		// a genuine authorization failure; retry once over HTTP/1.1 before
+		// accepting it (see retryOverHTTP1).
+		if resp.StatusCode == http.StatusForbidden {
+			if h1Resp := c.retryOverHTTP1(ctx, req, resp); h1Resp != nil {
+				return h1Resp, nil
+			}
+		}
+
 		// Success or non-retryable error
 		return resp, nil
 	}
@@ -255,6 +287,61 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 		return lastResp, fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
 	}
 	return lastResp, ErrMaxRetriesExceeded
+}
+
+// retryOverHTTP1 re-issues req over HTTP/1.1 after an HTTP/2 attempt came back
+// with a 403, and returns the new response — or nil to keep h2Resp, the original
+// response, which the caller still owns and must not have consumed.
+//
+// Cloudflare (and other WAFs) fingerprint the HTTP/2 connection preface, and
+// challenge Go's standard-library client with a "Just a moment..." 403
+// interstitial regardless of the User-Agent it sends. The very same request over
+// HTTP/1.1 is served normally. claude.ai's desktop release endpoint behaves
+// exactly this way, and a fix that only rewrites the User-Agent cannot help.
+//
+// The fallback is skipped — nil is returned, and the original 403 stands — when:
+//   - it is disabled (h1Client is nil, e.g. after SetHTTPClient),
+//   - the response did not come over HTTP/2, so HTTP/1.1 is not a new signal,
+//   - the request carries a body that cannot be replayed (no GetBody), or
+//   - the HTTP/1.1 attempt fails at the transport level.
+//
+// The retry deliberately bypasses the circuit breaker and the retry loop: it is
+// a single extra request on an error path that already lost the h2 attempt, so
+// it must not amplify load or trip the breaker on its own.
+func (c *RetryableHTTPClient) retryOverHTTP1(ctx context.Context, req *http.Request, h2Resp *http.Response) *http.Response {
+	if c.h1Client == nil || h2Resp.ProtoMajor < 2 {
+		return nil
+	}
+	if req.Body != nil && req.GetBody == nil {
+		return nil
+	}
+
+	h1Req := req.Clone(ctx)
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil
+		}
+		h1Req.Body = body
+	}
+
+	h1Resp, err := c.h1Client.Do(h1Req)
+	if err != nil {
+		// Transport-level failure: the caller keeps the untouched h2 response.
+		return nil
+	}
+
+	logger.Debug("HTTP/2 request to %s returned 403; HTTP/1.1 fallback returned %d",
+		req.URL.Redacted(), h1Resp.StatusCode)
+
+	// The h2 response is being dropped in favour of this one, so drain and close
+	// it to release the connection back to the pool.
+	if h2Resp.Body != nil {
+		io.Copy(io.Discard, h2Resp.Body) //nolint:errcheck // discarding a response we are replacing
+		h2Resp.Body.Close()              //nolint:errcheck
+	}
+
+	return h1Resp
 }
 
 // executeRequest performs a single HTTP attempt, optionally through the circuit breaker.
