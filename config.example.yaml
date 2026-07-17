@@ -19,7 +19,8 @@
 #     stderr — útil para pegar erros de digitação ou campo na seção errada.
 #   - O único campo necessário para a maioria dos comandos de overlay é
 #     overlay.path. Todo o resto tem default ou é opcional.
-#   - O bentoo grava este arquivo com permissão 0600, pois ele pode conter tokens.
+#   - O bentoo grava este arquivo com permissão 0600 por precaução; segredos
+#     agora vão no arquivo ~/.config/bentoo/secrets (formato NAME=valor), não aqui.
 #   - A concorrência de --check/--apply NÃO é configurada aqui: é o flag de linha
 #     de comando `--concurrency N` (default: 10).
 
@@ -40,13 +41,6 @@ overlay:
 git:
   user: "Seu Nome"
   email: "voce@example.com"
-
-# ----------------------------------------------------------------------------
-# github — token opcional para elevar o rate limit da API do GitHub durante os
-# checks de versão (`--check`). Um token de leitura pública já basta.
-# ----------------------------------------------------------------------------
-github:
-  token: ""   # ex.: "ghp_..."; vazio = requests anônimos (rate limit menor)
 
 # ----------------------------------------------------------------------------
 # autoupdate — comportamento de `bentoo overlay autoupdate`

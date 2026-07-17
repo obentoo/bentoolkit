@@ -17,9 +17,7 @@ func TestLoadFrom_UnknownKeyIsLenient(t *testing.T) {
 	content := "" +
 		"overlay:\n" +
 		"  path: /var/db/repos/bentoo\n" +
-		"  token: misplaced-secret\n" + // unknown: OverlayConfig has no token field
-		"github:\n" +
-		"  token: real-token\n"
+		"  token: misplaced-secret\n" // unknown: OverlayConfig has no token field
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -30,8 +28,5 @@ func TestLoadFrom_UnknownKeyIsLenient(t *testing.T) {
 	}
 	if cfg.Overlay.Path != "/var/db/repos/bentoo" {
 		t.Errorf("Overlay.Path = %q, want /var/db/repos/bentoo", cfg.Overlay.Path)
-	}
-	if cfg.GitHub.Token != "real-token" {
-		t.Errorf("GitHub.Token = %q, want real-token (the correctly-placed token)", cfg.GitHub.Token)
 	}
 }
