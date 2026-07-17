@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
+	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 const (
@@ -85,10 +86,17 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 		return nil, fmt.Errorf("%w: api_key_env not specified", ErrLLMNotConfigured)
 	}
 
-	// Get API key from environment
-	apiKey := os.Getenv(cfg.APIKeyEnv)
-	if apiKey == "" {
-		return nil, fmt.Errorf("%w: %s", ErrLLMAPIKeyMissing, cfg.APIKeyEnv)
+	// Resolve the API key through the unified secrets chain (env → user file →
+	// system file) rather than env-only. A present-but-unreadable secrets file
+	// propagates as secrets.ErrUnreadable instead of silently degrading to
+	// "anonymous"; a total miss names the env var and the searched paths.
+	apiKey, found, err := secrets.Lookup(cfg.APIKeyEnv)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %s (export %s=... or add it to one of: %s)",
+			ErrLLMAPIKeyMissing, cfg.APIKeyEnv, cfg.APIKeyEnv, strings.Join(secrets.Paths(), ", "))
 	}
 
 	// Set default model if not specified

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -139,8 +140,15 @@ func TestNewLLMClientMissingAPIKeyEnv(t *testing.T) {
 
 // TestNewLLMClientMissingAPIKey tests that NewLLMClient returns error when API key env var is not set
 func TestNewLLMClientMissingAPIKey(t *testing.T) {
-	// Ensure the env var is not set
-	os.Unsetenv("TEST_MISSING_API_KEY")
+	// D9: NewClaudeClient now resolves through secrets.Lookup, which consults
+	// the user secrets file when the env var is unset. Isolate HOME and
+	// XDG_CONFIG_HOME (secrets honors XDG first) to an empty tempdir so this
+	// missing-key assertion cannot read the developer's real
+	// ~/.config/bentoo/secrets. t.Setenv forbids t.Parallel (none is used here).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("TEST_MISSING_API_KEY", "") // empty == unset for secrets.Lookup
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -786,6 +794,17 @@ func findSubstring(s, substr string) bool {
 // variable set, NewLLMClient SHALL return ErrLLMAPIKeyMissing. Ollama SHALL NOT
 // require an API key.
 func TestAPIKeyValidation(t *testing.T) {
+	// D9: the "without API key returns ErrLLMAPIKeyMissing" properties (Claude
+	// and OpenAI) unset the key env and expect a miss; the constructors now
+	// resolve through secrets.Lookup, so isolate HOME and XDG_CONFIG_HOME
+	// (secrets honors XDG first) to an empty tempdir for the whole property run
+	// so they cannot read the developer's real ~/.config/bentoo/secrets. The
+	// key-present properties set their own env var, which still wins in Lookup.
+	// t.Setenv forbids t.Parallel (none is used here).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
 	parameters := gopter.DefaultTestParameters()
 	parameters.MinSuccessfulTests = 100
 	properties := gopter.NewProperties(parameters)

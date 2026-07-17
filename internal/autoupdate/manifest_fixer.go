@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // DefaultManifestFixTimeout bounds a single agentic `claude` fix invocation. The
@@ -131,9 +133,16 @@ type ClaudeCodeFixer struct {
 	// model is the resolved model name passed via --model.
 	model string
 	// apiKeyEnv is the environment variable name holding the Anthropic API key.
-	// Only its value (looked up at call time) is injected into the child env, and
-	// only when bareMode is true.
+	// In non-bare mode it names an auth var to scrub from the child env; the
+	// injected key VALUE is the pre-resolved apiKey (below), never re-read here.
 	apiKeyEnv string
+	// apiKey is the Anthropic API key resolved ONCE at construction via
+	// secrets.Lookup(apiKeyEnv) (env → user file → system file). It drives both
+	// the bare-mode decision and the child-env injection so a key present only in
+	// a secrets file cannot flip bare on yet be missing from the spawned CLI. It
+	// is injected solely via the child env in bare mode and never appears in
+	// argv, logs, or returned errors.
+	apiKey string
 	// bareMode mirrors ClaudeCodeClient.bareMode: when true the CLI runs with
 	// --bare and the API key is injected via the child environment.
 	bareMode bool
@@ -181,6 +190,18 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 		return nil, ErrClaudeCodeUnavailable
 	}
 
+	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
+	// user file → system file). This single value drives BOTH the bare-mode
+	// decision and the child-env injection below, so a key present only in a
+	// secrets file cannot flip bare on while the agentic `claude` is spawned
+	// without a credential. A present-but-unreadable secrets file surfaces as
+	// secrets.ErrUnreadable rather than silently degrading to an unauthenticated
+	// run.
+	key, _, err := secrets.Lookup(cfg.APIKeyEnv)
+	if err != nil {
+		return nil, err
+	}
+
 	model := cfg.Model
 	if model == "" {
 		model = DefaultClaudeCodeModel
@@ -189,7 +210,8 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 	f := &ClaudeCodeFixer{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
-		bareMode:     resolveBare(cfg),
+		apiKey:       key,
+		bareMode:     resolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
 		execCommand:  exec.CommandContext,
@@ -426,7 +448,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv)
+	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
