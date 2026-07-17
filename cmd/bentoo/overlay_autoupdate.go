@@ -239,7 +239,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Handle different modes
 	switch {
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
+		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateList:
 		runList(configDir)
 	case autoupdateApply == "all":
@@ -247,9 +247,9 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	case autoupdateApply != "":
 		runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM)
 	case autoupdateReviveList:
-		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
+		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateRevive != "":
-		runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM, appCtx.Config.GitHub.Token)
+		runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
@@ -273,7 +273,7 @@ func resolveHTTPTimeout(cfg *config.Config) time.Duration {
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
@@ -284,11 +284,8 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		// Restrict the batch to a package type when --only is set; empty is a
 		// no-op (checks every package). Ignored on the single-package path.
 		autoupdate.WithTypeFilter(autoupdateOnly),
-		// Authenticate api.github.com from ~/.config/bentoo/config.yaml's
-		// github.token (same source `overlay compare` uses). NewChecker lets a
-		// GITHUB_TOKEN/GH_TOKEN env override an empty value, matching compare's
-		// env > config precedence.
-		autoupdate.WithGitHubToken(githubToken),
+		// NewChecker authenticates api.github.com itself: it resolves the token
+		// from GITHUB_TOKEN/GH_TOKEN via the secrets chain (github.ResolveToken).
 		// Tune per-host HTTP rate limits: GitHub ~10/s and GitLab ~3/s (the two
 		// hosts that dominate packages.toml), every other host at the conservative
 		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
@@ -415,7 +412,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// best-effort — it never changes the check's exit code.
 	if autoupdateRevivable {
 		//nolint:contextcheck // ctx is already injected into checker via autoupdate.WithContext above
-		reportRevivableOrphans(checker, cfg, githubToken)
+		reportRevivableOrphans(checker, cfg)
 	}
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
@@ -437,8 +434,8 @@ func stdinIsTerminal() bool {
 // is read-only and best-effort — a provider-resolution failure warns and returns
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
-func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config, githubToken string) {
-	prov, err := resolveGentooProviderFn(cfg, githubToken)
+func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
+	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Warn("revivable-orphan scan skipped: %v", err)
 		return
@@ -926,17 +923,18 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 
 // reviveCheckerOptions builds the Checker option set shared by the revive modes.
 // It mirrors runCheck's option set exactly — config dir, context, concurrency,
-// type filter, GitHub token, tuned rate limiter, cache TTL, and the same LLM
-// wiring (with the err-first nil guard) — so a revived package's upstream check
-// behaves identically to a normal --check. The progress callback is omitted: the
-// revive paths drive single-package CheckPackage calls, which never fire it.
-func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, githubToken string) []autoupdate.CheckerOption {
+// type filter, tuned rate limiter, cache TTL, and the same LLM wiring (with the
+// err-first nil guard) — so a revived package's upstream check behaves
+// identically to a normal --check. The GitHub token is not an option: NewChecker
+// resolves it itself from GITHUB_TOKEN/GH_TOKEN via the secrets chain. The
+// progress callback is omitted: the revive paths drive single-package
+// CheckPackage calls, which never fire it.
+func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		autoupdate.WithTypeFilter(autoupdateOnly),
-		autoupdate.WithGitHubToken(githubToken),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
 		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
 	}
@@ -967,13 +965,14 @@ var resolveGentooProviderFn = resolveGentooProvider
 
 // resolveGentooProvider resolves the ::gentoo provider the revive flow seeds
 // from, mirroring `overlay compare`'s provider-resolution idiom: config repos >
-// registry, with the token precedence env (GITHUB_TOKEN > GH_TOKEN) > config.
-// forceClone is false so a user-configured local/clone repo is honoured; an
-// API-only gentoo simply will not implement provider.PackageDirProvider, which
-// runRevive detects and reports. The caller owns prov.Close() and decides
-// whether a resolution error is fatal (runRevive/runReviveList exit non-zero;
-// the --revivable add-on to --check only warns and skips the report).
-func resolveGentooProvider(cfg *config.Config, githubToken string) (provider.Provider, error) {
+// registry, with the GitHub token resolved from GITHUB_TOKEN/GH_TOKEN via the
+// secrets chain (github.ResolveToken). forceClone is false so a user-configured
+// local/clone repo is honoured; an API-only gentoo simply will not implement
+// provider.PackageDirProvider, which runRevive detects and reports. The caller
+// owns prov.Close() and decides whether a resolution error is fatal
+// (runRevive/runReviveList exit non-zero; the --revivable add-on to --check only
+// warns and skips the report).
+func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 	configRepos := convertConfigRepos(cfg)
 
 	registry, err := provider.NewRepositoryRegistry()
@@ -986,11 +985,13 @@ func resolveGentooProvider(cfg *config.Config, githubToken string) (provider.Pro
 		return nil, fmt.Errorf("repository 'gentoo' not found: %w", err)
 	}
 
-	// Token precedence: env (GITHUB_TOKEN > GH_TOKEN) > config. Only fill an
-	// empty repo token so a config-specific one wins.
-	token := github.TokenFromEnv()
-	if token == "" {
-		token = githubToken
+	// Resolve the GitHub token from GITHUB_TOKEN/GH_TOKEN via the secrets chain
+	// (github.ResolveToken); a resolution error warns and continues with
+	// unauthenticated access. Only fill an empty repo token so a config-specific
+	// one still wins.
+	token, err := github.ResolveToken()
+	if err != nil {
+		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
 	}
 	if token != "" && repoInfo.Token == "" {
 		repoInfo.Token = token
@@ -1010,15 +1011,15 @@ func resolveGentooProvider(cfg *config.Config, githubToken string) (provider.Pro
 // version ::gentoo still carries. It mutates nothing — it only builds a Checker
 // (the same option set as --check) and the ::gentoo provider, then prints the
 // candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
-func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg, githubToken)...)
+func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
 		return
 	}
 
-	prov, err := resolveGentooProviderFn(cfg, githubToken)
+	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)
@@ -1080,8 +1081,8 @@ type reviveOutcome struct {
 // that case aborts ONCE up front with a clear, actionable error. Each package is
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
-func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig, githubToken string) {
-	prov, err := resolveGentooProviderFn(cfg, githubToken)
+func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
+	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)
@@ -1106,7 +1107,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg, githubToken)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		osExit(1)
@@ -1162,7 +1163,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	httpTimeout := resolveHTTPTimeout(cfg)
 	outcomes := make([]reviveOutcome, 0, len(targets))
 	for _, pkg := range targets {
-		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, httpTimeout, llmCfg, githubToken, prov, pdp, applier, pending))
+		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, httpTimeout, llmCfg, prov, pdp, applier, pending))
 	}
 
 	failures := displayReviveSummary(outcomes)
@@ -1179,7 +1180,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 // version, seed it into the overlay, re-enable the entry in packages.toml BEFORE
 // checking (so the checker won't skip it), CheckPackage(force=true) to populate
 // pending with the upstream version, then Apply (honouring --compile / --clean).
-func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, githubToken string, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
+func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
 	output.Info.Printf("Reviving %s...\n", pkg)
 
 	category, pkgName, ok := splitPackage(pkg)
@@ -1221,7 +1222,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	// It shares the applier's pending list so the entry CheckPackage writes is
 	// visible to Apply below (same in-memory map, same process).
 	checker, err := autoupdate.NewChecker(overlayPath,
-		append(reviveCheckerOptions(ctx, configDir, cacheTTL, httpTimeout, llmCfg, githubToken), autoupdate.WithPendingList(pending))...)
+		append(reviveCheckerOptions(ctx, configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
 	}

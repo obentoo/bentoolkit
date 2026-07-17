@@ -17,7 +17,7 @@ import (
 func withFakeGentoo(t *testing.T, fake provider.Provider) {
 	t.Helper()
 	orig := resolveGentooProviderFn
-	resolveGentooProviderFn = func(*config.Config, string) (provider.Provider, error) { return fake, nil }
+	resolveGentooProviderFn = func(*config.Config) (provider.Provider, error) { return fake, nil }
 	t.Cleanup(func() { resolveGentooProviderFn = orig })
 }
 
@@ -54,7 +54,7 @@ func TestRunRevive_SkipPath(t *testing.T) {
 
 	code := withExitIntercept(func() {
 		runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
-			&config.Config{}, config.LLMConfig{}, "")
+			&config.Config{}, config.LLMConfig{})
 	})
 	if code != -1 {
 		t.Fatalf("runRevive exit code = %d, want no exit (skip path)", code)
@@ -88,7 +88,7 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 
 	code := withExitIntercept(func() {
 		runReviveList(context.Background(), overlay, configDir, 0,
-			&config.Config{}, config.LLMConfig{}, "")
+			&config.Config{}, config.LLMConfig{})
 	})
 	if code != -1 {
 		t.Fatalf("runReviveList exit code = %d, want no exit", code)
@@ -124,7 +124,7 @@ func TestRunCheck_Revivable(t *testing.T) {
 
 	code := withExitIntercept(func() {
 		runCheck(context.Background(), overlay, configDir, nil, 0,
-			&config.Config{}, config.LLMConfig{}, "")
+			&config.Config{}, config.LLMConfig{})
 	})
 	if code != 0 {
 		t.Fatalf("runCheck --revivable exit code = %d, want 0 (no active packages, report is read-only)", code)

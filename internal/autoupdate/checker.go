@@ -190,10 +190,6 @@ type Checker struct {
 	llmProviderConfigured bool
 	// httpClient handles HTTP requests with retry logic
 	httpClient *RetryableHTTPClient
-	// githubToken authenticates api.github.com requests, raising the rate limit
-	// from 60 to 5000 req/h. Set via WithGitHubToken; when empty, NewChecker
-	// falls back to the GITHUB_TOKEN/GH_TOKEN environment variables.
-	githubToken string
 	// configDir is the directory for storing cache and pending files
 	configDir string
 	// ctx is the parent context for all outbound HTTP/LLM calls. It is set via
@@ -316,16 +312,6 @@ func WithRateLimiter(limiter httpRateLimiter) CheckerOption {
 func WithConfigDir(dir string) CheckerOption {
 	return func(c *Checker) error {
 		c.configDir = dir
-		return nil
-	}
-}
-
-// WithGitHubToken sets the token used to authenticate api.github.com requests,
-// raising the rate limit from 60 to 5000 req/h. An empty token is ignored, so
-// NewChecker still falls back to the GITHUB_TOKEN/GH_TOKEN environment.
-func WithGitHubToken(token string) CheckerOption {
-	return func(c *Checker) error {
-		c.githubToken = token
 		return nil
 	}
 }
@@ -511,14 +497,14 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Authenticate api.github.com requests. Anonymous GitHub API access is capped
 	// at 60 req/h per IP, which the batch checker exhausts quickly; the server
-	// then answers HTTP 403. Token precedence mirrors `overlay compare`:
-	// GITHUB_TOKEN/GH_TOKEN env > WithGitHubToken (wired by the command from
-	// ~/.config/bentoo/config.yaml's github.token). An injected client that
-	// already carries a token is left untouched.
+	// then answers HTTP 403. The token is resolved from GITHUB_TOKEN/GH_TOKEN via
+	// the secrets chain (github.ResolveToken, the single source of truth); a
+	// resolution error warns and continues with unauthenticated access. An
+	// injected client that already carries a token is left untouched.
 	if checker.httpClient.GetGitHubToken() == "" {
-		token := githubTokenFromEnv()
-		if token == "" {
-			token = checker.githubToken
+		token, err := github.ResolveToken()
+		if err != nil {
+			warnLogf("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
 		}
 		if token != "" {
 			checker.httpClient.SetGitHubToken(token)
@@ -560,13 +546,6 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	}
 
 	return checker, nil
-}
-
-// githubTokenFromEnv returns a GitHub API token from the environment. It
-// delegates to github.TokenFromEnv (the shared GITHUB_TOKEN > GH_TOKEN
-// resolution) so the checker and the cmd-layer provider wiring stay consistent.
-func githubTokenFromEnv() string {
-	return github.TokenFromEnv()
 }
 
 // CheckPackage checks a single package for updates.

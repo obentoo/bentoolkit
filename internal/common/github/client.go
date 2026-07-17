@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 var (
@@ -311,16 +312,21 @@ func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err err
 	return result.Resources.Core.Remaining, resetTime, nil
 }
 
-// TokenFromEnv returns a GitHub API token from the environment, honouring
-// GITHUB_TOKEN first and falling back to GH_TOKEN (the gh CLI convention).
-// Surrounding whitespace is trimmed; an empty result means "no token". This is
-// the single source of truth for env-based token resolution shared by the
-// autoupdate checker and the overlay compare/revive provider wiring.
-func TokenFromEnv() string {
+// ResolveToken resolves a GitHub API token through the unified secrets chain,
+// honouring GITHUB_TOKEN first then GH_TOKEN (the gh CLI convention). It returns
+// ("", nil) when neither is set — anonymous access is allowed. A present-but-
+// unreadable secrets file returns a non-nil error wrapping secrets.ErrUnreadable
+// so a caller can warn rather than silently degrade to anonymous requests. This
+// is the single source of truth for GitHub-token resolution.
+func ResolveToken() (string, error) {
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
-		if tok := strings.TrimSpace(os.Getenv(name)); tok != "" {
-			return tok
+		v, found, err := secrets.Lookup(name)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return v, nil
 		}
 	}
-	return ""
+	return "", nil
 }

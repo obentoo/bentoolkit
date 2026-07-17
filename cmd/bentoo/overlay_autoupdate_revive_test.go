@@ -116,14 +116,14 @@ func TestHighestVersion(t *testing.T) {
 func TestReviveCheckerOptions(t *testing.T) {
 	pinReviveConcurrency(t)
 
-	opts := reviveCheckerOptions(context.Background(), t.TempDir(), 0, 0, config.LLMConfig{}, "")
+	opts := reviveCheckerOptions(context.Background(), t.TempDir(), 0, 0, config.LLMConfig{})
 	if len(opts) == 0 {
 		t.Fatal("reviveCheckerOptions returned an empty option set")
 	}
 
 	// A positive cacheTTL appends WithCacheTTL, so the set must be at least as
 	// large as the TTL-less one.
-	withTTL := reviveCheckerOptions(context.Background(), t.TempDir(), 1, 0, config.LLMConfig{}, "")
+	withTTL := reviveCheckerOptions(context.Background(), t.TempDir(), 1, 0, config.LLMConfig{})
 	if len(withTTL) < len(opts) {
 		t.Errorf("reviveCheckerOptions with cacheTTL produced fewer options (%d) than without (%d)",
 			len(withTTL), len(opts))
@@ -257,7 +257,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "skipped" {
 			t.Fatalf("reviveOne status = %q (detail: %s), want \"skipped\"", out.status, out.detail)
@@ -275,7 +275,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "noslash", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "failed" {
 			t.Errorf("reviveOne(%q) status = %q, want \"failed\"", "noslash", out.status)
@@ -293,7 +293,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "failed" {
 			t.Errorf("reviveOne with LocalPackagePath error status = %q, want \"failed\"", out.status)
@@ -313,7 +313,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "failed" {
 			t.Errorf("reviveOne with no gentoo versions status = %q, want \"failed\"", out.status)
@@ -340,7 +340,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "failed" {
 			t.Errorf("reviveOne with missing base ebuild status = %q, want \"failed\"", out.status)
@@ -380,7 +380,7 @@ func TestReviveOne(t *testing.T) {
 		applier := newReviveApplier(t, overlay, configDir, pending)
 
 		out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-			config.LLMConfig{}, "", fake, fake, applier, pending)
+			config.LLMConfig{}, fake, fake, applier, pending)
 
 		if out.status != "failed" {
 			t.Fatalf("reviveOne status = %q (detail: %s), want \"failed\"", out.status, out.detail)
@@ -414,7 +414,7 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 
 	cfg := configWithGentooGitHub()
 
-	prov, err := resolveGentooProvider(cfg, "")
+	prov, err := resolveGentooProvider(cfg)
 	if err != nil {
 		t.Fatalf("resolveGentooProvider: unexpected error: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 	cfg := configWithGentooGitHub()
 
 	code := withExitIntercept(func() {
-		runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{}, "")
+		runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{})
 	})
 	if code != 1 {
 		t.Fatalf("runRevive exit code = %d, want 1 (no PackageDirProvider guard)", code)
@@ -473,7 +473,7 @@ func TestRunReviveList_NoCandidates(t *testing.T) {
 	cfg := configWithGentooGitHub()
 
 	code := withExitIntercept(func() {
-		runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}, "")
+		runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{})
 	})
 	if code != -1 {
 		t.Fatalf("runReviveList exited with code %d, want no exit", code)

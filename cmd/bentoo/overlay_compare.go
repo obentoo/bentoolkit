@@ -134,13 +134,16 @@ func runCompare(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
-	// Apply token (priority: flag > env (GITHUB_TOKEN > GH_TOKEN) > config > repo-specific)
+	// Apply token (priority: flag > resolved GitHub token (GITHUB_TOKEN/GH_TOKEN
+	// via env or the secrets file) > repo-specific). config.yaml is no longer a
+	// token source.
 	token := compareToken
 	if token == "" {
-		token = github.TokenFromEnv()
-	}
-	if token == "" {
-		token = cfg.GitHub.Token
+		resolved, err := github.ResolveToken()
+		if err != nil {
+			logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
+		}
+		token = resolved
 	}
 	if token != "" && repoInfo.Token == "" {
 		repoInfo.Token = token
