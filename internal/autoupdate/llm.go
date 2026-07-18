@@ -199,7 +199,8 @@ func NewLLMProvider(cfg LLMConfig) (LLMProvider, error) {
 }
 
 // NewClaudeClient creates a new Claude client from configuration.
-// It validates the configuration and retrieves the API key from the environment.
+// It validates the configuration and resolves the API key via the unified
+// secrets chain (env → user file → system file).
 // The API endpoint can be overridden via the CLAUDE_API_ENDPOINT environment variable.
 func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 	// Check API key environment variable name
@@ -654,7 +655,8 @@ type LLMClient struct {
 }
 
 // NewLLMClient creates a new LLM client from configuration.
-// It validates the configuration and retrieves the API key from the environment.
+// It validates the configuration and resolves the API key via the unified
+// secrets chain (env → user file → system file).
 // Returns an error if the provider is not configured or the API key is missing.
 func NewLLMClient(cfg LLMConfig) (*LLMClient, error) {
 	// Check if provider is configured

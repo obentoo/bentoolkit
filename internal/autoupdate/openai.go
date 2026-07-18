@@ -79,7 +79,8 @@ type openAIErrorResponse struct {
 }
 
 // NewOpenAIClient creates a new OpenAI client from configuration.
-// It validates the configuration and retrieves the API key from the environment.
+// It validates the configuration and resolves the API key via the unified
+// secrets chain (env → user file → system file).
 func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 	// Check API key environment variable name
 	if cfg.APIKeyEnv == "" {

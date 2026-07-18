@@ -96,5 +96,6 @@ autoupdate:
 #   meu-fork:
 #     provider: github
 #     url: usuario/repo         # "org/repo" ou URL completa
-#     token: ""                 # opcional
 #     branch: main              # default: master/main
+#   # Token do repositório: NÃO vai aqui. Defina BENTOO_REPO_MEU_FORK_TOKEN no
+#   # arquivo ~/.config/bentoo/secrets (chmod 600) ou como variável de ambiente.

@@ -80,8 +80,8 @@ git:
   user: your_username
   email: your_email@example.com
 
-github:
-  token: ghp_xxxxxxxxxxxx  # Optional: for higher API rate limits
+# A GitHub token (optional — it raises the API rate limits) is NOT stored here.
+# Export GITHUB_TOKEN or add it to the secrets file; see "Secrets" below.
 
 # Optional: custom repositories for compare command
 repositories:
@@ -108,15 +108,52 @@ autoupdate:
 | `overlay.path` | Path to your local Bentoo overlay repository | Yes |
 | `git.user` | Git username for commits (fallback if not in ~/.gitconfig) | No |
 | `git.email` | Git email for commits (fallback if not in ~/.gitconfig) | No |
-| `github.token` | GitHub personal access token for higher API rate limits | No |
 | `repositories.<name>` | Custom repository definitions for the compare command | No |
 | `llm.provider` | LLM provider for autoupdate: `claude`, `claude-code`, `openai`, or `ollama` | No |
-| `llm.api_key_env` | Environment variable name containing the API key | No |
+| `llm.api_key_env` | Name of the variable holding the LLM API key, resolved via env or the secrets file | No |
 | `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
-| `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when the key env is set, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
+| `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when `api_key_env` resolves to a non-empty key via env or the secrets file, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
 | `llm.max_budget_usd` | `claude-code` only: optional per-call spend cap passed to `claude --max-budget-usd` (unset = no cap) | No |
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
+
+### Secrets
+
+bentoo never stores secrets in `config.yaml` or `snapshot.toml`. Every secret it
+consumes is resolved at runtime through a single chain:
+
+1. an **environment variable**, then
+2. the **user secrets file** `$XDG_CONFIG_HOME/bentoo/secrets` (else
+   `~/.config/bentoo/secrets`), then
+3. the **system secrets file** `/etc/bentoo/secrets`.
+
+The secrets file is `.env` style — `NAME=value`, `#` comments, an optional
+`export ` prefix — one entry per line. Keep it private with
+`chmod 600 ~/.config/bentoo/secrets` (bentoo warns once if the file is group- or
+world-readable).
+
+```bash
+# ~/.config/bentoo/secrets
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+BENTOO_REPO_MY_OVERLAY_TOKEN=ghp_xxxxxxxxxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
+BENTOO_NTFY_TOKEN=tk_xxxxxxxxxxxx
+```
+
+| Secret | Name(s) looked up |
+|--------|-------------------|
+| GitHub API token | `GITHUB_TOKEN`, then `GH_TOKEN` |
+| Per-repository token | `BENTOO_REPO_<NAME>_TOKEN` — `<NAME>` is the repository's config key uppercased, every character outside `[A-Z0-9]` replaced by `_` (e.g. `my-overlay` → `BENTOO_REPO_MY_OVERLAY_TOKEN`) |
+| LLM API key | the value of `llm.api_key_env` (e.g. `ANTHROPIC_API_KEY`), itself resolved through this chain |
+| Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `FILEZILLA_PRO_KEY`) |
+| ntfy auth token | `BENTOO_NTFY_TOKEN` |
+
+For `overlay compare` the GitHub token precedence is **`--token` flag >
+per-repo `BENTOO_REPO_<NAME>_TOKEN` > global `GITHUB_TOKEN`/`GH_TOKEN`**.
+
+> **One deliberate exception:** `${VAR}` expansion in `packages.toml` request
+> `headers` reads the **process environment only** (never the secrets file) —
+> see [Headers and environment variables](#headers-and-environment-variables).
 
 ## Usage
 
@@ -350,24 +387,27 @@ Total: 2 outdated packages
 
 **Using a GitHub Token:**
 
-You can provide a token in three ways (priority order):
+You can provide a token three ways, in **priority order** (`--token` >
+per-repo > global):
 
-1. **Command line flag:**
+1. **Command line flag** (highest priority):
    ```bash
    bentoo overlay compare --token ghp_xxxxxxxxxxxx
    ```
 
-2. **Environment variable:**
+2. **Per-repository secret** — `BENTOO_REPO_<NAME>_TOKEN` for a custom
+   repository (`<NAME>` = the repo's config key uppercased, every character
+   outside `[A-Z0-9]` replaced by `_`). See [Secrets](#secrets).
+
+3. **Global token** — the `GITHUB_TOKEN` (or `GH_TOKEN`) environment variable,
+   or a matching line in the secrets file:
    ```bash
    export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
    bentoo overlay compare
    ```
 
-3. **Configuration file** (`~/.config/bentoo/config.yaml`):
-   ```yaml
-   github:
-     token: ghp_xxxxxxxxxxxx
-   ```
+`config.yaml` no longer holds a token — the value is resolved once through the
+secrets chain (see [Secrets](#secrets)).
 
 To create a token: Go to GitHub Settings → Developer settings → Personal access tokens and generate a new token. No scopes are required (public repository access only).
 
@@ -384,11 +424,11 @@ repositories:
     url: https://gitlab.gentoo.org/repo/gentoo
     branch: master
 
-  # Custom GitHub overlay
+  # Custom GitHub overlay. For a private repo, put the token in the secrets
+  # file as BENTOO_REPO_MY_OVERLAY_TOKEN — it is never stored in config.
   my-overlay:
     provider: github
     url: myuser/my-overlay
-    token: ghp_xxxxxxxxxxxx
 
   # Generic git repository
   local-mirror:
@@ -540,7 +580,7 @@ llm:
 
 Authentication is hybrid, selected by `llm.bare`:
 
-- `auto` (default): use `claude --bare` with `ANTHROPIC_API_KEY` when `api_key_env` is set and that variable is non-empty; otherwise use the CLI's logged-in session (subscription).
+- `auto` (default): resolve `api_key_env` **once** through the secrets chain (env → user file → system file); if that yields a non-empty key, run `claude --bare` with it, otherwise use the CLI's logged-in session (subscription). The single resolved value drives both the bare-mode choice and the credential handed to the child `claude`.
 - `true` / `false`: force bare (`--bare` + key) or login/subscription mode respectively, regardless of key presence.
 
 > **Cost note.** `sonnet` in login/subscription mode is billed per call (a large page context of ~74k tokens is roughly $0.09+/call). The cheap path is `--bare` + an API key. Set a conservative `max_budget_usd` when running `--check` across many packages. If the `claude` CLI is missing or not authenticated, both `analyze` and `--check` log a Warn and fall back (heuristic schema / skip extraction) — they never fail because of the LLM.
@@ -675,6 +715,11 @@ arbitrary process secrets (e.g. a cloud credential) through a non-auth header
 or an arbitrary variable name. A `${VAR}` that does not satisfy both rules is
 **passed through literally** (the header value keeps the raw `${VAR}` text) and
 a `Warn` is logged.
+
+> **Env-only by design.** This `${VAR}` expansion reads the **process
+> environment only** (`os.Getenv`); it deliberately does **not** consult the
+> bentoo secrets file. It is the single intentional exception to the unified
+> secrets chain — export the variable in the environment to use it here.
 
 ```toml
 [app-misc/hello]

@@ -987,8 +987,8 @@ func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 
 	// Resolve the GitHub token from GITHUB_TOKEN/GH_TOKEN via the secrets chain
 	// (github.ResolveToken); a resolution error warns and continues with
-	// unauthenticated access. Only fill an empty repo token so a config-specific
-	// one still wins.
+	// unauthenticated access. Only fill an empty repo token so a per-repo one
+	// (BENTOO_REPO_<NAME>_TOKEN, resolved by convertConfigRepos) still wins.
 	token, err := github.ResolveToken()
 	if err != nil {
 		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
