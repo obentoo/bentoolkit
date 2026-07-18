@@ -42,11 +42,11 @@ var (
 // package without it is fetched the normal way (pkgdev from SRC_URI).
 const (
 	metaFetchMethod      = "fetch_method"       // "post" (default) or "get"
-	metaFetchURL         = "fetch_url"           // form action / endpoint
-	metaFetchSerialEnv   = "fetch_serial_env"    // env var holding the serial
-	metaFetchSerialField = "fetch_serial_field"  // form field name for the serial
-	metaFetchForm        = "fetch_form"          // other form fields, urlencoded
-	metaFetchFilename    = "fetch_filename"      // dest name; {version} is substituted
+	metaFetchURL         = "fetch_url"          // form action / endpoint
+	metaFetchSerialEnv   = "fetch_serial_env"   // env var holding the serial
+	metaFetchSerialField = "fetch_serial_field" // form field name for the serial
+	metaFetchForm        = "fetch_form"         // other form fields, urlencoded
+	metaFetchFilename    = "fetch_filename"     // dest name; {version} is substituted
 )
 
 // authFetchTimeout bounds the authenticated download. The payload is a full

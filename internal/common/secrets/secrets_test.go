@@ -458,3 +458,36 @@ func TestScrub(t *testing.T) {
 		t.Fatalf("Scrub left the secret in %q", got)
 	}
 }
+
+// TestPathsFn_HomeUnresolvable_YieldsSystemScopeOnly drives the REAL pathsFn
+// down its drop-the-user-entry branch, rather than the hand-assembled shape
+// withSystemOnlyPath builds.
+//
+// This is the branch F-1 lived in. The scope tag exists so that dropping the
+// user-scope entry cannot promote /etc/bentoo/secrets to user scope, which
+// would turn its by-design EACCES into a hard ErrUnreadable (D2) for exactly
+// the population that depends on it: the snapshot systemd timer, running as
+// root with no $HOME (D4). The error-mapping test covers the consequence, but
+// only against a seam override — so a refactor writing `user: true` here would
+// keep every other test green while silently reinstating F-1.
+func TestPathsFn_HomeUnresolvable_YieldsSystemScopeOnly(t *testing.T) {
+	// An empty HOME makes os.UserHomeDir() fail on unix. XDG_CONFIG_HOME is
+	// blanked too so the assertion reflects the design's stated scenario
+	// ("$HOME unresolvable → user-scope path skipped"); pathsFn returns before
+	// consulting XDG, so this only removes ambient noise.
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	got := pathsFn()
+
+	if len(got) != 1 {
+		t.Fatalf("pathsFn() returned %d entries, want exactly 1 (system scope): %+v", len(got), got)
+	}
+	if got[0].name != "/etc/bentoo/secrets" {
+		t.Errorf("pathsFn()[0].name = %q, want /etc/bentoo/secrets", got[0].name)
+	}
+	if got[0].user {
+		t.Error("pathsFn() tagged the system-scope file as user scope; " +
+			"its by-design EACCES will surface as ErrUnreadable instead of a silent miss (F-1, D2)")
+	}
+}

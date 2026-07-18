@@ -197,9 +197,18 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 	// without a credential. A present-but-unreadable secrets file surfaces as
 	// secrets.ErrUnreadable rather than silently degrading to an unauthenticated
 	// run.
-	key, _, err := secrets.Lookup(cfg.APIKeyEnv)
-	if err != nil {
-		return nil, err
+	//
+	// An EMPTY api_key_env means no credential was requested at all — the
+	// subscription shape. Skip the chain rather than resolving the empty name,
+	// which would consult the secrets file and turn an unreadable one into a
+	// spurious constructor failure (see NewClaudeCodeClient for the full note).
+	var key string
+	if cfg.APIKeyEnv != "" {
+		resolved, _, err := secrets.Lookup(cfg.APIKeyEnv)
+		if err != nil {
+			return nil, err
+		}
+		key = resolved
 	}
 
 	model := cfg.Model

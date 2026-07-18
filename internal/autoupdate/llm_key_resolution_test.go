@@ -14,6 +14,20 @@ import (
 // returns nothing; the caller has already set HOME via t.Setenv. Isolation is
 // mandatory: a test asserting a key is missing would otherwise read the
 // developer's real ~/.config/bentoo/secrets (D9, commit a77de4b).
+// isolateSecretsHome redirects the unified chain's user-scope slot at a fresh
+// tempdir and returns it. Both HOME and XDG_CONFIG_HOME must be set (D9):
+// secrets.pathsFn honors XDG_CONFIG_HOME BEFORE $HOME/.config, so redirecting
+// HOME alone lets the resolver walk past the tempdir into the developer's real
+// ~/.config/bentoo/secrets. Setting only HOME made these tests pass on a host
+// with XDG_CONFIG_HOME unset and fail wherever it is exported.
+func isolateSecretsHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	return home
+}
+
 func writeUserSecrets(t *testing.T, home, content string) {
 	t.Helper()
 	p := filepath.Join(home, ".config", "bentoo", "secrets")
@@ -39,7 +53,7 @@ func TestNewLLMClient_ResolvesViaChain(t *testing.T) {
 
 	for provider, construct := range constructors {
 		t.Run(provider+"/api_key_env unset is ErrLLMNotConfigured", func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			isolateSecretsHome(t)
 			err := construct(LLMConfig{Provider: provider, APIKeyEnv: ""})
 			if !errors.Is(err, ErrLLMNotConfigured) {
 				t.Fatalf("err = %v, want ErrLLMNotConfigured", err)
@@ -47,8 +61,7 @@ func TestNewLLMClient_ResolvesViaChain(t *testing.T) {
 		})
 
 		t.Run(provider+"/key in secrets file constructs client", func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
+			home := isolateSecretsHome(t)
 			t.Setenv("BENTOO_TEST_LLM_KEY", "") // env miss; only the file has it
 			writeUserSecrets(t, home, "BENTOO_TEST_LLM_KEY=file-key\n")
 
@@ -59,7 +72,7 @@ func TestNewLLMClient_ResolvesViaChain(t *testing.T) {
 		})
 
 		t.Run(provider+"/total miss names the secrets path", func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			isolateSecretsHome(t)
 			t.Setenv("BENTOO_TEST_LLM_KEY", "")
 
 			err := construct(LLMConfig{Provider: provider, APIKeyEnv: "BENTOO_TEST_LLM_KEY"})

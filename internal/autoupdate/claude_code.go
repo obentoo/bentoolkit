@@ -242,9 +242,21 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 	// os.Getenv injection spawned `claude` with no credential. A present-but-
 	// unreadable secrets file surfaces as secrets.ErrUnreadable rather than
 	// silently degrading to an unauthenticated run.
-	key, _, err := secrets.Lookup(cfg.APIKeyEnv)
-	if err != nil {
-		return nil, err
+	//
+	// An EMPTY api_key_env means no credential was requested at all — the
+	// subscription shape, where the agentic `claude` authenticates itself. Skip
+	// the chain entirely in that case: resolving the empty name would consult
+	// the secrets file and turn an unreadable one into a spurious constructor
+	// failure. NewClaudeClient/NewOpenAIClient guard the same way, except that
+	// for them an empty name is fatal (ErrLLMNotConfigured) while here it is a
+	// valid configuration.
+	var key string
+	if cfg.APIKeyEnv != "" {
+		resolved, _, err := secrets.Lookup(cfg.APIKeyEnv)
+		if err != nil {
+			return nil, err
+		}
+		key = resolved
 	}
 
 	model := cfg.Model
