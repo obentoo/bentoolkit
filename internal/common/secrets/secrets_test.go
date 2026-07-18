@@ -2,9 +2,11 @@ package secrets
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -17,7 +19,23 @@ func withPaths(t *testing.T, userPath, sysPath string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	orig := pathsFn
-	pathsFn = func() []string { return []string{userPath, sysPath} }
+	pathsFn = func() []scopedPath {
+		return []scopedPath{{name: userPath, user: true}, {name: sysPath, user: false}}
+	}
+	t.Cleanup(func() { pathsFn = orig })
+}
+
+// withSystemOnlyPath points the path seam at a SINGLE system-scope entry — the
+// exact shape pathsFn produces when os.UserHomeDir() fails and the user-scope
+// entry is dropped. HOME and XDG_CONFIG_HOME are still isolated so the chain can
+// never reach the developer's real files (D9).
+func withSystemOnlyPath(t *testing.T, sysPath string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	orig := pathsFn
+	pathsFn = func() []scopedPath { return []scopedPath{{name: sysPath, user: false}} }
 	t.Cleanup(func() { pathsFn = orig })
 }
 
@@ -134,6 +152,10 @@ func TestParse(t *testing.T) {
 		{"blank value is a miss", "TOK=\n", "TOK", "", false},
 		{"invalid line skipped, later key found", "noequalshere\nTOK=value\n", "TOK", "value", true},
 		{"absent key is a miss", "OTHER=x\n", "TOK", "", false},
+		// A file authored on Windows must resolve identically: the parser splits on
+		// "\n", so the trailing "\r" has to be trimmed off rather than becoming part
+		// of the value. Pins behavior that is already correct today (R1.2).
+		{"CRLF line endings leave no trailing carriage return", "TOK=value\r\n", "TOK", "value", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,6 +229,30 @@ func TestLookup_ErrorMapping(t *testing.T) {
 			t.Fatalf("Lookup = (%q, %v), want (\"\", false)", got, found)
 		}
 	})
+
+	// F-1: when os.UserHomeDir() fails, pathsFn drops the user-scope entry and the
+	// system file lands at index 0. Scope must be carried by the entry itself and
+	// never inferred from list position — otherwise the expected EACCES on a
+	// root-owned /etc/bentoo/secrets is reported as ErrUnreadable and every Lookup
+	// fails hard for a normal user whose HOME is unset.
+	t.Run("system scope stays system scope when it is the only path", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores permission bits; assertion is vacuous")
+		}
+		dir := t.TempDir()
+		sysPath := filepath.Join(dir, "sys")
+		writeFile(t, sysPath, "TOK=value\n", 0o000)
+		withSystemOnlyPath(t, sysPath)
+		t.Setenv("TOK", "")
+
+		got, found, err := Lookup("TOK")
+		if err != nil {
+			t.Fatalf("EACCES on the system-scope file must be a silent miss even when it is the only entry, got err = %v", err)
+		}
+		if found || got != "" {
+			t.Fatalf("Lookup = (%q, %v), want (\"\", false)", got, found)
+		}
+	})
 }
 
 // TestLookup_LooseModeStillReads pins D5's "warn, never block": a group/world-
@@ -230,18 +276,176 @@ func TestLookup_LooseModeStillReads(t *testing.T) {
 	}
 }
 
-// TestPaths asserts the searched locations are returned in order and both name
-// the secrets file.
-func TestPaths(t *testing.T) {
-	got := Paths()
-	if len(got) == 0 {
-		t.Fatal("Paths() returned no locations")
+// recordingLogger captures Warn calls so the loose-mode warning can be asserted
+// directly instead of by capturing os.Stderr.
+type recordingLogger struct{ lines []string }
+
+func (r *recordingLogger) Warn(format string, args ...interface{}) {
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+// withRecordingLogger swaps the package's default stderr logger for a recorder
+// and resets the once-guard, giving each test a fresh process-lifetime warning
+// budget. The reset is what makes the "at most once" assertion real rather than
+// vacuous: without it, a warning spent by an earlier test would make any later
+// count of zero-or-one pass regardless of the guard.
+func withRecordingLogger(t *testing.T) *recordingLogger {
+	t.Helper()
+	rec := &recordingLogger{}
+	origLogger, origOnce := warnLogger, looseWarnOnce
+	warnLogger = rec
+	looseWarnOnce = new(sync.Once)
+	t.Cleanup(func() {
+		warnLogger = origLogger
+		looseWarnOnce = origOnce
+	})
+	return rec
+}
+
+// TestLooseModeWarning pins R6.2: a group/world-accessible secrets file warns at
+// most ONCE per process, the warning identifies the offending file and its mode,
+// and it never echoes the secret it just read (R6.1).
+func TestLooseModeWarning(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permission bits; the loose-mode path is not exercised")
 	}
-	for _, p := range got {
-		if !strings.Contains(p, "secrets") {
-			t.Errorf("path %q does not name the secrets file", p)
+
+	t.Run("two reads of a loose file emit exactly one warning", func(t *testing.T) {
+		const secretValue = "s3cr3t-token-value"
+		dir := t.TempDir()
+		userPath := filepath.Join(dir, "user")
+		writeFile(t, userPath, "TOK="+secretValue+"\n", 0o644)
+		if err := os.Chmod(userPath, 0o644); err != nil { // defeat a restrictive umask
+			t.Fatalf("chmod: %v", err)
+		}
+		withPaths(t, userPath, filepath.Join(dir, "sys"))
+		t.Setenv("TOK", "")
+		rec := withRecordingLogger(t)
+
+		for i := 1; i <= 2; i++ {
+			if _, found, err := Lookup("TOK"); err != nil || !found {
+				t.Fatalf("read %d: Lookup = (found %v, err %v), want a hit", i, found, err)
+			}
+		}
+
+		if len(rec.lines) != 1 {
+			t.Fatalf("got %d warnings %q, want exactly 1 (R6.2: at most once per process)", len(rec.lines), rec.lines)
+		}
+		warning := rec.lines[0]
+		if !strings.Contains(warning, userPath) {
+			t.Errorf("warning %q does not name the offending file %q", warning, userPath)
+		}
+		if !strings.Contains(warning, "644") {
+			t.Errorf("warning %q does not report the file mode", warning)
+		}
+		if strings.Contains(warning, secretValue) {
+			t.Fatalf("warning leaked the secret value: %q", warning)
+		}
+	})
+
+	t.Run("an owner-only file emits no warning", func(t *testing.T) {
+		dir := t.TempDir()
+		userPath := filepath.Join(dir, "user")
+		writeFile(t, userPath, "TOK=value\n", 0o600)
+		withPaths(t, userPath, filepath.Join(dir, "sys"))
+		t.Setenv("TOK", "")
+		rec := withRecordingLogger(t)
+
+		if _, found, err := Lookup("TOK"); err != nil || !found {
+			t.Fatalf("Lookup = (found %v, err %v), want a hit", found, err)
+		}
+		if len(rec.lines) != 0 {
+			t.Fatalf("got %d warnings %q, want none for a 0600 file", len(rec.lines), rec.lines)
+		}
+	})
+}
+
+// TestPaths pins the EXACT chain Lookup searches and its order: the user-scope
+// file under $XDG_CONFIG_HOME/bentoo/secrets first, then the fixed
+// /etc/bentoo/secrets literal. It drives the REAL pathsFn — deliberately not the
+// withPaths override — because the layout itself is what is under test, and it
+// isolates BOTH HOME and XDG_CONFIG_HOME so it can never read the developer's
+// real files (D9, precedent commit a77de4b).
+func TestPaths(t *testing.T) {
+	home := t.TempDir()
+	xdg := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	got := Paths()
+	want := []string{
+		filepath.Join(xdg, "bentoo", "secrets"),
+		"/etc/bentoo/secrets",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Paths() = %q (%d entries), want %q (%d entries)", got, len(got), want, len(want))
+	}
+	if got[0] != want[0] {
+		t.Errorf("Paths()[0] = %q, want the user-scope file %q first", got[0], want[0])
+	}
+	if got[1] != want[1] {
+		t.Errorf("Paths()[1] = %q, want the system-scope literal %q second", got[1], want[1])
+	}
+}
+
+// userScopePath returns the location of the single user-scope entry the REAL
+// pathsFn produces under the ambient HOME/XDG_CONFIG_HOME. It selects by the
+// entry's scope tag rather than by list position, so it keeps asserting the right
+// entry if the chain ever grows, and it fails loudly if the user-scope entry is
+// missing or duplicated. It sets no environment variable of its own: each caller
+// establishes its own HOME + XDG_CONFIG_HOME isolation so that isolation stays
+// visible (and auditable) at the call site.
+func userScopePath(t *testing.T) string {
+	t.Helper()
+	var found []string
+	for _, e := range pathsFn() {
+		if e.user {
+			found = append(found, e.name)
 		}
 	}
+	if len(found) != 1 {
+		t.Fatalf("pathsFn() yielded %d user-scope entries %q, want exactly 1", len(found), found)
+	}
+	return found[0]
+}
+
+// TestPaths_XDGUserScope pins R1.5: the user-scope file lives under
+// $XDG_CONFIG_HOME when that variable is set, and under $HOME/.config when it is
+// not — the same rule config.ConfigPaths follows. Both cases exercise the REAL
+// pathsFn rather than the withPaths seam, since the path construction is exactly
+// what is being verified, and both isolate HOME as well as XDG_CONFIG_HOME (D9).
+func TestPaths_XDGUserScope(t *testing.T) {
+	t.Run("XDG_CONFIG_HOME set locates the user file under it", func(t *testing.T) {
+		home := t.TempDir()
+		// A sibling of home, never below it: this path is reachable ONLY by
+		// honoring XDG_CONFIG_HOME, so a silent fallback to $HOME/.config cannot
+		// produce it by coincidence.
+		xdg := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+
+		want := filepath.Join(xdg, "bentoo", "secrets")
+		if got := userScopePath(t); got != want {
+			t.Fatalf("user-scope path = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("XDG_CONFIG_HOME unset falls back to $HOME/.config", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		// t.Setenv(k, "") SETS the variable to empty rather than unsetting it.
+		// That is deliberate and sufficient here, not a coverage gap: pathsFn reads
+		// the variable with os.Getenv and branches on `xdg == ""`, and os.Getenv
+		// cannot distinguish "set to empty" from "absent" — both yield "" and take
+		// the same fallback. An os.Unsetenv variant would re-run the identical
+		// branch while giving up t.Setenv's automatic restore.
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		want := filepath.Join(home, ".config", "bentoo", "secrets")
+		if got := userScopePath(t); got != want {
+			t.Fatalf("user-scope path = %q, want %q", got, want)
+		}
+	})
 }
 
 // TestScrub pins the regression contract: a secret value never survives in the

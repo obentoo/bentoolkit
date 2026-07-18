@@ -135,19 +135,13 @@ func runCompare(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
-	// Token precedence (D3): --token flag > per-repo (BENTOO_REPO_<NAME>_TOKEN,
-	// already resolved into repoInfo.Token by convertConfigRepos) > global
-	// (GITHUB_TOKEN/GH_TOKEN via env or the secrets file). config.yaml is no
-	// longer a token source.
-	if compareToken != "" {
-		repoInfo.Token = compareToken
-	} else if repoInfo.Token == "" {
-		resolved, err := github.ResolveToken()
-		if err != nil {
-			logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
-		}
-		repoInfo.Token = resolved
+	// Token precedence (D3) lives in resolveRepoToken. An unreadable secrets file
+	// warns and degrades to anonymous access rather than aborting the comparison.
+	resolvedToken, err := resolveRepoToken(compareToken, repoInfo.Token)
+	if err != nil {
+		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
 	}
+	repoInfo.Token = resolvedToken
 
 	// Create provider
 	prov, err := provider.NewProvider(repoInfo, compareClone)
@@ -305,6 +299,33 @@ func repoTokenName(name string) string {
 		}
 	}
 	return "BENTOO_REPO_" + b.String() + "_TOKEN"
+}
+
+// resolveRepoToken applies the D3 token precedence for a single repository:
+//
+//	--token flag (flagToken)
+//	  > per-repo token (repoToken, resolved from BENTOO_REPO_<NAME>_TOKEN into
+//	    RepositoryInfo.Token by convertConfigRepos)
+//	  > global token (GITHUB_TOKEN/GH_TOKEN via env or the secrets file).
+//
+// config.yaml is no longer a token source. Before D3 the per-repo token beat
+// everything, including an explicit --token: defensible while that token lived
+// in the config file the user was editing, indefensible once it lives in a
+// secrets file the flag cannot override.
+//
+// github.ResolveToken is consulted ONLY when both arguments are empty, so the
+// two short-circuit paths do no file I/O. An absent token everywhere yields
+// ("", nil) — anonymous access, not a failure. A present-but-unreadable secrets
+// file yields ("", err) so the caller can warn; this function never logs, which
+// keeps it pure with respect to its inputs and leaves the warning to the caller.
+func resolveRepoToken(flagToken, repoToken string) (string, error) {
+	if flagToken != "" {
+		return flagToken, nil
+	}
+	if repoToken != "" {
+		return repoToken, nil
+	}
+	return github.ResolveToken()
 }
 
 // convertConfigRepos converts a config.RepoConfig map to a
