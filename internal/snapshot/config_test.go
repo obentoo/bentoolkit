@@ -185,7 +185,6 @@ on = ["failure", "success"]
 
 [notify.ntfy]
 url = "https://ntfy.sh/my-topic"
-token = "tk_secret"
 
 [notify.healthchecks]
 ping_url = "https://hc-ping.com/uuid"
@@ -204,7 +203,7 @@ headers = { X-Custom = "v", Authorization = "Bearer z" }
 	if len(n.On) != 2 || n.On[0] != "failure" || n.On[1] != "success" {
 		t.Errorf("notify.on = %v, want [failure success]", n.On)
 	}
-	if n.Ntfy.URL != "https://ntfy.sh/my-topic" || n.Ntfy.Token != "tk_secret" {
+	if n.Ntfy.URL != "https://ntfy.sh/my-topic" {
 		t.Errorf("notify.ntfy = %+v", n.Ntfy)
 	}
 	if n.Healthchecks.PingURL != "https://hc-ping.com/uuid" || !n.Healthchecks.Start {

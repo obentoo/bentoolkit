@@ -40,12 +40,16 @@ type GitConfig struct {
 	Email string `yaml:"email"`
 }
 
-// RepoConfig holds configuration for a custom repository
+// RepoConfig holds configuration for a custom repository.
+//
+// A per-repository auth token is no longer a field here: it now resolves from
+// BENTOO_REPO_<NAME>_TOKEN via the secrets chain (see internal/common/secrets and
+// cmd/bentoo's repoTokenName). A legacy `token:` key left in config.yaml is
+// surfaced by the migration diagnostic in LoadFrom and otherwise ignored.
 type RepoConfig struct {
 	Provider string `yaml:"provider"` // "github", "gitlab", "git", or "local"
 	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab/git (remote)
 	Path     string `yaml:"path"`     // On-disk tree for provider "local" (read in place, no clone)
-	Token    string `yaml:"token"`    // Optional auth token
 	Branch   string `yaml:"branch"`   // Branch to use (default: master/main)
 }
 
@@ -131,13 +135,34 @@ func Load() (*Config, error) {
 	return LoadFrom(configPath)
 }
 
-// probeConfig mirrors Config but retains the removed legacy github.token key,
-// so the strict decode does not report it as unknown; the migration diagnostic
-// reports it with an actionable message instead. repositories.*.token is still
-// a live RepoConfig field in this release, so it is read from cfg directly.
+// legacyRepo mirrors a repositories.* entry for the STRICT probe only. It
+// retains the removed `token` key so the strict decode does not flag it as
+// unknown; the migration diagnostic reports it with an actionable message
+// instead. The other fields mirror RepoConfig so a real entry decodes cleanly.
+type legacyRepo struct {
+	Provider string `yaml:"provider"`
+	URL      string `yaml:"url"`
+	Path     string `yaml:"path"`
+	Token    string `yaml:"token"`
+	Branch   string `yaml:"branch"`
+}
+
+// probeConfig is the STRICT re-decode target. It deliberately does NOT inline
+// Config: Config already carries a `repositories` field, and inlining it beside
+// probeConfig's own legacyRepo `repositories` map makes go-yaml panic with
+// "duplicated key 'repositories' in struct" (yaml.v3 re-panics that error out of
+// Decode, which would crash LoadFrom). So Config's top-level keys are listed
+// explicitly here, reusing Config's own sub-types so the strict decode stays
+// exactly as strict as a Config decode. Two removed-but-retained keys —
+// github.token and repositories.*.token — are kept so the strict decode does not
+// report them as unknown; the migration diagnostic reports each with an
+// actionable message instead.
 type probeConfig struct {
-	Config `yaml:",inline"`
-	GitHub struct {
+	Overlay      OverlayConfig         `yaml:"overlay"`
+	Git          GitConfig             `yaml:"git"`
+	Autoupdate   AutoupdateConfig      `yaml:"autoupdate,omitempty"`
+	Repositories map[string]legacyRepo `yaml:"repositories,omitempty"`
+	GitHub       struct {
 		Token string `yaml:"token"`
 	} `yaml:"github"`
 }
@@ -209,12 +234,11 @@ func LoadFrom(path string) (*Config, error) {
 			"warning: %s: `github.token` is no longer read. Move it to %s as `GITHUB_TOKEN=<value>` (chmod 600), then delete the key. Until then, GitHub requests are unauthenticated.\n",
 			path, secretsPath)
 	}
-	// NOTE: repositories.*.token is still a live RepoConfig field this release,
-	// so it is read from cfg directly. When Task 6.1 deletes RepoConfig.Token,
-	// this detection must move to a retained field on probeConfig (mirroring
-	// probeConfig.GitHub) or it will stop compiling.
-	for name, repo := range cfg.Repositories {
-		if repo != nil && repo.Token != "" {
+	// repositories.*.token is detected on the strict probe (probe.Repositories,
+	// whose legacyRepo retains the removed `token` key) rather than on cfg, which
+	// no longer carries a per-repo token field.
+	for name, repo := range probe.Repositories {
+		if repo.Token != "" {
 			fmt.Fprintf(os.Stderr,
 				"warning: %s: `repositories.%s.token` is no longer read. Move it to %s as `%s=<value>` (chmod 600), then delete the key.\n",
 				path, name, secretsPath, repoTokenEnvName(name))

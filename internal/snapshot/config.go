@@ -95,11 +95,12 @@ type NotifyConfig struct {
 	Email        EmailConfig        `toml:"email,omitempty"`
 }
 
-// NtfyConfig configures the ntfy driver (R1). URL is the topic URL; Token, when set,
-// is sent via the Authorization header and is never logged (R1.3).
+// NtfyConfig configures the ntfy driver (R1). URL is the topic URL. The auth token
+// is not a config field: it resolves from BENTOO_NTFY_TOKEN via the secrets chain
+// (env → user file → system file) and, when set, is sent via the Authorization
+// header and is never logged (R1.3).
 type NtfyConfig struct {
-	URL   string `toml:"url,omitempty"`
-	Token string `toml:"token,omitempty"`
+	URL string `toml:"url,omitempty"`
 }
 
 // HealthchecksConfig configures the healthchecks.io driver (R2). PingURL is the base

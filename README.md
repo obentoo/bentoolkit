@@ -910,7 +910,7 @@ on = ["failure"]                 # outcomes that notify: "failure" and/or "succe
 
 [notify.ntfy]
 url = "https://ntfy.sh/my-topic" # ntfy topic URL (POST the run summary)
-token = "tk_..."                 # optional; sent as a Bearer token, never logged
+# auth token (optional): set BENTOO_NTFY_TOKEN in the env or the bentoo secrets file
 
 [notify.healthchecks]
 ping_url = "https://hc-ping.com/<uuid>"   # base ping on success, /fail on failure
@@ -983,8 +983,9 @@ scheduled backup surfaces failures without scraping logs. Four backends fan out
 from one config — configure any subset:
 
 - **ntfy** (`[notify.ntfy]`) — POSTs a run summary to a topic URL. Failures use an
-  elevated priority and an alert tag; successes use normal priority. An optional
-  `token` is sent as a Bearer header.
+  elevated priority and an alert tag; successes use normal priority. An optional auth
+  token, resolved from `BENTOO_NTFY_TOKEN` via the secrets chain, is sent as a Bearer
+  header.
 - **healthchecks.io** (`[notify.healthchecks]`) — pings the base `ping_url` on
   success and `ping_url/fail` on failure (a dead-man's switch). With `start = true`
   it also pings `ping_url/start` before the run so the dashboard can time it.
