@@ -84,8 +84,13 @@ func TestLoadFrom_MigrationDiagnostic_GitHubToken(t *testing.T) {
 	// Assert the EXACT user-scope path, not a bare "secrets" substring: the
 	// warning's whole job is to tell the user where to put the value, and a
 	// substring check passed under any layout — including one pointing at a
-	// path the user does not own.
-	if want := secrets.Paths()[0]; !strings.Contains(out, want) {
+	// path the user does not own. Resolved via UserPath rather than Paths()[0]
+	// for the reason in F-H: index 0 is the user file only while one exists.
+	want, ok := secrets.UserPath()
+	if !ok {
+		t.Fatal("secrets.UserPath() reports no user-scope path with HOME set to a tempdir")
+	}
+	if !strings.Contains(out, want) {
 		t.Errorf("warning does not name the target secrets path %q:\n%s", want, out)
 	}
 	if strings.Contains(out, "legacy-secret") {

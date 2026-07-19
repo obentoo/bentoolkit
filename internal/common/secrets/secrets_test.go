@@ -448,6 +448,64 @@ func TestPaths_XDGUserScope(t *testing.T) {
 	})
 }
 
+// TestUserPath pins F-H: UserPath reports the user-scope file when the chain has
+// one, and reports absence rather than silently substituting a different scope
+// when it does not.
+//
+// The second case is the whole point. Callers use this to tell a user where to
+// put a secret, and the obvious spelling — Paths()[0] — is correct ONLY while a
+// user-scope entry exists. With $HOME unresolvable that entry is dropped and
+// index 0 slides to the root-owned /etc/bentoo/secrets, so the advice becomes
+// "write your secret into a 0600 file you cannot open". Paths() is never empty,
+// so nothing fails loudly; the caller just prints a plausible, unusable path.
+// Both cases drive the REAL pathsFn, since the scope selection is what is under
+// test, and both isolate HOME and XDG_CONFIG_HOME (D9).
+func TestUserPath(t *testing.T) {
+	t.Run("returns the user-scope file when the chain has one", func(t *testing.T) {
+		home := t.TempDir()
+		// A sibling of home, never below it: reachable only by honoring
+		// XDG_CONFIG_HOME, so a fallback to $HOME/.config cannot produce it by
+		// coincidence.
+		xdg := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+
+		got, ok := UserPath()
+		if !ok {
+			t.Fatal("UserPath() reported no user-scope path with HOME and XDG_CONFIG_HOME set")
+		}
+		if want := filepath.Join(xdg, "bentoo", "secrets"); got != want {
+			t.Errorf("UserPath() = %q, want %q", got, want)
+		}
+		// It must name the entry Lookup actually consults, not an independently
+		// re-derived path that could drift from the chain.
+		if want := userScopePath(t); got != want {
+			t.Errorf("UserPath() = %q, want the chain's own user-scope entry %q", got, want)
+		}
+	})
+
+	t.Run("reports absence when $HOME is unresolvable", func(t *testing.T) {
+		// An empty HOME makes os.UserHomeDir() fail on unix — the state of the
+		// snapshot systemd timer running as root, which is exactly where a caller
+		// indexing Paths()[0] would hand out /etc/bentoo/secrets.
+		t.Setenv("HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+
+		got, ok := UserPath()
+		if ok {
+			t.Fatalf("UserPath() = (%q, true), want no user-scope path when $HOME is unresolvable", got)
+		}
+		if got != "" {
+			t.Errorf("UserPath() = %q with ok=false, want the empty string", got)
+		}
+		// The failure mode being guarded against, stated positively: the system
+		// file is what Paths()[0] would have offered here.
+		if p := Paths(); len(p) > 0 && p[0] != "/etc/bentoo/secrets" {
+			t.Errorf("Paths()[0] = %q, want /etc/bentoo/secrets (the premise of this case)", p[0])
+		}
+	})
+}
+
 // TestScrub pins the regression contract: a secret value never survives in the
 // scrubbed output, so it cannot reach a log line or an error string.
 func TestScrub(t *testing.T) {

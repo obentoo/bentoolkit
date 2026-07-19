@@ -464,6 +464,13 @@ func TestEmailNotifier_SendmailReceivesSummary(t *testing.T) {
 }
 
 func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
+	// The password is no longer a config field (017 R2.1), so it must reach the
+	// notifier through the secrets chain. The chain is pinned to a per-test tempdir
+	// and driven from its env leg, so this never depends on — nor is satisfied
+	// by — the developer's real ~/.config/bentoo/secrets (015 D9).
+	isolateSecrets(t)
+	t.Setenv("BENTOO_SMTP_PASSWORD", "p")
+
 	var gotAddr, gotFrom string
 	var gotTo []string
 	var gotMsg []byte
@@ -475,12 +482,18 @@ func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
 		return nil
 	}
 
-	n := emailNotifier{
-		cfg: EmailConfig{
+	// Built through newNotifier because that is where the password is resolved;
+	// on=success lets the successful run below past the composite outcome filter.
+	n, err := newNotifier(NotifyConfig{
+		On: []string{"success"},
+		Email: EmailConfig{
 			To:   []string{"ops@example.com"},
 			From: "bentoo@example.com",
-			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 587, User: "u", Password: "p"},
+			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 587, User: "u"},
 		},
+	})
+	if err != nil {
+		t.Fatalf("newNotifier: %v", err)
 	}
 	if err := n.Notify(context.Background(), okRun()); err != nil {
 		t.Fatalf("Notify: %v", err)
@@ -490,7 +503,7 @@ func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
 		t.Errorf("SMTP addr = %q, want smtp.example.com:587 (008 R1.1)", gotAddr)
 	}
 	if gotAuth == nil {
-		t.Error("SMTP auth is nil with user/password configured (008 R1.1)")
+		t.Error("SMTP auth is nil with smtp.user set and a resolvable BENTOO_SMTP_PASSWORD (008 R1.1, 017 R1.1)")
 	}
 	if gotFrom != "bentoo@example.com" || len(gotTo) != 1 || gotTo[0] != "ops@example.com" {
 		t.Errorf("from=%q to=%v, want the configured from/to (008 R1.1)", gotFrom, gotTo)
@@ -529,24 +542,42 @@ func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
 		return errors.New("535 authentication failed")
 	}
 
-	em := emailNotifier{
-		cfg: EmailConfig{
+	// The secret now arrives via the secrets chain rather than snapshot.toml
+	// (017 R1.1, R2.1); the leak guarantee under test is unchanged (008 R1.3). The
+	// warn seam is already captured above, so a warning emitted during resolution
+	// would be inspected for the secret too.
+	isolateSecrets(t)
+	t.Setenv("BENTOO_SMTP_PASSWORD", secret)
+
+	n, err := newNotifier(NotifyConfig{
+		On: []string{"failure"},
+		Email: EmailConfig{
 			To:   []string{"ops@example.com"},
 			From: "b@e.com",
-			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 25, User: "u", Password: secret},
+			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 25, User: "u"},
 		},
+	})
+	if err != nil {
+		t.Fatalf("newNotifier: %v", err)
 	}
-	err := em.Notify(context.Background(), failRun())
-	if err == nil {
+	m, ok := n.(multiNotifier)
+	if !ok {
+		t.Fatalf("newNotifier returned %T, want multiNotifier", n)
+	}
+	if len(m.notifiers) != 1 {
+		t.Fatalf("built %d notifiers, want 1 (email only)", len(m.notifiers))
+	}
+	em := m.notifiers[0]
+
+	// Direct call: the driver's own error must not carry the password.
+	if err := em.Notify(context.Background(), failRun()); err == nil {
 		t.Fatal("want an error when the SMTP transport fails")
-	}
-	if strings.Contains(err.Error(), secret) {
+	} else if strings.Contains(err.Error(), secret) {
 		t.Errorf("error string leaked the SMTP password (008 R1.3): %v", err)
 	}
 
 	// The composite notifier downgrades the error to a warning — that warning
 	// must not leak the password either (008 R1.3).
-	m := multiNotifier{notifiers: []Notifier{em}, on: []string{"failure"}}
 	_ = m.Notify(context.Background(), failRun())
 	if strings.Contains(warned.String(), secret) {
 		t.Errorf("warning log leaked the SMTP password (008 R1.3): %s", warned.String())

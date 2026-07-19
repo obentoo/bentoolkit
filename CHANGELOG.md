@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-19
+
 ### Added
 - **Unified secret resolution.** Every secret bentoo consumes now resolves
   through one chain — an environment variable, then the user secrets file
@@ -33,9 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - **Plaintext secret fields in config are no longer read (BREAKING).**
   `github.token` and `repositories.<name>.token` in `config.yaml`, and
-  `ntfy.token` (`[notify.ntfy]`) in `snapshot.toml`, are no longer consulted.
-  (The runtime provider token field itself is unchanged — only the config source
-  was removed.)
+  `ntfy.token` (`[notify.ntfy]`) and `smtp.password` (`[notify.email.smtp]`) in
+  `snapshot.toml`, are no longer consulted. (The runtime provider token field
+  itself is unchanged — only the config source was removed.) With
+  `smtp.password` gone, **no bentoo config file holds a secret value of any
+  kind** — the claim `SECURITY.md` makes now stands without exception.
 
 ### Migration
 
@@ -49,6 +53,7 @@ cat >> ~/.config/bentoo/secrets <<'EOF'
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 BENTOO_REPO_MY_OVERLAY_TOKEN=ghp_xxxxxxxxxxxx
 BENTOO_NTFY_TOKEN=tk_xxxxxxxxxxxx
+BENTOO_SMTP_PASSWORD=your-smtp-password
 EOF
 chmod 600 ~/.config/bentoo/secrets
 ```
@@ -57,6 +62,14 @@ chmod 600 ~/.config/bentoo/secrets
 - `repositories.<name>.token` → `BENTOO_REPO_<NAME>_TOKEN` (`<name>` uppercased,
   every character outside `[A-Z0-9]` replaced by `_`).
 - `[notify.ntfy] token` → `BENTOO_NTFY_TOKEN`.
+- `[notify.email.smtp] password` → `BENTOO_SMTP_PASSWORD`. `host`, `port` and
+  `user` stay in `snapshot.toml` — they are configuration, not secrets. Until
+  you migrate, email notifications are sent **unauthenticated** rather than
+  failing, and each load of `snapshot.toml` warns once naming the stale key.
+
+When the notifier runs as root under the systemd timer, `$HOME` may be unset and
+the user secrets file is not consulted — put the value in `/etc/bentoo/secrets`
+(root-owned, `chmod 600`) or in the unit's environment for that case.
 
 Then remove the now-ignored `github:`/`token:` keys from `config.yaml` and the
 `token` key from `snapshot.toml`. bentoo warns (once, before any config write)
@@ -1292,7 +1305,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/obentoo/bentoolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...v0.12.0

@@ -184,6 +184,23 @@ func repoTokenEnvName(name string) string {
 	return "BENTOO_REPO_" + b.String() + "_TOKEN"
 }
 
+// secretDestination renders the "where this value belongs now" clause of a
+// migration warning for the given env-var name.
+//
+// It resolves the target through secrets.UserPath rather than secrets.Paths()[0].
+// Paths mirrors the resolution ORDER, so index 0 is the user-scope file only when
+// one exists; with $HOME unresolvable the chain drops that entry and index 0
+// becomes the root-owned /etc/bentoo/secrets, making the warning tell an
+// unprivileged user to write a secret into a 0600 file they cannot open. Paths()
+// is never empty, so that misdirection is silent (F-H). With no user-scope path
+// the env var is named on its own instead.
+func secretDestination(envName string) string {
+	if path, ok := secrets.UserPath(); ok {
+		return fmt.Sprintf("Move it to %s as `%s=<value>` (chmod 600)", path, envName)
+	}
+	return fmt.Sprintf("Set `%s=<value>` in the environment", envName)
+}
+
 // LoadFrom reads configuration from a specific file path
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -228,11 +245,10 @@ func LoadFrom(path string) (*Config, error) {
 	// release no longer reads gets exactly one actionable warning per key,
 	// emitted here in LoadFrom so it always precedes any later SaveTo that would
 	// silently drop the key. The secret VALUE is never printed.
-	secretsPath := secrets.Paths()[0]
 	if probe.GitHub.Token != "" {
 		fmt.Fprintf(os.Stderr,
-			"warning: %s: `github.token` is no longer read. Move it to %s as `GITHUB_TOKEN=<value>` (chmod 600), then delete the key. Until then, GitHub requests are unauthenticated.\n",
-			path, secretsPath)
+			"warning: %s: `github.token` is no longer read. %s, then delete the key. Until then, GitHub requests are unauthenticated.\n",
+			path, secretDestination("GITHUB_TOKEN"))
 	}
 	// repositories.*.token is detected on the strict probe (probe.Repositories,
 	// whose legacyRepo retains the removed `token` key) rather than on cfg, which
@@ -240,8 +256,8 @@ func LoadFrom(path string) (*Config, error) {
 	for name, repo := range probe.Repositories {
 		if repo.Token != "" {
 			fmt.Fprintf(os.Stderr,
-				"warning: %s: `repositories.%s.token` is no longer read. Move it to %s as `%s=<value>` (chmod 600), then delete the key.\n",
-				path, name, secretsPath, repoTokenEnvName(name))
+				"warning: %s: `repositories.%s.token` is no longer read. %s, then delete the key.\n",
+				path, name, secretDestination(repoTokenEnvName(name)))
 		}
 	}
 

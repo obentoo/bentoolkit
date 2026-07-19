@@ -138,6 +138,7 @@ GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 BENTOO_REPO_MY_OVERLAY_TOKEN=ghp_xxxxxxxxxxxx
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
 BENTOO_NTFY_TOKEN=tk_xxxxxxxxxxxx
+BENTOO_SMTP_PASSWORD=your-smtp-password
 ```
 
 | Secret | Name(s) looked up |
@@ -147,6 +148,7 @@ BENTOO_NTFY_TOKEN=tk_xxxxxxxxxxxx
 | LLM API key | the value of `llm.api_key_env` (e.g. `ANTHROPIC_API_KEY`), itself resolved through this chain |
 | Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `FILEZILLA_PRO_KEY`) |
 | ntfy auth token | `BENTOO_NTFY_TOKEN` |
+| SMTP password | `BENTOO_SMTP_PASSWORD` — enables PLAIN auth together with `[notify.email.smtp] user`; unresolvable means the mail is sent unauthenticated |
 
 For `overlay compare` the GitHub token precedence is **`--token` flag >
 per-repo `BENTOO_REPO_<NAME>_TOKEN` > global `GITHUB_TOKEN`/`GH_TOKEN`**.
@@ -973,8 +975,9 @@ from = "bentoo@myhost"
 [notify.email.smtp]              # optional — omit to send via local `sendmail -t`
 host = "smtp.example.com"
 port = 587
-user = "bentoo"                  # with password, enables SMTP AUTH (PLAIN)
-password = "..."                 # never logged, never placed in argv
+user = "bentoo"                  # with BENTOO_SMTP_PASSWORD set, enables SMTP AUTH (PLAIN)
+# The password is not a config key: put BENTOO_SMTP_PASSWORD in the secrets file
+# (~/.config/bentoo/secrets or /etc/bentoo/secrets, chmod 600).
 ```
 
 ### Commands
@@ -1039,7 +1042,9 @@ from one config — configure any subset:
 - **email** (`[notify.email]`) — sends the run summary to the configured
   recipients. Transport is local `sendmail -t` by default; configuring
   `[notify.email.smtp]` switches to direct SMTP (stdlib `net/smtp`, with PLAIN
-  auth when `user`/`password` are set). The subject reflects the outcome.
+  auth when `user` is set and `BENTOO_SMTP_PASSWORD` resolves through the secrets
+  chain). An unresolvable password sends unauthenticated rather than failing the
+  notification. The subject reflects the outcome.
 
 `on` filters which outcomes notify (`["failure"]`, `["success"]`, or both); an empty
 or omitted `on` notifies on **failure only**. Notification is **best-effort**: a

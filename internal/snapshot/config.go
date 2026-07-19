@@ -10,12 +10,15 @@
 package snapshot
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/BurntSushi/toml"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // warnLogf emits a non-fatal warning. It is a package var (defaulting to
@@ -130,14 +133,20 @@ type EmailConfig struct {
 }
 
 // SMTPConfig is the optional SMTP transport of the email driver (008 R1.1). Host
-// selects SMTP over local sendmail and is joined with Port as host:port. User and
-// Password, when both set, enable PLAIN auth; the password is never placed in
-// argv, error strings, or logs (008 R1.3).
+// selects SMTP over local sendmail and is joined with Port as host:port. Host,
+// Port and User stay in snapshot.toml because they are configuration, not
+// secrets (017 R2.2).
+//
+// The password is deliberately NOT a field here: it resolves from
+// BENTOO_SMTP_PASSWORD via the secrets chain (env → user file → system file) and
+// is never read from snapshot.toml (017 R1.1, R2.1). PLAIN auth is enabled only
+// when User is set AND that lookup yields a non-empty value; either one missing
+// means the message is sent unauthenticated (017 R1.2). The resolved password is
+// never placed in argv, error strings, or logs (008 R1.3).
 type SMTPConfig struct {
-	Host     string `toml:"host,omitempty"`
-	Port     int    `toml:"port,omitempty"`
-	User     string `toml:"user,omitempty"`
-	Password string `toml:"password,omitempty"`
+	Host string `toml:"host,omitempty"`
+	Port int    `toml:"port,omitempty"`
+	User string `toml:"user,omitempty"`
 }
 
 // shouldNotify reports whether a run with the given outcome should notify, given
@@ -249,8 +258,80 @@ func Load() (*Config, error) {
 	return LoadFrom(path)
 }
 
+// legacySMTPPasswordKey is the fully-qualified location the removed SMTP
+// password used to occupy: [notify.email.smtp] password = "...". Note the full
+// path — Undecoded reports "notify.email.smtp.password", never a bare
+// "smtp.password", so a shorter literal would match nothing and the diagnostic
+// would silently never fire.
+//
+// It is matched element by element rather than against a rendered string, so a
+// key whose segments need TOML quoting cannot coincidentally match and the
+// intent stays legible. It is a toml.Key so the warning can render it in the
+// library's own spelling, guaranteeing the message names exactly the key that
+// was matched.
+var legacySMTPPasswordKey = toml.Key{"notify", "email", "smtp", "password"}
+
+// hasLegacySMTPPassword reports whether the decoded document still carries the
+// removed SMTP password key.
+//
+// MetaData.Undecoded lists the keys present in the file that landed in no struct
+// field, which is exactly the removed key's signature — and, usefully, a
+// self-retiring test: should a Password field ever return to SMTPConfig, the key
+// decodes and this diagnostic goes quiet on its own.
+//
+// This is deliberately NOT the mechanism internal/common/config uses for the
+// same job. There, yaml.v3 offers no equivalent, so story 015 had to strict-
+// re-decode into a dedicated probeConfig (and work around a yaml-inline panic,
+// 015 D-03). BurntSushi/toml exposes undecoded keys natively, so no probe struct
+// is needed here. The two are not worth "unifying" — the shapes differ only
+// because the underlying libraries do.
+func hasLegacySMTPPassword(md toml.MetaData) bool {
+	for _, key := range md.Undecoded() {
+		if slices.Equal(key, legacySMTPPasswordKey) {
+			return true
+		}
+	}
+	return false
+}
+
+// smtpPasswordDestination renders the "where this value belongs now" clause of
+// the migration warning.
+//
+// The target comes from secrets.UserPath, never secrets.Paths()[0]. Paths mirrors
+// the resolution ORDER, so index 0 is the user-scope file only while one exists;
+// with $HOME unresolvable the chain drops that entry and index 0 becomes the
+// root-owned /etc/bentoo/secrets. That is not a hypothetical here — this loader
+// runs as root under the systemd timer, exactly where $HOME goes missing — and it
+// fails silently (Paths() is never empty), leaving the user with a plausible path
+// they cannot write (F-H). With no user-scope path the env var is named alone.
+func smtpPasswordDestination() string {
+	if path, ok := secrets.UserPath(); ok {
+		return fmt.Sprintf("Move it to %s as `%s=<value>` (chmod 600)", path, smtpPasswordEnv)
+	}
+	return fmt.Sprintf("Set `%s=<value>` in the environment", smtpPasswordEnv)
+}
+
+// warnLegacySMTPPassword emits the migration warning for a snapshot.toml still
+// carrying the removed SMTP password (R3.1) — exactly once per load, naming the
+// dead key, where the value belongs, the env-var name, and the consequence of
+// doing nothing. It mirrors the config.yaml diagnostic of story 015 task 5.2.
+// The password VALUE is never read or printed.
+func warnLegacySMTPPassword(path string) {
+	fmt.Fprintf(os.Stderr,
+		"warning: %s: `%s` is no longer read. %s, then delete the key. "+
+			"Until then, SMTP mail is sent unauthenticated.\n",
+		path, legacySMTPPasswordKey, smtpPasswordDestination())
+}
+
 // LoadFrom reads and parses snapshot.toml from a specific path. It does not
 // validate; call Validate after loading.
+//
+// Parsing stays lenient: an unknown key is ignored exactly as before. The decode
+// runs through a Decoder purely to obtain the MetaData that drives the ONE
+// targeted migration diagnostic below — toml.Unmarshal is itself just this call
+// with the MetaData discarded, so behavior, errors, and leniency are unchanged.
+// This is deliberately not a general strict-decode pass: only the single removed
+// key is reported, so forward-compatible additions to snapshot.toml stay silent.
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -258,8 +339,17 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	md, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&cfg)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse snapshot.toml: %w", err)
+	}
+
+	// Emitted here in LoadFrom, the single entry point for reading snapshot.toml,
+	// so the warning necessarily precedes anything a caller does with the result
+	// (R3.3). The load itself still succeeds and the password is simply treated as
+	// absent (R3.2).
+	if hasLegacySMTPPassword(md) {
+		warnLegacySMTPPassword(path)
 	}
 	return &cfg, nil
 }
