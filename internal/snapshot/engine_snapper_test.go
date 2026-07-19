@@ -209,6 +209,10 @@ func TestNewEngine_SnapperDriver(t *testing.T) {
 
 // stubSnapperConfigsDir points the snapperConfigsDir seam at a temp dir for the
 // test's duration, mirroring how redirectStateDir handles StateDir.
+//
+// A test that reaches ensureSnapperConfigs must ALSO call stubSnapperConfdPath:
+// ensuring configs registers them in /etc/conf.d/snapper (R1.1), so redirecting
+// only this seam still writes the developer's real /etc.
 func stubSnapperConfigsDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -216,6 +220,19 @@ func stubSnapperConfigsDir(t *testing.T) string {
 	t.Cleanup(func() { snapperConfigsDir = orig })
 	snapperConfigsDir = dir
 	return dir
+}
+
+// stubSnapperConfdPath points the snapperConfdPath seam at a file inside a temp
+// dir for the test's duration, the sibling of stubSnapperConfigsDir for the
+// registration half (R1.1). The returned path does not exist yet, so a caller
+// can assert that registration creates it (R1.3) or seed it with content first.
+func stubSnapperConfdPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "snapper")
+	orig := snapperConfdPath
+	t.Cleanup(func() { snapperConfdPath = orig })
+	snapperConfdPath = path
+	return path
 }
 
 // TestRenderSnapperConfig_ManagedKeys: rendering from scratch emits every
@@ -283,6 +300,7 @@ TIMELINE_CLEANUP="no"
 // second run changes nothing and user keys survive re-ensure (R2.2).
 func TestEnsureSnapperConfigs_WritesPerSubvolume(t *testing.T) {
 	dir := stubSnapperConfigsDir(t)
+	stubSnapperConfdPath(t)
 	cfg := &Config{Engine: EngineConfig{
 		Driver:     "snapper",
 		Subvolumes: []string{"/", "/home"},
@@ -324,6 +342,7 @@ func TestEnsureSnapperConfigs_WritesPerSubvolume(t *testing.T) {
 func TestWriteEngineConfig_DispatchesByDriver(t *testing.T) {
 	t.Run("btrbk", func(t *testing.T) {
 		stubSnapperConfigsDir(t)
+		stubSnapperConfdPath(t)
 		dir := t.TempDir()
 		confPath := filepath.Join(dir, "snapshot.toml")
 		cfg := &Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}}
@@ -337,6 +356,7 @@ func TestWriteEngineConfig_DispatchesByDriver(t *testing.T) {
 
 	t.Run("snapper", func(t *testing.T) {
 		snapDir := stubSnapperConfigsDir(t)
+		stubSnapperConfdPath(t)
 		dir := t.TempDir()
 		confPath := filepath.Join(dir, "snapshot.toml")
 		cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
@@ -356,6 +376,7 @@ func TestWriteEngineConfig_DispatchesByDriver(t *testing.T) {
 // snapper configs (R2.2) and, with no schedule configured, runs no subprocess.
 func TestApply_SnapperEnsuresConfigs(t *testing.T) {
 	snapDir := stubSnapperConfigsDir(t)
+	stubSnapperConfdPath(t)
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, "snapshot.toml")
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/"}}}
@@ -399,6 +420,7 @@ func TestValidate_SnapperDriver(t *testing.T) {
 // through the explicit `snapshot hook --install` command.
 func TestApply_DoesNotInstallEmergeHook(t *testing.T) {
 	stubSnapperConfigsDir(t)
+	stubSnapperConfdPath(t)
 	hookRoot := t.TempDir()
 	origRoot := EmergeHookRoot
 	t.Cleanup(func() { EmergeHookRoot = origRoot })

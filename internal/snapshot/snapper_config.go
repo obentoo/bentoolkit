@@ -106,13 +106,18 @@ func renderSnapperConfig(cfg EngineConfig, subvolume string, existing []byte) []
 // existing file is merged, not clobbered — user settings beyond the managed
 // keys survive — and each write is atomic (temp + rename, 0640). The operation
 // is idempotent: re-running over an unchanged config produces identical bytes
-// (R2.2).
+// (R2.2). Once the per-subvolume configs exist, every one of their names is
+// registered in SNAPPER_CONFIGS (R1.1): a config file snapper cannot enumerate
+// is a config snapper rejects as "unknown config".
 func ensureSnapperConfigs(cfg *Config) error {
 	if err := os.MkdirAll(snapperConfigsDir, 0o755); err != nil { //nolint:gosec // matches snapper's own /etc/snapper/configs permissions
 		return fmt.Errorf("create snapper configs dir %s: %w", snapperConfigsDir, err)
 	}
+	names := make([]string, 0, len(cfg.Engine.Subvolumes))
 	for _, sv := range cfg.Engine.Subvolumes {
-		path := filepath.Join(snapperConfigsDir, snapperConfigName(sv))
+		name := snapperConfigName(sv)
+		names = append(names, name)
+		path := filepath.Join(snapperConfigsDir, name)
 		existing, err := os.ReadFile(path)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -124,5 +129,148 @@ func ensureSnapperConfigs(cfg *Config) error {
 			return err
 		}
 	}
+	if err := ensureSnapperRegistered(names); err != nil {
+		return fmt.Errorf("register snapper configs: %w", err)
+	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Story 016 C2 — register configs in SNAPPER_CONFIGS (R1).
+// ---------------------------------------------------------------------------
+
+// snapperConfigsVar is the shell variable in /etc/conf.d/snapper listing the
+// configs snapper enumerates. It is the only place snapper looks: a config
+// under snapperConfigsDir but absent from this list is invisible to
+// `snapper create`/`list`, which fail with "unknown config" (R1.1).
+const snapperConfigsVar = "SNAPPER_CONFIGS"
+
+// snapperConfdPath is the shell config file holding snapperConfigsVar. Like
+// snapperConfigsDir it is a package var rather than a const, so tests redirect
+// it to a temp file instead of writing the developer's real /etc (R1.1).
+var snapperConfdPath = "/etc/conf.d/snapper"
+
+// ensureSnapperRegistered lists every name in the SNAPPER_CONFIGS assignment of
+// snapperConfdPath, making the configs ensureSnapperConfigs just wrote visible
+// to snapper (R1.1). A missing file is the one expected non-error: it merges as
+// empty content, so the file is created carrying the managed names (R1.3). The
+// merge adds only what is absent and copies every other variable, comment, and
+// line through verbatim (R1.2, R1.4); when nothing is missing it returns its
+// input byte for byte, so a second call rewrites identical content. The write
+// is atomic (temp + rename) at 0644 — snapper's own mode for this file, which
+// is world-readable shell config unlike the 0640 per-subvolume configs.
+func ensureSnapperRegistered(names []string) error {
+	existing, err := os.ReadFile(snapperConfdPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read %s: %w", snapperConfdPath, err)
+		}
+		existing = nil
+	}
+	merged := mergeSnapperConfigsLine(string(existing), names)
+	if err := atomicWrite(snapperConfdPath, []byte(merged), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", snapperConfdPath, err)
+	}
+	return nil
+}
+
+// mergeSnapperConfigsLine returns the content of /etc/conf.d/snapper with every
+// name in names present in its SNAPPER_CONFIGS list (R1.1). The FIRST active
+// (non-comment) SNAPPER_CONFIGS= assignment is authoritative: its
+// space-separated values are unioned with names — existing values keep their
+// original order and missing names are appended after them — and that one line
+// is re-emitted in place in the operator's own quoting style. Every other line
+// is copied verbatim, including comments, a commented-out #SNAPPER_CONFIGS=,
+// and any further SNAPPER_CONFIGS= assignment (R1.4). With no active assignment
+// the line is appended, which also covers content that is empty because the
+// file does not exist yet (R1.3). When every name is already listed the input
+// is returned byte for byte — quoting, spacing, and a missing final newline all
+// untouched — so applying twice leaves identical on-disk state (R1.2, R5.1).
+func mergeSnapperConfigsLine(existing string, names []string) string {
+	lines := strings.Split(existing, "\n")
+	idx := -1
+	for i, line := range lines {
+		if snapperConfigKey(line) == snapperConfigsVar {
+			idx = i
+			break
+		}
+	}
+
+	var (
+		lhs     = snapperConfigsVar
+		values  []string
+		quote   = byte('"')
+		trailer string
+	)
+	if idx >= 0 {
+		lhs, values, quote, trailer = parseSnapperConfigsLine(lines[idx])
+	}
+
+	merged := values
+	seen := make(map[string]bool, len(values)+len(names))
+	for _, v := range values {
+		seen[v] = true
+	}
+	for _, n := range names {
+		// A name holding whitespace cannot be represented in a space-separated
+		// list: admitting it would corrupt the list and, since it would never
+		// parse back, make every run append it again (R5.1). Drop it instead.
+		if n == "" || strings.ContainsAny(n, " \t") || seen[n] {
+			continue
+		}
+		seen[n] = true
+		merged = append(merged, n)
+	}
+	if idx >= 0 && len(merged) == len(values) {
+		return existing // nothing missing — leave the file byte-identical (R1.2, R5.1)
+	}
+
+	assignment := lhs + "=" + string(quote) + strings.Join(merged, " ") + string(quote) + trailer
+
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if i == idx {
+			b.WriteString(assignment)
+			continue
+		}
+		b.WriteString(line)
+	}
+	if idx < 0 {
+		// No active assignment to update: append one, first closing off a last
+		// line that lacks its newline so the appended line stands alone (R1.3).
+		if existing != "" && !strings.HasSuffix(existing, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString(assignment + "\n")
+	}
+	return b.String()
+}
+
+// parseSnapperConfigsLine splits a SNAPPER_CONFIGS= assignment into the text
+// left of its "=" (keeping any indentation), the space-separated config names,
+// the quote character a rewrite must re-emit with, and any same-line trailing
+// comment. The operator's own quote character is preserved so an idempotent
+// rewrite never restyles their file; an unquoted value re-emits as `"`, since
+// the merged list needs quoting to survive the shell. The trailer is copied
+// through verbatim rather than dropped (R1.4).
+func parseSnapperConfigsLine(line string) (lhs string, names []string, quote byte, trailer string) {
+	lhs, rhs, _ := strings.Cut(line, "=") // the "=" is why snapperConfigKey matched
+	rhs = strings.TrimLeft(rhs, " \t")
+	if rhs != "" && (rhs[0] == '"' || rhs[0] == '\'') {
+		quote = rhs[0]
+		if end := strings.IndexByte(rhs[1:], quote); end >= 0 {
+			return lhs, strings.Fields(rhs[1 : 1+end]), quote, rhs[end+2:]
+		}
+		return lhs, strings.Fields(rhs[1:]), quote, "" // unterminated quote
+	}
+	if i := strings.IndexByte(rhs, '#'); i >= 0 {
+		// Hand the run of whitespace before the "#" to the trailer, so the
+		// rewritten line keeps the gap the operator put there.
+		value := strings.TrimRight(rhs[:i], " \t")
+		return lhs, strings.Fields(value), '"', rhs[len(value):]
+	}
+	return lhs, strings.Fields(rhs), '"', ""
 }
