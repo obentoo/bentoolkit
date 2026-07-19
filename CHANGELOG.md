@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-19
+
 ### Added
 - **Unified secret resolution.** Every secret bentoo consumes now resolves
   through one chain — an environment variable, then the user secrets file
@@ -1303,7 +1305,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/obentoo/bentoolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...v0.12.0
