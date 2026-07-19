@@ -86,6 +86,32 @@ func Paths() []string {
 	return names
 }
 
+// UserPath returns the location of the user-scope secrets file — the one an
+// unprivileged user can actually create and chmod 600 — and whether the chain
+// has one at all. When $HOME is unresolvable pathsFn drops the user-scope entry
+// entirely (D4) and UserPath reports ("", false).
+//
+// Callers building a "put your secret here" message MUST use this instead of
+// Paths()[0]. Paths mirrors the RESOLUTION ORDER, so index 0 is the user file
+// only WHEN a user file exists; with $HOME unresolvable — precisely the case of
+// the snapshot systemd timer running as root — index 0 is the root-owned
+// /etc/bentoo/secrets, and the message then tells an unprivileged user to write
+// their secret into a 0600 file they cannot open. That failure is silent
+// (Paths() is never empty) and the bad path looks plausible, which is what makes
+// it worth a dedicated accessor.
+//
+// The scope is read from each entry's own tag and never from its position, so
+// this stays correct if the chain ever grows — the same rule that fixed F-1
+// inside Lookup.
+func UserPath() (string, bool) {
+	for _, p := range pathsFn() {
+		if p.user {
+			return p.name, true
+		}
+	}
+	return "", false
+}
+
 // Lookup resolves name across the fixed chain env → user file → system file and
 // returns the first hit.
 //

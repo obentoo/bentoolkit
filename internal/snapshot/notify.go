@@ -372,6 +372,13 @@ type emailNotifier struct {
 	runner       Runner
 }
 
+// smtpPasswordEnv names the environment variable (and secrets-file key) that
+// supplies the SMTP password (017 R1.1). It is a const shared with the migration
+// diagnostic in config.go: that warning's entire job is to tell a user which
+// variable to set, so it must never be able to name one this resolver does not
+// actually read.
+const smtpPasswordEnv = "BENTOO_SMTP_PASSWORD"
+
 // resolveSMTPPassword resolves the SMTP credential from BENTOO_SMTP_PASSWORD
 // through the secrets chain (017 R1.1), mirroring the ntfy token lookup above.
 //
@@ -390,7 +397,7 @@ func resolveSMTPPassword(host string) string {
 	if host == "" {
 		return ""
 	}
-	password, _, err := secrets.Lookup("BENTOO_SMTP_PASSWORD")
+	password, _, err := secrets.Lookup(smtpPasswordEnv)
 	if err != nil {
 		warnLogf("snapshot: resolving SMTP password: %v; sending unauthenticated", err)
 		return ""
