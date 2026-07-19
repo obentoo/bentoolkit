@@ -377,7 +377,7 @@ type emailNotifier struct {
 // diagnostic in config.go: that warning's entire job is to tell a user which
 // variable to set, so it must never be able to name one this resolver does not
 // actually read.
-const smtpPasswordEnv = "BENTOO_SMTP_PASSWORD"
+const smtpPasswordEnv = "BENTOO_SMTP_PASSWORD" //nolint:gosec // G101: this is the NAME of an env var, not a credential — the value it names is exactly what this story moved out of the source and config
 
 // resolveSMTPPassword resolves the SMTP credential from BENTOO_SMTP_PASSWORD
 // through the secrets chain (017 R1.1), mirroring the ntfy token lookup above.
