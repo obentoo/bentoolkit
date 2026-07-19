@@ -374,9 +374,18 @@ func TestWriteEngineConfig_DispatchesByDriver(t *testing.T) {
 
 // TestApply_SnapperEnsuresConfigs: `apply` with the snapper driver ensures the
 // snapper configs (R2.2) and, with no schedule configured, runs no subprocess.
+//
+// `apply` also provisions <subvolume>/.snapshots now (016 R2.1), so this test
+// pins that seam rather than inheriting the developer's filesystem: /.snapshots
+// is declared present, which is the skip case and keeps "no subprocess" true.
+// Left unstubbed the assertion would silently depend on the host — it holds on a
+// machine that has /.snapshots and fails on any clean CI runner, where the
+// missing directory legitimately produces a `btrfs subvolume create` call.
 func TestApply_SnapperEnsuresConfigs(t *testing.T) {
 	snapDir := stubSnapperConfigsDir(t)
 	stubSnapperConfdPath(t)
+	stubStatPath(t, "/.snapshots") // already provisioned — nothing to create
+	stubChmodPath(t, nil)          // never reached; keeps any mode change off the real /
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, "snapshot.toml")
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/"}}}
@@ -421,6 +430,11 @@ func TestValidate_SnapperDriver(t *testing.T) {
 func TestApply_DoesNotInstallEmergeHook(t *testing.T) {
 	stubSnapperConfigsDir(t)
 	stubSnapperConfdPath(t)
+	// `apply` provisions .snapshots for the snapper driver (016 R2.1): declare
+	// /.snapshots present so this hook-scoped test neither depends on the host's
+	// filesystem nor chmods a real system directory on a privileged runner.
+	stubStatPath(t, "/.snapshots")
+	stubChmodPath(t, nil)
 	hookRoot := t.TempDir()
 	origRoot := EmergeHookRoot
 	t.Cleanup(func() { EmergeHookRoot = origRoot })

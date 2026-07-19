@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -273,4 +274,70 @@ func parseSnapperConfigsLine(line string) (lhs string, names []string, quote byt
 		return lhs, strings.Fields(value), '"', rhs[len(value):]
 	}
 	return lhs, strings.Fields(rhs), '"', ""
+}
+
+// ---------------------------------------------------------------------------
+// Story 016 C3 — provision the per-subvolume .snapshots subvolume (R2).
+// ---------------------------------------------------------------------------
+
+// snapshotsDirName is the directory, relative to a managed subvolume, in which
+// snapper stores that config's snapshots (<subvolume>/.snapshots/<id>/snapshot,
+// the layout parseSnapperList reconstructs). snapper requires it to be a btrfs
+// subvolume of its own and will not create it for us (R2.1).
+const snapshotsDirName = ".snapshots"
+
+// snapshotsSubvolumePerm is the mode applied to a .snapshots subvolume bentoo
+// creates, matching what snapper's own create-config sets. It is deliberately
+// not world-readable: a snapshot exposes every file of the subvolume it came
+// from, so 0755 here would hand out read access to the whole subtree (R2.1).
+const snapshotsSubvolumePerm = 0o750
+
+// statPath reports whether a path exists. Like snapperConfigsDir and
+// snapperConfdPath it is a package var (defaulting to os.Stat) so tests decide
+// what exists rather than inheriting the developer's filesystem: a real
+// /home/.snapshots on the host would otherwise silently turn the "subvolume is
+// missing" case into the "already provisioned" one and assert nothing (R2.2).
+var statPath = os.Stat
+
+// chmodPath applies snapshotsSubvolumePerm to a freshly created .snapshots
+// subvolume. It is a seam for statPath's reason and one more: with statPath
+// stubbed to "missing" and the Runner mocked, an unseamed os.Chmod would still
+// run — against the real /home/.snapshots or /.snapshots. Unprivileged that is
+// a harmless EPERM; under a root CI runner it silently repermissions a live
+// system directory. Seaming it also makes the best-effort warn path observable,
+// which is the only way to prove a chmod failure never masks a create error.
+var chmodPath = os.Chmod
+
+// ensureSnapshotSubvolumes creates <subvolume>/.snapshots for every managed
+// subvolume that lacks one, through the Runner's `btrfs subvolume create`
+// (R2.1, R2.3). snapper keeps a config's snapshots there and refuses to run
+// without it, so any subvolume that was never snapshotted by hand — a fresh
+// /home is the usual case — fails on its first `run` until this exists; `/`
+// escapes only because the operator mounted @snapshots at /.snapshots
+// themselves. The operation is idempotent: a path that already exists is left
+// completely alone, never re-created and never re-permissioned, which is what
+// lets that hand-mounted /.snapshots survive untouched (R2.2). A create failure
+// aborts the whole pass and names the subvolume it belongs to, since the bare
+// btrfs error says only which directory it could not make (R2.4).
+//
+// The follow-up chmod is best-effort by design: the subvolume is created and
+// usable at whatever mode btrfs gave it, so a failure is warned and never
+// returned. In particular it must neither mask a create error (it runs only
+// after a create succeeded) nor manufacture one (it cannot make this function
+// fail), because the caller aborts `apply` on the error this returns.
+func ensureSnapshotSubvolumes(ctx context.Context, cfg *Config, run Runner) error {
+	for _, sv := range cfg.Engine.Subvolumes {
+		dir := filepath.Join(sv, snapshotsDirName)
+		if _, err := statPath(dir); err == nil {
+			continue // already provisioned — leave it exactly as it is (R2.2)
+		}
+		if _, err := run.Run(ctx, "btrfs", []string{"subvolume", "create", dir}, nil); err != nil {
+			return fmt.Errorf("create snapshots subvolume for %s: %w", sv, err)
+		}
+		if err := chmodPath(dir, snapshotsSubvolumePerm); err != nil {
+			warnLogf("snapshot: setting mode %#o on %s failed: %v; continuing at its created permissions",
+				snapshotsSubvolumePerm, dir, err)
+		}
+	}
+	return nil
 }

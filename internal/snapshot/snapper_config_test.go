@@ -1,7 +1,9 @@
 package snapshot
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -332,5 +334,227 @@ func TestSnapperRegister_EnsureSnapperConfigsRegisters(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("per-subvolume config %s not written: %v", name, err)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 016 C3 — provisioning <subvolume>/.snapshots (R2).
+//
+// These tests are hermetic in two independent ways, and both are deliberate.
+// First, every subvolume path is rooted in t.TempDir(), so no literal "/" or
+// "/home" ever reaches the code. Second, the statPath and chmodPath seams are
+// stubbed in every single test, so what "exists" is the test's decision and no
+// mode is ever applied for real.
+//
+// Either measure alone would be insufficient. This host has real, root-owned
+// /home/.snapshots and /.snapshots directories: an unstubbed statPath over a
+// literal "/home" would report "already provisioned" and quietly invert the
+// missing-subvolume assertion, while an unstubbed chmodPath — reached precisely
+// because statPath was stubbed to "missing" — would repermission one of those
+// live system directories on any runner privileged enough to succeed.
+// ---------------------------------------------------------------------------
+
+// stubStatPath points the statPath seam at a fixed set of existing paths for
+// the test's duration, restoring the original via t.Cleanup (the package-var
+// override pattern of stubSnapperConfigsDir). Any path not listed reports
+// os.ErrNotExist. A listed path returns a genuine os.FileInfo — the helper's
+// own temp dir — rather than a nil one, so the stub stays honest if the code
+// under test ever starts inspecting the result instead of only its error.
+func stubStatPath(t *testing.T, existing ...string) {
+	t.Helper()
+	real := t.TempDir()
+	set := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		set[p] = true
+	}
+	orig := statPath
+	t.Cleanup(func() { statPath = orig })
+	statPath = func(name string) (os.FileInfo, error) {
+		if set[name] {
+			return os.Stat(real)
+		}
+		return nil, os.ErrNotExist
+	}
+}
+
+// chmodCall records one invocation captured by stubChmodPath.
+type chmodCall struct {
+	path string
+	mode os.FileMode
+}
+
+// stubChmodPath points the chmodPath seam at a recorder returning ret, and
+// hands back the slice the calls land in. It keeps the best-effort chmod off
+// the real filesystem and, by letting a test return an error from it, makes the
+// warn-but-do-not-fail contract observable at all (R2.4).
+func stubChmodPath(t *testing.T, ret error) *[]chmodCall {
+	t.Helper()
+	var calls []chmodCall
+	orig := chmodPath
+	t.Cleanup(func() { chmodPath = orig })
+	chmodPath = func(name string, mode os.FileMode) error {
+		calls = append(calls, chmodCall{path: name, mode: mode})
+		return ret
+	}
+	return &calls
+}
+
+// TestSnapshotSubvolumes_CreatesMissing is the regression test for the bug: a
+// subvolume with no .snapshots gets one created through the Runner, as exactly
+// `btrfs subvolume create <subvolume>/.snapshots` (R2.1, R2.3). Without this,
+// snapper has nowhere to put a snapshot and the first `run` fails outright. The
+// mode is asserted too, since 0755 on a snapshot tree would expose every file
+// of the subvolume it mirrors.
+func TestSnapshotSubvolumes_CreatesMissing(t *testing.T) {
+	sv := filepath.Join(t.TempDir(), "home")
+	want := filepath.Join(sv, ".snapshots")
+	stubStatPath(t) // nothing exists yet
+	chmods := stubChmodPath(t, nil)
+	warned := captureWarn(t)
+	mock := &MockRunner{}
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{sv}}}
+
+	if err := ensureSnapshotSubvolumes(context.Background(), cfg, mock); err != nil {
+		t.Fatalf("ensureSnapshotSubvolumes: %v", err)
+	}
+
+	if len(mock.Calls) != 1 {
+		t.Fatalf("len(Calls) = %d, want 1: %+v", len(mock.Calls), mock.Calls)
+	}
+	c := mock.Calls[0]
+	wantArgs := []string{"subvolume", "create", want}
+	if c.Name != "btrfs" || !equalStrings(c.Args, wantArgs) {
+		t.Errorf("call = %s %v, want btrfs %v", c.Name, c.Args, wantArgs)
+	}
+
+	if len(*chmods) != 1 {
+		t.Fatalf("len(chmods) = %d, want 1: %+v", len(*chmods), *chmods)
+	}
+	if got := (*chmods)[0]; got.path != want || got.mode != 0o750 {
+		t.Errorf("chmod = (%q, %#o), want (%q, 0750)", got.path, got.mode, want)
+	}
+	if warned() {
+		t.Error("a fully successful provisioning must not warn")
+	}
+}
+
+// TestSnapshotSubvolumes_SkipsExisting: an existing .snapshots is left entirely
+// alone — not re-created and not re-permissioned (R2.2). This is the `/` case,
+// where the operator mounted @snapshots at /.snapshots by hand: re-running
+// `btrfs subvolume create` over it would fail, and chmod'ing it would silently
+// rewrite the mode they chose.
+func TestSnapshotSubvolumes_SkipsExisting(t *testing.T) {
+	sv := filepath.Join(t.TempDir(), "home")
+	stubStatPath(t, filepath.Join(sv, ".snapshots"))
+	chmods := stubChmodPath(t, nil)
+	mock := &MockRunner{}
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{sv}}}
+
+	if err := ensureSnapshotSubvolumes(context.Background(), cfg, mock); err != nil {
+		t.Fatalf("ensureSnapshotSubvolumes: %v", err)
+	}
+	if len(mock.Calls) != 0 {
+		t.Errorf("an existing .snapshots must not be touched, got calls: %+v", mock.Calls)
+	}
+	if len(*chmods) != 0 {
+		t.Errorf("an existing .snapshots must not be re-permissioned, got: %+v", *chmods)
+	}
+}
+
+// TestSnapshotSubvolumes_OnlyCreatesTheMissingOne: with a mixed set — the
+// realistic upgrade case of a host whose `/` already has .snapshots but whose
+// /home does not — only the missing subvolume is created (R2.1, R2.2), and the
+// present one contributes no call at all.
+func TestSnapshotSubvolumes_OnlyCreatesTheMissingOne(t *testing.T) {
+	base := t.TempDir()
+	root := base                        // stands in for "/", already provisioned
+	home := filepath.Join(base, "home") // stands in for "/home", missing
+	stubStatPath(t, filepath.Join(root, ".snapshots"))
+	stubChmodPath(t, nil)
+	mock := &MockRunner{}
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{root, home}}}
+
+	if err := ensureSnapshotSubvolumes(context.Background(), cfg, mock); err != nil {
+		t.Fatalf("ensureSnapshotSubvolumes: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("len(Calls) = %d, want 1 (only the missing subvolume): %+v", len(mock.Calls), mock.Calls)
+	}
+	wantArgs := []string{"subvolume", "create", filepath.Join(home, ".snapshots")}
+	if !equalStrings(mock.Calls[0].Args, wantArgs) {
+		t.Errorf("args = %v, want %v", mock.Calls[0].Args, wantArgs)
+	}
+}
+
+// TestSnapshotSubvolumes_WrapsCreateError: a failing `btrfs subvolume create`
+// aborts the pass and returns an error naming the affected subvolume (R2.4).
+// Naming it is the point — btrfs's own message identifies only the directory it
+// could not make, leaving the operator to work out which subvolume that was.
+// The underlying error stays unwrappable-to so callers keep the diagnostic, and
+// the second subvolume must never be attempted after the first one failed.
+func TestSnapshotSubvolumes_WrapsCreateError(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	varlog := filepath.Join(base, "var", "log")
+	stubStatPath(t) // neither exists
+	stubChmodPath(t, nil)
+	sentinel := errors.New("ERROR: cannot create subvolume: Read-only file system")
+	mock := &MockRunner{
+		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
+			return nil, sentinel
+		},
+	}
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{home, varlog}}}
+
+	err := ensureSnapshotSubvolumes(context.Background(), cfg, mock)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), home) {
+		t.Errorf("error %q does not name the affected subvolume %q", err, home)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error %v does not wrap the underlying btrfs failure", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Errorf("provisioning must abort on the first failure, got %d calls: %+v",
+			len(mock.Calls), mock.Calls)
+	}
+}
+
+// TestSnapshotSubvolumes_ChmodFailureWarnsOnly: the chmod after a successful
+// create is best-effort. A failure is warned and the pass still succeeds — the
+// subvolume exists and snapper can use it, only its mode is not what we wanted
+// — and it must not stop the remaining subvolumes from being provisioned. This
+// guards R2.4 from the inverse direction: the error `apply` aborts on has to
+// mean "a create failed", never "a chmod failed".
+func TestSnapshotSubvolumes_ChmodFailureWarnsOnly(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	varlog := filepath.Join(base, "var", "log")
+	stubStatPath(t) // neither exists
+	stubChmodPath(t, errors.New("operation not permitted"))
+
+	var warnings strings.Builder
+	origWarn := warnLogf
+	t.Cleanup(func() { warnLogf = origWarn })
+	warnLogf = func(format string, args ...interface{}) { fmt.Fprintf(&warnings, format, args...) }
+
+	mock := &MockRunner{}
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{home, varlog}}}
+
+	if err := ensureSnapshotSubvolumes(context.Background(), cfg, mock); err != nil {
+		t.Fatalf("a failing chmod must not fail provisioning, got: %v", err)
+	}
+	if len(mock.Calls) != 2 {
+		t.Errorf("a failing chmod must not stop later subvolumes, got %d calls: %+v",
+			len(mock.Calls), mock.Calls)
+	}
+	got := warnings.String()
+	if got == "" {
+		t.Fatal("a failing chmod must be warned, not swallowed")
+	}
+	if !strings.Contains(got, filepath.Join(home, ".snapshots")) {
+		t.Errorf("warning %q does not identify the path it could not chmod", got)
 	}
 }
