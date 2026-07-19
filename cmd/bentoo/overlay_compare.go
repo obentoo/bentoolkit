@@ -10,6 +10,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -134,17 +135,13 @@ func runCompare(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
-	// Apply token (priority: flag > env (GITHUB_TOKEN > GH_TOKEN) > config > repo-specific)
-	token := compareToken
-	if token == "" {
-		token = github.TokenFromEnv()
+	// Token precedence (D3) lives in resolveRepoToken. An unreadable secrets file
+	// warns and degrades to anonymous access rather than aborting the comparison.
+	resolvedToken, err := resolveRepoToken(compareToken, repoInfo.Token)
+	if err != nil {
+		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
 	}
-	if token == "" {
-		token = cfg.GitHub.Token
-	}
-	if token != "" && repoInfo.Token == "" {
-		repoInfo.Token = token
-	}
+	repoInfo.Token = resolvedToken
 
 	// Create provider
 	prov, err := provider.NewProvider(repoInfo, compareClone)
@@ -283,7 +280,59 @@ func printComparisonSummary(report *overlay.CompareReport, repoName string) {
 	}
 }
 
-// convertConfigRepos converts config.RepoConfig map to provider.RepositoryInfo map
+// repoTokenName maps a repository name to the environment variable / secrets key
+// that supplies its auth token: BENTOO_REPO_<NAME>_TOKEN, where <NAME> is the
+// name upper-cased with every rune outside [A-Z0-9] replaced by '_'.
+//
+// The normalization is lossy, so distinct names can collide: "my-repo" and
+// "my.repo" both map to BENTOO_REPO_MY_REPO_TOKEN. This is intentional and
+// documented — an actual key clash is resolved by the secrets file's
+// first-occurrence-wins rule (D6), so the first matching entry supplies the token
+// for every colliding name.
+func repoTokenName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return "BENTOO_REPO_" + b.String() + "_TOKEN"
+}
+
+// resolveRepoToken applies the D3 token precedence for a single repository:
+//
+//	--token flag (flagToken)
+//	  > per-repo token (repoToken, resolved from BENTOO_REPO_<NAME>_TOKEN into
+//	    RepositoryInfo.Token by convertConfigRepos)
+//	  > global token (GITHUB_TOKEN/GH_TOKEN via env or the secrets file).
+//
+// config.yaml is no longer a token source. Before D3 the per-repo token beat
+// everything, including an explicit --token: defensible while that token lived
+// in the config file the user was editing, indefensible once it lives in a
+// secrets file the flag cannot override.
+//
+// github.ResolveToken is consulted ONLY when both arguments are empty, so the
+// two short-circuit paths do no file I/O. An absent token everywhere yields
+// ("", nil) — anonymous access, not a failure. A present-but-unreadable secrets
+// file yields ("", err) so the caller can warn; this function never logs, which
+// keeps it pure with respect to its inputs and leaves the warning to the caller.
+func resolveRepoToken(flagToken, repoToken string) (string, error) {
+	if flagToken != "" {
+		return flagToken, nil
+	}
+	if repoToken != "" {
+		return repoToken, nil
+	}
+	return github.ResolveToken()
+}
+
+// convertConfigRepos converts a config.RepoConfig map to a
+// provider.RepositoryInfo map, resolving each repository's auth token from
+// BENTOO_REPO_<NAME>_TOKEN via the secrets chain (env → user file → system file).
+// config.yaml is no longer a token source. An unreadable secrets file warns and
+// the token is treated as unset rather than aborting the whole conversion.
 func convertConfigRepos(cfg *config.Config) map[string]*provider.RepositoryInfo {
 	if cfg.Repositories == nil {
 		return nil
@@ -291,12 +340,17 @@ func convertConfigRepos(cfg *config.Config) map[string]*provider.RepositoryInfo 
 
 	result := make(map[string]*provider.RepositoryInfo)
 	for name, repo := range cfg.Repositories {
+		tok, _, err := secrets.Lookup(repoTokenName(name))
+		if err != nil {
+			logger.Warn("resolving token for repository %q: %v; treating it as unset", name, err)
+			tok = ""
+		}
 		result[name] = &provider.RepositoryInfo{
 			Name:     name,
 			Provider: repo.Provider,
 			URL:      repo.URL,
 			Path:     repo.Path,
-			Token:    repo.Token,
+			Token:    tok,
 			Branch:   repo.Branch,
 		}
 	}

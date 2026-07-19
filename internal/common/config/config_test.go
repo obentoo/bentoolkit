@@ -1800,7 +1800,6 @@ repositories:
   my-gitlab-overlay:
     provider: gitlab
     url: https://gitlab.example.com/mygroup/my-overlay
-    token: glpat-secret
     branch: master
   my-git-overlay:
     provider: git
@@ -1840,9 +1839,6 @@ repositories:
 	}
 	if gl.Provider != "gitlab" {
 		t.Errorf("expected provider gitlab, got %q", gl.Provider)
-	}
-	if gl.Token != "glpat-secret" {
-		t.Errorf("expected token glpat-secret, got %q", gl.Token)
 	}
 
 	git := cfg.Repositories["my-git-overlay"]

@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // Error variables for authenticated fetching.
@@ -40,26 +42,16 @@ var (
 // package without it is fetched the normal way (pkgdev from SRC_URI).
 const (
 	metaFetchMethod      = "fetch_method"       // "post" (default) or "get"
-	metaFetchURL         = "fetch_url"           // form action / endpoint
-	metaFetchSerialEnv   = "fetch_serial_env"    // env var holding the serial
-	metaFetchSerialField = "fetch_serial_field"  // form field name for the serial
-	metaFetchForm        = "fetch_form"          // other form fields, urlencoded
-	metaFetchFilename    = "fetch_filename"      // dest name; {version} is substituted
+	metaFetchURL         = "fetch_url"          // form action / endpoint
+	metaFetchSerialEnv   = "fetch_serial_env"   // env var holding the serial
+	metaFetchSerialField = "fetch_serial_field" // form field name for the serial
+	metaFetchForm        = "fetch_form"         // other form fields, urlencoded
+	metaFetchFilename    = "fetch_filename"     // dest name; {version} is substituted
 )
 
 // authFetchTimeout bounds the authenticated download. The payload is a full
 // binary distfile (tens of MB), so it gets a generous-but-finite budget.
 const authFetchTimeout = 5 * time.Minute
-
-// secretsFilePath returns the fallback secrets file location. It is a var so
-// tests can point it at a temp file. Empty result means "no home dir".
-var secretsFilePath = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "bentoo", "secrets")
-}
 
 // authFetchSpec is the parsed, validated description of one authenticated
 // download, derived from a package's [meta] block.
@@ -125,51 +117,24 @@ func (s *authFetchSpec) resolvedFilename(version string) string {
 	return strings.ReplaceAll(s.filename, "{version}", version)
 }
 
-// resolveSecret looks up the named serial. Order: the environment variable
-// first, then the secrets file (~/.config/bentoo/secrets, ".env" style:
-// NAME=value per line, # comments allowed). The value is never logged.
+// resolveSecret looks up the named serial via the shared resolution chain in
+// internal/common/secrets (env var first, then the user-scope secrets file, then
+// the system-scope /etc/bentoo/secrets; ".env" style, value never logged).
+//
+// A total miss is reported as ErrAuthFetchSecretMissing so errors.Is callers and
+// the existing tests keep working; a present-but-unreadable secrets file
+// (secrets.ErrUnreadable) is surfaced wrapped rather than degraded to a silent
+// miss, and stays distinguishable via errors.Is.
 func resolveSecret(envName string) (string, error) {
-	if v := strings.TrimSpace(os.Getenv(envName)); v != "" {
-		return v, nil
-	}
-
-	path := secretsFilePath()
-	if path == "" {
-		return "", fmt.Errorf("%w: %s (env unset and no home dir for the secrets file)", ErrAuthFetchSecretMissing, envName)
-	}
-
-	v, err := readSecretFromFile(path, envName)
+	v, found, err := secrets.Lookup(envName)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: resolving %s: %w", ErrAuthFetchSecretMissing, envName, err)
 	}
-	if v == "" {
-		return "", fmt.Errorf("%w: %s (export %s=... or add it to %s)", ErrAuthFetchSecretMissing, envName, envName, path)
+	if !found {
+		return "", fmt.Errorf("%w: %s (export %s=... or add it to one of: %s)",
+			ErrAuthFetchSecretMissing, envName, envName, strings.Join(secrets.Paths(), ", "))
 	}
 	return v, nil
-}
-
-// readSecretFromFile reads NAME from a ".env"-style file. A missing file is not
-// an error here (it just means "not found"); a present-but-unreadable file is.
-func readSecretFromFile(path, name string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("%w: reading %s: %v", ErrAuthFetchSecretMissing, path, err)
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(key) != name {
-			continue
-		}
-		return strings.Trim(strings.TrimSpace(val), `"'`), nil
-	}
-	return "", nil
 }
 
 // fetchDistfile resolves the serial, submits the form, and writes the response
@@ -205,7 +170,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, scrubSecret(err.Error(), secret))
+		return "", fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, secrets.Scrub(err.Error(), secret))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -257,7 +222,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, secret string) (*http.
 		return nil, fmt.Errorf("%w: unsupported method %q", ErrAuthFetchFailed, s.method)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: building request: %v", ErrAuthFetchFailed, scrubSecret(err.Error(), secret))
+		return nil, fmt.Errorf("%w: building request: %v", ErrAuthFetchFailed, secrets.Scrub(err.Error(), secret))
 	}
 	// Some vendor endpoints reject empty/bot User-Agents.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) bentoo-autoupdate")
@@ -280,7 +245,7 @@ func writeBody(destDir, destPath string, body io.Reader, secret string) (string,
 	switch {
 	case copyErr != nil:
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, scrubSecret(copyErr.Error(), secret))
+		return "", fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, secrets.Scrub(copyErr.Error(), secret))
 	case closeErr != nil:
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: closing temp file: %v", ErrAuthFetchFailed, closeErr)
@@ -294,13 +259,4 @@ func writeBody(destDir, destPath string, body io.Reader, secret string) (string,
 		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
 	}
 	return destPath, nil
-}
-
-// scrubSecret removes the serial from a string before it is logged or wrapped
-// into an error, so a transport error echoing the request URL cannot leak it.
-func scrubSecret(s, secret string) string {
-	if secret == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, secret, "***")
 }

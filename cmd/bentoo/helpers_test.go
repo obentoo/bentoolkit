@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,14 +56,22 @@ func TestConvertConfigReposNil(t *testing.T) {
 	}
 }
 
-// TestConvertConfigRepos tests convertConfigRepos with populated repositories.
+// TestConvertConfigRepos tests convertConfigRepos with populated repositories,
+// including per-repo token resolution from BENTOO_REPO_<NAME>_TOKEN via the
+// secrets chain. HOME + XDG_CONFIG_HOME are isolated to an empty temp dir so the
+// host's real ~/.config/bentoo/secrets cannot influence the result; the env var
+// (checked first by secrets.Lookup) supplies the token deterministically.
 func TestConvertConfigRepos(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("BENTOO_REPO_MYGENTOO_TOKEN", "tok123")
+
 	cfg := &config.Config{
 		Repositories: map[string]*config.RepoConfig{
 			"mygentoo": {
 				Provider: "github",
 				URL:      "https://github.com/gentoo/gentoo",
-				Token:    "tok123",
 				Branch:   "master",
 			},
 		},
@@ -131,14 +140,21 @@ func TestGetStatusColor(t *testing.T) {
 	}
 }
 
-// TestConvertConfigReposPreservesAllFields tests that all RepositoryInfo fields are mapped.
+// TestConvertConfigReposPreservesAllFields tests that all RepositoryInfo fields
+// are mapped, with the token resolved from BENTOO_REPO_<NAME>_TOKEN via the
+// secrets chain. HOME + XDG_CONFIG_HOME are isolated so the host's real secrets
+// file cannot influence the result.
 func TestConvertConfigReposPreservesAllFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("BENTOO_REPO_TEST_TOKEN", "secret")
+
 	cfg := &config.Config{
 		Repositories: map[string]*config.RepoConfig{
 			"test": {
 				Provider: "git",
 				URL:      "https://example.com/repo",
-				Token:    "secret",
 				Branch:   "main",
 			},
 		},
@@ -150,5 +166,8 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 	_ = (*provider.RepositoryInfo)(repo)
 	if repo.Provider != "git" {
 		t.Errorf("Provider = %q, want %q", repo.Provider, "git")
+	}
+	if repo.Token != "secret" {
+		t.Errorf("Token = %q, want %q", repo.Token, "secret")
 	}
 }

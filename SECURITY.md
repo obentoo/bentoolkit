@@ -72,3 +72,29 @@ Every change to this repository is gated in CI by:
   dodge the window when most hijacked or yanked packages are caught.
 
 You can reproduce the dependency audit locally with `make audit`.
+
+## Secret Handling
+
+bentoolkit resolves secrets at runtime instead of storing them in its
+configuration files. `config.yaml` holds no tokens, API keys, or passwords at
+all. Every secret bentoo consumes — the GitHub token, per-repository tokens, the
+LLM API key, the authenticated-fetch serial, and the ntfy token — is resolved
+through a single chain:
+
+1. an environment variable, then
+2. the user secrets file `$XDG_CONFIG_HOME/bentoo/secrets` (else
+   `~/.config/bentoo/secrets`), then
+3. the system secrets file `/etc/bentoo/secrets`.
+
+The secrets file is `.env` style (`NAME=value`, `#` comments, an optional
+`export ` prefix) and should be `chmod 600`; bentoo warns once if it is group-
+or world-readable. Secret **values** never reach logs, argv, or error messages —
+only secret **paths** (e.g. a restic `password_file`) ever appear in a
+subprocess invocation.
+
+**One field is not yet on the chain.** `smtp.password` in `snapshot.toml` is
+still read as a plaintext value from the config file, to enable SMTP AUTH for
+email notifications. Migrating it onto the chain is planned follow-up work.
+Until then, `chmod 600` your `snapshot.toml` if you set that field. Its value is
+still never logged, never interpolated into an error, and never placed in argv —
+it lives only inside the `smtp.Auth` value handed to the SMTP client.

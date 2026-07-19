@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Unified secret resolution.** Every secret bentoo consumes now resolves
+  through one chain — an environment variable, then the user secrets file
+  `$XDG_CONFIG_HOME/bentoo/secrets` (else `~/.config/bentoo/secrets`), then the
+  system secrets file `/etc/bentoo/secrets`. The secrets file is `.env` style
+  (`NAME=value`, `#` comments, an optional `export ` prefix), should be
+  `chmod 600`, and triggers a one-time warning when it is group- or
+  world-readable. The names bentoo looks up: `GITHUB_TOKEN` then `GH_TOKEN`
+  (GitHub API), a per-repository `BENTOO_REPO_<NAME>_TOKEN` (the repo's config
+  key uppercased, every character outside `[A-Z0-9]` mapped to `_`),
+  `BENTOO_NTFY_TOKEN` (snapshot ntfy auth), and the *names* configured in
+  `llm.api_key_env` (e.g. `ANTHROPIC_API_KEY`) and `fetch_serial_env` (e.g.
+  `FILEZILLA_PRO_KEY`) — each resolved through the same chain.
+- **Legacy-secret migration diagnostic.** When a loaded config still carries a
+  removed secret key, bentoo prints an actionable warning — once, and before any
+  config write — telling you to move the value into the secrets file.
+
+### Changed
+- **`--token` now outranks a per-repository token.** For `overlay compare` the
+  precedence is `--token` flag > per-repo `BENTOO_REPO_<NAME>_TOKEN` > global
+  `GITHUB_TOKEN`/`GH_TOKEN`. Previously a config/file token could silently
+  override the explicit flag.
+
+### Removed
+- **Plaintext secret fields in config are no longer read (BREAKING).**
+  `github.token` and `repositories.<name>.token` in `config.yaml`, and
+  `ntfy.token` (`[notify.ntfy]`) in `snapshot.toml`, are no longer consulted.
+  (The runtime provider token field itself is unchanged — only the config source
+  was removed.)
+
+### Migration
+
+This is a **breaking change**: any token kept in a config file is now ignored.
+For each one, move the value into the secrets file under the named environment
+variable and delete the config key:
+
+```bash
+mkdir -p ~/.config/bentoo
+cat >> ~/.config/bentoo/secrets <<'EOF'
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+BENTOO_REPO_MY_OVERLAY_TOKEN=ghp_xxxxxxxxxxxx
+BENTOO_NTFY_TOKEN=tk_xxxxxxxxxxxx
+EOF
+chmod 600 ~/.config/bentoo/secrets
+```
+
+- `github.token` → `GITHUB_TOKEN` (or `GH_TOKEN`).
+- `repositories.<name>.token` → `BENTOO_REPO_<NAME>_TOKEN` (`<name>` uppercased,
+  every character outside `[A-Z0-9]` replaced by `_`).
+- `[notify.ntfy] token` → `BENTOO_NTFY_TOKEN`.
+
+Then remove the now-ignored `github:`/`token:` keys from `config.yaml` and the
+`token` key from `snapshot.toml`. bentoo warns (once, before any config write)
+if a legacy secret key is still present.
+
 ## [0.13.1] - 2026-07-13
 
 ### Fixed

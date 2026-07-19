@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 )
 
@@ -38,10 +39,20 @@ var _ Notifier = noopNotifier{}
 // yields the no-op default. The (Notifier, error) signature is final — NewManager
 // depends on it; it never returns a non-nil error today, but the error return is kept
 // for signature stability.
+//
+// The ntfy token is not a config field: it resolves from BENTOO_NTFY_TOKEN via the
+// secrets chain (env → user file → system file). An unreadable secrets file degrades
+// to an unauthenticated notification (a logged warning), never a hard failure — so
+// the resolution keeps the "never returns a non-nil error" contract above.
 func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	var notifiers []Notifier
 	if cfg.Ntfy.URL != "" {
-		notifiers = append(notifiers, ntfyNotifier{url: cfg.Ntfy.URL, token: cfg.Ntfy.Token})
+		ntfyToken, _, err := secrets.Lookup("BENTOO_NTFY_TOKEN")
+		if err != nil {
+			warnLogf("snapshot: resolving ntfy token: %v; sending unauthenticated", err)
+			ntfyToken = ""
+		}
+		notifiers = append(notifiers, ntfyNotifier{url: cfg.Ntfy.URL, token: ntfyToken})
 	}
 	if cfg.Healthchecks.PingURL != "" {
 		notifiers = append(notifiers, healthchecksNotifier{pingURL: cfg.Healthchecks.PingURL, start: cfg.Healthchecks.Start})

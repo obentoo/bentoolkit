@@ -222,19 +222,19 @@ func TestExtractPackageAtom(t *testing.T) {
 
 // TestOptionSetters exercises the small functional-option closures that are
 // otherwise only wired from cmd/ (and so show as uncovered): the checker's
-// GitHub token, the applier's packages config, and the analyzer's context and
-// timeouts. Construction is allowed to fail (e.g. analyzer config loading) — the
-// options still run inside the constructor's apply loop, which is the point.
+// config dir and rate limiter, the applier's packages config, and the analyzer's
+// context and timeouts. Construction is allowed to fail (e.g. analyzer config
+// loading) — the options still run inside the constructor's apply loop, which is
+// the point.
 func TestOptionSetters(t *testing.T) {
 	empty := &PackagesConfig{Packages: map[string]PackageConfig{}}
 
 	if _, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),
 		WithPackagesConfig(empty),
-		WithGitHubToken("ghp_test_token"),
 		WithRateLimiter(unlimitedRateLimiter()),
 	); err != nil {
-		t.Fatalf("NewChecker with token: %v", err)
+		t.Fatalf("NewChecker: %v", err)
 	}
 
 	if _, err := NewApplier(t.TempDir(), t.TempDir(),

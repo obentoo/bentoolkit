@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 func TestParseAuthFetchSpec(t *testing.T) {
@@ -97,13 +99,7 @@ func TestResolveSecret(t *testing.T) {
 	})
 
 	t.Run("file fallback", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "secrets")
-		content := "# a comment\nOTHER=nope\nFZ_FILE_KEY = \"from-file\"\n"
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		withSecretsFile(t, path)
+		withSecretsFile(t, "# a comment\nOTHER=nope\nFZ_FILE_KEY = \"from-file\"\n")
 		// Ensure env is unset so the file path is exercised.
 		t.Setenv("FZ_FILE_KEY", "")
 		got, err := resolveSecret("FZ_FILE_KEY")
@@ -113,7 +109,7 @@ func TestResolveSecret(t *testing.T) {
 	})
 
 	t.Run("missing everywhere errors", func(t *testing.T) {
-		withSecretsFile(t, filepath.Join(t.TempDir(), "does-not-exist"))
+		withSecretsFile(t, "")
 		t.Setenv("FZ_ABSENT_KEY", "")
 		if _, err := resolveSecret("FZ_ABSENT_KEY"); !errors.Is(err, ErrAuthFetchSecretMissing) {
 			t.Fatalf("err = %v, want ErrAuthFetchSecretMissing", err)
@@ -200,7 +196,7 @@ func TestFetchDistfileMissingSerial(t *testing.T) {
 		filename: "Foo.tar.xz", form: mustForm(t, ""),
 	}
 	t.Setenv("FZ_NONE_KEY", "")
-	withSecretsFile(t, filepath.Join(t.TempDir(), "absent"))
+	withSecretsFile(t, "")
 
 	if _, err := spec.fetchDistfile(context.Background(), "1.0.0", t.TempDir()); !errors.Is(err, ErrAuthFetchSecretMissing) {
 		t.Fatalf("err = %v, want ErrAuthFetchSecretMissing", err)
@@ -219,10 +215,10 @@ func TestFetchDistfileRejectsUnsafeFilename(t *testing.T) {
 }
 
 func TestScrubSecret(t *testing.T) {
-	if got := scrubSecret("url?key=ABC123&x=1", "ABC123"); strings.Contains(got, "ABC123") {
+	if got := secrets.Scrub("url?key=ABC123&x=1", "ABC123"); strings.Contains(got, "ABC123") {
 		t.Fatalf("scrubSecret left the secret in: %q", got)
 	}
-	if got := scrubSecret("no secret here", ""); got != "no secret here" {
+	if got := secrets.Scrub("no secret here", ""); got != "no secret here" {
 		t.Fatalf("scrubSecret with empty secret altered the string: %q", got)
 	}
 }
@@ -249,11 +245,26 @@ func mustForm(t *testing.T, raw string) (v map[string][]string) {
 	return spec.form
 }
 
-// withSecretsFile points the secrets-file resolver at path for the duration of
-// the test, restoring the original afterwards.
-func withSecretsFile(t *testing.T, path string) {
+// withSecretsFile isolates HOME (and XDG_CONFIG_HOME) to a fresh tempdir so
+// secrets.Lookup can never read the developer's real ~/.config/bentoo/secrets,
+// then, when content != "", writes it as the user-scope secrets file so the
+// lookup resolves it. Empty content leaves no file (absence == miss). Isolation
+// is mandatory (D9): a bare blank-env test would otherwise read the real user
+// secrets file. Both HOME and XDG_CONFIG_HOME are set because secrets.Paths
+// honors XDG_CONFIG_HOME first (mirroring cmd/bentoo's overlay_autoupdate_test).
+func withSecretsFile(t *testing.T, content string) {
 	t.Helper()
-	orig := secretsFilePath
-	secretsFilePath = func() string { return path }
-	t.Cleanup(func() { secretsFilePath = orig })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if content == "" {
+		return
+	}
+	p := filepath.Join(home, ".config", "bentoo", "secrets")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
 }

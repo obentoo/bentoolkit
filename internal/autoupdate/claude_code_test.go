@@ -278,16 +278,16 @@ func TestResolveBare_Matrix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// The single resolved key is now passed to resolveBare directly, so the
+			// matrix no longer manipulates the environment (nor reads any file):
+			// keySet chooses whether a non-empty key was resolved upstream.
+			key := ""
 			if tt.keySet {
-				t.Setenv(keyEnv, "secret-value")
-			} else {
-				// Ensure the var is empty for this subtest.
-				t.Setenv(keyEnv, "")
-				_ = os.Unsetenv(keyEnv)
+				key = "secret-value"
 			}
 
 			cfg := LLMConfig{Bare: tt.bare, APIKeyEnv: tt.keyEnv}
-			if got := resolveBare(cfg); got != tt.expected {
+			if got := resolveBare(cfg, key); got != tt.expected {
 				t.Errorf("resolveBare(bare=%q, keySet=%v, keyEnv=%q) = %v, want %v",
 					tt.bare, tt.keySet, tt.keyEnv, got, tt.expected)
 			}

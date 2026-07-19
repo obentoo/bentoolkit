@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 const (
@@ -198,7 +199,8 @@ func NewLLMProvider(cfg LLMConfig) (LLMProvider, error) {
 }
 
 // NewClaudeClient creates a new Claude client from configuration.
-// It validates the configuration and retrieves the API key from the environment.
+// It validates the configuration and resolves the API key via the unified
+// secrets chain (env → user file → system file).
 // The API endpoint can be overridden via the CLAUDE_API_ENDPOINT environment variable.
 func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 	// Check API key environment variable name
@@ -206,10 +208,17 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 		return nil, fmt.Errorf("%w: api_key_env not specified", ErrLLMNotConfigured)
 	}
 
-	// Get API key from environment
-	apiKey := os.Getenv(cfg.APIKeyEnv)
-	if apiKey == "" {
-		return nil, fmt.Errorf("%w: %s", ErrLLMAPIKeyMissing, cfg.APIKeyEnv)
+	// Resolve the API key through the unified secrets chain (env → user file →
+	// system file) rather than env-only. A present-but-unreadable secrets file
+	// propagates as secrets.ErrUnreadable instead of silently degrading to
+	// "anonymous"; a total miss names the env var and the searched paths.
+	apiKey, found, err := secrets.Lookup(cfg.APIKeyEnv)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %s (export %s=... or add it to one of: %s)",
+			ErrLLMAPIKeyMissing, cfg.APIKeyEnv, cfg.APIKeyEnv, strings.Join(secrets.Paths(), ", "))
 	}
 
 	// Set default model if not specified
@@ -646,7 +655,8 @@ type LLMClient struct {
 }
 
 // NewLLMClient creates a new LLM client from configuration.
-// It validates the configuration and retrieves the API key from the environment.
+// It validates the configuration and resolves the API key via the unified
+// secrets chain (env → user file → system file).
 // Returns an error if the provider is not configured or the API key is missing.
 func NewLLMClient(cfg LLMConfig) (*LLMClient, error) {
 	// Check if provider is configured

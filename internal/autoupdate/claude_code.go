@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 const (
@@ -67,9 +69,17 @@ type ClaudeCodeClient struct {
 	// model is the resolved model name passed via --model.
 	model string
 	// apiKeyEnv is the environment variable name that holds the Anthropic API
-	// key. Only its value (looked up at call time) is injected into the child
-	// environment, and only when bareMode is true.
+	// key. In non-bare mode it names an auth var to scrub from the child env; the
+	// injected key VALUE is the pre-resolved apiKey (below), never re-read here.
 	apiKeyEnv string
+	// apiKey is the Anthropic API key resolved ONCE at construction via
+	// secrets.Lookup(apiKeyEnv) over the fixed chain (env → user file → system
+	// file). This single value drives BOTH the bare-mode decision (resolveBare)
+	// and the child-env injection, so a key present only in a secrets file cannot
+	// flip bare on yet be missing from the spawned CLI. It is injected solely
+	// through the child env in bare mode and never appears in argv, logs, or
+	// returned errors (R2.4, G5).
+	apiKey string
 	// bareMode is the resolved tri-state auth decision (see resolveBare). When
 	// true the CLI runs with --bare and the API key is injected via the child
 	// process env; when false the CLI uses its own logged-in session.
@@ -140,15 +150,18 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 //     that session.
 //   - "auto"  (or any other value — config normalize already guarantees the set
 //     {auto,true,false}, but the default branch is defensive) → bare IFF an API
-//     key env var is configured AND populated in the environment.
-func resolveBare(cfg LLMConfig) bool {
+//     key env var is configured AND the single resolved key passed in is
+//     non-empty. The key is resolved ONCE by the caller (via secrets.Lookup) and
+//     handed in, so this decision no longer reads the environment itself — a key
+//     that lives only in a secrets file still selects bare.
+func resolveBare(cfg LLMConfig, key string) bool {
 	switch cfg.Bare {
 	case "true":
 		return true
 	case "false":
 		return false
 	default:
-		return cfg.APIKeyEnv != "" && os.Getenv(cfg.APIKeyEnv) != ""
+		return cfg.APIKeyEnv != "" && key != ""
 	}
 }
 
@@ -163,9 +176,12 @@ var scrubbedAuthEnvVars = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
 // childEnv builds the environment for a spawned `claude` process from the
 // resolved auth mode.
 //
-//   - bare mode: the inherited environment plus an injected ANTHROPIC_API_KEY
-//     taken from apiKeyEnv (when populated), so the CLI authenticates via the key.
-//     The value travels only through the env, never argv/logs.
+//   - bare mode: the inherited environment plus an injected ANTHROPIC_API_KEY set
+//     to key — the single credential the caller already resolved via
+//     secrets.Lookup (injected only when non-empty). The value travels solely
+//     through the env, never argv/logs, and is NOT re-read from apiKeyEnv here, so
+//     a key that lives only in a secrets file (absent from the process env) is
+//     still injected into the child.
 //   - non-bare mode: the inherited environment with every auth source in
 //     scrubbedAuthEnvVars AND apiKeyEnv REMOVED, so an API key present in the
 //     parent env (e.g. exported from a shell rc) cannot override the operator's
@@ -174,10 +190,10 @@ var scrubbedAuthEnvVars = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
 // It always returns a non-nil slice so callers assign cmd.Env unconditionally
 // (a nil cmd.Env would make the child inherit the parent env verbatim, defeating
 // the non-bare scrub).
-func childEnv(bareMode bool, apiKeyEnv string) []string {
+func childEnv(bareMode bool, apiKeyEnv string, key string) []string {
 	if bareMode {
 		env := os.Environ()
-		if key := os.Getenv(apiKeyEnv); key != "" {
+		if key != "" {
 			env = append(env, "ANTHROPIC_API_KEY="+key)
 		}
 		return env
@@ -219,6 +235,30 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 		return nil, ErrClaudeCodeUnavailable
 	}
 
+	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
+	// user file → system file). This single value drives BOTH the bare-mode
+	// decision and the child-env injection below, closing the split-brain gap
+	// where a key present only in a secrets file flipped bare on but the old
+	// os.Getenv injection spawned `claude` with no credential. A present-but-
+	// unreadable secrets file surfaces as secrets.ErrUnreadable rather than
+	// silently degrading to an unauthenticated run.
+	//
+	// An EMPTY api_key_env means no credential was requested at all — the
+	// subscription shape, where the agentic `claude` authenticates itself. Skip
+	// the chain entirely in that case: resolving the empty name would consult
+	// the secrets file and turn an unreadable one into a spurious constructor
+	// failure. NewClaudeClient/NewOpenAIClient guard the same way, except that
+	// for them an empty name is fatal (ErrLLMNotConfigured) while here it is a
+	// valid configuration.
+	var key string
+	if cfg.APIKeyEnv != "" {
+		resolved, _, err := secrets.Lookup(cfg.APIKeyEnv)
+		if err != nil {
+			return nil, err
+		}
+		key = resolved
+	}
+
 	model := cfg.Model
 	if model == "" {
 		model = DefaultClaudeCodeModel
@@ -227,7 +267,8 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 	c := &ClaudeCodeClient{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
-		bareMode:     resolveBare(cfg),
+		apiKey:       key,
+		bareMode:     resolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultClaudeCodeTimeout,
 		ctx:          context.Background(), // SAFE: default parent; replaced by WithClaudeCodeContext when a caller wires a cancellable context.
@@ -309,7 +350,7 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// (only via env, never argv/logs — R2.1, R2.4, G5); non-bare scrubs any
 	// inherited API key so the CLI uses its logged-in session.
-	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv)
+	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv, c.apiKey)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

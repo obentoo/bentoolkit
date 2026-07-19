@@ -591,3 +591,35 @@ func TestNewNotifier_BuildsConfiguredDrivers(t *testing.T) {
 		t.Errorf("built %d notifiers, want 2 (ntfy + webhook configured)", len(m.notifiers))
 	}
 }
+
+func TestNewNotifier_NtfyTokenFromEnv(t *testing.T) {
+	// The ntfy token is no longer a config field; newNotifier resolves it from
+	// BENTOO_NTFY_TOKEN via secrets.Lookup (env → user file → system file). Isolate
+	// HOME + XDG_CONFIG_HOME so no real secrets file interferes, then set the env var
+	// (the highest-priority hit) and assert it reaches the ntfyNotifier's token.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BENTOO_NTFY_TOKEN", "tk_env")
+
+	n, err := newNotifier(NotifyConfig{Ntfy: NtfyConfig{URL: "https://ntfy.sh/topic"}})
+	if err != nil {
+		t.Fatalf("newNotifier: %v", err)
+	}
+	m, ok := n.(multiNotifier)
+	if !ok {
+		t.Fatalf("newNotifier returned %T, want multiNotifier", n)
+	}
+	if len(m.notifiers) != 1 {
+		t.Fatalf("built %d notifiers, want 1 (ntfy configured)", len(m.notifiers))
+	}
+	nn, ok := m.notifiers[0].(ntfyNotifier)
+	if !ok {
+		t.Fatalf("notifier[0] is %T, want ntfyNotifier", m.notifiers[0])
+	}
+	if nn.token != "tk_env" {
+		t.Errorf("ntfy token = %q, want tk_env (resolved from BENTOO_NTFY_TOKEN)", nn.token)
+	}
+	if nn.url != "https://ntfy.sh/topic" {
+		t.Errorf("ntfy url = %q, want the configured URL", nn.url)
+	}
+}

@@ -53,8 +53,9 @@ uninstall:
 	rm -f $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
 
 # Install the example config into the user's config dir.
-# Never overwrites an existing config; writes 0600 (may hold tokens), matching
-# what the app itself does when it creates a config.
+# Never overwrites an existing config; writes 0600 as a defensive default (the
+# config holds no secrets — those live in the separate ~/.config/bentoo/secrets
+# file), matching what the app itself does when it creates a config.
 .PHONY: install-config
 install-config:
 	@if [ -f "$(CONFIG_FILE)" ]; then \

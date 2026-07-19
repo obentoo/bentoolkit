@@ -4,7 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // TestFetchDistfileLiveFileZillaProSecretsFile proves that a serial placed in
@@ -39,7 +42,7 @@ func TestFetchDistfileLiveFileZillaProSecretsFile(t *testing.T) {
 	// Fail loudly (rather than silently testing nothing) if the secrets file does
 	// not actually contain the key — that is the very thing being verified.
 	if v, err := resolveSecret("FILEZILLA_PRO_KEY"); err != nil || v == "" {
-		t.Fatalf("FILEZILLA_PRO_KEY not resolvable from %s (err=%v) — add `FILEZILLA_PRO_KEY=<serial>` to it", secretsFilePath(), err)
+		t.Fatalf("FILEZILLA_PRO_KEY not resolvable from %s (err=%v) — add `FILEZILLA_PRO_KEY=<serial>` to it", strings.Join(secrets.Paths(), ", "), err)
 	}
 
 	version := os.Getenv("FILEZILLA_PRO_VERSION")
@@ -78,5 +81,5 @@ func TestFetchDistfileLiveFileZillaProSecretsFile(t *testing.T) {
 		t.Fatalf("downloaded %q is only %d bytes (< %d) — likely not the real distfile", filepath.Base(got), info.Size(), minSize)
 	}
 
-	t.Logf("OK: serial from %s downloaded %s (%d bytes)", secretsFilePath(), filepath.Base(got), info.Size())
+	t.Logf("OK: serial from %s downloaded %s (%d bytes)", strings.Join(secrets.Paths(), ", "), filepath.Base(got), info.Size())
 }

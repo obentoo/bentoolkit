@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +24,6 @@ var (
 type Config struct {
 	Overlay      OverlayConfig          `yaml:"overlay"`
 	Git          GitConfig              `yaml:"git"`
-	GitHub       GitHubConfig           `yaml:"github"`
 	Autoupdate   AutoupdateConfig       `yaml:"autoupdate,omitempty"`
 	Repositories map[string]*RepoConfig `yaml:"repositories,omitempty"`
 }
@@ -40,17 +40,16 @@ type GitConfig struct {
 	Email string `yaml:"email"`
 }
 
-// GitHubConfig holds GitHub API settings
-type GitHubConfig struct {
-	Token string `yaml:"token"` // Personal access token for higher rate limits
-}
-
-// RepoConfig holds configuration for a custom repository
+// RepoConfig holds configuration for a custom repository.
+//
+// A per-repository auth token is no longer a field here: it now resolves from
+// BENTOO_REPO_<NAME>_TOKEN via the secrets chain (see internal/common/secrets and
+// cmd/bentoo's repoTokenName). A legacy `token:` key left in config.yaml is
+// surfaced by the migration diagnostic in LoadFrom and otherwise ignored.
 type RepoConfig struct {
 	Provider string `yaml:"provider"` // "github", "gitlab", "git", or "local"
 	URL      string `yaml:"url"`      // Full URL or org/repo for GitHub/GitLab/git (remote)
 	Path     string `yaml:"path"`     // On-disk tree for provider "local" (read in place, no clone)
-	Token    string `yaml:"token"`    // Optional auth token
 	Branch   string `yaml:"branch"`   // Branch to use (default: master/main)
 }
 
@@ -136,6 +135,55 @@ func Load() (*Config, error) {
 	return LoadFrom(configPath)
 }
 
+// legacyRepo mirrors a repositories.* entry for the STRICT probe only. It
+// retains the removed `token` key so the strict decode does not flag it as
+// unknown; the migration diagnostic reports it with an actionable message
+// instead. The other fields mirror RepoConfig so a real entry decodes cleanly.
+type legacyRepo struct {
+	Provider string `yaml:"provider"`
+	URL      string `yaml:"url"`
+	Path     string `yaml:"path"`
+	Token    string `yaml:"token"`
+	Branch   string `yaml:"branch"`
+}
+
+// probeConfig is the STRICT re-decode target. It deliberately does NOT inline
+// Config: Config already carries a `repositories` field, and inlining it beside
+// probeConfig's own legacyRepo `repositories` map makes go-yaml panic with
+// "duplicated key 'repositories' in struct" (yaml.v3 re-panics that error out of
+// Decode, which would crash LoadFrom). So Config's top-level keys are listed
+// explicitly here, reusing Config's own sub-types so the strict decode stays
+// exactly as strict as a Config decode. Two removed-but-retained keys —
+// github.token and repositories.*.token — are kept so the strict decode does not
+// report them as unknown; the migration diagnostic reports each with an
+// actionable message instead.
+type probeConfig struct {
+	Overlay      OverlayConfig         `yaml:"overlay"`
+	Git          GitConfig             `yaml:"git"`
+	Autoupdate   AutoupdateConfig      `yaml:"autoupdate,omitempty"`
+	Repositories map[string]legacyRepo `yaml:"repositories,omitempty"`
+	GitHub       struct {
+		Token string `yaml:"token"`
+	} `yaml:"github"`
+}
+
+// repoTokenEnvName derives the environment variable that now supplies a custom
+// repository's auth token: BENTOO_REPO_<NAME>_TOKEN, with NAME upper-cased and
+// every rune outside [A-Z0-9] replaced by '_'. This mirrors the resolver's
+// convention (duplicated with cmd/bentoo's repoTokenName in a different
+// package, which is acceptable for this small normalization).
+func repoTokenEnvName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return "BENTOO_REPO_" + b.String() + "_TOKEN"
+}
+
 // LoadFrom reads configuration from a specific file path
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -163,14 +211,38 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	// yaml.v3 silently drops keys that map to no struct field — e.g. a token
-	// placed under `overlay:` (which has no `token` field) instead of `github:`
-	// vanishes without a trace, leaving requests unauthenticated. A strict
-	// re-decode surfaces such mistakes as a warning to stderr; it never blocks
-	// loading, so the lenient cfg above stays authoritative.
-	probe := yaml.NewDecoder(bytes.NewReader(data))
-	probe.KnownFields(true)
-	if serr := probe.Decode(&Config{}); serr != nil {
-		fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, serr)
+	// placed under `overlay:` (which has no `token` field) vanishes without a
+	// trace. A strict re-decode surfaces such genuine typos as a warning to
+	// stderr; it never blocks loading, so the lenient cfg above stays
+	// authoritative. The decode target is probeConfig (not Config) so the
+	// removed legacy `github.token` key is NOT reported here as unknown — the
+	// migration diagnostic below reports it with an actionable message instead.
+	var probe probeConfig
+	pd := yaml.NewDecoder(bytes.NewReader(data))
+	pd.KnownFields(true)
+	if perr := pd.Decode(&probe); perr != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, perr)
+	}
+
+	// Migration diagnostics (R4): a config still carrying a secret that this
+	// release no longer reads gets exactly one actionable warning per key,
+	// emitted here in LoadFrom so it always precedes any later SaveTo that would
+	// silently drop the key. The secret VALUE is never printed.
+	secretsPath := secrets.Paths()[0]
+	if probe.GitHub.Token != "" {
+		fmt.Fprintf(os.Stderr,
+			"warning: %s: `github.token` is no longer read. Move it to %s as `GITHUB_TOKEN=<value>` (chmod 600), then delete the key. Until then, GitHub requests are unauthenticated.\n",
+			path, secretsPath)
+	}
+	// repositories.*.token is detected on the strict probe (probe.Repositories,
+	// whose legacyRepo retains the removed `token` key) rather than on cfg, which
+	// no longer carries a per-repo token field.
+	for name, repo := range probe.Repositories {
+		if repo.Token != "" {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s: `repositories.%s.token` is no longer read. Move it to %s as `%s=<value>` (chmod 600), then delete the key.\n",
+				path, name, secretsPath, repoTokenEnvName(name))
+		}
 	}
 
 	cfg.Autoupdate.LLM.normalize()
