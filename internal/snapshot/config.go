@@ -130,14 +130,20 @@ type EmailConfig struct {
 }
 
 // SMTPConfig is the optional SMTP transport of the email driver (008 R1.1). Host
-// selects SMTP over local sendmail and is joined with Port as host:port. User and
-// Password, when both set, enable PLAIN auth; the password is never placed in
-// argv, error strings, or logs (008 R1.3).
+// selects SMTP over local sendmail and is joined with Port as host:port. Host,
+// Port and User stay in snapshot.toml because they are configuration, not
+// secrets (017 R2.2).
+//
+// The password is deliberately NOT a field here: it resolves from
+// BENTOO_SMTP_PASSWORD via the secrets chain (env → user file → system file) and
+// is never read from snapshot.toml (017 R1.1, R2.1). PLAIN auth is enabled only
+// when User is set AND that lookup yields a non-empty value; either one missing
+// means the message is sent unauthenticated (017 R1.2). The resolved password is
+// never placed in argv, error strings, or logs (008 R1.3).
 type SMTPConfig struct {
-	Host     string `toml:"host,omitempty"`
-	Port     int    `toml:"port,omitempty"`
-	User     string `toml:"user,omitempty"`
-	Password string `toml:"password,omitempty"`
+	Host string `toml:"host,omitempty"`
+	Port int    `toml:"port,omitempty"`
+	User string `toml:"user,omitempty"`
 }
 
 // shouldNotify reports whether a run with the given outcome should notify, given

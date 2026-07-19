@@ -40,10 +40,13 @@ var _ Notifier = noopNotifier{}
 // depends on it; it never returns a non-nil error today, but the error return is kept
 // for signature stability.
 //
-// The ntfy token is not a config field: it resolves from BENTOO_NTFY_TOKEN via the
-// secrets chain (env → user file → system file). An unreadable secrets file degrades
-// to an unauthenticated notification (a logged warning), never a hard failure — so
-// the resolution keeps the "never returns a non-nil error" contract above.
+// Neither the ntfy token nor the SMTP password is a config field: they resolve from
+// BENTOO_NTFY_TOKEN and BENTOO_SMTP_PASSWORD via the secrets chain (env → user file
+// → system file). Both resolve HERE, once per notifier rather than once per send, so
+// an unreadable secrets file warns a single time instead of on every notification.
+// An unreadable secrets file degrades to an unauthenticated notification (a logged
+// warning), never a hard failure — so the resolution keeps the "never returns a
+// non-nil error" contract above.
 func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	var notifiers []Notifier
 	if cfg.Ntfy.URL != "" {
@@ -61,7 +64,11 @@ func newNotifier(cfg NotifyConfig) (Notifier, error) {
 		notifiers = append(notifiers, webhookNotifier{url: cfg.Webhook.URL, headers: cfg.Webhook.Headers})
 	}
 	if len(cfg.Email.To) > 0 {
-		notifiers = append(notifiers, emailNotifier{cfg: cfg.Email, runner: defaultRunner()})
+		notifiers = append(notifiers, emailNotifier{
+			cfg:          cfg.Email,
+			smtpPassword: resolveSMTPPassword(cfg.Email.SMTP.Host),
+			runner:       defaultRunner(),
+		})
 	}
 
 	if len(notifiers) == 0 {
@@ -352,9 +359,43 @@ var smtpSendMail = smtp.SendMail
 // message is piped to the local sendmail binary through the Runner seam; a
 // populated SMTP.Host switches to direct SMTP via smtpSendMail (008 R1.1, A1).
 // SMTP credentials never appear in argv, error strings, or logs (008 R1.3).
+//
+// smtpPassword carries the credential resolved once by newNotifier from
+// BENTOO_SMTP_PASSWORD (017 R1.1). It lives on the notifier rather than on
+// EmailConfig/SMTPConfig precisely because it is no longer configuration: nothing
+// reads it from snapshot.toml (017 R2.1). Its zero value is the safe one — empty
+// means send unauthenticated, whether the secret was absent (017 R1.2), its file
+// was unreadable (017 R1.3), or this notifier takes the sendmail path at all.
 type emailNotifier struct {
-	cfg    EmailConfig
-	runner Runner
+	cfg          EmailConfig
+	smtpPassword string
+	runner       Runner
+}
+
+// resolveSMTPPassword resolves the SMTP credential from BENTOO_SMTP_PASSWORD
+// through the secrets chain (017 R1.1), mirroring the ntfy token lookup above.
+//
+// It resolves only when host is non-empty — i.e. only when the SMTP transport is
+// actually selected — so a user on the local sendmail path is never warned about a
+// secrets file that path does not need.
+//
+// Lookup's three-way (value, found, err) contract collapses to one string here. A
+// miss yields "" with found=false — the normal "no secret" case, which the PLAIN
+// guard already reads as "send unauthenticated" (017 R1.2) — so found is discarded:
+// "" and "not found" are the same instruction. A non-nil err means a secrets file
+// exists but could not be read (secrets.ErrUnreadable); it warns and returns ""
+// as well, degrading the notification to unauthenticated rather than aborting it
+// (017 R1.3). The warning names the offending path, never a secret value.
+func resolveSMTPPassword(host string) string {
+	if host == "" {
+		return ""
+	}
+	password, _, err := secrets.Lookup("BENTOO_SMTP_PASSWORD")
+	if err != nil {
+		warnLogf("snapshot: resolving SMTP password: %v; sending unauthenticated", err)
+		return ""
+	}
+	return password
 }
 
 // Notify composes the RFC-822-style message for res and hands it to the selected
@@ -400,13 +441,20 @@ func (n emailNotifier) sendSendmail(ctx context.Context, msg []byte) error {
 }
 
 // sendSMTP sends msg via stdlib net/smtp through the smtpSendMail seam (008 R1.1).
-// PLAIN auth is enabled only when both User and Password are configured (nil auth
-// otherwise); the credentials live only in the smtp.Auth value and are never
-// interpolated into an error or log line (008 R1.3).
+// PLAIN auth is enabled only when SMTP.User is configured AND the password resolved
+// from BENTOO_SMTP_PASSWORD is non-empty (nil auth otherwise) — the guard shape is
+// unchanged, only the password's source moved from snapshot.toml to the secrets
+// chain (017 R1.1, R2.1). An unset user therefore still means no auth, and an
+// unresolvable password sends unauthenticated rather than failing (017 R1.2).
+//
+// The password is resolved once by newNotifier, not here: a per-send lookup would
+// re-warn on every notification when the secrets file is unreadable. The
+// credentials live only in the smtp.Auth value and are never interpolated into an
+// error or log line (008 R1.3).
 func (n emailNotifier) sendSMTP(msg []byte) error {
 	var auth smtp.Auth
-	if n.cfg.SMTP.User != "" && n.cfg.SMTP.Password != "" {
-		auth = smtp.PlainAuth("", n.cfg.SMTP.User, n.cfg.SMTP.Password, n.cfg.SMTP.Host)
+	if n.cfg.SMTP.User != "" && n.smtpPassword != "" {
+		auth = smtp.PlainAuth("", n.cfg.SMTP.User, n.smtpPassword, n.cfg.SMTP.Host)
 	}
 
 	addr := net.JoinHostPort(n.cfg.SMTP.Host, strconv.Itoa(n.cfg.SMTP.Port))
