@@ -2,11 +2,15 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,23 +92,33 @@ func TestSnapperEngine_CreateWrapsNonZeroExit(t *testing.T) {
 	}
 }
 
-// snapperListSample is a `snapper list` table in the pipe-separated layout.
-// Line 0 is the "current" pseudo-snapshot and must be skipped; header and
-// separator lines must be skipped too.
-const snapperListSample = ` # | Type   | Pre # | Date                | User | Cleanup  | Description     | Userdata
----+--------+-------+---------------------+------+----------+-----------------+---------
-0  | single |       |                     | root |          | current         |
-1  | single |       | 2026-06-08 12:00:00 | root | timeline | bentoo snapshot |
-2  | pre    |       | 2026-06-08 12:30:00 | root | number   | pre-emerge      |
-`
-
-// TestSnapperEngine_ListParsesOutput: List runs `snapper -c <config> list` and
-// parses the table into []Snapshot (R1.3) — IDs from the number column, paths
-// under <subvolume>/.snapshots/<n>/snapshot, skipping header/separator/current.
-func TestSnapperEngine_ListParsesOutput(t *testing.T) {
+// TestSnapperListEngine_RequestsJSONOut: List asks snapper for JSON and turns
+// the payload into []Snapshot (R1.3, 016 R3.1).
+//
+// Unlike its TestSnapperEngine_* siblings this name embeds "SnapperList", so
+// `go test -run SnapperList` reaches it — "SnapperEngine_List" does not match
+// that regex, which would leave the assertions below outside the gate that is
+// supposed to guard them.
+//
+// Two things are pinned. First the request: --jsonout must lead the argument
+// list. Drop it and snapper falls back to its human-readable table, whose
+// U+2502 column separators parse to nothing — `snapshot list` prints "(none)"
+// against a host full of snapshots, with no error raised anywhere to betray it.
+// That is Bug 3 verbatim, so the flag is asserted on its own before the
+// whole-argv comparison, to name the cause when it regresses.
+//
+// Second the round trip: the captured payload goes in through the Runner seam
+// and real Snapshots come out. The TestSnapperListParse_* tests below call the
+// parser directly, so they would all keep passing if List asked for the wrong
+// format or called the wrong parser — only this test covers the wiring.
+//
+// MockRunner keeps it hermetic: no snapper subprocess runs, so the result cannot
+// drift with the developer's own snapshots and holds on a host without snapper.
+func TestSnapperListEngine_RequestsJSONOut(t *testing.T) {
+	golden := snapperListGolden(t)
 	mock := &MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
-			return []byte(snapperListSample), nil
+			return golden, nil
 		},
 	}
 	e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)
@@ -113,31 +127,41 @@ func TestSnapperEngine_ListParsesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
+
+	// The request (016 R3.1).
 	if len(mock.Calls) != 1 {
 		t.Fatalf("len(Calls) = %d, want 1", len(mock.Calls))
 	}
-	wantArgs := []string{"-c", "home", "list"}
-	if mock.Calls[0].Name != "snapper" || !equalStrings(mock.Calls[0].Args, wantArgs) {
-		t.Errorf("call = %s %v, want snapper %v", mock.Calls[0].Name, mock.Calls[0].Args, wantArgs)
+	call := mock.Calls[0]
+	if !slices.Contains(call.Args, "--jsonout") {
+		t.Errorf("args %v carry no --jsonout: snapper would emit its U+2502 table and the listing would come back empty (R3.1)", call.Args)
+	}
+	wantArgs := []string{"--jsonout", "-c", "home", "list"}
+	if call.Name != "snapper" || !equalStrings(call.Args, wantArgs) {
+		t.Errorf("call = %s %v, want snapper %v", call.Name, call.Args, wantArgs)
 	}
 
-	if len(snaps) != 2 {
-		t.Fatalf("got %d snapshots, want 2 (header, separator and #0 skipped): %+v", len(snaps), snaps)
+	// The parse, end to end through List (016 R3.2, R3.3).
+	wantIDs := []string{"1", "16", "2303", "2304"}
+	if len(snaps) != len(wantIDs) {
+		t.Fatalf("got %d snapshots, want %d: %+v", len(snaps), len(wantIDs), snaps)
 	}
-	if snaps[0].ID != "1" || snaps[1].ID != "2" {
-		t.Errorf("IDs = %q, %q, want 1, 2", snaps[0].ID, snaps[1].ID)
+	for i, want := range wantIDs {
+		if snaps[i].ID != want {
+			t.Errorf("snaps[%d].ID = %q, want %q", i, snaps[i].ID, want)
+		}
+		if snaps[i].ID == "0" {
+			t.Errorf("snaps[%d] is the \"current\" pseudo-snapshot; it must be skipped (R3.3)", i)
+		}
+		if snaps[i].Subvolume != "/home" {
+			t.Errorf("snaps[%d].Subvolume = %q, want /home", i, snaps[i].Subvolume)
+		}
 	}
-	if snaps[0].Subvolume != "/home" {
-		t.Errorf("snaps[0].Subvolume = %q, want /home", snaps[0].Subvolume)
-	}
-	if snaps[0].Path != "/home/.snapshots/1/snapshot" {
-		t.Errorf("snaps[0].Path = %q, want /home/.snapshots/1/snapshot", snaps[0].Path)
+	if want := "/home/.snapshots/1/snapshot"; snaps[0].Path != want {
+		t.Errorf("snaps[0].Path = %q, want %q", snaps[0].Path, want)
 	}
 	if snaps[0].CreatedAt.IsZero() {
-		t.Error("snaps[0].CreatedAt is zero, want parsed date")
-	}
-	if got := snaps[0].CreatedAt.Format("2006-01-02 15:04:05"); got != "2026-06-08 12:00:00" {
-		t.Errorf("snaps[0].CreatedAt = %q, want 2026-06-08 12:00:00", got)
+		t.Error("snaps[0].CreatedAt is the zero time; the golden's date field must survive the trip through List (R3.2)")
 	}
 }
 
@@ -448,5 +472,183 @@ func TestApply_DoesNotInstallEmergeHook(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(hookRoot, "etc", "portage")); !os.IsNotExist(err) {
 		t.Errorf("apply wrote under %s/etc/portage; the emerge hook must be opt-in only (err=%v)", hookRoot, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 016 T4.1 — JSON snapshot listing (R3.2, R3.3, R3.4).
+//
+// testdata/snapper-list.json is a real `snapper --jsonout -c root list` capture
+// from a Gentoo host running snapper 0.13.1 on btrfs under a pt_BR locale,
+// trimmed to five representative entries: the "current" pseudo-snapshot 0 with
+// its blank date, two bentoo timeline snapshots, and a pre/post pair written by
+// the emerge hook. Every entry keeps all thirteen fields snapper emits, so these
+// tests also pin that the parser tolerates the nine it does not consume.
+//
+// The fixture is ground truth: regenerating or tidying it would hollow out the
+// assertions below, above all the date-format guard.
+// ---------------------------------------------------------------------------
+
+// snapperListGolden reads the captured `snapper --jsonout list` payload. The
+// parse is pure — no subprocess, no filesystem beyond this fixture read.
+func snapperListGolden(t *testing.T) []byte {
+	t.Helper()
+	out, err := os.ReadFile(filepath.Join("testdata", "snapper-list.json"))
+	if err != nil {
+		t.Fatalf("read snapper list fixture: %v", err)
+	}
+	return out
+}
+
+// TestSnapperListParse_GoldenFixture: the captured payload yields one Snapshot
+// per real entry, in snapper's own order, with the "current" pseudo-snapshot 0
+// excluded (016 R3.2, R3.3).
+func TestSnapperListParse_GoldenFixture(t *testing.T) {
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/")
+
+	wantIDs := []string{"1", "16", "2303", "2304"}
+	if len(snaps) != len(wantIDs) {
+		t.Fatalf("got %d snapshots, want %d (entry 0 excluded): %+v", len(snaps), len(wantIDs), snaps)
+	}
+	for i, want := range wantIDs {
+		if snaps[i].ID != want {
+			t.Errorf("snaps[%d].ID = %q, want %q", i, snaps[i].ID, want)
+		}
+		if snaps[i].ID == "0" {
+			t.Errorf("snaps[%d] is the \"current\" pseudo-snapshot; it must be skipped (R3.3)", i)
+		}
+	}
+}
+
+// TestSnapperListParse_CreatedAtMatchesGoldenDate is the date-format guard, and
+// the load-bearing assertion of this sub-task.
+//
+// snapperDateLayout must match what snapper actually prints ("2006-01-02
+// 15:04:05"). If it did not, time.Parse would fail and CreatedAt would silently
+// stay the zero time — every snapshot would list without a date and nothing else
+// in the suite would notice. So the check is deliberately doubled: CreatedAt
+// must be NON-ZERO, and it must equal the exact instant the fixture records for
+// entry 1. The expected value is built with time.Date rather than by re-parsing
+// through snapperDateLayout, because a wrong layout would fail both sides
+// identically and let the comparison pass on two zero times.
+func TestSnapperListParse_CreatedAtMatchesGoldenDate(t *testing.T) {
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/")
+	if len(snaps) == 0 {
+		t.Fatal("no snapshots parsed from the fixture")
+	}
+
+	got := snaps[0].CreatedAt // entry 1, "date": "2026-06-28 11:42:09"
+	if got.IsZero() {
+		t.Fatalf("snaps[0].CreatedAt is the zero time: snapperDateLayout (%q) does not match the date format snapper emits", snapperDateLayout)
+	}
+	// time.Parse with a zone-less layout yields UTC.
+	want := time.Date(2026, time.June, 28, 11, 42, 9, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("snaps[0].CreatedAt = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	// Cross-check against the fixture's literal text with a hardcoded layout, so
+	// the assertion cannot drift along with snapperDateLayout.
+	if s := got.Format("2006-01-02 15:04:05"); s != "2026-06-28 11:42:09" {
+		t.Errorf("snaps[0].CreatedAt renders as %q, want %q", s, "2026-06-28 11:42:09")
+	}
+}
+
+// TestSnapperListParse_DerivesPathAndSubvolume: Subvolume is the caller's
+// argument and Path follows snapper's fixed on-disk layout
+// <subvolume>/.snapshots/<id>/snapshot — the derivation carried over unchanged
+// from the table parser. A non-"/" subvolume is used so a stray hardcoded root
+// would show up.
+func TestSnapperListParse_DerivesPathAndSubvolume(t *testing.T) {
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/home")
+	if len(snaps) < 2 {
+		t.Fatalf("got %d snapshots, want at least 2", len(snaps))
+	}
+	for _, s := range snaps {
+		if s.Subvolume != "/home" {
+			t.Errorf("snapshot %s: Subvolume = %q, want /home", s.ID, s.Subvolume)
+		}
+	}
+	if want := "/home/.snapshots/1/snapshot"; snaps[0].Path != want {
+		t.Errorf("snaps[0].Path = %q, want %q", snaps[0].Path, want)
+	}
+	if want := "/home/.snapshots/16/snapshot"; snaps[1].Path != want {
+		t.Errorf("snaps[1].Path = %q, want %q", snaps[1].Path, want)
+	}
+}
+
+// TestSnapperListParse_EntryFieldsFromGolden: R3.2 asks for id, type, date and
+// description off every entry. Snapshot carries no description (and the CLI
+// renders none), so type and description are pinned where they are parsed — on
+// snapperListEntry — while the fixture's nine unconsumed fields are ignored
+// without error, which is the schema-drift tolerance the design asks for.
+func TestSnapperListParse_EntryFieldsFromGolden(t *testing.T) {
+	var configs map[string][]snapperListEntry
+	if err := json.Unmarshal(snapperListGolden(t), &configs); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	entries, ok := configs["root"]
+	if !ok {
+		t.Fatalf("fixture has no \"root\" config, got keys %v", slices.Sorted(maps.Keys(configs)))
+	}
+	if len(entries) != 5 {
+		t.Fatalf("got %d entries, want 5 (including the \"current\" pseudo-snapshot)", len(entries))
+	}
+
+	want := []snapperListEntry{
+		{Number: 0, Type: "single", Date: "", Description: "current"},
+		{Number: 1, Type: "single", Date: "2026-06-28 11:42:09", Description: "bentoo snapshot"},
+		{Number: 16, Type: "single", Date: "2026-06-29 00:00:49", Description: "bentoo snapshot"},
+		{Number: 2303, Type: "pre", Date: "2026-07-19 18:11:40", Description: "bentoo: emerge app-portage/bentoolkit-0.14.0"},
+		{Number: 2304, Type: "post", Date: "2026-07-19 18:11:57", Description: "bentoo: emerge app-portage/bentoolkit-0.14.0"},
+	}
+	for i, w := range want {
+		if entries[i] != w {
+			t.Errorf("entries[%d] = %+v, want %+v", i, entries[i], w)
+		}
+	}
+}
+
+// TestSnapperListParse_EmptyPayloads: a config with no snapshots, and no output
+// at all, each yield an empty list and no error — the parse returns no error by
+// signature, so "no error" means it must not panic or invent entries either
+// (016 R3.4). Neither case is a malformed payload, so neither may warn.
+func TestSnapperListParse_EmptyPayloads(t *testing.T) {
+	cases := []struct{ name, payload string }{
+		{"empty config slice", `{"root":[]}`},
+		{"no configs", `{}`},
+		{"zero-length output", ""},
+		{"blank output", "\n  \n"},
+		{"only the current pseudo-snapshot", `{"root":[{"number":0,"type":"single","date":"","description":"current"}]}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			warned := captureWarn(t)
+			if got := parseSnapperListJSON([]byte(c.payload), "/"); len(got) != 0 {
+				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
+			}
+			if warned() {
+				t.Error("an empty listing warned; only a malformed payload should (R3.4)")
+			}
+		})
+	}
+}
+
+// TestSnapperListParse_MalformedPayloadWarns: the parse cannot return an error,
+// so unparseable output would otherwise degrade to an empty list — the exact
+// shape of the bug this story fixes, where `snapshot list` reported "(none)"
+// against a host full of snapshots. A schema drift or a snapper that stops
+// emitting JSON must therefore be audible, mirroring how pruneRemote reports
+// unparseable `rclone lsjson` output.
+func TestSnapperListParse_MalformedPayloadWarns(t *testing.T) {
+	for _, payload := range []string{"not json at all", `{"root":`, `{"root":"unexpected"}`} {
+		t.Run(payload, func(t *testing.T) {
+			warned := captureWarn(t)
+			if got := parseSnapperListJSON([]byte(payload), "/"); len(got) != 0 {
+				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
+			}
+			if !warned() {
+				t.Error("malformed payload parsed silently; it must warn rather than look like an empty listing")
+			}
+		})
 	}
 }

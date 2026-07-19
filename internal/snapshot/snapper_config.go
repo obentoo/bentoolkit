@@ -282,8 +282,8 @@ func parseSnapperConfigsLine(line string) (lhs string, names []string, quote byt
 
 // snapshotsDirName is the directory, relative to a managed subvolume, in which
 // snapper stores that config's snapshots (<subvolume>/.snapshots/<id>/snapshot,
-// the layout parseSnapperList reconstructs). snapper requires it to be a btrfs
-// subvolume of its own and will not create it for us (R2.1).
+// the layout parseSnapperListJSON reconstructs). snapper requires it to be a
+// btrfs subvolume of its own and will not create it for us (R2.1).
 const snapshotsDirName = ".snapshots"
 
 // snapshotsSubvolumePerm is the mode applied to a .snapshots subvolume bentoo
