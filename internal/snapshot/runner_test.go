@@ -42,6 +42,51 @@ func TestExecRunner_ContextCancelKills(t *testing.T) {
 	}
 }
 
+// TestRunnerEnv_SetsLCAllC verifies the pure helper appends LC_ALL=C to the
+// parent environment (R4.1) and that it lands last, which is what makes it win:
+// os/exec keeps only the final value of a duplicated key, so a host LC_ALL is
+// overridden rather than merely accompanied.
+func TestRunnerEnv_SetsLCAllC(t *testing.T) {
+	t.Setenv("LC_ALL", "pt_BR.UTF-8")
+
+	env := runnerEnv()
+
+	var found bool
+	var lastLCAll string
+	for _, kv := range env {
+		if kv == "LC_ALL=C" {
+			found = true
+		}
+		if strings.HasPrefix(kv, "LC_ALL=") {
+			lastLCAll = kv
+		}
+	}
+	if !found {
+		t.Fatalf("runnerEnv() does not contain %q", "LC_ALL=C")
+	}
+	if lastLCAll != "LC_ALL=C" {
+		t.Errorf("last LC_ALL entry = %q, want LC_ALL=C so it overrides the host locale", lastLCAll)
+	}
+}
+
+// TestExecRunner_ForcesLCAllCInChild is the end-to-end counterpart of
+// TestRunnerEnv_SetsLCAllC: a real execRunner must hand LC_ALL=C to the child
+// process even when the parent exports a different locale (R4.1) — this is the
+// choke point that keeps snapper/btrbk output parseable on a pt_BR host. The
+// parent locale is deliberately set to a conflicting value so the test fails
+// whenever Run stops assigning cmd.Env, independently of the host's own locale.
+func TestExecRunner_ForcesLCAllCInChild(t *testing.T) {
+	t.Setenv("LC_ALL", "pt_BR.UTF-8")
+
+	out, err := execRunner{}.Run(t.Context(), "sh", []string{"-c", `printf %s "$LC_ALL"`}, nil)
+	if err != nil {
+		t.Fatalf("Run sh: %v", err)
+	}
+	if string(out) != "C" {
+		t.Errorf("child LC_ALL = %q, want %q", out, "C")
+	}
+}
+
 // TestExecRunner_StderrJoinedOnError checks a non-zero exit surfaces stderr in the
 // returned error so the engine can wrap it (design §6).
 func TestExecRunner_StderrJoinedOnError(t *testing.T) {

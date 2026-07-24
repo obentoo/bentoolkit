@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,16 @@ import (
 // without a real btrbk/systemd binary (AD3, R2.4). Mirrors the
 // internal/autoupdate claude_code.go seam.
 var execCommand = exec.CommandContext
+
+// runnerEnv returns the environment every execRunner child process inherits: the
+// parent environment with LC_ALL=C appended, so snapper and btrbk emit
+// locale-independent dates and messages that the parsers can actually match
+// (R4.1). The appended entry overrides any LC_ALL inherited from the parent
+// because os/exec keeps only the last value of a duplicated key. It is a pure
+// helper so the locale contract is unit-testable without spawning a process.
+func runnerEnv() []string {
+	return append(os.Environ(), "LC_ALL=C")
+}
 
 // Runner is the subprocess seam shared by the engine and shipper drivers. Every
 // external command goes through Run, which binds the process to ctx via
@@ -40,6 +51,10 @@ type execRunner struct {
 // It emits a TaskStage(taskID, name) before running and a TaskDone(taskID, ok)
 // after (R6.2: snapshot subprocess sites get stage/done events). Snapshot
 // commands do not stream meaningful progress, so no live tail is attached.
+//
+// The child always runs under LC_ALL=C (see runnerEnv) so its output is stable
+// enough to parse on a non-English host (R4.1); the trade-off is that a
+// command's own error text arrives in English, and it is surfaced verbatim.
 func (e execRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
 	rep := e.reporter
 	if rep == nil {
@@ -48,6 +63,9 @@ func (e execRunner) Run(ctx context.Context, name string, args []string, stdin [
 	rep.TaskStage(e.taskID, name)
 
 	cmd := execCommand(ctx, name, args...)
+	// Pin the child locale to C so every subprocess (snapper, btrbk) produces
+	// parseable, non-localized output regardless of the host locale (R4.1).
+	cmd.Env = runnerEnv()
 	// On cancel, CommandContext kills only the direct child; orphaned
 	// grandchildren (shell pipelines) can keep the stdout/stderr pipes open and
 	// stall Wait. WaitDelay forces the pipes closed shortly after cancel.

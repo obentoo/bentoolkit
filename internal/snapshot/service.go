@@ -41,12 +41,25 @@ func WriteEngineConfig(cfg *Config, configPath string) error {
 }
 
 // Apply materializes the native config and scheduler for cfg (R5.2, R4.1, R2.2):
-// it renders+writes the engine's native config (driver-aware) and, when a
-// systemd schedule is configured, installs and enables the timer. run is the
-// injectable subprocess seam.
+// it renders+writes the engine's native config (driver-aware), provisions the
+// per-subvolume .snapshots subvolumes the snapper driver requires (016 R2.1),
+// and, when a systemd schedule is configured, installs and enables the timer.
+// run is the injectable subprocess seam.
+//
+// The provisioning step sits between the engine config and the schedule check
+// deliberately. Below the check it would be skipped entirely for a config that
+// requests no schedule, leaving exactly the unprepared subvolume this fixes; run
+// here it also completes during `apply`, so a later `run` never meets a
+// subvolume snapper has nowhere to snapshot into (016 R5.1). It is snapper-only:
+// the btrbk driver keeps rendering btrbk.conf and does nothing further.
 func Apply(ctx context.Context, cfg *Config, configPath string, run Runner) error {
 	if err := WriteEngineConfig(cfg, configPath); err != nil {
 		return err
+	}
+	if cfg.Engine.Driver == "snapper" {
+		if err := ensureSnapshotSubvolumes(ctx, cfg, run); err != nil {
+			return err
+		}
 	}
 	if cfg.Schedule.Backend == "" {
 		return nil // no scheduling requested
