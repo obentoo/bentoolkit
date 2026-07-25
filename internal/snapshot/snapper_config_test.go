@@ -264,6 +264,59 @@ func TestSnapperRegister_SecondCallIsNoOp(t *testing.T) {
 	}
 }
 
+// TestSnapperRegister_NoOpCallLeavesFileMetadataAlone: when every name is
+// already listed, registration must not write the file at all — not even the
+// byte-identical content it would produce (R1.2, R5.1).
+//
+// Content equality is not enough to prove that. atomicWrite renames a fresh
+// temp file over the target, replacing the inode and stamping 0644 plus the
+// running user as owner, so a rewrite that TestSnapperRegister_SecondCallIsNoOp
+// passes still reverts an operator who tightened /etc/conf.d/snapper to 0600 —
+// silently, on every `apply`, including the common one with nothing to add. The
+// mode is the observable that distinguishes "wrote identical bytes" from "did
+// not write", and it is asserted on both an already-complete list and a
+// genuinely absent name, because only the second case may touch the file.
+func TestSnapperRegister_NoOpCallLeavesFileMetadataAlone(t *testing.T) {
+	path := stubSnapperConfdPath(t)
+	existing := `SNAPPER_CONFIGS="root home"` + "\n"
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureSnapperRegistered([]string{"root", "home"}); err != nil {
+		t.Fatalf("ensureSnapperRegistered: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after no-op call: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("no-op call rewrote the file: mode = %#o, want the operator's 0600", perm)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after no-op call: %v", err)
+	}
+	if string(got) != existing {
+		t.Errorf("content\n--- got ---\n%q\n--- want ---\n%q", got, existing)
+	}
+
+	// The skip must be conditional on there being nothing to do: a name that is
+	// genuinely missing still has to land, mode reset and all.
+	if err := ensureSnapperRegistered([]string{"root", "home", "var_log"}); err != nil {
+		t.Fatalf("ensureSnapperRegistered with a missing name: %v", err)
+	}
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after registering a missing name: %v", err)
+	}
+	want := `SNAPPER_CONFIGS="root home var_log"` + "\n"
+	if string(got) != want {
+		t.Errorf("a missing name was not registered\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
 // TestSnapperRegister_PreservesExistingFile: registering over an operator's own
 // /etc/conf.d/snapper appends only the missing name — the already-listed one is
 // not duplicated (R1.2) and every other variable, comment, and blank line

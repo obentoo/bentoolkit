@@ -157,9 +157,18 @@ var snapperConfdPath = "/etc/conf.d/snapper"
 // empty content, so the file is created carrying the managed names (R1.3). The
 // merge adds only what is absent and copies every other variable, comment, and
 // line through verbatim (R1.2, R1.4); when nothing is missing it returns its
-// input byte for byte, so a second call rewrites identical content. The write
-// is atomic (temp + rename) at 0644 — snapper's own mode for this file, which
-// is world-readable shell config unlike the 0640 per-subvolume configs.
+// input byte for byte and this function writes nothing at all. The write is
+// atomic (temp + rename) at 0644 — snapper's own mode for this file, which is
+// world-readable shell config unlike the 0640 per-subvolume configs.
+//
+// Skipping the no-op write is what makes the operation idempotent on disk and
+// not merely in content. atomicWrite renames a fresh temp file over the target,
+// so it replaces the inode and stamps 0644 plus the running user as owner. This
+// file belongs to sys-apps/snapper and then to the operator: one who tightened
+// it to 0600, or handed it to a group of their own, would have that silently
+// reverted by every `apply` — including the overwhelmingly common one that has
+// nothing to register. bentoo changes this file when it has a name to add, and
+// otherwise does not touch it.
 func ensureSnapperRegistered(names []string) error {
 	existing, err := os.ReadFile(snapperConfdPath)
 	if err != nil {
@@ -169,6 +178,12 @@ func ensureSnapperRegistered(names []string) error {
 		existing = nil
 	}
 	merged := mergeSnapperConfigsLine(string(existing), names)
+	// err == nil pins this to a file that was actually read: an absent file
+	// merges from "" into a non-empty assignment, so it can never compare equal
+	// here, but stating the precondition keeps the skip from resting on that.
+	if err == nil && merged == string(existing) {
+		return nil // every name already listed — leave the file untouched
+	}
 	if err := atomicWrite(snapperConfdPath, []byte(merged), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", snapperConfdPath, err)
 	}
