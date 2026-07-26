@@ -14,6 +14,13 @@ updates:
       golang-x:
         patterns:
           - "golang.org/x/*"
+    ignore:
+      # v0.6100.0 is published under the wrong module path — its go.mod
+      # declares github.com/mxschmitt/playwright-go, so the tag cannot be
+      # resolved under the playwright-community name. Stay on v0.6000.0
+      # until upstream retags. Drop this entry once a fixed release lands.
+      - dependency-name: "github.com/playwright-community/playwright-go"
+        versions: ["0.6100.0"]
     labels:
       - "dependencies"
       - "go"
