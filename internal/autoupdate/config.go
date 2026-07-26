@@ -34,6 +34,9 @@ var (
 	ErrInvalidSelect = errors.New("invalid select value: must be '', 'first', 'max', or 'last'")
 	// ErrInvalidType is returned when the type field has an unsupported value
 	ErrInvalidType = errors.New("invalid type value: must be '', 'bin', or 'source'")
+	// ErrInvalidPackageKey is returned when a packages.toml key is not a
+	// well-formed "category/package" atom, with or without a ":slot" suffix.
+	ErrInvalidPackageKey = errors.New("invalid package key: want category/package or category/package:slot")
 )
 
 // PackageConfig represents a single package's autoupdate configuration.
@@ -172,6 +175,23 @@ type PackageConfig struct {
 	// body used for version detection, that yields the value for AuxVar. Set
 	// together with aux_var.
 	AuxPattern string `toml:"aux_pattern,omitempty"`
+
+	// Revision is the -rN suffix to attach to the PV of a freshly bumped ebuild.
+	// It exists for packages that ship several SLOTs out of one directory and use
+	// the revision to tell them apart, which is how ::gentoo handles
+	// net-libs/webkit-gtk: -r410/-r411 are SLOT 4.1 and -r600/-r601 are SLOT 6,
+	// all sharing the same PV series. Such an entry is keyed with a ":slot"
+	// suffix (see PackagesConfig) and declares the slot's BASE revision here.
+	//
+	// It must be declared rather than carried over from the source ebuild: on a
+	// PV change the revision resets (foo-1.2.3-r1 bumps to foo-1.2.4), and where
+	// a revision marks a slot the value to write is the slot's base — ::gentoo
+	// bumps webkit-gtk-2.52.3-r411 to webkit-gtk-2.52.5-r410, not to -r411.
+	//
+	// Zero/absent means a plain PV with no revision, which is correct for every
+	// ordinary package and also for a slot whose ebuilds carry no revision (the
+	// bentoo overlay's SLOT 6 webkit-gtk is webkit-gtk-2.52.5.ebuild).
+	Revision int `toml:"revision,omitempty"`
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -192,7 +212,11 @@ func (c *PackageConfig) IsHeld() bool {
 }
 
 // PackagesConfig represents the entire packages.toml configuration file.
-// The keys in the map are package names in "category/package" format.
+// The keys in the map are package names in "category/package" format, optionally
+// suffixed with ":slot" ("net-libs/webkit-gtk:4.1") for a package that ships
+// several SLOTs out of one directory and needs one entry — and one independent
+// pending/cache record — per slot. The suffix is part of the key's identity but
+// never part of a filesystem path; use splitPkgAtom to build paths from a key.
 type PackagesConfig struct {
 	Packages map[string]PackageConfig `toml:"packages"`
 }
@@ -405,6 +429,18 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	// "use the global budget".
 	if cfg.Timeout < 0 {
 		return fmt.Errorf("package %s: timeout must be >= 0 seconds, got %d", pkg, cfg.Timeout)
+	}
+
+	// The key must be a well-formed atom, optionally slot-suffixed. A malformed
+	// key would otherwise surface much later as a path built from nonsense.
+	if _, _, ok := splitPkgAtom(pkg); !ok {
+		return fmt.Errorf("package %s: %w", pkg, ErrInvalidPackageKey)
+	}
+
+	// A negative revision cannot be written as a -rN suffix; reject the typo
+	// rather than silently emitting a plain PV.
+	if cfg.Revision < 0 {
+		return fmt.Errorf("package %s: revision must be >= 0, got %d", pkg, cfg.Revision)
 	}
 
 	// Validate parser type and required fields

@@ -1293,15 +1293,13 @@ func displayReviveSummary(outcomes []reviveOutcome) int {
 	return failed
 }
 
-// splitPackage splits a "category/package" string, returning ok=false for any
-// value that is not exactly two non-empty segments. It mirrors the split+length
-// check the checker/applier helpers use.
+// splitPackage splits a packages.toml key into its "category" and "package"
+// components, returning ok=false for any value that is not two non-empty
+// segments. It delegates to the checker/applier's own helper so a ":slot"
+// suffix ("net-libs/webkit-gtk:4.1") is dropped here exactly as it is there —
+// the slot is part of the key's identity, never of a filesystem path.
 func splitPackage(pkg string) (category, name string, ok bool) {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
+	return autoupdate.SplitPackageKey(pkg)
 }
 
 // highestVersion returns the highest valid version from versions using the same

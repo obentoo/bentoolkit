@@ -190,17 +190,17 @@ func createPyPISource(pkgName string) *DataSource {
 // extractPyPIPackageName attempts to extract a PyPI package name from a Gentoo package atom.
 // For example, "dev-python/requests" -> "requests"
 func extractPyPIPackageName(pkg string) string {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return ""
 	}
 
 	// Only consider dev-python category
-	if parts[0] != "dev-python" {
+	if category != "dev-python" {
 		return ""
 	}
 
-	return parts[1]
+	return pkgName
 }
 
 // discoverNPMSource attempts to discover an npm registry API endpoint.
@@ -252,17 +252,17 @@ func createNPMSource(pkgName string) *DataSource {
 // extractNPMPackageName attempts to extract an npm package name from a Gentoo package atom.
 // For example, "dev-nodejs/typescript" -> "typescript"
 func extractNPMPackageName(pkg string) string {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return ""
 	}
 
 	// Only consider dev-nodejs category
-	if parts[0] != "dev-nodejs" {
+	if category != "dev-nodejs" {
 		return ""
 	}
 
-	return parts[1]
+	return pkgName
 }
 
 // discoverCratesSource attempts to discover a crates.io API endpoint.
@@ -314,17 +314,17 @@ func createCratesSource(crateName string) *DataSource {
 // extractCrateName attempts to extract a crate name from a Gentoo package atom.
 // For example, "dev-rust/serde" -> "serde"
 func extractCrateName(pkg string) string {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return ""
 	}
 
 	// Only consider dev-rust category
-	if parts[0] != "dev-rust" {
+	if category != "dev-rust" {
 		return ""
 	}
 
-	return parts[1]
+	return pkgName
 }
 
 // detectContentType attempts to detect the expected content type from a URL.

@@ -674,63 +674,14 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 }
 
 // getCurrentVersion finds the current version of a package in the overlay.
-// It looks for ebuild files in the package directory and returns the highest version.
+// It looks for ebuild files in the package directory and returns the highest
+// version, restricted to the slot when pkg's key carries a ":slot" suffix.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	// Parse package name (category/package)
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid package name format: %s", pkg)
-	}
-	category := parts[0]
-	pkgName := parts[1]
-
-	// Build package directory path
-	pkgDir := filepath.Join(c.overlayPath, category, pkgName)
-
-	// Read directory entries
-	entries, err := os.ReadDir(pkgDir)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
-		}
-		return "", fmt.Errorf("failed to read package directory: %w", err)
+		return "", err
 	}
-
-	// Find all ebuild files and extract versions
-	var highestVersion string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".ebuild") {
-			continue
-		}
-
-		// Skip live ebuilds (9999)
-		if strings.Contains(name, "-9999.ebuild") {
-			continue
-		}
-
-		// Parse ebuild path to extract version
-		ebuildPath := filepath.Join(category, pkgName, name)
-		eb, err := ebuild.ParsePath(ebuildPath)
-		if err != nil {
-			continue // Skip invalid ebuild files
-		}
-
-		// Compare with highest version found so far
-		if highestVersion == "" || ebuild.CompareVersions(eb.Version, highestVersion) > 0 {
-			highestVersion = eb.Version
-		}
-	}
-
-	if highestVersion == "" {
-		return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
-	}
-
-	return highestVersion, nil
+	return best.Version, nil
 }
 
 // DisableOrphans marks each package as disabled (enabled = false) both in the
@@ -838,13 +789,13 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 			continue
 		}
 
-		// Split category/package the same way getCurrentVersion does.
-		parts := strings.Split(pkg, "/")
-		if len(parts) != 2 {
+		// Split category/package the same way getCurrentVersion does, dropping
+		// any ":slot" suffix so the ::gentoo lookup below gets a real path.
+		category, pkgName, ok := splitPkgAtom(pkg)
+		if !ok {
 			notes = append(notes, fmt.Sprintf("%s: invalid package name format", pkg))
 			continue
 		}
-		category, pkgName := parts[0], parts[1]
 
 		// A genuinely orphaned package has NO ebuild left in the overlay. A
 		// disabled entry whose ebuild is still present (e.g. a manually-disabled
@@ -924,43 +875,14 @@ func maxGentooVersion(versions []string) string {
 }
 
 // currentEbuildPath returns the absolute path of the highest-version, non-live
-// ebuild for pkg. It mirrors getCurrentVersion's selection but yields the file
+// ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid package name format: %s", pkg)
-	}
-	pkgDir := filepath.Join(c.overlayPath, parts[0], parts[1])
-
-	entries, err := os.ReadDir(pkgDir)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg)
 	if err != nil {
 		return "", err
 	}
-
-	var bestVer, bestPath string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".ebuild") || strings.Contains(name, "-9999.ebuild") {
-			continue
-		}
-		eb, err := ebuild.ParsePath(filepath.Join(parts[0], parts[1], name))
-		if err != nil {
-			continue
-		}
-		if bestVer == "" || ebuild.CompareVersions(eb.Version, bestVer) > 0 {
-			bestVer = eb.Version
-			bestPath = filepath.Join(pkgDir, name)
-		}
-	}
-
-	if bestPath == "" {
-		return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
-	}
-	return bestPath, nil
+	return best.Path, nil
 }
 
 // resolveType classifies pkg as "bin" or "source". An explicit config type
