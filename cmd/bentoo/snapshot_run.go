@@ -48,7 +48,7 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) {
 
 	// Ensure the engine's native config exists (btrbk.conf or the snapper
 	// configs) so the run is self-contained even if 'apply' was never executed.
-	if err := snapshot.WriteEngineConfig(cfg, path); err != nil {
+	if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
 		logger.Error("snapshot run: render engine config: %v", err)
 		osExit(1)
 		return
