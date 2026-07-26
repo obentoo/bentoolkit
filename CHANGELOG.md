@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-26
+
 ### Added
+- **Snapper configs are provisioned through snapper's own API.** `snapshot apply`
+  no longer writes `/etc/snapper/configs/<name>` and `/etc/conf.d/snapper` by
+  hand; it calls `snapper create-config` to provision and `snapper set-config`
+  to apply the managed keys. Writing those files directly cannot work: snapperd
+  caches its config list and offers no D-Bus reload, so a name added to
+  `SNAPPER_CONFIGS` by hand is invisible to an already-running daemon, and a
+  config file edited behind its back is not observed at all. `create-config`
+  also emits all 24 template keys (including `FSTYPE`, which bentoo never wrote)
+  and creates `.snapshots` as a 0750 subvolume, all visible to the live daemon
+  at once. Coverage is read from `snapper list-configs` rather than from a
+  file's presence, and the managed keys are applied to pre-existing configs too
+  — those are exactly the ones still running the template's retention. A
+  leftover `.snapshots` blocks `create-config` outright, so provisioning removes
+  an **empty** one and refuses a populated one, naming the command the operator
+  can run instead. The dry-run names the two commands instead of the file that
+  is no longer written.
 - **Multi-slot packages in autoupdate.** A `packages.toml` key may now carry a
   `:slot` suffix — `["net-libs/webkit-gtk:4.1"]` — so a package that ships
   several SLOTs out of one directory gets one entry, one pending record and one
@@ -38,6 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getCurrentVersion` and `currentEbuildPath` and the applier's
   `resolveCurrentVersion` were three copies of the same directory scan, so the
   slot filter had to land in three places to be correct in one.
+- **Snapshot retention in `snapshot.toml` now actually reaches snapper.** A
+  config file edited behind the running daemon's back was never observed, so
+  the configured `TIMELINE_LIMIT_*` values never took effect — with
+  `TIMELINE_LIMIT_HOURLY="7"` on disk, snapper reported 10. This predates the
+  snapper engine entirely; `set-config` fixes a bug older than the work that
+  uncovered it.
+
+### Changed
+- **`WriteEngineConfig` takes a context and a `Runner`.** The btrbk driver uses
+  neither and is unchanged.
 
 ## [0.14.0] - 2026-07-19
 
@@ -1337,7 +1365,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/obentoo/bentoolkit/compare/v0.12.0...v0.13.0
