@@ -544,6 +544,56 @@ selector = "a.release-tag"
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
+| `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
+
+#### Multi-slot packages
+
+Some packages ship several SLOTs out of one directory, distinguished by the
+revision suffix rather than by the version. `net-libs/webkit-gtk` is the
+canonical case: `-r410`/`-r411` are SLOT `4.1` and `-r600`/`-r601` are SLOT `6`,
+all sharing the same PV series.
+
+A single entry cannot express that. Taking the directory's highest version picks
+whichever slot happens to be ahead, so one slot is bumped forever and the other
+never is — and naming the destination from the bare upstream PV aims it at the
+*other* slot's filename.
+
+Give each slot its own entry by suffixing the key with `:slot`, and declare the
+slot's base revision:
+
+```toml
+["net-libs/webkit-gtk:4.1"]
+url = "https://www.webkitgtk.org/releases/"
+parser = "regex"
+pattern = 'webkitgtk-(2\.52\.[0-9]+)\.tar\.xz'
+select = "max"
+revision = 410
+
+["net-libs/webkit-gtk:6"]
+url = "https://www.webkitgtk.org/releases/"
+parser = "regex"
+pattern = 'webkitgtk-(2\.52\.[0-9]+)\.tar\.xz'
+select = "max"
+revision = 600
+```
+
+Each entry then resolves its current version by reading every ebuild's `SLOT=`
+and considering only its own slot, keeps its own pending and cache records, and
+writes its bump as `<pv>-r<revision>`.
+
+Two things to know:
+
+- **`revision` is the slot's base, not the source ebuild's.** Bumping
+  `webkit-gtk-2.52.3-r411` yields `webkit-gtk-2.52.5-r410`, matching ::gentoo:
+  `r411` was a revbump *within* the old PV, and a PV change resets it. Set
+  `revision` to the value the slot's first ebuild of a new version carries.
+- **Omit `revision` for a slot whose ebuilds carry no suffix.** If your overlay's
+  SLOT 6 ebuild is `webkit-gtk-2.52.5.ebuild` rather than `-r600`, leave the
+  field out for that entry so the plain PV is written.
+
+The `:slot` suffix is part of the entry's identity only — it never appears in a
+filesystem path. If a bump would ever land on an ebuild that already exists, the
+apply fails with `destination ebuild already exists` and touches nothing.
 
 #### Supported LLM Providers
 

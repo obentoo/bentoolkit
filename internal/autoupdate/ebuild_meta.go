@@ -77,14 +77,11 @@ var (
 // It finds the highest version ebuild in the package directory and extracts
 // HOMEPAGE, SRC_URI, DEPEND, RDEPEND, and detects live/binary packages.
 func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
-	// Validate package format (category/package)
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	// Validate package format (category/package, optionally :slot-suffixed)
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return nil, fmt.Errorf("%w: invalid package format %q, expected category/package", ErrPackageNotFound, pkg)
 	}
-
-	category := parts[0]
-	pkgName := parts[1]
 
 	// Build package directory path
 	pkgDir := filepath.Join(overlayPath, category, pkgName)

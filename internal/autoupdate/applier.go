@@ -53,6 +53,11 @@ var (
 	// already at/beyond the target version. The entry is pruned and the outcome
 	// is reported as obsolete, not as a failure.
 	ErrObsoletePending = errors.New("obsolete pending entry")
+	// ErrEbuildExists is returned when the destination ebuild a copy would write
+	// is already present in the overlay. Overwriting it would destroy a file the
+	// applier never authored — see copyEbuild's guard for why this is fatal
+	// rather than a silent overwrite.
+	ErrEbuildExists = errors.New("destination ebuild already exists")
 )
 
 // ApplyResult represents the result of applying an update.
@@ -129,10 +134,12 @@ type Applier struct {
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
 	clean bool
-	// configs holds the per-package autoupdate configuration, keyed by
-	// "category/package". It is consulted only for the optional [meta] block
-	// that drives an authenticated distfile fetch (serial-gated downloads);
-	// packages without it follow the normal pkgdev-from-SRC_URI path. Set via
+	// configs holds the per-package autoupdate configuration, keyed exactly as
+	// packages.toml is — "category/package", or "category/package:slot" for a
+	// multi-slot package. It is consulted for the optional [meta] block that
+	// drives an authenticated distfile fetch (serial-gated downloads) and for
+	// the slot's `revision`; packages without either follow the normal
+	// pkgdev-from-SRC_URI path with a plain PV. Set via
 	// WithApplierPackagesConfig; nil disables authenticated fetching entirely.
 	configs map[string]PackageConfig
 	// fixer, when non-nil, is invoked when the manifest step fails: it drives an
@@ -370,6 +377,13 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		}
 		return result, result.Error
 	}
+	// Attach the slot's pinned revision, when the entry declares one. Upstream
+	// yields a bare PV; for a slot discriminated by its revision suffix that PV
+	// names the WRONG slot's ebuild, so the whole apply — copy destination,
+	// manifest, compile, clean — has to run against the decorated version from
+	// here on. Validation stays on the bare upstream value above; the suffix is
+	// well-formed by construction.
+	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
 	result.NewVersion = newVersion
 
 	// Re-resolve the current version against the live overlay rather than
@@ -543,47 +557,17 @@ func applySummary(result *ApplyResult) string {
 }
 
 // resolveCurrentVersion returns the highest-version, non-live ebuild version
-// actually present in the overlay for pkg. It mirrors the checker's selection
-// (getCurrentVersion) so Apply works off the live overlay state instead of the
-// pending entry's possibly-stale current_version. Returns ErrNoEbuildFound when
-// the package directory is absent or holds no parsable, non-live ebuild.
+// actually present in the overlay for pkg — restricted to pkg's slot when its
+// key carries one. It shares the checker's selection (getCurrentVersion) so
+// Apply works off the live overlay state instead of the pending entry's
+// possibly-stale current_version. Returns ErrNoEbuildFound when the package
+// directory is absent or holds no parsable, non-live ebuild in the slot.
 func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid package name format: %s", pkg)
-	}
-	pkgDir := filepath.Join(a.overlayPath, parts[0], parts[1])
-
-	entries, err := os.ReadDir(pkgDir)
+	best, err := selectCurrentEbuild(a.overlayPath, pkg)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
-		}
-		return "", fmt.Errorf("failed to read package directory: %w", err)
+		return "", err
 	}
-
-	var best string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".ebuild") || strings.Contains(name, "-9999.ebuild") {
-			continue
-		}
-		eb, err := ebuild.ParsePath(filepath.Join(parts[0], parts[1], name))
-		if err != nil {
-			continue // Skip invalid ebuild files
-		}
-		if best == "" || ebuild.CompareVersions(eb.Version, best) > 0 {
-			best = eb.Version
-		}
-	}
-
-	if best == "" {
-		return "", fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
-	}
-	return best, nil
+	return best.Version, nil
 }
 
 // pruneObsolete marks result as an obsolete pending entry, removes it from the
@@ -629,12 +613,10 @@ func (a *Applier) cleanOldEbuild(pkg, oldVersion, newVersion string) (bool, erro
 // Destination: {category}/{package}/{package}-{newVersion}.ebuild
 func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	// Parse package name
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	category := parts[0]
-	pkgName := parts[1]
 
 	// Reject same-version copy: srcPath and dstPath would coincide, and
 	// os.Create truncates the destination before io.Copy reads, silently
@@ -651,6 +633,26 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	// Check source exists
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+	}
+
+	// Refuse to write over an ebuild that already exists. os.Create truncates,
+	// so without this the copy silently destroys a file the applier never wrote
+	// — and Apply's deferred orphan-rollback would then os.Remove it outright on
+	// any later failure, turning truncation into deletion.
+	//
+	// The oldVersion == newVersion check above only covers the case where source
+	// and destination are the same file. A distinct destination can still exist
+	// whenever the package directory holds several ebuilds whose versions are not
+	// totally ordered by the selection that produced oldVersion — most notably a
+	// multi-slot package, where the slots share a PV series and the revision
+	// suffix discriminates them (net-libs/webkit-gtk: -r410/-r411 = SLOT 4.1,
+	// -r600/-r601 = SLOT 6). Bumping the 4.1 ebuild from 2.52.4-r411 towards
+	// 2.52.5 targets webkit-gtk-2.52.5.ebuild — which is the SLOT 6 ebuild.
+	if _, err := os.Stat(dstPath); err == nil {
+		return fmt.Errorf("%w: %s (refusing to overwrite; %s-%s would be written over it)",
+			ErrEbuildExists, dstPath, pkgName, oldVersion)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to stat destination ebuild %s: %w", dstPath, err)
 	}
 
 	// Open source file
@@ -766,12 +768,11 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		return firstErr
 	}
 
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	pkgDir := pkgDirFor(a.overlayPath, pkg)
+	if pkgDir == "" {
 		// Malformed name: nothing the fixer can scope to; surface the original error.
 		return firstErr
 	}
-	pkgDir := filepath.Join(a.overlayPath, parts[0], parts[1])
 
 	// Writable distdir the agent can pass to `pkgdev manifest --distdir` while it
 	// self-verifies, so its checks never touch the system DISTDIR.
@@ -865,12 +866,10 @@ func (a *Applier) runQACheck(pkgDir, pkg string) string {
 // Command: pkgdev manifest --distdir {tmpdir}  (run from the package directory)
 func (a *Applier) runManifest(pkg, version string) error {
 	// Parse package name
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	category := parts[0]
-	pkgName := parts[1]
 
 	// Package directory pkgdev operates in (it discovers the ebuild itself).
 	pkgDir := filepath.Join(a.overlayPath, category, pkgName)
@@ -970,12 +969,10 @@ func (a *Applier) runCompile(pkg, version string) (string, error) {
 	}
 
 	// Parse package name
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return "", fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	category := parts[0]
-	pkgName := parts[1]
 
 	// Build ebuild path
 	ebuildPath := filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
@@ -1067,12 +1064,10 @@ func (a *Applier) LogsDir() string {
 
 // EbuildPath returns the full path to an ebuild file.
 func (a *Applier) EbuildPath(pkg, version string) string {
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return ""
 	}
-	category := parts[0]
-	pkgName := parts[1]
 	return filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
 }
 
@@ -1095,13 +1090,11 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 		return fmt.Errorf("SeedFromGentoo: empty argument (pkg=%q, srcPkgDir=%q, gentooVersion=%q)", pkg, srcPkgDir, gentooVersion)
 	}
 
-	// Parse package name (same split+length check as the sibling helpers).
-	parts := strings.Split(pkg, "/")
-	if len(parts) != 2 {
+	// Parse package name (same split+slot-stripping as the sibling helpers).
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	category := parts[0]
-	pkgName := parts[1]
 
 	// The overlay package dir was likely pruned when the package was orphaned;
 	// create the full <overlayPath>/<category>/<pkg>/ path before copying.

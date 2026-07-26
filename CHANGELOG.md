@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-slot packages in autoupdate.** A `packages.toml` key may now carry a
+  `:slot` suffix — `["net-libs/webkit-gtk:4.1"]` — so a package that ships
+  several SLOTs out of one directory gets one entry, one pending record and one
+  cache record per slot instead of the slots overwriting each other. The current
+  version for such an entry is resolved by reading each ebuild's `SLOT=` and
+  considering only the matching ones, rather than taking the directory's highest
+  version (which is whichever slot happens to be ahead). The suffix is part of
+  the entry's identity only; it is stripped everywhere a filesystem path is
+  built.
+- **`revision` field in `packages.toml`.** The `-rN` suffix to write on a freshly
+  bumped ebuild, for the packages that use the revision to tell their SLOTs apart
+  (`-r410`/`-r411` are SLOT 4.1 of `net-libs/webkit-gtk`, `-r600`/`-r601` are
+  SLOT 6). It is declared rather than inherited from the source ebuild because
+  a PV change resets the revision (`foo-1.2.3-r1` bumps to `foo-1.2.4`), and
+  where a revision marks a slot the value to write is the slot's base, not the
+  source's. Absent/zero keeps the plain PV, which is what every ordinary package
+  wants.
+
+### Fixed
+- **An apply can no longer overwrite an existing ebuild.** `copyEbuild` refused
+  only a same-version copy; any other collision was written straight through
+  `os.Create`, truncating the destination before a byte was read — and a later
+  failure in the same apply then had the deferred orphan-rollback `os.Remove` it
+  outright. The destination is now checked and the apply fails with
+  `ErrEbuildExists`. This is the safety net under the slot work above: the
+  colliding case is exactly a multi-slot package whose slots share a PV series.
+- **One implementation of "current ebuild in the overlay".** The checker's
+  `getCurrentVersion` and `currentEbuildPath` and the applier's
+  `resolveCurrentVersion` were three copies of the same directory scan, so the
+  slot filter had to land in three places to be correct in one.
+
 ## [0.14.0] - 2026-07-19
 
 ### Added
