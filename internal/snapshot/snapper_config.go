@@ -1,32 +1,61 @@
 package snapshot
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
-// snapperConfigsDir is where snapper expects its per-subvolume configs (R2.1).
-// It is a package var (mirroring the lookPath/warnLogf seams) so tests can
-// redirect it away from /etc.
-var snapperConfigsDir = "/etc/snapper/configs"
+// snapper_config.go — provisioning snapper configs through snapper's own API
+// (story 018).
+//
+// Everything here used to be done by writing /etc/snapper/configs/<name> and
+// /etc/conf.d/snapper directly. Measured on a live host (snapper 0.13.1), that
+// cannot work:
+//
+//   - snapperd caches its config list and offers no reload on D-Bus (only
+//     ListConfigs and CreateConfig), so a name added to SNAPPER_CONFIGS by hand
+//     is invisible to a daemon that is already running — `apply` registered it
+//     and the very next `run` still failed with "unknown config";
+//   - a config file edited behind the daemon's back is not observed at all:
+//     with TIMELINE_LIMIT_HOURLY="7" on disk, snapper reported 10.
+//
+// So bentoo asks snapper to do both: `create-config` to provision (it writes
+// the config with every template key, registers the name, and creates
+// .snapshots as a 0750 subvolume) and `set-config` to apply the managed keys.
+// The daemon performs each change itself and is therefore never stale.
 
-// snapperConfigHeader opens snapper configs created from scratch by bentoo, so
-// their origin is evident to anyone inspecting /etc/snapper/configs (R2.1).
-const snapperConfigHeader = "# managed by bentoo snapshot"
+// snapshotsDirName is the directory, relative to a managed subvolume, in which
+// snapper stores that config's snapshots. `create-config` creates it and
+// refuses to run when it already exists, which is why provisionSnapperConfig
+// has to deal with a leftover one.
+const snapshotsDirName = ".snapshots"
+
+// statPath and readDirPath are the filesystem seams used to classify a leftover
+// .snapshots. They are package vars (the lookPath/warnLogf seam pattern) so
+// tests decide what exists rather than inheriting the developer's filesystem: a real
+// /home/.snapshots on the host would otherwise turn the "leftover" case into
+// the "nothing there" one and assert nothing.
+var (
+	statPath    = os.Stat
+	readDirPath = os.ReadDir
+	removePath  = os.Remove
+)
 
 // managedSnapperKeys returns the key/value pairs bentoo owns in a snapper
-// config, in render order (R2.1):
-//   - SUBVOLUME pins the config to its subvolume.
+// config, in apply order:
+//   - SUBVOLUME pins the config to its subvolume. It is listed for the plan and
+//     for documentation; set-config cannot change it (snapper refuses) and
+//     create-config has already set it correctly.
 //   - TIMELINE_CREATE="no" — bentoo's own timer drives snapshot creation;
 //     snapper's timeline timer would duplicate it.
 //   - TIMELINE_CLEANUP="yes" plus the TIMELINE_LIMIT_* counts map
-//     [engine.retention] onto snapper's native timeline cleanup (R1.4).
+//     [engine.retention] onto snapper's native timeline cleanup.
 //     Retention has no yearly tier, so YEARLY is pinned to 0.
-//   - NUMBER_CLEANUP="yes" governs the emerge hook's pre/post pairs (T3).
+//   - NUMBER_CLEANUP="yes" governs the emerge hook's pre/post pairs.
 func managedSnapperKeys(cfg EngineConfig, subvolume string) [][2]string {
 	r := cfg.Retention
 	return [][2]string{
@@ -42,87 +71,157 @@ func managedSnapperKeys(cfg EngineConfig, subvolume string) [][2]string {
 	}
 }
 
-// snapperConfigKey extracts the KEY of a shell-style `KEY="value"` line, or ""
-// when the line is blank, a comment, or not an assignment (R2.2).
-func snapperConfigKey(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return ""
-	}
-	i := strings.Index(trimmed, "=")
-	if i < 0 {
-		return ""
-	}
-	return strings.TrimSpace(trimmed[:i])
-}
-
-// renderSnapperConfig renders the shell-style snapper config for subvolume
-// (R2.1). With no existing content it emits the managed-by header followed by
-// the managed keys. When merging over existing content it updates managed keys
-// in place — preserving line order, comments, and every unmanaged line —
-// appends managed keys that are absent, and never duplicates a key (a repeated
-// managed key collapses into its first occurrence) (R2.2).
-func renderSnapperConfig(cfg EngineConfig, subvolume string, existing []byte) []byte {
+// settableSnapperKeys is managedSnapperKeys minus SUBVOLUME, which is what
+// set-config may actually carry: snapper rejects a set-config that tries to
+// change SUBVOLUME or FSTYPE, and sending it would fail the whole call.
+func settableSnapperKeys(cfg EngineConfig, subvolume string) []string {
 	managed := managedSnapperKeys(cfg, subvolume)
-	values := make(map[string]string, len(managed))
+	out := make([]string, 0, len(managed))
 	for _, kv := range managed {
-		values[kv[0]] = kv[1]
-	}
-
-	var b strings.Builder
-	written := make(map[string]bool, len(managed))
-	writeKey := func(key, value string) {
-		b.WriteString(key + `="` + value + `"` + "\n")
-	}
-
-	if len(existing) == 0 {
-		b.WriteString(snapperConfigHeader + "\n")
-	} else {
-		for _, line := range strings.Split(strings.TrimSuffix(string(existing), "\n"), "\n") {
-			key := snapperConfigKey(line)
-			value, isManaged := values[key]
-			if !isManaged {
-				b.WriteString(line + "\n")
-				continue
-			}
-			if written[key] {
-				continue // never duplicate a managed key
-			}
-			written[key] = true
-			writeKey(key, value)
+		if kv[0] == "SUBVOLUME" {
+			continue
 		}
+		out = append(out, kv[0]+"="+kv[1])
 	}
-
-	for _, kv := range managed {
-		if !written[kv[0]] {
-			writeKey(kv[0], kv[1])
-		}
-	}
-	return []byte(b.String())
+	return out
 }
 
-// ensureSnapperConfigs renders/ensures one snapper config per managed
-// subvolume under snapperConfigsDir, named by snapperConfigName (R2.1). An
-// existing file is merged, not clobbered — user settings beyond the managed
-// keys survive — and each write is atomic (temp + rename, 0640). The operation
-// is idempotent: re-running over an unchanged config produces identical bytes
-// (R2.2).
-func ensureSnapperConfigs(cfg *Config) error {
-	if err := os.MkdirAll(snapperConfigsDir, 0o755); err != nil { //nolint:gosec // matches snapper's own /etc/snapper/configs permissions
-		return fmt.Errorf("create snapper configs dir %s: %w", snapperConfigsDir, err)
+// ensureSnapperConfigs makes sure every managed subvolume has a snapper config
+// carrying bentoo's keys, provisioning what is missing (018 R1, R3).
+//
+// Existing coverage is read from `snapper list-configs` rather than from the
+// presence of a file, because that is the question snapper itself answers:
+// create-config fails with "subvolume already covered" when a config — under
+// any name — already claims the subvolume (R2). The managed keys are then
+// applied to every config, new or pre-existing: the old file-merge never
+// reached a running daemon, so a config bentoo has managed for months may still
+// be running the template's retention rather than the operator's.
+func ensureSnapperConfigs(ctx context.Context, cfg *Config, run Runner) error {
+	// A nil Runner means "use the production one" everywhere else in this
+	// package, and the cmd layer relies on it: snapshotRunner is left nil
+	// outside tests, so every real apply arrives here with nil.
+	if run == nil {
+		run = defaultRunner()
+	}
+	covered, err := snapperConfigsBySubvolume(ctx, run)
+	if err != nil {
+		return err
 	}
 	for _, sv := range cfg.Engine.Subvolumes {
-		path := filepath.Join(snapperConfigsDir, snapperConfigName(sv))
-		existing, err := os.ReadFile(path)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("read snapper config %s: %w", path, err)
+		subvolume := filepath.Clean(sv)
+		name, exists := covered[subvolume]
+		switch {
+		case !exists:
+			name = snapperConfigName(subvolume)
+			if err := provisionSnapperConfig(ctx, run, name, subvolume); err != nil {
+				return err
 			}
-			existing = nil
+		case name != snapperConfigName(subvolume):
+			// snapper covers this subvolume under a name bentoo would not have
+			// chosen — an operator-made config. Its keys are still managed, but
+			// the engine derives the config name it passes to create/list from
+			// the subvolume, so those commands will not find it.
+			warnLogf("snapshot: %s is covered by snapper config %q, not %q; "+
+				"snapshot create/list will not find it until the config is renamed",
+				subvolume, name, snapperConfigName(subvolume))
 		}
-		if err := atomicWrite(path, renderSnapperConfig(cfg.Engine, sv, existing), 0o640); err != nil {
+		if err := applyManagedSnapperKeys(ctx, run, cfg.Engine, name, subvolume); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// snapperConfigsBySubvolume returns the config name snapper holds for each
+// subvolume it already covers, keyed by cleaned path so the lookup is not
+// defeated by a trailing slash in snapshot.toml.
+func snapperConfigsBySubvolume(ctx context.Context, run Runner) (map[string]string, error) {
+	out, err := run.Run(ctx, "snapper", []string{"--jsonout", "list-configs"}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list snapper configs: %w", err)
+	}
+	var payload struct {
+		Configs []struct {
+			Config    string `json:"config"`
+			Subvolume string `json:"subvolume"`
+		} `json:"configs"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return nil, fmt.Errorf("parse `snapper list-configs` output: %w", err)
+	}
+	bySubvolume := make(map[string]string, len(payload.Configs))
+	for _, c := range payload.Configs {
+		bySubvolume[filepath.Clean(c.Subvolume)] = c.Config
+	}
+	return bySubvolume, nil
+}
+
+// provisionSnapperConfig creates the snapper config for subvolume (018 R1).
+// snapper writes the config from its template, registers the name in
+// SNAPPER_CONFIGS, and creates <subvolume>/.snapshots as a 0750 subvolume — all
+// of it visible to the running daemon, because the daemon is what did it.
+//
+// A leftover .snapshots has to go first: create-config refuses outright
+// ("creating btrfs subvolume .snapshots failed since it already exists") and
+// has no option to skip that step, so it is remove-it-or-fail (018 R4).
+func provisionSnapperConfig(ctx context.Context, run Runner, name, subvolume string) error {
+	dir := filepath.Join(subvolume, snapshotsDirName)
+	if _, err := statPath(dir); err == nil {
+		if err := clearEmptySnapshotsDir(ctx, run, dir, subvolume); err != nil {
+			return err
+		}
+	}
+	if _, err := run.Run(ctx, "snapper", []string{"-c", name, "create-config", subvolume}, nil); err != nil {
+		return fmt.Errorf("create snapper config %s for %s: %w", name, subvolume, err)
+	}
+	return nil
+}
+
+// clearEmptySnapshotsDir removes a .snapshots that no config claims, so
+// create-config can make its own (018 R4).
+//
+// It removes ONLY an empty one. A .snapshots holding entries holds snapshots,
+// and deleting it would destroy backups to fix a configuration problem — never
+// a trade bentoo makes on its own. That case aborts with the command the
+// operator can run instead.
+//
+// Removal goes through `btrfs subvolume delete` first, since that is what
+// create-config makes it. A plain directory (or one on a filesystem where that
+// fails) falls back to a directory unlink. When neither works the path is
+// almost always a separately mounted subvolume — the classic @snapshots in
+// fstab — which is reported as such, because no amount of retrying will unmount
+// it.
+func clearEmptySnapshotsDir(ctx context.Context, run Runner, dir, subvolume string) error {
+	entries, err := readDirPath(dir)
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", dir, err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("%s holds %d entries but no snapper config covers %s: "+
+			"refusing to delete snapshots; run `snapper -c %s create-config %s` by hand "+
+			"after moving them aside",
+			dir, len(entries), subvolume, snapperConfigName(subvolume), subvolume)
+	}
+	if _, err := run.Run(ctx, "btrfs", []string{"subvolume", "delete", dir}, nil); err == nil {
+		return nil
+	}
+	if err := removePath(dir); err != nil {
+		return fmt.Errorf("%s exists but no snapper config covers %s, and it could not be "+
+			"removed so snapper can recreate it (%w); if it is a separately mounted "+
+			"subvolume, unmount it or run `snapper -c %s create-config %s` by hand",
+			dir, subvolume, err, snapperConfigName(subvolume), subvolume)
+	}
+	return nil
+}
+
+// applyManagedSnapperKeys pushes bentoo's keys into an existing config through
+// `snapper set-config` (018 R3). It goes through snapper rather than the config
+// file because a file write is not observed by a running daemon — the reason
+// the retention in snapshot.toml has never actually reached snapper.
+func applyManagedSnapperKeys(ctx context.Context, run Runner, cfg EngineConfig, name, subvolume string) error {
+	args := append([]string{"-c", name, "set-config"}, settableSnapperKeys(cfg, subvolume)...)
+	if _, err := run.Run(ctx, "snapper", args, nil); err != nil {
+		return fmt.Errorf("apply managed keys to snapper config %s: %w", name, err)
 	}
 	return nil
 }

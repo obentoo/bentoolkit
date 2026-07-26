@@ -26,15 +26,20 @@ func WriteBtrbkConf(cfg *Config, configPath string) error {
 
 // WriteEngineConfig materializes the native config for the configured engine
 // driver (R2.1): "btrbk" renders btrbk.conf next to the snapshot.toml at
-// configPath (behavior unchanged, R6.2); "snapper" ensures the per-subvolume
-// configs under snapperConfigsDir (configPath is unused there — snapper's
-// config location is fixed). An unknown driver fails with ErrInvalidDriver.
-func WriteEngineConfig(cfg *Config, configPath string) error {
+// configPath (behavior unchanged, R6.2); "snapper" provisions the per-subvolume
+// configs through snapper's own create-config/set-config (configPath is unused
+// there — snapper's config location is fixed). An unknown driver fails with
+// ErrInvalidDriver.
+//
+// It takes a context and a Runner because the snapper driver reaches snapper to
+// do the work (018 R1) rather than writing /etc itself — a file write is not
+// observed by a running snapperd. The btrbk driver uses neither.
+func WriteEngineConfig(ctx context.Context, cfg *Config, configPath string, run Runner) error {
 	switch cfg.Engine.Driver {
 	case "btrbk":
 		return WriteBtrbkConf(cfg, configPath)
 	case "snapper":
-		return ensureSnapperConfigs(cfg)
+		return ensureSnapperConfigs(ctx, cfg, run)
 	default:
 		return fmt.Errorf("%w: engine driver %q", ErrInvalidDriver, cfg.Engine.Driver)
 	}
@@ -45,7 +50,7 @@ func WriteEngineConfig(cfg *Config, configPath string) error {
 // systemd schedule is configured, installs and enables the timer. run is the
 // injectable subprocess seam.
 func Apply(ctx context.Context, cfg *Config, configPath string, run Runner) error {
-	if err := WriteEngineConfig(cfg, configPath); err != nil {
+	if err := WriteEngineConfig(ctx, cfg, configPath, run); err != nil {
 		return err
 	}
 	if cfg.Schedule.Backend == "" {

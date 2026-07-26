@@ -77,7 +77,7 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) {
 	// -c btrbk.conf), so ensure it exists — mirroring `run`. Skipped under
 	// --ship scoping, where the engine-local prune does not run at all.
 	if snapshotPruneShip == "" {
-		if err := snapshot.WriteEngineConfig(cfg, path); err != nil {
+		if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
 			logger.Error("snapshot prune: render engine config: %v", err)
 			osExit(1)
 			return
