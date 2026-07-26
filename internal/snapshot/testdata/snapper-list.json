@@ -1,0 +1,74 @@
+{
+  "root": [
+    {
+      "subvolume": "/",
+      "number": 0,
+      "default": false,
+      "active": false,
+      "type": "single",
+      "pre-number": null,
+      "date": "",
+      "user": "root",
+      "used-space": null,
+      "cleanup": "",
+      "description": "current",
+      "userdata": null
+    },
+    {
+      "subvolume": "/",
+      "number": 1,
+      "default": false,
+      "active": false,
+      "type": "single",
+      "pre-number": null,
+      "date": "2026-06-28 11:42:09",
+      "user": "root",
+      "used-space": null,
+      "cleanup": "timeline",
+      "description": "bentoo snapshot",
+      "userdata": null
+    },
+    {
+      "subvolume": "/",
+      "number": 16,
+      "default": false,
+      "active": false,
+      "type": "single",
+      "pre-number": null,
+      "date": "2026-06-29 00:00:49",
+      "user": "root",
+      "used-space": null,
+      "cleanup": "timeline",
+      "description": "bentoo snapshot",
+      "userdata": null
+    },
+    {
+      "subvolume": "/",
+      "number": 2303,
+      "default": false,
+      "active": false,
+      "type": "pre",
+      "pre-number": null,
+      "date": "2026-07-19 18:11:40",
+      "user": "root",
+      "used-space": null,
+      "cleanup": "number",
+      "description": "bentoo: emerge app-portage/bentoolkit-0.14.0",
+      "userdata": null
+    },
+    {
+      "subvolume": "/",
+      "number": 2304,
+      "default": false,
+      "active": false,
+      "type": "post",
+      "pre-number": 2303,
+      "date": "2026-07-19 18:11:57",
+      "user": "root",
+      "used-space": null,
+      "cleanup": "number",
+      "description": "bentoo: emerge app-portage/bentoolkit-0.14.0",
+      "userdata": null
+    }
+  ]
+}
