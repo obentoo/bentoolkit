@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -143,6 +144,45 @@ func TestApply_SnapperCreatesMissingSnapshotSubvolume(t *testing.T) {
 	wantArgs := []string{"subvolume", "create", filepath.Join(sv, ".snapshots")}
 	if !equalStrings(calls[0].Args, wantArgs) {
 		t.Errorf("args = %v, want %v", calls[0].Args, wantArgs)
+	}
+}
+
+// TestApply_SnapperNilRunnerUsesProductionRunner is the regression test for a
+// crash this story introduced and every other test here masked: `bentoo
+// snapshot apply` panicked with a nil pointer dereference on a live host.
+//
+// A nil Runner is this package's documented "use the production one" — newEngine,
+// newScheduler, newShipper, Rollback, and Restore all normalize it — and the cmd
+// layer depends on that: snapshotRunner is only ever assigned by tests, so every
+// real apply reaches Apply with nil. ensureSnapshotSubvolumes was the one new
+// Runner consumer that dereferenced the argument directly, and it runs before
+// the scheduler normalization that used to be the first thing to touch run.
+//
+// Every other Apply test injects a MockRunner, which is exactly why the whole
+// suite stayed green while the shipped command could not complete once. This
+// test therefore passes nil deliberately and stubs execCommand instead, so the
+// production path is exercised without spawning btrfs.
+func TestApply_SnapperNilRunnerUsesProductionRunner(t *testing.T) {
+	sv := filepath.Join(t.TempDir(), "home")
+	stubSnapperApplySeams(t) // .snapshots is missing, so the Runner is reached
+	dir := t.TempDir()
+
+	var got []string
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		got = append(got, append([]string{name}, arg...)...)
+		return exec.CommandContext(ctx, "true")
+	}
+
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{sv}}}
+	if err := Apply(context.Background(), cfg, filepath.Join(dir, "snapshot.toml"), nil); err != nil {
+		t.Fatalf("Apply with a nil Runner: %v", err)
+	}
+
+	want := []string{"btrfs", "subvolume", "create", filepath.Join(sv, ".snapshots")}
+	if !equalStrings(got, want) {
+		t.Errorf("command = %v, want %v", got, want)
 	}
 }
 

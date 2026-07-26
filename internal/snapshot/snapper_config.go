@@ -341,6 +341,14 @@ var chmodPath = os.Chmod
 // after a create succeeded) nor manufacture one (it cannot make this function
 // fail), because the caller aborts `apply` on the error this returns.
 func ensureSnapshotSubvolumes(ctx context.Context, cfg *Config, run Runner) error {
+	// A nil Runner means "use the production one" everywhere else in this
+	// package (newEngine, newScheduler, newShipper, Rollback, Restore), and the
+	// cmd layer relies on it: snapshotRunner is left nil outside tests, so every
+	// real `bentoo snapshot apply` arrives here with nil. Without this line the
+	// call below dereferences it and the command panics instead of running.
+	if run == nil {
+		run = defaultRunner()
+	}
 	for _, sv := range cfg.Engine.Subvolumes {
 		dir := filepath.Join(sv, snapshotsDirName)
 		if _, err := statPath(dir); err == nil {
