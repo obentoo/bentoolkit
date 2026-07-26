@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Bumped indirect dependencies to their latest releases: `golang.org/x/net`
+  v0.56.0 → v0.57.0, `golang.org/x/sync` v0.21.0 → v0.22.0, `golang.org/x/sys`
+  v0.46.0 → v0.47.0, `golang.org/x/text` v0.38.0 → v0.40.0, `golang.org/x/tools`
+  v0.46.0 → v0.47.0, and `golang.org/x/telemetry` (2026-06-25 snapshot). No API
+  changes; routine upstream fixes. `go mod tidy` reports no drift and
+  `govulncheck` finds no reachable vulnerabilities in the resulting graph.
+- Dependabot no longer proposes `playwright-go` v0.6100.0. The tag is published
+  under the wrong module path — its `go.mod` declares
+  `github.com/mxschmitt/playwright-go`, so it cannot be resolved under the
+  `playwright-community` name and the bump is uninstallable. Pinned to v0.6000.0
+  until upstream retags; the ignore entry says to drop it once a fixed release
+  lands.
+
 ## [0.15.0] - 2026-07-26
 
 ### Added
