@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-07-26
+
+### Fixed
+- **`hold = true` is now enforced at apply time, not only in the checker.** The
+  flag was read in exactly one place — `CheckAll`, which skips held packages —
+  and the applier never consulted the config at all. An explicit
+  `--check <pkg> --force` bypasses the checker's filter and writes the update to
+  `pending.json` like any other entry, so from that moment `--apply all` applied
+  the very bump the hold existed to prevent, silently and indistinguishably from
+  an ordinary update. This is reachable from normal use rather than a corner
+  case: probing a held package with `--force` is the only way to track it at
+  all, since it is absent from every mass check, and doing so arms the queue as
+  a side effect. `Apply` now refuses a held package before touching the
+  filesystem, modelled on the existing obsolete path — `Success` false, `Error`
+  nil, not counted as a failure by `--apply all`. Unlike an obsolete entry the
+  pending record is **kept**: the update is real and still pending, it just may
+  not be applied automatically, and pruning it would erase what the operator
+  wants to see. Surfaced as `Status: Held` per package and a `Held:` line in the
+  apply-all summary.
+- **The `revision` doc comment no longer recommends the case it exists to
+  prevent.** It offered the bentoo overlay's bare `webkit-gtk-2.52.5.ebuild` as
+  a legitimate example of an absent revision. A bare PV sorts below every `-rN`,
+  so that ebuild lost to `::gentoo`'s `-r600` and took its non-upstream
+  `USE=webdriver` with it — portage was selecting the Gentoo ebuild for SLOT 6
+  the whole time. Zero is right for an ordinary package, never for a slot that
+  `::gentoo` revisions.
+
 ### Changed
 - Bumped indirect dependencies to their latest releases: `golang.org/x/net`
   v0.56.0 → v0.57.0, `golang.org/x/sync` v0.21.0 → v0.22.0, `golang.org/x/sys`
@@ -1379,7 +1406,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/obentoo/bentoolkit/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
