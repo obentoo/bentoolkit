@@ -420,6 +420,16 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// pruned with a clear outcome instead of a hard failure.
 	currentVersion, err := a.resolveCurrentVersion(pkg)
 	if err != nil {
+		// A slot that matches nothing is a config error, not an obsolete entry:
+		// the package is present, its key is wrong. Pruning would delete the
+		// pending record and report success-ish, hiding the typo. Fail loudly.
+		if errors.Is(err, ErrSlotNotFound) {
+			result.Error = err
+			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+			}
+			return result, result.Error
+		}
 		// Package no longer present in the overlay (removed/renamed). The pending
 		// entry is obsolete — prune it and report, not as a failure.
 		return a.pruneObsolete(pkg, result,
