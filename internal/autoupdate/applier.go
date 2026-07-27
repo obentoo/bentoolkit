@@ -86,6 +86,15 @@ type ApplyResult struct {
 	// at/beyond the target version. The entry is pruned from pending.json and
 	// this is NOT counted as a failure (Success stays false, Error stays nil).
 	Obsolete bool
+	// Held indicates the package carries hold = true in packages.toml and was
+	// therefore refused. Like Obsolete this is NOT a failure (Success false,
+	// Error nil), but unlike Obsolete the pending entry is KEPT: the update is
+	// real and still pending, it just may not be applied automatically. A held
+	// package reaches this point at all because an explicit
+	// `--check <pkg> --force` bypasses the checker's hold filter and records the
+	// update, so the entry is already in pending.json by the time `--apply all`
+	// walks it.
+	Held bool
 	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
 	// obsolete. Empty unless Obsolete is true.
 	ObsoleteReason string
@@ -354,6 +363,22 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		a.reporter.TaskDone(pkg, result.Success, applySummary(result), "")
 	}()
 
+	// Refuse a held package before touching anything. hold = true is the
+	// maintainer's "present, but never auto-bump" decision, and until now it was
+	// enforced in the checker alone: CheckAll skips held packages, but an explicit
+	// `--check <pkg> --force` does not, and it writes the update to pending.json
+	// like any other. From there `--apply all` applied the very bump the hold
+	// existed to prevent. The guard belongs here because this is the only place
+	// every apply path passes through.
+	if cfg, ok := a.configs[pkg]; ok && cfg.IsHeld() {
+		result.Held = true
+		if update, found := a.pending.Get(pkg); found {
+			result.OldVersion = update.CurrentVersion
+			result.NewVersion = update.NewVersion
+		}
+		return result, nil
+	}
+
 	// Get pending update
 	update, found := a.pending.Get(pkg)
 	if !found {
@@ -549,6 +574,8 @@ func applySummary(result *ApplyResult) string {
 		return result.NewVersion
 	case result.Obsolete:
 		return result.ObsoleteReason
+	case result.Held:
+		return "held (hold = true)"
 	case result.Error != nil:
 		return result.Error.Error()
 	default:

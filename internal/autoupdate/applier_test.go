@@ -1830,3 +1830,96 @@ func TestApply_RollbackOnManifestWriteFailure(t *testing.T) {
 			dstPath, statErr)
 	}
 }
+
+// TestApplyRefusesHeldPackage covers the guard that makes hold = true mean
+// something at apply time. The checker skips held packages, but an explicit
+// `--check <pkg> --force` bypasses that filter and records the update, so a held
+// entry can be sitting in pending.json when `--apply all` runs. Before the
+// guard, that entry was applied like any other — the bump the hold existed to
+// prevent. The refusal is not a failure (Error nil) and, unlike an obsolete
+// entry, the pending record is KEPT: the update is real, just not automatable.
+func TestApplyRefusesHeldPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/held-pkg"
+	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.0.0",
+		NewVersion:     "1.1.0",
+		Status:         StatusPending,
+	})
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+		pkg: {Hold: true, URL: "https://example.invalid/", Parser: "json", Path: "tag_name"},
+	}}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithApplierPackagesConfig(cfg),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Errorf("Expected no error for a held package, got: %v", err)
+	}
+	if !result.Held {
+		t.Error("Expected result.Held to be true")
+	}
+	if result.Success {
+		t.Error("Expected Success to stay false for a held package")
+	}
+	if result.OldVersion != "1.0.0" || result.NewVersion != "1.1.0" {
+		t.Errorf("Expected the pending versions to be reported; got %q → %q", result.OldVersion, result.NewVersion)
+	}
+	if _, found := pending.Get(pkg); !found {
+		t.Error("Expected the held pending entry to be KEPT, not pruned")
+	}
+	// The refusal must happen before any filesystem work: no new ebuild.
+	if _, err := os.Stat(filepath.Join(overlayDir, pkg, "held-pkg-1.1.0.ebuild")); !os.IsNotExist(err) {
+		t.Error("Expected no ebuild to be written for a held package")
+	}
+}
+
+// TestApplyUnheldPackageStillApplies is the counterpart: an entry whose config
+// exists but carries no hold must be unaffected by the guard.
+func TestApplyUnheldPackageStillApplies(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "test-cat/free-pkg"
+	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.0.0",
+		NewVersion:     "1.1.0",
+		Status:         StatusPending,
+	})
+
+	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+		pkg: {URL: "https://example.invalid/", Parser: "json", Path: "tag_name"},
+	}}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithApplierPackagesConfig(cfg),
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	result, _ := applier.Apply(pkg, false)
+	if result.Held {
+		t.Error("Expected Held to be false for a package with no hold")
+	}
+}

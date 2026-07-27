@@ -189,8 +189,14 @@ type PackageConfig struct {
 	// bumps webkit-gtk-2.52.3-r411 to webkit-gtk-2.52.5-r410, not to -r411.
 	//
 	// Zero/absent means a plain PV with no revision, which is correct for every
-	// ordinary package and also for a slot whose ebuilds carry no revision (the
-	// bentoo overlay's SLOT 6 webkit-gtk is webkit-gtk-2.52.5.ebuild).
+	// ordinary package. It is NOT the right answer for a slot that ::gentoo
+	// revisions, even when the overlay's own ebuild happens to carry a bare PV:
+	// a bare PV sorts BELOW every -rN, so portage picks ::gentoo's ebuild over
+	// the overlay's and whatever divergence the overlay carries stops being
+	// selected at all. The bentoo overlay hit exactly that with SLOT 6
+	// webkit-gtk — a bare webkit-gtk-2.52.5.ebuild losing to ::gentoo's -r600,
+	// taking its non-upstream USE=webdriver with it — and that entry now
+	// declares revision = 600.
 	Revision int `toml:"revision,omitempty"`
 }
 
