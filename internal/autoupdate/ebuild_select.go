@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
+
+// ErrSlotNotFound is returned when a package's directory IS present in the
+// overlay but no ebuild in it declares the slot the entry's key asks for.
+//
+// It is deliberately NOT an ErrNoEbuildFound. That error means "this package is
+// gone from the overlay", and the checker acts on it: the entry is auto-disabled
+// in packages.toml so a removed package stops being processed. A slot that
+// matches nothing is the opposite situation — the package is right there, the
+// key is wrong (a typo, or a slot that has not been packaged yet) — and
+// silently writing enabled = false for it would turn a config mistake into a
+// package that quietly stops being updated.
+//
+// This distinction is not hypothetical. A 0.14.0 checker, which predates slot
+// keys entirely, reads "net-libs/webkit-gtk:4.1" as a directory name, fails to
+// find it, concludes the ebuild was removed and disables both webkit-gtk slot
+// entries — with no error and no exit code to notice. Config the checker cannot
+// interpret must fail loudly, never silently downgrade itself.
+var ErrSlotNotFound = errors.New("no ebuild in the package directory declares the requested slot")
 
 // A package key in packages.toml is normally a plain "category/package" atom.
 // A package that ships several SLOTs from one directory needs one entry per
@@ -156,8 +175,11 @@ func selectCurrentEbuild(overlayPath, pkg string) (ebuildCandidate, error) {
 	}
 
 	if best.Version == "" {
+		// The package directory exists (ReadDir succeeded above), so this is
+		// never an orphan. With a slot filter it is a config error; without one
+		// the directory holds no parsable, non-live ebuild at all.
 		if slot != "" {
-			return ebuildCandidate{}, fmt.Errorf("%w: %s (no ebuild declares SLOT %q)", ErrNoEbuildFound, pkg, slot)
+			return ebuildCandidate{}, fmt.Errorf("%w: %s (slot %q)", ErrSlotNotFound, pkg, slot)
 		}
 		return ebuildCandidate{}, fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
 	}

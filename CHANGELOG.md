@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A slot that matches nothing no longer disables the entry.**
+  `selectCurrentEbuild` reported "no ebuild declares this SLOT" as
+  `ErrNoEbuildFound` — the same error that means "this package is gone from the
+  overlay", which the checker acts on by writing `enabled = false` into
+  `packages.toml`. A typo'd slot (`net-libs/webkit-gtk:4.2`) therefore switched
+  a live entry off silently, with no error and no exit code to notice. The two
+  are now distinct: the new `ErrSlotNotFound` is raised only when the package
+  directory IS present and no ebuild in it declares the slot, and it surfaces as
+  an ordinary failure. The applier likewise stops pruning such a pending entry
+  as obsolete — the package is there, the key is wrong.
+
+  This is the failure mode a pre-0.15.0 checker hits against the slot keys it
+  predates: it reads `net-libs/webkit-gtk:4.1` as a directory name, does not
+  find it, and disables both webkit-gtk entries without a word. Config the
+  checker cannot interpret must fail loudly rather than quietly downgrade
+  itself.
+
 ## [0.15.1] - 2026-07-26
 
 ### Fixed

@@ -147,12 +147,65 @@ func TestSelectCurrentEbuildSlotFiltering(t *testing.T) {
 	}
 }
 
+// TestSelectCurrentEbuildUnmatchedSlot pins the distinction the auto-disable
+// path depends on: a slot that matches nothing is a config error, NOT the
+// "package is gone from the overlay" signal. Conflating the two is how a typo'd
+// slot would silently switch a live entry off in packages.toml.
 func TestSelectCurrentEbuildUnmatchedSlot(t *testing.T) {
 	overlayDir := writeWebkitOverlay(t)
 
 	_, err := selectCurrentEbuild(overlayDir, "net-libs/webkit-gtk:5")
-	if !errors.Is(err, ErrNoEbuildFound) {
-		t.Fatalf("selectCurrentEbuild with an unmatched slot: got %v, want %v", err, ErrNoEbuildFound)
+	if !errors.Is(err, ErrSlotNotFound) {
+		t.Fatalf("selectCurrentEbuild with an unmatched slot: got %v, want %v", err, ErrSlotNotFound)
+	}
+	if errors.Is(err, ErrNoEbuildFound) {
+		t.Error("an unmatched slot must NOT report as ErrNoEbuildFound: the checker auto-disables on that")
+	}
+}
+
+// TestCheckAllDoesNotDisableOnSlotTypo is the end-to-end guarantee: an entry
+// whose slot matches nothing must be reported as a failure and must leave
+// packages.toml untouched. The alternative — what a slot-blind checker does —
+// is to write enabled = false and go quiet, which is how both webkit-gtk slot
+// entries were switched off without a single error line.
+func TestCheckAllDoesNotDisableOnSlotTypo(t *testing.T) {
+	const cfg = `["net-libs/webkit-gtk:4.2"]
+url = "https://example.invalid/releases/"
+parser = "regex"
+pattern = 'webkitgtk-([0-9.]+)\.tar\.xz'
+`
+	overlayPath, configPath := writePackagesTOML(t, cfg)
+	createTestEbuildFileWithContent(t, overlayPath, "net-libs/webkit-gtk", "2.52.4-r411",
+		"EAPI=8\nSLOT=\"4.1/0\"\n")
+
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	checker, err := NewChecker(overlayPath)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	batch := checker.CheckAll(true)
+
+	if len(batch.Failures) != 1 {
+		t.Errorf("expected the slot typo to be reported as a failure, got %d failures and %d results",
+			len(batch.Failures), len(batch.Items))
+	}
+	for _, r := range batch.Items {
+		if r.Orphaned {
+			t.Errorf("%s was treated as an orphan; the package directory is right there", r.Package)
+		}
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config after: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("packages.toml was rewritten on a slot typo:\n--- before\n%s\n--- after\n%s", before, after)
 	}
 }
 
