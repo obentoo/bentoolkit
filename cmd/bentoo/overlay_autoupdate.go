@@ -844,12 +844,14 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 		displayApplyResult(result)
 	}
 
-	applied, obsolete := 0, 0
+	applied, obsolete, held := 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
 		case r.Obsolete:
 			obsolete++
+		case r.Held:
+			held++
 		case r.Success:
 			applied++
 		}
@@ -861,6 +863,9 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 	if obsolete > 0 {
 		output.Warning.Printf("  Obsolete: %d (pruned from pending)\n", obsolete)
 	}
+	if held > 0 {
+		output.Warning.Printf("  Held:     %d (hold = true; kept in pending)\n", held)
+	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
 	}
@@ -871,7 +876,7 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 
 // displayApplyResult formats and displays a single apply outcome.
 // It is a no-op when result is nil. Otherwise it prints the package and
-// version transition, then reports status (obsolete, success, or failure)
+// version transition, then reports status (obsolete, held, success, or failure)
 // plus any available details such as obsolete reason, LLM fix/QA summary,
 // cleaned old-version info/warnings, and failure log path.
 func displayApplyResult(result *autoupdate.ApplyResult) {
@@ -891,6 +896,12 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
 		}
+		return
+	}
+
+	if result.Held {
+		output.Warning.Println("    Status:  Held (hold = true; kept in pending)")
+		output.Info.Println("    Reason:  bumped by hand — drop the hold in packages.toml to automate it")
 		return
 	}
 
