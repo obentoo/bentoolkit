@@ -12,8 +12,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20260311145557-c83711a11ffa
-	github.com/chromedp/cdproto v0.0.0-20260704091341-6ca7914c3938
-	github.com/chromedp/chromedp v0.15.1
+	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
+	github.com/chromedp/chromedp v0.16.0
 	github.com/fatih/color v1.19.0
 	github.com/leanovate/gopter v0.2.11
 	github.com/playwright-community/playwright-go v0.6000.0
