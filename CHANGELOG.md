@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **CI now compiles the tagged script evaluators.** `script_evaluator_chromedp.go`
+  is `//go:build chromedp && !playwright` and its playwright sibling is the
+  mirror, so `go build ./...` and `go test ./...` skipped both files entirely —
+  the only code that calls chromedp or playwright-go was never compiled by any
+  job. A dependency bump that broke their API passed CI fully green and failed
+  only for whoever built with the tag. The `build` job now runs `go build` and
+  `go vet` under each tag. Verified by breaking a chromedp call on purpose:
+  default `build`, `vet` and `test` all still passed; the new step failed.
+
 ### Fixed
 - **A slot that matches nothing no longer disables the entry.**
   `selectCurrentEbuild` reported "no ebuild declares this SLOT" as
