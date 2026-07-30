@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-07-30
+
 ### Changed
+- Bumped dependencies: `github.com/antchfx/xpath` v1.3.6 → v1.3.7,
+  `github.com/chromedp/chromedp` v0.15.1 → v0.16.0 (with `cdproto` to match),
+  `actions/checkout` v7.0.0 → v7.0.1 and `actions/setup-go` v6.5.0 → v7.0.0.
+  The setup-go major is an internal ESM migration — the runtime stays `node24`
+  and no input changed. Each action's pinned SHA was checked against the real
+  tag. A full supply-chain audit accompanied the bumps: no open Dependabot
+  alerts, and no findings from `govulncheck` (under all three build tags),
+  `osv-scanner` over the whole module graph, or `trivy`. `go1.26.5` is current.
 - **CI now compiles the tagged script evaluators.** `script_evaluator_chromedp.go`
   is `//go:build chromedp && !playwright` and its playwright sibling is the
   mirror, so `go build ./...` and `go test ./...` skipped both files entirely —
@@ -1443,7 +1453,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/obentoo/bentoolkit/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/obentoo/bentoolkit/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/obentoo/bentoolkit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
