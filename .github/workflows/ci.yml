@@ -82,22 +82,51 @@ jobs:
           # JSON mode always exits 0; we parse the findings ourselves.
           # govulncheck is pinned via the `tool` directive in go.mod (tracked by
           # Dependabot's golang-x group); invoked here with `go tool`.
-          go tool govulncheck -json ./... > /tmp/vulncheck.json
-          # Count REACHABLE vulnerabilities (trace frame with a called function)
-          # in third-party modules. stdlib/toolchain issues require a Go update,
-          # not a dependency bump, so they don't fail this job.
-          THIRD_PARTY=$(jq -s '
-            [ .[] | .finding // empty
-              | select(.trace[0].function != null)
-              | .trace[0].module
-              | select(. != "stdlib" and . != "toolchain")
-            ] | unique | length' /tmp/vulncheck.json)
-          if [ "$THIRD_PARTY" -gt 0 ]; then
-            echo "::error::${THIRD_PARTY} third-party vulnerability(ies) found"
-            go tool govulncheck ./...
+          #
+          # Analysed once per build tag, not just by default. govulncheck skips a
+          # file behind a tag it was not given, exactly as `go build` does, so the
+          # default run says nothing about chromedp or playwright-go — the two
+          # modules whose call sites live only in the tagged script evaluators. A
+          # reachable CVE in either would have gone unreported here.
+          #
+          # No workflow expressions are interpolated; the loop variable is local
+          # to this step and quoted.
+          failed=""
+          for tag in "" chromedp playwright; do
+            label="${tag:-default}"
+            echo "::group::govulncheck (${label})"
+            if [ -z "$tag" ]; then
+              go tool govulncheck -json ./... > "/tmp/vulncheck-${label}.json"
+            else
+              go tool govulncheck -tags "$tag" -json ./... > "/tmp/vulncheck-${label}.json"
+            fi
+            # Count REACHABLE vulnerabilities (trace frame with a called function)
+            # in third-party modules. stdlib/toolchain issues require a Go update,
+            # not a dependency bump, so they don't fail this job.
+            THIRD_PARTY=$(jq -s '
+              [ .[] | .finding // empty
+                | select(.trace[0].function != null)
+                | .trace[0].module
+                | select(. != "stdlib" and . != "toolchain")
+              ] | unique | length' "/tmp/vulncheck-${label}.json")
+            if [ "$THIRD_PARTY" -gt 0 ]; then
+              echo "::error::${THIRD_PARTY} third-party vulnerability(ies) found (${label})"
+              if [ -z "$tag" ]; then
+                go tool govulncheck ./... || true
+              else
+                go tool govulncheck -tags "$tag" ./... || true
+              fi
+              failed="${failed} ${label}"
+            else
+              echo "No third-party vulnerabilities (${label})"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::govulncheck found third-party vulnerabilities under:${failed}"
             exit 1
           fi
-          echo "No third-party vulnerabilities (stdlib-only issues require a Go update)"
+          echo "No third-party vulnerabilities under any build tag (stdlib-only issues require a Go update)"
 
   secrets:
     name: Secret Scan

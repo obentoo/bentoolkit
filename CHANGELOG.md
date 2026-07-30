@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only for whoever built with the tag. The `build` job now runs `go build` and
   `go vet` under each tag. Verified by breaking a chromedp call on purpose:
   default `build`, `vet` and `test` all still passed; the new step failed.
+- **`govulncheck` now runs under each build tag too.** The same blind spot, with
+  a security consequence rather than a compile one: govulncheck skips a file
+  behind a tag it was not given, so the default run said nothing about chromedp
+  or playwright-go — the two modules whose call sites live only in the tagged
+  evaluators. A reachable CVE in either went unreported. The `audit` job now
+  analyses default, `chromedp` and `playwright`, reports every affected tag
+  rather than stopping at the first, and fails the job if any has a reachable
+  third-party finding. Confirmed by simulating a finding under one tag: the
+  other two still passed, the affected one was named, and the step exited 1.
 
 ### Fixed
 - **A slot that matches nothing no longer disables the entry.**
