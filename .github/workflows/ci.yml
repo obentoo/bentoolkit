@@ -156,6 +156,25 @@ jobs:
       - name: Build all targets
         run: make build-all
 
+      # The browser-driven script evaluators sit behind build tags
+      # (script_evaluator_chromedp.go is `//go:build chromedp && !playwright`,
+      # its playwright sibling the mirror), so nothing above ever compiles them:
+      # `go build ./...` and `go test ./...` both skip a tagged file entirely.
+      # That left a dependency bump to chromedp or playwright-go passing CI fully
+      # green while breaking the only code that calls it — the failure would
+      # surface for whoever built with the tag, not here. Compile and vet both
+      # tags so an incompatible bump fails in the PR that proposes it.
+      # No workflow expressions are interpolated below; the loop variable is
+      # local to the step and quoted.
+      - name: Build and vet the tagged script evaluators
+        run: |
+          for tag in chromedp playwright; do
+            echo "::group::-tags ${tag}"
+            go build -tags "${tag}" ./...
+            go vet -tags "${tag}" ./...
+            echo "::endgroup::"
+          done
+
   workflow-lint:
     name: Workflow Lint
     runs-on: ubuntu-latest
