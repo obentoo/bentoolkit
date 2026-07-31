@@ -42,3 +42,5 @@ import (
 	// Import TOML library for configuration parsing
 	_ "github.com/BurntSushi/toml"
 )
+
+// prova temporária do gate de changelog; este branch será descartado
