@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,10 @@ var (
 	// rate-limited output instead. It is one of the gate's opt-outs (alongside
 	// NO_COLOR and BENTOO_NO_TUI); see tuiEnabledForApply (R2.1, R2.2).
 	autoupdateNoTUI bool
+	// autoupdateLint checks the overlay's packages.toml against the record model
+	// (every record closed by "# END", documented by a trailing comments field,
+	// with no floating comments) and validates each record's fields. Read-only.
+	autoupdateLint bool
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -84,7 +89,8 @@ Examples:
   bentoo overlay autoupdate --revive-list         List orphaned packages with a newer upstream
   bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans
   bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump
-  bentoo overlay autoupdate --revive all          Revive every revivable orphan`,
+  bentoo overlay autoupdate --revive all          Revive every revivable orphan
+  bentoo overlay autoupdate --lint                Check packages.toml against the record model`,
 	Run: runAutoupdate,
 }
 
@@ -102,6 +108,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
+	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model (# END marker, comments field, no floating comments)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -238,6 +245,8 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 
 	// Handle different modes
 	switch {
+	case autoupdateLint:
+		runLint(overlayPath)
 	case autoupdateCheck:
 		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateList:
@@ -555,6 +564,48 @@ func runList(configDir string) {
 
 	updates := pending.List()
 	displayPendingUpdates(updates)
+}
+
+// runLint handles the --lint flag: it checks the overlay's packages.toml
+// against the record model and prints one line per violation, grouped in file
+// order. It exits non-zero when anything is reported, so the same command works
+// as a pre-commit gate on the registry.
+func runLint(overlayPath string) {
+	issues, err := autoupdate.LintPackagesConfig(overlayPath)
+	// Issues found by the text scan are printed even when the file then fails to
+	// parse — a missing marker is worth reporting alongside the syntax error.
+	for _, issue := range issues {
+		output.Error.Println("  " + issue.String())
+	}
+	if err != nil {
+		logger.Error("failed to lint packages.toml: %v", err)
+		osExit(1)
+	}
+
+	if len(issues) == 0 {
+		output.Success.Println("packages.toml: record model OK")
+		return
+	}
+
+	// A registry mid-migration reports the same rule hundreds of times, so close
+	// with a per-rule tally: the detail lines above say where, this says what.
+	counts := make(map[string]int, len(issues))
+	rules := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		if counts[issue.Rule] == 0 {
+			rules = append(rules, issue.Rule)
+		}
+		counts[issue.Rule]++
+	}
+	sort.Strings(rules)
+
+	fmt.Println()
+	for _, rule := range rules {
+		fmt.Printf("  %-26s %d\n", rule, counts[rule])
+	}
+	fmt.Println()
+	logger.Error("packages.toml: %d issue(s)", len(issues))
+	osExit(1)
 }
 
 // displayPendingUpdates formats and displays pending updates

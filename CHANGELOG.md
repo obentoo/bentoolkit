@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`suffix` / `suffix_when`: a record can declare that what it extracts is a
+  pre-release.** Upstream numbering rarely says so. LibreOffice publishes
+  `26.8.0.1` in its testing channel with a version string indistinguishable from
+  a stable one, so the value landed in the overlay as a finished release: the
+  bump rewrote `libreoffice-26.8.0.1_pre.ebuild` to `libreoffice-26.8.0.1.ebuild`
+  and reported an update where there was none. `suffix = "_pre"` restores both
+  the label and the ordering — Gentoo sorts `_pre` below the bare version, so the
+  bump now fires exactly when upstream promotes the release. `suffix_when` gates
+  it by regex, for the common case of one index listing several release lines
+  (the LibreOffice archive carries the stable 26.2 line and the testing 26.8 one
+  together, and `select = "max"` always returns the latter). The suffix is
+  applied after `transform` and before comparison, so `select` orders the values
+  that will actually become the PV; it is idempotent, and rejected in
+  combination with `track = "commit"`, which derives its own snapshot suffix.
+
+- **`comments`: record documentation is now a field, not a floating comment.**
+  Two problems went with `#` lines. A comment between two records belongs to
+  neither, so nothing says which one it documents; and `overlay analyze --save`
+  re-encodes the whole registry through `toml.Encoder`, which silently erased
+  every doc comment in it. As a field the text has an owner and survives the
+  rewrite — `savePackagesConfig` now writes records one at a time, emitting the
+  doc as a readable multi-line string instead of one line of escaped `\n`.
+
+- **`bentoo overlay autoupdate --lint`** checks the registry against the record
+  model: every record closed by a `# END` marker, documented by a trailing
+  `comments` field, with no comment floating outside a record — plus the
+  semantic validation of every record's fields. It reports the full list with a
+  per-rule tally and exits non-zero, so it works as a pre-commit gate. `# END`
+  is a comment because TOML has no block delimiter: a bare `[END]` table would
+  parse as a package named `END`, and repeated per record, as a duplicate-table
+  error that stops the file from loading.
+
 ## [0.15.3] - 2026-07-31
 
 ### Added

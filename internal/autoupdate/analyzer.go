@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -735,19 +736,19 @@ func (a *Analyzer) SaveSchema(pkg string, schema *PackageConfig) error {
 }
 
 // savePackagesConfig saves the packages configuration to disk.
-// It preserves existing entries and formats TOML consistently with sorted keys.
+//
+// Records are written one at a time, in sorted key order, each closed by the
+// `# END` marker the record model requires — a single Encode call over the whole
+// map would emit valid TOML that the registry lint then rejects for missing
+// markers. The doc field is written by hand as a multi-line string rather than
+// through the encoder, which would collapse it into one line of escaped \n and
+// make the registry unreadable.
 func (a *Analyzer) savePackagesConfig() error {
 	configPath := filepath.Join(a.overlayPath, ".autoupdate", "packages.toml")
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	// Convert to file format (top-level keys are package names)
-	fileConfig := make(map[string]PackageConfig)
-	for pkg, cfg := range a.config.Packages {
-		fileConfig[pkg] = cfg
 	}
 
 	// Write to temp file first for atomic operation
@@ -757,13 +758,43 @@ func (a *Analyzer) savePackagesConfig() error {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 
-	// Use TOML encoder with consistent formatting
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(fileConfig); err != nil {
+	fail := func(err error) error {
 		f.Close()          //nolint:errcheck
 		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to encode config: %w", err)
+		return err
 	}
+
+	pkgs := make([]string, 0, len(a.config.Packages))
+	for pkg := range a.config.Packages {
+		pkgs = append(pkgs, pkg)
+	}
+	sort.Strings(pkgs)
+
+	for i, pkg := range pkgs {
+		cfg := a.config.Packages[pkg]
+		comments := cfg.Comments
+		// Encode the record without the doc field, then append it by hand so it
+		// keeps its line breaks.
+		cfg.Comments = ""
+
+		if i > 0 {
+			if _, err := io.WriteString(f, "\n"); err != nil {
+				return fail(fmt.Errorf("failed to write config: %w", err))
+			}
+		}
+		if err := toml.NewEncoder(f).Encode(map[string]PackageConfig{pkg: cfg}); err != nil {
+			return fail(fmt.Errorf("failed to encode config: %w", err))
+		}
+		if comments != "" {
+			if _, err := io.WriteString(f, formatCommentsField(comments)); err != nil {
+				return fail(fmt.Errorf("failed to write config: %w", err))
+			}
+		}
+		if _, err := io.WriteString(f, recordEndMarker+"\n"); err != nil {
+			return fail(fmt.Errorf("failed to write config: %w", err))
+		}
+	}
+
 	f.Close() //nolint:errcheck
 
 	// Rename to final path (atomic on most filesystems)
@@ -773,6 +804,40 @@ func (a *Analyzer) savePackagesConfig() error {
 	}
 
 	return nil
+}
+
+// formatCommentsField renders a record's doc text as the TOML multi-line basic
+// string that closes the record, marker line excluded.
+//
+// Three things are escaped or adjusted, all for the same reason — the registry
+// is edited by hand and read back by raw-text tooling, so the output has to be
+// both valid TOML and safe to scan line by line:
+//   - a backslash, and any run of three or more quotes, would either be read as
+//     an escape or close the string early;
+//   - a line starting with "[" looks like a section header to the surgical edit
+//     in setPackagesEnabled, which would cut the record short there, so it is
+//     indented by one space (the lint rejects the same shape in hand-written
+//     records);
+//   - trailing whitespace is dropped so a re-encode is byte-stable.
+func formatCommentsField(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	// Only a run of three or more quotes can close the string early; escape every
+	// quote in such a run and leave ordinary "quoted" words alone.
+	s = tripleQuoteRegex.ReplaceAllStringFunc(s, func(run string) string {
+		return strings.Repeat(`\"`, len(run))
+	})
+
+	lines := strings.Split(strings.Trim(s, "\n"), "\n")
+	for i, ln := range lines {
+		ln = strings.TrimRight(ln, " \t")
+		if strings.HasPrefix(ln, "[") {
+			ln = " " + ln
+		}
+		lines[i] = ln
+	}
+
+	return "comments = \"\"\"\n" + strings.Join(lines, "\n") + "\n\"\"\"\n"
 }
 
 // LoadAndMergeSchema loads existing config, adds/updates a schema, and saves.

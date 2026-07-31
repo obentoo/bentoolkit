@@ -1141,9 +1141,26 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 	return best
 }
 
-// fetchUpstreamVersion fetches and parses the upstream version for a package.
-// It tries the primary URL/parser first, then fallback if configured, then LLM if available.
+// fetchUpstreamVersion fetches and parses the upstream version for a package,
+// then applies the record's pre-release suffix.
+//
+// The suffix is applied here, on the single value every extraction path
+// converges to, so that script/fallback/LLM results are marked exactly like the
+// primary one — those paths bypass fetchAndParse and would otherwise emit a bare
+// version for a record that declares a development channel. selectVersion also
+// applies it per candidate so "max" orders the final values; applySuffix is
+// idempotent, so the second pass is a no-op.
 func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, error) {
+	version, err := c.fetchUpstreamVersionRaw(pkg, cfg)
+	if err != nil {
+		return "", err
+	}
+	return applySuffix(version, cfg), nil
+}
+
+// fetchUpstreamVersionRaw fetches and parses the upstream version for a package.
+// It tries the primary URL/parser first, then fallback if configured, then LLM if available.
+func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (string, error) {
 	// The script parser drives a headless browser itself, so it bypasses
 	// fetchContent/fetchAndParse entirely (and therefore transform/select, which
 	// the script handles in JS — see ValidatePackageConfig). It has no fallback
@@ -1231,7 +1248,7 @@ func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, erro
 			if cErr != nil {
 				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
 			}
-			best := selectVersion(cands, cfg.Transform, cfg.Select)
+			best := selectVersion(cands, cfg)
 			if best == "" {
 				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
 					ErrNoVersionFound, len(cands), cfg.Select)

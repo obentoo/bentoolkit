@@ -37,7 +37,19 @@ var (
 	// ErrInvalidPackageKey is returned when a packages.toml key is not a
 	// well-formed "category/package" atom, with or without a ":slot" suffix.
 	ErrInvalidPackageKey = errors.New("invalid package key: want category/package or category/package:slot")
+	// ErrInvalidSuffix is returned when the suffix field is not one of the Gentoo
+	// version suffixes, optionally numbered (_alpha, _beta2, _pre, _rc1, _p).
+	ErrInvalidSuffix = errors.New("invalid suffix: must be _alpha, _beta, _pre, _rc or _p, optionally numbered")
+	// ErrSuffixWhenWithoutSuffix is returned when suffix_when is set but suffix is
+	// not: the condition has nothing to gate.
+	ErrSuffixWhenWithoutSuffix = errors.New("suffix_when requires suffix")
 )
+
+// validSuffixRegex matches the value accepted by PackageConfig.Suffix: one of
+// the Gentoo pre-release/patch markers, with an optional number (_rc, _rc1,
+// _beta2). It deliberately allows a single suffix only — a stacked value like
+// "_pre_p1" is a version string, not a channel marker.
+var validSuffixRegex = regexp.MustCompile(`^_(alpha|beta|pre|rc|p)[0-9]*$`)
 
 // PackageConfig represents a single package's autoupdate configuration.
 // It defines how to check upstream versions for a specific package.
@@ -128,6 +140,41 @@ type PackageConfig struct {
 	// "last" = last match. Requires a parser that can extract a list
 	// (json/regex/html); ignored by the "script" parser.
 	Select string `toml:"select,omitempty"`
+
+	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
+	// optionally numbered) appended to the detected version, declaring that what
+	// this record extracts is a pre-release rather than a final release.
+	//
+	// It exists because upstream numbering rarely says so itself: LibreOffice
+	// publishes 26.8.0.1 in its testing channel with a version string
+	// indistinguishable from a stable one, so the bare value would land in the
+	// overlay as a finished release. The suffix restores the truth AND the
+	// ordering — Gentoo sorts _pre below the bare version, so 26.8.0.1_pre stays
+	// older than the eventual 26.8.0.1, and the bump fires exactly when upstream
+	// promotes the release.
+	//
+	// The suffix is applied after transform and before validation/comparison, so
+	// candidates are already suffixed when select = "max" orders them. It does
+	// not apply to track = "commit", whose _p<date>/_pre<date> snapshot suffix is
+	// derived from the current ebuild instead.
+	//
+	// Ebuilds must be able to strip it when building SRC_URI — the LibreOffice
+	// ebuild's MY_PV="${MY_PV/_pre/}" is the canonical shape.
+	Suffix string `toml:"suffix,omitempty"`
+
+	// SuffixWhen is a regex gating Suffix: the suffix is appended only to a
+	// detected version that matches it. Absent (the common case) means the suffix
+	// applies unconditionally, which is right when the probed URL *is* the
+	// pre-release channel.
+	//
+	// It is for the opposite case: one endpoint listing several release lines at
+	// once. The LibreOffice archive index carries both the stable 26.2 line and
+	// the testing 26.8 one, and select = "max" always returns the latter, so
+	// suffix_when = '^26\.8\.' marks that line — and only it — as _pre. Such a
+	// record needs an edit when the line is promoted to stable (drop the field,
+	// or point it at the next development line); the doc comment must say so.
+	SuffixWhen string `toml:"suffix_when,omitempty"`
+
 	// Script is a JS expression/IIFE evaluated against the live DOM by the
 	// "script" parser; its string result is the version. Inline, or "@file.js"
 	// to load from .autoupdate/scripts/<file>.
@@ -198,6 +245,24 @@ type PackageConfig struct {
 	// taking its non-upstream USE=webdriver with it — and that entry now
 	// declares revision = 600.
 	Revision int `toml:"revision,omitempty"`
+
+	// Comments is the record's documentation: why this source and parser, and
+	// every caveat a future bump must know (stale endpoints, pre-release traps,
+	// hand-edited ebuild variables). It is the LAST field of every record, and
+	// the record ends with a `# END` marker on the following line.
+	//
+	// It is a field rather than a `#` comment for two reasons. First, comments do
+	// not survive a rewrite: savePackagesConfig re-encodes the whole file through
+	// toml.Encoder, so a single `overlay analyze --save` used to erase every doc
+	// comment in the registry — as a field the text is data and comes back out.
+	// Second, it gives the documentation an owner: it belongs to a record instead
+	// of floating between two of them, where nothing says which one it describes.
+	//
+	// Write it as a TOML multi-line basic string ("""…""") starting with the
+	// package name. Keep `[` off the start of any line: the raw-text surgery in
+	// setPackagesEnabled scans for `[section]` headers and a line that looks like
+	// one would end the record early.
+	Comments string `toml:"comments,omitempty"`
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -501,6 +566,27 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if _, err := regexp.Compile(r[0]); err != nil {
 			warnLogf("package %s: transform rule #%d has bad regex %q (%v); it will be ignored", pkg, i, r[0], err)
 		}
+	}
+
+	// Validate the pre-release suffix. A typo here would be written straight into
+	// an ebuild filename, so reject anything that is not a Gentoo suffix rather
+	// than emitting a PV no package manager can order.
+	if cfg.Suffix != "" && !validSuffixRegex.MatchString(cfg.Suffix) {
+		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidSuffix, cfg.Suffix)
+	}
+	if cfg.SuffixWhen != "" {
+		if cfg.Suffix == "" {
+			return fmt.Errorf("package %s: %w", pkg, ErrSuffixWhenWithoutSuffix)
+		}
+		if _, err := regexp.Compile(cfg.SuffixWhen); err != nil {
+			return fmt.Errorf("package %s: invalid suffix_when %q: %w", pkg, cfg.SuffixWhen, err)
+		}
+	}
+	// track="commit" derives its own _p<date>/_pre<date> suffix from the current
+	// ebuild (see extractSnapshotSuffix), so a declared suffix would either be
+	// ignored or stack into a nonsense PV. Fail rather than pick one silently.
+	if cfg.Suffix != "" && cfg.Track == "commit" {
+		return fmt.Errorf("package %s: suffix cannot be combined with track=\"commit\" (the snapshot suffix comes from the current ebuild)", pkg)
 	}
 
 	// transform/select do not apply to the script parser: that branch bypasses
