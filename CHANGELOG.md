@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parse as a package named `END`, and repeated per record, as a duplicate-table
   error that stops the file from loading.
 
+### Fixed
+- **`SetDefaultHeaders` no longer drops the built-in User-Agent.** It replaced
+  the whole map, so any caller setting a single header also erased the
+  `User-Agent` the constructor installs — the descriptive UA that exists
+  precisely because many WAF/Cloudflare-fronted upstreams reject Go's default
+  `Go-http-client/1.1` with a 403. Provided headers are now merged into the
+  defaults, and an explicit key still overrides. The bug was latent rather than
+  live: today the method has no production caller, only tests. Found by the
+  repository's AI code-quality findings (#79).
+
 ## [0.15.3] - 2026-07-31
 
 ### Added
