@@ -204,6 +204,66 @@ jobs:
             echo "::endgroup::"
           done
 
+  # A PR that changes what ships must say so in the changelog. Three releases in
+  # a row nearly went out with notes that omitted whole changes — PR #57 before
+  # 0.15.0, #60-63 before 0.15.2, #69-73 before this — every time because a merge
+  # touched only go.mod/go.sum and nobody noticed until the release was being
+  # cut. Dependency bumps are the recurring case: the tooling that opens them
+  # does not write changelog entries, so the omission is silent by construction.
+  #
+  # This makes it loud instead. Add the entry, or label the PR `no-changelog`
+  # when there genuinely is nothing to record (a test-only fix, a typo).
+  changelog:
+    name: Changelog
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # need the base branch to diff against
+          persist-credentials: false
+
+      - name: Require a changelog entry for user-visible changes
+        env:
+          # Passed through env, never interpolated into the script body.
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view "$PR_NUMBER" --json labels \
+               --jq '.labels[].name' | grep -qx 'no-changelog'; then
+            echo "Labelled no-changelog; skipping."
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+
+          # What counts as user-visible: the module graph, and the code itself.
+          # Test files are excluded — a test-only change ships nothing.
+          relevant=$(echo "$changed" | grep -E '^(go\.mod|go\.sum)$|\.go$' \
+                     | grep -vE '_test\.go$' || true)
+          if [ -z "$relevant" ]; then
+            echo "No user-visible change; changelog not required."
+            exit 0
+          fi
+
+          if echo "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "Changelog updated alongside:"
+            echo "$relevant" | sed 's/^/  /'
+            exit 0
+          fi
+
+          echo "::error::This PR changes what ships but does not touch CHANGELOG.md"
+          echo "Files that require an entry:"
+          echo "$relevant" | sed 's/^/  /'
+          echo
+          echo "Add a line under [Unreleased], or label the PR 'no-changelog'."
+          exit 1
+
   workflow-lint:
     name: Workflow Lint
     runs-on: ubuntu-latest
