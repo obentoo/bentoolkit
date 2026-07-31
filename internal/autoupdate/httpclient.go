@@ -499,8 +499,15 @@ func (c *RetryableHTTPClient) GetGitHubToken() string {
 
 // SetDefaultHeaders sets default headers that will be applied to all requests.
 // These headers are applied before any request-specific headers.
+// Provided headers are merged into existing defaults so built-in headers
+// (for example User-Agent) are preserved unless explicitly overridden.
 func (c *RetryableHTTPClient) SetDefaultHeaders(headers map[string]string) {
-	c.defaultHeaders = headers
+	if c.defaultHeaders == nil {
+		c.defaultHeaders = make(map[string]string)
+	}
+	for k, v := range headers {
+		c.defaultHeaders[k] = v
+	}
 }
 
 // GetDefaultHeaders returns the configured default headers.
