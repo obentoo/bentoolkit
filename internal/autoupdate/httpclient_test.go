@@ -96,13 +96,10 @@ func TestRetryExponentialBackoff(t *testing.T) {
 
 	// Property: After 3 failures, no more retries are attempted
 	properties.Property("After max retries, no more attempts are made", prop.ForAll(
-		func(extraFailures int) bool {
-			// Ensure extraFailures is positive (used to vary test inputs)
-			if extraFailures < 0 {
-				extraFailures = -extraFailures
-			}
-			_ = (extraFailures % 10) + 1 // Vary input but always test max retries
-
+		// The generated int is deliberately unused: the server fails every
+		// request, so the property is about the retry cap alone and the
+		// parameter only makes gopter run the case repeatedly.
+		func(_ int) bool {
 			var requestCount int32
 
 			// Create a test server that always fails
@@ -1303,7 +1300,7 @@ func TestHTTPClient_CircuitAndRateLimiterIndependent(t *testing.T) {
 	}
 
 	// Circuit breaker should still be closed
-	if client.breaker.State() != 0 { // 0 = gobreaker.StateClosed
+	if client.breaker.State() != gobreaker.StateClosed {
 		t.Error("Expected circuit to remain closed after successful request")
 	}
 }
