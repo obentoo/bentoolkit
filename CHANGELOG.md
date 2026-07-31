@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Bumped dependencies: `github.com/antchfx/xpath` v1.3.7 → v1.3.8,
+  `github.com/mattn/go-isatty` v0.0.22 → v0.0.24,
+  `github.com/mattn/go-runewidth` v0.0.24 → v0.0.27,
+  `github.com/aymanbagabas/go-udiff` v0.3.1 → v0.4.1, and the `golang-x` group
+  (`x/mod` v0.38.0, `x/tools` v0.48.0, `x/vuln` v1.6.0, `x/telemetry`). The two
+  `mattn` modules are the ones the previous entry predicted: indirect, linked
+  into the binary, and proposed for the first time now that Dependabot watches
+  transitive requirements.
+
+  Validated as a set against `main` rather than trusting each PR's own checks,
+  which had run against an older base: `go mod verify`, no `go mod tidy` drift,
+  `go build` under the default and both build tags, `go test -race`,
+  `make build-all`, and `govulncheck` re-run under all three tags — the last
+  because this batch upgrades `x/vuln` itself, so the analyser changed.
+
+  Two linked modules stay behind deliberately. `chromedp/cdproto` is pinned to
+  the exact pseudo-version `chromedp` v0.16.0 requires and must move with it,
+  not ahead of it. `playwright-go` stays at v0.6000.0 because v0.6100.0 is still
+  published under the wrong module path — the two releases are 19 hours apart on
+  the same day, so the pin is not accumulating debt.
 - **Dependabot now watches indirect dependencies too.** The `gomod` config used
   the default `allow` (direct only), so everything transitive went unwatched —
   except `golang.org/x/*`, which slipped through only because the `golang-x`
