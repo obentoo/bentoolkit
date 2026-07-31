@@ -673,11 +673,22 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	return result, nil
 }
 
+// seriesFor returns the release-line filter configured for pkg, or "" when the
+// entry declares none (or is absent, which happens in tests that drive the
+// checker without a config).
+func (c *Checker) seriesFor(pkg string) string {
+	if c.config == nil {
+		return ""
+	}
+	return c.config.Packages[pkg].Series
+}
+
 // getCurrentVersion finds the current version of a package in the overlay.
 // It looks for ebuild files in the package directory and returns the highest
-// version, restricted to the slot when pkg's key carries a ":slot" suffix.
+// version, restricted to the slot when pkg's key carries a ":slot" suffix and to
+// the release line when the entry declares a `series`.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -878,7 +889,7 @@ func maxGentooVersion(versions []string) string {
 // ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1155,7 +1166,19 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 	if err != nil {
 		return "", err
 	}
-	return applySuffix(version, cfg), nil
+	version = applySuffix(version, cfg)
+
+	// An entry restricted to a release line must never report a version from
+	// another one: it would be compared against — and could bump — the ebuild of
+	// a line it does not track. The select path already drops such candidates
+	// per candidate; this covers the paths that yield a single value (first
+	// match, script, fallback, LLM). Failing loudly is the point: the entry's
+	// source moved, or its series is wrong, and both need a human.
+	if m := newSeriesMatcher(cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
+		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
+			ErrNoVersionFound, version, cfg.Series)
+	}
+	return version, nil
 }
 
 // fetchUpstreamVersionRaw fetches and parses the upstream version for a package.

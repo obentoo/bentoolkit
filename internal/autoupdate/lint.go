@@ -39,6 +39,7 @@ const (
 	LintInlineComment    = "inline-comment"
 	LintBracketInComment = "bracket-line-in-comments"
 	LintInvalidConfig    = "invalid-config"
+	LintAmbiguousEntries = "ambiguous-entries"
 )
 
 // LintIssue is one violation of the packages.toml record model.
@@ -104,6 +105,16 @@ func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 				Message: verr.Error(),
 			})
 		}
+	}
+
+	// Cross-entry check: two entries that scan the same ebuilds would race each
+	// other over one ebuild, which reads as a checker bug rather than the config
+	// mistake it is.
+	if derr := validateDistinctEntries(cfg.Packages); derr != nil {
+		issues = append(issues, LintIssue{
+			Rule:    LintAmbiguousEntries,
+			Message: derr.Error(),
+		})
 	}
 
 	return issues, nil

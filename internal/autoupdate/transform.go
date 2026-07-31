@@ -84,16 +84,24 @@ func applySuffix(v string, cfg *PackageConfig) string {
 // prefix stripping) are skipped. Returns "" when no candidate is comparable.
 func selectVersion(cands []string, cfg *PackageConfig) string {
 	var transform [][]string
-	mode := ""
+	mode, series := "", ""
 	if cfg != nil {
 		transform = cfg.Transform
 		mode = cfg.Select
+		series = cfg.Series
 	}
+	matcher := newSeriesMatcher(series)
 	best := ""
 	for _, c := range cands {
 		c = applyTransforms(strings.TrimSpace(c), transform)
 		cc := applySuffix(stripVersionPrefix(c), cfg)
 		if !ebuild.IsValidVersion(cc) {
+			continue
+		}
+		// An entry restricted to a release line must not select outside it: with
+		// two entries per package, the other line has its own entry, and "max"
+		// over the whole listing would make both chase the same version.
+		if !matcher.matches(cc) {
 			continue
 		}
 		switch mode {

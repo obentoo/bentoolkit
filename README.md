@@ -609,6 +609,63 @@ comments = """…"""                  # REQUIRED — the doc, always last
   `bentoo overlay autoupdate --check <category/package> --force`; never
   hand-write a record from a guessed URL shape.
 
+#### Several release lines of one package (`series`)
+
+An overlay routinely carries more than one ebuild per package, and **one entry
+cannot track them all**: the scan takes the directory's highest version, so the
+other lines are never bumped.
+
+The `:slot` key suffix already covers the case where the lines are separate
+SLOTs — see [Multi-slot packages](#multi-slot-packages). `series` covers the
+other half: lines that **share a SLOT** and differ by version. `libreoffice`
+keeps the stable 26.2 series beside the testing 26.8 one, both `SLOT=0`;
+`zed-bin` keeps 1.13.1 stable beside 1.14.1_pre.
+
+What the absence of it costs is worth stating plainly. With `zed-bin-1.13.1` and
+`zed-bin-1.14.1_pre` both present and one entry tracking the stable channel, the
+scan returns `1.14.1_pre` as "current" — so every stable release below `1.14.1`
+compares *older* and reports "up to date". The stable line stops being updated,
+and the silence looks like success.
+
+Give each line its own entry, distinguished by an `@label` in the key, and let
+`series` say which versions belong to it:
+
+```toml
+["app-office/libreoffice@stable"]
+url = "https://downloadarchive.documentfoundation.org/libreoffice/old/"
+parser = "regex"
+pattern = 'href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"'
+select = "max"
+series = '^26\.2\.'
+comments = """…"""
+# END
+
+["app-office/libreoffice@testing"]
+url = "https://downloadarchive.documentfoundation.org/libreoffice/old/"
+parser = "regex"
+pattern = 'href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"'
+select = "max"
+series = '^26\.8\.'
+suffix = "_pre"
+comments = """…"""
+# END
+```
+
+`series` narrows **both ends** of the comparison: which ebuild counts as the
+entry's current version, and which upstream candidates survive selection. An
+extraction path that yields a single value (first match, `script`, fallback,
+LLM) *fails* when the version falls outside the series, rather than comparing it
+against an ebuild the entry does not track.
+
+The `@label` is identity only — it makes the key unique and never reaches a
+filesystem path or a `SLOT=` lookup. `@` rather than `:` because `:` already
+means SLOT; both may appear (`net-libs/webkit-gtk:4.1@lts`). Two entries for one
+package must differ by slot **or** series: a label alone filters nothing, and
+`--lint` rejects it.
+
+Note that with `series` the `suffix_when` below becomes unnecessary — the series
+already delimits the line, so a plain `suffix = "_pre"` says the rest.
+
 #### Pre-release channels (`suffix`)
 
 Upstream numbering rarely says a release is a pre-release. LibreOffice publishes
@@ -687,6 +744,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
+| `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
 | `suffix` | Gentoo pre-release suffix (`_alpha`, `_beta`, `_pre`, `_rc`, `_p`, each optionally numbered) appended to the detected version — see [Pre-release channels](#pre-release-channels-suffix). |
 | `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |

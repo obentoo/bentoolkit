@@ -31,6 +31,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrite — `savePackagesConfig` now writes records one at a time, emitting the
   doc as a readable multi-line string instead of one line of escaped `\n`.
 
+- **`series` + `@label`: one package can be tracked on several release lines.**
+  An overlay routinely carries more than one ebuild per package, and one entry
+  could not track them all — `selectCurrentEbuild` takes the directory's highest
+  version, so the other lines were never bumped. The `:slot` key suffix covered
+  the case where the lines are separate SLOTs (`net-libs/webkit-gtk`); nothing
+  covered lines that share a SLOT. `app-editors/zed-bin` shows the cost: with
+  `1.13.1` stable and `1.14.1_pre` preview side by side and the entry tracking
+  the stable channel, every stable release below `1.14.1` compared *older* than
+  the preview ebuild and reported "up to date" — the line silently stopped being
+  updated. `series` is a regex that narrows both ends of the comparison (which
+  ebuild is current, which upstream candidates are eligible), and `@label` makes
+  the keys unique (`app-office/libreoffice@stable` / `@testing`). A version
+  outside the series now fails loudly instead of being compared against an ebuild
+  the entry does not track; a series that matches no ebuild reports
+  `ErrSeriesNotFound` rather than the orphan error that auto-disables an entry;
+  and two entries that would scan the same ebuilds are rejected by validation
+  and by `--lint`, since a label alone filters nothing.
+
 - **`bentoo overlay autoupdate --lint`** checks the registry against the record
   model: every record closed by a `# END` marker, documented by a trailing
   `comments` field, with no comment floating outside a record — plus the

@@ -175,6 +175,31 @@ type PackageConfig struct {
 	// or point it at the next development line); the doc comment must say so.
 	SuffixWhen string `toml:"suffix_when,omitempty"`
 
+	// Series restricts the entry to one release line, given as a regex matched
+	// against the version. It narrows BOTH ends of the comparison: which ebuild
+	// in the overlay counts as this entry's current version, and which upstream
+	// candidates survive selection.
+	//
+	// It exists because an overlay routinely carries more than one ebuild per
+	// package, and one entry cannot track them all — selectCurrentEbuild takes
+	// the directory's highest version, so the other lines are never bumped. The
+	// ":slot" key suffix already solves that when the lines are separate SLOTs
+	// (net-libs/webkit-gtk). Series solves the other half: lines that share a
+	// SLOT and differ by version. app-office/libreoffice keeps the stable 26.2
+	// series beside the testing 26.8 one, both SLOT=0; app-editors/zed-bin keeps
+	// 1.13.1 stable beside 1.14.1_pre, likewise.
+	//
+	// zed-bin is what the absence of this costs. Its entry tracks the stable
+	// channel, but the scan returns 1.14.1_pre as "current", so every stable
+	// release below 1.14.1 compares older and reports "up to date": the line
+	// stops being updated, and the silence looks like success.
+	//
+	// A package with one line does not need it. With it, give each entry of the
+	// same package a distinct "@label" so the keys stay unique
+	// ("app-office/libreoffice@stable" / "@testing"); the label is identity only
+	// and never reaches a filesystem path.
+	Series string `toml:"series,omitempty"`
+
 	// Script is a JS expression/IIFE evaluated against the live DOM by the
 	// "script" parser; its string result is the version. Inline, or "@file.js"
 	// to load from .autoupdate/scripts/<file>.
@@ -502,10 +527,16 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		return fmt.Errorf("package %s: timeout must be >= 0 seconds, got %d", pkg, cfg.Timeout)
 	}
 
-	// The key must be a well-formed atom, optionally slot-suffixed. A malformed
-	// key would otherwise surface much later as a path built from nonsense.
+	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
+	// malformed key would otherwise surface much later as a path built from
+	// nonsense.
 	if _, _, ok := splitPkgAtom(pkg); !ok {
 		return fmt.Errorf("package %s: %w", pkg, ErrInvalidPackageKey)
+	}
+	// An empty label ("cat/pkg@") is a typo: it makes the key no more unique
+	// than the bare atom while looking like it does.
+	if rest, label := splitPkgLabel(pkg); rest != pkg && label == "" {
+		return fmt.Errorf("package %s: %w: the \"@\" label is empty", pkg, ErrInvalidPackageKey)
 	}
 
 	// A negative revision cannot be written as a -rN suffix; reject the typo
@@ -582,6 +613,15 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 			return fmt.Errorf("package %s: invalid suffix_when %q: %w", pkg, cfg.SuffixWhen, err)
 		}
 	}
+	// Validate the release-line filter. An uncompilable regex would silently
+	// widen the scan back to the whole directory — the exact failure the field
+	// exists to prevent — so reject it here.
+	if cfg.Series != "" {
+		if _, err := regexp.Compile(cfg.Series); err != nil {
+			return fmt.Errorf("package %s: invalid series %q: %w", pkg, cfg.Series, err)
+		}
+	}
+
 	// track="commit" derives its own _p<date>/_pre<date> suffix from the current
 	// ebuild (see extractSnapshotSuffix), so a declared suffix would either be
 	// ignored or stack into a nonsense PV. Fail rather than pick one silently.
@@ -673,11 +713,35 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 // ValidateAll validates all package configurations in the PackagesConfig.
 // Returns the first validation error encountered, or nil if all are valid.
 func (c *PackagesConfig) ValidateAll() error {
-	for pkg, cfg := range c.Packages {
-		cfgCopy := cfg // Create a copy to get a pointer
+	for _, pkg := range sortedKeys(c.Packages) {
+		cfgCopy := c.Packages[pkg] // Create a copy to get a pointer
 		if err := ValidatePackageConfig(pkg, &cfgCopy); err != nil {
 			return err
 		}
+	}
+	return validateDistinctEntries(c.Packages)
+}
+
+// validateDistinctEntries rejects two entries that would scan the same ebuilds.
+//
+// Entries for one package only make sense when each can say which ebuilds are
+// its own: a distinct slot, or a distinct series. Two that agree on both resolve
+// to the same current version and race each other — both bump the same ebuild,
+// each overwriting the other's pending record — which looks like a checker bug
+// rather than the config mistake it is. Two entries differing only by their
+// "@label" are exactly that mistake: the label is identity, not a filter.
+func validateDistinctEntries(pkgs map[string]PackageConfig) error {
+	type scan struct{ atom, slot, series string }
+	seen := make(map[scan]string, len(pkgs))
+	for _, pkg := range sortedKeys(pkgs) {
+		atom, slot := splitPkgSlot(pkg)
+		key := scan{atom: atom, slot: slot, series: pkgs[pkg].Series}
+		if other, dup := seen[key]; dup {
+			return fmt.Errorf(
+				"packages %s and %s select the same ebuilds: entries for one package must differ by slot or series (an \"@label\" alone does not filter anything)",
+				other, pkg)
+		}
+		seen[key] = pkg
 	}
 	return nil
 }
