@@ -1303,7 +1303,7 @@ func TestHTTPClient_CircuitAndRateLimiterIndependent(t *testing.T) {
 	}
 
 	// Circuit breaker should still be closed
-	if client.breaker.State() != 0 { // 0 = gobreaker.StateClosed
+	if client.breaker.State() != gobreaker.StateClosed {
 		t.Error("Expected circuit to remain closed after successful request")
 	}
 }
