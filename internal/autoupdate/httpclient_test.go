@@ -96,12 +96,10 @@ func TestRetryExponentialBackoff(t *testing.T) {
 
 	// Property: After 3 failures, no more retries are attempted
 	properties.Property("After max retries, no more attempts are made", prop.ForAll(
-		func(extraFailures int) bool {
-			// Ensure extraFailures is positive.
-			if extraFailures < 0 {
-				extraFailures = -extraFailures
-			}
-
+		// The generated int is deliberately unused: the server fails every
+		// request, so the property is about the retry cap alone and the
+		// parameter only makes gopter run the case repeatedly.
+		func(_ int) bool {
 			var requestCount int32
 
 			// Create a test server that always fails
