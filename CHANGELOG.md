@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-31
+
 ### Added
 - **`suffix` / `suffix_when`: a record can declare that what it extracts is a
   pre-release.** Upstream numbering rarely says so. LibreOffice publishes
@@ -1558,7 +1560,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.15.3...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/obentoo/bentoolkit/compare/v0.15.3...v0.16.0
 [0.15.3]: https://github.com/obentoo/bentoolkit/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/obentoo/bentoolkit/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/obentoo/bentoolkit/compare/v0.15.0...v0.15.1
