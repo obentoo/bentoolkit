@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CI requires a changelog entry for user-visible changes.** A PR that touches
+  `go.mod`, `go.sum` or non-test Go source must also touch `CHANGELOG.md`, or
+  carry a `no-changelog` label. Three releases in a row nearly shipped notes
+  that omitted whole changes — PR #57 before 0.15.0, #60-63 before 0.15.2,
+  #69-73 before this — every time because a merge touched only the module files
+  and nobody noticed until the release was being cut. Dependency bumps are the
+  recurring case: the tooling that opens them does not write changelog entries,
+  so the omission was silent by construction. Now it is loud. Verified against
+  six cases, including the two that must fail.
+
+
 ### Changed
 - Bumped dependencies: `github.com/antchfx/xpath` v1.3.7 → v1.3.8,
   `github.com/mattn/go-isatty` v0.0.22 → v0.0.24,
