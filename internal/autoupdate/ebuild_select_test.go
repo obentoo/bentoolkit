@@ -133,7 +133,7 @@ func TestSelectCurrentEbuildSlotFiltering(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			got, err := selectCurrentEbuild(overlayDir, tt.key)
+			got, err := selectCurrentEbuild(overlayDir, tt.key, "")
 			if err != nil {
 				t.Fatalf("selectCurrentEbuild(%q): %v", tt.key, err)
 			}
@@ -154,7 +154,7 @@ func TestSelectCurrentEbuildSlotFiltering(t *testing.T) {
 func TestSelectCurrentEbuildUnmatchedSlot(t *testing.T) {
 	overlayDir := writeWebkitOverlay(t)
 
-	_, err := selectCurrentEbuild(overlayDir, "net-libs/webkit-gtk:5")
+	_, err := selectCurrentEbuild(overlayDir, "net-libs/webkit-gtk:5", "")
 	if !errors.Is(err, ErrSlotNotFound) {
 		t.Fatalf("selectCurrentEbuild with an unmatched slot: got %v, want %v", err, ErrSlotNotFound)
 	}
@@ -214,7 +214,7 @@ func TestSelectCurrentEbuildSkipsLive(t *testing.T) {
 	createTestEbuildFile(t, overlayDir, "app-misc/hello", "1.0.0")
 	createTestEbuildFile(t, overlayDir, "app-misc/hello", "9999")
 
-	got, err := selectCurrentEbuild(overlayDir, "app-misc/hello")
+	got, err := selectCurrentEbuild(overlayDir, "app-misc/hello", "")
 	if err != nil {
 		t.Fatalf("selectCurrentEbuild: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSelectCurrentEbuildSkipsLive(t *testing.T) {
 }
 
 func TestSelectCurrentEbuildMissingPackage(t *testing.T) {
-	_, err := selectCurrentEbuild(t.TempDir(), "app-misc/absent")
+	_, err := selectCurrentEbuild(t.TempDir(), "app-misc/absent", "")
 	if !errors.Is(err, ErrNoEbuildFound) {
 		t.Fatalf("selectCurrentEbuild on an absent package: got %v, want %v", err, ErrNoEbuildFound)
 	}

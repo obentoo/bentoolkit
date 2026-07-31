@@ -673,11 +673,22 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	return result, nil
 }
 
+// seriesFor returns the release-line filter configured for pkg, or "" when the
+// entry declares none (or is absent, which happens in tests that drive the
+// checker without a config).
+func (c *Checker) seriesFor(pkg string) string {
+	if c.config == nil {
+		return ""
+	}
+	return c.config.Packages[pkg].Series
+}
+
 // getCurrentVersion finds the current version of a package in the overlay.
 // It looks for ebuild files in the package directory and returns the highest
-// version, restricted to the slot when pkg's key carries a ":slot" suffix.
+// version, restricted to the slot when pkg's key carries a ":slot" suffix and to
+// the release line when the entry declares a `series`.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -878,7 +889,7 @@ func maxGentooVersion(versions []string) string {
 // ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg)
+	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1141,9 +1152,38 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 	return best
 }
 
-// fetchUpstreamVersion fetches and parses the upstream version for a package.
-// It tries the primary URL/parser first, then fallback if configured, then LLM if available.
+// fetchUpstreamVersion fetches and parses the upstream version for a package,
+// then applies the record's pre-release suffix.
+//
+// The suffix is applied here, on the single value every extraction path
+// converges to, so that script/fallback/LLM results are marked exactly like the
+// primary one — those paths bypass fetchAndParse and would otherwise emit a bare
+// version for a record that declares a development channel. selectVersion also
+// applies it per candidate so "max" orders the final values; applySuffix is
+// idempotent, so the second pass is a no-op.
 func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, error) {
+	version, err := c.fetchUpstreamVersionRaw(pkg, cfg)
+	if err != nil {
+		return "", err
+	}
+	version = applySuffix(version, cfg)
+
+	// An entry restricted to a release line must never report a version from
+	// another one: it would be compared against — and could bump — the ebuild of
+	// a line it does not track. The select path already drops such candidates
+	// per candidate; this covers the paths that yield a single value (first
+	// match, script, fallback, LLM). Failing loudly is the point: the entry's
+	// source moved, or its series is wrong, and both need a human.
+	if m := newSeriesMatcher(cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
+		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
+			ErrNoVersionFound, version, cfg.Series)
+	}
+	return version, nil
+}
+
+// fetchUpstreamVersionRaw fetches and parses the upstream version for a package.
+// It tries the primary URL/parser first, then fallback if configured, then LLM if available.
+func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (string, error) {
 	// The script parser drives a headless browser itself, so it bypasses
 	// fetchContent/fetchAndParse entirely (and therefore transform/select, which
 	// the script handles in JS — see ValidatePackageConfig). It has no fallback
@@ -1231,7 +1271,7 @@ func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, erro
 			if cErr != nil {
 				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
 			}
-			best := selectVersion(cands, cfg.Transform, cfg.Select)
+			best := selectVersion(cands, cfg)
 			if best == "" {
 				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
 					ErrNoVersionFound, len(cands), cfg.Select)

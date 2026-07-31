@@ -600,7 +600,7 @@ func applySummary(result *ApplyResult) string {
 // possibly-stale current_version. Returns ErrNoEbuildFound when the package
 // directory is absent or holds no parsable, non-live ebuild in the slot.
 func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(a.overlayPath, pkg)
+	best, err := selectCurrentEbuild(a.overlayPath, pkg, a.configs[pkg].Series)
 	if err != nil {
 		return "", err
 	}

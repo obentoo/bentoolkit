@@ -37,7 +37,19 @@ var (
 	// ErrInvalidPackageKey is returned when a packages.toml key is not a
 	// well-formed "category/package" atom, with or without a ":slot" suffix.
 	ErrInvalidPackageKey = errors.New("invalid package key: want category/package or category/package:slot")
+	// ErrInvalidSuffix is returned when the suffix field is not one of the Gentoo
+	// version suffixes, optionally numbered (_alpha, _beta2, _pre, _rc1, _p).
+	ErrInvalidSuffix = errors.New("invalid suffix: must be _alpha, _beta, _pre, _rc or _p, optionally numbered")
+	// ErrSuffixWhenWithoutSuffix is returned when suffix_when is set but suffix is
+	// not: the condition has nothing to gate.
+	ErrSuffixWhenWithoutSuffix = errors.New("suffix_when requires suffix")
 )
+
+// validSuffixRegex matches the value accepted by PackageConfig.Suffix: one of
+// the Gentoo pre-release/patch markers, with an optional number (_rc, _rc1,
+// _beta2). It deliberately allows a single suffix only — a stacked value like
+// "_pre_p1" is a version string, not a channel marker.
+var validSuffixRegex = regexp.MustCompile(`^_(alpha|beta|pre|rc|p)[0-9]*$`)
 
 // PackageConfig represents a single package's autoupdate configuration.
 // It defines how to check upstream versions for a specific package.
@@ -128,6 +140,66 @@ type PackageConfig struct {
 	// "last" = last match. Requires a parser that can extract a list
 	// (json/regex/html); ignored by the "script" parser.
 	Select string `toml:"select,omitempty"`
+
+	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
+	// optionally numbered) appended to the detected version, declaring that what
+	// this record extracts is a pre-release rather than a final release.
+	//
+	// It exists because upstream numbering rarely says so itself: LibreOffice
+	// publishes 26.8.0.1 in its testing channel with a version string
+	// indistinguishable from a stable one, so the bare value would land in the
+	// overlay as a finished release. The suffix restores the truth AND the
+	// ordering — Gentoo sorts _pre below the bare version, so 26.8.0.1_pre stays
+	// older than the eventual 26.8.0.1, and the bump fires exactly when upstream
+	// promotes the release.
+	//
+	// The suffix is applied after transform and before validation/comparison, so
+	// candidates are already suffixed when select = "max" orders them. It does
+	// not apply to track = "commit", whose _p<date>/_pre<date> snapshot suffix is
+	// derived from the current ebuild instead.
+	//
+	// Ebuilds must be able to strip it when building SRC_URI — the LibreOffice
+	// ebuild's MY_PV="${MY_PV/_pre/}" is the canonical shape.
+	Suffix string `toml:"suffix,omitempty"`
+
+	// SuffixWhen is a regex gating Suffix: the suffix is appended only to a
+	// detected version that matches it. Absent (the common case) means the suffix
+	// applies unconditionally, which is right when the probed URL *is* the
+	// pre-release channel.
+	//
+	// It is for the opposite case: one endpoint listing several release lines at
+	// once. The LibreOffice archive index carries both the stable 26.2 line and
+	// the testing 26.8 one, and select = "max" always returns the latter, so
+	// suffix_when = '^26\.8\.' marks that line — and only it — as _pre. Such a
+	// record needs an edit when the line is promoted to stable (drop the field,
+	// or point it at the next development line); the doc comment must say so.
+	SuffixWhen string `toml:"suffix_when,omitempty"`
+
+	// Series restricts the entry to one release line, given as a regex matched
+	// against the version. It narrows BOTH ends of the comparison: which ebuild
+	// in the overlay counts as this entry's current version, and which upstream
+	// candidates survive selection.
+	//
+	// It exists because an overlay routinely carries more than one ebuild per
+	// package, and one entry cannot track them all — selectCurrentEbuild takes
+	// the directory's highest version, so the other lines are never bumped. The
+	// ":slot" key suffix already solves that when the lines are separate SLOTs
+	// (net-libs/webkit-gtk). Series solves the other half: lines that share a
+	// SLOT and differ by version. app-office/libreoffice keeps the stable 26.2
+	// series beside the testing 26.8 one, both SLOT=0; app-editors/zed-bin keeps
+	// 1.13.1 stable beside 1.14.1_pre, likewise.
+	//
+	// zed-bin is what the absence of this costs. Its entry tracks the stable
+	// channel, but the scan returns 1.14.1_pre as "current", so every stable
+	// release below 1.14.1 compares older and reports "up to date": the line
+	// stops being updated, and the silence looks like success.
+	//
+	// A package with one line does not need it. With it, give each entry of the
+	// same package a distinct "@label" so the keys stay unique
+	// ("app-office/libreoffice@stable" / "@testing"); the label is identity only
+	// and never reaches a filesystem path.
+	Series string `toml:"series,omitempty"`
+
 	// Script is a JS expression/IIFE evaluated against the live DOM by the
 	// "script" parser; its string result is the version. Inline, or "@file.js"
 	// to load from .autoupdate/scripts/<file>.
@@ -198,6 +270,24 @@ type PackageConfig struct {
 	// taking its non-upstream USE=webdriver with it — and that entry now
 	// declares revision = 600.
 	Revision int `toml:"revision,omitempty"`
+
+	// Comments is the record's documentation: why this source and parser, and
+	// every caveat a future bump must know (stale endpoints, pre-release traps,
+	// hand-edited ebuild variables). It is the LAST field of every record, and
+	// the record ends with a `# END` marker on the following line.
+	//
+	// It is a field rather than a `#` comment for two reasons. First, comments do
+	// not survive a rewrite: savePackagesConfig re-encodes the whole file through
+	// toml.Encoder, so a single `overlay analyze --save` used to erase every doc
+	// comment in the registry — as a field the text is data and comes back out.
+	// Second, it gives the documentation an owner: it belongs to a record instead
+	// of floating between two of them, where nothing says which one it describes.
+	//
+	// Write it as a TOML multi-line basic string ("""…""") starting with the
+	// package name. Keep `[` off the start of any line: the raw-text surgery in
+	// setPackagesEnabled scans for `[section]` headers and a line that looks like
+	// one would end the record early.
+	Comments string `toml:"comments,omitempty"`
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -437,10 +527,16 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		return fmt.Errorf("package %s: timeout must be >= 0 seconds, got %d", pkg, cfg.Timeout)
 	}
 
-	// The key must be a well-formed atom, optionally slot-suffixed. A malformed
-	// key would otherwise surface much later as a path built from nonsense.
+	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
+	// malformed key would otherwise surface much later as a path built from
+	// nonsense.
 	if _, _, ok := splitPkgAtom(pkg); !ok {
 		return fmt.Errorf("package %s: %w", pkg, ErrInvalidPackageKey)
+	}
+	// An empty label ("cat/pkg@") is a typo: it makes the key no more unique
+	// than the bare atom while looking like it does.
+	if rest, label := splitPkgLabel(pkg); rest != pkg && label == "" {
+		return fmt.Errorf("package %s: %w: the \"@\" label is empty", pkg, ErrInvalidPackageKey)
 	}
 
 	// A negative revision cannot be written as a -rN suffix; reject the typo
@@ -501,6 +597,36 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if _, err := regexp.Compile(r[0]); err != nil {
 			warnLogf("package %s: transform rule #%d has bad regex %q (%v); it will be ignored", pkg, i, r[0], err)
 		}
+	}
+
+	// Validate the pre-release suffix. A typo here would be written straight into
+	// an ebuild filename, so reject anything that is not a Gentoo suffix rather
+	// than emitting a PV no package manager can order.
+	if cfg.Suffix != "" && !validSuffixRegex.MatchString(cfg.Suffix) {
+		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidSuffix, cfg.Suffix)
+	}
+	if cfg.SuffixWhen != "" {
+		if cfg.Suffix == "" {
+			return fmt.Errorf("package %s: %w", pkg, ErrSuffixWhenWithoutSuffix)
+		}
+		if _, err := regexp.Compile(cfg.SuffixWhen); err != nil {
+			return fmt.Errorf("package %s: invalid suffix_when %q: %w", pkg, cfg.SuffixWhen, err)
+		}
+	}
+	// Validate the release-line filter. An uncompilable regex would silently
+	// widen the scan back to the whole directory — the exact failure the field
+	// exists to prevent — so reject it here.
+	if cfg.Series != "" {
+		if _, err := regexp.Compile(cfg.Series); err != nil {
+			return fmt.Errorf("package %s: invalid series %q: %w", pkg, cfg.Series, err)
+		}
+	}
+
+	// track="commit" derives its own _p<date>/_pre<date> suffix from the current
+	// ebuild (see extractSnapshotSuffix), so a declared suffix would either be
+	// ignored or stack into a nonsense PV. Fail rather than pick one silently.
+	if cfg.Suffix != "" && cfg.Track == "commit" {
+		return fmt.Errorf("package %s: suffix cannot be combined with track=\"commit\" (the snapshot suffix comes from the current ebuild)", pkg)
 	}
 
 	// transform/select do not apply to the script parser: that branch bypasses
@@ -587,11 +713,35 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 // ValidateAll validates all package configurations in the PackagesConfig.
 // Returns the first validation error encountered, or nil if all are valid.
 func (c *PackagesConfig) ValidateAll() error {
-	for pkg, cfg := range c.Packages {
-		cfgCopy := cfg // Create a copy to get a pointer
+	for _, pkg := range sortedKeys(c.Packages) {
+		cfgCopy := c.Packages[pkg] // Create a copy to get a pointer
 		if err := ValidatePackageConfig(pkg, &cfgCopy); err != nil {
 			return err
 		}
+	}
+	return validateDistinctEntries(c.Packages)
+}
+
+// validateDistinctEntries rejects two entries that would scan the same ebuilds.
+//
+// Entries for one package only make sense when each can say which ebuilds are
+// its own: a distinct slot, or a distinct series. Two that agree on both resolve
+// to the same current version and race each other — both bump the same ebuild,
+// each overwriting the other's pending record — which looks like a checker bug
+// rather than the config mistake it is. Two entries differing only by their
+// "@label" are exactly that mistake: the label is identity, not a filter.
+func validateDistinctEntries(pkgs map[string]PackageConfig) error {
+	type scan struct{ atom, slot, series string }
+	seen := make(map[scan]string, len(pkgs))
+	for _, pkg := range sortedKeys(pkgs) {
+		atom, slot := splitPkgSlot(pkg)
+		key := scan{atom: atom, slot: slot, series: pkgs[pkg].Series}
+		if other, dup := seen[key]; dup {
+			return fmt.Errorf(
+				"packages %s and %s select the same ebuilds: entries for one package must differ by slot or series (an \"@label\" alone does not filter anything)",
+				other, pkg)
+		}
+		seen[key] = pkg
 	}
 	return nil
 }

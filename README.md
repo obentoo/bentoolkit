@@ -461,7 +461,15 @@ bentoo overlay autoupdate
 
 # Check a specific package
 bentoo overlay autoupdate app-misc/hello
+
+# Check the registry itself against the record model (read-only)
+bentoo overlay autoupdate --lint
 ```
+
+`--lint` reports every record missing its `# END` marker or its `comments`
+field, every comment left floating outside a record, and every record whose
+fields are semantically invalid — then exits non-zero, so it doubles as a
+pre-commit gate on the registry.
 
 The autoupdate system reads version schemas from `packages.toml` in your overlay root, fetches upstream sources, and updates ebuilds when a new version is found.
 
@@ -485,29 +493,221 @@ The autoupdate system automates version tracking by fetching upstream sources an
 
 #### Schema Configuration (`packages.toml`)
 
-Place a `packages.toml` file in the root of your overlay. Each entry defines how to extract the version for a package:
+Place a `packages.toml` file in the root of your overlay. Each entry — a
+*record* — defines how to extract the version for a package:
 
 ```toml
-[app-misc/hello]
+["app-misc/hello"]
 url = "https://api.github.com/repos/owner/hello/releases/latest"
 parser = "json"
 path = "tag_name"
+comments = """
+hello — GitHub release tag "vX.Y.Z" (the "v" is stripped before comparison).
+"""
+# END
 
-[www-client/firefox]
-url = "https://product-details.mozilla.org/1.0/firefox_versions.json"
-parser = "json"
-path = "LATEST_FIREFOX_VERSION"
-
-[dev-libs/mylib]
+["dev-libs/mylib"]
 url = "https://example.com/releases"
 parser = "regex"
-pattern = "mylib-([0-9.]+)\\.tar\\.gz"
+pattern = 'mylib-([0-9.]+)\.tar\.gz'
+comments = """
+mylib — the download index; the pattern is anchored on the tarball name so a
+changelog mention of an older version cannot win the first match.
+"""
+# END
 
-[app-text/myapp]
+["app-text/myapp"]
 url = "https://example.com/downloads"
 parser = "html"
 selector = "a.release-tag"
+comments = """
+myapp — the download page's release badge; there is no JSON endpoint.
+"""
+# END
 ```
+
+#### The record model
+
+Two conventions hold the file together as it grows past a few hundred entries.
+Both are checked by `bentoo overlay autoupdate --lint`.
+
+**Every record ends with a `# END` line.** TOML has no block delimiter, and a
+bare `[END]` table would not be one — it would parse as a package named `END`,
+and repeated once per record, as a duplicate-table error that stops the whole
+file from loading. A comment on the record's last line is the closest valid
+equivalent, and it makes the boundary between two records explicit.
+
+**Documentation lives in the `comments` field, never in a floating `#` line.**
+This is not only tidiness. A comment sitting between two records belongs to
+neither, so nothing says which one it describes; and comments do not survive a
+rewrite — `bentoo overlay analyze --save` re-encodes the whole registry, which
+used to erase every doc comment in it. As a field the text is data: it has an
+owner, and it comes back out.
+
+Write it as a TOML multi-line string starting with the package name, as the last
+field of the record, and keep `[` off the start of any line inside it (the
+raw-text editors that flip `enabled` scan for `[section]` headers and would read
+such a line as one).
+
+##### Field order
+
+Fields run bookkeeping → source → extraction → post-processing → auxiliary
+substitution → transport → classification → doc. Omit what you do not need;
+never invent a key — `PackageConfig` in
+[`internal/autoupdate/config.go`](internal/autoupdate/config.go) is the sole
+authority on what parses, and an unknown key is silently ignored.
+
+```toml
+["category/package"]                # header: quoted, exactly as in the overlay
+enabled = false                     # ONLY when false. Absent = enabled.
+hold = true                         # ONLY when true. See "enabled vs hold".
+track = "commit"                    # omit for tag/version tracking
+url = "https://…"                   # REQUIRED — the endpoint being probed
+timeout = 60                        # seconds, only for reliably slow hosts
+parser = "json"                     # REQUIRED — json | regex | html | script
+path = "tag_name"                   # REQUIRED for parser=json
+pattern = 'name-([0-9.]+)\.tar\.xz' # REQUIRED for parser=regex (1 capture group)
+selector = "a.release-tag"          # REQUIRED for parser=html (or xpath)
+script = "@vendor.js"               # REQUIRED for parser=script (scripts/vendor.js)
+transform = [['^v', ""]]            # ordered regex substitutions on the result
+select = "max"                      # first (default) | max | last
+suffix = "_pre"                     # pre-release channel marker
+suffix_when = '^26\.8\.'            # …applied only to a matching version
+commit_sha_path = "[0].sha"         # REQUIRED with track="commit"
+commit_message_path = "commit.message"
+commit_version_pattern = 'sdk-([0-9.]+)'
+aux_var = "MY_BUILD"                # free-text ebuild var kept in sync…
+aux_pattern = 'esr-bb([0-9]+)'      # …always paired with aux_var
+headers = { "User-Agent" = "bentoo-autoupdate" }
+binary = true                       # binary package → manifest-only testing
+type = "bin"                        # ONLY to override the -bin/RESTRICT heuristic
+meta = { key = "value" }            # documentation only; NEVER a secret
+comments = """…"""                  # REQUIRED — the doc, always last
+# END
+```
+
+##### Rules that are not obvious from the field list
+
+- **Regex values** (`pattern`, `aux_pattern`, `commit_version_pattern`, and the
+  left side of every `transform` rule) use TOML **literal** strings `'…'`. A
+  basic string `"…"` rejects `\.` and `\d` outright. Replacements use basic
+  strings.
+- **`enabled` vs `hold`.** `enabled` is *bookkeeping the checker flips on its
+  own*: it writes `enabled = false` when the ebuild vanishes from the overlay,
+  and back to `true` when it reappears. `hold` is a *maintainer decision*
+  ("present, but never auto-bump") that reconciliation never touches. A package
+  needing manual work each release (patchset, pinned SHA, bootstrap compiler)
+  takes `hold` — `enabled = false` would be silently reverted. Both skip the
+  fetch entirely.
+- **User-Agent** is required by `api.github.com` and `crates.io` — always the
+  literal `"bentoo-autoupdate"`. A browser UA is a last resort for a
+  Cloudflare-fronted host, and the reason belongs in `comments`.
+- **Regex returns capture group 1 of the FIRST match** on the raw body; anchor
+  it so a page listing several releases cannot yield an older one, or use
+  `select = "max"`.
+- **Verify before committing.** Probe the real endpoint with
+  `bentoo overlay autoupdate --check <category/package> --force`; never
+  hand-write a record from a guessed URL shape.
+
+#### Several release lines of one package (`series`)
+
+An overlay routinely carries more than one ebuild per package, and **one entry
+cannot track them all**: the scan takes the directory's highest version, so the
+other lines are never bumped.
+
+The `:slot` key suffix already covers the case where the lines are separate
+SLOTs — see [Multi-slot packages](#multi-slot-packages). `series` covers the
+other half: lines that **share a SLOT** and differ by version. `libreoffice`
+keeps the stable 26.2 series beside the testing 26.8 one, both `SLOT=0`;
+`zed-bin` keeps 1.13.1 stable beside 1.14.1_pre.
+
+What the absence of it costs is worth stating plainly. With `zed-bin-1.13.1` and
+`zed-bin-1.14.1_pre` both present and one entry tracking the stable channel, the
+scan returns `1.14.1_pre` as "current" — so every stable release below `1.14.1`
+compares *older* and reports "up to date". The stable line stops being updated,
+and the silence looks like success.
+
+Give each line its own entry, distinguished by an `@label` in the key, and let
+`series` say which versions belong to it:
+
+```toml
+["app-office/libreoffice@stable"]
+url = "https://downloadarchive.documentfoundation.org/libreoffice/old/"
+parser = "regex"
+pattern = 'href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"'
+select = "max"
+series = '^26\.2\.'
+comments = """…"""
+# END
+
+["app-office/libreoffice@testing"]
+url = "https://downloadarchive.documentfoundation.org/libreoffice/old/"
+parser = "regex"
+pattern = 'href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"'
+select = "max"
+series = '^26\.8\.'
+suffix = "_pre"
+comments = """…"""
+# END
+```
+
+`series` narrows **both ends** of the comparison: which ebuild counts as the
+entry's current version, and which upstream candidates survive selection. An
+extraction path that yields a single value (first match, `script`, fallback,
+LLM) *fails* when the version falls outside the series, rather than comparing it
+against an ebuild the entry does not track.
+
+The `@label` is identity only — it makes the key unique and never reaches a
+filesystem path or a `SLOT=` lookup. `@` rather than `:` because `:` already
+means SLOT; both may appear (`net-libs/webkit-gtk:4.1@lts`). Two entries for one
+package must differ by slot **or** series: a label alone filters nothing, and
+`--lint` rejects it.
+
+Note that with `series` the `suffix_when` below becomes unnecessary — the series
+already delimits the line, so a plain `suffix = "_pre"` says the rest.
+
+#### Pre-release channels (`suffix`)
+
+Upstream numbering rarely says a release is a pre-release. LibreOffice publishes
+`26.8.0.1` in its **testing** channel with a version string indistinguishable
+from a stable one, so the bare value lands in the overlay as if it were a
+finished release — and a bump silently drops the `_pre` the ebuild carried.
+
+`suffix` declares the truth, and with it the ordering. Gentoo sorts `_pre` below
+the bare version, so `26.8.0.1_pre` stays *older* than the eventual `26.8.0.1`
+and the bump fires exactly when upstream promotes the release:
+
+```toml
+["app-office/libreoffice"]
+url = "https://downloadarchive.documentfoundation.org/libreoffice/old/"
+parser = "regex"
+pattern = 'href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"'
+select = "max"
+suffix = "_pre"
+suffix_when = '^26\.8\.'
+comments = """
+libreoffice — old/ lists the stable 26.2 line and the testing 26.8 one in one
+index, and select=max always returns the latter, so suffix_when marks that line
+(and only it) as _pre. The ebuild strips it back out for SRC_URI via
+MY_PV="${MY_PV/_pre/}". When 26.8 is promoted to stable, drop suffix_when or
+point it at the next development line.
+"""
+# END
+```
+
+`suffix_when` is what makes one endpoint serving several release lines
+workable. Omit it when the probed URL **is** the pre-release channel: then every
+version it yields is a pre-release and the suffix applies unconditionally.
+
+The suffix is applied after `transform` and before comparison, so `select = "max"`
+orders the values that will actually become the PV. It is idempotent — a version
+upstream already marked (`2.0.0_rc1`) is left alone — and it cannot be combined
+with `track = "commit"`, whose `_p<date>` snapshot suffix comes from the current
+ebuild instead.
+
+Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
+`_pre`, `_rc`, `_p`. The ebuild must be able to strip the suffix when building
+`SRC_URI`, since upstream's filenames do not carry it.
 
 **Supported parsers:**
 
@@ -544,6 +744,10 @@ selector = "a.release-tag"
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
 | `binary` | Set to `true` for binary packages (manifest-only testing) |
+| `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
+| `suffix` | Gentoo pre-release suffix (`_alpha`, `_beta`, `_pre`, `_rc`, `_p`, each optionally numbered) appended to the detected version — see [Pre-release channels](#pre-release-channels-suffix). |
+| `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |
+| `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
 
 #### Multi-slot packages

@@ -121,7 +121,8 @@ func TestSelectVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := selectVersion(tt.cands, tt.transform, tt.mode); got != tt.want {
+			cfg := &PackageConfig{Transform: tt.transform, Select: tt.mode}
+			if got := selectVersion(tt.cands, cfg); got != tt.want {
 				t.Fatalf("selectVersion(%v, %v, %q) = %q, want %q",
 					tt.cands, tt.transform, tt.mode, got, tt.want)
 			}
