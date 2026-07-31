@@ -97,11 +97,10 @@ func TestRetryExponentialBackoff(t *testing.T) {
 	// Property: After 3 failures, no more retries are attempted
 	properties.Property("After max retries, no more attempts are made", prop.ForAll(
 		func(extraFailures int) bool {
-			// Ensure extraFailures is positive (used to vary test inputs)
+			// Ensure extraFailures is positive.
 			if extraFailures < 0 {
 				extraFailures = -extraFailures
 			}
-			_ = (extraFailures % 10) + 1 // Vary input but always test max retries
 
 			var requestCount int32
 
