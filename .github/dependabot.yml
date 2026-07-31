@@ -6,6 +6,16 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    # Indirect dependencies are proposed too, not just direct ones. The default
+    # ("direct") left everything transitive unwatched except golang.org/x/*,
+    # which only slipped through because the group pattern below matches it. A
+    # dependency-chain audit found github.com/mattn/go-isatty and
+    # go-runewidth — both linked into the binary — sitting behind with no PR
+    # ever opened for them. Being compiled in is what matters, not how the
+    # requirement is spelled in go.mod. The extra volume is bounded by the PR
+    # limit and the cooldown below.
+    allow:
+      - dependency-type: "all"
     # Release quarantine: ignore versions newer than 7 days, dodging
     # the window when most hijacked/yanked packages are caught.
     cooldown:

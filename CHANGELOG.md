@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Dependabot now watches indirect dependencies too.** The `gomod` config used
+  the default `allow` (direct only), so everything transitive went unwatched —
+  except `golang.org/x/*`, which slipped through only because the `golang-x`
+  group pattern matches it. A dependency-chain audit found
+  `github.com/mattn/go-isatty` and `go-runewidth`, both linked into the binary,
+  sitting behind with no PR ever opened. What matters is being compiled in, not
+  how the requirement is spelled in `go.mod`. The added volume is bounded by the
+  existing PR limit and the 7-day cooldown.
+
 ## [0.15.2] - 2026-07-30
 
 ### Changed
