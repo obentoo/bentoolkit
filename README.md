@@ -549,6 +549,66 @@ field of the record, and keep `[` off the start of any line inside it (the
 raw-text editors that flip `enabled` scan for `[section]` headers and would read
 such a line as one).
 
+##### Field order
+
+Fields run bookkeeping → source → extraction → post-processing → auxiliary
+substitution → transport → classification → doc. Omit what you do not need;
+never invent a key — `PackageConfig` in
+[`internal/autoupdate/config.go`](internal/autoupdate/config.go) is the sole
+authority on what parses, and an unknown key is silently ignored.
+
+```toml
+["category/package"]                # header: quoted, exactly as in the overlay
+enabled = false                     # ONLY when false. Absent = enabled.
+hold = true                         # ONLY when true. See "enabled vs hold".
+track = "commit"                    # omit for tag/version tracking
+url = "https://…"                   # REQUIRED — the endpoint being probed
+timeout = 60                        # seconds, only for reliably slow hosts
+parser = "json"                     # REQUIRED — json | regex | html | script
+path = "tag_name"                   # REQUIRED for parser=json
+pattern = 'name-([0-9.]+)\.tar\.xz' # REQUIRED for parser=regex (1 capture group)
+selector = "a.release-tag"          # REQUIRED for parser=html (or xpath)
+script = "@vendor.js"               # REQUIRED for parser=script (scripts/vendor.js)
+transform = [['^v', ""]]            # ordered regex substitutions on the result
+select = "max"                      # first (default) | max | last
+suffix = "_pre"                     # pre-release channel marker
+suffix_when = '^26\.8\.'            # …applied only to a matching version
+commit_sha_path = "[0].sha"         # REQUIRED with track="commit"
+commit_message_path = "commit.message"
+commit_version_pattern = 'sdk-([0-9.]+)'
+aux_var = "MY_BUILD"                # free-text ebuild var kept in sync…
+aux_pattern = 'esr-bb([0-9]+)'      # …always paired with aux_var
+headers = { "User-Agent" = "bentoo-autoupdate" }
+binary = true                       # binary package → manifest-only testing
+type = "bin"                        # ONLY to override the -bin/RESTRICT heuristic
+meta = { key = "value" }            # documentation only; NEVER a secret
+comments = """…"""                  # REQUIRED — the doc, always last
+# END
+```
+
+##### Rules that are not obvious from the field list
+
+- **Regex values** (`pattern`, `aux_pattern`, `commit_version_pattern`, and the
+  left side of every `transform` rule) use TOML **literal** strings `'…'`. A
+  basic string `"…"` rejects `\.` and `\d` outright. Replacements use basic
+  strings.
+- **`enabled` vs `hold`.** `enabled` is *bookkeeping the checker flips on its
+  own*: it writes `enabled = false` when the ebuild vanishes from the overlay,
+  and back to `true` when it reappears. `hold` is a *maintainer decision*
+  ("present, but never auto-bump") that reconciliation never touches. A package
+  needing manual work each release (patchset, pinned SHA, bootstrap compiler)
+  takes `hold` — `enabled = false` would be silently reverted. Both skip the
+  fetch entirely.
+- **User-Agent** is required by `api.github.com` and `crates.io` — always the
+  literal `"bentoo-autoupdate"`. A browser UA is a last resort for a
+  Cloudflare-fronted host, and the reason belongs in `comments`.
+- **Regex returns capture group 1 of the FIRST match** on the raw body; anchor
+  it so a page listing several releases cannot yield an older one, or use
+  `select = "max"`.
+- **Verify before committing.** Probe the real endpoint with
+  `bentoo overlay autoupdate --check <category/package> --force`; never
+  hand-write a record from a guessed URL shape.
+
 #### Pre-release channels (`suffix`)
 
 Upstream numbering rarely says a release is a pre-release. LibreOffice publishes
