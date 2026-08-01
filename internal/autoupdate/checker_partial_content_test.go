@@ -44,8 +44,14 @@ func TestFetchContent_AcceptsPartialContent(t *testing.T) {
 	}
 }
 
-// TestFetchContent_RejectsNonSuccessStatuses pins the guard to 200 and 206
-// exactly. 204 and 205 are the reason the check is not a 2xx range: both have an
+// TestFetchContent_RejectsNonSuccessStatuses pins the statuses no request can
+// make acceptable. The guard is asymmetric: 200 always counts as success, while
+// 206 counts only when the request that actually reached the server carried a
+// Range header. None of the statuses below is 206, so each must be rejected
+// with or without a Range on the wire — the Range-dependent half of the policy
+// belongs to TestFetchContent_ObservedRangeGate.
+//
+// 204 and 205 are the reason the check is not a 2xx range: both have an
 // empty body by definition, so accepting them would swap this explicit error for
 // a confusing parser failure further down.
 //
