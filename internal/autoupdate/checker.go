@@ -134,6 +134,22 @@ func hostForError(rawURL string) string {
 	return rawURL
 }
 
+// requestDeclaresRange reports whether a per-package header map asks the server
+// for a byte range, which is what makes a 206 answer legitimate (R2.1, R2.2).
+//
+// The match is case-insensitive (R2.3): these keys come straight from
+// packages.toml and are never canonicalized on the way to the request, so
+// "Range", "range" and "RANGE" all name the same header on the wire. A nil or
+// empty map simply declares no range.
+func requestDeclaresRange(headers map[string]string) bool {
+	for k := range headers {
+		if strings.EqualFold(k, "Range") {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultConcurrency is the default number of packages processed in parallel
 // when no explicit concurrency is configured. It governs both --check (CheckAll's
 // per-package HTTP fan-out) and the --apply all worker pool. For --check, per-host
@@ -1673,23 +1689,32 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	}
 	defer resp.Body.Close()
 
-	// 206 is a success here: a record may declare a Range header to read a
-	// pattern that lives in the first bytes of a large file, and the server
-	// answers the partial request with 206, not 200. www-misc/warsaw is the
-	// motivating case — an 8.2 MB payload whose version string sits ~590 KB in.
+	// 206 counts as success ONLY as the answer to a Range this request actually
+	// declared (R2.1): a record may ask for a byte range to read a pattern that
+	// lives near the front of a large file, and the server answers that partial
+	// request with 206 rather than 200. www-misc/warsaw is the motivating case —
+	// an 8.2 MB payload whose version string sits ~590 KB in (UB4).
 	//
-	// Both codes are listed explicitly rather than accepting the whole 2xx
-	// range: 204 and 205 have an empty body by definition, so admitting them
-	// would trade this clear error for a confusing parser failure downstream.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
+	// An UNSOLICITED 206 — one no Range asked for, a protocol violation seen
+	// behind some CDNs and proxies — must fail safe with the status error
+	// instead (R2.2). Its body is a fragment by definition, and a truncated
+	// fragment does not look like a failure to the version parser: it looks
+	// like a successful read, so the checker would silently record a stale or
+	// simply wrong version with no error anywhere to show for it.
+	acceptedStatuses := []int{http.StatusOK}
+	if requestDeclaresRange(headers) {
+		acceptedStatuses = append(acceptedStatuses, http.StatusPartialContent)
 	}
 
-	content, err := io.ReadAll(resp.Body)
+	// readBodyForStatus enumerates the accepted codes rather than admitting the
+	// whole 2xx range (204/205 have no body by definition — see its doc), then
+	// reads the body and translates an http.MaxBytesReader overflow into
+	// ErrResponseTooLarge (R3.1, R3.2, R11.3). The cap is imposed upstream by
+	// GetWithHeadersContext, not here. Its errors are already phrased for the
+	// user, so they are returned as-is rather than re-wrapped.
+	content, err := readBodyForStatus(resp, acceptedStatuses...)
 	if err != nil {
-		// Translate an http.MaxBytesReader overflow into ErrResponseTooLarge
-		// (R11.3); GetWithContext caps the body at httputil.MaxBodyBytes.
-		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
+		return nil, err
 	}
 
 	return content, nil

@@ -1,10 +1,12 @@
 package autoupdate
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestFetchContent_AcceptsPartialContent asserts that a record declaring a Range
@@ -69,6 +71,126 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "returned status") {
 				t.Errorf("error %q does not name the offending status", err)
+			}
+		})
+	}
+}
+
+// TestFetchContent_RangeGated206 locks the corrected 206 gating and the memory
+// cap on the checker's headers/Range path (B1, B2, R2.1-R2.3, R5.1-R5.3, UB4).
+//
+// A 206 is a valid success ONLY as the answer to a Range the checker actually
+// declared — matched case-insensitively over the user-supplied headers map. An
+// unsolicited 206 (no Range) must fail safe with the status error, and a server
+// that ignores Range and streams past httputil.MaxBodyBytes must trip
+// ErrResponseTooLarge now that GetWithHeadersContext caps the body.
+//
+// RED (pre-fix): checker.go accepts 206 unconditionally, so "206 without a
+// Range is rejected" fails; GetWithHeadersContext is uncapped, so "server
+// ignores Range and streams over the cap" fails. The two accepted-206 cases
+// pass today and pin UB4 / R2.1 / R2.3 against regression.
+func TestFetchContent_RangeGated206(t *testing.T) {
+	const body = `{"version":"1.2.3"}`
+	// 11 MiB, one byte over the 10 MiB cap.
+	const oversized = 11 * 1024 * 1024
+
+	partialHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Range", "bytes 0-18/9999999")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte(body))
+	}
+
+	// A server that ignores the Range request and streams a full oversized body
+	// over a 206, exercising the cap on the Range path.
+	oversizedPartialHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Range", "bytes 0-/9999999")
+		w.WriteHeader(http.StatusPartialContent)
+		buf := make([]byte, 64*1024)
+		written := 0
+		for written < oversized {
+			n := len(buf)
+			if oversized-written < n {
+				n = oversized - written
+			}
+			if _, err := w.Write(buf[:n]); err != nil {
+				return
+			}
+			written += n
+		}
+	}
+
+	tests := []struct {
+		name        string
+		handler     http.HandlerFunc
+		headers     map[string]string
+		wantErr     bool
+		wantErrText string
+		wantBody    string
+	}{
+		{
+			name:     "206 answering a declared Range is accepted",
+			handler:  partialHandler,
+			headers:  map[string]string{"Range": "bytes=0-2097151"},
+			wantErr:  false,
+			wantBody: body,
+		},
+		{
+			name:     "206 answering a lowercase range key is accepted",
+			handler:  partialHandler,
+			headers:  map[string]string{"range": "bytes=0-2097151"},
+			wantErr:  false,
+			wantBody: body,
+		},
+		{
+			name:        "206 with no Range header is rejected with the status error",
+			handler:     partialHandler,
+			headers:     nil,
+			wantErr:     true,
+			wantErrText: "returned status",
+		},
+		{
+			name:        "server ignores Range and streams over the cap",
+			handler:     oversizedPartialHandler,
+			headers:     map[string]string{"Range": "bytes=0-2097151"},
+			wantErr:     true,
+			wantErrText: "", // asserted via errors.Is below
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(tt.handler))
+			defer server.Close()
+
+			client := NewRetryableHTTPClient()
+			client.SetHTTPClient(server.Client())
+			client.SetDelayFunc(func(time.Duration) {})
+
+			checker := newContextTestChecker(t, server.URL, WithHTTPClient(client))
+
+			content, err := checker.fetchContent(server.URL, tt.headers, checker.operationTimeout(nil))
+
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("fetchContent rejected a valid 206: %v", err)
+				}
+				if string(content) != tt.wantBody {
+					t.Errorf("got body %q, want %q", content, tt.wantBody)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("fetchContent accepted %q, want an error", tt.name)
+			}
+			if tt.name == "server ignores Range and streams over the cap" {
+				if !errors.Is(err, ErrResponseTooLarge) {
+					t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
+				}
+				return
+			}
+			if tt.wantErrText != "" && !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Errorf("error %q does not contain %q", err, tt.wantErrText)
 			}
 		})
 	}
