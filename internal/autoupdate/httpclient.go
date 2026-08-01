@@ -10,6 +10,7 @@ import (
 	"net/textproto"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -426,6 +427,36 @@ func classifyBodyReadError(err error) error {
 		return fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
 	}
 	return err
+}
+
+// readBodyForStatus validates an HTTP response status against the accepted set
+// supplied by the caller and, when the status is accepted, reads the body in
+// full and classifies an overflow (R3.1). A status outside the set yields
+// "HTTP request returned status %d" without touching the body.
+//
+// The accepted statuses are the caller's to choose (R3.2): Checker.fetchContent
+// passes http.StatusOK plus http.StatusPartialContent when the record declared
+// a Range header, Analyzer.fetchContentFromURL passes http.StatusOK alone. Both
+// list codes explicitly rather than accepting the whole 2xx range, since 204 and
+// 205 have an empty body by definition.
+//
+// This helper imposes no cap of its own: the GET helpers already wrap the body
+// in an http.MaxBytesReader bounded by httputil.MaxBodyBytes, so the bound has a
+// single source. A read that trips that cap is translated into an error wrapping
+// ErrResponseTooLarge via classifyBodyReadError (R11.3). The LLM path keeps its
+// own per-client, raisable cap (readCappedBody in llm.go) and deliberately does
+// not route through here (R3.3, UB3).
+func readBodyForStatus(resp *http.Response, accepted ...int) ([]byte, error) {
+	if !slices.Contains(accepted, resp.StatusCode) {
+		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
+	}
+
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
+	}
+
+	return content, nil
 }
 
 // calculateDelay calculates the delay for a given retry attempt.

@@ -1907,3 +1907,78 @@ func TestHTTP1FallbackNotUsedOnHTTP1_403(t *testing.T) {
 		t.Errorf("requests = %d, want exactly 1 (an HTTP/1.1 403 must not be retried)", got)
 	}
 }
+
+// TestReadBodyForStatus covers the shared status-check + capped-read + classify
+// helper (R3.1, R3.2, R3.3). The caller supplies the accepted statuses; a
+// rejected status yields the byte-identical "HTTP request returned status %d"
+// error without reading, and an already-capped body that overflows classifies
+// as ErrResponseTooLarge.
+//
+// RED (pre-fix): readBodyForStatus does not exist — this file will not compile
+// against the current tree (undefined: readBodyForStatus).
+func TestReadBodyForStatus(t *testing.T) {
+	const body = `{"version":"1.2.3"}`
+
+	t.Run("accepted 200 returns the body", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK)
+		if err != nil {
+			t.Fatalf("readBodyForStatus rejected an accepted status: %v", err)
+		}
+		if string(got) != body {
+			t.Errorf("got body %q, want %q", got, body)
+		}
+	})
+
+	t.Run("accepted 206 when in the accepted set", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK, http.StatusPartialContent)
+		if err != nil {
+			t.Fatalf("readBodyForStatus rejected an accepted 206: %v", err)
+		}
+		if string(got) != body {
+			t.Errorf("got body %q, want %q", got, body)
+		}
+	})
+
+	t.Run("rejected status returns the status error and no body", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK)
+		if err == nil {
+			t.Fatal("readBodyForStatus accepted a rejected status, want an error")
+		}
+		if !strings.Contains(err.Error(), "HTTP request returned status 404") {
+			t.Errorf("error %q does not carry the byte-identical status message", err)
+		}
+		if got != nil {
+			t.Errorf("rejected status must not return a body, got %q", got)
+		}
+	})
+
+	t.Run("overflowing capped body classifies as ErrResponseTooLarge", func(t *testing.T) {
+		// A body already wrapped in a MaxBytesReader with a tiny limit: the read
+		// inside the helper must trip the cap and classify the overflow.
+		const limit = 8
+		capped := http.MaxBytesReader(nil, io.NopCloser(strings.NewReader(body)), limit)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       capped,
+		}
+		_, err := readBodyForStatus(resp, http.StatusOK)
+		if err == nil {
+			t.Fatal("expected an overflow error, got nil")
+		}
+		if !errors.Is(err, ErrResponseTooLarge) {
+			t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
+		}
+	})
+}
