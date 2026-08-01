@@ -561,6 +561,14 @@ func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]stri
 // GetWithHeadersContext performs an HTTP GET request with custom headers, context, and retry logic.
 // Headers are processed for environment variable substitution using ${VAR_NAME} syntax.
 // If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
+//
+// The returned response body is wrapped in an http.MaxBytesReader bounded by
+// httputil.MaxBodyBytes (10 MiB), exactly as GetWithContext does. A subsequent
+// read that exceeds the cap yields an *http.MaxBytesError; callers should pass
+// such read errors through classifyBodyReadError so the overflow surfaces as
+// ErrResponseTooLarge. The cap holds even when a caller sent a Range header: a
+// Range is only a request, and a server that ignores it and streams the full
+// body is bounded here rather than at the caller's read (R1.1, R1.2).
 func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url string, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -570,7 +578,16 @@ func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url str
 	// Apply headers to request
 	c.applyHeaders(req, url, headers)
 
-	return c.DoWithContext(ctx, req)
+	resp, err := c.DoWithContext(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if resp != nil && resp.Body != nil {
+		// Cap the body so an oversized or malicious response cannot exhaust
+		// memory when a caller reads it (R11.1, AD-12).
+		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	}
+	return resp, nil
 }
 
 // applyHeaders applies headers to a request in the following order:

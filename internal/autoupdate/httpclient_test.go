@@ -1982,3 +1982,98 @@ func TestReadBodyForStatus(t *testing.T) {
 		}
 	})
 }
+
+// oversizedBodyServer streams `size` bytes over a 200 response in 64 KiB
+// chunks, deliberately ignoring any Range header the client sent. It mirrors
+// the oversized-body pattern used by TestGetWithContext_BodyCap so a server can
+// defeat a Range request and push a body past httputil.MaxBodyBytes.
+func oversizedBodyServer(size int) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, 64*1024)
+		written := 0
+		for written < size {
+			n := len(buf)
+			if size-written < n {
+				n = size - written
+			}
+			if _, err := w.Write(buf[:n]); err != nil {
+				return
+			}
+			written += n
+		}
+	}))
+}
+
+// TestGetWithHeadersContext_BodyCap asserts GetWithHeadersContext caps its
+// returned body at httputil.MaxBodyBytes, mirroring GetWithContext (R1.1,
+// R1.2, R5.1). A server that ignores the Range header and streams >10 MiB must
+// trip the http.MaxBytesReader cap so classifyBodyReadError can surface
+// ErrResponseTooLarge; a body under the cap must still read byte-identically.
+//
+// RED (pre-fix): GetWithHeadersContext returns the raw, uncapped body — the
+// oversized read succeeds with a nil error, so the "oversized" case fails.
+func TestGetWithHeadersContext_BodyCap(t *testing.T) {
+	// 11 MiB payload, one byte over the 10 MiB cap.
+	const oversized = 11 * 1024 * 1024
+	const smallBody = "a small, well-behaved response body"
+
+	t.Run("oversized body trips the cap", func(t *testing.T) {
+		server := oversizedBodyServer(oversized)
+		defer server.Close()
+
+		client := NewRetryableHTTPClient()
+		client.SetHTTPClient(server.Client())
+		client.SetDelayFunc(func(time.Duration) {})
+
+		// A Range header is declared, but the server ignores it and streams the
+		// full oversized body — exactly the case the cap must defend against.
+		headers := map[string]string{"Range": "bytes=0-2097151"}
+		resp, err := client.GetWithHeadersContext(context.Background(), server.URL, headers)
+		if err != nil {
+			t.Fatalf("GetWithHeadersContext returned an unexpected error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		_, readErr := io.ReadAll(resp.Body)
+		if readErr == nil {
+			t.Fatal("expected an error reading an oversized body, got nil (body is uncapped)")
+		}
+
+		classified := classifyBodyReadError(readErr)
+		if !errors.Is(classified, ErrResponseTooLarge) {
+			t.Errorf("expected classified error to satisfy errors.Is(ErrResponseTooLarge), got: %v", classified)
+		}
+
+		var maxBytesErr *http.MaxBytesError
+		if !errors.As(readErr, &maxBytesErr) {
+			t.Errorf("expected the raw read error to be an *http.MaxBytesError, got: %v", readErr)
+		}
+	})
+
+	t.Run("small body reads unchanged", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(smallBody))
+		}))
+		defer server.Close()
+
+		client := NewRetryableHTTPClient()
+		client.SetHTTPClient(server.Client())
+		client.SetDelayFunc(func(time.Duration) {})
+
+		resp, err := client.GetWithHeadersContext(context.Background(), server.URL, nil)
+		if err != nil {
+			t.Fatalf("GetWithHeadersContext returned an unexpected error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		got, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("reading a small body must not error, got: %v", err)
+		}
+		if string(got) != smallBody {
+			t.Errorf("body mismatch: got %q, want %q", got, smallBody)
+		}
+	})
+}
