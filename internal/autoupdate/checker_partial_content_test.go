@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -191,6 +192,232 @@ func TestFetchContent_RangeGated206(t *testing.T) {
 			}
 			if tt.wantErrText != "" && !strings.Contains(err.Error(), tt.wantErrText) {
 				t.Errorf("error %q does not contain %q", err, tt.wantErrText)
+			}
+		})
+	}
+}
+
+// observedRanges records the Range header each request actually carried on the
+// wire. The handler runs on the server's goroutine while the test reads from
+// its own, so the mutex is what makes the assertions safe under -race rather
+// than merely usually correct.
+type observedRanges struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (o *observedRanges) record(v string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.seen = append(o.seen, v)
+}
+
+// last returns the Range observed on the most recent request, or "" when no
+// request arrived. Under a redirect the last request is the one that produced
+// the 206, which is exactly the request the gate must be observing.
+func (o *observedRanges) last() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.seen) == 0 {
+		return ""
+	}
+	return o.seen[len(o.seen)-1]
+}
+
+func (o *observedRanges) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.seen)
+}
+
+// TestSentRequestDeclaresRange pins the fail-safe contract of the predicate the
+// 206 gate consults (R1.4, R5.4).
+//
+// The predicate answers one question — did the request that actually reached
+// the wire ask for a byte range? — from the response alone. Absent evidence is
+// not permission: a nil response, or one whose Request the transport did not
+// record, must read as "no Range declared" so an unsolicited 206 is rejected
+// rather than accepted on a guess.
+func TestSentRequestDeclaresRange(t *testing.T) {
+	withRange := httptest.NewRequest(http.MethodGet, "http://example.com/f.json", nil)
+	withRange.Header.Set("Range", "bytes=0-2097151")
+
+	emptyRange := httptest.NewRequest(http.MethodGet, "http://example.com/f.json", nil)
+	emptyRange.Header.Set("Range", "")
+
+	tests := []struct {
+		name string
+		resp *http.Response
+		want bool
+	}{
+		{
+			name: "nil response declares nothing",
+			resp: nil,
+			want: false,
+		},
+		{
+			name: "response without a recorded request declares nothing",
+			resp: &http.Response{StatusCode: http.StatusPartialContent},
+			want: false,
+		},
+		{
+			name: "request without a Range header declares nothing",
+			resp: &http.Response{
+				StatusCode: http.StatusPartialContent,
+				Request:    httptest.NewRequest(http.MethodGet, "http://example.com/f.json", nil),
+			},
+			want: false,
+		},
+		{
+			name: "request with an empty Range value declares nothing",
+			resp: &http.Response{StatusCode: http.StatusPartialContent, Request: emptyRange},
+			want: false,
+		},
+		{
+			name: "request carrying a Range declares one",
+			resp: &http.Response{StatusCode: http.StatusPartialContent, Request: withRange},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sentRequestDeclaresRange(tt.resp); got != tt.want {
+				t.Errorf("sentRequestDeclaresRange() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFetchContent_ObservedRangeGate asserts that the 206 gate is decided by the
+// request that reached the server, not by the caller's header map (B1, B2, R1.3,
+// R2.2, R2.3, R3.1, R5.1-R5.3, and assumption A2).
+//
+// The map and the wire disagree at three edges, and each edge is a case here:
+//   - " Range " is trimmed and canonicalised by setHeader, so a Range DOES reach
+//     the server and its 206 is legitimate (R5.1 / R2.2).
+//   - "Range\n" is dropped outright by setHeader's CR/LF guard, so NO Range
+//     reaches the server and its 206 is unsolicited — it must be rejected with
+//     the status error. This is the fail-open trap: a repair that merely trims
+//     the key before comparing would open the gate on a header that was never
+//     sent (R5.2 / R2.3).
+//   - a Range supplied through the client's default headers is applied by
+//     applyHeaders just like a per-package one, so it must open the gate too
+//     (R5.3 / R3.1).
+//
+// Every accepted case also asserts the Range the server actually observed, as
+// TestFetchContent_AcceptsPartialContent does. Without that assertion a gate
+// that guessed right by luck would be indistinguishable from one that observed.
+func TestFetchContent_ObservedRangeGate(t *testing.T) {
+	const body = `{"version":"1.2.3"}`
+	const rangeValue = "bytes=0-2097151"
+
+	tests := []struct {
+		name string
+		// headers is the per-package map handed to fetchContent.
+		headers map[string]string
+		// defaultHeaders, when set, goes through client.SetDefaultHeaders and
+		// never appears in the per-package map.
+		defaultHeaders map[string]string
+		// viaRedirect fetches a first server that 302s to the 206 server, so the
+		// response's recorded request is the redirected one (A2).
+		viaRedirect bool
+		wantErr     bool
+		wantErrText string
+		// wantSeenRange is the Range the 206 server must have observed; "" means
+		// no Range must have reached it.
+		wantSeenRange string
+	}{
+		{
+			name:          "whitespace-padded Range key is trimmed on the wire and its 206 is accepted",
+			headers:       map[string]string{" Range ": rangeValue},
+			wantErr:       false,
+			wantSeenRange: rangeValue,
+		},
+		{
+			name:          "CRLF-bearing Range key sends no Range, so its 206 is rejected",
+			headers:       map[string]string{"Range\n": rangeValue},
+			wantErr:       true,
+			wantErrText:   "returned status",
+			wantSeenRange: "",
+		},
+		{
+			name:           "Range from the client default headers is accepted",
+			headers:        nil,
+			defaultHeaders: map[string]string{"Range": rangeValue},
+			wantErr:        false,
+			wantSeenRange:  rangeValue,
+		},
+		{
+			name:          "no Range from any source is rejected with the status error",
+			headers:       nil,
+			wantErr:       true,
+			wantErrText:   "returned status",
+			wantSeenRange: "",
+		},
+		{
+			name:          "206 answering a Range that survived a redirect is accepted",
+			headers:       map[string]string{"Range": rangeValue},
+			viaRedirect:   true,
+			wantErr:       false,
+			wantSeenRange: rangeValue,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observed := &observedRanges{}
+
+			partial := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				observed.record(r.Header.Get("Range"))
+				w.Header().Set("Content-Range", "bytes 0-18/9999999")
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer partial.Close()
+
+			target := partial.URL
+			if tt.viaRedirect {
+				redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, partial.URL, http.StatusFound)
+				}))
+				defer redirector.Close()
+				target = redirector.URL
+			}
+
+			client := NewRetryableHTTPClient()
+			client.SetHTTPClient(partial.Client())
+			client.SetDelayFunc(func(time.Duration) {})
+			if tt.defaultHeaders != nil {
+				client.SetDefaultHeaders(tt.defaultHeaders)
+			}
+
+			checker := newContextTestChecker(t, target, WithHTTPClient(client))
+
+			content, err := checker.fetchContent(target, tt.headers, checker.operationTimeout(nil))
+
+			if observed.count() == 0 {
+				t.Fatalf("the 206 server was never reached; the case proves nothing about the gate")
+			}
+			if got := observed.last(); got != tt.wantSeenRange {
+				t.Errorf("server observed Range %q on the wire, want %q", got, tt.wantSeenRange)
+			}
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("fetchContent accepted the 206, want an error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Errorf("error %q does not contain %q", err, tt.wantErrText)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("fetchContent rejected a 206 answering an observed Range: %v", err)
+			}
+			if string(content) != body {
+				t.Errorf("got body %q, want %q", content, body)
 			}
 		})
 	}

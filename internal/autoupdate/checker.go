@@ -134,20 +134,34 @@ func hostForError(rawURL string) string {
 	return rawURL
 }
 
-// requestDeclaresRange reports whether a per-package header map asks the server
-// for a byte range, which is what makes a 206 answer legitimate (R2.1, R2.2).
+// sentRequestDeclaresRange reports whether the request that actually reached the
+// wire asked the server for a byte range, which is what makes a 206 answer
+// legitimate (R1.1, R1.2). It reads the request recorded on the response instead
+// of predicting the wire from the per-package header map, because that map is
+// not what the server sees:
 //
-// The match is case-insensitive (R2.3): these keys come straight from
-// packages.toml and are never canonicalized on the way to the request, so
-// "Range", "range" and "RANGE" all name the same header on the wire. A nil or
-// empty map simply declares no range.
-func requestDeclaresRange(headers map[string]string) bool {
-	for k := range headers {
-		if strings.EqualFold(k, "Range") {
-			return true
-		}
+//   - setHeader (httpclient.go) DROPS any header whose name contains CR or LF,
+//     so a "Range\n" key sends no Range at all. A map-based guess would open the
+//     gate for a header that was never on the wire — the fail-open trap this
+//     predicate closes by construction (R2.3).
+//   - setHeader also applies strings.TrimSpace and
+//     textproto.CanonicalMIMEHeaderKey to the name, so " Range " and "RANGE"
+//     both arrive as the canonical "Range" (R2.1, R2.2).
+//   - applyHeaders (httpclient.go) additionally contributes c.defaultHeaders,
+//     a source the per-package map never sees at all (R3.1).
+//
+// Header.Get canonicalises its lookup key too, so casing and padding are already
+// resolved by the time this reads it: one Get answers every spelling, with no
+// normalisation logic here to drift out of step with setHeader's.
+//
+// Absent evidence is not permission (R1.4): a nil response, or one whose Request
+// the transport did not record, reads as "no Range declared", so an unsolicited
+// 206 fails safe on the status error rather than being accepted on a guess.
+func sentRequestDeclaresRange(resp *http.Response) bool {
+	if resp == nil || resp.Request == nil {
+		return false
 	}
-	return false
+	return resp.Request.Header.Get("Range") != ""
 }
 
 // DefaultConcurrency is the default number of packages processed in parallel
@@ -1689,20 +1703,28 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	}
 	defer resp.Body.Close()
 
-	// 206 counts as success ONLY as the answer to a Range this request actually
-	// declared (R2.1): a record may ask for a byte range to read a pattern that
-	// lives near the front of a large file, and the server answers that partial
-	// request with 206 rather than 200. www-misc/warsaw is the motivating case —
-	// an 8.2 MB payload whose version string sits ~590 KB in (UB4).
+	// 206 counts as success ONLY as the answer to a Range the request that
+	// reached the server actually carried (R1.1, R1.2): a record may ask for a
+	// byte range to read a pattern that lives near the front of a large file, and
+	// the server answers that partial request with 206 rather than 200.
+	// www-misc/warsaw is the motivating case — an 8.2 MB payload whose version
+	// string sits ~590 KB in (UB4).
+	//
+	// The evidence is the request recorded on resp, NOT the headers map above:
+	// the map is what was asked for, the response carries what was actually sent,
+	// and applyHeaders rewrites and supplements the one into the other. Observing
+	// the wire keeps the acceptance policy in a single place, unable to drift out
+	// of step with header application again — sentRequestDeclaresRange documents
+	// each way the two diverge.
 	//
 	// An UNSOLICITED 206 — one no Range asked for, a protocol violation seen
 	// behind some CDNs and proxies — must fail safe with the status error
-	// instead (R2.2). Its body is a fragment by definition, and a truncated
+	// instead (R1.3). Its body is a fragment by definition, and a truncated
 	// fragment does not look like a failure to the version parser: it looks
 	// like a successful read, so the checker would silently record a stale or
 	// simply wrong version with no error anywhere to show for it.
 	acceptedStatuses := []int{http.StatusOK}
-	if requestDeclaresRange(headers) {
+	if sentRequestDeclaresRange(resp) {
 		acceptedStatuses = append(acceptedStatuses, http.StatusPartialContent)
 	}
 
