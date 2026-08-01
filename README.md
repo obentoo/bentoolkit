@@ -576,6 +576,10 @@ suffix_when = '^26\.8\.'            # …applied only to a matching version
 commit_sha_path = "[0].sha"         # REQUIRED with track="commit"
 commit_message_path = "commit.message"
 commit_version_pattern = 'sdk-([0-9.]+)'
+base_from = "file"                  # where the base version lives: file | commit_message
+base_url = "https://raw.…/VERSION"  # REQUIRED with base_from="file"
+base_pattern = '^([0-9][0-9.]*)-devel'  # …1 capture group, the base version
+base_tag_pattern = 'vulkan-sdk-([0-9.]+)'  # REQUIRED with base_from="tag"
 aux_var = "MY_BUILD"                # free-text ebuild var kept in sync…
 aux_pattern = 'esr-bb([0-9]+)'      # …always paired with aux_var
 headers = { "User-Agent" = "bentoo-autoupdate" }
@@ -588,10 +592,42 @@ comments = """…"""                  # REQUIRED — the doc, always last
 
 ##### Rules that are not obvious from the field list
 
-- **Regex values** (`pattern`, `aux_pattern`, `commit_version_pattern`, and the
-  left side of every `transform` rule) use TOML **literal** strings `'…'`. A
-  basic string `"…"` rejects `\.` and `\d` outright. Replacements use basic
-  strings.
+- **Regex values** (`pattern`, `aux_pattern`, `commit_version_pattern`,
+  `base_pattern`, and the left side of every `transform` rule) use TOML
+  **literal** strings `'…'`. A basic string `"…"` rejects `\.` and `\d`
+  outright. Replacements use basic strings.
+- **Where the base version comes from** (`track = "commit"` only). The
+  `_p<date>`/`_pre<date>` suffix is derived from the current ebuild, but the
+  `X.Y.Z` in front of it needs a source, and `base_from` names it:
+  - `"file"` — fetch `base_url`, apply `base_pattern`. **Prefer this.** One
+    request, no window, no pagination; use it whenever upstream versions itself
+    in-tree (`crates/zed/Cargo.toml`, mesa's `VERSION`, `meson.build`,
+    `CMakeLists.txt`). Go anchors `^`/`$` to the whole body, so a version
+    declared mid-file needs `(?m)`.
+  - `"tag"` — fetch a tag listing (`…/git/refs/tags` on GitHub,
+    `…/repository/tags` on GitLab) and take the highest version matching
+    `base_tag_pattern`. Use it when the scheme **the ebuild uses** exists only
+    as tags: glslang and spirv-\* version themselves `2026.3`/`1.5.5` in-tree
+    while the overlay tracks `vulkan-sdk-X.Y.Z.W`. Always anchor the pattern to
+    one tag family — these repos carry four or more at once, and an unfiltered
+    ranking picks `khronos-master-20141209` for vulkan-loader.
+  - `"commit_message"` — the older scan via `commit_version_pattern`. Correct
+    only when upstream announces releases in commit titles **and** commits
+    slowly enough that the bump stays inside the fetch window. That window is
+    measured in commits, not days: `per_page=50` covers ten months of
+    Vulkan-Headers but 1.3 days of zed.
+  - Absent — the base is whatever the ebuild already carries, and never moves.
+    Right for upstreams that do not version at all (`0_p<date>`), wrong for
+    everything else.
+
+  A declared source that resolves nothing is now a **check failure**, not a
+  fallback. Six of the seven entries that carried a `commit_version_pattern`
+  matched nothing — the pattern had been copied to sibling repos that never
+  write it — and their bases froze up to seven releases behind while the
+  `_p<date>` kept advancing, so the versions looked alive and were not.
+  Pick the source that matches the scheme **the ebuild** uses: spirv-tools
+  publishes `v2026.3` in `CHANGES`, but the overlay versions it on the
+  `vulkan-sdk` scheme, so that file is the wrong source even though it parses.
 - **`enabled` vs `hold`.** `enabled` is *bookkeeping the checker flips on its
   own*: it writes `enabled = false` when the ebuild vanishes from the overlay,
   and back to `true` when it reappears. `hold` is a *maintainer decision*

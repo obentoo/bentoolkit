@@ -40,6 +40,7 @@ const (
 	LintBracketInComment = "bracket-line-in-comments"
 	LintInvalidConfig    = "invalid-config"
 	LintAmbiguousEntries = "ambiguous-entries"
+	LintMissingSeries    = "missing-series"
 )
 
 // LintIssue is one violation of the packages.toml record model.
@@ -117,7 +118,145 @@ func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 		})
 	}
 
+	// Overlay-aware check: an entry covering a directory that holds more than one
+	// release line, without saying which line it tracks.
+	issues = append(issues, lintUntrackedReleaseLines(overlayPath, cfg.Packages)...)
+
 	return issues, nil
+}
+
+// releaseLineOf reduces a version to the release line it belongs to: the first
+// two numeric components, so 1.28.4, 1.28.5 and 1.28.5-r1 all collapse to
+// "1.28" while 1.29.2 and 1.29.2_pre collapse to "1.29". A single-component
+// version (llama-cpp's "0_pre10202") yields that component alone, which keeps
+// every build-numbered snapshot of such a package in one line.
+func releaseLineOf(version string) string {
+	m := releaseLineRegex.FindStringSubmatch(version)
+	if m == nil {
+		return ""
+	}
+	if m[2] != "" {
+		return m[1] + "." + m[2]
+	}
+	return m[1]
+}
+
+// releaseLineRegex captures the first two DOT-separated numeric components of a
+// version. Anchoring at the start and requiring the literal "." matters: a bare
+// \d+ scan would read llama-cpp's "0_pre10202" as components 0 and 10202 and
+// call it line "0.10202", making every build-numbered snapshot look like a
+// release line of its own.
+var releaseLineRegex = regexp.MustCompile(`^(\d+)(?:\.(\d+))?`)
+
+// prereleaseSuffixRegex matches the Gentoo suffixes that mark a version as
+// coming BEFORE its base: _alpha, _beta, _pre, _rc, each optionally numbered.
+// _p is deliberately absent — it marks a post-release snapshot, which orders
+// after the base and says nothing about a line being unstable.
+var prereleaseSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc)\d*`)
+
+// lintUntrackedReleaseLines reports entries whose package directory carries more
+// than one release line while the entry declares neither `series` nor a `:slot`.
+//
+// It exists because that combination fails silently and looks like success.
+// selectCurrentEbuild takes the directory's HIGHEST version as "the current
+// one", so once a newer line lands beside an older one, every release of the
+// older line compares older than the current version and the entry reports
+// "up to date" forever — the line simply stops being maintained. The overlay hit
+// exactly this: 85 GStreamer packages carried a 1.29.x development ebuild beside
+// nothing else, and the 1.28.5 stable release could never be picked up because
+// 1.28.5 < 1.29.2.
+//
+// Two lines in one directory are perfectly legitimate (a stable line beside a
+// testing one); what is not legitimate is leaving it undeclared. The fix is one
+// entry per line, each with its own `series` and a distinct "@label".
+//
+// Deliberately conservative to stay useful, on two counts. Revisions and
+// snapshot suffixes of the SAME line (1.28.4 next to 1.28.5-r1) are not
+// reported, because keeping the previous version around is ordinary overlay
+// hygiene. Neither are two lines that merely SUCCEED each other: bentoolkit
+// itself ships 0.15.3 beside 0.16.0, which is one line mid-rotation, not two
+// maintained in parallel — warning there would bury the real finding under a
+// warning on almost every directory.
+//
+// What distinguishes the real case is the pre-release suffix. A line kept in
+// parallel on purpose is the unstable one and says so: libreoffice-26.2.5.2
+// beside libreoffice-26.8.0.1_pre, zed-bin-1.13.1 beside zed-bin-1.14.1_pre.
+// So the rule fires only when one line carries _alpha/_beta/_pre/_rc and
+// another does not — the shape of a stable line coexisting with a testing one.
+// Note _p is excluded on purpose: it marks a post-release snapshot, so two _p
+// lines are two snapshot lines rather than a stable/unstable pair.
+//
+// An unreadable directory yields no issue — the linter must not invent findings
+// from a failed stat.
+func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig) []LintIssue {
+	var issues []LintIssue
+
+	for _, pkg := range sortedKeys(pkgs) {
+		cfg := pkgs[pkg]
+		// A disabled entry tracks nothing, and a slot- or series-qualified one has
+		// already said which line it means.
+		if cfg.Enabled != nil && !*cfg.Enabled {
+			continue
+		}
+		if cfg.Series != "" {
+			continue
+		}
+		if _, slot := splitPkgSlot(pkg); slot != "" {
+			continue
+		}
+
+		dir := pkgDirFor(overlayPath, pkg)
+		if dir == "" {
+			continue
+		}
+		paths, err := findEbuilds(dir)
+		if err != nil || len(paths) < 2 {
+			continue
+		}
+
+		lines := make(map[string]string, 2) // release line → one example version
+		for _, p := range paths {
+			v := extractVersionFromFilename(filepath.Base(p))
+			if v == "" {
+				continue
+			}
+			if line := releaseLineOf(v); line != "" {
+				lines[line] = v
+			}
+		}
+		if len(lines) < 2 {
+			continue
+		}
+
+		// Only a stable/unstable pair counts: one line marked as a pre-release
+		// and another that is not. Successive versions of one line carry no such
+		// marker and are left alone.
+		var withPre, withoutPre bool
+		examples := make([]string, 0, len(lines))
+		for _, v := range lines {
+			if prereleaseSuffixRegex.MatchString(v) {
+				withPre = true
+			} else {
+				withoutPre = true
+			}
+			examples = append(examples, v)
+		}
+		if !withPre || !withoutPre {
+			continue
+		}
+		sort.Strings(examples)
+
+		issues = append(issues, LintIssue{
+			Package: pkg,
+			Rule:    LintMissingSeries,
+			Message: fmt.Sprintf(
+				"directory holds a stable and a pre-release line (%s) but the entry declares no series; "+
+					"only the highest is tracked, so the other reports \"up to date\" forever",
+				strings.Join(examples, ", ")),
+		})
+	}
+
+	return issues
 }
 
 // recordLintState tracks the record currently being scanned by lintRecordModel.
