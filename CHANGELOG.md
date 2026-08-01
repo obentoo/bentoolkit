@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A `Range` header on a record now works: `--check` accepts HTTP 206 as
+  success.** `Headers` in `packages.toml` could already put `Range` on the wire,
+  but the fetcher treated everything except 200 as a failure, so the partial
+  response came back as `HTTP request returned status 206` and the header was
+  unusable. This mattered most for `www-misc/warsaw`, at 56% of all autoupdate
+  traffic: the version string sits ~590 KB into an 8.2 MB payload that has not
+  changed since 2024-08-26, so every check pulled the whole file and
+  intermittently blew the 30 s per-request deadline. With a 2 MiB range the same
+  check measures ~1 s end to end.
+
+  The guard names 200 and 206 explicitly rather than accepting the 2xx range:
+  204 and 205 carry an empty body by definition, and admitting them would trade
+  a clear HTTP error for a confusing parser failure further downstream. 5xx is
+  unaffected — the retry layer classifies it as retryable and never reaches this
+  guard.
+
 ## [0.17.0] - 2026-08-01
 
 ### Added

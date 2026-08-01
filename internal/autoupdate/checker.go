@@ -1673,7 +1673,15 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	// 206 is a success here: a record may declare a Range header to read a
+	// pattern that lives in the first bytes of a large file, and the server
+	// answers the partial request with 206, not 200. www-misc/warsaw is the
+	// motivating case — an 8.2 MB payload whose version string sits ~590 KB in.
+	//
+	// Both codes are listed explicitly rather than accepting the whole 2xx
+	// range: 204 and 205 have an empty body by definition, so admitting them
+	// would trade this clear error for a confusing parser failure downstream.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
 	}
 
