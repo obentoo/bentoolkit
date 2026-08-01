@@ -458,15 +458,19 @@ func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
-	}
-
-	content, err := io.ReadAll(resp.Body)
+	// 200 alone is accepted here (R3.2, UB2). The analyzer never declares a
+	// Range, so unlike the checker it has no 206 to honour: a 206 at this call
+	// site could only be unsolicited, and its body is a fragment the version
+	// parser would read as a complete, successful answer.
+	//
+	// readBodyForStatus does the status check, the body read and the
+	// translation of an http.MaxBytesReader overflow into ErrResponseTooLarge
+	// (R3.1, R11.3); the cap itself is imposed upstream by GetWithContext at
+	// httputil.MaxBodyBytes, not here. Its errors are already phrased for the
+	// user, so they are returned as-is rather than re-wrapped.
+	content, err := readBodyForStatus(resp, http.StatusOK)
 	if err != nil {
-		// Translate an http.MaxBytesReader overflow into ErrResponseTooLarge
-		// (R11.3); GetWithContext caps the body at httputil.MaxBodyBytes.
-		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
+		return nil, err
 	}
 
 	return content, nil

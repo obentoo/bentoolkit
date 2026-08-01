@@ -2080,3 +2080,104 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 		t.Errorf("expected Info log %q, got lines: %v", "analysis cache entry for "+pkg+" invalidated: ...", lines)
 	}
 }
+
+// TestFetchContentFromURL_ViaHelper asserts the analyzer fetch path keeps its
+// status policy and body cap after being routed through readBodyForStatus
+// (R3.1, R3.2, R5.4, UB1, UB2): non-200 is rejected with the status error, a
+// ≤cap 200 body reads byte-identically, and a >cap 200 body trips
+// ErrResponseTooLarge.
+func TestFetchContentFromURL_ViaHelper(t *testing.T) {
+	const smallBody = `{"version":"4.5.6"}`
+	// 11 MiB, one byte over the 10 MiB cap.
+	const oversized = 11 * 1024 * 1024
+
+	oversizedHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, 64*1024)
+		written := 0
+		for written < oversized {
+			n := len(buf)
+			if oversized-written < n {
+				n = oversized - written
+			}
+			if _, err := w.Write(buf[:n]); err != nil {
+				return
+			}
+			written += n
+		}
+	}
+
+	tests := []struct {
+		name         string
+		handler      http.HandlerFunc
+		wantErr      bool
+		wantStatus   bool // error must name the status
+		wantOverflow bool // error must be ErrResponseTooLarge
+		wantBody     string
+	}{
+		{
+			name: "non-200 is rejected with the status error",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			wantErr:    true,
+			wantStatus: true,
+		},
+		{
+			name: "200 body under the cap reads unchanged",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(smallBody))
+			},
+			wantErr:  false,
+			wantBody: smallBody,
+		},
+		{
+			name:         "200 body over the cap trips ErrResponseTooLarge",
+			handler:      oversizedHandler,
+			wantErr:      true,
+			wantOverflow: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(tt.handler))
+			defer server.Close()
+
+			client := NewRetryableHTTPClientWithConfig(RetryConfig{
+				MaxRetries: 0,
+				Timeout:    5 * time.Second,
+			})
+			client.SetHTTPClient(server.Client())
+			client.SetDelayFunc(func(time.Duration) {})
+
+			analyzer, err := NewAnalyzer(t.TempDir(), WithAnalyzerHTTPClient(client))
+			if err != nil {
+				t.Fatalf("NewAnalyzer failed: %v", err)
+			}
+
+			content, err := analyzer.fetchContentFromURL(server.URL)
+
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("fetchContentFromURL returned an unexpected error: %v", err)
+				}
+				if string(content) != tt.wantBody {
+					t.Errorf("got body %q, want %q", content, tt.wantBody)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("fetchContentFromURL accepted %q, want an error", tt.name)
+			}
+			if tt.wantStatus && !strings.Contains(err.Error(), "returned status") {
+				t.Errorf("error %q does not name the offending status", err)
+			}
+			if tt.wantOverflow && !errors.Is(err, ErrResponseTooLarge) {
+				t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
+			}
+		})
+	}
+}
