@@ -292,3 +292,47 @@ func TestApply_NoFixer_Unchanged(t *testing.T) {
 		t.Errorf("error %v should wrap ErrManifestFailed", applyErr)
 	}
 }
+
+// TestSubstituteCommitHash_AlreadyCorrect covers a pure base correction: the
+// version moves (mesa 26.2.0 → 26.3.0) while upstream's HEAD has not, so the
+// hash to write is the one already in the file. That used to be reported as
+// "no commit hash variable found" — naming a variable that is sitting right
+// there, and failing an apply that had nothing wrong with it.
+func TestSubstituteCommitHash_AlreadyCorrect(t *testing.T) {
+	sha := "bc99a094bd926ae7b5ab8643947ce1438c950720"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mesa-26.3.0_pre20260801.ebuild")
+	body := "EAPI=8\n\tGIT_COMMIT=\"" + sha + "\"\n\tSRC_URI=\"…/${GIT_COMMIT}.tar.gz\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := substituteCommitHash(path, sha); err != nil {
+		t.Fatalf("substituteCommitHash with an already-correct hash: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("file was rewritten; want it left byte-for-byte identical")
+	}
+}
+
+// TestSubstituteCommitHash_TrulyMissing keeps the real error reachable.
+func TestSubstituteCommitHash_TrulyMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo-1.0.ebuild")
+	if err := os.WriteFile(path, []byte("EAPI=8\nSLOT=\"0\"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	err := substituteCommitHash(path, "bc99a094bd926ae7b5ab8643947ce1438c950720")
+	if err == nil {
+		t.Fatal("expected an error when no commit variable exists")
+	}
+	if !strings.Contains(err.Error(), "no commit hash variable") {
+		t.Errorf("error = %v, want it to name the missing variable", err)
+	}
+}

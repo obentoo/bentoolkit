@@ -738,11 +738,22 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID)=")[0-9a-f]{40}(")`)
 	reBare := regexp.MustCompile(`(COMMIT=)[0-9a-f]{40}\b`)
 
+	// "Nothing changed" has two very different causes, and conflating them
+	// reports a missing variable that is sitting right there. Decide on presence
+	// first: an ebuild that already pins the target hash is correct, not broken.
+	//
+	// This is reachable now that a base version has its own source: a bump can be
+	// a pure base correction (mesa 26.2.0 → 26.3.0 while upstream's HEAD has not
+	// moved), where the hash to write is the one already in the file.
+	if !reQuoted.Match(content) && !reBare.Match(content) {
+		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/BUILD_ID/COMMIT) found in %s", ebuildPath)
+	}
+
 	updated := reQuoted.ReplaceAllString(string(content), "${1}"+newHash+"${2}")
 	updated = reBare.ReplaceAllString(updated, "${1}"+newHash)
 
 	if updated == string(content) {
-		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/BUILD_ID/COMMIT) found in %s", ebuildPath)
+		return nil
 	}
 
 	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {

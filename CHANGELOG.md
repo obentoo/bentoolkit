@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`base_from` / `base_url` / `base_pattern`: a commit-tracked record can say
+  where its base version actually lives.** The `X.Y.Z` in front of the
+  `_p<date>` suffix had exactly one possible source — a regex over commit titles
+  — and that source is the weakest one upstreams offer. The fetch reads a fixed
+  window of recent commits (`per_page=`), and the window is measured in commits,
+  not days: 50 commits cover ten months of Vulkan-Headers but 1.3 days of zed,
+  whose `Bump Zed to v1.15.0` had already fallen to index 59 and become
+  invisible. `base_from = "file"` instead fetches the file upstream maintains
+  itself (`crates/zed/Cargo.toml`, mesa's `VERSION`, `meson.build`,
+  `CMakeLists.txt`) — one request, no window, no pagination. Measured against
+  live upstreams, it corrects eight packages at once: `media-libs/mesa`
+  26.2.0 → 26.3.0, `net-libs/libqmi` 1.38.1 → 1.39.1, `net-misc/modemmanager`
+  1.25.1 → 1.25.95, `media-libs/vulkan-loader` 1.4.354 → 1.4.358,
+  `dev-util/vulkan-tools` 1.4.354 → 1.4.357, `media-libs/vulkan-layers`
+  1.4.352 → 1.4.357.
+
+- **`base_from = "tag"` / `base_tag_pattern`: resolve the base version from a
+  tag listing.** For upstreams whose in-tree files use a different scheme than
+  the ebuild does — glslang and spirv-* version themselves as `2026.3`/`1.5.5`
+  while the overlay tracks them on `vulkan-sdk-X.Y.Z.W`, which exists only as
+  tags. Filtering by family via `base_tag_pattern` is the whole job: these repos
+  carry four or more tag families at once, and an unfiltered ranking picks
+  `khronos-master-20141209` for vulkan-loader purely because it contains a large
+  number. It takes the highest tag of the family rather than emulating
+  `git describe` — proving ancestry would cost a `/compare` call per candidate
+  per check, and would still reject the right tag, since a release-branch tag
+  reports `diverged` (SPIRV-Tools: ahead 22, behind 1) against `main`.
+- **A commit that IS a release tag now yields the bare version.** vulkan-headers
+  pinned `11d6898`, which is exactly tag `v1.4.358`, yet shipped as
+  `1.4.358_p20260731` — and `_p` orders ABOVE its base, so the name claimed to
+  be newer than the very release it was. Restricted to `_p`: a `_pre` package's
+  version-bump commit opens the cycle rather than closing it (zed's
+  "Bump Zed to v1.15.0" precedes the release by weeks), so there the snapshot
+  form stays correct.
+- **The checker now reads the commit a snapshot ebuild pins.** It only ever
+  wrote that value. Without reading it, a bare release version in the overlay
+  would be re-bumped every single day, because tomorrow's `1.4.358_p<date>`
+  compares newer than today's `1.4.358`. The guard yields to a base correction,
+  which is precisely the case where the commit does not move and the version
+  must: vulkan-tools sat at 1.4.354 against upstream's 1.4.357 with its pinned
+  commit already current.
+- **`--lint` now reports a package directory that holds a stable and a
+  pre-release line without declaring `series`.** The combination fails silently
+  and looks like success: `selectCurrentEbuild` takes the directory's highest
+  version as "the current one", so once the pre-release line lands beside the
+  stable one, every stable release compares older and the entry reports "up to
+  date" forever — the line simply stops being maintained. The rule fires only on
+  a genuine stable/unstable pair (one line carrying `_alpha`/`_beta`/`_pre`/
+  `_rc`, another not), so two successive versions of one line mid-rotation stay
+  quiet, and so do two `_p` snapshot lines. Run against the overlay's 323
+  entries it reports zero false positives; `app-editors/zed-bin@stable` /
+  `@preview` is the shape it points you toward.
+
+### Changed
+- **A declared base-version source that resolves nothing now fails the check.**
+  It used to fall through to whatever base the ebuild already carried, which is
+  indistinguishable from being up to date. Six of the seven registry entries
+  carrying a `commit_version_pattern` matched nothing at all — the pattern had
+  been copied from Vulkan-Headers to sibling Khronos repos that never write
+  `Update for Vulkan-Docs` in their commit titles — and their bases froze up to
+  seven releases behind while the `_p<date>` kept advancing every day. The
+  versions looked alive and were not. The error names the pattern, the endpoint,
+  and the two ways out (raise `per_page`, or move to `base_from = "file"`).
+
 ## [0.16.0] - 2026-07-31
 
 ### Added

@@ -108,7 +108,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
-	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model (# END marker, comments field, no floating comments)")
+	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model (# END marker, comments field, no floating comments, undeclared release lines)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }

@@ -234,6 +234,94 @@ type PackageConfig struct {
 	// "1.4.352_p20260515" → "1.4.353_p<today>" when the match is "1.4.353").
 	CommitVersionPattern string `toml:"commit_version_pattern,omitempty"`
 
+	// BaseFrom declares WHERE the base version of a track = "commit" package
+	// comes from — the X.Y.Z that carries the _p<date>/_pre<date> snapshot
+	// suffix. Absent means the legacy behaviour: the base is whatever the current
+	// ebuild already has, optionally raised by commit_version_pattern.
+	//
+	// It exists because scanning commit titles is the weakest of the three ways
+	// upstreams announce a version, and it was the only one available. The fetch
+	// reads a fixed window of the most recent commits (per_page= in the URL), so
+	// the pattern only ever sees what fits in it — and the window is measured in
+	// COMMITS, not days. Measured on 2026-07-31: 50 commits cover ten months of
+	// Vulkan-Headers but 1.3 days of zed, whose "Bump Zed to v1.15.0" had already
+	// fallen to index 59 and become invisible. Worse, six of the seven registry
+	// entries carrying a commit_version_pattern matched nothing at all — the
+	// pattern had been copied between Khronos packages, but only Vulkan-Headers
+	// writes "Update for Vulkan-Docs X.Y.Z" in its commits. The bases froze up to
+	// seven releases behind while the _p<date> kept advancing, so the versions
+	// looked alive and were not.
+	//
+	// Values:
+	//
+	//	"file"           — fetch base_url and apply base_pattern. The strongest
+	//	                   option: one request, no window, no pagination. Use it
+	//	                   whenever upstream versions itself in-tree (zed's
+	//	                   crates/zed/Cargo.toml, mesa's VERSION, libqmi's
+	//	                   meson.build, sqlitebrowser's CMakeLists.txt).
+	//	"tag"            — fetch base_url (a tag/ref listing) and take the highest
+	//	                   version whose tag name matches base_tag_pattern. For
+	//	                   upstreams that mark releases with a tag and say nothing
+	//	                   in-tree about the scheme the ebuild uses: glslang and
+	//	                   spirv-* version themselves as "2026.3"/"1.5.5" in their
+	//	                   own files, while the overlay tracks them on the
+	//	                   vulkan-sdk-X.Y.Z.W scheme that exists only as tags.
+	//	"commit_message" — the legacy scan, driven by commit_version_pattern +
+	//	                   commit_message_path. Correct only when upstream marks
+	//	                   releases in commit titles AND commits slowly enough that
+	//	                   the bump stays inside the window.
+	//
+	// Whichever is chosen, an unresolvable base is now an ERROR rather than a
+	// silent fallback to the ebuild's version: a frozen base is indistinguishable
+	// from a correct one at a glance, which is exactly how the seven-release drift
+	// went unnoticed. Say where the version lives, or do not declare a source.
+	//
+	// The source must match the scheme the EBUILD uses, not whatever upstream
+	// finds prettiest. dev-util/spirv-tools publishes "v2026.3" in its CHANGES
+	// file, but the overlay versions it on the vulkan-sdk scheme — for that
+	// package the file is the wrong source even though it parses cleanly.
+	BaseFrom string `toml:"base_from,omitempty"`
+
+	// BaseURL is the endpoint fetched to resolve the base version when
+	// base_from = "file". Point it at the raw file, not at an API wrapper:
+	// "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>" for
+	// GitHub, "https://<host>/<project>/-/raw/<branch>/<path>" for GitLab.
+	BaseURL string `toml:"base_url,omitempty"`
+
+	// BasePattern is a regex with ONE capture group applied to the body fetched
+	// from base_url; the captured text is the base version. Anchor it enough to
+	// survive the rest of the file — a bare `VERSION ([0-9.]+)` matches CMake's
+	// own `cmake_minimum_required(VERSION 3.22.1)` long before it reaches the
+	// project's version, which is how a naive probe reported Vulkan-Headers as
+	// "3.22.1". Use a TOML literal string ('…'), same as every other regex field.
+	//
+	// The capture may carry a suffix the ebuild does not want; strip it in the
+	// regex rather than post-processing (mesa's VERSION file holds
+	// "26.3.0-devel", so '^([0-9][0-9.]*)-devel' captures exactly "26.3.0").
+	//
+	// Go's ^ and $ anchor to the whole body unless the pattern opens with (?m).
+	// A version declared mid-file therefore needs it — zed's Cargo.toml wants
+	// '(?m)^version = "([0-9][0-9.]*)"', and the same pattern without (?m)
+	// matches nothing at all. Note too that $ does not match before a trailing
+	// newline the way Perl's does.
+	BasePattern string `toml:"base_pattern,omitempty"`
+
+	// BaseTagPattern is a regex with ONE capture group matched against each tag
+	// name returned by base_url, used with base_from = "tag". The highest
+	// captured version becomes the base.
+	//
+	// Filtering by family is the whole job, not a refinement. These repos carry
+	// several tag families at once — Vulkan-Loader alone has v*, sdk-*,
+	// vulkan-sdk-* and windows-rt-*, and Vulkan-ValidationLayers adds
+	// snapshot-2026wk*. Ranking tags without a family filter picks nonsense:
+	// measured on 2026-07-31, an unfiltered scan chose "khronos-master-20141209"
+	// for vulkan-loader and "benchmark-m4" for zed, both purely because they
+	// contain large numbers.
+	//
+	// Anchor it. 'vulkan-sdk-([0-9.]+)' is right; '([0-9.]+)' would match inside
+	// every other family's names too.
+	BaseTagPattern string `toml:"base_tag_pattern,omitempty"`
+
 	// AuxVar is the name of a free-text auxiliary variable in the ebuild to keep
 	// in sync with upstream (e.g. "MY_BUILD" for betterbird's esr-bbNN tag, or
 	// "MY_P" for nomachine's build-numbered tarball). Unlike commit_sha_path it
@@ -676,6 +764,63 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	}
 	if cfg.CommitMessagePath != "" && cfg.Track != "commit" {
 		warnLogf("package %s: commit_message_path is set but track!=\"commit\"; it will be ignored", pkg)
+	}
+
+	// Validate the declared base-version source. Every failure here is fatal
+	// rather than a warning: the whole point of the field is to replace a silent
+	// fallback with a stated source, so a half-declared one must not load.
+	switch cfg.BaseFrom {
+	case "":
+		// Not declared — legacy behaviour. base_url/base_pattern would be dead
+		// weight, and a reader would reasonably expect them to work.
+		if cfg.BaseURL != "" || cfg.BasePattern != "" {
+			return fmt.Errorf("package %s: base_url/base_pattern require base_from", pkg)
+		}
+	case "file":
+		if cfg.Track != "commit" {
+			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+		}
+		if cfg.BaseURL == "" || cfg.BasePattern == "" {
+			return fmt.Errorf("package %s: base_from=\"file\" requires base_url and base_pattern", pkg)
+		}
+		re, err := regexp.Compile(cfg.BasePattern)
+		if err != nil {
+			return fmt.Errorf("package %s: invalid base_pattern %q: %w", pkg, cfg.BasePattern, err)
+		}
+		// One capture group exactly. Zero means the pattern can never yield a
+		// version; more than one is almost always an unescaped group in a regex
+		// whose author expected the first one to win.
+		if n := re.NumSubexp(); n != 1 {
+			return fmt.Errorf("package %s: base_pattern %q must have exactly one capture group, got %d",
+				pkg, cfg.BasePattern, n)
+		}
+	case "tag":
+		if cfg.Track != "commit" {
+			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+		}
+		if cfg.BaseURL == "" || cfg.BaseTagPattern == "" {
+			return fmt.Errorf("package %s: base_from=\"tag\" requires base_url and base_tag_pattern", pkg)
+		}
+		re, err := regexp.Compile(cfg.BaseTagPattern)
+		if err != nil {
+			return fmt.Errorf("package %s: invalid base_tag_pattern %q: %w", pkg, cfg.BaseTagPattern, err)
+		}
+		if n := re.NumSubexp(); n != 1 {
+			return fmt.Errorf("package %s: base_tag_pattern %q must have exactly one capture group, got %d",
+				pkg, cfg.BaseTagPattern, n)
+		}
+	case "commit_message":
+		if cfg.Track != "commit" {
+			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+		}
+		if cfg.CommitVersionPattern == "" || cfg.CommitMessagePath == "" {
+			return fmt.Errorf("package %s: base_from=\"commit_message\" requires commit_version_pattern and commit_message_path", pkg)
+		}
+	default:
+		return fmt.Errorf("package %s: invalid base_from %q: must be \"file\", \"tag\" or \"commit_message\"", pkg, cfg.BaseFrom)
+	}
+	if cfg.BaseTagPattern != "" && cfg.BaseFrom != "tag" {
+		return fmt.Errorf("package %s: base_tag_pattern requires base_from=\"tag\"", pkg)
 	}
 
 	// Validate the auxiliary free-text variable substitution. Both fields are

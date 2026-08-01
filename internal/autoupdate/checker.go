@@ -41,6 +41,12 @@ var (
 	ErrNoEbuildFound = errors.New("no ebuild file found for package")
 	// ErrFetchFailed is returned when fetching upstream version fails
 	ErrFetchFailed = errors.New("failed to fetch upstream version")
+	// ErrBaseVersionUnresolved is returned when an entry declares where its base
+	// version lives (base_from, or commit_version_pattern) and that source yields
+	// nothing. It is deliberately fatal for the check: falling back to the
+	// ebuild's own base is what let six Khronos packages drift up to seven
+	// releases behind while still reporting "up to date".
+	ErrBaseVersionUnresolved = errors.New("declared base version source resolved nothing")
 )
 
 // CheckResult represents the result of checking a single package for updates.
@@ -581,18 +587,39 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	if pkgConfig.Track == "commit" {
 		info, err := c.fetchCommitInfo(&pkgConfig)
 		if err != nil {
-			result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+			// An unresolved base is a configuration fault, not a transport one;
+			// wrapping it as ErrFetchFailed would hide that from callers that
+			// branch on the sentinel (and from anyone reading the message).
+			if errors.Is(err, ErrBaseVersionUnresolved) {
+				result.Error = err
+			} else {
+				result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+			}
 			return result, result.Error
 		}
 
 		base := extractSnapshotBase(currentVersion)
 		suffix := extractSnapshotSuffix(currentVersion)
-		// If the commit list reveals a version bump (e.g. "Update for
-		// Vulkan-Docs 1.4.353") that is newer than the current base, adopt it.
+		// Adopt the resolved base when it is newer than the ebuild's. The
+		// one-way ratchet is deliberate: a momentarily wrong upstream (a
+		// reverted bump, a file mid-edit) must not be able to walk the overlay
+		// backwards, and a real downgrade is rare enough to want a human.
 		if info.NewBase != "" && ebuild.CompareVersions(info.NewBase, base) > 0 {
 			base = info.NewBase
 		}
+		// A tracked commit that IS a release tag gets the bare version, not a
+		// snapshot one. vulkan-headers pinned 11d6898, which is exactly tag
+		// v1.4.358, yet shipped as 1.4.358_p20260731 — and _p orders ABOVE its
+		// base, so the name claimed to be newer than the very release it was.
+		//
+		// Restricted to _p on purpose. A _pre package's version-bump commit
+		// OPENS the cycle rather than closing it (zed's "Bump Zed to v1.15.0"
+		// precedes the 1.15.0 release by weeks), so there the snapshot form
+		// stays correct.
 		newVersion := base + suffix + info.Date
+		if info.BaseIsExactTag && suffix == "_p" {
+			newVersion = base
+		}
 		result.UpstreamVersion = newVersion
 
 		// Write to cache so the UI can display the latest known state,
@@ -604,6 +631,25 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		hasUpdate, comparable := c.compareVersions(newVersion, currentVersion)
 		result.HasUpdate = hasUpdate
 		result.NotComparable = !comparable
+
+		// Version comparison alone cannot decide a commit-tracked package once a
+		// bare release version can be emitted: the overlay would hold 1.4.358
+		// while the next check builds 1.4.358_p<today>, which compares NEWER and
+		// would re-bump the same commit every single day.
+		//
+		// So an ebuild already pinned to the tracked commit is up to date — but
+		// ONLY while its base version still agrees. A base correction is exactly
+		// the case where the commit does not move and the version must: when the
+		// registry started reading vulkan-tools' CMakeLists, the pinned commit
+		// was already current while the ebuild still said 1.4.354 against
+		// upstream's 1.4.357. Suppressing on the SHA alone would have frozen
+		// that package at the wrong version for good.
+		if result.HasUpdate && extractSnapshotBase(currentVersion) == base {
+			if cur := currentEbuildCommit(c.overlayPath, pkg, c.seriesFor(pkg)); cur != "" &&
+				strings.EqualFold(cur, info.SHA) {
+				result.HasUpdate = false
+			}
+		}
 
 		if result.HasUpdate {
 			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, ""); err != nil {
@@ -1055,6 +1101,159 @@ type commitInfo struct {
 	// NewBase is the base version detected in a commit title via
 	// CommitVersionPattern. Empty when no version bump was found.
 	NewBase string
+	// BaseIsExactTag reports that the tracked commit IS the commit a release tag
+	// points at, i.e. the ebuild would be packaging that release itself rather
+	// than a snapshot taken after it. Only base_from="tag" can know this.
+	BaseIsExactTag bool
+}
+
+// ebuildCommitRegex matches the commit-hash assignment a snapshot ebuild pins,
+// across the four variable names the overlay uses. It is the read counterpart of
+// substituteCommitHash's write, and deliberately shares its narrow anchoring.
+var ebuildCommitRegex = regexp.MustCompile(
+	`(?m)^\s*(?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID)="([0-9a-fA-F]{40})"|^\s*COMMIT=([0-9a-fA-F]{40})\b`)
+
+// currentEbuildCommit returns the 40-hex commit SHA pinned by pkg's current
+// ebuild, or "" when there is no ebuild, no such assignment, or the file cannot
+// be read.
+//
+// Returning "" on every failure is the safe direction: the only caller uses a
+// match to SUPPRESS an update, so an unreadable ebuild leaves the normal version
+// comparison in charge rather than silently freezing the package.
+func currentEbuildCommit(overlayPath, pkg, series string) string {
+	best, err := selectCurrentEbuild(overlayPath, pkg, series)
+	if err != nil || best.Path == "" {
+		return ""
+	}
+	content, err := os.ReadFile(best.Path) //nolint:gosec // path comes from the overlay dir listing
+	if err != nil {
+		return ""
+	}
+	m := ebuildCommitRegex.FindSubmatch(content)
+	if m == nil {
+		return ""
+	}
+	if len(m[1]) > 0 {
+		return string(m[1])
+	}
+	return string(m[2])
+}
+
+// gitRef is one entry of a GitHub /git/refs/tags listing. The object SHA is the
+// tag object's for an annotated tag and the commit's for a lightweight one —
+// which is why an exact-match test has to accept either.
+type gitRef struct {
+	Ref    string `json:"ref"`
+	Object struct {
+		SHA  string `json:"sha"`
+		Type string `json:"type"`
+	} `json:"object"`
+}
+
+// gitLabTag is one entry of a GitLab repository/tags listing.
+type gitLabTag struct {
+	Name   string `json:"name"`
+	Commit struct {
+		ID string `json:"id"`
+	} `json:"commit"`
+}
+
+// resolveBaseFromTag fetches cfg.BaseURL (a tag listing) and returns the highest
+// version captured by cfg.BaseTagPattern, plus whether one of those tags points
+// exactly at headSHA.
+//
+// It deliberately does NOT emulate `git describe`: it takes the highest tag of
+// the family rather than the highest tag that is an ancestor of the tracked
+// commit. Ancestry cannot be read from the tag listing, so proving it would cost
+// a /compare call per candidate on every check, and the answer is not even
+// clean — measured on SPIRV-Tools, `compare vulkan-sdk-1.4.357.0...main` reports
+// "diverged" (ahead 22, behind 1) because the tag lives on a release branch, so
+// a strict ancestor test would reject the correct tag and fall seven releases
+// back. Highest-of-family matches what the release actually is for every package
+// this serves, and the exact-tag test below is precise regardless.
+func (c *Checker) resolveBaseFromTag(cfg *PackageConfig, headSHA string) (string, bool, error) {
+	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, c.operationTimeout(cfg))
+	if err != nil {
+		return "", false, fmt.Errorf("base version tags %s: %w", cfg.BaseURL, err)
+	}
+
+	re, err := regexp.Compile(cfg.BaseTagPattern)
+	if err != nil {
+		return "", false, fmt.Errorf("invalid base_tag_pattern %q: %w", cfg.BaseTagPattern, err)
+	}
+
+	names, shas, err := parseTagListing(content)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: %v (%s)", ErrBaseVersionUnresolved, err, cfg.BaseURL)
+	}
+
+	var best, bestSHA string
+	exact := false
+	for i, name := range names {
+		m := re.FindStringSubmatch(name)
+		if len(m) < 2 {
+			continue
+		}
+		v := strings.TrimSpace(m[1])
+		if !ebuild.IsValidVersion(v) {
+			continue
+		}
+		// An exact hit is recorded whichever tag it is: the tracked commit
+		// carrying ANY release tag of the family is what makes the version a
+		// release rather than a snapshot.
+		if headSHA != "" && shas[i] != "" && strings.EqualFold(shas[i], headSHA) {
+			exact = true
+		}
+		if best == "" || ebuild.CompareVersions(v, best) > 0 {
+			best, bestSHA = v, shas[i]
+		}
+	}
+
+	if best == "" {
+		return "", false, fmt.Errorf("%w: base_tag_pattern %q matched no tag among %d at %s",
+			ErrBaseVersionUnresolved, cfg.BaseTagPattern, len(names), cfg.BaseURL)
+	}
+	// Only the HIGHEST tag matching the head makes this a release build: an
+	// older tag pointing at the same commit would still leave newer releases
+	// ahead of it.
+	if exact && !strings.EqualFold(bestSHA, headSHA) {
+		exact = false
+	}
+	return best, exact, nil
+}
+
+// parseTagListing accepts either shape of tag listing the registry points at:
+// GitHub's /git/refs/tags (a list of refs) and GitLab's repository/tags. It
+// returns parallel name/SHA slices; a SHA is "" when the listing does not
+// expose a usable one.
+func parseTagListing(content []byte) (names, shas []string, err error) {
+	var refs []gitRef
+	if e := json.Unmarshal(content, &refs); e == nil && len(refs) > 0 && refs[0].Ref != "" {
+		for _, r := range refs {
+			name := strings.TrimPrefix(r.Ref, "refs/tags/")
+			sha := r.Object.SHA
+			// An annotated tag's object is the tag, not the commit; there is no
+			// commit SHA in this listing, so drop it rather than compare the
+			// wrong thing and call a snapshot a release.
+			if r.Object.Type == "tag" {
+				sha = ""
+			}
+			names = append(names, name)
+			shas = append(shas, sha)
+		}
+		return names, shas, nil
+	}
+
+	var tags []gitLabTag
+	if e := json.Unmarshal(content, &tags); e == nil && len(tags) > 0 && tags[0].Name != "" {
+		for _, t := range tags {
+			names = append(names, t.Name)
+			shas = append(shas, t.Commit.ID)
+		}
+		return names, shas, nil
+	}
+
+	return nil, nil, errors.New("tag listing is neither a GitHub refs array nor a GitLab tags array")
 }
 
 // fetchCommitInfo fetches cfg.URL once (expected to be a JSON array of commits)
@@ -1092,15 +1291,73 @@ func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
 
 	info := &commitInfo{Date: date, SHA: sha}
 
-	// Optionally scan commit titles for a version bump (e.g. "Update for
-	// Vulkan-Docs 1.4.353"). When a match is found and the detected version is
-	// newer than the current base, it becomes the new base so the generated
-	// ebuild version uses the correct release series.
-	if cfg.CommitVersionPattern != "" && cfg.CommitMessagePath != "" {
+	// Resolve the base version from its declared source. base_from = "file"
+	// fetches a second URL; everything else reads the commit list already in
+	// hand. An entry that declares a source and gets nothing back fails the
+	// check — see ErrBaseVersionUnresolved for why silence is not an option.
+	switch {
+	case cfg.BaseFrom == "file":
+		base, err := c.resolveBaseFromFile(cfg)
+		if err != nil {
+			return nil, err
+		}
+		info.NewBase = base
+
+	case cfg.BaseFrom == "tag":
+		base, exact, err := c.resolveBaseFromTag(cfg, sha)
+		if err != nil {
+			return nil, err
+		}
+		info.NewBase, info.BaseIsExactTag = base, exact
+
+	case cfg.CommitVersionPattern != "" && cfg.CommitMessagePath != "":
+		// Covers both base_from = "commit_message" and the legacy form that
+		// predates the field, so existing registries keep working unchanged.
 		info.NewBase = scanCommitsForVersion(content, cfg.CommitMessagePath, cfg.CommitVersionPattern)
+		if info.NewBase == "" {
+			return nil, fmt.Errorf("%w: commit_version_pattern %q matched no commit title at %q in %s "+
+				"(the bump may have fallen outside the fetch window — raise per_page, or move to base_from=\"file\")",
+				ErrBaseVersionUnresolved, cfg.CommitVersionPattern, cfg.CommitMessagePath, cfg.URL)
+		}
 	}
 
 	return info, nil
+}
+
+// resolveBaseFromFile fetches cfg.BaseURL and extracts the base version with
+// cfg.BasePattern. It is the strongest of the base-version providers: a single
+// request against a file the upstream itself maintains, with no dependency on
+// how many commits fit in a window or on which tag an ancestor carries.
+//
+// ValidatePackageConfig has already checked that the pattern compiles and has
+// exactly one capture group, so the failures left here are runtime ones: the
+// file moved, the branch was renamed, or upstream restructured its version
+// declaration. All three must be loud — a base that silently stops advancing
+// looks identical to one that is simply up to date.
+func (c *Checker) resolveBaseFromFile(cfg *PackageConfig) (string, error) {
+	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, c.operationTimeout(cfg))
+	if err != nil {
+		return "", fmt.Errorf("base version file %s: %w", cfg.BaseURL, err)
+	}
+
+	re, err := regexp.Compile(cfg.BasePattern)
+	if err != nil {
+		// Unreachable via a validated config; defensive for direct construction.
+		return "", fmt.Errorf("invalid base_pattern %q: %w", cfg.BasePattern, err)
+	}
+
+	m := re.FindSubmatch(content)
+	if len(m) < 2 {
+		return "", fmt.Errorf("%w: base_pattern %q matched nothing in %s",
+			ErrBaseVersionUnresolved, cfg.BasePattern, cfg.BaseURL)
+	}
+
+	base := strings.TrimSpace(string(m[1]))
+	if !ebuild.IsValidVersion(base) {
+		return "", fmt.Errorf("%w: base_pattern %q captured %q from %s, which is not a valid Gentoo version",
+			ErrBaseVersionUnresolved, cfg.BasePattern, base, cfg.BaseURL)
+	}
+	return base, nil
 }
 
 // scanCommitsForVersion iterates over a JSON array of commit objects and
