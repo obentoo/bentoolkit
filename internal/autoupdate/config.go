@@ -127,9 +127,19 @@ type PackageConfig struct {
 
 	// Meta holds free-form key/value annotations for packages with special
 	// acquisition requirements (e.g. a purchased serial, a platform selector,
-	// a download endpoint). It is documentation only — the checker ignores it
-	// when detecting versions. Never store secrets here; reference an env var
-	// instead (e.g. serial_env = "FILEZILLA_PRO_KEY").
+	// a download endpoint). The version checker ignores it.
+	//
+	// The APPLIER does not: keys prefixed fetch_ are a typed sub-schema it reads
+	// to download a serial-gated distfile before the manifest step (see
+	// parseAuthFetchSpec and metaFetchKeys in authfetch.go). The six it reads are
+	// fetch_url — the trigger, no fetch_url means no authenticated fetch —
+	// fetch_method, fetch_serial_env, fetch_serial_field, fetch_form and
+	// fetch_filename. That namespace is therefore validated: a misspelled key is
+	// reported by ValidatePackageConfig rather than silently disabling the
+	// download. Any other key is annotation nothing reads.
+	//
+	// Never store secrets here; reference an env var instead (e.g.
+	// fetch_serial_env = "FILEZILLA_PRO_KEY").
 	Meta map[string]string `toml:"meta,omitempty"`
 
 	// New fields for version history
@@ -1176,6 +1186,15 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		default:
 			return fmt.Errorf("package %s: invalid fallback_parser type: %q", pkg, cfg.FallbackParser)
 		}
+	}
+
+	// The [meta] map is free-form except for the fetch_* namespace, which the
+	// applier reads as a typed sub-schema. Every key inside a map[string]string
+	// is claimed by the map, so the decoder's unknown-key check cannot see into
+	// it — this sub-validator is the only thing standing between a typo there and
+	// an authenticated download that never runs.
+	if err := validateMetaFetch(pkg, cfg.Meta); err != nil {
+		return err
 	}
 
 	return nil
