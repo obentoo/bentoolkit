@@ -1034,3 +1034,83 @@ func TestAutoupdateApplyReportPrintsRegistryWarningUnderItsOwnLabel(t *testing.T
 		t.Errorf("a registry failure was reported as a clean failure; got:\n%s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The gate that refuses an unattended registry write (S021-R3.4)
+// ---------------------------------------------------------------------------
+
+// swapStdio points os.Stdin and os.Stdout at the given files for one test,
+// restoring both afterwards. These are process globals, so this is only safe
+// because no test in this package calls t.Parallel.
+func swapStdio(t *testing.T, stdin, stdout *os.File) {
+	t.Helper()
+	origIn, origOut := os.Stdin, os.Stdout
+	t.Cleanup(func() { os.Stdin, os.Stdout = origIn, origOut })
+	os.Stdin, os.Stdout = stdin, stdout
+}
+
+// pipeRead and pipeWrite return the two ends of a fresh pipe. A pipe never
+// carries os.ModeCharDevice, which is what lets it stand in for a redirected
+// stream without a pty.
+func pipeRead(t *testing.T) *os.File  { r, _ := newPipe(t); return r }
+func pipeWrite(t *testing.T) *os.File { _, w := newPipe(t); return w }
+
+func newPipe(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+	return r, w
+}
+
+// charDevice opens /dev/null, which always carries os.ModeCharDevice — the only
+// bit either terminal probe actually tests.
+func charDevice(t *testing.T) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// TestRegistryPromptIsInteractive exercises the REAL predicate. Every other test
+// in this file replaces it through setReconcileInteractive, which is the right
+// seam for driving runCheck but leaves the predicate's own composition — the
+// thing standing between a scripted --check and a published registry — asserted
+// nowhere. Invert the && to || and this is the only test that notices.
+//
+// The "neither stream redirected" case is worth reading twice: it passes with
+// both streams on /dev/null, because these probes test for a character device
+// rather than for a terminal, and /dev/null is one. So
+// `bentoo overlay autoupdate --check </dev/null >/dev/null` IS judged
+// interactive and IS prompted with no human present. What refuses that run is
+// confirmAction answering no on EOF, already pinned by TestConfirmActionEOF
+// (run_functions_test.go). The gate and that default are two independent
+// reasons the unattended publish does not happen; neither may be relaxed on the
+// assumption that the other covers it.
+func TestRegistryPromptIsInteractive(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdin  func(*testing.T) *os.File
+		stdout func(*testing.T) *os.File
+		want   bool
+	}{
+		{"both streams redirected", pipeRead, pipeWrite, false},
+		{"stdout redirected, so the operator cannot see what they approve", charDevice, pipeWrite, false},
+		{"stdin redirected, so nobody is there to answer", pipeRead, charDevice, false},
+		{"neither stream redirected", charDevice, charDevice, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			swapStdio(t, tc.stdin(t), tc.stdout(t))
+			if got := registryPromptIsInteractive(); got != tc.want {
+				t.Errorf("registryPromptIsInteractive() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
