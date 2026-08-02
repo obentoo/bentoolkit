@@ -19,7 +19,7 @@ type OllamaClient struct {
 	baseURL    string
 	// maxBodyBytes caps how many bytes are read from an API response body.
 	// It defaults to httputil.MaxBodyBytes and can be overridden via
-	// WithMaxBodyBytes (R11.2).
+	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
 
@@ -101,7 +101,7 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 // response body and returns the client for chaining. Values <= 0 are ignored so
 // the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. A local Ollama
 // instance can emit JSON larger than the default cap, so a higher limit can be
-// supplied here (R11.2).
+// supplied here (S001-R11.2).
 func (c *OllamaClient) WithMaxBodyBytes(n int64) *OllamaClient {
 	if n > 0 {
 		c.maxBodyBytes = n
@@ -152,7 +152,7 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
@@ -226,7 +226,7 @@ func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
