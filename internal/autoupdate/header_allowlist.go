@@ -8,7 +8,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
-// Header env-var expansion allow-list (R1, AD-8).
+// Header env-var expansion allow-list (S001-R1, AD-8).
 //
 // A malicious packages.toml must not be able to exfiltrate arbitrary process
 // secrets (e.g. ANTHROPIC_API_KEY) by embedding ${VAR} in any header value.
