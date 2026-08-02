@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -812,6 +814,11 @@ func TestApplyRejectsInvalidNewVersion(t *testing.T) {
 // TestApplyCleanRemovesOldEbuild verifies that WithApplierClean makes a
 // successful apply delete the previous version's ebuild, keep the new one, and
 // report the removed version on the result.
+//
+// The registry entry is what authorises the sweep: cleanPackageDir plans against
+// packages.toml, and a directory no entry claims is never touched. Production
+// always supplies one (every --apply path passes WithApplierPackagesConfig), so
+// this fixture supplies one too.
 func TestApplyCleanRemovesOldEbuild(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
@@ -835,6 +842,9 @@ func TestApplyCleanRemovesOldEbuild(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierClean(true),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -1921,5 +1931,495 @@ func TestApplyUnheldPackageStillApplies(t *testing.T) {
 	result, _ := applier.Apply(pkg, false)
 	if result.Held {
 		t.Error("Expected Held to be false for a package with no hold")
+	}
+}
+
+// =============================================================================
+// --clean Sweep Tests (S021 sub-task 4.1: cleanPackageDir)
+// =============================================================================
+
+// countingManifestSeam returns an exec seam where every command succeeds and
+// each `pkgdev` invocation is counted. `pkgdev manifest` is the Manifest
+// regeneration (runManifest shells out to it), so counting at the seam the
+// applier already exposes is how "regenerated exactly once" (R4.2) becomes
+// observable — no second seam is invented for the test. The counter is atomic
+// so -race is satisfied whatever goroutine exec is driven from.
+func countingManifestSeam(n *atomic.Int64) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" {
+			n.Add(1)
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+}
+
+// mockExecCommandLockDirAndSucceed returns an exec seam whose command makes dir
+// read-only (0500) and then exits ZERO. Unlike mockExecCommandFailAndLockDir it
+// lets the apply succeed: copyEbuild has already written the new ebuild and the
+// manifest step passes, so the failure lands where the test wants it — on the
+// --clean sweep's os.Remove inside a directory it can no longer write to.
+func mockExecCommandLockDirAndSucceed(dir string) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "chmod 0500 \""+dir+"\"; exit 0")
+	}
+}
+
+// TestCleanPackageDirSweepsResidueAndRegeneratesManifestOnce covers the ordinary
+// single-entry directory (R4.1, R4.2): everything the entry's pin does not claim
+// goes, the live ebuild stays whatever the pins say, and the Manifest is
+// regenerated exactly once — after the last removal, not once per file.
+//
+// The pin under test is the OVERLAID one: the fixture entry has no version, and
+// the sweep is nonetheless authorised because the version just applied is what
+// that entry now keeps. That is the whole reason the feature is not dead on
+// arrival against today's pinless registry.
+func TestCleanPackageDirSweepsResidueAndRegeneratesManifestOnce(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	pkg := "test-cat/test-pkg"
+
+	for _, v := range []string{"1.0.0", "1.5.0", "2.0.0", "9999"} {
+		createTestEbuildFile(t, overlayDir, pkg, v)
+	}
+
+	var manifestRuns atomic.Int64
+	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
+		WithExecCommand(countingManifestSeam(&manifestRuns)),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	if err != nil {
+		t.Fatalf("cleanPackageDir: %v", err)
+	}
+
+	if !reflect.DeepEqual(plan.Remove, []string{"1.0.0", "1.5.0"}) {
+		t.Errorf("Remove = %v, want [1.0.0 1.5.0]", plan.Remove)
+	}
+	wantKeep := map[string]string{"2.0.0": pkg, "9999": ""}
+	if !reflect.DeepEqual(plan.Keep, wantKeep) {
+		t.Errorf("Keep = %v, want %v", plan.Keep, wantKeep)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	for _, gone := range []string{"test-pkg-1.0.0.ebuild", "test-pkg-1.5.0.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s should have been swept: os.Stat error = %v", gone, err)
+		}
+	}
+	for _, kept := range []string{"test-pkg-2.0.0.ebuild", "test-pkg-9999.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, kept)); err != nil {
+			t.Errorf("%s must survive the sweep: %v", kept, err)
+		}
+	}
+
+	// R4.2: one regeneration for the whole sweep, not one per removed file.
+	if got := manifestRuns.Load(); got != 1 {
+		t.Errorf("the Manifest was regenerated %d time(s), want exactly 1", got)
+	}
+
+	// The overlaid pin must live in the sweep's own copy of the registry: the
+	// applier's map is shared state the rest of Apply reads (hold, revision,
+	// series, [meta]), and a version written into it here would outlive the call.
+	if v := applier.configs[pkg].Version; v != "" {
+		t.Errorf("cleanPackageDir mutated a.configs: %s pin = %q, want it untouched", pkg, v)
+	}
+}
+
+// TestCleanPackageDirNoRemovalSkipsManifest is R4.2's other half: with nothing
+// to remove, the Manifest is not regenerated at all. Rewriting it would re-fetch
+// and re-digest every distfile of an untouched directory.
+func TestCleanPackageDirNoRemovalSkipsManifest(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	pkg := "test-cat/test-pkg"
+	createTestEbuildFile(t, overlayDir, pkg, "2.0.0")
+
+	var manifestRuns atomic.Int64
+	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
+		WithExecCommand(countingManifestSeam(&manifestRuns)),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	if err != nil {
+		t.Fatalf("cleanPackageDir: %v", err)
+	}
+	if len(plan.Remove) != 0 {
+		t.Errorf("Remove = %v, want nothing removed", plan.Remove)
+	}
+	if got := manifestRuns.Load(); got != 0 {
+		t.Errorf("the Manifest was regenerated %d time(s) with nothing removed, want 0", got)
+	}
+}
+
+// TestCleanPackageDirBlockedByPinlessSibling is the guard over the overlay's 89
+// deliberate multi-entry directories (UB3, R5.1, R6.2).
+//
+// The bumped entry gets its pin from the apply, but its SIBLING — the other
+// release line, sharing the directory — has none, and one pinless claim blocks
+// the whole directory. WouldRemove is asserted to contain the sibling's own
+// ebuild precisely because that is what the block is saving: without it, R4.1
+// read literally deletes a maintained release line.
+func TestCleanPackageDirBlockedByPinlessSibling(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	atom := "media-plugins/gst-plugins-vpx"
+	stable, dev := atom+"@stable", atom+"@dev"
+
+	for _, v := range []string{"1.28.4", "1.28.5", "1.29.2"} {
+		createTestEbuildFile(t, overlayDir, atom, v)
+	}
+
+	var manifestRuns atomic.Int64
+	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
+		WithExecCommand(countingManifestSeam(&manifestRuns)),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			stable: regEntry("", gstStableSeries),
+			dev:    regEntry("", gstDevSeries), // no pin: this is what blocks
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	plan, err := applier.cleanPackageDir(stable, "1.28.5")
+	if err == nil {
+		t.Fatalf("a blocked sweep reported success: %+v", plan)
+	}
+	if !strings.Contains(err.Error(), dev) {
+		t.Errorf("the warning does not name the entry that lacks a pin (R6.2): %v", err)
+	}
+	if plan.Blocked != dev {
+		t.Errorf("Blocked = %q, want %q", plan.Blocked, dev)
+	}
+	if len(plan.Remove) != 0 {
+		t.Errorf("a blocked sweep removed %v", plan.Remove)
+	}
+	if !reflect.DeepEqual(plan.WouldRemove, []string{"1.28.4", "1.29.2"}) {
+		t.Errorf("WouldRemove = %v, want [1.28.4 1.29.2] — including the dev line the block saved", plan.WouldRemove)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "media-plugins", "gst-plugins-vpx")
+	for _, f := range []string{"gst-plugins-vpx-1.28.4.ebuild", "gst-plugins-vpx-1.28.5.ebuild", "gst-plugins-vpx-1.29.2.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, f)); err != nil {
+			t.Errorf("%s must survive a blocked sweep: %v", f, err)
+		}
+	}
+	if got := manifestRuns.Load(); got != 0 {
+		t.Errorf("a blocked sweep regenerated the Manifest %d time(s), want 0", got)
+	}
+}
+
+// TestApplyCleanBlockedKeepsSuccessAndNamesEntry walks the same block through a
+// full Apply: the update stands (R4.4), nothing is deleted, and the entry
+// without a pin is named on the result where a user can read it (R6.2).
+func TestApplyCleanBlockedKeepsSuccessAndNamesEntry(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+	atom := "media-plugins/gst-plugins-vpx"
+	stable, dev := atom+"@stable", atom+"@dev"
+
+	createTestEbuildFile(t, overlayDir, atom, "1.28.4")
+	createTestEbuildFile(t, overlayDir, atom, "1.29.2")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        stable,
+		CurrentVersion: "1.28.4",
+		NewVersion:     "1.28.6",
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierClean(true),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			stable: regEntry("", gstStableSeries),
+			dev:    regEntry("", gstDevSeries),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, err := applier.Apply(stable, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("a blocked clean flipped the apply to failed: %v", result.Error)
+	}
+	if !strings.Contains(result.CleanWarning, dev) {
+		t.Errorf("CleanWarning = %q, want it to name %q", result.CleanWarning, dev)
+	}
+	if len(result.CleanRemoved) != 0 || result.CleanedOldVersion != "" {
+		t.Errorf("a blocked clean reported removals: CleanRemoved=%v CleanedOldVersion=%q",
+			result.CleanRemoved, result.CleanedOldVersion)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "media-plugins", "gst-plugins-vpx")
+	for _, f := range []string{"gst-plugins-vpx-1.28.4.ebuild", "gst-plugins-vpx-1.28.6.ebuild", "gst-plugins-vpx-1.29.2.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, f)); err != nil {
+			t.Errorf("%s must still be there after a blocked clean: %v", f, err)
+		}
+	}
+}
+
+// TestApplyCleanRemovalFailureWarnsButKeepsSuccess is R4.4: a sweep that cannot
+// delete a file surfaces the reason through CleanWarning and leaves the apply
+// successful. The update itself is done — the new ebuild is in place and the
+// Manifest was generated — so failing the apply here would report a rollback
+// that did not happen.
+func TestApplyCleanRemovalFailureWarnsButKeepsSuccess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not stop os.Remove, so no removal can fail")
+	}
+
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+	pkg := "test-cat/test-pkg"
+
+	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.0.0",
+		NewVersion:     "2.0.0",
+		Status:         StatusPending,
+	})
+
+	// The manifest command locks the directory and then SUCCEEDS: copyEbuild has
+	// already written 2.0.0 with the directory writable, so the apply completes
+	// and the failure lands on the sweep's os.Remove (EACCES). Restore the mode
+	// afterwards or t.TempDir's cleanup cannot delete the tree.
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandLockDirAndSucceed(pkgDir)),
+		WithApplierClean(true),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("a failed clean must not fail the apply: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("a failed clean flipped Success: %v", result.Error)
+	}
+	if result.Error != nil {
+		// result.Error is what the deferred orphan-rollback keys on: setting it
+		// here would delete the ebuild this apply just created.
+		t.Errorf("result.Error = %v, want nil so the orphan rollback stays off", result.Error)
+	}
+	if result.CleanWarning == "" {
+		t.Error("a failed removal must be surfaced through CleanWarning (R4.4)")
+	}
+	if len(result.CleanRemoved) != 0 || result.CleanedOldVersion != "" {
+		t.Errorf("nothing was removed, yet the result claims it: CleanRemoved=%v CleanedOldVersion=%q",
+			result.CleanRemoved, result.CleanedOldVersion)
+	}
+	if _, err := os.Stat(filepath.Join(pkgDir, "test-pkg-1.0.0.ebuild")); err != nil {
+		t.Errorf("the ebuild the sweep could not remove must still be there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pkgDir, "test-pkg-2.0.0.ebuild")); err != nil {
+		t.Errorf("the freshly applied ebuild must survive a failed clean: %v", err)
+	}
+}
+
+// TestApplyCleanWithoutRegistryRemovesNothing pins the nil-configs path, which
+// is production-reachable: loadPackagesConfigForApply returns nil whenever
+// packages.toml cannot be read, and with no registry nothing says which ebuilds
+// this directory keeps. Refusing to sweep is the only safe answer, and the
+// reason has to reach the user.
+func TestApplyCleanWithoutRegistryRemovesNothing(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+	pkg := "test-cat/test-pkg"
+
+	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.0.0",
+		NewVersion:     "2.0.0",
+		Status:         StatusPending,
+	})
+
+	// No WithApplierPackagesConfig at all: a.configs stays nil.
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierClean(true),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+	if applier.configs != nil {
+		t.Fatalf("this test needs a nil registry; got %v", applier.configs)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("Apply: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("a refused clean flipped Success: %v", result.Error)
+	}
+	if !strings.Contains(result.CleanWarning, "no packages.toml entry") {
+		t.Errorf("CleanWarning = %q, want it to explain that no entry claims the directory", result.CleanWarning)
+	}
+	if len(result.CleanRemoved) != 0 || result.CleanedOldVersion != "" {
+		t.Errorf("a refused clean reported removals: CleanRemoved=%v CleanedOldVersion=%q",
+			result.CleanRemoved, result.CleanedOldVersion)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	for _, f := range []string{"test-pkg-1.0.0.ebuild", "test-pkg-2.0.0.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, f)); err != nil {
+			t.Errorf("%s must survive a refused clean: %v", f, err)
+		}
+	}
+}
+
+// TestCleanPackageDirVanishedCandidateIsNotPlanned pins that an ebuild removed
+// behind the applier's back is simply not swept: the plan is computed from the
+// directory as it is NOW, so a file already gone is never a candidate, nothing
+// is deleted, and the Manifest is left alone.
+//
+// This is NOT coverage of cleanPackageDir's os.ErrNotExist branch, and no test
+// here is: that branch handles a file vanishing BETWEEN the plan and the
+// removal (a concurrent rm, a second process), a window a single-threaded test
+// cannot open without inventing a seam in the middle of the sweep. It stays
+// because the sweep deletes files and "someone beat me to it" must never be
+// reported as a failure — see the mutation table in the sub-task report, where
+// it is recorded as a deliberate survivor.
+func TestCleanPackageDirVanishedCandidateIsNotPlanned(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	pkg := "test-cat/test-pkg"
+	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+	createTestEbuildFile(t, overlayDir, pkg, "2.0.0")
+
+	var manifestRuns atomic.Int64
+	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
+		WithExecCommand(countingManifestSeam(&manifestRuns)),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	// Plan says remove 1.0.0; something else got there first.
+	if err := os.Remove(filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-1.0.0.ebuild")); err != nil {
+		t.Fatalf("pre-removing the candidate: %v", err)
+	}
+
+	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	if err != nil {
+		t.Fatalf("an already-absent candidate must not be an error: %v", err)
+	}
+	if len(plan.Remove) != 0 {
+		t.Errorf("Remove = %v, want empty — nothing was actually deleted", plan.Remove)
+	}
+	if got := manifestRuns.Load(); got != 0 {
+		t.Errorf("the Manifest was regenerated %d time(s) for a file that was already gone, want 0", got)
+	}
+}
+
+// TestApplyCleanReportsKeptAndRemoved pins the report the sweep hands back on
+// the success path: every kept version with the entry that claims it (R6.1),
+// every version actually deleted, and the legacy one-line view still holding the
+// HIGHEST removed version — that field feeds a printer that predates the sweep
+// and prints a single "Removed: pkg-X.ebuild" line.
+func TestApplyCleanReportsKeptAndRemoved(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+	pkg := "test-cat/test-pkg"
+
+	for _, v := range []string{"1.0.0", "1.5.0", "9999"} {
+		createTestEbuildFile(t, overlayDir, pkg, v)
+	}
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.5.0",
+		NewVersion:     "2.0.0",
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierClean(true),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: regEntry("", ""),
+		}}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("Apply: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("Apply failed: %v", result.Error)
+	}
+	if result.CleanWarning != "" {
+		t.Fatalf("unexpected clean warning: %s", result.CleanWarning)
+	}
+
+	if !reflect.DeepEqual(result.CleanRemoved, []string{"1.0.0", "1.5.0"}) {
+		t.Errorf("CleanRemoved = %v, want [1.0.0 1.5.0]", result.CleanRemoved)
+	}
+	if result.CleanedOldVersion != "1.5.0" {
+		t.Errorf("CleanedOldVersion = %q, want the highest removed version %q",
+			result.CleanedOldVersion, "1.5.0")
+	}
+	wantKept := map[string]string{"2.0.0": pkg, "9999": ""}
+	if !reflect.DeepEqual(result.CleanKept, wantKept) {
+		t.Errorf("CleanKept = %v, want %v", result.CleanKept, wantKept)
+	}
+
+	pkgDir := filepath.Join(overlayDir, "test-cat", "test-pkg")
+	for _, gone := range []string{"test-pkg-1.0.0.ebuild", "test-pkg-1.5.0.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s should have been swept: os.Stat error = %v", gone, err)
+		}
+	}
+	for _, kept := range []string{"test-pkg-2.0.0.ebuild", "test-pkg-9999.ebuild"} {
+		if _, err := os.Stat(filepath.Join(pkgDir, kept)); err != nil {
+			t.Errorf("%s must survive the sweep: %v", kept, err)
+		}
 	}
 }

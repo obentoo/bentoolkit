@@ -74,10 +74,20 @@ type ApplyResult struct {
 	Error error
 	// LogPath is the path to the compile log if compilation failed
 	LogPath string
-	// CleanedOldVersion is the previous version whose ebuild was removed when
-	// --clean is set; empty when clean was off, a no-op (same version), or the
-	// old ebuild was already absent.
+	// CleanedOldVersion is the highest version whose ebuild --clean removed. It
+	// is the single-version view of CleanRemoved, kept because callers that
+	// print one "Removed: pkg-X.ebuild" line predate the sweep; empty when clean
+	// was off, removed nothing, or was blocked.
 	CleanedOldVersion string
+	// CleanKept maps each version --clean left in place to the registry entry
+	// key that claims it (R6.1). An empty value means the version was kept by a
+	// rule rather than by an entry — the live -9999 rule or the last-non-live
+	// floor (R4.3) — since a registry key is never itself empty.
+	CleanKept map[string]string
+	// CleanRemoved lists the versions whose ebuilds --clean actually deleted,
+	// ascending. It is the executed plan, not the intended one: a sweep stopped
+	// by a removal failure reports the prefix it managed to delete.
+	CleanRemoved []string
 	// CleanWarning records a non-fatal failure of the --clean step (the update
 	// itself still succeeded). Empty on success.
 	CleanWarning string
@@ -552,16 +562,24 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			"(apply itself succeeded; entry can be cleared manually)", pkg, err)
 	}
 
-	// --clean (R-clean): drop the previous version's ebuild so only the freshly
-	// applied one remains. This runs only on the full success path and is
-	// best-effort — a removal or manifest-prune failure is surfaced as a warning
-	// on the result but never flips Success, because the update itself is done.
+	// --clean (R4.1): sweep the package directory against the registry's pins so
+	// only the ebuilds an entry claims are left. This runs only on the full
+	// success path and is best-effort — a blocked plan, a failed removal or a
+	// failed Manifest regeneration is surfaced as a warning on the result and
+	// never flips Success, because the update itself is done (R4.4).
 	if a.clean {
-		if removed, err := a.cleanOldEbuild(pkg, currentVersion, newVersion); err != nil {
+		plan, err := a.cleanPackageDir(pkg, newVersion)
+		result.CleanKept = plan.Keep
+		result.CleanRemoved = plan.Remove
+		if n := len(plan.Remove); n > 0 {
+			// The legacy single-version view: Remove is ascending, so its last
+			// entry is the highest version actually removed. Set even when the
+			// sweep then failed — those files really are gone.
+			result.CleanedOldVersion = plan.Remove[n-1]
+		}
+		if err != nil {
 			warnLogf("clean: %v", err)
 			result.CleanWarning = err.Error()
-		} else if removed {
-			result.CleanedOldVersion = currentVersion
 		}
 	}
 
@@ -621,28 +639,135 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 	return result, nil
 }
 
-// cleanOldEbuild removes the previous version's ebuild and regenerates the
-// Manifest so the now-orphaned distfiles are pruned. It returns (true, nil) when
-// an ebuild was actually removed, (false, nil) when there was nothing to remove
-// (same version, or the old file is already gone), and a non-nil error when the
-// removal or the manifest regeneration fails. The new ebuild is left untouched.
-func (a *Applier) cleanOldEbuild(pkg, oldVersion, newVersion string) (bool, error) {
-	if oldVersion == newVersion {
-		return false, nil
+// cleanPackageDir sweeps pkg's package directory against the registry's pins:
+// it deletes every non-live ebuild no entry claims, regenerates the Manifest
+// once, and returns the plan it actually executed so the caller can report it.
+//
+// The predecessor removed a single file by name. That was safe only because it
+// never looked at the rest of the directory — and equally blind to everything
+// the bump left behind (an older release still on disk, a version bumped and
+// superseded between two cleans). Deciding by claim instead of by name is what
+// makes removing more than one file survivable.
+//
+// The plan is computed against a COPY of a.configs in which pkg's entry is
+// pinned to newVersion. The pin on disk is written by a separate step of the
+// same run, so planning against a.configs verbatim would use the PRE-apply
+// registry — where every record is pinless today, meaning every clean would
+// block and the feature would ship dead. The overlaid pin is not a prediction:
+// the version just applied IS the one this entry now keeps, and writing it to
+// packages.toml records that same fact in the other file. The overlay covers
+// exactly one entry, so a pinless SIBLING — the other release line of a
+// two-entry directory — still has no pin here and still blocks the whole
+// directory (UB3).
+//
+// Nothing is removed at all in three cases. Each is returned as an error, which
+// the caller surfaces as a warning without failing the apply (R4.4):
+//
+//   - a claiming entry declares no pin (R5.1); the error names it (R6.2);
+//   - pkg has no entry in the registry at all, so nothing here authorises a
+//     deletion. This is reachable in production — loadPackagesConfigForApply
+//     returns nil when packages.toml cannot be read — and refusing to sweep is
+//     exactly right then. The guard is explicit rather than left to planSweep's
+//     no-claims block because a SIBLING entry can still claim the atom WITH a
+//     pin, and that plan would cheerfully delete the ebuild this very apply
+//     just created;
+//   - the package directory cannot be read, which planSweep reports as an
+//     error rather than as an empty plan.
+func (a *Applier) cleanPackageDir(pkg, newVersion string) (sweepPlan, error) {
+	cfgs, claimed := a.sweepConfigs(pkg, newVersion)
+
+	plan, err := planSweep(a.overlayPath, cfgs, pkg)
+	if err != nil {
+		return sweepPlan{}, fmt.Errorf("cannot plan the sweep of %s: %w", pkg, err)
 	}
-	oldPath := a.EbuildPath(pkg, oldVersion)
-	if err := os.Remove(oldPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+
+	// R5.1/R6.2 first: this is the blocked case that HAS an entry to name, and
+	// naming it is what lets a maintainer unblock the directory.
+	if plan.Blocked != "" {
+		return plan, fmt.Errorf("nothing removed from %s: registry entry %q has no version pin, "+
+			"so the sweep cannot tell which ebuilds that entry keeps%s",
+			pkg, plan.Blocked, wouldRemoveSuffix(plan.WouldRemove))
+	}
+	if !claimed {
+		// Report what an authorised sweep would have done, delete nothing.
+		if len(plan.Remove) > 0 {
+			plan.WouldRemove, plan.Remove = plan.Remove, nil
 		}
-		return false, fmt.Errorf("failed to remove old ebuild %s: %w", oldPath, err)
+		return plan, fmt.Errorf("nothing removed from %s: no packages.toml entry claims it, "+
+			"so nothing here says which ebuilds are kept%s", pkg, wouldRemoveSuffix(plan.WouldRemove))
 	}
-	// The old ebuild is gone; regenerate the Manifest against the remaining
-	// ebuild(s) so its distfile entries no longer reference the removed version.
+
+	// Execute the plan. Remove is ascending, so a sweep cut short by a failure
+	// still hands back an ascending prefix of what it intended.
+	planned := plan.Remove
+	var removed []string
+	for _, version := range planned {
+		path := a.EbuildPath(pkg, version)
+		if err := os.Remove(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Already gone: the sweep's goal for this file is met. It is not
+				// counted as a removal, so a directory whose candidates had all
+				// vanished does not trigger a Manifest regeneration for a
+				// change that never happened.
+				continue
+			}
+			plan.Remove = removed
+			return plan, fmt.Errorf("swept %d of %d ebuild(s) from %s, then failed to remove %s: %w",
+				len(removed), len(planned), pkg, path, err)
+		}
+		removed = append(removed, version)
+	}
+	plan.Remove = removed
+
+	// R4.2: exactly once, after the last removal, and only when a file actually
+	// went away. The Manifest is regenerated so its distfile entries stop
+	// referencing the removed versions; with nothing removed there is nothing to
+	// prune, and the run would only re-fetch distfiles for an untouched
+	// directory.
+	if len(removed) == 0 {
+		return plan, nil
+	}
 	if err := a.runManifest(pkg, newVersion); err != nil {
-		return true, fmt.Errorf("removed old ebuild %s but failed to regenerate manifest: %w", oldPath, err)
+		return plan, fmt.Errorf("removed %s from %s but failed to regenerate the Manifest: %w",
+			strings.Join(removed, ", "), pkg, err)
 	}
-	return true, nil
+	return plan, nil
+}
+
+// sweepConfigs returns the registry the sweep plans against — a copy of
+// a.configs with pkg's entry pinned to newVersion — and whether pkg has an entry
+// at all.
+//
+// a.configs is never mutated: it is shared state the rest of Apply reads for the
+// hold flag, the slot's revision, the series filter and the [meta] block, and a
+// version written into it here would outlive this call. The copy is shallow —
+// entries are copied by value and only Version is rewritten — so the maps and
+// slices inside an entry are shared with a.configs and, like a.configs, only
+// ever read.
+func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]PackageConfig, bool) {
+	entry, ok := a.configs[pkg] // nil-safe: a nil map yields the zero value and ok == false
+	if !ok {
+		// Nothing to overlay. a.configs is handed over unchanged (planSweep only
+		// reads it) and the caller refuses to delete anything in this case.
+		return a.configs, false
+	}
+	cfgs := make(map[string]PackageConfig, len(a.configs))
+	for key, cfg := range a.configs {
+		cfgs[key] = cfg
+	}
+	entry.Version = newVersion
+	cfgs[pkg] = entry
+	return cfgs, true
+}
+
+// wouldRemoveSuffix renders the candidates a blocked plan left alone, for the
+// tail of its warning (R5.1's report). It is empty when there were none, so the
+// message never trails a dangling "would have removed:".
+func wouldRemoveSuffix(versions []string) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (would have removed: %s)", strings.Join(versions, ", "))
 }
 
 // copyEbuild copies the source ebuild to a new file with the updated version.

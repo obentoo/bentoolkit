@@ -305,10 +305,19 @@ func TestFetchUpstreamVersionOutsideSeries(t *testing.T) {
 	}
 }
 
-// TestCleanOldEbuildLeavesOtherSeries pins that --clean prunes only the line it
-// bumped. It removes by exact filename, built from the series-filtered current
-// version, so the parallel line's ebuild must survive.
-func TestCleanOldEbuildLeavesOtherSeries(t *testing.T) {
+// TestCleanPackageDirLeavesOtherSeries pins that --clean prunes only the line it
+// bumped: the parallel line's ebuild must survive.
+//
+// The guarantee is unchanged from when this test covered the by-name removal
+// this replaced; what changed is what upholds it. Removal used to be by exact
+// filename, built from the series-filtered current version, so the other line
+// was spared by never being looked at. cleanPackageDir sweeps the directory, so
+// the other line
+// survives because its OWN registry entry claims it — which is how the overlay
+// really describes a two-line package, one entry per line. The fixture gains
+// that second entry for exactly that reason; without it the dev line is claimed
+// by nobody and R4.1 removes it.
+func TestCleanPackageDirLeavesOtherSeries(t *testing.T) {
 	tmp := t.TempDir()
 	overlay := filepath.Join(tmp, "overlay")
 	atom := "app-office/libreoffice"
@@ -319,7 +328,8 @@ func TestCleanOldEbuildLeavesOtherSeries(t *testing.T) {
 	key := atom + "@stable"
 	applier, err := NewApplier(overlay, filepath.Join(tmp, "config"),
 		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
-			key: {URL: "https://example.com", Parser: "json", Path: "v", Series: `^26\.2\.`},
+			key:           {URL: "https://example.com", Parser: "json", Path: "v", Series: `^26\.2\.`},
+			atom + "@dev": {URL: "https://example.com", Parser: "json", Path: "v", Series: `^26\.8\.`, Version: "26.8.0.1_pre"},
 		}}),
 		WithExecCommand(mockExecCommandSuccess),
 	)
@@ -336,8 +346,8 @@ func TestCleanOldEbuildLeavesOtherSeries(t *testing.T) {
 		t.Fatalf("resolveCurrentVersion = %q, want %q", current, "26.2.6.1")
 	}
 
-	if _, err := applier.cleanOldEbuild(key, "26.2.5.2", "26.2.6.1"); err != nil {
-		t.Fatalf("cleanOldEbuild: %v", err)
+	if _, err := applier.cleanPackageDir(key, "26.2.6.1"); err != nil {
+		t.Fatalf("cleanPackageDir: %v", err)
 	}
 
 	pkgDir := filepath.Join(overlay, "app-office", "libreoffice")
