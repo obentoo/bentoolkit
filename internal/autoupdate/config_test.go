@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -848,4 +849,87 @@ path = "tag_name"
 	if !vscode.IsEnabled() {
 		t.Error("Expected vscode IsEnabled() to be true (default)")
 	}
+}
+
+// TestValidatePackageConfigVersion covers the version pin's two validation
+// rules: a non-empty version must be a well-formed Gentoo version, revision
+// suffix included, and — when the entry also declares a series — must belong
+// to that series. An absent version stays valid, so every pre-existing record
+// loads without migration.
+func TestValidatePackageConfigVersion(t *testing.T) {
+	base := func() *PackageConfig {
+		return &PackageConfig{
+			URL:    "https://example.com/api",
+			Parser: "json",
+			Path:   "version",
+		}
+	}
+
+	t.Run("absent version still validates", func(t *testing.T) {
+		if err := ValidatePackageConfig("test/pkg", base()); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("valid pin passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.28.4"
+		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("pin with revision suffix passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "2.52.4-r411" // the webkit-gtk shape
+		if err := ValidatePackageConfig("net-libs/webkit-gtk:4.1", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("malformed pin fails naming the key", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "not-a-version"
+		err := ValidatePackageConfig("test/pkg", cfg)
+		if err == nil {
+			t.Fatal("Expected error for malformed version")
+		}
+		if !errors.Is(err, ErrInvalidVersion) {
+			t.Errorf("Expected ErrInvalidVersion, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "test/pkg") {
+			t.Errorf("Expected the entry key in the message, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "not-a-version") {
+			t.Errorf("Expected the offending value in the message, got %q", err.Error())
+		}
+	})
+
+	t.Run("pin outside its own series fails", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.29.2"
+		cfg.Series = `^1\.28\.`
+		err := ValidatePackageConfig("test/pkg", cfg)
+		if err == nil {
+			t.Fatal("Expected error for version outside series")
+		}
+		if !errors.Is(err, ErrVersionOutsideSeries) {
+			t.Errorf("Expected ErrVersionOutsideSeries, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "test/pkg") {
+			t.Errorf("Expected the entry key in the message, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "1.29.2") {
+			t.Errorf("Expected the offending value in the message, got %q", err.Error())
+		}
+	})
+
+	t.Run("pin inside its series passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.28.4"
+		cfg.Series = `^1\.28\.`
+		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
 }

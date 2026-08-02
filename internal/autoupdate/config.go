@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
 // Error variables for configuration errors
@@ -43,6 +45,13 @@ var (
 	// ErrSuffixWhenWithoutSuffix is returned when suffix_when is set but suffix is
 	// not: the condition has nothing to gate.
 	ErrSuffixWhenWithoutSuffix = errors.New("suffix_when requires suffix")
+	// ErrInvalidVersion is returned when the version field is not a well-formed
+	// Gentoo version string (an -rN revision suffix is allowed).
+	ErrInvalidVersion = errors.New("invalid version: must be a well-formed Gentoo version, optionally with an -rN revision")
+	// ErrVersionOutsideSeries is returned when version and series are both set
+	// but the pinned version does not match the series regex: such an entry
+	// claims an ebuild it can never select.
+	ErrVersionOutsideSeries = errors.New("version does not match series")
 )
 
 // validSuffixRegex matches the value accepted by PackageConfig.Suffix: one of
@@ -358,6 +367,13 @@ type PackageConfig struct {
 	// taking its non-upstream USE=webdriver with it — and that entry now
 	// declares revision = 600.
 	Revision int `toml:"revision,omitempty"`
+
+	// Version is the ebuild version this entry keeps in the overlay — the pin
+	// the --clean sweep preserves — not the upstream version being tracked. It
+	// includes the -rN revision suffix when the ebuild carries one
+	// ("2.52.4-r411"). Absent means "derive it through selectCurrentEbuild",
+	// so every pre-existing record loads unchanged.
+	Version string `toml:"version,omitempty"`
 
 	// Comments is the record's documentation: why this source and parser, and
 	// every caveat a future bump must know (stale endpoints, pre-release traps,
@@ -707,6 +723,21 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	if cfg.Series != "" {
 		if _, err := regexp.Compile(cfg.Series); err != nil {
 			return fmt.Errorf("package %s: invalid series %q: %w", pkg, cfg.Series, err)
+		}
+	}
+
+	// Validate the pinned version. A pin that is not a well-formed Gentoo
+	// version can never name an ebuild, and one outside the entry's own series
+	// claims an ebuild the entry can never select — both are config mistakes
+	// the sweep would otherwise act on, so fail hard. Checked after the series
+	// compile check above, so newSeriesMatcher below can never hit its
+	// warn-and-pass-everything fallback for a bad regex.
+	if cfg.Version != "" {
+		if !ebuild.IsValidVersion(cfg.Version) {
+			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
+		}
+		if cfg.Series != "" && !newSeriesMatcher(cfg.Series).matches(cfg.Version) {
+			return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
 		}
 	}
 
