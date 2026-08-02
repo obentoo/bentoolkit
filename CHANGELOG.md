@@ -66,6 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "no range declared": absent evidence is not permission, so an unsolicited 206
   still fails on the status error.
 
+- **`--lint` no longer flags the file header of `packages.toml`.** The
+  `stray-comment` rule treated every comment outside a record as stranded
+  documentation, header included. Restoring the overlay's ~112-line header — the
+  text that documents the record model itself: field order, `enabled` vs `hold`,
+  the traps a new record has to avoid — turned a clean registry into 112
+  violations and an exit code of 1, so the rule read as an order to delete the
+  one thing that makes the file editable by hand. Comments before the first
+  record are now the file header and are allowed; a comment anywhere after the
+  first record has begun — between records or trailing the last one — is still
+  reported, because it belongs in the `comments` field of the record it
+  describes.
+
 ## [0.17.1] - 2026-08-01
 
 ### Fixed

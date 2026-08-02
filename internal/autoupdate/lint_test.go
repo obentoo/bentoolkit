@@ -49,6 +49,39 @@ func TestLintRecordModelClean(t *testing.T) {
 	}
 }
 
+// TestLintRecordModelFileHeader pins the one comment block that is not a stray
+// comment: the header that opens packages.toml. It documents the record model
+// for whoever edits the file by hand, belongs to no single record, and the real
+// registry carries ~112 lines of it — flagging them would read as an order to
+// delete the documentation.
+func TestLintRecordModelFileHeader(t *testing.T) {
+	const header = `# Bentoo Autoupdate Package Configuration
+# Every record obeys the field order below.
+#
+# NOTE: BEGIN/END markers are comments only.
+
+# >>>>>>>>>>  BEGIN PACKAGES  <<<<<<<<<<
+
+` + cleanRecord
+
+	if issues := lintRecordModel(header); len(issues) != 0 {
+		t.Fatalf("file header reported %v", rules(issues))
+	}
+}
+
+// TestLintRecordModelStrayAfterLastRecord keeps the exemption anchored to the
+// top of the file: a comment block that trails the final record is stranded
+// documentation, not a header, and still has to be reported.
+func TestLintRecordModelStrayAfterLastRecord(t *testing.T) {
+	trailing := cleanRecord + `
+# npm registry — a section banner left behind by an old layout.
+`
+	issues := lintRecordModel(trailing)
+	if !hasRule(issues, LintStrayComment) {
+		t.Fatalf("trailing comment not reported, got %v", rules(issues))
+	}
+}
+
 func TestLintRecordModelViolations(t *testing.T) {
 	tests := []struct {
 		name    string

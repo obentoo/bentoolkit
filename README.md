@@ -549,6 +549,12 @@ field of the record, and keep `[` off the start of any line inside it (the
 raw-text editors that flip `enabled` scan for `[section]` headers and would read
 such a line as one).
 
+The one exception is the **file header**: the comment block before the first
+record. It documents the model itself rather than any single package, so it can
+live inside no record, and `--lint` leaves it alone. The exemption ends at the
+first `[section]` header — a comment after that, between records or trailing the
+last one, is reported as before.
+
 ##### Field order
 
 Fields run bookkeeping → source → extraction → post-processing → auxiliary

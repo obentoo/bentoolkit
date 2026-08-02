@@ -72,7 +72,8 @@ func (i LintIssue) String() string {
 // LintPackagesConfig checks the overlay's packages.toml against the record
 // model: every record ends with the `# END` marker, its documentation lives in a
 // trailing comments field rather than in floating `#` lines, and each record's
-// fields are semantically valid.
+// fields are semantically valid. The comment block that opens the file, before
+// the first record, is the file header and is not a violation.
 //
 // It reports issues instead of failing on the first one, because the point is to
 // hand back the whole list of what needs fixing. A nil slice means the registry
@@ -276,10 +277,20 @@ type recordLintState struct {
 // field comes last, whether the record is closed. It tracks the multi-line
 // string opened by `comments = """` so that a `#` line or a `[`-prefixed line
 // inside the documentation is not mistaken for file structure.
+//
+// The comment block that opens the file is exempt: see seenRecord below.
 func lintRecordModel(content string) []LintIssue {
 	var issues []LintIssue
 	var cur *recordLintState
 	inComments := false
+	// seenRecord turns the stray-comment rule on. Everything before the first
+	// record header is the file header — the text that documents the record
+	// model itself (field order, enabled vs hold, the traps a new record has to
+	// avoid). It describes every record, so it can live inside none of them, and
+	// flagging it would push maintainers to delete the one thing that makes the
+	// file editable by hand. Once a record has been seen, a floating comment is
+	// documentation stranded between records, which is what the rule is for.
+	seenRecord := false
 
 	closeRecord := func() {
 		if cur == nil {
@@ -328,6 +339,7 @@ func lintRecordModel(content string) []LintIssue {
 		if name, isHeader := tomlTableName(line); isHeader {
 			closeRecord()
 			cur = &recordLintState{name: name, headerLine: lineNo}
+			seenRecord = true
 			continue
 		}
 
@@ -335,11 +347,14 @@ func lintRecordModel(content string) []LintIssue {
 			continue
 		}
 
-		// A comment line. Inside an open record it is either the end marker or a
-		// leftover doc line that belongs in comments; outside one it is the
+		// A comment line. Before the first record it is the file header, which
+		// the model allows. Inside an open record it is either the end marker or
+		// a leftover doc line that belongs in comments; between records it is the
 		// floating comment the record model forbids.
 		if strings.HasPrefix(trimmed, "#") {
 			switch {
+			case !seenRecord:
+				// File header — allowed, see seenRecord.
 			case cur == nil || cur.closed:
 				issues = append(issues, LintIssue{
 					Line: lineNo, Rule: LintStrayComment,

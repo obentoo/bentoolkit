@@ -40,18 +40,56 @@ claude-code — npm dist-tags.latest is the stable channel.
 }
 
 // TestRunLintReportsAndExits pins the gate behavior: a violation exits non-zero
-// so the command can be wired into a pre-commit hook.
+// so the command can be wired into a pre-commit hook. The violation is a banner
+// stranded BETWEEN two records — the same block at the top of the file would be
+// the file header, which the model allows.
 func TestRunLintReportsAndExits(t *testing.T) {
-	dir := writeLintRegistry(t, `# a banner comment floating outside every record
+	dir := writeLintRegistry(t, `["dev-util/claude-code"]
+url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
+parser = "json"
+path = "dist-tags.latest"
+comments = """
+claude-code — npm dist-tags.latest is the stable channel.
+"""
+# END
+
+# ============ npm registry ============
+
+["sys-apps/pnpm"]
+url = "https://registry.npmjs.org/pnpm"
+parser = "json"
+path = "dist-tags.latest"
+comments = """
+pnpm — npm package, stable channel.
+"""
+# END
+`)
+
+	if code := withExitIntercept(func() { runLint(dir) }); code != 1 {
+		t.Fatalf("got exit %d, want 1", code)
+	}
+}
+
+// TestRunLintFileHeaderIsClean pins the exemption at the command level: a
+// registry whose only comments outside a record are the file header passes the
+// gate. Without this the restored ~112-line header of the real overlay would
+// fail a pre-commit hook.
+func TestRunLintFileHeaderIsClean(t *testing.T) {
+	dir := writeLintRegistry(t, `# Bentoo Autoupdate Package Configuration
+# Every record obeys the field order documented here.
 
 ["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
 path = "dist-tags.latest"
+comments = """
+claude-code — npm dist-tags.latest is the stable channel.
+"""
+# END
 `)
 
-	if code := withExitIntercept(func() { runLint(dir) }); code != 1 {
-		t.Fatalf("got exit %d, want 1", code)
+	if code := withExitIntercept(func() { runLint(dir) }); code != -1 {
+		t.Fatalf("file header exited with %d, want no exit", code)
 	}
 }
 
