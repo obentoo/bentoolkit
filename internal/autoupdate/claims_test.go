@@ -467,3 +467,356 @@ func TestPlanSweep(t *testing.T) {
 		}
 	})
 }
+
+// writeReconcileOverlay lays SEVERAL package directories out in one fresh
+// t.TempDir() and returns the overlay root.
+//
+// Reconcile walks the whole registry rather than one atom, so its fixtures need
+// a tree with more than one directory in it — which is the only reason this is
+// not writeSweepOverlay. Temporary for the same reason that one is: the output
+// feeds a write to a registry that auto-publishes, so a fixture must never point
+// at a real overlay.
+func writeReconcileOverlay(t *testing.T, dirs map[string][]sweepEbuild) string {
+	t.Helper()
+	overlay := filepath.Join(t.TempDir(), "overlay")
+	for atom, ebuilds := range dirs {
+		for _, e := range ebuilds {
+			if e.slot == "" {
+				createTestEbuildFile(t, overlay, atom, e.version)
+				continue
+			}
+			createTestEbuildFileWithContent(t, overlay, atom, e.version,
+				"# Test ebuild\nEAPI=8\nDESCRIPTION=\"Test package\"\nSLOT=\""+e.slot+"\"\nKEYWORDS=\"~amd64\"\n")
+		}
+	}
+	return overlay
+}
+
+// offEntry is a registry entry the checker skips: enabled = false, the state the
+// existing orphan reconciliation writes and owns (R3.5).
+func offEntry(version, series string) PackageConfig {
+	c := regEntry(version, series)
+	off := false
+	c.Enabled = &off
+	return c
+}
+
+// heldEntry is a registry entry the maintainer has parked: hold = true.
+func heldEntry(version, series string) PackageConfig {
+	c := regEntry(version, series)
+	c.Hold = true
+	return c
+}
+
+// TestReconcile pins the divergence set itself: which of R3.1's three classes
+// each disagreement between the registry and the overlay falls into.
+//
+// What makes each case load-bearing is that the output is about to be turned
+// into a WRITE to a registry that auto-publishes. A class that is wrong here is
+// a wrong pin on origin minutes later, so every case below is a shape that
+// really occurs in the overlay, not an invented one.
+func TestReconcile(t *testing.T) {
+	tests := []struct {
+		name string
+		dirs map[string][]sweepEbuild
+		cfgs map[string]PackageConfig
+		want []Divergence
+	}{
+		{
+			// All three classes at once, which is also the shape of a real run:
+			// most of the noise is in one or two directories.
+			name: "one of each class",
+			dirs: map[string][]sweepEbuild{
+				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.0"}, {version: "1.71.1"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"net-misc/rclone": regEntry("1.71.0", ""),
+				// No directory for it at all: the package was removed from the
+				// overlay. R3.1's third class.
+				"app-misc/hello": regEntry("1.0.0", ""),
+			},
+			want: []Divergence{
+				{Key: "app-misc/hello", Kind: NoEbuild, Pin: "1.0.0"},
+				// The entry pins 1.71.0 but resolves to the higher 1.71.1.
+				{Key: "net-misc/rclone", Kind: StalePin, Pin: "1.71.0", Disk: "1.71.1"},
+				// 1.71.0 is NOT unclaimed — the pin names it — but 1.70.0 is
+				// held by nothing at all. Key is the directory, not the entry.
+				{Key: "net-misc/rclone", Kind: UnclaimedEbuild, Disk: "1.70.0"},
+			},
+		},
+		{
+			// A1, the whole point of the first run: all 409 records are pinless
+			// today, so an enabled entry that resolves to an ebuild is a stale
+			// pin whose Pin happens to be empty. 5.2 builds its write batch from
+			// exactly these — classify them as anything else and the ~317-entry
+			// bulk fill has nothing to write.
+			name: "an empty pin that resolves to an ebuild is a stale pin (A1)",
+			dirs: map[string][]sweepEbuild{
+				"media-plugins/gst-plugins-vpx": {{version: "1.28.5"}, {version: "1.29.2"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"media-plugins/gst-plugins-vpx@stable": regEntry("", gstStableSeries),
+				"media-plugins/gst-plugins-vpx@dev":    regEntry("", gstDevSeries),
+			},
+			want: []Divergence{
+				{Key: "media-plugins/gst-plugins-vpx@dev", Kind: StalePin, Pin: "", Disk: "1.29.2"},
+				{Key: "media-plugins/gst-plugins-vpx@stable", Kind: StalePin, Pin: "", Disk: "1.28.5"},
+			},
+			// And no UnclaimedEbuild anywhere: with nothing pinned, an entry
+			// still holds the file it RESOLVES to. Claiming by pin alone would
+			// report every ebuild in the overlay as unclaimed on the first run
+			// and bury the pins that actually need writing.
+		},
+		{
+			// R3.5: the enabled = false reconciliation owns these entries. This
+			// must neither report them nor — since the directory is never
+			// reached — call their ebuilds unclaimed.
+			name: "a disabled entry and a held entry produce nothing (R3.5)",
+			dirs: map[string][]sweepEbuild{
+				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.1"}},
+				"app-misc/hello":  {{version: "1.0.0"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"net-misc/rclone": offEntry("", ""),  // stale pin AND residue, both invisible
+				"app-misc/hello":  heldEntry("", ""), // a deliberate maintainer decision
+			},
+			want: nil,
+		},
+		{
+			// The other half of R3.5, and the reason resolveClaims does not skip
+			// disabled entries: "stop checking upstream" is not "this ebuild is
+			// disposable". The :6 entry is switched off, so it is not reported —
+			// but it still holds its ebuild, which must not be offered up as
+			// claimed by nobody.
+			name: "a disabled sibling still claims its ebuild",
+			dirs: map[string][]sweepEbuild{
+				"net-libs/webkit-gtk": {
+					{version: "2.52.4-r411", slot: "4.1/0"},
+					{version: "2.52.5-r601", slot: "6/0"},
+				},
+			},
+			cfgs: map[string]PackageConfig{
+				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""),
+				"net-libs/webkit-gtk:6":   offEntry("2.52.5-r601", ""),
+			},
+			want: nil,
+		},
+		{
+			// R5.2 through the reconciliation: the package is right there, the
+			// entry's slot filter matches nothing in it. A fact about one entry
+			// — R3.1's third class — never an error, and never an
+			// ErrNoEbuildFound that would read as "the package was removed".
+			name: "a slot that matches nothing is a NoEbuild, and leaves the sibling ebuild unclaimed",
+			dirs: map[string][]sweepEbuild{
+				"net-libs/webkit-gtk": {{version: "2.52.4-r411", slot: "4.1/0"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"net-libs/webkit-gtk:6": regEntry("2.52.5-r601", ""),
+			},
+			want: []Divergence{
+				{Key: "net-libs/webkit-gtk", Kind: UnclaimedEbuild, Disk: "2.52.4-r411"},
+				{Key: "net-libs/webkit-gtk:6", Kind: NoEbuild, Pin: "2.52.5-r601"},
+			},
+		},
+		{
+			// The pin is compared to the resolved version as an exact STRING,
+			// never through ebuild.CompareVersions — and the two disagree
+			// exactly here: the comparison calls "1.71.1-r0" and "1.71.1" equal.
+			// The sweep sides with the string, because planSweep keeps a file by
+			// looking its version up in a map keyed by the pin's text, so a pin
+			// of "1.71.1-r0" protects rclone-1.71.1.ebuild from nothing.
+			// Declaring it "not stale" would leave a pin that reads correct and
+			// lets --clean delete the ebuild it names.
+			name: "a pin that only COMPARES equal is still stale",
+			dirs: map[string][]sweepEbuild{
+				"net-misc/rclone": {{version: "1.71.1"}},
+			},
+			cfgs: map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1-r0", "")},
+			want: []Divergence{
+				{Key: "net-misc/rclone", Kind: StalePin, Pin: "1.71.1-r0", Disk: "1.71.1"},
+			},
+		},
+		{
+			// A live ebuild is claimed by nobody by construction — selection
+			// skips it (UB2), so no pin can ever name one — and reporting that
+			// would put the one file an overlay cannot re-fetch at the top of a
+			// removal candidate list.
+			name: "a live -9999 ebuild is never unclaimed",
+			dirs: map[string][]sweepEbuild{
+				"app-editors/neovim": {{version: "0.11.0"}, {version: "0.11.1"}, {version: "9999"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"app-editors/neovim": regEntry("0.11.1", ""),
+			},
+			want: []Divergence{
+				{Key: "app-editors/neovim", Kind: UnclaimedEbuild, Disk: "0.11.0"},
+			},
+		},
+		{
+			// The registry agrees with the overlay: no prompt, no write, nothing
+			// to confirm. The state every run after the first one should be in.
+			name: "a registry that matches the overlay diverges in nothing",
+			dirs: map[string][]sweepEbuild{
+				"net-misc/rclone": {{version: "1.71.1"}},
+			},
+			cfgs: map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlay := writeReconcileOverlay(t, tt.dirs)
+			got := Reconcile(overlay, tt.cfgs)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Reconcile() =\n  %+v\nwant\n  %+v", got, tt.want)
+			}
+		})
+	}
+
+	// One stray file, several entries sharing the directory: the finding belongs
+	// to the FILE, so it is reported once. Emitted per sibling entry it would
+	// double in the 85 GStreamer directories built exactly like this, and the
+	// prompt's count of what is about to be reviewed would be fiction.
+	t.Run("a stray ebuild in a two-entry directory is reported once, not per entry", func(t *testing.T) {
+		atom := "media-plugins/gst-plugins-vpx"
+		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
+			atom: {{version: "1.28.4"}, {version: "1.28.5"}, {version: "1.29.2"}},
+		})
+		cfgs := map[string]PackageConfig{
+			atom + "@stable": regEntry("1.28.5", gstStableSeries),
+			atom + "@dev":    regEntry("1.29.2", gstDevSeries),
+		}
+
+		got := Reconcile(overlay, cfgs)
+		want := []Divergence{{Key: atom, Kind: UnclaimedEbuild, Disk: "1.28.4"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Reconcile() =\n  %+v\nwant exactly one unclaimed ebuild\n  %+v", got, want)
+		}
+	})
+
+	// An unreadable directory is the one case that must produce NOTHING. An
+	// invented divergence here is an invented pin in a registry that publishes
+	// itself minutes later, so the entry is dropped and the warning says which
+	// one and why.
+	t.Run("an unreadable directory invents no divergence and warns", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: the directory mode is not enforced, so nothing here is unreadable")
+		}
+		atom := "app-misc/hello"
+		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
+			atom: {{version: "1.0.0"}, {version: "2.0.0"}},
+		})
+		pkgDir := filepath.Join(overlay, "app-misc", "hello")
+		if err := os.Chmod(pkgDir, 0o000); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		// Restore the mode, or t.TempDir()'s own cleanup cannot remove the tree.
+		t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
+
+		lc := captureWarnLogs(t)
+		got := Reconcile(overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")})
+		if got != nil {
+			t.Fatalf("an unreadable directory produced divergences: %+v", got)
+		}
+		if lc.count() == 0 {
+			t.Fatalf("the skipped entry was not warned about")
+		}
+		if !strings.Contains(strings.Join(lc.all(), "\n"), atom) {
+			t.Errorf("the warning does not name the entry it skipped: %v", lc.all())
+		}
+	})
+
+	// A key that is not an atom cannot be resolved to a directory, and a
+	// reconciliation that guessed one would be building a path out of a string
+	// it does not understand.
+	t.Run("a malformed key is skipped with a warning", func(t *testing.T) {
+		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
+			"net-misc/rclone": {{version: "1.71.1"}},
+		})
+		lc := captureWarnLogs(t)
+		if got := Reconcile(overlay, map[string]PackageConfig{"rclone": regEntry("1.71.1", "")}); got != nil {
+			t.Fatalf("a malformed key produced divergences: %+v", got)
+		}
+		if lc.count() == 0 {
+			t.Errorf("the malformed key was skipped silently")
+		}
+	})
+
+	t.Run("a nil registry diverges in nothing", func(t *testing.T) {
+		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
+			"net-misc/rclone": {{version: "1.71.1"}},
+		})
+		if got := Reconcile(overlay, nil); got != nil {
+			t.Errorf("Reconcile with a nil registry = %+v, want nil", got)
+		}
+	})
+}
+
+// TestReconcileOrderIsStable is the prompt's precondition: a maintainer
+// confirms this list in one go, so two runs over an unchanged overlay must
+// produce the identical list in the identical order. A reshuffle between runs
+// is indistinguishable from the overlay having changed.
+//
+// The fixture is built to catch an order that merely LOOKS sorted: the entry
+// divergences already come out in key order (the walk is over sorted keys), so
+// the only way to observe the sort is a directory-level UnclaimedEbuild, whose
+// key is the bare atom and therefore sorts BEFORE the "@label" siblings that
+// produced it — but is appended after the first of them.
+func TestReconcileOrderIsStable(t *testing.T) {
+	vpx := "media-plugins/gst-plugins-vpx"
+	overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
+		vpx: {{version: "1.28.4"}, {version: "1.28.5"}, {version: "1.29.2"}},
+		// Two strays in one directory, out of Gentoo order lexically: sorted as
+		// strings 1.10.0 precedes 1.9.0.
+		"net-misc/rclone":    {{version: "1.9.0"}, {version: "1.10.0"}, {version: "1.71.1"}},
+		"app-editors/neovim": {{version: "0.11.1"}},
+	})
+	cfgs := map[string]PackageConfig{
+		vpx + "@stable":      regEntry("1.28.5", gstStableSeries),
+		vpx + "@dev":         regEntry("1.29.2", gstDevSeries),
+		"net-misc/rclone":    regEntry("1.71.1", ""),
+		"app-editors/neovim": regEntry("", ""),
+		"app-misc/hello":     regEntry("1.0.0", ""), // no directory: NoEbuild
+	}
+
+	want := []Divergence{
+		{Key: "app-editors/neovim", Kind: StalePin, Pin: "", Disk: "0.11.1"},
+		{Key: "app-misc/hello", Kind: NoEbuild, Pin: "1.0.0"},
+		{Key: vpx, Kind: UnclaimedEbuild, Disk: "1.28.4"},
+		{Key: "net-misc/rclone", Kind: UnclaimedEbuild, Disk: "1.9.0"},
+		{Key: "net-misc/rclone", Kind: UnclaimedEbuild, Disk: "1.10.0"},
+	}
+
+	// Eight runs, because a map-iteration order that leaks into the output is a
+	// coin flip, not a constant failure.
+	for i := 0; i < 8; i++ {
+		got := Reconcile(overlay, cfgs)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("run %d: Reconcile() =\n  %+v\nwant\n  %+v", i, got, want)
+		}
+	}
+}
+
+// TestDivergenceKindString pins the identifiers a report and a filter both key
+// on: they are stable strings, not the integers they happen to be.
+func TestDivergenceKindString(t *testing.T) {
+	want := map[DivergenceKind]string{
+		StalePin:        "stale-pin",
+		UnclaimedEbuild: "unclaimed-ebuild",
+		NoEbuild:        "no-ebuild",
+	}
+	seen := make(map[string]bool)
+	for kind, s := range want {
+		if got := kind.String(); got != s {
+			t.Errorf("DivergenceKind(%d).String() = %q, want %q", int(kind), got, s)
+		}
+		if seen[s] {
+			t.Errorf("two kinds render as %q", s)
+		}
+		seen[s] = true
+	}
+	if got := DivergenceKind(42).String(); !strings.Contains(got, "42") {
+		t.Errorf("an unknown kind renders as %q, which names no value", got)
+	}
+}

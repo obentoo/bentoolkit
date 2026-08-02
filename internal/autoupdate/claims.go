@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -280,6 +281,287 @@ func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (
 	}
 
 	return plan, nil
+}
+
+// DivergenceKind classifies one disagreement between the registry and the
+// overlay. The three kinds are R3.1's three classes and they are NOT
+// interchangeable: only StalePin carries a version the reconciliation may
+// write, so a consumer that builds a write batch MUST switch on the kind rather
+// than map every divergence to Key -> Disk.
+type DivergenceKind int
+
+const (
+	// StalePin — the entry resolves to an ebuild whose version is not the one
+	// it declares. Disk is the version on disk (never empty) and Pin is what the
+	// registry says today.
+	//
+	// Pin is empty for the whole first reconciliation: all 409 records are
+	// pinless right now, so an enabled entry that resolves to an ebuild diverges
+	// from its (absent) pin. That is deliberate and load-bearing — it is exactly
+	// the ~317-entry bulk fill of A1, and the only class the write batch is
+	// built from. A caller wording the prompt can still tell the two apart
+	// (Pin == "" reads "pin 317 entries for the first time", Pin != "" reads
+	// "correct N stale pins"); the reconciliation itself does not, because the
+	// repair is identical: write Disk.
+	StalePin DivergenceKind = iota
+	// UnclaimedEbuild — a non-live ebuild that no entry of its directory pins or
+	// resolves to.
+	//
+	// It is a property of a DIRECTORY, not of an entry: several entries share
+	// one directory (":slot" and "@label" siblings), and reporting the same
+	// stray file once per sibling would inflate the prompt's count of what is
+	// about to happen. So it is emitted ONCE per file, and Key holds the bare
+	// "category/package" atom rather than a registry key. Pin is always empty —
+	// nothing pins it, that IS the finding — and nothing about it is writable:
+	// the repair is a sweep or a new registry entry, both decided by a human.
+	UnclaimedEbuild
+	// NoEbuild — the entry is enabled but its directory holds no ebuild it can
+	// select: the package was removed, or its ":slot"/`series` filter matches
+	// nothing there.
+	//
+	// Disk is always empty, so there is nothing to write (UB4: the registry
+	// never holds a version that is not on disk) and reporting it is the whole
+	// of the action. The existing orphan reconciliation, not this one, is what
+	// acts on a removed package (R3.5).
+	NoEbuild
+)
+
+// String renders a kind as the stable identifier a report and a filter can both
+// use, in the kebab-case the lint rules already use.
+func (k DivergenceKind) String() string {
+	switch k {
+	case StalePin:
+		return "stale-pin"
+	case UnclaimedEbuild:
+		return "unclaimed-ebuild"
+	case NoEbuild:
+		return "no-ebuild"
+	default:
+		return fmt.Sprintf("DivergenceKind(%d)", int(k))
+	}
+}
+
+// Divergence is one disagreement between what the registry claims and what the
+// overlay holds.
+//
+// The invariants a consumer may rely on, per kind:
+//
+//	StalePin        Key = registry key · Disk != "" · Disk != Pin  → writable
+//	UnclaimedEbuild Key = "category/package" atom · Pin = ""       → report only
+//	NoEbuild        Key = registry key · Disk = ""                 → report only
+type Divergence struct {
+	// Key identifies what the divergence is about: the registry key
+	// ("net-libs/webkit-gtk:4.1") for StalePin and NoEbuild, the bare atom of
+	// the directory for UnclaimedEbuild — see that constant for why. Either way
+	// it is identity only: never build a path from it, always split it first.
+	Key string
+	// Kind is which of R3.1's three classes this is.
+	Kind DivergenceKind
+	// Pin is the version the registry declares (PackageConfig.Version), empty
+	// when the entry has no pin — which is every entry today.
+	Pin string
+	// Disk is the version the overlay actually holds: the ebuild the entry
+	// resolves to (StalePin), or the stray ebuild itself (UnclaimedEbuild).
+	// Empty for NoEbuild, where the point is that there is none.
+	Disk string
+}
+
+// Reconcile compares every enabled entry's pin against the ebuild it resolves
+// to on disk, for the whole registry, and returns the divergences in R3.1's
+// three classes.
+//
+// # Why this returns data instead of writing it
+//
+// The registry is a published artifact. ~/Projetos/git/bentoo auto-commits and
+// pushes, so an unattended write reaches origin within minutes — a wrong pin is
+// not a local mistake to be fixed before anyone sees it, it is a released one.
+// That is why this function only ever reads: it hands the whole divergence set
+// back so a caller can show it and take ONE confirmation covering all of it
+// (R3.2), leave packages.toml byte-identical when the answer is no (R3.3), and
+// refuse to write at all from a non-TTY without --yes (R3.4). Nothing here
+// touches packages.toml, and nothing here should ever start to.
+//
+// # What is compared, and what is skipped
+//
+// A disabled (enabled = false) or held (hold = true) entry is skipped: the
+// existing overlay-driven status reconciliation in CheckAll owns those, and
+// R3.5 requires this to leave it alone. Their ebuilds are NOT thereby unclaimed
+// — a switched-off entry still holds its file (see resolveClaims) — so the
+// unclaimed scan below counts every entry of a directory, disabled ones
+// included, while only enabled ones can be the SUBJECT of a divergence. The two
+// functions differ deliberately on this point; do not unify them.
+//
+// Resolution goes through selectCurrentEbuild, so ":slot" and `series` are
+// filtered by the one implementation the checker and the sweep use (D2). Its
+// sentinels — ErrNoEbuildFound, ErrSlotNotFound, ErrSeriesNotFound — are facts
+// about one entry rather than failures, and they are precisely R3.1's third
+// class, so they land in NoEbuild. Any OTHER error is a directory that could not
+// be read: that entry is skipped with a warning naming it, and NO divergence is
+// invented from it. A fabricated divergence here becomes a fabricated pin in the
+// registry, published.
+//
+// The pin is compared to the resolved version as an exact string, not through
+// ebuild.CompareVersions, because an exact string is what the sweep matches on
+// (planSweep's pinnedBy map). A pin the sweep cannot match keeps no file, so
+// declaring it "not stale" because it compares equal would leave the registry
+// pinning a version that does not protect its ebuild.
+//
+// The result is sorted, so the prompt a maintainer reads is the same list in the
+// same order on two consecutive runs and a diff between them means the overlay
+// changed.
+//
+// # Cost
+//
+// One directory read per enabled entry for the resolution, one per distinct
+// directory for the unclaimed scan, and one more per entry of that directory to
+// collect its claims: roughly 2-3 readdir per enabled entry, not the single one
+// design.md's performance note assumes. That note asks for the checker's
+// CheckResult data to be reused instead, which this signature cannot do — it
+// takes no results — and which would not remove the scan anyway: CheckResult
+// carries a resolved CurrentVersion but never the directory listing that
+// UnclaimedEbuild is computed from.
+func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
+	var divs []Divergence
+	// Directories already scanned for unclaimed ebuilds, keyed by atom: several
+	// entries routinely share one, and the finding belongs to the file, not to
+	// each sibling that happens to live next to it.
+	scanned := make(map[string]bool)
+
+	for _, key := range sortedKeys(cfgs) {
+		cfg := cfgs[key]
+		// R3.5: the enabled = false reconciliation owns these entries, and a
+		// held entry is a maintainer decision this must not second-guess.
+		if !cfg.IsEnabled() || cfg.IsHeld() {
+			continue
+		}
+		category, pkgName, ok := splitPkgAtom(key)
+		if !ok {
+			warnLogf("reconcile: skipping registry key %q: it is not a category/package atom", key)
+			continue
+		}
+
+		cand, err := selectCurrentEbuild(overlayPath, key, cfg.Series)
+		switch {
+		case err == nil:
+			if cand.Version != cfg.Version {
+				divs = append(divs, Divergence{
+					Key: key, Kind: StalePin, Pin: cfg.Version, Disk: cand.Version,
+				})
+			}
+		case errors.Is(err, ErrNoEbuildFound),
+			errors.Is(err, ErrSlotNotFound),
+			errors.Is(err, ErrSeriesNotFound):
+			divs = append(divs, Divergence{Key: key, Kind: NoEbuild, Pin: cfg.Version})
+		default:
+			// An unreadable directory, and nothing else: every "this entry holds
+			// nothing" case is a sentinel above. Say which entry and why, and
+			// report nothing about it.
+			warnLogf("reconcile: skipping %s: %v", key, err)
+			continue
+		}
+
+		atom := category + "/" + pkgName
+		if scanned[atom] {
+			continue
+		}
+		// ErrNoEbuildFound is the one sentinel that does not prove the directory
+		// is scannable, and it is also the one that guarantees the scan would
+		// find nothing: selectCurrentEbuild returns it either because the
+		// directory is absent, or — with no ":slot" and no `series` narrowing
+		// the search — because the directory holds no parsable non-live ebuild
+		// at all, and only such an ebuild can ever be reported as unclaimed.
+		if errors.Is(err, ErrNoEbuildFound) {
+			continue
+		}
+		scanned[atom] = true
+		divs = append(divs, unclaimedIn(overlayPath, cfgs, atom)...)
+	}
+
+	// Sorted by key, then by class, so the order is total and no map iteration
+	// can reach the output: two runs over an unchanged overlay must produce the
+	// identical prompt, or a maintainer cannot tell a real change from a
+	// reshuffle. Within one directory's unclaimed files the versions are ordered
+	// the way the sweep reports its removals — Gentoo order, oldest first — so
+	// the two lists about the same files never disagree.
+	sort.SliceStable(divs, func(i, j int) bool {
+		a, b := divs[i], divs[j]
+		if a.Key != b.Key {
+			return a.Key < b.Key
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if c := ebuild.CompareVersions(a.Disk, b.Disk); c != 0 {
+			return c < 0
+		}
+		// Two versions the comparison calls equal ("1.0" and "1.0.0") are still
+		// two files; order them by their text so the order stays total.
+		return a.Disk < b.Disk
+	})
+	return divs
+}
+
+// unclaimedIn returns one UnclaimedEbuild per non-live ebuild in atom's package
+// directory that no entry of that atom accounts for.
+//
+// "Accounted for" is the union of both halves of a claim: the version an entry
+// PINS and the version it RESOLVES to. The second half is what keeps the first
+// reconciliation honest — with the registry entirely pinless, claiming by pin
+// alone would report every ebuild in the overlay as unclaimed and bury the ~317
+// pins that actually need writing. An entry that resolves to a file is holding
+// it, pin or no pin.
+//
+// Live -9999 ebuilds are never reported: selection skips them (UB2), so no pin
+// can ever name one, so "no entry claims it" is true of every live ebuild in the
+// overlay and means nothing. Reporting them would put the one file that cannot
+// be restored by re-fetching a release at the top of a removal candidate list.
+//
+// An unreadable directory yields a warning and no divergences at all, never a
+// guess about what is in it.
+func unclaimedIn(overlayPath string, cfgs map[string]PackageConfig, atom string) []Divergence {
+	category, pkgName, ok := splitPkgAtom(atom)
+	if !ok {
+		return nil
+	}
+	// Built from the split components, never from the raw key.
+	pkgDir := filepath.Join(overlayPath, category, pkgName)
+	paths, err := findEbuilds(pkgDir)
+	if err != nil {
+		warnLogf("reconcile: skipping the unclaimed-ebuild scan of %s/%s: %v", category, pkgName, err)
+		return nil
+	}
+
+	// Claims are collected from EVERY entry of the atom, disabled and held
+	// included: R3.5 says a switched-off entry is not a divergence to report,
+	// not that its ebuild belongs to nobody. resolveClaims is the one place that
+	// knows who holds what; re-deriving it here would give the report a second,
+	// drifting answer to that question.
+	claimed := make(map[string]bool)
+	for _, c := range resolveClaims(overlayPath, cfgs, atom) {
+		if c.Pin != "" {
+			claimed[c.Pin] = true
+		}
+		if c.Version != "" {
+			claimed[c.Version] = true
+		}
+	}
+
+	var divs []Divergence
+	for _, p := range paths {
+		name := filepath.Base(p)
+		eb, err := ebuild.ParsePath(filepath.Join(category, pkgName, name))
+		if err != nil {
+			// Not a "<pkg>-<version>.ebuild": selection never picks it and the
+			// sweep never removes it, so calling it unclaimed would report a
+			// file nothing was ever going to act on.
+			continue
+		}
+		if isLiveEbuild(name, eb.Version) || claimed[eb.Version] {
+			continue
+		}
+		divs = append(divs, Divergence{Key: atom, Kind: UnclaimedEbuild, Disk: eb.Version})
+	}
+	return divs
 }
 
 // isLiveEbuild reports whether an ebuild is a live one, i.e. built from VCS HEAD
