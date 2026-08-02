@@ -136,25 +136,25 @@ func hostForError(rawURL string) string {
 
 // sentRequestDeclaresRange reports whether the request that actually reached the
 // wire asked the server for a byte range, which is what makes a 206 answer
-// legitimate (R1.1, R1.2). It reads the request recorded on the response instead
+// legitimate (S020-R1.1, S020-R1.2). It reads the request recorded on the response instead
 // of predicting the wire from the per-package header map, because that map is
 // not what the server sees:
 //
 //   - setHeader (httpclient.go) DROPS any header whose name contains CR or LF,
 //     so a "Range\n" key sends no Range at all. A map-based guess would open the
 //     gate for a header that was never on the wire — the fail-open trap this
-//     predicate closes by construction (R2.3).
+//     predicate closes by construction (S020-R2.3).
 //   - setHeader also applies strings.TrimSpace and
 //     textproto.CanonicalMIMEHeaderKey to the name, so " Range " and "RANGE"
-//     both arrive as the canonical "Range" (R2.1, R2.2).
+//     both arrive as the canonical "Range" (S020-R2.1, S020-R2.2).
 //   - applyHeaders (httpclient.go) additionally contributes c.defaultHeaders,
-//     a source the per-package map never sees at all (R3.1).
+//     a source the per-package map never sees at all (S020-R3.1).
 //
 // Header.Get canonicalises its lookup key too, so casing and padding are already
 // resolved by the time this reads it: one Get answers every spelling, with no
 // normalisation logic here to drift out of step with setHeader's.
 //
-// Absent evidence is not permission (R1.4): a nil response, or one whose Request
+// Absent evidence is not permission (S020-R1.4): a nil response, or one whose Request
 // the transport did not record, reads as "no Range declared", so an unsolicited
 // 206 fails safe on the status error rather than being accepted on a guess.
 func sentRequestDeclaresRange(resp *http.Response) bool {
@@ -219,7 +219,7 @@ type Checker struct {
 	// provider for this run (autoupdate.llm.provider was non-empty), regardless
 	// of whether construction ultimately succeeded. It gates the "unused
 	// llm_prompt" Warn: that diagnostic must fire ONLY when no provider was
-	// configured at all (R5.3). When a provider was configured but failed to
+	// configured at all (S003-R5.3). When a provider was configured but failed to
 	// build, runCheck emits its own failure Warn, so suppressing the construction
 	// Warn here avoids a confusing double-warn. Set via WithLLMProviderConfigured;
 	// defaults false so existing direct callers are unaffected.
@@ -261,7 +261,7 @@ type Checker struct {
 	progressCallback ProgressCallback
 	// cacheTTL, when positive, is passed to the default Cache construction so
 	// the user-configured TTL from ~/.config/bentoo/config.yaml reaches Cache.TTL
-	// (R2.1, R2.2). Set via WithCacheTTL. Zero (the absence sentinel) keeps the
+	// (S002-R2.1, S002-R2.2). Set via WithCacheTTL. Zero (the absence sentinel) keeps the
 	// default 1-hour TTL. It is ignored when a Cache is injected via WithCache,
 	// since that injected Cache carries its own TTL.
 	cacheTTL time.Duration
@@ -311,7 +311,7 @@ func WithLLMClient(llm LLMProvider) CheckerOption {
 // LLM provider for this run (true when autoupdate.llm.provider was non-empty),
 // independent of whether the provider was successfully built and wired via
 // WithLLMClient. It exists to gate the "unused llm_prompt" Warn so that warning
-// fires only when NO provider was configured (R5.3); when a provider was
+// fires only when NO provider was configured (S003-R5.3); when a provider was
 // configured but failed to construct, runCheck logs its own failure Warn and
 // this flag suppresses the duplicate construction Warn. Defaults false, so
 // callers that omit it preserve the pre-refactor warn behaviour.
@@ -446,7 +446,7 @@ func WithProgressCallback(cb ProgressCallback) CheckerOption {
 // WithCacheTTL sets the TTL applied to the default Cache constructed by
 // NewChecker when no Cache is injected via WithCache. It enables
 // `autoupdate.cache_ttl` from ~/.config/bentoo/config.yaml to reach Cache.TTL
-// (R2.1). A non-positive duration is rejected at construction time (R2.2),
+// (S002-R2.1). A non-positive duration is rejected at construction time (S002-R2.2),
 // mirroring WithOpTimeout's validation; the CLI guards the value upstream via
 // AutoupdateConfig.GetCacheTTL, so this is defence-in-depth for direct callers.
 func WithCacheTTL(d time.Duration) CheckerOption {
@@ -491,7 +491,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Initialize cache if not provided. When WithCacheTTL set cacheTTL to a
 	// positive value, thread it through to the underlying Cache via WithTTL so
-	// the user-configured `autoupdate.cache_ttl` is honoured (R2.1). When the
+	// the user-configured `autoupdate.cache_ttl` is honoured (S002-R2.1). When the
 	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
 	if checker.cache == nil {
 		cacheOpts := []CacheOption{}
@@ -548,12 +548,12 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	}
 
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
-	// have a nil rateLimiter: fetchContent unconditionally waits on it (R10.3).
+	// have a nil rateLimiter: fetchContent unconditionally waits on it (S001-R10.3).
 	if checker.rateLimiter == nil {
 		checker.rateLimiter = NewRateLimiter()
 	}
 
-	// R5.3 / R4.2: a non-empty llm_prompt only drives --check when an LLM
+	// S003-R5.3 / S002-R4.2: a non-empty llm_prompt only drives --check when an LLM
 	// provider is wired (llmClient != nil). Warn for each affected package so
 	// users discover an UNUSED llm_prompt before debugging a silent no-op — but
 	// ONLY when no provider was configured for this run (llmProviderConfigured
@@ -1640,12 +1640,12 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 
 // fetchContent fetches content from a URL using the HTTP client with retry logic.
 //
-// It first gates on the per-host rate limiter (R10.1), waiting on the Checker's
+// It first gates on the per-host rate limiter (S001-R10.1), waiting on the Checker's
 // parent context (set via WithContext) so the wait is signal-cancellable but
 // NOT bounded by the per-operation timeout. The host is parsed from the URL and
 // c.rateLimiter.WaitHTTP blocks until a token is available; if the wait is
 // cancelled by the parent context the context error is returned and no HTTP
-// request is made (R10.2). A URL that fails to parse fails open (R10.1): a Warn
+// request is made (S001-R10.2). A URL that fails to parse fails open (S001-R10.1): a Warn
 // line is logged and the fetch proceeds without a rate-limit wait.
 //
 // Only after a token is acquired does the per-operation timeout start: the HTTP
@@ -1666,7 +1666,7 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	// package can wait several limiter intervals, and folding that into
 	// opTimeout made late packages fail with "context deadline exceeded" before
 	// any request was issued. The parent context still carries SIGINT/SIGTERM,
-	// so a cancelled wait aborts without issuing the request (R10.2).
+	// so a cancelled wait aborts without issuing the request (S001-R10.2).
 	//
 	// Fail open on a parse error: an unparseable URL still gets a
 	// (rate-limit-free) attempt rather than silently dropping the fetch.
@@ -1676,7 +1676,7 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	} else if waitErr := c.rateLimiter.WaitHTTP(c.ctx, parsed.Host); waitErr != nil {
 		// The wait did not yield a token. If the parent context is done the wait
 		// was cancelled (parent cancelled or deadline exceeded): return the
-		// context error WITHOUT issuing the HTTP request (R10.2). Prefer the raw
+		// context error WITHOUT issuing the HTTP request (S001-R10.2). Prefer the raw
 		// context error so callers' errors.Is(err, context.Canceled /
 		// .DeadlineExceeded) checks hold regardless of how the limiter wraps it.
 		if ctxErr := c.ctx.Err(); ctxErr != nil {
@@ -1704,11 +1704,11 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	defer resp.Body.Close()
 
 	// 206 counts as success ONLY as the answer to a Range the request that
-	// reached the server actually carried (R1.1, R1.2): a record may ask for a
+	// reached the server actually carried (S020-R1.1, S020-R1.2): a record may ask for a
 	// byte range to read a pattern that lives near the front of a large file, and
 	// the server answers that partial request with 206 rather than 200.
 	// www-misc/warsaw is the motivating case — an 8.2 MB payload whose version
-	// string sits ~590 KB in (UB4).
+	// string sits ~590 KB in (S019-UB4).
 	//
 	// The evidence is the request recorded on resp, NOT the headers map above:
 	// the map is what was asked for, the response carries what was actually sent,
@@ -1719,7 +1719,7 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	//
 	// An UNSOLICITED 206 — one no Range asked for, a protocol violation seen
 	// behind some CDNs and proxies — must fail safe with the status error
-	// instead (R1.3). Its body is a fragment by definition, and a truncated
+	// instead (S020-R1.3). Its body is a fragment by definition, and a truncated
 	// fragment does not look like a failure to the version parser: it looks
 	// like a successful read, so the checker would silently record a stale or
 	// simply wrong version with no error anywhere to show for it.
@@ -1731,7 +1731,7 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 	// readBodyForStatus enumerates the accepted codes rather than admitting the
 	// whole 2xx range (204/205 have no body by definition — see its doc), then
 	// reads the body and translates an http.MaxBytesReader overflow into
-	// ErrResponseTooLarge (R3.1, R3.2, R11.3). The cap is imposed upstream by
+	// ErrResponseTooLarge (S019-R3.1, S019-R3.2, S001-R11.3). The cap is imposed upstream by
 	// GetWithHeadersContext, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
 	content, err := readBodyForStatus(resp, acceptedStatuses...)
