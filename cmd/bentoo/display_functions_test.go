@@ -295,7 +295,7 @@ func TestDisplaySchemaFull(t *testing.T) {
 		Pattern:          `v(\d+\.\d+)`,
 		Selector:         "a.release",
 		XPath:            "//a",
-		Binary:           true,
+		Type:             "bin",
 		FallbackURL:      "https://fallback.com",
 		FallbackParser:   "github",
 		FallbackPattern:  `v(\d+)`,

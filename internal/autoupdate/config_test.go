@@ -40,7 +40,7 @@ func genPackageConfigJSON() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidJSONPath(),
-		gen.Bool(),
+		genPackageType(),
 		gen.Bool(), // has fallback
 		genValidURL(),
 		genValidRegexPattern(),
@@ -51,7 +51,7 @@ func genPackageConfigJSON() gopter.Gen {
 			URL:    values[0].(string),
 			Parser: "json",
 			Path:   values[1].(string),
-			Binary: values[2].(bool),
+			Type:   values[2].(string),
 		}
 		if values[3].(bool) {
 			cfg.FallbackURL = values[4].(string)
@@ -65,18 +65,24 @@ func genPackageConfigJSON() gopter.Gen {
 	})
 }
 
+// genPackageType generates the accepted values of PackageConfig.Type: the two
+// explicit classifiers plus "" (auto-detect from the ebuild).
+func genPackageType() gopter.Gen {
+	return gen.OneConstOf("", "bin", "source")
+}
+
 // genPackageConfigRegex generates valid PackageConfig structs for regex parser
 func genPackageConfigRegex() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidRegexPattern(),
-		gen.Bool(),
+		genPackageType(),
 	).Map(func(values []interface{}) PackageConfig {
 		return PackageConfig{
 			URL:     values[0].(string),
 			Parser:  "regex",
 			Pattern: values[1].(string),
-			Binary:  values[2].(bool),
+			Type:    values[2].(string),
 		}
 	})
 }
@@ -219,11 +225,15 @@ func TestLoadPackagesConfigValid(t *testing.T) {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}
 
+	// The record keeps the retired binary key on purpose: 23 records in the real
+	// registry still carry it, and retiring the struct field behind it must not
+	// stop such a record from loading. type is the classifier actually read.
 	validTOML := `["net-misc/postman-bin"]
 url = "https://www.postman.com/mkapi/release.json"
 parser = "json"
 path = "notes[0].version"
 binary = true
+type = "bin"
 fallback_url = "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=postman-bin"
 fallback_parser = "regex"
 fallback_pattern = 'pkgver=([0-9.]+)'
@@ -257,8 +267,8 @@ path = "tag_name"
 	if postman.Path != "notes[0].version" {
 		t.Errorf("Unexpected path: %s", postman.Path)
 	}
-	if !postman.Binary {
-		t.Error("Expected binary to be true")
+	if postman.Type != "bin" {
+		t.Errorf("Unexpected type: %s", postman.Type)
 	}
 	if postman.FallbackURL != "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=postman-bin" {
 		t.Errorf("Unexpected fallback URL: %s", postman.FallbackURL)
@@ -619,7 +629,7 @@ func genPackageConfigHTML() gopter.Gen {
 		genValidXPath(),        // xpath
 		gen.Bool(),             // has pattern
 		genValidRegexPattern(), // pattern
-		gen.Bool(),             // binary
+		genPackageType(),       // type
 		gen.Bool(),             // has headers
 		genHeaders(),           // headers
 		gen.Bool(),             // has versions_selector
@@ -628,7 +638,7 @@ func genPackageConfigHTML() gopter.Gen {
 		cfg := PackageConfig{
 			URL:    values[0].(string),
 			Parser: "html",
-			Binary: values[6].(bool),
+			Type:   values[6].(string),
 		}
 		if values[1].(bool) {
 			cfg.Selector = values[2].(string)
@@ -656,7 +666,7 @@ func genPackageConfigJSONWithVersionsPath() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidJSONPath(),
-		gen.Bool(),         // binary
+		genPackageType(),   // type
 		gen.Bool(),         // has versions_path
 		genValidJSONPath(), // versions_path
 		gen.Bool(),         // has headers
@@ -666,7 +676,7 @@ func genPackageConfigJSONWithVersionsPath() gopter.Gen {
 			URL:    values[0].(string),
 			Parser: "json",
 			Path:   values[1].(string),
-			Binary: values[2].(bool),
+			Type:   values[2].(string),
 		}
 		if values[3].(bool) {
 			cfg.VersionsPath = values[4].(string)

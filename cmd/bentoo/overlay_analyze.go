@@ -315,8 +315,8 @@ func displaySchema(schema *autoupdate.PackageConfig) {
 	if schema.XPath != "" {
 		schemaMap["xpath"] = schema.XPath
 	}
-	if schema.Binary {
-		schemaMap["binary"] = schema.Binary
+	if schema.Type != "" {
+		schemaMap["type"] = schema.Type
 	}
 	if schema.FallbackURL != "" {
 		schemaMap["fallback_url"] = schema.FallbackURL

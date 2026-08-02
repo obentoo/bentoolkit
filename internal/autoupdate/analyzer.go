@@ -368,6 +368,17 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 			continue
 		}
 
+		// Carry the ebuild-level binary detection already done by
+		// ExtractEbuildMetadata into the suggested record, so a binary package
+		// is suggested (and saved) as type = "bin" (R8.2). Only "bin" is
+		// written: an absent type means "auto-detect from the ebuild", which is
+		// exactly what the checker's resolveType does for a source package, so
+		// pinning type = "source" would add a redundant claim the maintainer
+		// then has to keep true.
+		if meta.IsBinary {
+			schema.Type = "bin"
+		}
+
 		result.SuggestedSchema = schema
 		result.DataSource = &source
 

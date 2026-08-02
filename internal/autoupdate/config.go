@@ -89,8 +89,6 @@ type PackageConfig struct {
 	Path string `toml:"path,omitempty"`
 	// Pattern is the regex pattern with capture group (used with regex parser)
 	Pattern string `toml:"pattern,omitempty"`
-	// Binary indicates if this is a binary package (manifest-only testing)
-	Binary bool `toml:"binary,omitempty"`
 	// Type classifies the package as binary ("bin") or source-built
 	// ("source"). Empty means auto-detect from the ebuild (RESTRICT=bindist,
 	// a -bin suffix, or a binary SRC_URI). Set it only to override/correct the
