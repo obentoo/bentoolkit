@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -2421,5 +2422,326 @@ func TestApplyCleanReportsKeptAndRemoved(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(pkgDir, kept)); err != nil {
 			t.Errorf("%s must survive the sweep: %v", kept, err)
 		}
+	}
+}
+
+// =============================================================================
+// Registry pin on the success path (S021 sub-task 4.2)
+// =============================================================================
+
+// applyPinFixture lays out the shape all three pin tests share: an overlay
+// holding the current ebuild, a registry with the package's record plus an
+// untouched neighbour, and a pending entry for the bump.
+//
+// The registry lives under the SAME t.TempDir() overlay the ebuilds do, because
+// SetPackageVersions resolves <overlay>/.autoupdate/packages.toml itself — a
+// fixture pointed anywhere else would silently test nothing. It is never the
+// real overlay: that one auto-commits and publishes.
+func applyPinFixture(t *testing.T, pkg, oldVersion, pendingNewVersion string) (overlayDir, configDir, registryPath string, pending *PendingList) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	overlayDir = filepath.Join(tmpDir, "overlay")
+	configDir = filepath.Join(tmpDir, "config")
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	registryDir := filepath.Join(overlayDir, ".autoupdate")
+	if err := os.MkdirAll(registryDir, 0o750); err != nil {
+		t.Fatalf("mkdir registry: %v", err)
+	}
+	registryPath = filepath.Join(registryDir, "packages.toml")
+	if err := os.WriteFile(registryPath, []byte(applyPinRegistry), 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	var err error
+	pending, err = NewPendingList(configDir)
+	if err != nil {
+		t.Fatalf("NewPendingList: %v", err)
+	}
+	if err := pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     pendingNewVersion,
+		Status:         StatusPending,
+	}); err != nil {
+		t.Fatalf("pending.Add: %v", err)
+	}
+	return overlayDir, configDir, registryPath, pending
+}
+
+// applyPinRegistry is the fixture registry: the package being applied, with no
+// pin yet (today's state for every entry), and a neighbour that must come out
+// byte-identical so a batch of one is proved not to rewrite the file.
+const applyPinRegistry = `["test-cat/test-pkg"]
+url = "https://example.invalid/releases.json"
+parser = "json"
+path = "version"
+comments = """test-cat/test-pkg: the entry under test."""
+# END
+
+["other-cat/other-pkg"]
+url = "https://example.invalid/other.json"
+parser = "json"
+path = "version"
+# END
+`
+
+// TestApply_SuccessWritesRegistryPin is S021-R2.1: a successful apply records
+// the version it just produced in packages.toml.
+//
+// The assertion is the WHOLE file, not just the pin, because the registry is a
+// hand-maintained, published artifact: a write that got the version right and
+// reflowed a neighbour would still be a regression. The injected writer wraps —
+// rather than replaces — the real SetPackageVersions, so it can additionally
+// witness ORDERING: at the moment of the write the new ebuild must already be on
+// disk and the manifest step must already have run. That is what makes "the
+// registry never claims a file that is not there" (S021-UB4) a tested property
+// instead of a comment.
+func TestApply_SuccessWritesRegistryPin(t *testing.T) {
+	pkg := "test-cat/test-pkg"
+	oldVersion, newVersion := "1.0.0", "2.0.0"
+	overlayDir, configDir, registryPath, pending := applyPinFixture(t, pkg, oldVersion, newVersion)
+
+	var manifestRuns atomic.Int64
+	var (
+		writeCalls        int
+		gotOverlayPath    string
+		gotPins           map[string]string
+		ebuildExistsAtWri bool
+		manifestsAtWrite  int64
+	)
+	newEbuild := filepath.Join(overlayDir, "test-cat", "test-pkg", "test-pkg-"+newVersion+".ebuild")
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(countingManifestSeam(&manifestRuns)),
+		WithApplierSetVersionsFunc(func(overlayPath string, pins map[string]string) error {
+			writeCalls++
+			gotOverlayPath = overlayPath
+			gotPins = pins
+			_, statErr := os.Stat(newEbuild)
+			ebuildExistsAtWri = statErr == nil
+			manifestsAtWrite = manifestRuns.Load()
+			return SetPackageVersions(overlayPath, pins)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("Apply: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("Apply failed: %v", result.Error)
+	}
+	if result.RegistryWarning != "" {
+		t.Errorf("RegistryWarning = %q, want empty on a written pin", result.RegistryWarning)
+	}
+
+	if writeCalls != 1 {
+		t.Fatalf("registry writer called %d time(s), want exactly 1", writeCalls)
+	}
+	if gotOverlayPath != overlayDir {
+		t.Errorf("writer got overlay %q, want %q", gotOverlayPath, overlayDir)
+	}
+	if !reflect.DeepEqual(gotPins, map[string]string{pkg: newVersion}) {
+		t.Errorf("writer got pins %v, want %v", gotPins, map[string]string{pkg: newVersion})
+	}
+	// Ordering (S021-R2.2/UB4): the file first, the claim after.
+	if !ebuildExistsAtWri {
+		t.Errorf("the pin was written while %s did not exist yet — the registry would claim a missing file", newEbuild)
+	}
+	if manifestsAtWrite < 1 {
+		t.Errorf("the pin was written before the manifest step ran (pkgdev invocations at write time: %d)", manifestsAtWrite)
+	}
+
+	got, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	want := `["test-cat/test-pkg"]
+url = "https://example.invalid/releases.json"
+parser = "json"
+path = "version"
+version = "2.0.0"
+comments = """test-cat/test-pkg: the entry under test."""
+# END
+
+["other-cat/other-pkg"]
+url = "https://example.invalid/other.json"
+parser = "json"
+path = "version"
+# END
+`
+	if string(got) != want {
+		t.Errorf("registry after a successful apply:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	// The pin must also survive a reload, since that is how the sweep reads it.
+	cfg, err := LoadPackagesConfig(overlayDir)
+	if err != nil {
+		t.Fatalf("LoadPackagesConfig: %v", err)
+	}
+	if v := cfg.Packages[pkg].Version; v != newVersion {
+		t.Errorf("reloaded pin = %q, want %q", v, newVersion)
+	}
+}
+
+// TestApply_ManifestFailureLeavesRegistryByteIdentical is S021-R2.2: a failed
+// apply writes nothing at all.
+//
+// The failure is put at the manifest step deliberately: that is the LAST thing
+// standing between a copied ebuild and the success point, so it is where a pin
+// written one step too early would already have landed. Two independent
+// assertions cover it — the writer is never invoked, and the file's bytes are
+// unchanged — because the first alone would pass a writer that got called with
+// an empty batch, and the second alone would pass a writer that failed silently.
+//
+// S021-UB5: the deferred orphan rollback still fires, so the half-applied ebuild
+// is gone and the registry, having no pin, claims nothing that is missing.
+func TestApply_ManifestFailureLeavesRegistryByteIdentical(t *testing.T) {
+	pkg := "test-cat/test-pkg"
+	oldVersion, newVersion := "1.0.0", "2.0.0"
+	overlayDir, configDir, registryPath, pending := applyPinFixture(t, pkg, oldVersion, newVersion)
+
+	before, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+
+	writeCalls := 0
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandFailure),
+		WithApplierSetVersionsFunc(func(overlayPath string, pins map[string]string) error {
+			writeCalls++
+			return SetPackageVersions(overlayPath, pins)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr == nil {
+		t.Fatal("Apply reported success although the manifest step failed")
+	}
+	if result.Success {
+		t.Errorf("result.Success = true on a failed apply")
+	}
+	if result.Error == nil {
+		t.Errorf("result.Error = nil on a failed apply")
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("the registry writer ran %d time(s) on a failed apply, want 0 (S021-R2.2)", writeCalls)
+	}
+	after, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("a failed apply changed packages.toml:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+
+	// S021-UB5: the orphan rollback is untouched by this task.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("orphan ebuild survived a failed apply: os.Stat(%q) error = %v, want os.ErrNotExist", dstPath, statErr)
+	}
+}
+
+// TestApply_RegistryWriteFailureWarnsButKeepsSuccess is S021-R2.4: a pin that
+// cannot be written is a bookkeeping miss, not a failed update.
+//
+// The load-bearing assertion is the ebuild still on disk. result.Error is what
+// arms the deferred orphan rollback, so an implementation that reported the
+// write failure through it would DELETE the very ebuild the apply just produced
+// — the update would be undone by its own bookkeeping (S021-UB5).
+//
+// The pending entry carries "v2.0.0" while the ebuild is written as 2.0.0, so
+// the pin handed to the writer also proves S021-UB4: what is recorded is the
+// version that landed on disk, never the upstream string pending.json holds.
+func TestApply_RegistryWriteFailureWarnsButKeepsSuccess(t *testing.T) {
+	pkg := "test-cat/test-pkg"
+	oldVersion, newVersion := "1.0.0", "2.0.0"
+	overlayDir, configDir, registryPath, pending := applyPinFixture(t, pkg, oldVersion, "v"+newVersion)
+
+	before, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+
+	wantErr := errors.New("synthetic registry write failure")
+	var gotPins map[string]string
+	writeCalls := 0
+	logs := captureWarnLogs(t)
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierSetVersionsFunc(func(_ string, pins map[string]string) error {
+			writeCalls++
+			gotPins = pins
+			return wantErr
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr != nil {
+		t.Fatalf("Apply returned an error for a failed pin write: %v", applyErr)
+	}
+	if !result.Success {
+		t.Fatalf("Success = false after a failed pin write (S021-R2.4); result.Error = %v", result.Error)
+	}
+	if result.Error != nil {
+		t.Errorf("result.Error = %v, want nil — a non-nil error here arms the orphan rollback (S021-UB5)", result.Error)
+	}
+	if writeCalls != 1 {
+		t.Errorf("registry writer called %d time(s), want 1", writeCalls)
+	}
+	if !reflect.DeepEqual(gotPins, map[string]string{pkg: newVersion}) {
+		t.Errorf("writer got pins %v, want %v — the pin is the version on disk, not the pending target",
+			gotPins, map[string]string{pkg: newVersion})
+	}
+
+	// The warning must reach both the log sink and the result.
+	if logs.count() == 0 {
+		t.Errorf("no Warn emitted via warnLogf after a failed pin write (S021-R2.4)")
+	}
+	joined := strings.Join(logs.all(), "\n")
+	if !strings.Contains(joined, pkg) || !strings.Contains(joined, wantErr.Error()) {
+		t.Errorf("Warn lines do not carry the package and the cause: %v", logs.all())
+	}
+	if result.RegistryWarning == "" {
+		t.Fatalf("RegistryWarning is empty after a failed pin write (S021-R2.4)")
+	}
+	if !strings.Contains(result.RegistryWarning, newVersion) || !strings.Contains(result.RegistryWarning, wantErr.Error()) {
+		t.Errorf("RegistryWarning = %q, want it to name the version and the cause", result.RegistryWarning)
+	}
+	if result.CleanWarning != "" {
+		t.Errorf("CleanWarning = %q — a registry failure must not be reported as a --clean failure", result.CleanWarning)
+	}
+
+	// S021-UB5: the rollback stayed dormant, so the applied ebuild is still there.
+	dstPath := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(dstPath); statErr != nil {
+		t.Errorf("the applied ebuild was rolled back by a bookkeeping failure: os.Stat(%q) error = %v", dstPath, statErr)
+	}
+
+	// Nothing wrote to the registry: the failing writer is the only writer.
+	after, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("packages.toml changed although the write failed:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
 }

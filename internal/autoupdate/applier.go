@@ -91,6 +91,13 @@ type ApplyResult struct {
 	// CleanWarning records a non-fatal failure of the --clean step (the update
 	// itself still succeeded). Empty on success.
 	CleanWarning string
+	// RegistryWarning records a non-fatal failure to write the applied version
+	// back into packages.toml (S021-R2.4). It is deliberately NOT CleanWarning:
+	// the two report different steps — the pin is written on every successful
+	// apply, the sweep only under --clean — and the CLI prints CleanWarning on a
+	// line labelled "Clean:", so reusing it would blame the wrong step for a
+	// registry failure. Empty when the pin was recorded.
+	RegistryWarning string
 	// Obsolete indicates the pending entry no longer corresponds to anything to
 	// apply: the package was removed from the overlay, or the overlay is already
 	// at/beyond the target version. The entry is pruned from pending.json and
@@ -149,6 +156,12 @@ type Applier struct {
 	// purely for tests that need to simulate a Delete failure (R3.4).
 	// Production callers never supply this option.
 	pendingDeleteFn func(pkg string) error
+	// setVersionsFn is the function Apply invokes to record the version it just
+	// applied in the overlay's registry (S021-R2.1). It defaults to
+	// SetPackageVersions and is overridable via WithApplierSetVersionsFunc
+	// purely for tests that need to force a write failure without a real
+	// registry (S021-R2.4). Production callers never supply this option.
+	setVersionsFn func(overlayPath string, pins map[string]string) error
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
@@ -236,6 +249,19 @@ func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 	return func(a *Applier) {
 		if fn != nil {
 			a.pendingDeleteFn = fn
+		}
+	}
+}
+
+// WithApplierSetVersionsFunc overrides the function Apply invokes to record the
+// applied version in packages.toml after a successful apply (S021-R2.1). The
+// default is SetPackageVersions. This option exists for tests that need to
+// simulate a write failure (S021-R2.4) or to observe the pin without a registry
+// on disk; a nil fn is ignored. Production callers never supply it.
+func WithApplierSetVersionsFunc(fn func(overlayPath string, pins map[string]string) error) ApplierOption {
+	return func(a *Applier) {
+		if fn != nil {
+			a.setVersionsFn = fn
 		}
 	}
 }
@@ -337,6 +363,13 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	// list's Delete method. Bound only after applier.pending is initialised.
 	if applier.pendingDeleteFn == nil {
 		applier.pendingDeleteFn = applier.pending.Delete
+	}
+
+	// Same shape for the registry writer: a nil field means "production path",
+	// so a caller that never passes WithApplierSetVersionsFunc gets the real
+	// raw-text write into <overlay>/.autoupdate/packages.toml (S021-R2.1).
+	if applier.setVersionsFn == nil {
+		applier.setVersionsFn = SetPackageVersions
 	}
 
 	// Ensure logs directory exists
@@ -560,6 +593,29 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	if err := a.pendingDeleteFn(pkg); err != nil {
 		warnLogf("pending: failed to remove %s after successful apply: %v "+
 			"(apply itself succeeded; entry can be cleared manually)", pkg, err)
+	}
+
+	// S021-R2.1: record the version that just landed on disk as the one this
+	// registry entry keeps. Reached only here, past copyEbuild, past the manifest
+	// step and past the compile test, because the registry must never claim a
+	// file that is not there: `--clean` removes every ebuild no entry claims, so
+	// a pin written ahead of the file would aim that rule at the only ebuild
+	// present and a failed update would become a deleted package (S021-R2.2).
+	// The value written is newVersion — what was applied — never the pending
+	// entry's upstream target, which stays pending.json's business alone
+	// (S021-UB4). An overlay with no packages.toml gets a warning here and no
+	// pin, which is the honest report: nothing recorded the version.
+	//
+	// S021-R2.4: a failed write is a bookkeeping miss, exactly like the pending
+	// delete above — warn through the package warnLogf sink (so tests can capture
+	// it), surface it on the result, and leave result.Success true with
+	// result.Error nil. Setting result.Error here would fire the deferred
+	// orphan-rollback and delete the ebuild this apply just created (S021-UB5).
+	if err := a.setVersionsFn(a.overlayPath, map[string]string{pkg: newVersion}); err != nil {
+		warnLogf("registry: failed to record version = %q for %s in packages.toml: %v "+
+			"(the update itself succeeded; the next check's reconciliation can write the pin)",
+			newVersion, pkg, err)
+		result.RegistryWarning = fmt.Sprintf("could not record version = %q for %s: %v", newVersion, pkg, err)
 	}
 
 	// --clean (R4.1): sweep the package directory against the registry's pins so
