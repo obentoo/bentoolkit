@@ -594,7 +594,7 @@ func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url str
 	}
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
-		// memory when a caller reads it (S001-R11.1, AD-12).
+		// memory when a caller reads it (S019-R1.1, AD-12).
 		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	}
 	return resp, nil
