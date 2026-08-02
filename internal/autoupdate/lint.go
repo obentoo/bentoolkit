@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,6 +42,7 @@ const (
 	LintInvalidConfig    = "invalid-config"
 	LintAmbiguousEntries = "ambiguous-entries"
 	LintMissingSeries    = "missing-series"
+	LintUnknownField     = "unknown-field"
 )
 
 // LintIssue is one violation of the packages.toml record model.
@@ -78,7 +80,9 @@ func (i LintIssue) String() string {
 // It reports issues instead of failing on the first one, because the point is to
 // hand back the whole list of what needs fixing. A nil slice means the registry
 // is clean. An error is returned only when the file cannot be read or parsed at
-// all — a TOML syntax error leaves nothing to lint.
+// all — a TOML syntax error leaves nothing to lint. An unknown key is both: it
+// fails the load AND is reported as an issue, so the maintainer reads the same
+// per-record line the other rules produce instead of only a fatal error.
 func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 	data, err := os.ReadFile(configPath)
@@ -96,6 +100,21 @@ func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	// nothing about whether the file loads.
 	cfg, err := LoadPackagesConfig(overlayPath)
 	if err != nil {
+		// An unknown key is a lint finding in its own right, not merely a reason
+		// the file would not load: reported per record it reads like every other
+		// rule and says which of 411 entries to open (R4.1). It stays a returned
+		// error too, because the semantic checks below need a config that could
+		// not be built. No repair is offered — see UnknownKeysError (R4.2).
+		var unknown *UnknownKeysError
+		if errors.As(err, &unknown) {
+			for _, k := range unknown.Keys {
+				issues = append(issues, LintIssue{
+					Package: k.Package,
+					Rule:    LintUnknownField,
+					Message: fmt.Sprintf("unknown key %q: no field claims it; check the spelling — an unknown key is reported, never repaired", k.Key),
+				})
+			}
+		}
 		return issues, err
 	}
 	for _, pkg := range sortedKeys(cfg.Packages) {

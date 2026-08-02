@@ -248,6 +248,58 @@ comments = "x — doc."
 		}
 	})
 
+	t.Run("an unknown key is reported as an issue, not only as a load error", func(t *testing.T) {
+		dir := writeRegistry(t, `["dev-util/x"]
+url = "https://example.com"
+parser = "json"
+path = "version"
+serie = '^1\.'
+comments = "x — doc."
+# END
+`)
+		issues, err := LintPackagesConfig(dir)
+		// The error stays: the config could not be built, so the semantic checks
+		// below it never ran and the caller must not read a short list as clean.
+		if err == nil {
+			t.Fatal("an unknown key did not fail the load")
+		}
+		var found *LintIssue
+		for i := range issues {
+			if issues[i].Rule == LintUnknownField {
+				found = &issues[i]
+			}
+		}
+		if found == nil {
+			t.Fatalf("got %v, want a %s issue", rules(issues), LintUnknownField)
+		}
+		if found.Package != "dev-util/x" {
+			t.Errorf("issue names record %q, want dev-util/x", found.Package)
+		}
+		if !strings.Contains(found.Message, "serie") {
+			t.Errorf("issue message omits the key: %q", found.Message)
+		}
+	})
+
+	t.Run("a retired key is not an unknown field", func(t *testing.T) {
+		// `binary` must reach the linter as a lintable record, not as a dead file:
+		// --lint --fix is the only migration path for the 23 records carrying it.
+		dir := writeRegistry(t, `["net-misc/postman-bin"]
+url = "https://example.com"
+parser = "json"
+path = "version"
+binary = true
+comments = "postman-bin — doc."
+# END
+`)
+		issues, err := LintPackagesConfig(dir)
+		if err != nil {
+			t.Fatalf("a retired key broke the lint: %v", err)
+		}
+		if hasRule(issues, LintUnknownField) {
+			t.Fatalf("retired key reported as unknown: %v", rules(issues))
+		}
+	})
+
 	t.Run("unparseable registry still reports layout issues", func(t *testing.T) {
 		dir := writeRegistry(t, `["dev-util/x"]
 url = "https://example.com

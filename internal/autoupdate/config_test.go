@@ -299,6 +299,133 @@ path = "tag_name"
 	}
 }
 
+// TestLoadPackagesConfigUnknownKey pins strict decoding: a key no struct field
+// claims fails the load and says WHICH record carries it (R4.1).
+//
+// The motivating case is the first subtest. `serie` for `series` parses as
+// perfectly valid TOML, so the old lenient decode dropped it silently and the
+// entry lost its release-line filter — the very silent failure `series` exists
+// to prevent, now reported instead of absorbed.
+//
+// _Requirements: R4, R4.1, R4.2_
+func TestLoadPackagesConfigUnknownKey(t *testing.T) {
+	t.Run("a misspelled field fails the load, naming the record", func(t *testing.T) {
+		dir := writeRegistry(t, `["app-editors/zed-bin"]
+url = "https://example.com"
+parser = "json"
+path = "tag_name"
+serie = '^1\.28\.'
+comments = "zed-bin — doc."
+# END
+`)
+		_, err := LoadPackagesConfig(dir)
+		if err == nil {
+			t.Fatal("a misspelled field loaded silently")
+		}
+		// Both halves matter: the key alone would leave the maintainer grepping
+		// 411 records for it.
+		msg := err.Error()
+		if !strings.Contains(msg, "serie") {
+			t.Errorf("error does not name the key: %q", msg)
+		}
+		if !strings.Contains(msg, "app-editors/zed-bin") {
+			t.Errorf("error does not name the record: %q", msg)
+		}
+
+		var unknown *UnknownKeysError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("want an *UnknownKeysError, got %T", err)
+		}
+		want := []UnknownKey{{Package: "app-editors/zed-bin", Key: "serie"}}
+		if !reflect.DeepEqual(unknown.Keys, want) {
+			t.Errorf("got %v, want %v", unknown.Keys, want)
+		}
+	})
+
+	t.Run("only known keys load", func(t *testing.T) {
+		dir := writeRegistry(t, `["app-editors/zed-bin"]
+url = "https://example.com"
+parser = "json"
+path = "tag_name"
+series = '^1\.28\.'
+select = "max"
+comments = "zed-bin — doc."
+# END
+`)
+		cfg, err := LoadPackagesConfig(dir)
+		if err != nil {
+			t.Fatalf("a registry of known keys was rejected: %v", err)
+		}
+		if got := cfg.Packages["app-editors/zed-bin"].Series; got != `^1\.28\.` {
+			t.Errorf("series = %q, want the declared regex", got)
+		}
+	})
+
+	t.Run("a retired key still loads", func(t *testing.T) {
+		// `binary` has no field since story 022 task 1.1, but 23 records in the
+		// real registry still carry it. Rejecting it would make them unreadable by
+		// --lint --fix, the only thing that can migrate them — so the allowlist
+		// claims the key and the linter, not the loader, reports it.
+		dir := writeRegistry(t, `["net-misc/postman-bin"]
+url = "https://example.com"
+parser = "json"
+path = "notes[0].version"
+binary = true
+comments = "postman-bin — doc."
+# END
+`)
+		if _, err := LoadPackagesConfig(dir); err != nil {
+			t.Fatalf("a retired key failed the load: %v", err)
+		}
+	})
+
+	t.Run("every unknown key is named in one error", func(t *testing.T) {
+		// Failing on the first typo would cost one edit-and-rerun cycle per typo.
+		// The records are deliberately out of alphabetical order in the file, so
+		// the assertion also pins that the message is sorted rather than emitted
+		// in whatever order the file happens to use.
+		dir := writeRegistry(t, `["dev-util/zzz"]
+url = "https://example.com"
+patern = 'v([0-9.]+)'
+comments = "zzz — doc."
+# END
+
+["dev-libs/aaa"]
+url = "https://example.com"
+serie = '^1\.28\.'
+binary = true
+comments = "aaa — doc."
+# END
+`)
+		_, err := LoadPackagesConfig(dir)
+		if err == nil {
+			t.Fatal("two misspelled fields loaded silently")
+		}
+		var unknown *UnknownKeysError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("want an *UnknownKeysError, got %T", err)
+		}
+		want := []UnknownKey{
+			{Package: "dev-libs/aaa", Key: "serie"},
+			{Package: "dev-util/zzz", Key: "patern"},
+		}
+		if !reflect.DeepEqual(unknown.Keys, want) {
+			t.Fatalf("got %v, want both keys, sorted by record: %v", unknown.Keys, want)
+		}
+		msg := err.Error()
+		for _, s := range []string{"dev-libs/aaa", "serie", "dev-util/zzz", "patern"} {
+			if !strings.Contains(msg, s) {
+				t.Errorf("error omits %q: %q", s, msg)
+			}
+		}
+		// The retired key rode along in one of those records and must not be
+		// reported as unknown.
+		if strings.Contains(msg, "binary") {
+			t.Errorf("retired key reported as unknown: %q", msg)
+		}
+	})
+}
+
 // TestValidatePackageConfigMissingURL tests validation with missing URL
 // _Requirements: 1.6_
 func TestValidatePackageConfigMissingURL(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -423,8 +424,121 @@ type PackagesConfig struct {
 // where each [category/package] section is a top-level key
 type packagesConfigFile map[string]PackageConfig
 
+// retiredKeys are registry keys that no longer have a PackageConfig field but
+// still appear in packages.toml files in the wild, mapped to what replaced them.
+// A key listed here does NOT fail the load: --lint reports it and --lint --fix
+// migrates it.
+//
+// It exists because rejecting such a key would deadlock its own migration.
+// LintPackagesConfig loads the very file it is about to repair, so a hard
+// failure on `binary` would leave the 23 records still carrying it unreadable by
+// the only tool that can rewrite them — the strict-decode rule (R4.1) and the
+// migration (R1.2/R1.3) would annul each other. Listing the key makes it
+// *claimed* — by this list rather than by a struct field — and claimed is the
+// only distinction the load cares about.
+//
+// It is emphatically not a general escape hatch. A key in neither the struct nor
+// this list is a typo (`serie` for `series`) and still fails the load, which is
+// the whole point of R4.1. Add an entry only for a field deliberately retired by
+// a migration that --lint --fix can perform, and drop it once the key is gone
+// from the registries it was written for.
+var retiredKeys = map[string]string{
+	"binary": `replaced by type = "bin"`,
+}
+
+// UnknownKey is one packages.toml key that neither a PackageConfig field nor
+// retiredKeys claims.
+type UnknownKey struct {
+	// Package is the record the key sits in — the first element of its key path.
+	// Empty for a key outside every record.
+	Package string
+	// Key is the key path relative to the record ("serie"), dotted when the key
+	// is nested inside an unclaimed sub-table ("metaa.foo").
+	Key string
+}
+
+// String names the key the way both the load error and the linter need it:
+// record first, because the maintainer's next move is to open that one record
+// out of 411.
+func (k UnknownKey) String() string {
+	if k.Package == "" {
+		return fmt.Sprintf("%q (outside any record)", k.Key)
+	}
+	return fmt.Sprintf("[%s] %q", k.Package, k.Key)
+}
+
+// UnknownKeysError is returned by LoadPackagesConfig when packages.toml holds
+// keys that nothing claims (R4.1). It aggregates every one of them instead of
+// failing on the first, so a registry with three typos is corrected in one pass
+// rather than in three round trips.
+//
+// There is deliberately no repair (R4.2): a wrong name may be a misspelling of a
+// real field or a concept that does not exist, and a guess would silently write
+// a value into a field the maintainer never meant.
+type UnknownKeysError struct {
+	// Keys are the offending keys, ordered by record then key.
+	Keys []UnknownKey
+}
+
+func (e *UnknownKeysError) Error() string {
+	parts := make([]string, 0, len(e.Keys))
+	for _, k := range e.Keys {
+		parts = append(parts, k.String())
+	}
+	return fmt.Sprintf("packages.toml: %d unknown key(s): %s; no field claims them — fix the spelling by hand, an unknown key is never repaired automatically",
+		len(e.Keys), strings.Join(parts, ", "))
+}
+
+// unknownRegistryKeys reduces the decoder's undecoded-key list to the keys that
+// must fail the load, dropping the retired ones.
+//
+// The record comes from the key path's FIRST element rather than from position
+// information, because there is none: toml.Key is a []string and Undecoded
+// carries no line number. Key.String() cannot name the record either — it
+// renders a package key needing TOML quoting as `"net-misc/postman-bin".serie`,
+// quotes included, which is not the string a maintainer greps the file for.
+func unknownRegistryKeys(undecoded []toml.Key) []UnknownKey {
+	keys := make([]UnknownKey, 0, len(undecoded))
+	for _, k := range undecoded {
+		if len(k) == 0 {
+			continue
+		}
+		var pkg, field string
+		if len(k) == 1 {
+			// A key outside every record. The flat map modelling the file claims
+			// every top-level key, so this branch is defensive rather than
+			// reachable by an ordinary registry.
+			field = k[0]
+		} else {
+			pkg, field = k[0], strings.Join(k[1:], ".")
+		}
+		if _, retired := retiredKeys[field]; retired {
+			continue
+		}
+		keys = append(keys, UnknownKey{Package: pkg, Key: field})
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Undecoded() yields document order; sorting by record makes the message
+	// independent of where in the file the typos happen to sit, so the same
+	// registry always produces the same error text.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Package != keys[j].Package {
+			return keys[i].Package < keys[j].Package
+		}
+		return keys[i].Key < keys[j].Key
+	})
+	return keys
+}
+
 // LoadPackagesConfig loads and parses packages.toml from the overlay.
 // The configuration file is expected at overlay/.autoupdate/packages.toml
+//
+// Decoding is strict: a key no struct field claims fails the load, naming the
+// record and the key (R4.1). Writing `serie` instead of `series` would otherwise
+// disable the release-line filter in silence — the exact failure `series` exists
+// to prevent. The only exemption is retiredKeys; see there for why.
 func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 
@@ -439,10 +553,17 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
 
-	// Parse TOML into the internal structure
+	// Parse TOML into the internal structure. Decode rather than Unmarshal purely
+	// for the MetaData that drives the strict check below: Unmarshal IS this call
+	// with the MetaData discarded, so a syntax error still surfaces here with the
+	// same message it always had.
 	var fileConfig packagesConfigFile
-	if err := toml.Unmarshal(data, &fileConfig); err != nil {
+	md, err := toml.Decode(string(data), &fileConfig)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse packages.toml: %w", err)
+	}
+	if unknown := unknownRegistryKeys(md.Undecoded()); len(unknown) > 0 {
+		return nil, &UnknownKeysError{Keys: unknown}
 	}
 
 	// Convert to PackagesConfig
