@@ -154,8 +154,12 @@ type sweepPlan struct {
 //     entry's current version. Here selection has already ignored them, which is
 //     precisely why no pin can ever claim one, which is precisely why they need
 //     a preservation rule of their own or the sweep would delete every one.
-//  4. R4.1 — every pinned version present on disk is kept, recorded against the
-//     entry that pins it; everything else non-live is removed.
+//  4. R4.1 — every version a claiming entry HOLDS and that is present on disk is
+//     kept, recorded against the entry holding it; everything else non-live is
+//     removed. "Holds" is the union of both halves of a claim — the version the
+//     entry PINS and the version it RESOLVES to — exactly as unclaimedIn
+//     computes it. See "Why the resolved half" below: that half is what stops a
+//     batch apply deleting the release line it created seconds earlier.
 //  5. R4.3 — if that would leave the directory with no non-live ebuild at all,
 //     the highest one is dropped from the removal list and kept instead. A
 //     directory emptied of releases is unrecoverable from the overlay alone; a
@@ -167,13 +171,42 @@ type sweepPlan struct {
 // looser second one.
 //
 // A pin naming a version that is not on disk keeps nothing and is not reported
-// as kept — the report must not claim a file that is not there. That drift
-// (registry says 2.0.0, overlay has 1.0.0) is what rule 5 then catches, and what
+// as kept — the report must not claim a file that is not there. What happens to
+// the directory then depends on what the entry still resolves to: some OTHER
+// ebuild, which rule 4's resolved half keeps in that entry's name, or nothing at
+// all, in which case rule 5 is the only thing between the directory and being
+// emptied. Either way the drift (registry says 2.0.0, overlay has 1.0.0) is what
 // a later reconciliation is meant to repair.
 //
 // An unreadable — or absent — package directory is an error, never an empty
 // plan: an empty plan reads as "nothing to keep", which is one caller away from
 // "remove everything".
+//
+// # Why the resolved half
+//
+// An entry that resolves to a file is holding it, pin or no pin. That is this
+// package's stated rule — unclaimedIn says so in as many words and takes the
+// same union — and rule 4 is the one place that used to ignore it, which is
+// exactly the place that deletes files.
+//
+// `--apply all --clean` builds ONE Applier whose registry snapshot is taken at
+// construction and never reloaded, and cleanPackageDir freshens the pin of the
+// entry being applied ONLY (sweepConfigs). So while @dev is being applied, its
+// @stable sibling is planned against the pin the run STARTED with — which the
+// @stable apply, moments earlier in the same command, has already made stale.
+// Claiming by pin alone, that sibling's brand-new ebuild is held by nobody and
+// goes straight into Remove: UB3 broken, Success still true, no CleanWarning
+// printed, and the registry left pinning a file that no longer exists. Reverse
+// the order and it is the dev line that dies instead; either order loses one.
+// The identical drift is reachable without a batch — R4.4 deliberately tolerates
+// a failed pin write, and any out-of-band bump (a hand edit, pkgdev, a `git
+// pull` of the overlay from another machine) leaves the same stale pin behind.
+//
+// So the keep-set is deliberately wider than R4.1 read literally, in the same
+// direction and for the same reason rule 2 is: keeping one ebuild too many costs
+// a directory that stays dirty one more run, keeping one too few costs a
+// maintained release line — and 90 directories in the overlay have one to lose.
+// Do not "simplify" it back to the pin alone.
 func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (sweepPlan, error) {
 	category, pkgName, ok := splitPkgAtom(atom)
 	if !ok {
@@ -191,20 +224,39 @@ func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (
 
 	plan := sweepPlan{Keep: make(map[string]string)}
 
-	// Rule 1: collect the pins and the first entry that has none.
+	// Rule 1: collect what each entry holds, and the first entry that can say
+	// nothing about what it holds.
 	claims := resolveClaims(overlayPath, cfgs, atom)
-	pinnedBy := make(map[string]string)
+	// heldBy maps a version to the entry holding it — by pin OR by resolution,
+	// see rule 4. It is deliberately NOT named pinnedBy: the pin is only half of
+	// what an entry holds, and treating it as the whole is the bug that deleted
+	// the sibling release line a batch apply had just created.
+	heldBy := make(map[string]string)
+	// Claims arrive in key order, so first-writer-wins below is stable across
+	// runs rather than a map-iteration coin flip.
 	for _, c := range claims {
 		if c.Pin == "" {
 			if plan.Blocked == "" {
 				plan.Blocked = c.Key
 			}
+			// R5.1/D3: a pinless entry blocks the whole directory, so its
+			// resolved version is not collected either. Nothing is at risk —
+			// a blocked plan removes nothing — and collecting it would only
+			// shrink the candidate list the block is required to REPORT.
 			continue
 		}
-		if _, dup := pinnedBy[c.Pin]; !dup {
-			// Two entries pinning one version is pathological config; the first
+		if _, dup := heldBy[c.Pin]; !dup {
+			// Two entries holding one version is pathological config; the first
 			// in key order owns the report line, and both keep the ebuild.
-			pinnedBy[c.Pin] = c.Key
+			heldBy[c.Pin] = c.Key
+		}
+		// The resolved half. Equal to the pin in the steady state, and different
+		// exactly when the registry has drifted from the overlay — which is when
+		// this file is one plan away from being deleted.
+		if c.Version != "" {
+			if _, dup := heldBy[c.Version]; !dup {
+				heldBy[c.Version] = c.Key
+			}
 		}
 	}
 
@@ -230,12 +282,12 @@ func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (
 	// Keep would be a claim the report cannot attribute to anyone.
 	if len(claims) > 0 {
 		for _, v := range nonLive {
-			if key, pinned := pinnedBy[v]; pinned {
+			if key, held := heldBy[v]; held {
 				plan.Keep[v] = key
 			}
 		}
 		for _, v := range live {
-			if key, pinned := pinnedBy[v]; pinned {
+			if key, held := heldBy[v]; held {
 				plan.Keep[v] = key // an entry pinning a live version still owns the line
 				continue
 			}
@@ -402,7 +454,7 @@ type Divergence struct {
 //
 // The pin is compared to the resolved version as an exact string, not through
 // ebuild.CompareVersions, because an exact string is what the sweep matches on
-// (planSweep's pinnedBy map). A pin the sweep cannot match keeps no file, so
+// (planSweep's heldBy map). A pin the sweep cannot match keeps no file, so
 // declaring it "not stale" because it compares equal would leave the registry
 // pinning a version that does not protect its ebuild.
 //

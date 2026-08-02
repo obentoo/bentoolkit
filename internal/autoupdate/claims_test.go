@@ -223,6 +223,56 @@ func TestPlanSweep(t *testing.T) {
 			wantRemove: nil,
 		},
 		{
+			// (b2) THE BATCH REGRESSION — case (b) with one detail changed, and
+			// that detail used to delete the stable release line.
+			//
+			// Everything in (b) has each sibling pinned to exactly what is on
+			// disk. Here @stable's pin is one release behind, which is not an
+			// exotic misconfiguration: it is the state `--apply all --clean`
+			// produces by itself. That command builds ONE Applier, snapshots the
+			// registry at construction and never reloads it, and cleanPackageDir
+			// freshens the pin of the entry being applied ONLY (sweepConfigs).
+			// So on a release day where both GStreamer lines move — routine:
+			//
+			//	apply @stable 1.28.4 -> 1.28.5 --clean   removes 1.28.4   fine
+			//	apply @dev    1.29.2 -> 1.29.3 --clean   plans @stable against
+			//	                                         the snapshot's 1.28.4
+			//
+			// Claiming by pin alone, the 1.28.5 built seconds earlier is held by
+			// nobody and goes into Remove — Success still true, no CleanWarning,
+			// and the registry left pinning a file that no longer exists. The
+			// floor cannot catch it: two other ebuilds survive, so it never
+			// fires. What holds 1.28.5 is that @stable RESOLVES to it, which is
+			// this package's rule everywhere else (unclaimedIn) and now here.
+			//
+			// Reversing the apply order loses the dev line instead. Either order
+			// destroys one, in any of the 90 two-entry directories.
+			//
+			// The sweep must still do its job: 1.29.2, the release @dev really
+			// did supersede, is removed.
+			name: "b2: a sibling's stale pin does not license deleting the ebuild the batch just applied",
+			atom: "media-plugins/gst-plugins-vpx",
+			ebuilds: []sweepEbuild{
+				{version: "1.28.5"}, // built by the @stable apply moments ago
+				{version: "1.29.2"}, // the release @dev is superseding
+				{version: "1.29.3"}, // built by the @dev apply now running
+			},
+			cfgs: map[string]PackageConfig{
+				// The pre-run pin, now stale: 1.28.4 was deleted by @stable's
+				// own clean earlier in this very command.
+				"media-plugins/gst-plugins-vpx@stable": regEntry("1.28.4", gstStableSeries),
+				// Fresh, the way sweepConfigs overlays the entry being applied.
+				"media-plugins/gst-plugins-vpx@dev": regEntry("1.29.3", gstDevSeries),
+			},
+			wantKeep: map[string]string{
+				// Attributed to the entry that holds it by RESOLUTION rather
+				// than by pin — the report can still name who holds it.
+				"1.28.5": "media-plugins/gst-plugins-vpx@stable",
+				"1.29.3": "media-plugins/gst-plugins-vpx@dev",
+			},
+			wantRemove: []string{"1.29.2"},
+		},
+		{
 			// (c) The other half of UB3, and R5.2: two SLOTs out of one
 			// directory, told apart only by the SLOT= line inside each file.
 			name: "c: two entries by :slot, both pinned, nothing is removed",
@@ -240,6 +290,37 @@ func TestPlanSweep(t *testing.T) {
 				"2.52.5-r601": "net-libs/webkit-gtk:6",
 			},
 			wantRemove: nil,
+		},
+		{
+			// (c2) The same batch drift as (b2), across a ":slot" boundary
+			// instead of a series one — and this is the shape where nothing
+			// else can save the file.
+			//
+			// The R4.3 floor is per-DIRECTORY, not per-slot or per-line. Here
+			// the 6 slot keeps an ebuild of its own, so the directory never
+			// comes close to empty and the floor never fires; there is nothing
+			// at all between :4.1's ONLY ebuild and deletion. Claiming by pin
+			// alone, Remove would be [2.52.4-r601, 2.52.5-r411] and the 4.1 slot
+			// would disappear from the overlay entirely.
+			//
+			// The batch: :4.1 was bumped first, so its pin is still the pre-run
+			// -r411 revision, and :6 is the entry being applied now.
+			name: "c2: a stale :slot pin does not license deleting the sibling slot's only ebuild",
+			atom: "net-libs/webkit-gtk",
+			ebuilds: []sweepEbuild{
+				{version: "2.52.5-r411", slot: "4.1/0"}, // built by the :4.1 apply moments ago
+				{version: "2.52.4-r601", slot: "6/0"},   // the revision :6 is superseding
+				{version: "2.52.5-r601", slot: "6/0"},   // built by the :6 apply now running
+			},
+			cfgs: map[string]PackageConfig{
+				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""), // pre-run, stale
+				"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""), // fresh
+			},
+			wantKeep: map[string]string{
+				"2.52.5-r411": "net-libs/webkit-gtk:4.1", // held by resolution, not by pin
+				"2.52.5-r601": "net-libs/webkit-gtk:6",
+			},
+			wantRemove: []string{"2.52.4-r601"},
 		},
 		{
 			// (d) R5.1/D3: one entry cannot say what it holds, so the whole
@@ -301,11 +382,39 @@ func TestPlanSweep(t *testing.T) {
 		{
 			// (f) R4.3: the pin says 2.0.0, the overlay has only 1.0.0. Honour
 			// the pin literally and the directory ends up with no ebuild at all.
-			name:       "f: the last non-live ebuild is never removed, whatever the pin says",
-			atom:       "app-misc/hello",
-			ebuilds:    []sweepEbuild{{version: "1.0.0"}},
-			cfgs:       map[string]PackageConfig{"app-misc/hello": regEntry("2.0.0", "")},
-			wantKeep:   map[string]string{"1.0.0": ""}, // kept by the floor, not by a claim
+			name:    "f: the last non-live ebuild is never removed, whatever the pin says",
+			atom:    "app-misc/hello",
+			ebuilds: []sweepEbuild{{version: "1.0.0"}},
+			cfgs:    map[string]PackageConfig{"app-misc/hello": regEntry("2.0.0", "")},
+			// The entry pins a version that is not there but RESOLVES to 1.0.0,
+			// so rule 4's resolved half keeps it and the report can name who
+			// holds it — strictly more informative than the anonymous keep the
+			// floor would have produced. The floor is the backstop underneath:
+			// it catches the same directory when the entry resolves to nothing
+			// at all (see f2), and Remove is nil either way.
+			wantKeep:   map[string]string{"1.0.0": "app-misc/hello"},
+			wantRemove: nil,
+		},
+		{
+			// (f2) R4.3 with nothing else underneath it — the case (f) used to
+			// be, and stopped being once an entry could hold an ebuild by
+			// resolving to it. The @dev entry pins a dev release the overlay
+			// does not have and its `series` matches nothing there either, so it
+			// resolves to NOTHING: no pin holds a file, no resolution holds a
+			// file, and every ebuild in the directory is a removal candidate.
+			// The floor is the only thing left, and what it keeps is anonymous
+			// (kept by a rule, not by an entry) — which is exactly the
+			// distinction sweepPlan.Keep's empty value exists to record.
+			//
+			// Real shape: an @dev entry registered before the first dev bump, or
+			// left behind after the dev ebuild was dropped.
+			name:    "f2: the floor still keeps the last ebuild when the entry resolves to nothing at all",
+			atom:    "media-plugins/gst-plugins-vpx",
+			ebuilds: []sweepEbuild{{version: "1.28.5"}},
+			cfgs: map[string]PackageConfig{
+				"media-plugins/gst-plugins-vpx@dev": regEntry("1.29.2", gstDevSeries),
+			},
+			wantKeep:   map[string]string{"1.28.5": ""},
 			wantRemove: nil,
 		},
 		{
