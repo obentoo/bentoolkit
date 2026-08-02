@@ -1785,6 +1785,10 @@ func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
 // command is pointed at it. The package directory keeps mode 0755 so the
 // rollback os.Remove of the orphan ebuild still succeeds.
 func TestApply_RollbackOnManifestWriteFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not stop the manifest write, so it cannot fail")
+	}
+
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
