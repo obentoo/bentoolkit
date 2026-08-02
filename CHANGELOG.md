@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`version` in `packages.toml`: a record now says which ebuild it keeps, and
+  `--clean` sweeps the rest.** `--clean` used to remove exactly one file — the
+  ebuild it had just bumped from — so every other stale version stayed. The
+  registry could not help decide what was left over, because it stored no
+  version at all: which ebuild belonged to which entry was resolved at run time
+  from `series` and the key's `:slot` suffix, and never written down. The new
+  `version` field records that answer, and the sweep becomes "keep what the
+  registry claims, remove what it does not". Measured on a 410-record overlay:
+  94 directories hold more than one non-live ebuild and 90 of them are
+  deliberate — one entry per release line or per slot — so a "keep only the
+  highest" sweep would have destroyed all 90. This one removes exactly the four
+  directories that really hold residue.
+
+  The pin is written by the **apply**, after the ebuild lands on disk, never by
+  the check from the upstream target. Writing an unbuilt version would point the
+  registry at a file that does not exist, and the rule "remove what the registry
+  does not claim" would then delete the only ebuild there is — a failed update
+  would become a deleted package.
+
+  Nothing is removed when the answer is unknown: if any entry sharing the
+  directory declares no `version`, the sweep reports what it would have removed
+  and touches nothing. Live `-9999` ebuilds are always kept, and the last
+  non-live ebuild of a directory is never removed whatever the pins say.
+
+- **`--check` reconciles the registry against the overlay, behind one
+  confirmation.** After a check, divergences are reported in three classes —
+  a stale pin, an ebuild no entry keeps, an entry whose directory holds none —
+  and a single prompt writes the whole batch. `--yes` (`-y`) approves without
+  prompting and is **required** for a non-interactive run: without it, a piped
+  or scripted check reports the divergences and writes nothing. `packages.toml`
+  is a published artifact, so an unattended write would reach `origin` within
+  minutes. Only stale pins are written; the other two classes are reported and
+  left for a human.
+
+### Fixed
+- **`--apply all --clean` no longer deletes a release line it just built.** The
+  sweep decided what to keep from the pin alone, while the reconciliation
+  already treated an entry as holding whatever it resolves to on disk. Because
+  `--apply all` builds one applier whose registry snapshot is never reloaded,
+  applying both lines of a two-entry package in one command planned the second
+  against the pin the run started with — which the first apply had already made
+  stale. The ebuild built seconds earlier was held by nobody and was removed,
+  with the apply still reporting success and the registry left pinning a file
+  that no longer existed. Both halves of a claim now count.
+
 ## [0.17.1] - 2026-08-01
 
 ### Fixed
