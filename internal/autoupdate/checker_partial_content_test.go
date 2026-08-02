@@ -86,16 +86,18 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 // TestFetchContent_RangeGated206 locks the corrected 206 gating and the memory
 // cap on the checker's headers/Range path (B1, B2, R2.1-R2.3, R5.1-R5.3, UB4).
 //
-// A 206 is a valid success ONLY as the answer to a Range the checker actually
-// declared — matched case-insensitively over the user-supplied headers map. An
+// A 206 is a valid success ONLY as the answer to a Range the request actually
+// carried to the server. Casing and padding are irrelevant here: setHeader
+// canonicalises the name before it reaches the wire and Header.Get canonicalises
+// the lookup, so the gate never inspects the caller's headers map. An
 // unsolicited 206 (no Range) must fail safe with the status error, and a server
 // that ignores Range and streams past httputil.MaxBodyBytes must trip
 // ErrResponseTooLarge now that GetWithHeadersContext caps the body.
 //
-// RED (pre-fix): checker.go accepts 206 unconditionally, so "206 without a
-// Range is rejected" fails; GetWithHeadersContext is uncapped, so "server
-// ignores Range and streams over the cap" fails. The two accepted-206 cases
-// pass today and pin UB4 / R2.1 / R2.3 against regression.
+// RED (before story 019): checker.go accepted 206 unconditionally, so "206
+// without a Range is rejected" failed; GetWithHeadersContext was uncapped, so
+// "server ignores Range and streams over the cap" failed. The two accepted-206
+// cases passed already and pin UB4 / R2.1 / R2.3 against regression.
 func TestFetchContent_RangeGated206(t *testing.T) {
 	const body = `{"version":"1.2.3"}`
 	// 11 MiB, one byte over the 10 MiB cap.
