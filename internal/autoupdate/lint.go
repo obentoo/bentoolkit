@@ -590,8 +590,8 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 	effective := make([]orderedField, 0, len(rec.fields))
 
 	for _, f := range rec.fields {
-		switch {
-		case f.key == "binary":
+		switch f.key {
+		case "binary":
 			// The classifier is `type`. Which repair applies depends on whether
 			// the record already declares one — carried in Fix, not in the prose.
 			if on, isBool := tomlBoolValue(f.value); isBool && on && !hasType {
@@ -616,7 +616,7 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 				Message: fmt.Sprintf("binary is retired: %s, so the line is deleted", detail),
 			})
 
-		case f.key == "enabled":
+		case "enabled":
 			// Only `true` is redundant. `enabled = false` is the bookkeeping that
 			// keeps an orphaned entry out of the run and must survive untouched.
 			if on, isBool := tomlBoolValue(f.value); isBool && on {
