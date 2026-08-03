@@ -118,7 +118,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
-	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model (# END marker, comments field, no floating comments, undeclared release lines)")
+	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve the post-check registry reconciliation without prompting; REQUIRED for a non-interactive registry write (without it, a piped or scripted --check reports the divergences and writes nothing)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
