@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -248,7 +247,7 @@ func displayAnalyzeResult(result *autoupdate.AnalyzeResult) {
 	output.Header.Println("Suggested Schema")
 	fmt.Println()
 
-	displaySchema(result.SuggestedSchema)
+	displaySchema(result.Package, result.SuggestedSchema)
 
 	// Display validation status
 	fmt.Println()
@@ -296,61 +295,65 @@ func displayBatchResults(results []autoupdate.AnalyzeResult) {
 	output.Info.Printf("Summary: %d successful, %d failed, %d skipped\n", successful, failed, skipped)
 }
 
-// displaySchema formats and displays a PackageConfig schema
-func displaySchema(schema *autoupdate.PackageConfig) {
-	// Build TOML representation
-	schemaMap := make(map[string]interface{})
-	schemaMap["url"] = schema.URL
-	schemaMap["parser"] = schema.Parser
-
-	if schema.Path != "" {
-		schemaMap["path"] = schema.Path
-	}
-	if schema.Pattern != "" {
-		schemaMap["pattern"] = schema.Pattern
-	}
-	if schema.Selector != "" {
-		schemaMap["selector"] = schema.Selector
-	}
-	if schema.XPath != "" {
-		schemaMap["xpath"] = schema.XPath
-	}
-	if schema.Type != "" {
-		schemaMap["type"] = schema.Type
-	}
-	if schema.FallbackURL != "" {
-		schemaMap["fallback_url"] = schema.FallbackURL
-	}
-	if schema.FallbackParser != "" {
-		schemaMap["fallback_parser"] = schema.FallbackParser
-	}
-	if schema.FallbackPattern != "" {
-		schemaMap["fallback_pattern"] = schema.FallbackPattern
-	}
-	if schema.LLMPrompt != "" {
-		schemaMap["llm_prompt"] = schema.LLMPrompt
-	}
-	if len(schema.Headers) > 0 {
-		schemaMap["headers"] = schema.Headers
-	}
-	if schema.VersionsPath != "" {
-		schemaMap["versions_path"] = schema.VersionsPath
-	}
-	if schema.VersionsSelector != "" {
-		schemaMap["versions_selector"] = schema.VersionsSelector
+// displaySchema prints the record `overlay analyze` suggests for a package, in
+// the shape packages.toml expects: the fields in canonical order, a comments
+// field, and the `# END` marker that closes a record (R8.1, R8.2).
+//
+// It renders through autoupdate.RenderRecord — the same function that writes the
+// registry — instead of assembling a map and handing it to the TOML encoder. The
+// map could not carry the order (Go map iteration is unordered, and the encoder
+// sorted what it got), and each field needed its own `if` here, so a field added
+// to PackageConfig was simply never suggested. Sharing the renderer means the
+// printed record is what --save would write, and passes the linter the
+// maintainer runs next.
+//
+// It is printed flush against the left margin, unlike the rest of the result
+// block, because the whole value of this output is that it can be pasted into
+// packages.toml verbatim: an indent would be carried into the doc field's own
+// text and onto the `# END` line.
+func displaySchema(pkg string, schema *autoupdate.PackageConfig) {
+	if schema == nil {
+		return
 	}
 
-	// Encode to TOML
-	var buf strings.Builder
-	encoder := toml.NewEncoder(&buf)
-	encoder.Encode(schemaMap) //nolint:errcheck // stdout encode error is not actionable
+	// Seeded on a COPY: the same pointer is handed to SaveSchema next, and the
+	// registry must record what the analyzer detected, not a placeholder written
+	// for a reader.
+	record := *schema
+	if record.Comments == "" {
+		record.Comments = suggestedComments(pkg, schema)
+	}
 
-	// Print with indentation
-	for _, line := range strings.Split(buf.String(), "\n") {
-		if line != "" {
-			fmt.Printf("  %s\n", line)
+	fmt.Print(autoupdate.RenderRecord(pkg, &record))
+}
+
+// suggestedComments seeds the doc field of a suggested record: the package name
+// the record model requires as its first word, the source the analyzer actually
+// chose, and one line telling the maintainer what is still missing.
+//
+// It states only what was detected — the URL and the parser — and invents
+// nothing else. The record model asks the doc field for WHY this source and
+// parser, and that answer is not the analyzer's to give: it belongs to whoever
+// pastes the record, which is why the second line asks for it in those words
+// rather than filling the space with prose that reads like documentation and is
+// not.
+func suggestedComments(pkg string, schema *autoupdate.PackageConfig) string {
+	source := schema.URL
+	if schema.Parser != "" {
+		if source == "" {
+			source = "the " + schema.Parser + " parser"
+		} else {
+			source += " via the " + schema.Parser + " parser"
 		}
 	}
+
+	first := pkg
+	if source != "" {
+		first += " — " + source + "."
+	}
+
+	return first + "\nSuggested by `bentoo overlay analyze`: replace this line with WHY this source and\n" +
+		"parser, plus every caveat a future bump must know."
 }
 
 // confirmAction prompts the user for confirmation

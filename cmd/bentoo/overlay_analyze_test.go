@@ -122,7 +122,7 @@ func TestAnalyzeSuggestedSchemaClassifiesWithType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := captureStdout(t, func() { displaySchema(tt.schema) })
+			out := captureStdout(t, func() { displaySchema("dev-util/example", tt.schema) })
 
 			if got := strings.Contains(out, `type = "bin"`); got != tt.wantTypeIn {
 				t.Errorf("type = \"bin\" present = %v, want %v; record was:\n%s", got, tt.wantTypeIn, out)
