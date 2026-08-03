@@ -10,6 +10,7 @@ import (
 	"net/textproto"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -406,7 +407,7 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 	}
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
-		// memory when a caller reads it (R11.1, AD-12).
+		// memory when a caller reads it (S001-R11.1, AD-12).
 		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	}
 	return resp, nil
@@ -415,7 +416,7 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 // classifyBodyReadError maps an error returned while reading an HTTP response
 // body to a domain error. When the read tripped an http.MaxBytesReader cap the
 // standard library yields an *http.MaxBytesError; this is translated into an
-// error wrapping ErrResponseTooLarge (R11.3). Any other non-nil error is
+// error wrapping ErrResponseTooLarge (S001-R11.3). Any other non-nil error is
 // returned unchanged, and a nil error yields nil.
 func classifyBodyReadError(err error) error {
 	if err == nil {
@@ -426,6 +427,39 @@ func classifyBodyReadError(err error) error {
 		return fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
 	}
 	return err
+}
+
+// readBodyForStatus validates an HTTP response status against the accepted set
+// supplied by the caller and, when the status is accepted, reads the body in
+// full and classifies an overflow (S019-R3.1). A status outside the set yields
+// "HTTP request returned status %d" without touching the body.
+//
+// The accepted statuses are the caller's to choose (S019-R3.2):
+// Checker.fetchContent passes http.StatusOK plus http.StatusPartialContent when
+// the request that was actually sent carried a Range header (the
+// sentRequestDeclaresRange predicate in checker.go, which reads the request
+// recorded on the response rather than the record's declared header map),
+// Analyzer.fetchContentFromURL passes http.StatusOK alone. Both list codes
+// explicitly rather than accepting the whole 2xx range, since 204 and 205 have
+// an empty body by definition.
+//
+// This helper imposes no cap of its own: the GET helpers already wrap the body
+// in an http.MaxBytesReader bounded by httputil.MaxBodyBytes, so the bound has a
+// single source. A read that trips that cap is translated into an error wrapping
+// ErrResponseTooLarge via classifyBodyReadError (S001-R11.3). The LLM path keeps
+// its own per-client, raisable cap (readCappedBody in llm.go) and deliberately
+// does not route through here (S019-R3.3, S019-UB3).
+func readBodyForStatus(resp *http.Response, accepted ...int) ([]byte, error) {
+	if !slices.Contains(accepted, resp.StatusCode) {
+		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
+	}
+
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", classifyBodyReadError(err))
+	}
+
+	return content, nil
 }
 
 // calculateDelay calculates the delay for a given retry attempt.
@@ -522,14 +556,29 @@ func (c *RetryableHTTPClient) GetDefaultHeaders() map[string]string {
 // Callers that need cancellation should use GetWithHeadersContext directly.
 func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]string) (*http.Response, error) {
 	// This convenience wrapper is intentionally non-cancellable; the Checker and
-	// Analyzer context spine (R3) uses GetWithContext / GetWithHeadersContext,
-	// which context-aware callers must use instead.
+	// Analyzer context spine (S001-R3) uses GetWithContext /
+	// GetWithHeadersContext, which context-aware callers must use instead.
+	//
+	// The trailing "(R3)" on the return statement below is deliberately left
+	// bare rather than qualified as S001-R3: that line carries the annotation
+	// the audit-ctx Makefile target greps for to whitelist this deliberate
+	// non-cancellable call, and it is kept byte-identical so the audit keeps
+	// matching it (S020-UB5). The asymmetry with the line above is intentional;
+	// do not "fix" it.
 	return c.GetWithHeadersContext(context.Background(), url, headers) // SAFE: non-cancellable convenience wrapper (R3)
 }
 
 // GetWithHeadersContext performs an HTTP GET request with custom headers, context, and retry logic.
 // Headers are processed for environment variable substitution using ${VAR_NAME} syntax.
 // If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
+//
+// The returned response body is wrapped in an http.MaxBytesReader bounded by
+// httputil.MaxBodyBytes (10 MiB), exactly as GetWithContext does. A subsequent
+// read that exceeds the cap yields an *http.MaxBytesError; callers should pass
+// such read errors through classifyBodyReadError so the overflow surfaces as
+// ErrResponseTooLarge. The cap holds even when a caller sent a Range header: a
+// Range is only a request, and a server that ignores it and streams the full
+// body is bounded here rather than at the caller's read (S019-R1.1, S019-R1.2).
 func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url string, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -539,7 +588,16 @@ func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url str
 	// Apply headers to request
 	c.applyHeaders(req, url, headers)
 
-	return c.DoWithContext(ctx, req)
+	resp, err := c.DoWithContext(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if resp != nil && resp.Body != nil {
+		// Cap the body so an oversized or malicious response cannot exhaust
+		// memory when a caller reads it (S019-R1.1, AD-12).
+		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	}
+	return resp, nil
 }
 
 // applyHeaders applies headers to a request in the following order:
@@ -583,7 +641,7 @@ func (c *RetryableHTTPClient) setHeader(req *http.Request, name, value string) {
 
 // SubstituteEnvVars replaces ${VAR_NAME} patterns in a header value with the
 // corresponding environment variable values, subject to a strict allow-list
-// (R1, AD-8).
+// (S001-R1, AD-8).
 //
 // A ${VAR} reference is expanded ONLY when BOTH of the following hold:
 //   - headerName is an allow-listed header (see isAllowedHeaderName), AND

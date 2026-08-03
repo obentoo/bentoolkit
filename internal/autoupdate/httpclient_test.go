@@ -1907,3 +1907,173 @@ func TestHTTP1FallbackNotUsedOnHTTP1_403(t *testing.T) {
 		t.Errorf("requests = %d, want exactly 1 (an HTTP/1.1 403 must not be retried)", got)
 	}
 }
+
+// TestReadBodyForStatus covers the shared status-check + capped-read + classify
+// helper (R3.1, R3.2, R3.3). The caller supplies the accepted statuses; a
+// rejected status yields the byte-identical "HTTP request returned status %d"
+// error without reading, and an already-capped body that overflows classifies
+// as ErrResponseTooLarge.
+//
+// RED (pre-fix): readBodyForStatus does not exist — this file will not compile
+// against the current tree (undefined: readBodyForStatus).
+func TestReadBodyForStatus(t *testing.T) {
+	const body = `{"version":"1.2.3"}`
+
+	t.Run("accepted 200 returns the body", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK)
+		if err != nil {
+			t.Fatalf("readBodyForStatus rejected an accepted status: %v", err)
+		}
+		if string(got) != body {
+			t.Errorf("got body %q, want %q", got, body)
+		}
+	})
+
+	t.Run("accepted 206 when in the accepted set", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK, http.StatusPartialContent)
+		if err != nil {
+			t.Fatalf("readBodyForStatus rejected an accepted 206: %v", err)
+		}
+		if string(got) != body {
+			t.Errorf("got body %q, want %q", got, body)
+		}
+	})
+
+	t.Run("rejected status returns the status error and no body", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		got, err := readBodyForStatus(resp, http.StatusOK)
+		if err == nil {
+			t.Fatal("readBodyForStatus accepted a rejected status, want an error")
+		}
+		if !strings.Contains(err.Error(), "HTTP request returned status 404") {
+			t.Errorf("error %q does not carry the byte-identical status message", err)
+		}
+		if got != nil {
+			t.Errorf("rejected status must not return a body, got %q", got)
+		}
+	})
+
+	t.Run("overflowing capped body classifies as ErrResponseTooLarge", func(t *testing.T) {
+		// A body already wrapped in a MaxBytesReader with a tiny limit: the read
+		// inside the helper must trip the cap and classify the overflow.
+		const limit = 8
+		capped := http.MaxBytesReader(nil, io.NopCloser(strings.NewReader(body)), limit)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       capped,
+		}
+		_, err := readBodyForStatus(resp, http.StatusOK)
+		if err == nil {
+			t.Fatal("expected an overflow error, got nil")
+		}
+		if !errors.Is(err, ErrResponseTooLarge) {
+			t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
+		}
+	})
+}
+
+// oversizedBodyServer streams `size` bytes over a 200 response in 64 KiB
+// chunks, deliberately ignoring any Range header the client sent. It mirrors
+// the oversized-body pattern used by TestGetWithContext_BodyCap so a server can
+// defeat a Range request and push a body past httputil.MaxBodyBytes.
+func oversizedBodyServer(size int) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, 64*1024)
+		written := 0
+		for written < size {
+			n := len(buf)
+			if size-written < n {
+				n = size - written
+			}
+			if _, err := w.Write(buf[:n]); err != nil {
+				return
+			}
+			written += n
+		}
+	}))
+}
+
+// TestGetWithHeadersContext_BodyCap asserts GetWithHeadersContext caps its
+// returned body at httputil.MaxBodyBytes, mirroring GetWithContext (R1.1,
+// R1.2, R5.1). A server that ignores the Range header and streams >10 MiB must
+// trip the http.MaxBytesReader cap so classifyBodyReadError can surface
+// ErrResponseTooLarge; a body under the cap must still read byte-identically.
+//
+// RED (pre-fix): GetWithHeadersContext returns the raw, uncapped body — the
+// oversized read succeeds with a nil error, so the "oversized" case fails.
+func TestGetWithHeadersContext_BodyCap(t *testing.T) {
+	// 11 MiB payload, one byte over the 10 MiB cap.
+	const oversized = 11 * 1024 * 1024
+	const smallBody = "a small, well-behaved response body"
+
+	t.Run("oversized body trips the cap", func(t *testing.T) {
+		server := oversizedBodyServer(oversized)
+		defer server.Close()
+
+		client := NewRetryableHTTPClient()
+		client.SetHTTPClient(server.Client())
+		client.SetDelayFunc(func(time.Duration) {})
+
+		// A Range header is declared, but the server ignores it and streams the
+		// full oversized body — exactly the case the cap must defend against.
+		headers := map[string]string{"Range": "bytes=0-2097151"}
+		resp, err := client.GetWithHeadersContext(context.Background(), server.URL, headers)
+		if err != nil {
+			t.Fatalf("GetWithHeadersContext returned an unexpected error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		_, readErr := io.ReadAll(resp.Body)
+		if readErr == nil {
+			t.Fatal("expected an error reading an oversized body, got nil (body is uncapped)")
+		}
+
+		classified := classifyBodyReadError(readErr)
+		if !errors.Is(classified, ErrResponseTooLarge) {
+			t.Errorf("expected classified error to satisfy errors.Is(ErrResponseTooLarge), got: %v", classified)
+		}
+
+		var maxBytesErr *http.MaxBytesError
+		if !errors.As(readErr, &maxBytesErr) {
+			t.Errorf("expected the raw read error to be an *http.MaxBytesError, got: %v", readErr)
+		}
+	})
+
+	t.Run("small body reads unchanged", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(smallBody))
+		}))
+		defer server.Close()
+
+		client := NewRetryableHTTPClient()
+		client.SetHTTPClient(server.Client())
+		client.SetDelayFunc(func(time.Duration) {})
+
+		resp, err := client.GetWithHeadersContext(context.Background(), server.URL, nil)
+		if err != nil {
+			t.Fatalf("GetWithHeadersContext returned an unexpected error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		got, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("reading a small body must not error, got: %v", err)
+		}
+		if string(got) != smallBody {
+			t.Errorf("body mismatch: got %q, want %q", got, smallBody)
+		}
+	})
+}
