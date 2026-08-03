@@ -17,9 +17,13 @@
 // # Response body size cap
 //
 // Every HTTP response body is bounded so an oversized or malicious response
-// cannot exhaust memory. RetryableHTTPClient.GetWithContext wraps the response
-// body in an http.MaxBytesReader capped at httputil.MaxBodyBytes (10 MiB); a
-// read that exceeds the cap surfaces as an error wrapping ErrResponseTooLarge.
+// cannot exhaust memory. Both GET helpers cap:
+// RetryableHTTPClient.GetWithContext and
+// RetryableHTTPClient.GetWithHeadersContext each wrap the response body in an
+// http.MaxBytesReader capped at httputil.MaxBodyBytes (10 MiB); a read that
+// exceeds the cap surfaces as an error wrapping ErrResponseTooLarge. The cap on
+// the headers variant holds even for a Range request, since a server may ignore
+// the Range header and stream the whole body.
 //
 // The LLM clients (ClaudeClient, OpenAIClient, OllamaClient) apply the same
 // 10 MiB default to their API response bodies, but the limit is per-client and

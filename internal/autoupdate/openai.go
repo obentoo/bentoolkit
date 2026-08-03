@@ -27,7 +27,7 @@ type OpenAIClient struct {
 	baseURL    string
 	// maxBodyBytes caps how many bytes are read from an API response body.
 	// It defaults to httputil.MaxBodyBytes and can be overridden via
-	// WithMaxBodyBytes (R11.2).
+	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
 
@@ -133,7 +133,7 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 // response body and returns the client for chaining. Values <= 0 are ignored so
 // the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
 // may legitimately exceed the default cap, so a larger limit can be supplied
-// here (R11.2).
+// here (S001-R11.2).
 func (c *OpenAIClient) WithMaxBodyBytes(n int64) *OpenAIClient {
 	if n > 0 {
 		c.maxBodyBytes = n
@@ -187,7 +187,7 @@ func (c *OpenAIClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
@@ -264,7 +264,7 @@ func (c *OpenAIClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)

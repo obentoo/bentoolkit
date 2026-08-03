@@ -7,7 +7,7 @@
 // hybrid: when an API key env var is configured and populated the client runs the
 // CLI in --bare mode and injects the key solely through the child process
 // environment; otherwise it relies on the CLI's own logged-in session. The API
-// key value never appears in argv, logs, or returned errors (R2.4, G5).
+// key value never appears in argv, logs, or returned errors (S003-R2.4, G5).
 package autoupdate
 
 import (
@@ -29,7 +29,7 @@ const (
 	// DefaultClaudeCodeModel is the default model used by ClaudeCodeClient when
 	// none is specified in the config. It is intentionally distinct from
 	// DefaultClaudeModel (the haiku model used by the HTTP ClaudeClient): the
-	// claude-code CLI provider defaults to sonnet (R1.4, AD7).
+	// claude-code CLI provider defaults to sonnet (S003-R1.4, AD7).
 	//
 	// The value is the CLI's "sonnet" alias rather than a pinned ID such as
 	// "claude-sonnet-4-6": `claude --model` resolves the alias to the latest
@@ -41,12 +41,12 @@ const (
 
 	// DefaultClaudeCodeTimeout bounds a single `claude` CLI invocation. The CLI
 	// performs a full agentic round-trip (model call plus tool turns), so it gets
-	// a generous-but-finite budget of at least 120s per R7.3.
+	// a generous-but-finite budget of at least 120s per S003-R7.3.
 	DefaultClaudeCodeTimeout = 120 * time.Second
 )
 
 // ErrClaudeCodeUnavailable is returned by NewClaudeCodeClient when the `claude`
-// CLI cannot be found on PATH (R6.1). Callers can use errors.Is to fall back to
+// CLI cannot be found on PATH (S003-R6.1). Callers can use errors.Is to fall back to
 // another provider.
 var ErrClaudeCodeUnavailable = errors.New("claude CLI not available on PATH")
 
@@ -55,7 +55,7 @@ var ErrClaudeCodeUnavailable = errors.New("claude CLI not available on PATH")
 // regardless of the host PATH.
 var lookPath = exec.LookPath
 
-// claudeAvailable reports whether the `claude` CLI is resolvable on PATH (R6.1).
+// claudeAvailable reports whether the `claude` CLI is resolvable on PATH (S003-R6.1).
 func claudeAvailable() bool {
 	_, err := lookPath("claude")
 	return err == nil
@@ -64,7 +64,7 @@ func claudeAvailable() bool {
 // ClaudeCodeClient implements LLMProvider by driving the local `claude` CLI
 // (Claude Code). Page content is piped on the command's stdin and the static
 // instruction is the value of the -p flag; content never appears in argv
-// (R1.2, AD8).
+// (S003-R1.2, AD8).
 type ClaudeCodeClient struct {
 	// model is the resolved model name passed via --model.
 	model string
@@ -78,21 +78,21 @@ type ClaudeCodeClient struct {
 	// and the child-env injection, so a key present only in a secrets file cannot
 	// flip bare on yet be missing from the spawned CLI. It is injected solely
 	// through the child env in bare mode and never appears in argv, logs, or
-	// returned errors (R2.4, G5).
+	// returned errors (S003-R2.4, G5).
 	apiKey string
 	// bareMode is the resolved tri-state auth decision (see resolveBare). When
 	// true the CLI runs with --bare and the API key is injected via the child
 	// process env; when false the CLI uses its own logged-in session.
 	bareMode bool
 	// maxBudgetUSD, when > 0, is passed to the CLI as --max-budget-usd to cap
-	// spend (R7.2).
+	// spend (S003-R7.2).
 	maxBudgetUSD float64
-	// timeout bounds a single CLI invocation (R7.3). Defaults to
+	// timeout bounds a single CLI invocation (S003-R7.3). Defaults to
 	// DefaultClaudeCodeTimeout.
 	timeout time.Duration
 	// ctx is the parent context for spawned CLI processes. Defaults to
 	// context.Background(); a cancelled parent (or the per-call timeout) kills
-	// the child via exec.CommandContext (R7.1).
+	// the child via exec.CommandContext (S003-R7.1).
 	ctx context.Context
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
 	// exec.CommandContext and is injectable for testing.
@@ -130,7 +130,7 @@ func WithClaudeCodeContext(ctx context.Context) ClaudeCodeOption {
 	}
 }
 
-// WithClaudeCodeTimeout overrides the per-invocation timeout (R7.3). A
+// WithClaudeCodeTimeout overrides the per-invocation timeout (S003-R7.3). A
 // non-positive duration is ignored so the default (DefaultClaudeCodeTimeout)
 // remains in effect.
 func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
@@ -142,7 +142,7 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 }
 
 // resolveBare resolves the tri-state Bare config into a concrete bareMode
-// decision (R2.1, R2.2, R2.3).
+// decision (S003-R2.1, S003-R2.2, S003-R2.3).
 //
 //   - "true"  → always bare (caller must ensure auth is available).
 //   - "false" → never bare; rely on the CLI's logged-in session. Any inherited
@@ -225,11 +225,11 @@ func childEnv(bareMode bool, apiKeyEnv string, key string) []string {
 	return env
 }
 
-// NewClaudeCodeClient constructs a ClaudeCodeClient from configuration (R1, R1.1,
-// R7.3, AD6). It resolves the model (defaulting to sonnet) and the auth mode,
+// NewClaudeCodeClient constructs a ClaudeCodeClient from configuration (S003-R1, S003-R1.1,
+// S003-R7.3, AD6). It resolves the model (defaulting to sonnet) and the auth mode,
 // applies defaults (exec.CommandContext seam, context.Background, a >=120s
 // timeout), then applies any options. If the `claude` CLI is not on PATH it
-// returns ErrClaudeCodeUnavailable (R6.1) so callers can fall back.
+// returns ErrClaudeCodeUnavailable (S003-R6.1) so callers can fall back.
 func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeClient, error) {
 	if !claudeAvailable() {
 		return nil, ErrClaudeCodeUnavailable
@@ -284,7 +284,7 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 	return c, nil
 }
 
-// GetModel returns the resolved model name used by this client (R1.4).
+// GetModel returns the resolved model name used by this client (S003-R1.4).
 func (c *ClaudeCodeClient) GetModel() string {
 	return c.model
 }
@@ -300,12 +300,12 @@ type claudeCodeEnvelope struct {
 	TotalCostUSD float64  `json:"total_cost_usd"`
 }
 
-// buildArgs assembles the CLI argument vector (R1.2, R1.3, R1.5, R7, R7.2).
+// buildArgs assembles the CLI argument vector (S003-R1.2, S003-R1.3, S003-R1.5, S003-R7, S003-R7.2).
 //
-// The static instruction is always the value of -p (R1.2); page content is NEVER
+// The static instruction is always the value of -p (S003-R1.2); page content is NEVER
 // placed here — it is piped on stdin by run. The fixed flags --output-format json,
 // --max-turns 2 and --allowedTools "" lock the CLI into a single structured,
-// tool-free round-trip (R1.3, R1.5). --bare is added in bare mode; --json-schema
+// tool-free round-trip (S003-R1.3, S003-R1.5). --bare is added in bare mode; --json-schema
 // is added only for a structured request with a non-empty schema; --max-budget-usd
 // is added when a positive cap is configured.
 func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema string) []string {
@@ -329,12 +329,12 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 }
 
 // run executes the `claude` CLI for a single request and returns the envelope
-// result string (R1.2, R2.4, R7, R7.1).
+// result string (S003-R1.2, S003-R2.4, S003-R7, S003-R7.1).
 //
 // Page content is piped on stdin (AD8); the instruction travels in -p. The call
 // is bound to a child context derived from c.ctx with c.timeout, so a cancelled
-// parent or an elapsed timeout kills the child (R7.1). In bare mode the API key
-// is injected ONLY through the child environment (never argv/logs — R2.1, R2.4).
+// parent or an elapsed timeout kills the child (S003-R7.1). In bare mode the API key
+// is injected ONLY through the child environment (never argv/logs — S003-R2.1, S003-R2.4).
 // stdout and stderr are captured separately. A non-zero exit, an is_error
 // envelope, or non-JSON stdout each yield an error that includes the envelope
 // errors/subtype and stderr but NEVER the API key.
@@ -344,11 +344,11 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 
 	cmd := c.execCommand(ctx, "claude", c.buildArgs(instruction, schema != "", schema)...)
 
-	// Page content goes on stdin, never in argv (R1.2, AD8).
+	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
 	cmd.Stdin = bytes.NewReader(content)
 
 	// Resolve the child environment from the auth mode: bare injects the API key
-	// (only via env, never argv/logs — R2.1, R2.4, G5); non-bare scrubs any
+	// (only via env, never argv/logs — S003-R2.1, S003-R2.4, G5); non-bare scrubs any
 	// inherited API key so the CLI uses its logged-in session.
 	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv, c.apiKey)
 
@@ -398,7 +398,7 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 
 // buildVersionInstruction builds the static instruction for version extraction.
 // The page content is NOT embedded (it is piped on stdin); the caller's prompt is
-// appended as extra guidance when non-empty (R1.2).
+// appended as extra guidance when non-empty (S003-R1.2).
 func buildClaudeCodeVersionInstruction(prompt string) string {
 	var sb strings.Builder
 	sb.WriteString("Extract the version number from the piped content. ")
@@ -411,7 +411,7 @@ func buildClaudeCodeVersionInstruction(prompt string) string {
 }
 
 // ExtractVersion extracts a version string from content using the `claude` CLI
-// (R1.2). The content is piped on stdin; only a static instruction (plus the
+// (S003-R1.2). The content is piped on stdin; only a static instruction (plus the
 // caller's optional prompt) travels in -p. The envelope result is normalized via
 // the shared cleanVersionString helper.
 func (c *ClaudeCodeClient) ExtractVersion(content []byte, prompt string) (string, error) {
@@ -430,7 +430,7 @@ func (c *ClaudeCodeClient) ExtractVersion(content []byte, prompt string) (string
 }
 
 // claudeCodeSchemaJSON is the JSON Schema describing the SchemaAnalysis shape that
-// the CLI is asked to satisfy via --json-schema (R3, R3.1). It mirrors the field
+// the CLI is asked to satisfy via --json-schema (S003-R3, S003-R3.1). It mirrors the field
 // set parseSchemaAnalysis understands.
 const claudeCodeSchemaJSON = `{
   "type": "object",
@@ -452,7 +452,7 @@ const claudeCodeSchemaJSON = `{
 // page content is NOT embedded (it is piped on stdin); package metadata and the
 // optional hint are included to guide the model. When askForJSON is true (the
 // schema-less fallback path) the instruction explicitly asks for a raw JSON
-// response so parseSchemaAnalysis can recover it (R3.3).
+// response so parseSchemaAnalysis can recover it (S003-R3.3).
 func buildClaudeCodeAnalysisInstruction(meta *EbuildMetadata, hint string, askForJSON bool) string {
 	var sb strings.Builder
 	sb.WriteString("Analyze the piped content and respond with the parser schema as JSON")
@@ -509,14 +509,14 @@ func stripJSONFences(text string) string {
 }
 
 // AnalyzeContent analyzes content via the `claude` CLI and returns a suggested
-// parser configuration (R3, R3.1, R3.2, R3.3).
+// parser configuration (S003-R3, S003-R3.1, S003-R3.2, S003-R3.3).
 //
 // Control flow:
 //  1. Attempt a structured request that passes --json-schema; on success parse
 //     the result (stripping any markdown fences) via parseSchemaAnalysis.
 //  2. If the structured request ERRORS (e.g. the CLI build does not support
 //     --json-schema), retry WITHOUT a schema, asking for a raw JSON response, and
-//     parse that (R3.3).
+//     parse that (S003-R3.3).
 //  3. If both attempts fail, return the resulting error.
 //
 // Page content is piped on stdin on both attempts.
@@ -532,7 +532,7 @@ func (c *ClaudeCodeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, 
 		}
 	}
 
-	// Attempt 2 (fallback, R3.3): retry without a schema, asking for raw JSON.
+	// Attempt 2 (fallback, S003-R3.3): retry without a schema, asking for raw JSON.
 	fallbackInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, true)
 	fallbackResult, fallbackErr := c.run(fallbackInstruction, content, "")
 	if fallbackErr != nil {

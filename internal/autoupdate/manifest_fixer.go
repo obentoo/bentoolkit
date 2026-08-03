@@ -363,41 +363,41 @@ func exitCodeString(runErr error) string {
 // "claude fixer failed (success): " was exactly that). It reports, in precedence
 // order:
 //
-//   - ctxErr (caller context cancelled or deadline elapsed) — AD4/R1.3, takes
+//   - ctxErr (caller context cancelled or deadline elapsed) — AD4/S009-R1.3, takes
 //     precedence over any exit-code framing;
 //   - a non-zero exit paired with a self-reported success envelope as an explicit
-//     contradiction ("exited N but reported success") — AD3/R1.2, never an empty
+//     contradiction ("exited N but reported success") — AD3/S009-R1.2, never an empty
 //     tail;
-//   - a generic non-zero exit (with the parsed subtype when available) — R1.1;
-//   - an explicit error envelope (is_error) with its subtype — R1.5;
-//   - a parse failure (non-JSON stdout) — R1.4.
+//   - a generic non-zero exit (with the parsed subtype when available) — S009-R1.1;
+//   - an explicit error envelope (is_error) with its subtype — S009-R1.5;
+//   - a parse failure (non-JSON stdout) — S009-R1.4.
 //
 // It then appends, each bounded by truncateDiagnostic: the envelope errors, the
 // result text, the captured stderr, and — on a parse failure — the raw stdout
-// (R1.4). The returned error always wraps ErrLLMRequestFailed (R3.1). The API key
-// is never one of its inputs, so it can never appear in the output (R2.2).
+// (S009-R1.4). The returned error always wraps ErrLLMRequestFailed (S009-R3.1). The API key
+// is never one of its inputs, so it can never appear in the output (S009-R2.2).
 func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
 	var sb strings.Builder
 
 	switch {
 	case ctxErr != nil:
-		// AD4/R1.3: cancellation or deadline takes precedence over exit framing.
+		// AD4/S009-R1.3: cancellation or deadline takes precedence over exit framing.
 		sb.WriteString(fmt.Sprintf("claude fixer aborted: %v", ctxErr))
 	case runErr != nil && jsonErr == nil && !env.IsError && env.Subtype == "success":
-		// AD3/R1.2: non-zero exit but a self-reported success envelope.
+		// AD3/S009-R1.2: non-zero exit but a self-reported success envelope.
 		sb.WriteString(fmt.Sprintf("claude fixer exited %s but reported success (subtype=%s)",
 			exitCodeString(runErr), env.Subtype))
 	case runErr != nil:
-		// R1.1: generic non-zero exit (envelope may or may not have parsed).
+		// S009-R1.1: generic non-zero exit (envelope may or may not have parsed).
 		sb.WriteString(fmt.Sprintf("claude fixer failed: exit %s", exitCodeString(runErr)))
 		if jsonErr == nil && env.Subtype != "" {
 			sb.WriteString(fmt.Sprintf(" (subtype=%s)", env.Subtype))
 		}
 	case env.IsError:
-		// R1.5: explicit error envelope on a zero exit.
+		// S009-R1.5: explicit error envelope on a zero exit.
 		sb.WriteString(fmt.Sprintf("claude fixer reported error (subtype=%s)", env.Subtype))
 	default:
-		// R1.4: zero exit but stdout did not parse as JSON.
+		// S009-R1.4: zero exit but stdout did not parse as JSON.
 		sb.WriteString("claude fixer emitted non-JSON output")
 	}
 
@@ -417,7 +417,7 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		sb.WriteString(truncateDiagnostic(s))
 	}
 	// On a parse failure the raw stdout is the one artifact needed to see what the
-	// CLI actually printed (R1.4).
+	// CLI actually printed (S009-R1.4).
 	if jsonErr != nil && strings.TrimSpace(stdout) != "" {
 		sb.WriteString("\nstdout: ")
 		sb.WriteString(truncateDiagnostic(stdout))
@@ -472,7 +472,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// Every terminal failure funnels through formatFixerError so each carries the
 	// full, bounded set of signals (exit code or cancellation cause, subtype,
 	// result, stderr, and raw stdout on a parse failure). The success path below
-	// is unchanged (UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
+	// is unchanged (S009-UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
 	// and a parent cancellation (Canceled), since runCtx derives from ctx.
 	if runErr != nil || jsonErr != nil || env.IsError {
 		return ManifestFixResult{}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)

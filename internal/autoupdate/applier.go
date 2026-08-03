@@ -151,9 +151,9 @@ type Applier struct {
 	// context.Background().
 	ctx context.Context
 	// pendingDeleteFn is the function Apply invokes to remove a package from
-	// pending.json after the full success path (R3.1). It defaults to
+	// pending.json after the full success path (S002-R3.1). It defaults to
 	// a.pending.Delete and is overridable via WithApplierPendingDeleteFunc
-	// purely for tests that need to simulate a Delete failure (R3.4).
+	// purely for tests that need to simulate a Delete failure (S002-R3.4).
 	// Production callers never supply this option.
 	pendingDeleteFn func(pkg string) error
 	// setVersionsFn is the function Apply invokes to record the version it just
@@ -182,14 +182,14 @@ type Applier struct {
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
-	// every existing test stays byte-identical (R3.3).
+	// every existing test stays byte-identical (S010-R3.3).
 	reporter tui.Reporter
 	// runAttached executes the compile-test command and returns its combined
 	// output. The privileged child needs the REAL terminal for the sudo/doas
-	// password prompt (R4.1), which rules out capturing its stdout/stderr through
+	// password prompt (S010-R4.1), which rules out capturing its stdout/stderr through
 	// a StreamCapture pipe the way runManifest does. The default (set in
 	// NewApplier) is exactly cmd.CombinedOutput, so the compile-log path stays
-	// byte-identical to the pre-TUI behaviour (R3.3/R7.1). The apply driver
+	// byte-identical to the pre-TUI behaviour (S010-R3.3/S010-R7.1). The apply driver
 	// (sub-task 4.1) overrides it via WithApplierRunAttached to release the
 	// terminal for the prompt and tee the raw output to the TTY and a capture
 	// buffer. A nil override is normalized back to the CombinedOutput default.
@@ -242,9 +242,9 @@ func WithApplierContext(ctx context.Context) ApplierOption {
 }
 
 // WithApplierPendingDeleteFunc overrides the function Apply invokes to remove
-// a package from pending.json after a successful apply (R3.1). The default is
+// a package from pending.json after a successful apply (S002-R3.1). The default is
 // a.pending.Delete. This option exists for tests that need to simulate a
-// Delete failure (R3.4); a nil fn is ignored.
+// Delete failure (S002-R3.4); a nil fn is ignored.
 func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 	return func(a *Applier) {
 		if fn != nil {
@@ -301,7 +301,7 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 // WithApplierReporter wires a progress reporter into the applier so Apply emits
 // its lifecycle (TaskStart → TaskStage → TaskDone) to the TUI/plain sink. A nil
 // reporter is normalized to tui.Noop(), preserving the silent, fully-buffered
-// behaviour predating the TUI (R3.3).
+// behaviour predating the TUI (S010-R3.3).
 func WithApplierReporter(r tui.Reporter) ApplierOption {
 	return func(a *Applier) {
 		if r == nil {
@@ -313,11 +313,11 @@ func WithApplierReporter(r tui.Reporter) ApplierOption {
 
 // WithApplierRunAttached overrides how the compile test executes. The default
 // (cmd.CombinedOutput) buffers the child's output, which is byte-identical to the
-// pre-TUI behaviour (R3.3/R7.1) but swallows the sudo/doas password prompt. The
+// pre-TUI behaviour (S010-R3.3/S010-R7.1) but swallows the sudo/doas password prompt. The
 // apply driver (sub-task 4.1) supplies a variant that hands the child the real
-// terminal so the prompt is visible (R4.1) while teeing its raw output to the TTY
+// terminal so the prompt is visible (S010-R4.1) while teeing its raw output to the TTY
 // and a capture buffer (the captured bytes still feed saveCompileLog on failure,
-// R7.1). A nil fn is normalized back to the CombinedOutput default.
+// S010-R7.1). A nil fn is normalized back to the CombinedOutput default.
 func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOption {
 	return func(a *Applier) {
 		if fn == nil {
@@ -338,9 +338,9 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		confirmFunc: defaultConfirmFunc,
 		execCommand: exec.CommandContext,
 		ctx:         context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
-		reporter:    tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (R3.3)
+		reporter:    tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
-		// path is byte-identical (R3.3/R7.1); replaced by WithApplierRunAttached.
+		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 	}
 
@@ -396,7 +396,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// every return path (mirrors the deferred orphan-rollback below, keyed on the
 	// same named result). The package name doubles as both the task id and its
 	// display label. Under the default Noop reporter these are no-ops, so the
-	// silent, fully-buffered behaviour is byte-identical to before (R3.3).
+	// silent, fully-buffered behaviour is byte-identical to before (S010-R3.3).
 	a.reporter.TaskStart(pkg, pkg)
 	defer func() {
 		if result == nil {
@@ -584,8 +584,8 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 
 	result.Success = true
 
-	// R3.1: remove the now-applied package from pending.json so `--list` no
-	// longer surfaces it. R3.4: a Delete failure is a bookkeeping miss, not
+	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
+	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (via the package warnLogf sink so tests
 	// can capture it) but keep result.Success == true and result.Error == nil
 	// so the deferred orphan-rollback (keyed on result.Error == nil) does not
@@ -1133,13 +1133,13 @@ func (a *Applier) runManifest(pkg, version string) error {
 	cmd.Dir = pkgDir
 
 	// Stream the long manifest run (distfile download + digest) live as TaskLine
-	// events (R1.1; the StreamCapture handles in-place "\r" updates, R1.2). The
+	// events (S010-R1.1; the StreamCapture handles in-place "\r" updates, S010-R1.2). The
 	// task id is pkg so the lines are attributed to the same task the reporter
 	// lifecycle uses (sub-task 3.1). The SAME StreamCapture instance is used for
 	// both stdout and stderr, so exec gives the child a single pipe — the captured
 	// bytes are byte-identical to CombinedOutput's, keeping the error string and
-	// every existing failure test byte-identical (R7.1). Under the default Noop
-	// reporter the TaskLine events are discarded, so behaviour is unchanged (R3.3).
+	// every existing failure test byte-identical (S010-R7.1). Under the default Noop
+	// reporter the TaskLine events are discarded, so behaviour is unchanged (S010-R3.3).
 	sc := tui.NewStreamCapture(a.reporter, pkg, tui.StreamStdout)
 	cmd.Stdout = sc
 	cmd.Stderr = sc
@@ -1214,10 +1214,10 @@ func (a *Applier) runCompile(pkg, version string) (string, error) {
 
 	// Execute through the runAttached seam rather than StreamCapture: the
 	// privileged child needs the real TTY for the sudo/doas password prompt
-	// (R4.1), which is incompatible with capturing its stdout/stderr into a
+	// (S010-R4.1), which is incompatible with capturing its stdout/stderr into a
 	// StreamCapture pipe. The default seam is exactly cmd.CombinedOutput, so the
 	// compile log written below is byte-identical to the pre-TUI behaviour
-	// (R3.3/R7.1); the TUI override (sub-task 4.1) releases the terminal and tees
+	// (S010-R3.3/S010-R7.1); the TUI override (sub-task 4.1) releases the terminal and tees
 	// the raw output to the TTY plus a capture buffer fed back here as output.
 	output, err := a.runAttached(cmd)
 	if err != nil {

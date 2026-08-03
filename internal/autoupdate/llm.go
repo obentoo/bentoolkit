@@ -100,7 +100,7 @@ type LLMConfig struct {
 // readCappedBody reads an HTTP response body while enforcing a maximum size.
 // The body is wrapped in an http.MaxBytesReader bounded by maxBodyBytes; if the
 // payload exceeds the cap the standard library yields an *http.MaxBytesError,
-// which is translated into an error wrapping ErrResponseTooLarge (R11.2, R11.3).
+// which is translated into an error wrapping ErrResponseTooLarge (S001-R11.2, S001-R11.3).
 // A non-positive maxBodyBytes falls back to httputil.MaxBodyBytes so a
 // zero-valued client field can never disable the cap.
 func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
@@ -126,7 +126,7 @@ type ClaudeClient struct {
 	apiKey     string
 	// maxBodyBytes caps how many bytes are read from an API response body.
 	// It defaults to httputil.MaxBodyBytes and can be overridden via
-	// WithMaxBodyBytes (R11.2).
+	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
 
@@ -189,7 +189,7 @@ func NewLLMProvider(cfg LLMConfig) (LLMProvider, error) {
 	case "claude-code":
 		// NewClaudeCodeClient returns (*ClaudeCodeClient, error); since
 		// *ClaudeCodeClient implements LLMProvider, the pair satisfies the
-		// (LLMProvider, error) return signature directly (R1.1, R8, R8.1).
+		// (LLMProvider, error) return signature directly (S003-R1.1, S003-R8, S003-R8.1).
 		return NewClaudeCodeClient(cfg)
 	case "":
 		return nil, ErrLLMNotConfigured
@@ -253,7 +253,7 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 // response body and returns the client for chaining. Values <= 0 are ignored so
 // the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
 // may legitimately exceed the default cap, so a larger limit can be supplied
-// here (R11.2).
+// here (S001-R11.2).
 func (c *ClaudeClient) WithMaxBodyBytes(n int64) *ClaudeClient {
 	if n > 0 {
 		c.maxBodyBytes = n
@@ -307,7 +307,7 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
@@ -384,7 +384,7 @@ func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (R11.2)
+	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)

@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the apply still reporting success and the registry left pinning a file
   that no longer existed. Both halves of a claim now count.
 
+- **The 206 gate now observes the request that was actually sent.** Accepting
+  HTTP 206 is conditional on the record having asked for a range, but the check
+  read the header map from `packages.toml` instead of the wire — and the two
+  disagree at the edges. `setHeader` drops names containing CR/LF and then
+  applies `TrimSpace` + `CanonicalMIMEHeaderKey`, and the client's own default
+  headers never appear in that map at all. The gate now reads `Range` off the
+  request recorded on the response, which removes the second copy of the
+  acceptance policy entirely so it cannot drift from header application again.
+
+  A nil response, or one whose request the transport did not record, reads as
+  "no range declared": absent evidence is not permission, so an unsolicited 206
+  still fails on the status error.
+
 ## [0.17.1] - 2026-08-01
 
 ### Fixed
