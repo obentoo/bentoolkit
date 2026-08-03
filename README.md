@@ -464,12 +464,34 @@ bentoo overlay autoupdate app-misc/hello
 
 # Check the registry itself against the record model (read-only)
 bentoo overlay autoupdate --lint
+
+# …and repair what has a mechanical fix (prints the diff, then asks)
+bentoo overlay autoupdate --lint --fix
 ```
 
 `--lint` reports every record missing its `# END` marker or its `comments`
-field, every comment left floating outside a record, and every record whose
-fields are semantically invalid — then exits non-zero, so it doubles as a
-pre-commit gate on the registry.
+field, every comment left floating outside a record, every record whose fields
+are semantically invalid, and every deviation from the closed field set — an
+unknown or retired key, a redundant `enabled = true`, fields out of the
+canonical order, or an entry tracking commits with no `base_from` (whose base
+version can freeze unnoticed). It exits non-zero, so it doubles as a pre-commit
+gate on the registry.
+
+`--fix` repairs the deviations that have one right answer: the retired `binary`
+key becomes `type = "bin"` (or is dropped where `type` is already there), a
+redundant `enabled = true` goes, and fields are reordered. It never guesses —
+an unknown key and a missing `base_from` are reported and left to a human,
+because a wrong name may be a misspelling or a concept that does not exist, and
+choosing between `base_from = "file"`, `"tag"` and `"commit_message"` depends on
+where upstream versions itself.
+
+The repair is textual: your quoting, spacing and every `comments` block come
+through byte for byte. Before writing it reparses the result and compares it
+record by record against the original, aborting without writing on any
+difference outside those transformations. **The write is gated behind the diff
+and a confirmation** — this overlay auto-commits and pushes, so a repair written
+unattended is a repair published unattended. Use `--yes` only when you mean
+that; a piped or scripted run without it prints the diff and writes nothing.
 
 The autoupdate system reads version schemas from `packages.toml` in your overlay root, fetches upstream sources, and updates ebuilds when a new version is found.
 
@@ -549,13 +571,28 @@ field of the record, and keep `[` off the start of any line inside it (the
 raw-text editors that flip `enabled` scan for `[section]` headers and would read
 such a line as one).
 
+The one exception is the **file header**: the comment block before the first
+record. It documents the model itself rather than any single package, so it can
+live inside no record, and `--lint` leaves it alone. The exemption ends at the
+first `[section]` header — a comment after that, between records or trailing the
+last one, is reported as before.
+
 ##### Field order
 
-Fields run bookkeeping → source → extraction → post-processing → auxiliary
-substitution → transport → classification → doc. Omit what you do not need;
-never invent a key — `PackageConfig` in
+Fields run bookkeeping → source → extraction → post-processing → transport →
+classification → auxiliary substitution → doc. Omit what you do not need; never
+invent a key — `PackageConfig` in
 [`internal/autoupdate/config.go`](internal/autoupdate/config.go) is the sole
-authority on what parses, and an unknown key is silently ignored.
+authority on what parses, and a key it does not declare **fails the load**,
+naming the record and the key. That is deliberate: `serie` instead of `series`
+used to disable the release-line filter silently, which is exactly the failure
+`series` exists to prevent.
+
+The order below is not a style preference — it is the practice measured across
+the overlay's records, encoded as `CanonicalFieldOrder` in
+[`internal/autoupdate/lint.go`](internal/autoupdate/lint.go). `--lint` reports a
+record that deviates and `--lint --fix` reorders it, so this block and the
+linter cannot disagree.
 
 ```toml
 ["category/package"]                # header: quoted, exactly as in the overlay
@@ -563,7 +600,6 @@ enabled = false                     # ONLY when false. Absent = enabled.
 hold = true                         # ONLY when true. See "enabled vs hold".
 track = "commit"                    # omit for tag/version tracking
 url = "https://…"                   # REQUIRED — the endpoint being probed
-timeout = 60                        # seconds, only for reliably slow hosts
 parser = "json"                     # REQUIRED — json | regex | html | script
 path = "tag_name"                   # REQUIRED for parser=json
 pattern = 'name-([0-9.]+)\.tar\.xz' # REQUIRED for parser=regex (1 capture group)
@@ -580,15 +616,26 @@ base_from = "file"                  # where the base version lives: file | commi
 base_url = "https://raw.…/VERSION"  # REQUIRED with base_from="file"
 base_pattern = '^([0-9][0-9.]*)-devel'  # …1 capture group, the base version
 base_tag_pattern = 'vulkan-sdk-([0-9.]+)'  # REQUIRED with base_from="tag"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+timeout = 60                        # seconds, only for reliably slow hosts
+meta = { fetch_url = "https://…" }  # authenticated fetch; NEVER a secret
+type = "bin"                        # ONLY to override the -bin/RESTRICT heuristic
+series = '^1\.28\.'                 # REQUIRED when the dir holds two release lines
 aux_var = "MY_BUILD"                # free-text ebuild var kept in sync…
 aux_pattern = 'esr-bb([0-9]+)'      # …always paired with aux_var
-headers = { "User-Agent" = "bentoo-autoupdate" }
-binary = true                       # binary package → manifest-only testing
-type = "bin"                        # ONLY to override the -bin/RESTRICT heuristic
-meta = { key = "value" }            # documentation only; NEVER a secret
 comments = """…"""                  # REQUIRED — the doc, always last
 # END
 ```
+
+There is no `binary` key. It was retired: nothing ever read it, and `type`
+classifies. `--lint --fix` migrates a record still carrying it.
+
+`meta` is **not** documentation-only, whatever an older comment may have said.
+The applier reads six typed keys out of it for authenticated downloads —
+`fetch_url`, `fetch_method`, `fetch_serial_env`, `fetch_serial_field`,
+`fetch_form`, `fetch_filename` — and `--lint` validates them, because a typo in
+`fetch_serial_env` used to disable the download without a word. The rule about
+secrets stands: reference an env var, never the value.
 
 ##### Rules that are not obvious from the field list
 

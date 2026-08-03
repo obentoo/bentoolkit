@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
 
 // TestAnalyzeCmd_HasRunFunction verifies that the analyze command has a Run or RunE function set.
@@ -83,6 +85,52 @@ func TestAnalyzeCmd_IsRegisteredUnderOverlay(t *testing.T) {
 	}
 	if !found {
 		t.Error("analyze command should be registered under overlay command")
+	}
+}
+
+// TestAnalyzeSuggestedSchemaClassifiesWithType verifies that the record
+// `overlay analyze` suggests classifies a package with `type`, the only
+// classifier the checker reads, and never with the retired `binary` key (R1.1,
+// R8.2). None of the fixture values below contain the substring "binary", so a
+// hit anywhere in the rendered record means the key came back.
+func TestAnalyzeSuggestedSchemaClassifiesWithType(t *testing.T) {
+	tests := []struct {
+		name       string
+		schema     *autoupdate.PackageConfig
+		wantTypeIn bool
+	}{
+		{
+			name: "binary package is suggested as type = bin",
+			schema: &autoupdate.PackageConfig{
+				URL:    "https://example.com/releases.json",
+				Parser: "json",
+				Path:   "version",
+				Type:   "bin",
+			},
+			wantTypeIn: true,
+		},
+		{
+			name: "unclassified package emits no type key at all",
+			schema: &autoupdate.PackageConfig{
+				URL:    "https://example.com/releases.json",
+				Parser: "json",
+				Path:   "version",
+			},
+			wantTypeIn: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := captureStdout(t, func() { displaySchema("dev-util/example", tt.schema) })
+
+			if got := strings.Contains(out, `type = "bin"`); got != tt.wantTypeIn {
+				t.Errorf("type = \"bin\" present = %v, want %v; record was:\n%s", got, tt.wantTypeIn, out)
+			}
+			if strings.Contains(out, "binary") {
+				t.Errorf("suggested record still emits the retired binary key; record was:\n%s", out)
+			}
+		})
 	}
 }
 

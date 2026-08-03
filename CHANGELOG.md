@@ -8,6 +8,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`--lint` now checks the registry's field SET, and `--lint --fix` repairs it.**
+  Validation covered the values of a record's fields well — `select`, `type`,
+  `track`, `base_from`, capture arity on the `base_*` regexes — but never which
+  fields exist, which are live data, and in what order they appear. The result
+  was a 411-record registry whose most-declared classification field was the one
+  nothing read. Four rules close that, each derived from a count over the real
+  registry rather than from taste: `legacy-binary` (23 records), 
+  `redundant-enabled` (3), `field-order` (13, the Khronos entries putting
+  `headers` mid-`base_*`) and `legacy-base` (2 entries tracking commits with no
+  `base_from`, so the base version freezes without warning). `--lint --fix`
+  rewrites the first three; `legacy-base` is reported and left alone, because
+  choosing between `file`, `tag` and `commit_message` depends on where upstream
+  versions itself and a guess is worse than the report.
+
+  The repair is textual, not a re-encode: it keeps the maintainer's original
+  lines and only reorders, drops or substitutes them, so the quoting choices
+  survive (414 regexes in literal strings, 2 in basic strings because the regex
+  itself contains a quote a literal string cannot hold) and every `comments`
+  block comes through byte for byte. Before writing, it reparses the result and
+  compares it record by record against the original, aborting without writing on
+  any difference outside the declared transformations — plus a byte-level check
+  on the doc blocks and a line inventory, because `# END` markers, the file
+  header and the blank lines between records are invisible to a TOML parse and a
+  rewriter silently stripping them is exactly the corruption the gate exists to
+  prevent. Ten injected corruptions were each verified to abort leaving the file
+  byte-identical. The write is gated behind the unified diff and a confirmation:
+  this overlay auto-commits and pushes, so an unattended repair is a published
+  repair, and only `--yes` writes without asking.
+
+- **An unknown key in `packages.toml` now fails the load instead of vanishing.**
+  Loading used `toml.Unmarshal`, which silently ignores any key the struct does
+  not declare, so writing `serie` instead of `series` would quietly disable the
+  release-line filter — precisely the silent failure `series` exists to prevent.
+  Every offending key is named with its record in one error rather than one per
+  round trip. There is deliberately no repair: a wrong name may be a misspelling
+  of a real field or a concept that does not exist.
+
+- **The six authenticated-fetch keys hidden inside `meta` are validated.** The
+  field's own comment claimed the checker ignored it, but the applier reads
+  `fetch_url`, `fetch_method`, `fetch_serial_env`, `fetch_serial_field`,
+  `fetch_form` and `fetch_filename` out of it — real fields inside a
+  `map[string]string`, where a typo silently disabled the authenticated
+  download. Strict decoding cannot see them (a map claims every key inside it),
+  so they get their own validator, and the doc comment now says what the field
+  actually is.
+
 - **`version` in `packages.toml`: a record now says which ebuild it keeps, and
   `--clean` sweeps the rest.** `--clean` used to remove exactly one file — the
   ebuild it had just bumped from — so every other stale version stayed. The
@@ -42,6 +88,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minutes. Only stale pins are written; the other two classes are reported and
   left for a human.
 
+### Changed
+- **`binary` is retired; `type` is the only classifier.** Nothing in the checker
+  or the applier ever read `PackageConfig.Binary` — the live classifier is
+  `resolveType`, which uses `type` and falls back to reading the ebuild. The only
+  consumer was `overlay analyze`, which *wrote* the field, so the registry
+  accumulated 23 records declaring `binary = true` with no effect. `--lint --fix`
+  migrates them to `type = "bin"`, or drops the line where `type` is already
+  present.
+
+- **Both record writers now emit the canonical field order.** `overlay analyze`
+  printed a suggestion assembled by hand-written blocks in arbitrary sequence,
+  and `--save` delegated to `toml.Encoder`, which emits in struct-declaration
+  order — so a record the tool generated could fail the linter it was about to be
+  checked against. Both now render through one function driven by the same order
+  slice the linter ranks against. That also fixes two defects in the save path: a
+  populated `headers` or `meta` was written as a sub-table, `["pkg".headers]`,
+  which the record scanner reads as a *new* record — leaving the real one
+  reported unclosed and undocumented while the phantom collected its `# END` —
+  and `timeout = 0` / `revision = 0` were written into every saved record because
+  `omitempty` does not suppress a numeric zero.
+
 ### Fixed
 - **`--apply all --clean` no longer deletes a release line it just built.** The
   sweep decided what to keep from the pin alone, while the reconciliation
@@ -65,6 +132,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A nil response, or one whose request the transport did not record, reads as
   "no range declared": absent evidence is not permission, so an unsolicited 206
   still fails on the status error.
+
+- **`--lint` no longer flags the file header of `packages.toml`.** The
+  `stray-comment` rule treated every comment outside a record as stranded
+  documentation, header included. Restoring the overlay's ~112-line header — the
+  text that documents the record model itself: field order, `enabled` vs `hold`,
+  the traps a new record has to avoid — turned a clean registry into 112
+  violations and an exit code of 1, so the rule read as an order to delete the
+  one thing that makes the file editable by hand. Comments before the first
+  record are now the file header and are allowed; a comment anywhere after the
+  first record has begun — between records or trailing the last one — is still
+  reported, because it belongs in the `comments` field of the record it
+  describes.
 
 ## [0.17.1] - 2026-08-01
 

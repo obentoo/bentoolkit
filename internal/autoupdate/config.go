@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -89,8 +90,6 @@ type PackageConfig struct {
 	Path string `toml:"path,omitempty"`
 	// Pattern is the regex pattern with capture group (used with regex parser)
 	Pattern string `toml:"pattern,omitempty"`
-	// Binary indicates if this is a binary package (manifest-only testing)
-	Binary bool `toml:"binary,omitempty"`
 	// Type classifies the package as binary ("bin") or source-built
 	// ("source"). Empty means auto-detect from the ebuild (RESTRICT=bindist,
 	// a -bin suffix, or a binary SRC_URI). Set it only to override/correct the
@@ -128,9 +127,19 @@ type PackageConfig struct {
 
 	// Meta holds free-form key/value annotations for packages with special
 	// acquisition requirements (e.g. a purchased serial, a platform selector,
-	// a download endpoint). It is documentation only — the checker ignores it
-	// when detecting versions. Never store secrets here; reference an env var
-	// instead (e.g. serial_env = "FILEZILLA_PRO_KEY").
+	// a download endpoint). The version checker ignores it.
+	//
+	// The APPLIER does not: keys prefixed fetch_ are a typed sub-schema it reads
+	// to download a serial-gated distfile before the manifest step (see
+	// parseAuthFetchSpec and metaFetchKeys in authfetch.go). The six it reads are
+	// fetch_url — the trigger, no fetch_url means no authenticated fetch —
+	// fetch_method, fetch_serial_env, fetch_serial_field, fetch_form and
+	// fetch_filename. That namespace is therefore validated: a misspelled key is
+	// reported by ValidatePackageConfig rather than silently disabling the
+	// download. Any other key is annotation nothing reads.
+	//
+	// Never store secrets here; reference an env var instead (e.g.
+	// fetch_serial_env = "FILEZILLA_PRO_KEY").
 	Meta map[string]string `toml:"meta,omitempty"`
 
 	// New fields for version history
@@ -425,8 +434,121 @@ type PackagesConfig struct {
 // where each [category/package] section is a top-level key
 type packagesConfigFile map[string]PackageConfig
 
+// retiredKeys are registry keys that no longer have a PackageConfig field but
+// still appear in packages.toml files in the wild, mapped to what replaced them.
+// A key listed here does NOT fail the load: --lint reports it and --lint --fix
+// migrates it.
+//
+// It exists because rejecting such a key would deadlock its own migration.
+// LintPackagesConfig loads the very file it is about to repair, so a hard
+// failure on `binary` would leave the 23 records still carrying it unreadable by
+// the only tool that can rewrite them — the strict-decode rule (R4.1) and the
+// migration (R1.2/R1.3) would annul each other. Listing the key makes it
+// *claimed* — by this list rather than by a struct field — and claimed is the
+// only distinction the load cares about.
+//
+// It is emphatically not a general escape hatch. A key in neither the struct nor
+// this list is a typo (`serie` for `series`) and still fails the load, which is
+// the whole point of R4.1. Add an entry only for a field deliberately retired by
+// a migration that --lint --fix can perform, and drop it once the key is gone
+// from the registries it was written for.
+var retiredKeys = map[string]string{
+	"binary": `replaced by type = "bin"`,
+}
+
+// UnknownKey is one packages.toml key that neither a PackageConfig field nor
+// retiredKeys claims.
+type UnknownKey struct {
+	// Package is the record the key sits in — the first element of its key path.
+	// Empty for a key outside every record.
+	Package string
+	// Key is the key path relative to the record ("serie"), dotted when the key
+	// is nested inside an unclaimed sub-table ("metaa.foo").
+	Key string
+}
+
+// String names the key the way both the load error and the linter need it:
+// record first, because the maintainer's next move is to open that one record
+// out of 411.
+func (k UnknownKey) String() string {
+	if k.Package == "" {
+		return fmt.Sprintf("%q (outside any record)", k.Key)
+	}
+	return fmt.Sprintf("[%s] %q", k.Package, k.Key)
+}
+
+// UnknownKeysError is returned by LoadPackagesConfig when packages.toml holds
+// keys that nothing claims (R4.1). It aggregates every one of them instead of
+// failing on the first, so a registry with three typos is corrected in one pass
+// rather than in three round trips.
+//
+// There is deliberately no repair (R4.2): a wrong name may be a misspelling of a
+// real field or a concept that does not exist, and a guess would silently write
+// a value into a field the maintainer never meant.
+type UnknownKeysError struct {
+	// Keys are the offending keys, ordered by record then key.
+	Keys []UnknownKey
+}
+
+func (e *UnknownKeysError) Error() string {
+	parts := make([]string, 0, len(e.Keys))
+	for _, k := range e.Keys {
+		parts = append(parts, k.String())
+	}
+	return fmt.Sprintf("packages.toml: %d unknown key(s): %s; no field claims them — fix the spelling by hand, an unknown key is never repaired automatically",
+		len(e.Keys), strings.Join(parts, ", "))
+}
+
+// unknownRegistryKeys reduces the decoder's undecoded-key list to the keys that
+// must fail the load, dropping the retired ones.
+//
+// The record comes from the key path's FIRST element rather than from position
+// information, because there is none: toml.Key is a []string and Undecoded
+// carries no line number. Key.String() cannot name the record either — it
+// renders a package key needing TOML quoting as `"net-misc/postman-bin".serie`,
+// quotes included, which is not the string a maintainer greps the file for.
+func unknownRegistryKeys(undecoded []toml.Key) []UnknownKey {
+	keys := make([]UnknownKey, 0, len(undecoded))
+	for _, k := range undecoded {
+		if len(k) == 0 {
+			continue
+		}
+		var pkg, field string
+		if len(k) == 1 {
+			// A key outside every record. The flat map modelling the file claims
+			// every top-level key, so this branch is defensive rather than
+			// reachable by an ordinary registry.
+			field = k[0]
+		} else {
+			pkg, field = k[0], strings.Join(k[1:], ".")
+		}
+		if _, retired := retiredKeys[field]; retired {
+			continue
+		}
+		keys = append(keys, UnknownKey{Package: pkg, Key: field})
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Undecoded() yields document order; sorting by record makes the message
+	// independent of where in the file the typos happen to sit, so the same
+	// registry always produces the same error text.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Package != keys[j].Package {
+			return keys[i].Package < keys[j].Package
+		}
+		return keys[i].Key < keys[j].Key
+	})
+	return keys
+}
+
 // LoadPackagesConfig loads and parses packages.toml from the overlay.
 // The configuration file is expected at overlay/.autoupdate/packages.toml
+//
+// Decoding is strict: a key no struct field claims fails the load, naming the
+// record and the key (R4.1). Writing `serie` instead of `series` would otherwise
+// disable the release-line filter in silence — the exact failure `series` exists
+// to prevent. The only exemption is retiredKeys; see there for why.
 func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 
@@ -441,10 +563,29 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
 
-	// Parse TOML into the internal structure
+	return decodePackagesConfig(data)
+}
+
+// decodePackagesConfig parses packages.toml from memory, applying the same
+// strict-decoding rule as LoadPackagesConfig.
+//
+// It is separate from the file read because the repair pass has to parse text
+// that is not on disk yet: R7.1's gate reparses the rewritten file and compares
+// it record by record against the original BEFORE anything is written, and
+// staging a candidate through a temp file just to read it back would make the
+// gate depend on the very write it is meant to authorise.
+func decodePackagesConfig(data []byte) (*PackagesConfig, error) {
+	// Parse TOML into the internal structure. Decode rather than Unmarshal purely
+	// for the MetaData that drives the strict check below: Unmarshal IS this call
+	// with the MetaData discarded, so a syntax error still surfaces here with the
+	// same message it always had.
 	var fileConfig packagesConfigFile
-	if err := toml.Unmarshal(data, &fileConfig); err != nil {
+	md, err := toml.Decode(string(data), &fileConfig)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse packages.toml: %w", err)
+	}
+	if unknown := unknownRegistryKeys(md.Undecoded()); len(unknown) > 0 {
+		return nil, &UnknownKeysError{Keys: unknown}
 	}
 
 	// Convert to PackagesConfig
@@ -703,10 +844,6 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 	if err != nil {
 		return fmt.Errorf("failed to read packages.toml: %w", err)
 	}
-	info, err := os.Stat(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to stat packages.toml: %w", err)
-	}
 
 	// Split on "\n" (not bufio.Scanner) so a file without a trailing newline is
 	// reproduced byte-for-byte by the strings.Join below.
@@ -751,9 +888,37 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 		return nil
 	}
 
+	return writePackagesConfigAtomically(configPath, []byte(strings.Join(out, "\n")))
+}
+
+// writePackagesConfigAtomically replaces packages.toml with data through a temp
+// file in the same directory and a rename, preserving the mode the file already
+// has. Every writer of the registry goes through it, so there is one copy of the
+// "never leave a half-written registry behind" policy rather than one per caller.
+//
+// Atomicity is what the policy buys: the registry is a hand-maintained,
+// auto-committing file, and a truncated write would publish the truncation. The
+// rename is atomic within a filesystem, so a reader sees either the old file or
+// the new one — never a partial one — and a failed rename removes the temp file
+// instead of leaving debris beside the registry.
+//
+// The mode is set explicitly rather than left to os.WriteFile's create mode,
+// which the process umask masks: under umask 077 a 0644 registry would come back
+// 0600 and stop being readable by anything else on the box.
+func writePackagesConfigAtomically(configPath string, data []byte) error {
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat packages.toml: %w", err)
+	}
+	mode := info.Mode().Perm()
+
 	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(strings.Join(out, "\n")), info.Mode().Perm()); err != nil {
+	if err := os.WriteFile(tmpPath, data, mode); err != nil {
 		return fmt.Errorf("failed to write temp config: %w", err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck
+		return fmt.Errorf("failed to preserve packages.toml mode: %w", err)
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
 		os.Remove(tmpPath) //nolint:errcheck
@@ -1057,6 +1222,15 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		default:
 			return fmt.Errorf("package %s: invalid fallback_parser type: %q", pkg, cfg.FallbackParser)
 		}
+	}
+
+	// The [meta] map is free-form except for the fetch_* namespace, which the
+	// applier reads as a typed sub-schema. Every key inside a map[string]string
+	// is claimed by the map, so the decoder's unknown-key check cannot see into
+	// it — this sub-validator is the only thing standing between a typo there and
+	// an authenticated download that never runs.
+	if err := validateMetaFetch(pkg, cfg.Meta); err != nil {
+		return err
 	}
 
 	return nil

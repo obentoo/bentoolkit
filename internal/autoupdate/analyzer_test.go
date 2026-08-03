@@ -676,6 +676,72 @@ HOMEPAGE="https://example.com"
 	}
 }
 
+// TestAnalyzeSuggestsTypeFromEbuildDetection verifies that the schema Analyze
+// suggests carries the classifier the analyzer already detected from the ebuild:
+// a binary package (RESTRICT="bindist") gets type = "bin", and a source package
+// gets no type at all, leaving the checker's resolveType to auto-detect (R8.2).
+func TestAnalyzeSuggestsTypeFromEbuildDetection(t *testing.T) {
+	const sourceEbuild = `EAPI=8
+DESCRIPTION="Test package"
+HOMEPAGE="https://example.com"
+SLOT="0"
+KEYWORDS="~amd64"
+`
+	const binaryEbuild = sourceEbuild + `RESTRICT="bindist strip"
+`
+
+	tests := []struct {
+		name          string
+		ebuildContent string
+		wantType      string
+	}{
+		{name: "binary ebuild", ebuildContent: binaryEbuild, wantType: "bin"},
+		{name: "source ebuild", ebuildContent: sourceEbuild, wantType: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
+			}))
+			defer server.Close()
+
+			tmpDir := t.TempDir()
+			createTestEbuildContent(t, tmpDir, "app-misc/test", "1.0.0", tt.ebuildContent)
+
+			rateLimiter := createFastRateLimiter()
+			setFastHTTPLimit(rateLimiter, server.URL)
+
+			analyzer, err := NewAnalyzer(tmpDir,
+				WithAnalyzerConfigDir(t.TempDir()),
+				WithAnalyzerRateLimiter(rateLimiter),
+				WithAnalyzerHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{
+					MaxRetries: 0,
+					Timeout:    5 * time.Second,
+				})),
+			)
+			if err != nil {
+				t.Fatalf("NewAnalyzer failed: %v", err)
+			}
+
+			result, err := analyzer.Analyze("app-misc/test", AnalyzeOptions{
+				URL:     server.URL,
+				NoCache: true,
+			})
+			if err != nil {
+				t.Fatalf("Analyze failed: %v", err)
+			}
+			if result.SuggestedSchema == nil {
+				t.Fatal("Expected a suggested schema")
+			}
+			if result.SuggestedSchema.Type != tt.wantType {
+				t.Errorf("Suggested type = %q, want %q", result.SuggestedSchema.Type, tt.wantType)
+			}
+		})
+	}
+}
+
 // TestFindPackagesWithoutSchemas tests finding packages without schemas
 func TestFindPackagesWithoutSchemas(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1463,13 +1529,17 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
 				switch i % 3 {
 				case 0:
-					// JSON parser
-					schemas[pkgName] = PackageConfig{
+					// JSON parser. The classifier alternates so the round-trip
+					// covers both an explicit type and an absent one.
+					jsonCfg := PackageConfig{
 						URL:    "https://example.com/api/" + string(rune('a'+i)),
 						Parser: "json",
 						Path:   "version",
-						Binary: i%2 == 0,
 					}
+					if i%2 == 0 {
+						jsonCfg.Type = "bin"
+					}
+					schemas[pkgName] = jsonCfg
 				case 1:
 					// Regex parser
 					schemas[pkgName] = PackageConfig{
@@ -1528,7 +1598,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 					actualCfg.Path != expectedCfg.Path ||
 					actualCfg.Pattern != expectedCfg.Pattern ||
 					actualCfg.Selector != expectedCfg.Selector ||
-					actualCfg.Binary != expectedCfg.Binary {
+					actualCfg.Type != expectedCfg.Type {
 					t.Logf("Package %s mismatch: expected %+v, got %+v", pkgName, expectedCfg, actualCfg)
 					return false
 				}
@@ -1666,7 +1736,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 				URL:             "https://api.github.com/repos/test/test/releases",
 				Parser:          "json",
 				Path:            "[0].tag_name",
-				Binary:          true,
+				Type:            "bin",
 				FallbackURL:     "https://example.com/fallback",
 				FallbackParser:  "regex",
 				FallbackPattern: `v(\d+\.\d+\.\d+)`,
@@ -1708,7 +1778,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			if reloaded.URL != complexSchema.URL ||
 				reloaded.Parser != complexSchema.Parser ||
 				reloaded.Path != complexSchema.Path ||
-				reloaded.Binary != complexSchema.Binary ||
+				reloaded.Type != complexSchema.Type ||
 				reloaded.FallbackURL != complexSchema.FallbackURL ||
 				reloaded.FallbackParser != complexSchema.FallbackParser ||
 				reloaded.FallbackPattern != complexSchema.FallbackPattern ||

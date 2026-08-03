@@ -40,7 +40,7 @@ func genPackageConfigJSON() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidJSONPath(),
-		gen.Bool(),
+		genPackageType(),
 		gen.Bool(), // has fallback
 		genValidURL(),
 		genValidRegexPattern(),
@@ -51,7 +51,7 @@ func genPackageConfigJSON() gopter.Gen {
 			URL:    values[0].(string),
 			Parser: "json",
 			Path:   values[1].(string),
-			Binary: values[2].(bool),
+			Type:   values[2].(string),
 		}
 		if values[3].(bool) {
 			cfg.FallbackURL = values[4].(string)
@@ -65,18 +65,24 @@ func genPackageConfigJSON() gopter.Gen {
 	})
 }
 
+// genPackageType generates the accepted values of PackageConfig.Type: the two
+// explicit classifiers plus "" (auto-detect from the ebuild).
+func genPackageType() gopter.Gen {
+	return gen.OneConstOf("", "bin", "source")
+}
+
 // genPackageConfigRegex generates valid PackageConfig structs for regex parser
 func genPackageConfigRegex() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidRegexPattern(),
-		gen.Bool(),
+		genPackageType(),
 	).Map(func(values []interface{}) PackageConfig {
 		return PackageConfig{
 			URL:     values[0].(string),
 			Parser:  "regex",
 			Pattern: values[1].(string),
-			Binary:  values[2].(bool),
+			Type:    values[2].(string),
 		}
 	})
 }
@@ -219,11 +225,15 @@ func TestLoadPackagesConfigValid(t *testing.T) {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}
 
+	// The record keeps the retired binary key on purpose: 23 records in the real
+	// registry still carry it, and retiring the struct field behind it must not
+	// stop such a record from loading. type is the classifier actually read.
 	validTOML := `["net-misc/postman-bin"]
 url = "https://www.postman.com/mkapi/release.json"
 parser = "json"
 path = "notes[0].version"
 binary = true
+type = "bin"
 fallback_url = "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=postman-bin"
 fallback_parser = "regex"
 fallback_pattern = 'pkgver=([0-9.]+)'
@@ -257,8 +267,8 @@ path = "tag_name"
 	if postman.Path != "notes[0].version" {
 		t.Errorf("Unexpected path: %s", postman.Path)
 	}
-	if !postman.Binary {
-		t.Error("Expected binary to be true")
+	if postman.Type != "bin" {
+		t.Errorf("Unexpected type: %s", postman.Type)
 	}
 	if postman.FallbackURL != "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=postman-bin" {
 		t.Errorf("Unexpected fallback URL: %s", postman.FallbackURL)
@@ -287,6 +297,133 @@ path = "tag_name"
 	if vscode.Path != "tag_name" {
 		t.Errorf("Unexpected path: %s", vscode.Path)
 	}
+}
+
+// TestLoadPackagesConfigUnknownKey pins strict decoding: a key no struct field
+// claims fails the load and says WHICH record carries it (R4.1).
+//
+// The motivating case is the first subtest. `serie` for `series` parses as
+// perfectly valid TOML, so the old lenient decode dropped it silently and the
+// entry lost its release-line filter — the very silent failure `series` exists
+// to prevent, now reported instead of absorbed.
+//
+// _Requirements: R4, R4.1, R4.2_
+func TestLoadPackagesConfigUnknownKey(t *testing.T) {
+	t.Run("a misspelled field fails the load, naming the record", func(t *testing.T) {
+		dir := writeRegistry(t, `["app-editors/zed-bin"]
+url = "https://example.com"
+parser = "json"
+path = "tag_name"
+serie = '^1\.28\.'
+comments = "zed-bin — doc."
+# END
+`)
+		_, err := LoadPackagesConfig(dir)
+		if err == nil {
+			t.Fatal("a misspelled field loaded silently")
+		}
+		// Both halves matter: the key alone would leave the maintainer grepping
+		// 411 records for it.
+		msg := err.Error()
+		if !strings.Contains(msg, "serie") {
+			t.Errorf("error does not name the key: %q", msg)
+		}
+		if !strings.Contains(msg, "app-editors/zed-bin") {
+			t.Errorf("error does not name the record: %q", msg)
+		}
+
+		var unknown *UnknownKeysError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("want an *UnknownKeysError, got %T", err)
+		}
+		want := []UnknownKey{{Package: "app-editors/zed-bin", Key: "serie"}}
+		if !reflect.DeepEqual(unknown.Keys, want) {
+			t.Errorf("got %v, want %v", unknown.Keys, want)
+		}
+	})
+
+	t.Run("only known keys load", func(t *testing.T) {
+		dir := writeRegistry(t, `["app-editors/zed-bin"]
+url = "https://example.com"
+parser = "json"
+path = "tag_name"
+series = '^1\.28\.'
+select = "max"
+comments = "zed-bin — doc."
+# END
+`)
+		cfg, err := LoadPackagesConfig(dir)
+		if err != nil {
+			t.Fatalf("a registry of known keys was rejected: %v", err)
+		}
+		if got := cfg.Packages["app-editors/zed-bin"].Series; got != `^1\.28\.` {
+			t.Errorf("series = %q, want the declared regex", got)
+		}
+	})
+
+	t.Run("a retired key still loads", func(t *testing.T) {
+		// `binary` has no field since story 022 task 1.1, but 23 records in the
+		// real registry still carry it. Rejecting it would make them unreadable by
+		// --lint --fix, the only thing that can migrate them — so the allowlist
+		// claims the key and the linter, not the loader, reports it.
+		dir := writeRegistry(t, `["net-misc/postman-bin"]
+url = "https://example.com"
+parser = "json"
+path = "notes[0].version"
+binary = true
+comments = "postman-bin — doc."
+# END
+`)
+		if _, err := LoadPackagesConfig(dir); err != nil {
+			t.Fatalf("a retired key failed the load: %v", err)
+		}
+	})
+
+	t.Run("every unknown key is named in one error", func(t *testing.T) {
+		// Failing on the first typo would cost one edit-and-rerun cycle per typo.
+		// The records are deliberately out of alphabetical order in the file, so
+		// the assertion also pins that the message is sorted rather than emitted
+		// in whatever order the file happens to use.
+		dir := writeRegistry(t, `["dev-util/zzz"]
+url = "https://example.com"
+patern = 'v([0-9.]+)'
+comments = "zzz — doc."
+# END
+
+["dev-libs/aaa"]
+url = "https://example.com"
+serie = '^1\.28\.'
+binary = true
+comments = "aaa — doc."
+# END
+`)
+		_, err := LoadPackagesConfig(dir)
+		if err == nil {
+			t.Fatal("two misspelled fields loaded silently")
+		}
+		var unknown *UnknownKeysError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("want an *UnknownKeysError, got %T", err)
+		}
+		want := []UnknownKey{
+			{Package: "dev-libs/aaa", Key: "serie"},
+			{Package: "dev-util/zzz", Key: "patern"},
+		}
+		if !reflect.DeepEqual(unknown.Keys, want) {
+			t.Fatalf("got %v, want both keys, sorted by record: %v", unknown.Keys, want)
+		}
+		msg := err.Error()
+		for _, s := range []string{"dev-libs/aaa", "serie", "dev-util/zzz", "patern"} {
+			if !strings.Contains(msg, s) {
+				t.Errorf("error omits %q: %q", s, msg)
+			}
+		}
+		// The retired key rode along in one of those records and must not be
+		// reported as unknown.
+		if strings.Contains(msg, "binary") {
+			t.Errorf("retired key reported as unknown: %q", msg)
+		}
+	})
 }
 
 // TestValidatePackageConfigMissingURL tests validation with missing URL
@@ -619,7 +756,7 @@ func genPackageConfigHTML() gopter.Gen {
 		genValidXPath(),        // xpath
 		gen.Bool(),             // has pattern
 		genValidRegexPattern(), // pattern
-		gen.Bool(),             // binary
+		genPackageType(),       // type
 		gen.Bool(),             // has headers
 		genHeaders(),           // headers
 		gen.Bool(),             // has versions_selector
@@ -628,7 +765,7 @@ func genPackageConfigHTML() gopter.Gen {
 		cfg := PackageConfig{
 			URL:    values[0].(string),
 			Parser: "html",
-			Binary: values[6].(bool),
+			Type:   values[6].(string),
 		}
 		if values[1].(bool) {
 			cfg.Selector = values[2].(string)
@@ -656,7 +793,7 @@ func genPackageConfigJSONWithVersionsPath() gopter.Gen {
 	return gopter.CombineGens(
 		genValidURL(),
 		genValidJSONPath(),
-		gen.Bool(),         // binary
+		genPackageType(),   // type
 		gen.Bool(),         // has versions_path
 		genValidJSONPath(), // versions_path
 		gen.Bool(),         // has headers
@@ -666,7 +803,7 @@ func genPackageConfigJSONWithVersionsPath() gopter.Gen {
 			URL:    values[0].(string),
 			Parser: "json",
 			Path:   values[1].(string),
-			Binary: values[2].(bool),
+			Type:   values[2].(string),
 		}
 		if values[3].(bool) {
 			cfg.VersionsPath = values[4].(string)
@@ -930,6 +1067,183 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 		cfg.Series = `^1\.28\.`
 		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+}
+
+// TestValidatePackageConfigMetaFetch covers the fetch_* sub-schema hidden inside
+// the free-form [meta] map. Every key inside a map[string]string is claimed by
+// the map, so the decoder's unknown-key check cannot see into it: without these
+// rules a misspelled key does not fail anything, it just quietly turns the
+// authenticated download off and lets pkgdev chase a distfile no mirror has.
+//
+// The rules must stay a mirror of parseAuthFetchSpec, never a stricter schema of
+// their own — a validation the consumer does not share would reject a record
+// that works today.
+func TestValidatePackageConfigMetaFetch(t *testing.T) {
+	base := func(meta map[string]string) *PackageConfig {
+		return &PackageConfig{
+			URL:     "https://filezillapro.com/filezilla-pro-version-history/",
+			Parser:  "regex",
+			Pattern: `Latest:\s*([0-9]+\.[0-9]+\.[0-9]+)`,
+			Meta:    meta,
+		}
+	}
+	// The net-ftp/filezilla-pro shape — the only record in the registry using
+	// this sub-schema. Inlined rather than read from the maintainer's overlay so
+	// the test runs on a clean machine.
+	filezillaMeta := func() map[string]string {
+		return map[string]string{
+			"fetch_method":       "post",
+			"fetch_url":          "https://filezilla-project.org/prodownload.php?beta=0",
+			"fetch_serial_env":   "FILEZILLA_PRO_KEY",
+			"fetch_serial_field": "key",
+			"fetch_form":         "mail=&number=&platform=linux&download_program=Start download of FileZilla Pro",
+			"fetch_filename":     "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
+		}
+	}
+
+	t.Run("the real filezilla-pro shape validates", func(t *testing.T) {
+		if err := ValidatePackageConfig("net-ftp/filezilla-pro", base(filezillaMeta())); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("meta without any fetch_ key is untouched", func(t *testing.T) {
+		for _, meta := range []map[string]string{
+			nil,
+			{},
+			{"requires_serial": "true", "platform": "linux", "notes": "bought 2024"},
+		} {
+			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+				t.Errorf("meta %v: expected no error, got: %v", meta, err)
+			}
+		}
+	})
+
+	// R5.1 — the silent failure the whole rule exists for: the trigger is gone,
+	// so the applier reads the block as "no authenticated fetch" and says nothing.
+	t.Run("fetch_serial_env without fetch_url fails", func(t *testing.T) {
+		cfg := base(map[string]string{"fetch_serial_env": "FILEZILLA_PRO_KEY"})
+		err := ValidatePackageConfig("net-ftp/filezilla-pro", cfg)
+		if err == nil {
+			t.Fatal("Expected error for a fetch_* block without fetch_url")
+		}
+		if !errors.Is(err, ErrMetaFetchURLRequired) {
+			t.Errorf("Expected ErrMetaFetchURLRequired, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "net-ftp/filezilla-pro") {
+			t.Errorf("Expected the entry key in the message, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "fetch_serial_env") {
+			t.Errorf("Expected the offending key in the message, got %q", err.Error())
+		}
+	})
+
+	// A blanked-out URL disables the download exactly as silently as a missing
+	// one, because parseAuthFetchSpec trims before testing the trigger.
+	t.Run("blank fetch_url fails like a missing one", func(t *testing.T) {
+		meta := filezillaMeta()
+		meta["fetch_url"] = "   "
+		err := ValidatePackageConfig("test/pkg", base(meta))
+		if err == nil {
+			t.Fatal("Expected error for a blank fetch_url")
+		}
+		if !errors.Is(err, ErrMetaFetchURLRequired) {
+			t.Errorf("Expected ErrMetaFetchURLRequired, got %v", err)
+		}
+	})
+
+	// R5.2 — the parser lowercases the method before comparing, so an uppercase
+	// value works at apply time and must not be rejected here.
+	t.Run("fetch_method case and default", func(t *testing.T) {
+		for _, valid := range []string{"post", "POST", "get", "Get", "  post  ", ""} {
+			meta := filezillaMeta()
+			meta["fetch_method"] = valid
+			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+				t.Errorf("fetch_method %q: unexpected error: %v", valid, err)
+			}
+		}
+		// Absent is legal too: the parser defaults it to "post".
+		meta := filezillaMeta()
+		delete(meta, "fetch_method")
+		if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+			t.Errorf("absent fetch_method: unexpected error: %v", err)
+		}
+	})
+
+	t.Run("fetch_method PUT fails", func(t *testing.T) {
+		meta := filezillaMeta()
+		meta["fetch_method"] = "PUT"
+		err := ValidatePackageConfig("test/pkg", base(meta))
+		if err == nil {
+			t.Fatal("Expected error for fetch_method = \"PUT\"")
+		}
+		if !errors.Is(err, ErrInvalidMetaFetchMethod) {
+			t.Errorf("Expected ErrInvalidMetaFetchMethod, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "PUT") {
+			t.Errorf("Expected the offending value in the message, got %q", err.Error())
+		}
+	})
+
+	// R5.3 — the misspelling M2 measured. The record still has a valid
+	// fetch_url, so nothing else fires: only the unknown-key rule can catch it.
+	t.Run("misspelled fetch_serial_env is reported as unknown", func(t *testing.T) {
+		meta := filezillaMeta()
+		delete(meta, "fetch_serial_env")
+		meta["fetch_seral_env"] = "FILEZILLA_PRO_KEY"
+		err := ValidatePackageConfig("net-ftp/filezilla-pro", base(meta))
+		if err == nil {
+			t.Fatal("Expected error for the misspelled fetch_seral_env")
+		}
+		if !errors.Is(err, ErrUnknownMetaFetchKey) {
+			t.Errorf("Expected ErrUnknownMetaFetchKey, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "fetch_seral_env") {
+			t.Errorf("Expected the misspelled key in the message, got %q", err.Error())
+		}
+		// The message must offer the right spelling, or it names a mistake
+		// without saying what the fix is.
+		if !strings.Contains(err.Error(), "fetch_serial_env") {
+			t.Errorf("Expected the known keys in the message, got %q", err.Error())
+		}
+	})
+
+	// Every offending key at once, in a stable order: map iteration is random, so
+	// an unsorted message would reshuffle between runs and be useless in a diff.
+	t.Run("all unknown keys are reported deterministically", func(t *testing.T) {
+		meta := filezillaMeta()
+		meta["fetch_zebra"] = "1"
+		meta["fetch_alpha"] = "2"
+		first := ValidatePackageConfig("test/pkg", base(meta))
+		if first == nil {
+			t.Fatal("Expected error for the unknown fetch_* keys")
+		}
+		if !strings.Contains(first.Error(), "fetch_alpha, fetch_zebra") {
+			t.Errorf("Expected both keys sorted in the message, got %q", first.Error())
+		}
+		for i := 0; i < 20; i++ {
+			again := ValidatePackageConfig("test/pkg", base(meta))
+			if again == nil || again.Error() != first.Error() {
+				t.Fatalf("message is not stable across runs: %v vs %v", first, again)
+			}
+		}
+	})
+
+	// The validator must stop where parseAuthFetchSpec already fails loudly:
+	// those companions are checked at apply time with a precise message, and
+	// re-checking them here would let one broken record block the whole load.
+	t.Run("companions the parser checks are left to the parser", func(t *testing.T) {
+		for _, key := range []string{"fetch_serial_env", "fetch_serial_field", "fetch_filename"} {
+			meta := filezillaMeta()
+			delete(meta, key)
+			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+				t.Errorf("missing %s: expected the load to pass and the apply to fail, got: %v", key, err)
+			}
+			if _, _, perr := parseAuthFetchSpec(meta); perr == nil {
+				t.Errorf("missing %s: expected parseAuthFetchSpec to reject it at apply time", key)
+			}
 		}
 	})
 }

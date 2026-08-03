@@ -15,8 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/antchfx/xpath"
 
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -366,6 +364,17 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 		if err != nil {
 			lastErr = err
 			continue
+		}
+
+		// Carry the ebuild-level binary detection already done by
+		// ExtractEbuildMetadata into the suggested record, so a binary package
+		// is suggested (and saved) as type = "bin" (R8.2). Only "bin" is
+		// written: an absent type means "auto-detect from the ebuild", which is
+		// exactly what the checker's resolveType does for a source package, so
+		// pinning type = "source" would add a redundant claim the maintainer
+		// then has to keep true.
+		if meta.IsBinary {
+			schema.Type = "bin"
 		}
 
 		result.SuggestedSchema = schema
@@ -741,12 +750,17 @@ func (a *Analyzer) SaveSchema(pkg string, schema *PackageConfig) error {
 
 // savePackagesConfig saves the packages configuration to disk.
 //
-// Records are written one at a time, in sorted key order, each closed by the
-// `# END` marker the record model requires — a single Encode call over the whole
-// map would emit valid TOML that the registry lint then rejects for missing
-// markers. The doc field is written by hand as a multi-line string rather than
-// through the encoder, which would collapse it into one line of escaped \n and
-// make the registry unreadable.
+// Records are written one at a time, in sorted key order, each rendered by
+// RenderRecord — the same function `overlay analyze` prints its suggestion with,
+// so the file this produces is the file the linter accepts (R8). Going through
+// the TOML encoder instead is what used to break that: it ordered fields by
+// struct declaration, turned a populated headers/meta into a sub-table the
+// record scanner read as a phantom record, and wrote `timeout = 0` into every
+// entry.
+//
+// The write is atomic — a temp file renamed over the registry only once every
+// record is on disk and the file is closed — because this path rewrites all 411
+// records at once and a partial write is a destroyed registry.
 func (a *Analyzer) savePackagesConfig() error {
 	configPath := filepath.Join(a.overlayPath, ".autoupdate", "packages.toml")
 
@@ -775,31 +789,23 @@ func (a *Analyzer) savePackagesConfig() error {
 	sort.Strings(pkgs)
 
 	for i, pkg := range pkgs {
-		cfg := a.config.Packages[pkg]
-		comments := cfg.Comments
-		// Encode the record without the doc field, then append it by hand so it
-		// keeps its line breaks.
-		cfg.Comments = ""
-
 		if i > 0 {
 			if _, err := io.WriteString(f, "\n"); err != nil {
 				return fail(fmt.Errorf("failed to write config: %w", err))
 			}
 		}
-		if err := toml.NewEncoder(f).Encode(map[string]PackageConfig{pkg: cfg}); err != nil {
-			return fail(fmt.Errorf("failed to encode config: %w", err))
-		}
-		if comments != "" {
-			if _, err := io.WriteString(f, formatCommentsField(comments)); err != nil {
-				return fail(fmt.Errorf("failed to write config: %w", err))
-			}
-		}
-		if _, err := io.WriteString(f, recordEndMarker+"\n"); err != nil {
-			return fail(fmt.Errorf("failed to write config: %w", err))
+		cfg := a.config.Packages[pkg]
+		if _, err := io.WriteString(f, RenderRecord(pkg, &cfg)); err != nil {
+			return fail(fmt.Errorf("failed to write record for %s: %w", pkg, err))
 		}
 	}
 
-	f.Close() //nolint:errcheck
+	// Checked rather than deferred: a write that only fails on flush would
+	// otherwise be renamed over the registry as if it had succeeded.
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
 
 	// Rename to final path (atomic on most filesystems)
 	if err := os.Rename(tmpPath, configPath); err != nil {

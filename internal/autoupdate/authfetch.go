@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,6 +42,11 @@ var (
 // meta keys that drive an authenticated fetch. fetch_url is the trigger: a
 // package without it is fetched the normal way (pkgdev from SRC_URI).
 const (
+	// metaFetchPrefix namespaces the sub-schema inside the otherwise free-form
+	// [meta] map: a key carrying it is claimed by this file and validated,
+	// anything else is an annotation nothing reads.
+	metaFetchPrefix = "fetch_"
+
 	metaFetchMethod      = "fetch_method"       // "post" (default) or "get"
 	metaFetchURL         = "fetch_url"          // form action / endpoint
 	metaFetchSerialEnv   = "fetch_serial_env"   // env var holding the serial
@@ -48,6 +54,103 @@ const (
 	metaFetchForm        = "fetch_form"         // other form fields, urlencoded
 	metaFetchFilename    = "fetch_filename"     // dest name; {version} is substituted
 )
+
+// metaFetchKeys is the closed set of meta keys above, as one list. It exists so
+// the parser below and ValidatePackageConfig share a single enumeration of the
+// six instead of repeating the literals: the schema drifted out of sight once
+// already (the PackageConfig.Meta doc claimed nothing read this map) precisely
+// because the key set was knowledge only this file held.
+//
+// Order matters only for the error message that offers it as a spelling guide,
+// so it follows the const block.
+var metaFetchKeys = []string{
+	metaFetchMethod,
+	metaFetchURL,
+	metaFetchSerialEnv,
+	metaFetchSerialField,
+	metaFetchForm,
+	metaFetchFilename,
+}
+
+// Validation errors for the meta.fetch_* sub-schema. They are checked at config
+// load / lint time, unlike the Err* pair above, which report a download that
+// actually failed.
+var (
+	// ErrMetaFetchURLRequired is returned when a [meta] block configures an
+	// authenticated fetch but its trigger, fetch_url, is missing or blank.
+	ErrMetaFetchURLRequired = errors.New("meta: fetch_url is required when any fetch_* key is present (it is the trigger; without it the authenticated download is silently skipped)")
+	// ErrInvalidMetaFetchMethod is returned when meta.fetch_method holds
+	// something other than the two HTTP methods the fetcher can build.
+	ErrInvalidMetaFetchMethod = errors.New(`invalid meta.fetch_method: must be "post" (default) or "get"`)
+	// ErrUnknownMetaFetchKey is returned for a fetch_*-prefixed key the applier
+	// does not read — almost always a misspelling of one of the six.
+	ErrUnknownMetaFetchKey = errors.New("meta: unknown authenticated-fetch key")
+)
+
+// validateMetaFetch checks the fetch_* sub-schema hiding inside a package's
+// free-form [meta] map. It lives beside parseAuthFetchSpec on purpose: these
+// rules only stay correct while they mirror that consumer, and holding the two
+// in different files is what let the schema go undocumented.
+//
+// The rules are deliberately NOT the parser's full requirement set. Once
+// fetch_url is present the parser already fails loudly on a missing
+// serial_env/serial_field/filename, so repeating those checks here would move an
+// already-visible failure earlier at the price of letting one broken record
+// block the whole registry load. What the parser cannot report is the silent
+// case: a [meta] block whose trigger is missing or misspelled does not read as
+// broken, it reads as "no authenticated fetch", and pkgdev is then sent to
+// digest a distfile that exists on no public mirror.
+func validateMetaFetch(pkg string, meta map[string]string) error {
+	var present, unknown []string
+	for k := range meta {
+		if !strings.HasPrefix(k, metaFetchPrefix) {
+			continue // annotation; [meta] stays free-form outside this namespace
+		}
+		present = append(present, k)
+		if !slices.Contains(metaFetchKeys, k) {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(present) == 0 {
+		return nil
+	}
+	// Map iteration order is random, so sort before naming keys in a message:
+	// an error whose text reshuffles between runs is unusable in a diff.
+	slices.Sort(present)
+	slices.Sort(unknown)
+
+	// Reported first, and with every offending key at once: when the typo is in
+	// fetch_url itself the missing-trigger rule below fires too, and "you wrote
+	// fetch_ur1" is the actionable half of that pair.
+	if len(unknown) > 0 {
+		return fmt.Errorf("package %s: %w: %s (the applier reads only: %s)", pkg, ErrUnknownMetaFetchKey,
+			strings.Join(unknown, ", "), strings.Join(metaFetchKeys, ", "))
+	}
+
+	// A blank fetch_url counts as absent, because that is exactly how
+	// parseAuthFetchSpec tests the trigger (TrimSpace, then compare to ""): a
+	// blanked-out URL disables the download just as silently as a missing one.
+	if strings.TrimSpace(meta[metaFetchURL]) == "" {
+		detail := "fetch_* keys present: " + strings.Join(present, ", ")
+		if _, set := meta[metaFetchURL]; set {
+			detail = "fetch_url is set but blank"
+		}
+		return fmt.Errorf("package %s: %w; %s", pkg, ErrMetaFetchURLRequired, detail)
+	}
+
+	// Mirror the parser exactly: it trims and lowercases before comparing, and
+	// an empty value is the documented "post" default rather than an error.
+	if method, ok := meta[metaFetchMethod]; ok {
+		switch strings.ToLower(strings.TrimSpace(method)) {
+		case "", "post", "get":
+			// valid
+		default:
+			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidMetaFetchMethod, method)
+		}
+	}
+
+	return nil
+}
 
 // authFetchTimeout bounds the authenticated download. The payload is a full
 // binary distfile (tens of MB), so it gets a generous-but-finite budget.

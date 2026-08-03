@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,53 @@ import (
 // line is the closest valid equivalent, and unlike a floating comment it belongs
 // to the record it terminates.
 const recordEndMarker = "# END"
+
+// CanonicalFieldOrder is the sequence in which a packages.toml record assigns
+// its fields. It is the single source of that order: the linter checks against
+// it (LintFieldOrder), the repair sorts by it, and `overlay analyze` emits by
+// it, so the generator and the linter agree by construction.
+//
+// IT IS DERIVED FROM MEASUREMENT, NOT FROM TASTE. The sequence is the practice
+// the registry's 411 hand-written records already follow; it was read off them
+// rather than designed, and only two adjustments were made — the four `base_*`
+// siblings were grouped so a commit-tracked record declares its base source in
+// one block, and `comments` was pinned last because the record model already
+// requires it there (see PackageConfig.Comments and LintCommentsNotLast).
+// Measured against the real registry, that costs 13 records a reordering. A
+// prettier order — grouping by theme, alphabetising, moving `type` up next to
+// `parser` — would have cost 178. Do not "tidy" this list: every edit to it is a
+// churn bill payable in records, so change it only with a fresh measurement in
+// hand.
+//
+// It covers every `toml:` tag of PackageConfig exactly once, which
+// TestCanonicalFieldOrderCoversPackageConfig pins — a field missing from here
+// would silently stop being ordered at all. `binary` is deliberately absent: it
+// has no struct field, because the classifier is `type` (R1.1).
+//
+// Treat it as read-only; canonicalFieldRank below is built from it once.
+var CanonicalFieldOrder = []string{
+	"enabled", "hold", "track",
+	"url", "parser", "path", "pattern", "selector", "xpath", "script",
+	"transform", "select", "suffix", "suffix_when",
+	"commit_sha_path", "commit_message_path", "commit_version_pattern",
+	"base_from", "base_url", "base_pattern", "base_tag_pattern",
+	"headers", "timeout", "meta", "type", "series",
+	"aux_var", "aux_pattern", "revision", "version",
+	"fallback_url", "fallback_parser", "fallback_pattern", "llm_prompt",
+	"versions_path", "versions_selector",
+	"comments",
+}
+
+// canonicalFieldRank maps each canonical field to its position in
+// CanonicalFieldOrder, so the order rule is a rank comparison rather than a
+// linear search per field.
+var canonicalFieldRank = func() map[string]int {
+	m := make(map[string]int, len(CanonicalFieldOrder))
+	for i, f := range CanonicalFieldOrder {
+		m[f] = i
+	}
+	return m
+}()
 
 // tripleQuoteRegex matches a run of three or more double quotes, the only quote
 // sequence that can close a multi-line basic string early.
@@ -41,6 +89,35 @@ const (
 	LintInvalidConfig    = "invalid-config"
 	LintAmbiguousEntries = "ambiguous-entries"
 	LintMissingSeries    = "missing-series"
+	LintUnknownField     = "unknown-field"
+	LintLegacyBinary     = "legacy-binary"
+	LintRedundantEnabled = "redundant-enabled"
+	LintFieldOrder       = "field-order"
+	LintLegacyBase       = "legacy-base"
+)
+
+// Repair actions. A rule says WHAT is wrong; the action says what `--lint --fix`
+// would do about it, as a stable identifier the repair pass switches on.
+//
+// The pair exists because one rule can carry two repairs: a record declaring the
+// retired `binary` is one finding (LintLegacyBinary), but the fix is a rewrite
+// when nothing else classifies the package (R1.2) and a plain deletion when
+// `type` is already there (R1.3). Encoding that in the message text would force
+// the repair to string-match prose, so it is encoded here instead.
+const (
+	// FixNone marks an issue that is reported and never repaired. It is the
+	// zero value, so every rule that offers no repair says so by default.
+	FixNone = ""
+	// FixBinaryToType rewrites `binary = true` as `type = "bin"` (R1.2).
+	FixBinaryToType = "binary-to-type"
+	// FixDropBinary deletes the `binary` line, leaving `type` untouched (R1.3).
+	FixDropBinary = "drop-binary"
+	// FixDropEnabled deletes a redundant `enabled = true` line (R2.2). It is
+	// never produced for `enabled = false`, which carries real information.
+	FixDropEnabled = "drop-enabled"
+	// FixReorderFields sorts the record's assignments into CanonicalFieldOrder
+	// (R3.2).
+	FixReorderFields = "reorder-fields"
 )
 
 // LintIssue is one violation of the packages.toml record model.
@@ -55,6 +132,13 @@ type LintIssue struct {
 	Rule string
 	// Message states the violation in one line.
 	Message string
+	// Fix is the repair `--lint --fix` would apply, one of the Fix* identifiers
+	// above. FixNone (the zero value) means the issue is reported only — either
+	// because the rule deliberately declines to guess (legacy-base cannot know
+	// where upstream versions itself, R6.1; unknown-field would write a value
+	// into a field nobody meant, R4.2) or because the violation needs a human
+	// edit. Read this rather than the message when deciding what to do.
+	Fix string
 }
 
 // String renders an issue the way a linter conventionally prints one.
@@ -72,12 +156,15 @@ func (i LintIssue) String() string {
 // LintPackagesConfig checks the overlay's packages.toml against the record
 // model: every record ends with the `# END` marker, its documentation lives in a
 // trailing comments field rather than in floating `#` lines, and each record's
-// fields are semantically valid.
+// fields are semantically valid. The comment block that opens the file, before
+// the first record, is the file header and is not a violation.
 //
 // It reports issues instead of failing on the first one, because the point is to
 // hand back the whole list of what needs fixing. A nil slice means the registry
 // is clean. An error is returned only when the file cannot be read or parsed at
-// all — a TOML syntax error leaves nothing to lint.
+// all — a TOML syntax error leaves nothing to lint. An unknown key is both: it
+// fails the load AND is reported as an issue, so the maintainer reads the same
+// per-record line the other rules produce instead of only a fatal error.
 func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 	data, err := os.ReadFile(configPath)
@@ -95,6 +182,21 @@ func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	// nothing about whether the file loads.
 	cfg, err := LoadPackagesConfig(overlayPath)
 	if err != nil {
+		// An unknown key is a lint finding in its own right, not merely a reason
+		// the file would not load: reported per record it reads like every other
+		// rule and says which of 411 entries to open (R4.1). It stays a returned
+		// error too, because the semantic checks below need a config that could
+		// not be built. No repair is offered — see UnknownKeysError (R4.2).
+		var unknown *UnknownKeysError
+		if errors.As(err, &unknown) {
+			for _, k := range unknown.Keys {
+				issues = append(issues, LintIssue{
+					Package: k.Package,
+					Rule:    LintUnknownField,
+					Message: fmt.Sprintf("unknown key %q: no field claims it; check the spelling — an unknown key is reported, never repaired", k.Key),
+				})
+			}
+		}
 		return issues, err
 	}
 	for _, pkg := range sortedKeys(cfg.Packages) {
@@ -259,6 +361,13 @@ func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig
 	return issues
 }
 
+// recordField is one key/value assignment of a record, as written.
+type recordField struct {
+	key   string // the bare key, left of "="
+	value string // the raw text right of "=", trimmed; "[" for a multi-line array
+	line  int    // 1-indexed line of the assignment
+}
+
 // recordLintState tracks the record currently being scanned by lintRecordModel.
 type recordLintState struct {
 	name          string
@@ -266,7 +375,8 @@ type recordLintState struct {
 	closed        bool // the `# END` marker has been seen
 	hasComments   bool
 	commentsLine  int
-	fieldsAfterCm int // fields assigned after comments — the doc must be last
+	fieldsAfterCm int           // fields assigned after comments — the doc must be last
+	fields        []recordField // every assignment, in file order, for lintRecordFields
 }
 
 // lintRecordModel scans the raw file text for record-model violations.
@@ -276,10 +386,20 @@ type recordLintState struct {
 // field comes last, whether the record is closed. It tracks the multi-line
 // string opened by `comments = """` so that a `#` line or a `[`-prefixed line
 // inside the documentation is not mistaken for file structure.
+//
+// The comment block that opens the file is exempt: see seenRecord below.
 func lintRecordModel(content string) []LintIssue {
 	var issues []LintIssue
 	var cur *recordLintState
 	inComments := false
+	// seenRecord turns the stray-comment rule on. Everything before the first
+	// record header is the file header — the text that documents the record
+	// model itself (field order, enabled vs hold, the traps a new record has to
+	// avoid). It describes every record, so it can live inside none of them, and
+	// flagging it would push maintainers to delete the one thing that makes the
+	// file editable by hand. Once a record has been seen, a floating comment is
+	// documentation stranded between records, which is what the rule is for.
+	seenRecord := false
 
 	closeRecord := func() {
 		if cur == nil {
@@ -302,6 +422,7 @@ func lintRecordModel(content string) []LintIssue {
 				Message: fmt.Sprintf("comments must be the last field, but %d field(s) follow it", cur.fieldsAfterCm),
 			})
 		}
+		issues = append(issues, lintRecordFields(cur)...)
 		cur = nil
 	}
 
@@ -328,6 +449,7 @@ func lintRecordModel(content string) []LintIssue {
 		if name, isHeader := tomlTableName(line); isHeader {
 			closeRecord()
 			cur = &recordLintState{name: name, headerLine: lineNo}
+			seenRecord = true
 			continue
 		}
 
@@ -335,11 +457,14 @@ func lintRecordModel(content string) []LintIssue {
 			continue
 		}
 
-		// A comment line. Inside an open record it is either the end marker or a
-		// leftover doc line that belongs in comments; outside one it is the
+		// A comment line. Before the first record it is the file header, which
+		// the model allows. Inside an open record it is either the end marker or
+		// a leftover doc line that belongs in comments; between records it is the
 		// floating comment the record model forbids.
 		if strings.HasPrefix(trimmed, "#") {
 			switch {
+			case !seenRecord:
+				// File header — allowed, see seenRecord.
 			case cur == nil || cur.closed:
 				issues = append(issues, LintIssue{
 					Line: lineNo, Rule: LintStrayComment,
@@ -364,6 +489,15 @@ func lintRecordModel(content string) []LintIssue {
 		if m == nil {
 			continue
 		}
+		// Every assignment is recorded, comments included, because the field-set
+		// and field-order rules need the whole sequence. m[0] ends at the "=", so
+		// the remainder is the value even when the value itself contains one
+		// (pattern = 'a=b').
+		cur.fields = append(cur.fields, recordField{
+			key:   m[1],
+			value: strings.TrimSpace(line[len(m[0]):]),
+			line:  lineNo,
+		})
 		if m[1] == "comments" {
 			cur.hasComments = true
 			cur.commentsLine = lineNo
@@ -381,6 +515,197 @@ func lintRecordModel(content string) []LintIssue {
 	closeRecord()
 
 	return issues
+}
+
+// orderedField is one field as the record will carry it AFTER repair: canonical
+// is the name it will then have, written is the key literally in the file. The
+// two differ only for a `binary` line that repairs into `type`.
+type orderedField struct {
+	canonical string
+	written   string
+	line      int
+}
+
+// lintRecordFields reports the four field-set rules of one record: the retired
+// `binary` key (R1.2, R1.3), a redundant `enabled = true` (R2.1), an assignment
+// order that is not canonical (R3.2), and a commit-tracked entry whose base
+// version has no declared source (R6.1).
+//
+// All four live in the text scanner rather than beside ValidatePackageConfig,
+// for reasons that differ per rule but converge:
+//
+//   - `binary` has no struct field at all (R1.1), so the parsed config cannot
+//     see it; only the raw text can.
+//   - `enabled = true` and `enabled` absent parse to the same behaviour, and the
+//     order of assignments is discarded by the parser outright.
+//   - `track = "commit"` without `base_from` IS visible to the parser, and could
+//     have gone into ValidatePackageConfig — but that function's contract is
+//     "this record is invalid", and such a record is perfectly legal: it is the
+//     documented legacy behaviour two entries still rely on. Failing the load
+//     over a risk is not the same as reporting it.
+//
+// And every one of them owes the maintainer a line number out of ~5850, which
+// only the scan has.
+//
+// The order check runs over the EFFECTIVE field list — the sequence the record
+// will have once the repairs above are applied — not over the literal one. That
+// matters in both directions. A `binary` line that becomes `type = "bin"` is
+// ranked as `type`, so net-misc/nxplayer (…aux_var, aux_pattern, binary…) is
+// reported: after migration its `type` would sit two ranks too late, and a
+// repair that reorders a record the lint never flagged is a repair nobody
+// approved. Conversely a deleted line (a redundant `binary` or `enabled = true`)
+// is dropped before ranking, so it cannot manufacture a deviation that the
+// repair then "fixes" by removing the line anyway. The consequence worth
+// stating: `--lint --fix` followed by `--lint` reports nothing, which is the
+// property that makes the repair trustworthy.
+//
+// A key in neither CanonicalFieldOrder nor the retired set is skipped rather
+// than ranked last: it already fails the load and is reported as
+// LintUnknownField, and a second finding about where the typo SITS would be
+// noise.
+func lintRecordFields(rec *recordLintState) []LintIssue {
+	if rec == nil || len(rec.fields) == 0 {
+		return nil
+	}
+
+	var hasType bool
+	var typeValue string
+	var hasBaseFrom bool
+	var trackCommitLine int
+	for _, f := range rec.fields {
+		switch f.key {
+		case "type":
+			hasType = true
+			typeValue = tomlStringValue(f.value)
+		case "base_from":
+			hasBaseFrom = true
+		case "track":
+			if tomlStringValue(f.value) == "commit" {
+				trackCommitLine = f.line
+			}
+		}
+	}
+
+	var issues []LintIssue
+	effective := make([]orderedField, 0, len(rec.fields))
+
+	for _, f := range rec.fields {
+		switch f.key {
+		case "binary":
+			// The classifier is `type`. Which repair applies depends on whether
+			// the record already declares one — carried in Fix, not in the prose.
+			if on, isBool := tomlBoolValue(f.value); isBool && on && !hasType {
+				issues = append(issues, LintIssue{
+					Line: f.line, Package: rec.name, Rule: LintLegacyBinary, Fix: FixBinaryToType,
+					Message: `binary is retired: the record declares no type, so it becomes type = "bin"`,
+				})
+				effective = append(effective, orderedField{canonical: "type", written: f.key, line: f.line})
+				continue
+			}
+			detail := "the record already declares type"
+			if typeValue != "" {
+				detail = fmt.Sprintf("the record already declares type = %q", typeValue)
+			}
+			if !hasType {
+				// binary = false: the default classification spelled out. It says
+				// nothing `type` would not say better, so the line just goes.
+				detail = "it says nothing, auto-detection is the default"
+			}
+			issues = append(issues, LintIssue{
+				Line: f.line, Package: rec.name, Rule: LintLegacyBinary, Fix: FixDropBinary,
+				Message: fmt.Sprintf("binary is retired: %s, so the line is deleted", detail),
+			})
+
+		case "enabled":
+			// Only `true` is redundant. `enabled = false` is the bookkeeping that
+			// keeps an orphaned entry out of the run and must survive untouched.
+			if on, isBool := tomlBoolValue(f.value); isBool && on {
+				issues = append(issues, LintIssue{
+					Line: f.line, Package: rec.name, Rule: LintRedundantEnabled, Fix: FixDropEnabled,
+					Message: "enabled = true is redundant: an absent enabled already means enabled",
+				})
+				continue
+			}
+			effective = append(effective, orderedField{canonical: f.key, written: f.key, line: f.line})
+
+		default:
+			if _, ranked := canonicalFieldRank[f.key]; ranked {
+				effective = append(effective, orderedField{canonical: f.key, written: f.key, line: f.line})
+			}
+		}
+	}
+
+	// The rule is that the record's fields form a SUBSEQUENCE of the canonical
+	// order — each rank strictly greater than the one before. Demanding anything
+	// stronger, contiguity for instance, would flag all 411 records: no record
+	// declares more than a fraction of the 37 fields.
+	prevRank := -1
+	prevName := ""
+	for _, f := range effective {
+		rank := canonicalFieldRank[f.canonical]
+		if rank < prevRank {
+			msg := fmt.Sprintf("field %q is out of canonical order: it belongs before %q", f.canonical, prevName)
+			if f.written != f.canonical {
+				msg = fmt.Sprintf("field %q (written as the retired %q) is out of canonical order: it belongs before %q",
+					f.canonical, f.written, prevName)
+			}
+			issues = append(issues, LintIssue{
+				Line: f.line, Package: rec.name, Rule: LintFieldOrder, Fix: FixReorderFields,
+				Message: msg,
+			})
+			break // one issue per record: the first offending field is what to look at
+		}
+		prevRank = rank
+		prevName = f.canonical
+	}
+
+	// No repair is offered on purpose (R6.1): "file" or "tag" depends on where
+	// upstream versions itself, which only a human reading that upstream knows.
+	if trackCommitLine > 0 && !hasBaseFrom {
+		issues = append(issues, LintIssue{
+			Line: trackCommitLine, Package: rec.name, Rule: LintLegacyBase, Fix: FixNone,
+			Message: `track = "commit" without base_from: the base version is whatever the ebuild already carries and can freeze there unnoticed; declare base_from = "file", "tag" or "commit_message"`,
+		})
+	}
+
+	// Emitted in line order so the report reads down the file, the way runLint
+	// prints it. Stable, so two issues on one line keep the order above.
+	sort.SliceStable(issues, func(i, j int) bool { return issues[i].Line < issues[j].Line })
+	return issues
+}
+
+// tomlBoolValue reports the boolean an assignment's right-hand side holds, and
+// whether it holds one at all. It reads the first whitespace-separated token so
+// a trailing inline comment (`enabled = true # legacy`) is not read as part of
+// the value; anything that is not a bare TOML boolean yields ok = false.
+func tomlBoolValue(raw string) (value, ok bool) {
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return false, false
+	}
+	switch fields[0] {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	return false, false
+}
+
+// tomlStringValue unquotes the right-hand side of an assignment when it is a
+// single-line basic ("…") or literal ('…') string, and returns "" otherwise. It
+// is deliberately minimal: the only values read through it are the closed
+// vocabularies of `track` and `type`, which never carry an escape.
+func tomlStringValue(raw string) string {
+	v := strings.TrimSpace(raw)
+	if len(v) < 2 {
+		return ""
+	}
+	q := v[0]
+	if (q != '"' && q != '\'') || v[len(v)-1] != q {
+		return ""
+	}
+	return v[1 : len(v)-1]
 }
 
 // sortedKeys returns the map's keys in ascending order, so lint output is

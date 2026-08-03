@@ -283,7 +283,7 @@ func TestDisplaySchemaMinimal(t *testing.T) {
 		URL:    "https://example.com",
 		Parser: "github",
 	}
-	displaySchema(schema)
+	displaySchema("dev-util/minimal", schema)
 }
 
 // TestDisplaySchemaFull tests displaySchema with all optional fields.
@@ -295,7 +295,7 @@ func TestDisplaySchemaFull(t *testing.T) {
 		Pattern:          `v(\d+\.\d+)`,
 		Selector:         "a.release",
 		XPath:            "//a",
-		Binary:           true,
+		Type:             "bin",
 		FallbackURL:      "https://fallback.com",
 		FallbackParser:   "github",
 		FallbackPattern:  `v(\d+)`,
@@ -304,7 +304,7 @@ func TestDisplaySchemaFull(t *testing.T) {
 		VersionsPath:     "/versions",
 		VersionsSelector: "span.version",
 	}
-	displaySchema(schema)
+	displaySchema("dev-util/full", schema)
 }
 
 // ---- printComparisonSummary ----
