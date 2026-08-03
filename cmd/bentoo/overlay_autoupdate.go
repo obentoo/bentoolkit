@@ -68,6 +68,14 @@ var (
 	// (every record closed by "# END", documented by a trailing comments field,
 	// with no floating comments) and validates each record's fields. Read-only.
 	autoupdateLint bool
+	// autoupdateFix, with --lint, repairs in place the violations the linter
+	// reports mechanically: the retired `binary` key, a redundant
+	// `enabled = true`, and the canonical field order (R7).
+	//
+	// It is a MODIFIER of --lint, never a mode of its own — what it repairs is
+	// defined by what the linter reports — and it writes only behind the same
+	// three gates story 021 built for the version pins (see confirmLintRepair).
+	autoupdateFix bool
 	// autoupdateYes approves the post-check registry reconciliation without a
 	// prompt (S021-R3.4). It is REQUIRED for any non-interactive run: with it
 	// absent and no terminal to prompt on, --check reports the divergences and
@@ -100,7 +108,9 @@ Examples:
   bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans
   bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump
   bentoo overlay autoupdate --revive all          Revive every revivable orphan
-  bentoo overlay autoupdate --lint                Check packages.toml against the record model`,
+  bentoo overlay autoupdate --lint                Check packages.toml against the record model
+  bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff
+  bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)`,
 	Run: runAutoupdate,
 }
 
@@ -119,6 +129,10 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
 	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)")
+	// No back-quoted words in this usage string: pflag reads the first one as the
+	// flag's value placeholder and strips the quotes, which would render a bool
+	// flag as "--fix binary".
+	autoupdateCmd.Flags().BoolVar(&autoupdateFix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve the post-check registry reconciliation without prompting; REQUIRED for a non-interactive registry write (without it, a piped or scripted --check reports the divergences and writes nothing)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
@@ -219,6 +233,18 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		// valid
 	default:
 		logger.Error("--only must be \"bin\" or \"source\", got %q", autoupdateOnly)
+		osExit(1)
+		return
+	}
+
+	// --fix repairs what --lint reports, so without --lint there is nothing for
+	// it to repair. Validated here, beside the other flag checks and before any
+	// config or network work, so `--check --fix` fails in a millisecond with a
+	// message naming the command that works — rather than after a full check run,
+	// or (worse) silently, leaving the operator believing the registry was
+	// repaired when it was never even read.
+	if autoupdateFix && !autoupdateLint {
+		logger.Error("--fix repairs what --lint reports, so it is valid only together with it — run: bentoo overlay autoupdate --lint --fix")
 		osExit(1)
 		return
 	}
@@ -855,6 +881,9 @@ func runList(configDir string) {
 // against the record model and prints one line per violation, grouped in file
 // order. It exits non-zero when anything is reported, so the same command works
 // as a pre-commit gate on the registry.
+//
+// With --fix it hands over to runLintFix after the report, which repairs what
+// the rules above can repair and then owns the exit code — see there.
 func runLint(overlayPath string) {
 	issues, err := autoupdate.LintPackagesConfig(overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
@@ -863,17 +892,37 @@ func runLint(overlayPath string) {
 		output.Error.Println("  " + issue.String())
 	}
 	if err != nil {
+		// --fix adds nothing on this path: a file that does not load cannot be
+		// repaired either, and RepairPackagesConfig refuses to start on one.
 		logger.Error("failed to lint packages.toml: %v", err)
 		osExit(1)
+		return
+	}
+
+	if len(issues) > 0 {
+		printLintTally(issues)
+	}
+
+	if autoupdateFix {
+		// From here the repair owns the verdict: the exit code must describe the
+		// registry as it stands AFTER the run, which the list above no longer
+		// does.
+		runLintFix(overlayPath, issues)
+		return
 	}
 
 	if len(issues) == 0 {
 		output.Success.Println("packages.toml: record model OK")
 		return
 	}
+	logger.Error("packages.toml: %d issue(s)", len(issues))
+	osExit(1)
+}
 
-	// A registry mid-migration reports the same rule hundreds of times, so close
-	// with a per-rule tally: the detail lines above say where, this says what.
+// printLintTally closes the report with a per-rule count: a registry
+// mid-migration reports the same rule hundreds of times, so the detail lines
+// above say WHERE and this says WHAT.
+func printLintTally(issues []autoupdate.LintIssue) {
 	counts := make(map[string]int, len(issues))
 	rules := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -889,8 +938,6 @@ func runLint(overlayPath string) {
 		fmt.Printf("  %-26s %d\n", rule, counts[rule])
 	}
 	fmt.Println()
-	logger.Error("packages.toml: %d issue(s)", len(issues))
-	osExit(1)
 }
 
 // displayPendingUpdates formats and displays pending updates
