@@ -68,6 +68,15 @@ var (
 	// (every record closed by "# END", documented by a trailing comments field,
 	// with no floating comments) and validates each record's fields. Read-only.
 	autoupdateLint bool
+	// autoupdateYes approves the post-check registry reconciliation without a
+	// prompt (S021-R3.4). It is REQUIRED for any non-interactive run: with it
+	// absent and no terminal to prompt on, --check reports the divergences and
+	// writes nothing at all.
+	//
+	// The default is false and MUST stay false. packages.toml is a published
+	// artifact — the overlay it lives in auto-commits and pushes — so a flag that
+	// defaulted to true would turn every piped or scripted --check into a release.
+	autoupdateYes bool
 )
 
 var autoupdateCmd = &cobra.Command{
@@ -79,6 +88,7 @@ Examples:
   bentoo overlay autoupdate --check              Check all packages for updates
   bentoo overlay autoupdate --check net-misc/foo Check specific package
   bentoo overlay autoupdate --check --force      Check ignoring cache
+  bentoo overlay autoupdate --check --yes        Check, then write the registry pins without prompting
   bentoo overlay autoupdate --check --only source Check only source packages
   bentoo overlay autoupdate --check --only bin    Check only binary packages
   bentoo overlay autoupdate --list               List pending updates
@@ -109,6 +119,7 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
 	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model (# END marker, comments field, no floating comments, undeclared release lines)")
+	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve the post-check registry reconciliation without prompting; REQUIRED for a non-interactive registry write (without it, a piped or scripted --check reports the divergences and writes nothing)")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -424,6 +435,22 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		reportRevivableOrphans(checker, cfg)
 	}
 
+	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
+	// ONE confirmation, write the pins back. It runs here, at the very end of the
+	// batch path, for three reasons:
+	//
+	//   - it reads packages.toml from disk, and the LLM registry fixer above may
+	//     have just rewritten it; running earlier would reconcile a file that no
+	//     longer exists in that form;
+	//   - the one prompt in this command that can PUBLISH must be the last thing
+	//     on screen, not scrolled off by the revivable-orphan report;
+	//   - it is best-effort, exactly like that report: it never changes the exit
+	//     code, so a non-TTY run that writes nothing still exits 0 (R3.4).
+	//
+	// Only this batch path reconciles. The single-package path above returns
+	// before reaching here on purpose — see reconcileRegistryAfterCheck.
+	reconcileRegistryAfterCheck(overlayPath)
+
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	osExit(result.ExitCode())
 }
@@ -436,6 +463,264 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// ---------------------------------------------------------------------------
+// Post-check registry reconciliation (S021-R3.2, R3.3, R3.4)
+// ---------------------------------------------------------------------------
+
+// registryWriterFn is the seam through which the post-check reconciliation
+// writes packages.toml.
+//
+// It is a variable for the test that matters most: the one that must prove
+// NOTHING was written can keep the REAL writer wired and compare the file's
+// bytes before and after, instead of asserting against a mock that would pass
+// even if the guard were removed. The failure-path test swaps it for a stub.
+var registryWriterFn = autoupdate.SetPackageVersions
+
+// confirmRegistryWriteFn is the y/N seam. It defaults to confirmAction — the
+// single confirmation helper this package already uses — which reads os.Stdin
+// and answers "no" on any read error, so an EOF is a decline rather than an
+// accident.
+var confirmRegistryWriteFn = confirmAction
+
+// registryPromptIsInteractive reports whether this process may ASK before
+// writing the registry, and it deliberately requires BOTH streams to be
+// terminals.
+//
+// R3.4 is worded in terms of stdout, and output.IsTerminal is that check: with
+// stdout redirected the operator never sees the divergence list, so a prompt
+// there asks for blind consent to a published diff.
+//
+// stdin matters just as much, and R3.4's literal reading misses it:
+// confirmAction reads os.Stdin, so `yes | bentoo overlay autoupdate --check`
+// or a CI step with a heredoc on stdin would answer "y" with no human present —
+// the exact unattended publish this gate exists to prevent. stdinIsTerminal
+// (the probe story 014 already uses for its own prompt) is what proves someone
+// is there to answer.
+//
+// Requiring both is therefore strictly more conservative than R3.4, never less:
+// every run R3.4 refuses is refused here too, plus the piped-stdin one it does
+// not name. A run that lands in the refused set is not blocked, only made
+// explicit — it writes with --yes.
+var registryPromptIsInteractive = func() bool {
+	return stdinIsTerminal() && output.IsTerminal()
+}
+
+// reconcileRegistryAfterCheck is the post-check reconciliation: it compares the
+// whole registry against the overlay, prints the three classes of disagreement,
+// and — behind exactly one confirmation covering all of them (R3.2) — writes the
+// repairable ones back in a single batch (design D4).
+//
+// # Why a confirmation at all
+//
+// packages.toml is a published artifact. The overlay it lives in auto-commits
+// and pushes, so a write here reaches origin within minutes: a wrong pin is not
+// a local mistake to fix before anyone notices, it is a released one. Hence the
+// three gates, in order of how much they trust the caller: --yes writes
+// unattended because the operator asked for that in so many words; an
+// interactive terminal is asked; anything else prints the divergences and
+// writes nothing (R3.4).
+//
+// # Why only the batch path calls this
+//
+// Reconcile walks the ENTIRE registry, not the packages named on the command
+// line — it has no notion of a subset. Calling it from `--check <one-package>`
+// would answer a question about one package with a prompt to write a few hundred
+// pins, and would pay the whole registry's directory-read cost for a command
+// meant to be quick. design.md's check sequence starts at CheckAll for the same
+// reason. A maintainer who wants the reconciliation runs a full --check.
+//
+// Every failure here is best-effort and non-fatal: an unreadable registry, a
+// declined prompt and a failed write all leave the check's exit code alone. The
+// check itself already succeeded; reconciliation is bookkeeping on top of it.
+func reconcileRegistryAfterCheck(overlayPath string) {
+	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		// Nothing to reconcile against. The check has already reported whatever
+		// this meant for the packages themselves, so this is a debug note, not a
+		// second error line about the same file.
+		logger.Debug("reconcile: skipped, no usable packages.toml: %v", err)
+		return
+	}
+
+	divs := autoupdate.Reconcile(overlayPath, cfg.Packages)
+	if len(divs) == 0 {
+		// R3.2 is conditional on divergences existing: with none, print nothing
+		// at all and let the check's own output stand.
+		return
+	}
+
+	pins := stalePinBatch(divs)
+	displayDivergences(divs, len(pins))
+
+	if len(pins) == 0 {
+		// Every divergence is report-only (an unclaimed ebuild, an entry whose
+		// directory is empty). There is no batch, so there is nothing to confirm:
+		// asking "write 0 pins?" would train the operator to say yes.
+		output.Info.Println("  Nothing to write: no entry's pin disagrees with the overlay.")
+		return
+	}
+
+	if !confirmRegistryWrite(divs, len(pins)) {
+		// R3.3: return WITHOUT calling the writer. Not "call it with an empty
+		// map", not "call it and roll back" — the file is never opened, so it is
+		// byte-identical by construction rather than by care.
+		return
+	}
+
+	// D4: one call, the whole batch. SetPackageVersions does one read and one
+	// atomic rename, so a partially-written registry is never reachable.
+	if err := registryWriterFn(overlayPath, pins); err != nil {
+		// Reported, never swallowed — but not fatal: the check itself succeeded
+		// and its exit code says so. The next run proposes the same batch again.
+		logger.Error("reconcile: failed to write %d version pin(s) to packages.toml: %v", len(pins), err)
+		output.Error.Printf("  The registry was NOT updated: %v\n", err)
+		return
+	}
+	output.Success.Printf("  Wrote %d version pin(s) to packages.toml.\n", len(pins))
+	output.Info.Println("  Review the diff before it is published: 'bentoo overlay diff'")
+}
+
+// stalePinBatch builds the write batch, and is the ONLY place a Divergence
+// becomes something written to the registry.
+//
+// It switches on Kind because the three classes are not interchangeable, and
+// mapping all of them to Key -> Disk corrupts the registry in two distinct ways:
+//
+//   - NoEbuild carries an empty Disk, so writing it would ERASE the entry's pin
+//     — and an entry with no pin blocks its whole directory's next --clean;
+//   - UnclaimedEbuild's Key is a bare "category/package" atom, not a registry
+//     key, and the two routinely coincide (net-misc/rclone is both). Writing it
+//     would point that entry's pin at the stray ebuild the finding is asking a
+//     human to delete: the exact opposite of the intent.
+//
+// A future fourth kind falls through unwritten, which is the safe direction.
+func stalePinBatch(divs []autoupdate.Divergence) map[string]string {
+	pins := make(map[string]string, len(divs))
+	for _, d := range divs {
+		switch d.Kind {
+		case autoupdate.StalePin:
+			// The only writable class: Key is a registry key and Disk is a
+			// version that exists on disk (UB4).
+			pins[d.Key] = d.Disk
+		case autoupdate.UnclaimedEbuild:
+			// Report only: the repair is a sweep or a new entry, both human
+			// decisions.
+		case autoupdate.NoEbuild:
+			// Report only: there is no version on disk to record.
+		}
+	}
+	if len(pins) == 0 {
+		return nil
+	}
+	return pins
+}
+
+// displayDivergences prints the three classes grouped, then the batch summary
+// the confirmation is about. writable is the number of entries that would be
+// written — the stale-pin count, never len(divs), because the other two classes
+// are reported and left alone.
+//
+// The full list is printed, not a sample: the operator is approving one diff
+// (D4), and a truncated list hides exactly the line that is wrong.
+func displayDivergences(divs []autoupdate.Divergence, writable int) {
+	fmt.Println()
+	output.Header.Println("Registry Reconciliation")
+	fmt.Println()
+	output.Info.Printf("  The registry and the overlay disagree on %d point(s).\n\n", len(divs))
+
+	// Counted up front, in their own loop, so the summary below cannot depend on
+	// which groups happened to be printed or in what order.
+	var firstTime, corrected int
+	for _, d := range divs {
+		if d.Kind != autoupdate.StalePin {
+			continue
+		}
+		if d.Pin == "" {
+			firstTime++
+		} else {
+			corrected++
+		}
+	}
+
+	// Grouped by class, each group keeping Reconcile's order (sorted by key,
+	// then by class, then in Gentoo version order) so two runs over an unchanged
+	// overlay print the identical list.
+	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(autoupdate.Divergence) string) {
+		var body []string
+		for _, d := range divs {
+			if d.Kind == kind {
+				body = append(body, line(d))
+			}
+		}
+		if len(body) == 0 {
+			return
+		}
+		fmt.Printf("  %s (%d):\n", heading, len(body))
+		for _, l := range body {
+			fmt.Printf("    %s\n", l)
+		}
+		fmt.Println()
+	}
+
+	printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence) string {
+		if d.Pin == "" {
+			return fmt.Sprintf("%-45s (no pin) → %s", d.Key, d.Disk)
+		}
+		return fmt.Sprintf("%-45s %s → %s", d.Key, d.Pin, d.Disk)
+	})
+	printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence) string {
+		return fmt.Sprintf("%-45s %s", d.Key, d.Disk)
+	})
+	printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence) string {
+		if d.Pin == "" {
+			return fmt.Sprintf("%-45s (no pin)", d.Key)
+		}
+		return fmt.Sprintf("%-45s pins %s", d.Key, d.Pin)
+	})
+
+	if writable == 0 {
+		return
+	}
+
+	// A1: state the number of entries about to be written, and split it the way
+	// the operator needs to read it. On the first run these are ~316 entries
+	// gaining a pin they never had; on later runs the same number means
+	// something very different, so the two are counted apart.
+	output.Warning.Printf("  About to write %d version pin(s) into packages.toml", writable)
+	switch {
+	case corrected == 0:
+		output.Warning.Printf(" — all %d pinned for the FIRST time.\n", firstTime)
+	case firstTime == 0:
+		output.Warning.Printf(" — %d stale pin(s) corrected.\n", corrected)
+	default:
+		output.Warning.Printf(" — %d pinned for the FIRST time, %d stale pin(s) corrected.\n", firstTime, corrected)
+	}
+	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
+}
+
+// confirmRegistryWrite is the write gate (R3.2, R3.4). It reports whether the
+// batch of `writable` pins may be written, and prints why whenever the answer is
+// no — a run that silently declines to write is indistinguishable from one that
+// wrote and failed to say so.
+func confirmRegistryWrite(divs []autoupdate.Divergence, writable int) bool {
+	if autoupdateYes {
+		// R3.4: an explicit, in-so-many-words approval. Stdin is never read on
+		// this path, so it works from a pipe, a cron job or a CI step.
+		output.Warning.Printf("  --yes given: writing %d version pin(s) without a prompt.\n", writable)
+		return true
+	}
+	if !registryPromptIsInteractive() {
+		// R3.4: the divergences above ARE the report; this run writes nothing.
+		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
+		output.Info.Printf("  Re-run with --yes to write these %d version pin(s) unattended.\n", writable)
+		return false
+	}
+	// R3.2: ONE question covering every divergence above, not one per entry.
+	fmt.Println()
+	return confirmRegistryWriteFn(fmt.Sprintf(
+		"Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)", writable, len(divs)))
 }
 
 // reportRevivableOrphans is the --check --revivable add-on: it resolves the
@@ -964,11 +1249,21 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		if result.QASummary != "" {
 			output.Warning.Printf("    QA:      pkgcheck findings after the fix — review before committing:\n%s\n", result.QASummary)
 		}
-		if result.CleanedOldVersion != "" {
-			fmt.Printf("    Removed: %s-%s.ebuild (old version)\n", filepath.Base(result.Package), result.CleanedOldVersion)
-		}
+		displayCleanReport(result)
 		if result.CleanWarning != "" {
+			// R6.2's blocked-entry line arrives here and nowhere else: a plan
+			// blocked by a pinless entry is returned as an error naming that
+			// entry, which Apply stores in CleanWarning. ApplyResult carries no
+			// sweepPlan and therefore no Blocked field, so this IS the line —
+			// printing a second one would repeat the same entry name twice.
 			output.Warning.Printf("    Clean:   %s\n", result.CleanWarning)
+		}
+		if result.RegistryWarning != "" {
+			// Its own label, deliberately not "Clean:". The pin is written on
+			// every successful apply while the sweep runs only under --clean, so
+			// filing a registry failure under the clean step would blame a step
+			// that may not even have run.
+			output.Warning.Printf("    Registry: %s\n", result.RegistryWarning)
 		}
 		output.Success.Println("\n✓ Update applied successfully")
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
@@ -979,6 +1274,65 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		if result.LogPath != "" {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
+		}
+	}
+}
+
+// displayCleanReport prints what the --clean sweep did to the package
+// directory: every version it removed, and every version it kept together with
+// the registry entry that claims it (R6.1).
+//
+// Naming the claiming entry is the point. "Kept 1.28.5" invites the question
+// the report exists to answer — kept by whom, and may I delete it? — while
+// "kept 1.28.5, claimed by media-plugins/gst-plugins-vpx@stable" says which
+// record to edit if that is wrong. An empty claimant is not an omission: it
+// means a RULE kept the file rather than an entry (a live -9999 ebuild, which no
+// pin can ever name, or the R4.3 floor that refuses to leave a directory with no
+// release at all), and saying which rule is what stops it reading as a bug.
+//
+// It prints nothing when --clean did not run, since every field is then empty.
+func displayCleanReport(result *autoupdate.ApplyResult) {
+	pkgName := filepath.Base(result.Package)
+
+	switch {
+	case len(result.CleanRemoved) > 1:
+		// The legacy one-version line below under-reports a multi-file sweep,
+		// and under-reporting a deletion is the one direction this report must
+		// not fail in. List every ebuild that went away.
+		names := make([]string, 0, len(result.CleanRemoved))
+		for _, v := range result.CleanRemoved {
+			names = append(names, fmt.Sprintf("%s-%s.ebuild", pkgName, v))
+		}
+		fmt.Printf("    Removed: %s (%d ebuilds)\n", strings.Join(names, ", "), len(names))
+	case result.CleanedOldVersion != "":
+		// The single-removal case keeps its original wording verbatim: it is by
+		// far the common one and nothing about it changed.
+		fmt.Printf("    Removed: %s-%s.ebuild (old version)\n", pkgName, result.CleanedOldVersion)
+	}
+
+	if len(result.CleanKept) == 0 {
+		return
+	}
+	// Gentoo version order, the same order the sweep reports its removals in, so
+	// the two lists about one directory never disagree about what "oldest" means.
+	kept := make([]string, 0, len(result.CleanKept))
+	for v := range result.CleanKept {
+		kept = append(kept, v)
+	}
+	sort.SliceStable(kept, func(i, j int) bool {
+		if c := ebuild.CompareVersions(kept[i], kept[j]); c != 0 {
+			return c < 0
+		}
+		// Two versions the comparison calls equal ("1.0" and "1.0.0") are still
+		// two files; order them by text so the report is total and stable.
+		return kept[i] < kept[j]
+	})
+	fmt.Println("    Kept:")
+	for _, v := range kept {
+		if key := result.CleanKept[v]; key != "" {
+			fmt.Printf("      %s-%s.ebuild — claimed by %s\n", pkgName, v, key)
+		} else {
+			fmt.Printf("      %s-%s.ebuild — kept by rule (live ebuild, or the last release standing)\n", pkgName, v)
 		}
 	}
 }

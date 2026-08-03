@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
 // Error variables for configuration errors
@@ -43,6 +45,13 @@ var (
 	// ErrSuffixWhenWithoutSuffix is returned when suffix_when is set but suffix is
 	// not: the condition has nothing to gate.
 	ErrSuffixWhenWithoutSuffix = errors.New("suffix_when requires suffix")
+	// ErrInvalidVersion is returned when the version field is not a well-formed
+	// Gentoo version string (an -rN revision suffix is allowed).
+	ErrInvalidVersion = errors.New("invalid version: must be a well-formed Gentoo version, optionally with an -rN revision")
+	// ErrVersionOutsideSeries is returned when version and series are both set
+	// but the pinned version does not match the series regex: such an entry
+	// claims an ebuild it can never select.
+	ErrVersionOutsideSeries = errors.New("version does not match series")
 )
 
 // validSuffixRegex matches the value accepted by PackageConfig.Suffix: one of
@@ -359,6 +368,13 @@ type PackageConfig struct {
 	// declares revision = 600.
 	Revision int `toml:"revision,omitempty"`
 
+	// Version is the ebuild version this entry keeps in the overlay — the pin
+	// the --clean sweep preserves — not the upstream version being tracked. It
+	// includes the -rN revision suffix when the ebuild carries one
+	// ("2.52.4-r411"). Absent means "derive it through selectCurrentEbuild",
+	// so every pre-existing record loads unchanged.
+	Version string `toml:"version,omitempty"`
+
 	// Comments is the record's documentation: why this source and parser, and
 	// every caveat a future bump must know (stale endpoints, pre-release traps,
 	// hand-edited ebuild variables). It is the LAST field of every record, and
@@ -506,16 +522,179 @@ func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, true, false)
 }
 
-// setPackagesEnabled is the shared text-surgery behind DisablePackagesInConfig
-// (value=false, insertIfAbsent=true) and EnablePackagesInConfig (value=true,
-// insertIfAbsent=false). It rewrites each target section's `enabled = ...`
-// assignment to `enabled = <value>`, and — only when insertIfAbsent is set —
-// inserts the key immediately after the header for sections that lack it. Enable
-// leaves an absent key alone because nil already means enabled. The write is
-// atomic (temp file + rename) and preserves the original file mode; an empty
-// package list, or a run that changes nothing, leaves the file untouched.
+// enabledAssignRegex matches an `enabled = ...` assignment line, capturing the
+// indentation so a rewrite preserves it.
+var enabledAssignRegex = regexp.MustCompile(`^(\s*)enabled\s*=`)
+
+// versionAssignRegex matches a `version = ...` assignment line, capturing the
+// indentation so a rewrite preserves it. The `=` must follow `version` after
+// nothing but spaces, so versions_path/versions_selector never match.
+var versionAssignRegex = regexp.MustCompile(`^(\s*)version\s*=`)
+
+// setPackagesEnabled is the shared editing policy behind
+// DisablePackagesInConfig (value=false, insertIfAbsent=true) and
+// EnablePackagesInConfig (value=true, insertIfAbsent=false), on top of the
+// section scanner in editPackagesConfigSections. It rewrites each target
+// section's `enabled = ...` assignment to `enabled = <value>`, and — only when
+// insertIfAbsent is set — inserts the key immediately after the header for
+// sections that lack it. Enable leaves an absent key alone because nil already
+// means enabled. The write is atomic (temp file + rename) and preserves the
+// original file mode; an empty package list, or a run that changes nothing,
+// leaves the file untouched.
 func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent bool) error {
 	if len(pkgs) == 0 {
+		return nil
+	}
+
+	targets := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		targets[p] = true
+	}
+
+	assign := fmt.Sprintf("enabled = %t", value)
+
+	return editPackagesConfigSections(overlayPath, targets, func(_ string, body []string, inComments []bool) ([]string, bool) {
+		out := make([]string, 0, len(body)+1)
+		changed := false
+		found := false
+		for j, line := range body {
+			if !inComments[j] {
+				if m := enabledAssignRegex.FindStringSubmatch(line); m != nil {
+					out = append(out, m[1]+assign)
+					found = true
+					changed = true
+					continue
+				}
+			}
+			out = append(out, line)
+		}
+		if !found && insertIfAbsent {
+			out = append(append(make([]string, 0, len(body)+1), assign), out...)
+			changed = true
+		}
+		return out, changed
+	})
+}
+
+// SetPackageVersions writes `version = "<v>"` for each key in pins, editing the
+// raw text so comments, ordering and formatting survive. Existing assignments
+// are rewritten in place; absent ones are inserted immediately before the
+// record's comments field. One read, one atomic write for the whole batch.
+//
+// The insertion point is the comments assignment rather than the header because
+// comments is required to be the record's LAST field (see PackageConfig.Comments
+// and LintCommentsNotLast): landing just before it puts the pin after every
+// other field. A record with no comments field gets the pin immediately before
+// its `# END` marker instead, and one that violates the model on both counts
+// gets it after its last non-blank line so the pin still lands inside the
+// record. No other field is moved and the comments body is never touched.
+//
+// Keys whose section is absent are skipped silently, matching
+// DisablePackagesInConfig. The write is atomic (temp file + rename) and
+// preserves the original file mode; an empty map, or a batch that changes
+// nothing (every pin already written verbatim), leaves the file untouched.
+func SetPackageVersions(overlayPath string, pins map[string]string) error {
+	if len(pins) == 0 {
+		return nil
+	}
+
+	targets := make(map[string]bool, len(pins))
+	for k := range pins {
+		targets[k] = true
+	}
+
+	return editPackagesConfigSections(overlayPath, targets, func(name string, body []string, inComments []bool) ([]string, bool) {
+		assign := fmt.Sprintf("version = %q", pins[name])
+
+		// An existing assignment is rewritten in place, keeping its indentation;
+		// nothing else moves. Only a rewrite that actually alters the text marks
+		// the batch as changed, so re-pinning the already-pinned value stays a
+		// full no-op (no write, same mtime).
+		found := false
+		changed := false
+		out := make([]string, len(body))
+		copy(out, body)
+		for j, line := range body {
+			if inComments[j] {
+				continue
+			}
+			if m := versionAssignRegex.FindStringSubmatch(line); m != nil {
+				found = true
+				if newLine := m[1] + assign; newLine != line {
+					out[j] = newLine
+					changed = true
+				}
+			}
+		}
+		if found {
+			return out, changed
+		}
+
+		// No version key yet: insert before the comments assignment, falling
+		// back to the `# END` marker, then to after the last non-blank line.
+		at := -1
+		for j, line := range body {
+			if inComments[j] {
+				continue
+			}
+			if m := keyAssignRegex.FindStringSubmatch(line); m != nil && m[1] == "comments" {
+				at = j
+				break
+			}
+		}
+		if at < 0 {
+			for j, line := range body {
+				if inComments[j] {
+					continue
+				}
+				if strings.TrimSpace(line) == recordEndMarker {
+					at = j
+					break
+				}
+			}
+		}
+		if at < 0 {
+			at = 0
+			for j, line := range body {
+				if strings.TrimSpace(line) != "" {
+					at = j + 1
+				}
+			}
+		}
+		out = make([]string, 0, len(body)+1)
+		out = append(out, body[:at]...)
+		out = append(out, assign)
+		out = append(out, body[at:]...)
+		return out, true
+	})
+}
+
+// sectionBodyEditor rewrites the body of one target section of packages.toml.
+// body holds the section's lines — header excluded, running up to the next
+// header or EOF — and inComments flags, line for line, which of them sit inside
+// a multi-line `comments = """` doc string and must be treated as opaque text.
+// It returns the replacement body and whether it differs from the input; the
+// input slices must not be mutated.
+type sectionBodyEditor func(name string, body []string, inComments []bool) ([]string, bool)
+
+// editPackagesConfigSections is the shared raw-text surgery behind
+// setPackagesEnabled and SetPackageVersions: one read, one linear pass locating
+// each target `[section]` by table name, one atomic write. What to change
+// inside a matched section is delegated to the sectionBodyEditor; everything
+// structural lives here so there is exactly one copy of the scanner to keep
+// correct.
+//
+// Lines inside a multi-line `comments = """` block are never read as section
+// headers — and are flagged to the editor — so a doc body containing
+// `#`-prefixed or `[`-prefixed lines can neither end a record early nor be
+// edited as if it were configuration (the hazard noted on
+// PackageConfig.Comments).
+//
+// The write is atomic (temp file + rename) and preserves the original file
+// mode; an empty target set, or an edit that changes nothing, returns before
+// any write, leaving the file untouched.
+func editPackagesConfigSections(overlayPath string, targets map[string]bool, edit sectionBodyEditor) error {
+	if len(targets) == 0 {
 		return nil
 	}
 
@@ -529,54 +708,41 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 		return fmt.Errorf("failed to stat packages.toml: %w", err)
 	}
 
-	targets := make(map[string]bool, len(pkgs))
-	for _, p := range pkgs {
-		targets[p] = true
-	}
-
-	assign := fmt.Sprintf("enabled = %t", value)
-
 	// Split on "\n" (not bufio.Scanner) so a file without a trailing newline is
 	// reproduced byte-for-byte by the strings.Join below.
 	lines := strings.Split(string(data), "\n")
-	enabledRe := regexp.MustCompile(`^(\s*)enabled\s*=`)
+	inComments := commentsBodyMask(lines)
 
 	changed := false
-	out := make([]string, 0, len(lines)+len(pkgs))
+	out := make([]string, 0, len(lines)+len(targets))
 	for i := 0; i < len(lines); {
-		name, isHeader := tomlTableName(lines[i])
+		var name string
+		isHeader := false
+		if !inComments[i] {
+			name, isHeader = tomlTableName(lines[i])
+		}
 		if !isHeader || !targets[name] {
 			out = append(out, lines[i])
 			i++
 			continue
 		}
 
-		// At the header of a target section: emit the header, then walk its body
-		// (up to the next header or EOF), rewriting an existing `enabled` key or —
-		// when insertIfAbsent is set — inserting one right after the header.
+		// At the header of a target section: emit the header, then hand the body
+		// (up to the next header or EOF) to the editor.
 		out = append(out, lines[i])
 		i++
-		bodyStart := len(out)
-		found := false
+		start := i
 		for i < len(lines) {
-			if _, nextHeader := tomlTableName(lines[i]); nextHeader {
-				break
-			}
-			if m := enabledRe.FindStringSubmatch(lines[i]); m != nil {
-				out = append(out, m[1]+assign)
-				found = true
-				changed = true
-			} else {
-				out = append(out, lines[i])
+			if !inComments[i] {
+				if _, nextHeader := tomlTableName(lines[i]); nextHeader {
+					break
+				}
 			}
 			i++
 		}
-		if !found && insertIfAbsent {
-			inserted := make([]string, 0, len(out)+1)
-			inserted = append(inserted, out[:bodyStart]...)
-			inserted = append(inserted, assign)
-			inserted = append(inserted, out[bodyStart:]...)
-			out = inserted
+		body, edited := edit(name, lines[start:i], inComments[start:i])
+		out = append(out, body...)
+		if edited {
 			changed = true
 		}
 	}
@@ -595,6 +761,32 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 	}
 
 	return nil
+}
+
+// commentsBodyMask reports, line for line, whether a line lies inside a
+// multi-line `comments = """` doc string — the opening assignment line
+// excluded, the closing `"""` line included. It mirrors the tracking
+// lintRecordModel does for the same reason: a comments body may contain
+// `#`-prefixed and `[`-prefixed lines that only LOOK like structure. Bodies
+// written by the analyzer never contain a `"""` run (see formatCommentsField's
+// tripleQuoteRegex escaping), so plain containment is a sound terminator check.
+func commentsBodyMask(lines []string) []bool {
+	mask := make([]bool, len(lines))
+	open := false
+	for i, line := range lines {
+		if open {
+			mask[i] = true
+			if strings.Contains(line, `"""`) {
+				open = false
+			}
+			continue
+		}
+		if commentsOpenRegex.MatchString(line) {
+			rest := line[strings.Index(line, `"""`)+3:]
+			open = !strings.Contains(rest, `"""`)
+		}
+	}
+	return mask
 }
 
 // ValidatePackageConfig validates a single package configuration.
@@ -707,6 +899,21 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	if cfg.Series != "" {
 		if _, err := regexp.Compile(cfg.Series); err != nil {
 			return fmt.Errorf("package %s: invalid series %q: %w", pkg, cfg.Series, err)
+		}
+	}
+
+	// Validate the pinned version. A pin that is not a well-formed Gentoo
+	// version can never name an ebuild, and one outside the entry's own series
+	// claims an ebuild the entry can never select — both are config mistakes
+	// the sweep would otherwise act on, so fail hard. Checked after the series
+	// compile check above, so newSeriesMatcher below can never hit its
+	// warn-and-pass-everything fallback for a bad regex.
+	if cfg.Version != "" {
+		if !ebuild.IsValidVersion(cfg.Version) {
+			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
+		}
+		if cfg.Series != "" && !newSeriesMatcher(cfg.Series).matches(cfg.Version) {
+			return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
 		}
 	}
 

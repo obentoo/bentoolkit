@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -847,5 +848,362 @@ path = "tag_name"
 	}
 	if !vscode.IsEnabled() {
 		t.Error("Expected vscode IsEnabled() to be true (default)")
+	}
+}
+
+// TestValidatePackageConfigVersion covers the version pin's two validation
+// rules: a non-empty version must be a well-formed Gentoo version, revision
+// suffix included, and — when the entry also declares a series — must belong
+// to that series. An absent version stays valid, so every pre-existing record
+// loads without migration.
+func TestValidatePackageConfigVersion(t *testing.T) {
+	base := func() *PackageConfig {
+		return &PackageConfig{
+			URL:    "https://example.com/api",
+			Parser: "json",
+			Path:   "version",
+		}
+	}
+
+	t.Run("absent version still validates", func(t *testing.T) {
+		if err := ValidatePackageConfig("test/pkg", base()); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("valid pin passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.28.4"
+		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("pin with revision suffix passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "2.52.4-r411" // the webkit-gtk shape
+		if err := ValidatePackageConfig("net-libs/webkit-gtk:4.1", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("malformed pin fails naming the key", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "not-a-version"
+		err := ValidatePackageConfig("test/pkg", cfg)
+		if err == nil {
+			t.Fatal("Expected error for malformed version")
+		}
+		if !errors.Is(err, ErrInvalidVersion) {
+			t.Errorf("Expected ErrInvalidVersion, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "test/pkg") {
+			t.Errorf("Expected the entry key in the message, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "not-a-version") {
+			t.Errorf("Expected the offending value in the message, got %q", err.Error())
+		}
+	})
+
+	t.Run("pin outside its own series fails", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.29.2"
+		cfg.Series = `^1\.28\.`
+		err := ValidatePackageConfig("test/pkg", cfg)
+		if err == nil {
+			t.Fatal("Expected error for version outside series")
+		}
+		if !errors.Is(err, ErrVersionOutsideSeries) {
+			t.Errorf("Expected ErrVersionOutsideSeries, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "test/pkg") {
+			t.Errorf("Expected the entry key in the message, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "1.29.2") {
+			t.Errorf("Expected the offending value in the message, got %q", err.Error())
+		}
+	})
+
+	t.Run("pin inside its series passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Version = "1.28.4"
+		cfg.Series = `^1\.28\.`
+		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+}
+
+// A record without a version key gets the pin inserted immediately before its
+// comments assignment — after every other field, since comments must be last —
+// and a record with no comments field gets it immediately before `# END`.
+func TestSetPackageVersionsInsertsBeforeComments(t *testing.T) {
+	content := `["media-plugins/gst-plugins-vpx@stable"]
+url = "https://example.com/releases.json"
+parser = "regex"
+pattern = '"name":"([0-9]+\.[0-9]+\.[0-9]+)"'
+select = "max"
+series = '^1\.28\.'
+comments = """gst-plugins-vpx: stable line."""
+# END
+
+["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+
+	pins := map[string]string{
+		"media-plugins/gst-plugins-vpx@stable": "1.28.5",
+		"a/b":                                  "2.0.0",
+	}
+	if err := SetPackageVersions(overlay, pins); err != nil {
+		t.Fatalf("SetPackageVersions: %v", err)
+	}
+
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	want := `["media-plugins/gst-plugins-vpx@stable"]
+url = "https://example.com/releases.json"
+parser = "regex"
+pattern = '"name":"([0-9]+\.[0-9]+\.[0-9]+)"'
+select = "max"
+series = '^1\.28\.'
+version = "1.28.5"
+comments = """gst-plugins-vpx: stable line."""
+# END
+
+["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+version = "2.0.0"
+# END
+`
+	if string(got) != want {
+		t.Errorf("unexpected output:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	// The result must still parse and carry the pins.
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if v := cfg.Packages["media-plugins/gst-plugins-vpx@stable"].Version; v != "1.28.5" {
+		t.Errorf("expected version 1.28.5 after edit, got %q", v)
+	}
+	if v := cfg.Packages["a/b"].Version; v != "2.0.0" {
+		t.Errorf("expected version 2.0.0 after edit, got %q", v)
+	}
+}
+
+// An existing version assignment is rewritten in place: same position, nothing
+// else in the record moves.
+func TestSetPackageVersionsRewritesExisting(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+series = '^1\.28\.'
+version = "1.28.4"
+comments = """a/b: pinned to the stable line."""
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	if err := SetPackageVersions(overlay, map[string]string{"a/b": "1.28.5"}); err != nil {
+		t.Fatalf("SetPackageVersions: %v", err)
+	}
+	got, _ := os.ReadFile(configPath)
+	want := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+series = '^1\.28\.'
+version = "1.28.5"
+comments = """a/b: pinned to the stable line."""
+# END
+`
+	if string(got) != want {
+		t.Errorf("unexpected output:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if v := cfg.Packages["a/b"].Version; v != "1.28.5" {
+		t.Errorf("expected version 1.28.5 after edit, got %q", v)
+	}
+}
+
+// A multi-line comments body may contain `#`-prefixed lines, `[`-prefixed lines
+// that look exactly like section headers, and even `version = ...`-shaped text.
+// None of it is structure: the record must survive byte-identical apart from
+// the one inserted pin, placed before the comments assignment.
+func TestSetPackageVersionsPreservesMultilineComments(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+comments = """a/b: doc body with hostile lines.
+# this is doc text, not a marker
+[gotcha/section]
+version = "9.9.9" would have been rewritten by an unguarded scanner
+"""
+# END
+
+["c/d"]
+url = "https://x/z"
+parser = "json"
+path = "v"
+comments = """c/d: untouched neighbour."""
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	if err := SetPackageVersions(overlay, map[string]string{"a/b": "1.2.3"}); err != nil {
+		t.Fatalf("SetPackageVersions: %v", err)
+	}
+	got, _ := os.ReadFile(configPath)
+	want := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+version = "1.2.3"
+comments = """a/b: doc body with hostile lines.
+# this is doc text, not a marker
+[gotcha/section]
+version = "9.9.9" would have been rewritten by an unguarded scanner
+"""
+# END
+
+["c/d"]
+url = "https://x/z"
+parser = "json"
+path = "v"
+comments = """c/d: untouched neighbour."""
+# END
+`
+	if string(got) != want {
+		t.Errorf("comments body corrupted:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if v := cfg.Packages["a/b"].Version; v != "1.2.3" {
+		t.Errorf("expected version 1.2.3 after edit, got %q", v)
+	}
+}
+
+// A pin whose section is absent is skipped silently — no error, no write — and
+// in a mixed batch the present sections are still edited.
+func TestSetPackageVersionsAbsentSectionSkipped(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+comments = """a/b: doc."""
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	before, _ := os.ReadFile(configPath)
+
+	// Absent-only batch: no error, file untouched.
+	if err := SetPackageVersions(overlay, map[string]string{"c/d": "1.0.0"}); err != nil {
+		t.Fatalf("absent section: %v", err)
+	}
+	after, _ := os.ReadFile(configPath)
+	if string(before) != string(after) {
+		t.Errorf("file changed for an absent section:\n%s", after)
+	}
+
+	// Mixed batch: the absent key is skipped, the present one is pinned.
+	if err := SetPackageVersions(overlay, map[string]string{"c/d": "1.0.0", "a/b": "2.0.0"}); err != nil {
+		t.Fatalf("mixed batch: %v", err)
+	}
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if v := cfg.Packages["a/b"].Version; v != "2.0.0" {
+		t.Errorf("expected version 2.0.0 after mixed batch, got %q", v)
+	}
+}
+
+// An empty (or nil) map returns before any I/O — bytes AND mtime unchanged —
+// and a batch that re-pins the value already written changes nothing either.
+func TestSetPackageVersionsNoOps(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+version = "1.2.3"
+comments = """a/b: doc."""
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	before, _ := os.ReadFile(configPath)
+	infoBefore, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	if err := SetPackageVersions(overlay, nil); err != nil {
+		t.Fatalf("nil map: %v", err)
+	}
+	if err := SetPackageVersions(overlay, map[string]string{}); err != nil {
+		t.Fatalf("empty map: %v", err)
+	}
+	after, _ := os.ReadFile(configPath)
+	infoAfter, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("empty map changed the bytes:\n%s", after)
+	}
+	if !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
+		t.Errorf("empty map changed the mtime: before %v, after %v", infoBefore.ModTime(), infoAfter.ModTime())
+	}
+
+	// Re-pinning the value already in the file must not rewrite it.
+	if err := SetPackageVersions(overlay, map[string]string{"a/b": "1.2.3"}); err != nil {
+		t.Fatalf("same-value batch: %v", err)
+	}
+	after, _ = os.ReadFile(configPath)
+	if string(before) != string(after) {
+		t.Errorf("same-value batch changed the bytes:\n%s", after)
+	}
+}
+
+// The atomic rewrite must preserve the original file mode.
+func TestSetPackageVersionsPreservesFileMode(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+parser = "json"
+path = "v"
+comments = """a/b: doc."""
+# END
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	if err := os.Chmod(configPath, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	if err := SetPackageVersions(overlay, map[string]string{"a/b": "1.2.3"}); err != nil {
+		t.Fatalf("SetPackageVersions: %v", err)
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("file mode not preserved: got %v, want %v", got, os.FileMode(0o600))
 	}
 }
