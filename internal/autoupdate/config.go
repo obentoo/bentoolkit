@@ -563,6 +563,18 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
 
+	return decodePackagesConfig(data)
+}
+
+// decodePackagesConfig parses packages.toml from memory, applying the same
+// strict-decoding rule as LoadPackagesConfig.
+//
+// It is separate from the file read because the repair pass has to parse text
+// that is not on disk yet: R7.1's gate reparses the rewritten file and compares
+// it record by record against the original BEFORE anything is written, and
+// staging a candidate through a temp file just to read it back would make the
+// gate depend on the very write it is meant to authorise.
+func decodePackagesConfig(data []byte) (*PackagesConfig, error) {
 	// Parse TOML into the internal structure. Decode rather than Unmarshal purely
 	// for the MetaData that drives the strict check below: Unmarshal IS this call
 	// with the MetaData discarded, so a syntax error still surfaces here with the
@@ -832,10 +844,6 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 	if err != nil {
 		return fmt.Errorf("failed to read packages.toml: %w", err)
 	}
-	info, err := os.Stat(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to stat packages.toml: %w", err)
-	}
 
 	// Split on "\n" (not bufio.Scanner) so a file without a trailing newline is
 	// reproduced byte-for-byte by the strings.Join below.
@@ -880,9 +888,37 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 		return nil
 	}
 
+	return writePackagesConfigAtomically(configPath, []byte(strings.Join(out, "\n")))
+}
+
+// writePackagesConfigAtomically replaces packages.toml with data through a temp
+// file in the same directory and a rename, preserving the mode the file already
+// has. Every writer of the registry goes through it, so there is one copy of the
+// "never leave a half-written registry behind" policy rather than one per caller.
+//
+// Atomicity is what the policy buys: the registry is a hand-maintained,
+// auto-committing file, and a truncated write would publish the truncation. The
+// rename is atomic within a filesystem, so a reader sees either the old file or
+// the new one — never a partial one — and a failed rename removes the temp file
+// instead of leaving debris beside the registry.
+//
+// The mode is set explicitly rather than left to os.WriteFile's create mode,
+// which the process umask masks: under umask 077 a 0644 registry would come back
+// 0600 and stop being readable by anything else on the box.
+func writePackagesConfigAtomically(configPath string, data []byte) error {
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat packages.toml: %w", err)
+	}
+	mode := info.Mode().Perm()
+
 	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(strings.Join(out, "\n")), info.Mode().Perm()); err != nil {
+	if err := os.WriteFile(tmpPath, data, mode); err != nil {
 		return fmt.Errorf("failed to write temp config: %w", err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck
+		return fmt.Errorf("failed to preserve packages.toml mode: %w", err)
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
 		os.Remove(tmpPath) //nolint:errcheck

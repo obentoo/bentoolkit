@@ -1,0 +1,224 @@
+# Bentoo Autoupdate Package Configuration — SYNTHETIC REPAIR FIXTURE
+#
+# This is NOT the real registry. It is the fixture pair for `--lint --fix`
+# (story 022, task 5.1): repair_input.toml is the messy input, repair_golden.toml
+# is the byte-for-byte output the repair must produce from it. This header is
+# identical in both, because the repair returns the file header untouched.
+#
+# It is synthetic on purpose. The real overlay auto-commits and auto-publishes,
+# it drifted from 408 to 411 records mid-story, and CI has no copy of it at all —
+# so an assertion against it would be neither deterministic nor runnable where it
+# matters. Every record below instead earns its place by covering one thing that
+# can break, and says which in its own comments field: a floating "#" line
+# between records is itself a lint violation (stray-comment), so the explanation
+# cannot live beside the record, only inside it.
+#
+# This header block is the last trap of its own: it is the file header, the one
+# comment block the stray-comment rule exempts, and the repair must return it
+# untouched.
+
+["app-arch/canonical-record"]
+url = "https://api.github.com/repos/example/canonical/releases/latest"
+parser = "json"
+path = "tag_name"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+comments = """
+Already canonical — every field in CanonicalFieldOrder, nothing retired, nothing
+redundant. It must come out of the repair byte for byte: a repair that "tidies" a
+record the linter never reported is a repair nobody approved.
+"""
+# END
+
+["app-editors/legacy-binary-only"]
+url = "https://api.github.com/repos/example/editor/releases/latest"
+parser = "json"
+path = "tag_name"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+type = "bin"
+comments = """
+R1.2 — binary = true with no type becomes type = "bin", substituted where the
+binary line stood. Nothing else moves: type already sits in canonical position
+here, so this record proves the migration alone, without a reorder riding along.
+"""
+# END
+
+["app-editors/legacy-binary-with-type"]
+url = "https://example.com/downloads/"
+parser = "regex"
+pattern = 'editor-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.xz'
+type = "bin"
+comments = """
+R1.3 — binary beside an existing type yields ONLY the deletion. The record
+already classifies itself, so there is nothing to migrate and the type line must
+come out untouched.
+"""
+# END
+
+["app-misc/legacy-binary-false"]
+url = "https://example.com/misc/releases.json"
+parser = "json"
+path = "version"
+comments = """
+R1.3 again, the other half: binary = false was only spelling out the default, so
+the line goes and no type is invented. Auto-detection is what happens anyway.
+"""
+# END
+
+["net-misc/redundant-enabled"]
+url = "https://api.github.com/repos/example/tool/releases/latest"
+parser = "json"
+path = "tag_name"
+comments = """
+R2.2 — enabled = true says exactly what an absent enabled says, so the line is
+deleted. IsEnabled reads the record identically before and after.
+"""
+# END
+
+["net-misc/disabled-entry"]
+enabled = false
+url = "https://api.github.com/repos/example/orphan/releases/latest"
+parser = "json"
+path = "tag_name"
+comments = """
+R2.2, the half that must NOT happen: enabled = false is the bookkeeping that
+keeps an orphaned entry out of the run. It carries real information and survives
+untouched — this whole record must come out byte for byte.
+"""
+# END
+
+["dev-libs/khronos-shape"]
+track = "commit"
+url = "https://api.github.com/repos/example/khronos/commits?sha=main&per_page=50"
+parser = "json"
+path = "[0].commit.committer.date"
+transform = [['T.*', ""], ['-', ""]]
+commit_sha_path = "[0].sha"
+base_from = "tag"
+base_url = "https://api.github.com/repos/example/khronos/git/refs/tags"
+base_tag_pattern = '^vulkan-sdk-([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$'
+headers = { "User-Agent" = "bentoo-autoupdate" }
+comments = """
+R3.2 — the measured deviation the canonical order exists to settle: headers
+written in the middle of the base_* block, which is the shape eight Khronos
+records in the real registry share. The repair moves headers below
+base_tag_pattern and touches nothing else.
+"""
+# END
+
+["net-libs/basic-string-regex"]
+track = "commit"
+url = "https://gitlab.example.com/api/v4/projects/1/repository/commits?ref_name=main"
+parser = "json"
+path = "[0].committed_date"
+transform = [['T.*', ""], ['-', ""]]
+commit_sha_path = "[0].id"
+base_from = "file"
+base_url = "https://gitlab.example.com/example/lib/-/raw/main/meson.build"
+base_pattern = "(?m)^  version: '([0-9][0-9.]*)'"
+comments = """
+UB5 — one of the two regexes in the real registry that CANNOT be a literal
+string, because the regex itself contains a single quote. The repair must not
+requote it: rendering this record from the parsed struct would emit a basic
+string with the backslashes re-escaped, which is exactly why the repair is
+textual and never goes through RenderRecord.
+"""
+# END
+
+["app-editors/build-id-substitution"]
+url = "https://api.example.com/updates/api/download/stable/linux-x64/editor"
+parser = "json"
+path = "version"
+commit_sha_path = "commitSha"
+comments = """
+UB4 — commit_sha_path WITHOUT track = "commit". This is app-editors/cursor's
+shape: the SHA is not a tracked version, it is the per-release BUILD_ID the
+applier substitutes into SRC_URI. No rule may couple the two fields, and this
+record must come out unchanged.
+"""
+# END
+
+["sys-apps/legacy-base"]
+track = "commit"
+url = "https://api.github.com/repos/example/sensors/commits?sha=master&per_page=50"
+parser = "json"
+path = "[0].commit.committer.date"
+transform = [['T.*', ""], ['-', ""]]
+commit_sha_path = "[0].sha"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+comments = """
+R6.1 — track = "commit" with no base_from. The linter reports it (legacy-base)
+and the repair deliberately offers nothing: whether the base comes from a file,
+a tag or a commit message depends on where upstream versions itself, which only
+a human reading that upstream knows. So this record must come out of --fix
+completely unchanged, and --lint must keep reporting it afterwards.
+"""
+# END
+
+["www-client/structural-comments"]
+url = "https://example.com/browser/history"
+parser = "regex"
+pattern = 'browser-([0-9]+\.[0-9]+)\.tar\.bz2'
+select = "max"
+comments = """
+R3.3 / UB2 — THE record this fixture exists for. Its doc block holds lines that
+look like file structure and are not, and the block is relocated by the reorder
+below, so it travels through the rewriter rather than sitting still:
+
+# this line starts with a hash and is documentation, not a comment
+[this line starts with a bracket and is documentation, not a header]
+
+A run of three quotes appears here as \"\"\" — escaped, the way
+formatCommentsField writes it — and must survive escaped. An open-detector
+written as "the line does not end with the delimiter" reads comments = \"\"\" as
+closed on its opening line, truncates every block from here down and leaves the
+file unparseable. That is measured, from the prototype, not hypothetical.
+"""
+# END
+
+["dev-util/multiline-array"]
+url = "https://api.github.com/repos/example/util/tags"
+parser = "regex"
+pattern = '"name":"v([0-9.]+)"'
+transform = [
+  ['^v', ""],
+  ['-', "_p"],
+]
+comments = """
+A value spread over several lines, moved as one unit by the reorder. The real
+registry writes every transform on one line today, so nothing here is measured —
+this record is the guard for the day someone writes the first multi-line array
+and discovers whether the rewriter carries the continuation lines with the key
+they belong to.
+"""
+# END
+
+["media-video/combined-repairs"]
+url = "https://api.github.com/repos/example/player/releases/latest"
+parser = "json"
+path = "tag_name"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+type = "bin"
+series = '^[0-9.]+$'
+comments = """
+The three repairs composing in one record: the redundant enabled goes, binary
+becomes type, and the result is then sorted — series was written before headers,
+and the migrated type belongs between them. Ranking the record as it will be
+AFTER the migration is what makes the reorder reported and the reorder applied
+the same one.
+"""
+# END
+
+["sci-libs/authenticated-fetch"]
+url = "https://example.com/pro/version-history/"
+parser = "regex"
+pattern = 'Latest:\s*([0-9]+\.[0-9]+\.[0-9]+)'
+timeout = 60
+meta = { fetch_method = "post", fetch_url = "https://example.com/pro/download.php", fetch_serial_env = "EXAMPLE_PRO_KEY", fetch_serial_field = "key", fetch_filename = "example-pro-{version}.tar.xz" }
+comments = """
+An inline table carried through verbatim, out of order against its neighbour:
+meta is written before timeout and belongs after it. Re-encoding this record from
+the parsed struct would emit meta as the sub-table ["sci-libs/authenticated-fetch".meta],
+which the record scanner reads as a new record — another reason the repair keeps
+the original line.
+"""
+# END
