@@ -677,11 +677,13 @@ secrets stands: reference an env var, never the value.
   `vulkan-sdk` scheme, so that file is the wrong source even though it parses.
 - **`enabled` vs `hold`.** `enabled` is *bookkeeping the checker flips on its
   own*: it writes `enabled = false` when the ebuild vanishes from the overlay,
-  and back to `true` when it reappears. `hold` is a *maintainer decision*
-  ("present, but never auto-bump") that reconciliation never touches. A package
-  needing manual work each release (patchset, pinned SHA, bootstrap compiler)
-  takes `hold` — `enabled = false` would be silently reverted. Both skip the
-  fetch entirely.
+  and **deletes that line** when it reappears. The deletion is the point —
+  enabled is the default, spelled by the key's absence, so writing
+  `enabled = true` would state nothing the file did not already say and `--lint`
+  reports it as redundant. `hold` is a *maintainer decision* ("present, but
+  never auto-bump") that reconciliation never touches. A package needing manual
+  work each release (patchset, pinned SHA, bootstrap compiler) takes `hold` —
+  `enabled = false` would be silently reverted. Both skip the fetch entirely.
 - **User-Agent** is required by `api.github.com` and `crates.io` — always the
   literal `"bentoo-autoupdate"`. A browser UA is a last resort for a
   Cloudflare-fronted host, and the reason belongs in `comments`.
@@ -826,7 +828,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
-| `binary` | Set to `true` for binary packages (manifest-only testing) |
+| `type` | `"bin"` for a binary package (manifest-only testing), `"source"` for a source-built one. Only to **override** the auto-detection, which already reads the ebuild (`RESTRICT="bindist"`, a `-bin` suffix, a binary `SRC_URI`). Replaces the retired `binary` key; `--lint --fix` migrates a record still carrying it. |
 | `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
 | `suffix` | Gentoo pre-release suffix (`_alpha`, `_beta`, `_pre`, `_rc`, `_p`, each optionally numbered) appended to the detected version — see [Pre-release channels](#pre-release-channels-suffix). |
 | `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |

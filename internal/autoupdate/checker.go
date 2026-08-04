@@ -794,16 +794,18 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 	return nil
 }
 
-// ReviveDisabled re-enables (enabled = true) each named package in the overlay's
-// packages.toml and in the in-memory config. It is the inverse of DisableOrphans:
-// a package that was auto-disabled when its ebuild vanished is reconciled back to
-// enabled once that ebuild is present in the overlay again, because the overlay —
-// not packages.toml — is the source of truth for whether a package exists. The
-// file edit is a single comment-preserving rewrite of the existing
-// `enabled = false` assignment (EnablePackagesInConfig inserts nothing for a
-// section that lacks the key, since absent already means enabled). A nil or empty
-// slice is a no-op. The in-memory config is updated only after the file write
-// succeeds, so a failed write leaves both views consistent.
+// ReviveDisabled re-enables each named package in the overlay's packages.toml
+// and in the in-memory config. It is the inverse of DisableOrphans: a package
+// that was auto-disabled when its ebuild vanished is reconciled back to enabled
+// once that ebuild is present in the overlay again, because the overlay — not
+// packages.toml — is the source of truth for whether a package exists. The file
+// edit is a comment-preserving DELETION of the existing `enabled = false`
+// assignment: enabled is the default, spelled by the key's absence, so writing
+// `enabled = true` would state nothing new and would leave a redundant-enabled
+// finding for --lint --fix to undo (EnablePackagesInConfig likewise inserts
+// nothing for a section that lacks the key). A nil or empty slice is a no-op.
+// The in-memory config is updated only after the file write succeeds, so a
+// failed write leaves both views consistent.
 //
 // Callers must exclude held packages (hold = true): a hold is an explicit
 // maintainer decision that the overlay reconciliation must never flip.

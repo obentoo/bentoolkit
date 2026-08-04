@@ -54,8 +54,12 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// changes?" is exactly the question that teaches an operator to answer
 		// yes without reading, and the one prompt here that has to survive that
 		// habit is the one that publishes.
-		output.Info.Println("  Nothing to repair: no record deviates in a way --fix can rewrite.")
-		reportUnrepaired(issues)
+		//
+		// The findings are NOT reprinted here: runLint listed every one of them
+		// moments ago and nothing has been written since, so a second copy would
+		// be the same lines twice in one screen. One sentence ties the two facts
+		// together instead — nothing was repairable, and what remains is why.
+		summarizeUnrepaired(issues)
 		return
 	}
 
@@ -116,7 +120,9 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 }
 
 // reportUnrepaired states what the registry says NOW and sets the exit code from
-// it.
+// it. It is the AFTER-A-WRITE report: `remaining` comes from a fresh lint of the
+// rewritten file, so it can differ from anything printed earlier and is listed in
+// full.
 //
 // The distinction it draws is the point: `--fix` deliberately declines to guess
 // at some findings — an entry tracking commits with no base source cannot be
@@ -133,6 +139,26 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) {
 	for _, issue := range remaining {
 		output.Warning.Println("    " + issue.String())
 	}
+	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
+	osExit(1)
+}
+
+// summarizeUnrepaired is the NOTHING-WAS-WRITTEN report: the findings are the
+// ones runLint just listed, so it states the verdict in one line instead of
+// printing them again.
+//
+// The two facts belong in one sentence. "Nothing to repair" followed by "N
+// issues remain" reads as a contradiction to anyone who does not already know
+// that a rule may carry no repair; said together, the second explains the first.
+func summarizeUnrepaired(remaining []autoupdate.LintIssue) {
+	if len(remaining) == 0 {
+		output.Success.Println("packages.toml: record model OK")
+		return
+	}
+
+	output.Warning.Printf(
+		"  Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.\n",
+		len(remaining))
 	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
 	osExit(1)
 }

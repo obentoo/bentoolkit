@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`--lint --fix` no longer prints the same findings twice when there is
+  nothing to repair.** Once the mechanical findings are gone, the run listed
+  them once as lint output and again under "still need a human", and the two
+  sentences read as a contradiction besides — "Nothing to repair" followed by
+  "2 issue(s) remain". The verdict is now one line that ties both together:
+  nothing was repairable *because* what remains has no mechanical fix. The
+  after-a-write report is unchanged and still lists in full, since there it
+  comes from a fresh lint of the rewritten file and can differ from anything
+  printed earlier.
+
 - **Reviving a package no longer writes the redundant `enabled = true` that the
   linter then reports.** Enabling is the registry's DEFAULT, spelled by the
   key's absence — `EnablePackagesInConfig` already knew that well enough not to

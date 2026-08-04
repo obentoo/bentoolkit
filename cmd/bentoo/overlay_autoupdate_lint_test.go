@@ -426,3 +426,67 @@ claude-code — npm dist-tags.latest is the stable channel.
 		t.Errorf("exit code = %d, want no exit: the registry is clean", code)
 	}
 }
+
+// TestAutoupdateLintFixNothingRepairableSaysItOnce covers the shape a maintainer
+// actually hits once the registry has been repaired: every mechanical finding is
+// gone, and what is left is the kind --fix declines to guess at.
+//
+// The run must not print those findings twice. runLint lists them, then --fix
+// finds nothing to write — reprinting them under "still need a human" would put
+// the same lines on screen twice in one command, and the two sentences read as a
+// contradiction besides ("nothing to repair" / "2 issues remain"). One line ties
+// them together instead.
+func TestAutoupdateLintFixNothingRepairableSaysItOnce(t *testing.T) {
+	// track = "commit" with no base_from: reported by legacy-base, which carries
+	// no repair on purpose (R6.1).
+	dir := writeLintRegistry(t, `["sci-ml/ik_llama-cpp"]
+track = "commit"
+url = "https://api.github.com/repos/x/y/commits"
+parser = "json"
+path = "0.sha"
+commit_sha_path = "0.sha"
+comments = """
+ik_llama-cpp — commit-tracked, base version left to the ebuild.
+"""
+# END
+`)
+	before := readLintRegistry(t, dir)
+
+	setLintFix(t, true)
+	setReconcileYes(t, false)
+	setReconcileConfirm(t, func(string) bool {
+		t.Error("a repair that changes nothing must not prompt")
+		return true
+	})
+
+	code, out := runLintCapturing(t, dir)
+
+	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
+		t.Errorf("a no-op repair rewrote packages.toml\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	// The finding LINE appears exactly once: runLint's listing. The old code
+	// added a second copy under the "still need a human" heading.
+	//
+	// Counted on "[pkg] rule:" rather than on the rule name alone, because the
+	// tally block prints the rule name too ("legacy-base  1") — that is a
+	// different statement, not a repetition, and must not make this fail.
+	finding := "[sci-ml/ik_llama-cpp] " + autoupdate.LintLegacyBase + ":"
+	if n := strings.Count(out, finding); n != 1 {
+		t.Errorf("the finding line is printed %d time(s), want exactly 1; got:\n%s", n, out)
+	}
+	if strings.Contains(out, "still need a human:") {
+		t.Errorf("the findings were listed a second time; got:\n%s", out)
+	}
+	// …and the verdict still says both things: nothing was repairable, and that
+	// is because what remains has no mechanical fix.
+	if !strings.Contains(out, "Nothing to repair") {
+		t.Errorf("the run did not say the repair found nothing; got:\n%s", out)
+	}
+	if !strings.Contains(out, "no mechanical fix") {
+		t.Errorf("the run did not explain why nothing was repaired; got:\n%s", out)
+	}
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1: a finding no repair touches is still a finding", code)
+	}
+}
