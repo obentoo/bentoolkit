@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-04
+
 ### Fixed
 - **`--lint --fix` no longer prints the same findings twice when there is
   nothing to repair.** Once the mechanical findings are gone, the run listed
