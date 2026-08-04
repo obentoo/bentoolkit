@@ -1,14 +1,17 @@
 package autoupdate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -726,4 +729,174 @@ func TestSweepManifestVersionIsAKeptVersion(t *testing.T) {
 			t.Errorf("manifest runs = %d, want 0", runs.Load())
 		}
 	})
+}
+
+// =============================================================================
+// Contract and integration (S027 sub-tasks 4.1 and 4.2)
+// =============================================================================
+
+// TestSweepContractHoldsAcrossPlanAndReport walks every field a consumer reads
+// and asserts the producer fills it. A field the CLI display reads but the plan
+// never populates produces a report that lies — "kept, claimed by" with nothing
+// after it — and the operator approves a batch they cannot check.
+func TestSweepContractHoldsAcrossPlanAndReport(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	if len(batch.Dirs) == 0 {
+		t.Fatal("empty batch — the contract check would be vacuous")
+	}
+
+	for _, d := range batch.Dirs {
+		// Paths are built from Atom, so a registry suffix here is destructive.
+		if strings.ContainsAny(d.Atom, ":@") {
+			t.Errorf("Atom %q carries a registry suffix", d.Atom)
+		}
+		// Remove and WouldRemove are mutually exclusive: one is pending work,
+		// the other is what a block left alone.
+		if len(d.Remove) > 0 && len(d.WouldRemove) > 0 {
+			t.Errorf("%s has both Remove %v and WouldRemove %v", d.Atom, d.Remove, d.WouldRemove)
+		}
+		if d.IsBlocked() && len(d.Remove) > 0 {
+			t.Errorf("%s is blocked but carries Remove %v", d.Atom, d.Remove)
+		}
+		// A non-empty claim must name a key that exists, or the report's
+		// "claimed by" line points at nothing.
+		for version, key := range d.Keep {
+			if key == "" {
+				continue // kept by a rule (live ebuild, or the floor)
+			}
+			if _, ok := cfgs[key]; !ok {
+				t.Errorf("%s keeps %s claimed by %q, which is not a registry key", d.Atom, version, key)
+			}
+		}
+	}
+
+	// The report must carry the plan's Keep through, since R6.1's "claimed by"
+	// line is printed from the result, not from the plan.
+	var runs atomic.Int64
+	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepExecCommand(countingManifestSeam(&runs)))
+	if len(report.Results) != len(batch.Dirs) {
+		t.Fatalf("report has %d results, batch had %d directories", len(report.Results), len(batch.Dirs))
+	}
+	for i, r := range report.Results {
+		if r.Atom != batch.Dirs[i].Atom {
+			t.Errorf("result %d is %s, plan was %s", i, r.Atom, batch.Dirs[i].Atom)
+		}
+		if !reflect.DeepEqual(r.Kept, batch.Dirs[i].Keep) {
+			t.Errorf("%s: report Kept = %v, plan Keep = %v", r.Atom, r.Kept, batch.Dirs[i].Keep)
+		}
+		// A report may only claim files that really went away.
+		for _, v := range r.Removed {
+			if _, err := os.Stat(filepath.Join(overlayDir, r.Atom, path.Base(r.Atom)+"-"+v+".ebuild")); err == nil {
+				t.Errorf("%s reports %s removed, but the file is still on disk", r.Atom, v)
+			}
+		}
+	}
+}
+
+// TestOverlaySweepIntegration is the end-to-end guard: one fixture holding every
+// case the sweep must distinguish, planned and executed for real, then checked
+// file by file.
+//
+// This is the test that would catch the class of bug story 021 exists to
+// prevent — a sweep that deletes a maintained release line.
+func TestOverlaySweepIntegration(t *testing.T) {
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+
+	// residue: the ordinary case — one stale release to remove.
+	createTestEbuildFile(t, overlayDir, "test-cat/residue", "1.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/residue", "2.0.0")
+	// siblings: two release lines, one ebuild each, both maintained (UB7).
+	createTestEbuildFile(t, overlayDir, "test-cat/siblings", "1.28.5")
+	createTestEbuildFile(t, overlayDir, "test-cat/siblings", "1.29.2")
+	createTestEbuildFile(t, overlayDir, "test-cat/siblings", "1.27.0") // genuine residue
+	// live: a -9999 ebuild that must survive whatever the pins say (UB3).
+	createTestEbuildFile(t, overlayDir, "test-cat/live", "1.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/live", "2.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/live", "9999")
+	// blocked: the claiming entry declares no pin, so nothing may be removed.
+	createTestEbuildFile(t, overlayDir, "test-cat/blocked", "1.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/blocked", "2.0.0")
+
+	cfgs := map[string]PackageConfig{
+		"test-cat/residue":         regEntry("2.0.0", ""),
+		"test-cat/siblings@stable": regEntry("1.28.5", ""),
+		"test-cat/siblings@dev":    regEntry("1.29.2", ""),
+		"test-cat/live":            regEntry("2.0.0", ""),
+		"test-cat/blocked":         regEntry("", ""),
+	}
+
+	// UB5: the registry is read-only to a sweep. Written here so its bytes can
+	// be compared afterwards.
+	registryDir := filepath.Join(overlayDir, ".autoupdate")
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	registryPath := filepath.Join(registryDir, "packages.toml")
+	if err := os.WriteFile(registryPath, []byte("# fixture registry\n"), 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	before, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	var runs atomic.Int64
+	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepConcurrency(4), WithSweepExecCommand(countingManifestSeam(&runs)))
+
+	exists := func(pkg, version string) bool {
+		name := path.Base(pkg) + "-" + version + ".ebuild"
+		_, err := os.Stat(filepath.Join(overlayDir, pkg, name))
+		return err == nil
+	}
+
+	gone := map[string]string{
+		"test-cat/residue":  "1.0.0",
+		"test-cat/siblings": "1.27.0",
+		"test-cat/live":     "1.0.0",
+	}
+	for pkg, version := range gone {
+		if exists(pkg, version) {
+			t.Errorf("%s-%s survived the sweep", pkg, version)
+		}
+	}
+
+	kept := map[string][]string{
+		"test-cat/residue":  {"2.0.0"},
+		"test-cat/siblings": {"1.28.5", "1.29.2"}, // UB7: one per entry
+		"test-cat/live":     {"2.0.0", "9999"},    // UB3
+		"test-cat/blocked":  {"1.0.0", "2.0.0"},   // R5.1
+	}
+	for pkg, versions := range kept {
+		for _, v := range versions {
+			if !exists(pkg, v) {
+				t.Errorf("%s-%s was removed and must not have been", pkg, v)
+			}
+		}
+	}
+
+	if report.Removed != 3 {
+		t.Errorf("Removed = %d, want 3", report.Removed)
+	}
+	if report.Failed != 0 {
+		t.Errorf("Failed = %d, want 0", report.Failed)
+	}
+
+	// UB5: not one byte of the registry.
+	after, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the sweep modified packages.toml")
+	}
 }
