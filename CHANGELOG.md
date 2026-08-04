@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-04
+
 ### Added
 - **`base_from = "none"`: an upstream that publishes no version at all can now
   say so.** `base_from` named where the base version comes from, but had no way
