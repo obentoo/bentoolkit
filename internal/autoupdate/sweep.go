@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -151,6 +152,207 @@ func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersion string) (s
 			strings.Join(removed, ", "), pkg, err)
 	}
 	return plan, nil
+}
+
+// SweepDirPlan is one package directory's verdict in an overlay sweep.
+//
+// Exactly one of Remove / WouldRemove carries versions: a blocked directory
+// removes nothing and reports its candidates in WouldRemove instead, so a
+// report can state what an authorised sweep would have done without ever
+// implying it happened.
+type SweepDirPlan struct {
+	// Atom is "category/package" — never a registry key. Paths are built from
+	// it, so a ":slot" or "@label" here would be destructive (S027-G4).
+	Atom string
+	// Remove lists the versions to delete, ascending in Gentoo order. Empty on
+	// any blocked plan.
+	Remove []string
+	// Keep maps a kept version to the entry key claiming it. An empty value
+	// means the version is kept by a rule (the live-ebuild rule or the
+	// last-non-live floor) rather than by an entry.
+	Keep map[string]string
+	// Blocked names the entry that lacks a pin, when there is one to name. A
+	// directory blocked because NO entry claims it has an empty Blocked — see
+	// sweepPlan's type comment for why the two are distinguishable.
+	Blocked string
+	// WouldRemove lists what a blocked directory left alone, ascending.
+	WouldRemove []string
+}
+
+// IsBlocked reports whether this directory will remove nothing. It is true for
+// both block cases — a pinless entry (Blocked names it) and a directory no
+// entry claims (Blocked is empty) — which is why callers must not test
+// Blocked != "" on its own.
+func (p SweepDirPlan) IsBlocked() bool {
+	return len(p.WouldRemove) > 0 || p.Blocked != ""
+}
+
+// SweepPlanError is a directory that could not be planned at all — an
+// unreadable package directory, not a directory with nothing to do. It is
+// reported and dropped from the batch rather than aborting the sweep.
+type SweepPlanError struct {
+	Atom string
+	Err  error
+}
+
+// SweepBatch is everything an overlay sweep intends to do, ordered so two runs
+// over an unchanged overlay produce the identical plan.
+type SweepBatch struct {
+	// Dirs holds one entry per candidate directory, sorted by Atom.
+	Dirs []SweepDirPlan
+	// PlanErrors holds the directories that could not be planned.
+	PlanErrors []SweepPlanError
+	// TotalRemove is the number of files the batch would delete. It counts
+	// Remove only — a blocked directory's WouldRemove is not pending work.
+	TotalRemove int
+}
+
+// ErrInvalidSweepTarget is returned for a target that is neither a category nor
+// a "category/package" atom present in the overlay.
+var ErrInvalidSweepTarget = errors.New("invalid sweep target")
+
+// normaliseSweepTarget validates target against the overlay and returns the
+// atom and category it selects. An empty target selects everything.
+//
+// A registry key is accepted and normalised to its atom ("net-libs/webkit-gtk:6"
+// selects net-libs/webkit-gtk), because pasting a key from packages.toml is the
+// obvious thing to do and the resulting path is built from the atom either way.
+//
+// The directory must exist. Failing here rather than returning an empty batch is
+// what makes a typo obvious instead of reading as "nothing to clean" (S027-R1.4).
+func normaliseSweepTarget(overlayPath, target string) (atom, category string, err error) {
+	if target == "" {
+		return "", "", nil
+	}
+	if strings.Contains(target, "/") {
+		cat, pkgName, ok := splitPkgAtom(target)
+		if !ok {
+			return "", "", fmt.Errorf("%w: %q is not a category/package atom", ErrInvalidSweepTarget, target)
+		}
+		atom = cat + "/" + pkgName
+		if err := dirMustExist(filepath.Join(overlayPath, cat, pkgName)); err != nil {
+			return "", "", fmt.Errorf("%w: %q: %v", ErrInvalidSweepTarget, target, err)
+		}
+		return atom, "", nil
+	}
+	if strings.ContainsAny(target, ":@") {
+		return "", "", fmt.Errorf("%w: %q is not a category/package atom", ErrInvalidSweepTarget, target)
+	}
+	if err := dirMustExist(filepath.Join(overlayPath, target)); err != nil {
+		return "", "", fmt.Errorf("%w: %q is not a category in this overlay: %v", ErrInvalidSweepTarget, target, err)
+	}
+	return "", target, nil
+}
+
+func dirMustExist(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", path)
+	}
+	return nil
+}
+
+// scopeConfigs narrows the registry to the entries a scoped sweep must
+// consider. It returns cfgs unchanged for an empty scope.
+//
+// # Why this keeps more than it looks like it should
+//
+// It is an optimisation — sparing a one-package sweep the directory read
+// Reconcile performs per enabled entry — and it is the most dangerous function
+// in this story, because the sweep it feeds deletes files.
+//
+// Matching is by ATOM, never by exact key, and disabled and held entries are
+// kept. Both rules exist for the same reason: unclaimedIn collects claims from
+// EVERY entry of an atom, switched-off ones included, because a switched-off
+// entry still holds its ebuild. Drop "media-plugins/gst-plugins-vpx@dev" while
+// keeping "@stable" and the dev line's ebuild becomes claimed by nobody — so
+// the sweep deletes a maintained release line (S027-G1).
+func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[string]PackageConfig {
+	if atom == "" && category == "" {
+		return cfgs
+	}
+	scoped := make(map[string]PackageConfig, len(cfgs))
+	for key, cfg := range cfgs {
+		cat, pkgName, ok := splitPkgAtom(key)
+		if !ok {
+			continue
+		}
+		switch {
+		case atom != "" && cat+"/"+pkgName == atom:
+			scoped[key] = cfg
+		case category != "" && cat == category:
+			scoped[key] = cfg
+		}
+	}
+	return scoped
+}
+
+// PlanOverlaySweep computes what a sweep would do to every package directory
+// holding an ebuild no entry claims, for the whole overlay or for one target.
+//
+// # Why the candidates come from Reconcile
+//
+// Reconcile already walks the registry and reports exactly this class of
+// finding (UnclaimedEbuild), including its enabled/held filter. Taking the
+// candidates from it means what a sweep touches is what `--check` printed —
+// parity by construction rather than by two implementations agreeing (S027-R2.1,
+// S027-R2.2). Its Key for that class is already the bare atom.
+//
+// # Why the verdict does NOT come from Reconcile
+//
+// A divergence says a file is unclaimed. Whether removing it is allowed is a
+// different question, and planSweep is the only thing that answers it: the
+// live-ebuild rule, the last-non-live floor, and both block cases live there.
+// Deleting straight from the divergence list would drop all of them — which is
+// precisely the failure story 021 exists to prevent (S027-D1).
+//
+// Nothing here touches the filesystem beyond reading directories.
+func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target string) (SweepBatch, error) {
+	atom, category, err := normaliseSweepTarget(overlayPath, target)
+	if err != nil {
+		return SweepBatch{}, err
+	}
+
+	scoped := scopeConfigs(cfgs, atom, category)
+
+	// One divergence is emitted per unclaimed FILE; several files can share a
+	// directory, so reduce to unique atoms before planning.
+	seen := make(map[string]bool)
+	var atoms []string
+	for _, d := range Reconcile(overlayPath, scoped) {
+		if d.Kind != UnclaimedEbuild || seen[d.Key] {
+			continue
+		}
+		seen[d.Key] = true
+		atoms = append(atoms, d.Key)
+	}
+	sort.Strings(atoms)
+
+	batch := SweepBatch{}
+	for _, a := range atoms {
+		plan, err := planSweep(overlayPath, scoped, a)
+		if err != nil {
+			// An unreadable directory is a fact about that directory. Report it
+			// and keep planning the rest: refusing the whole batch because one
+			// directory is unreadable would make a single permission problem
+			// block every other cleanup.
+			batch.PlanErrors = append(batch.PlanErrors, SweepPlanError{Atom: a, Err: err})
+			continue
+		}
+		dir := SweepDirPlan{
+			Atom:        a,
+			Remove:      plan.Remove,
+			Keep:        plan.Keep,
+			Blocked:     plan.Blocked,
+			WouldRemove: plan.WouldRemove,
+		}
+		batch.Dirs = append(batch.Dirs, dir)
+		batch.TotalRemove += len(dir.Remove)
+	}
+	return batch, nil
 }
 
 // runManifest regenerates the Manifest file with pkgdev, from inside the

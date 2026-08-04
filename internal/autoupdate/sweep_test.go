@@ -2,9 +2,11 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"sync/atomic"
 	"testing"
 )
@@ -205,5 +207,316 @@ func TestSweeperExecuteHonoursCancelledContext(t *testing.T) {
 	plan := sweepPlan{Keep: map[string]string{"2.0.0": pkg}, Remove: []string{"1.0.0"}}
 	if _, err := s.execute(pkg, plan, "2.0.0"); err == nil {
 		t.Error("execute with a cancelled context: expected the manifest step to fail")
+	}
+}
+
+// =============================================================================
+// scopeConfigs (S027 sub-task 2.1)
+// =============================================================================
+
+// TestScopeConfigsKeepsEveryClaimantOfTheAtom is the G1 guard.
+//
+// scopeConfigs feeds a sweep that deletes files, and every entry it drops turns
+// that entry's ebuild into an unclaimed file. A ":slot" or "@label" sibling — or
+// a disabled or held entry — still HOLDS its ebuild, so dropping one would make
+// the sweep delete a maintained release line.
+func TestScopeConfigsKeepsEveryClaimantOfTheAtom(t *testing.T) {
+	cfgs := map[string]PackageConfig{
+		"media-plugins/gst-vpx@stable": regEntry("1.28.5", ""),
+		"media-plugins/gst-vpx@dev":    regEntry("1.29.2", ""),
+		"net-libs/webkit-gtk:4.1":      regEntry("2.52.5-r411", ""),
+		"net-libs/webkit-gtk:6":        regEntry("2.52.5-r601", ""),
+		"net-misc/rclone":              regEntry("1.75.0", ""),
+		"kde-plasma/kwin":              regEntry("6.7.4", ""),
+		"kde-plasma/breeze":            regEntry("6.7.4", ""),
+	}
+	disabled := regEntry("1.0.0", "")
+	disabled.Enabled = boolPtr(false)
+	cfgs["media-plugins/gst-vpx@legacy"] = disabled
+	held := regEntry("2.0.0", "")
+	held.Hold = true
+	cfgs["net-libs/webkit-gtk:5"] = held
+
+	t.Run("empty scope returns the map unchanged", func(t *testing.T) {
+		got := scopeConfigs(cfgs, "", "")
+		if len(got) != len(cfgs) {
+			t.Errorf("len = %d, want %d", len(got), len(cfgs))
+		}
+	})
+
+	t.Run("atom scope keeps @label siblings, disabled included", func(t *testing.T) {
+		got := scopeConfigs(cfgs, "media-plugins/gst-vpx", "")
+		want := []string{
+			"media-plugins/gst-vpx@stable",
+			"media-plugins/gst-vpx@dev",
+			"media-plugins/gst-vpx@legacy",
+		}
+		if len(got) != len(want) {
+			t.Fatalf("kept %d entries (%v), want %d", len(got), keysOf(got), len(want))
+		}
+		for _, key := range want {
+			if _, ok := got[key]; !ok {
+				t.Errorf("sibling %q was dropped — the sweep would delete its ebuild", key)
+			}
+		}
+	})
+
+	t.Run("atom scope keeps :slot siblings, held included", func(t *testing.T) {
+		got := scopeConfigs(cfgs, "net-libs/webkit-gtk", "")
+		for _, key := range []string{"net-libs/webkit-gtk:4.1", "net-libs/webkit-gtk:6", "net-libs/webkit-gtk:5"} {
+			if _, ok := got[key]; !ok {
+				t.Errorf("sibling %q was dropped", key)
+			}
+		}
+		if _, ok := got["net-misc/rclone"]; ok {
+			t.Error("an unrelated atom survived the filter")
+		}
+	})
+
+	t.Run("category scope keeps every atom of that category", func(t *testing.T) {
+		got := scopeConfigs(cfgs, "", "kde-plasma")
+		if len(got) != 2 {
+			t.Fatalf("kept %v, want the two kde-plasma entries", keysOf(got))
+		}
+		for _, key := range []string{"kde-plasma/kwin", "kde-plasma/breeze"} {
+			if _, ok := got[key]; !ok {
+				t.Errorf("%q was dropped", key)
+			}
+		}
+	})
+}
+
+func keysOf(m map[string]PackageConfig) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// =============================================================================
+// PlanOverlaySweep (S027 sub-task 2.2)
+// =============================================================================
+
+// sweepFixture builds an overlay whose directories cover every case the planner
+// must distinguish, and returns the overlay path with its registry.
+func sweepFixture(t *testing.T) (string, map[string]PackageConfig) {
+	t.Helper()
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+
+	files := map[string][]string{
+		"test-cat/residue":  {"1.0.0", "2.0.0"}, // stale ebuild left behind
+		"test-cat/clean":    {"2.0.0"},          // nothing to do
+		"test-cat/blocked":  {"1.0.0", "2.0.0"}, // claiming entry has no pin
+		"test-cat/live":     {"1.0.0", "2.0.0", "9999"},
+		"test-cat/disabled": {"1.0.0", "2.0.0"},
+		"test-cat/held":     {"1.0.0", "2.0.0"},
+		"other-cat/residue": {"1.0.0", "2.0.0"},
+	}
+	for pkg, versions := range files {
+		for _, v := range versions {
+			createTestEbuildFile(t, overlayDir, pkg, v)
+		}
+	}
+
+	cfgs := map[string]PackageConfig{
+		"test-cat/residue":  regEntry("2.0.0", ""),
+		"test-cat/clean":    regEntry("2.0.0", ""),
+		"test-cat/blocked":  regEntry("", ""),
+		"test-cat/live":     regEntry("2.0.0", ""),
+		"other-cat/residue": regEntry("2.0.0", ""),
+	}
+	disabled := regEntry("2.0.0", "")
+	disabled.Enabled = boolPtr(false)
+	cfgs["test-cat/disabled"] = disabled
+	held := regEntry("2.0.0", "")
+	held.Hold = true
+	cfgs["test-cat/held"] = held
+
+	return overlayDir, cfgs
+}
+
+func atomsOf(batch SweepBatch) []string {
+	out := make([]string, 0, len(batch.Dirs))
+	for _, d := range batch.Dirs {
+		out = append(out, d.Atom)
+	}
+	return out
+}
+
+func dirIn(t *testing.T, batch SweepBatch, atom string) SweepDirPlan {
+	t.Helper()
+	for _, d := range batch.Dirs {
+		if d.Atom == atom {
+			return d
+		}
+	}
+	t.Fatalf("%s not in batch %v", atom, atomsOf(batch))
+	return SweepDirPlan{}
+}
+
+// TestPlanOverlaySweepMatchesReconcileUnclaimedSet is the R2.1 parity guard:
+// what a sweep touches must be exactly what `--check` printed. Two
+// implementations that merely agree today would drift; this pins them.
+func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+
+	var want []string
+	seen := map[string]bool{}
+	for _, d := range Reconcile(overlayDir, cfgs) {
+		if d.Kind == UnclaimedEbuild && !seen[d.Key] {
+			seen[d.Key] = true
+			want = append(want, d.Key)
+		}
+	}
+	sort.Strings(want)
+
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	if !reflect.DeepEqual(atomsOf(batch), want) {
+		t.Errorf("candidates = %v, want the reconciliation's unclaimed atoms %v", atomsOf(batch), want)
+	}
+}
+
+// TestPlanOverlaySweepSkipsDisabledAndHeld: R2.2 — those entries belong to the
+// existing status reconciliation, and a held entry is a maintainer decision.
+func TestPlanOverlaySweepSkipsDisabledAndHeld(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	for _, atom := range []string{"test-cat/disabled", "test-cat/held"} {
+		for _, d := range batch.Dirs {
+			if d.Atom == atom {
+				t.Errorf("%s reached the batch; disabled and held directories are out of scope", atom)
+			}
+		}
+	}
+}
+
+// TestPlanOverlaySweepCarriesBlockedDirectories: a directory whose entry has no
+// pin removes nothing and reports its candidates instead (R5.1/R5.2). It must
+// never appear as removable, and must not inflate TotalRemove.
+func TestPlanOverlaySweepCarriesBlockedDirectories(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+
+	blocked := dirIn(t, batch, "test-cat/blocked")
+	if len(blocked.Remove) != 0 {
+		t.Errorf("Remove = %v, want empty on a blocked directory", blocked.Remove)
+	}
+	if len(blocked.WouldRemove) == 0 {
+		t.Error("WouldRemove is empty — a blocked directory must report its candidates")
+	}
+	if blocked.Blocked == "" {
+		t.Error("Blocked is empty — this block has an entry to name")
+	}
+	if !blocked.IsBlocked() {
+		t.Error("IsBlocked() = false on a blocked directory")
+	}
+
+	// TotalRemove counts pending work only.
+	var want int
+	for _, d := range batch.Dirs {
+		want += len(d.Remove)
+	}
+	if batch.TotalRemove != want {
+		t.Errorf("TotalRemove = %d, want %d", batch.TotalRemove, want)
+	}
+}
+
+// TestPlanOverlaySweepNeverRemovesLiveEbuild: UB3 — a -9999 ebuild is the one
+// file an overlay cannot restore by re-fetching a release.
+func TestPlanOverlaySweepNeverRemovesLiveEbuild(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	live := dirIn(t, batch, "test-cat/live")
+	for _, v := range live.Remove {
+		if v == "9999" {
+			t.Fatal("the live ebuild is in Remove")
+		}
+	}
+	if _, kept := live.Keep["9999"]; !kept {
+		t.Errorf("Keep = %v, want the live ebuild kept", live.Keep)
+	}
+}
+
+// TestPlanOverlaySweepIsDeterministic: the operator approves one batch, so two
+// runs over an unchanged overlay must produce the identical plan — a diff
+// between them has to mean the overlay changed.
+func TestPlanOverlaySweepIsDeterministic(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	first, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	second, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Errorf("two runs disagree:\n%+v\n%+v", first, second)
+	}
+}
+
+// TestPlanOverlaySweepScopesToTarget: an atom target plans one directory, a
+// category target plans that category, and both leave the rest alone.
+func TestPlanOverlaySweepScopesToTarget(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+
+	atomBatch, err := PlanOverlaySweep(overlayDir, cfgs, "test-cat/residue")
+	if err != nil {
+		t.Fatalf("atom target: %v", err)
+	}
+	if !reflect.DeepEqual(atomsOf(atomBatch), []string{"test-cat/residue"}) {
+		t.Errorf("atom target planned %v, want [test-cat/residue]", atomsOf(atomBatch))
+	}
+
+	catBatch, err := PlanOverlaySweep(overlayDir, cfgs, "other-cat")
+	if err != nil {
+		t.Fatalf("category target: %v", err)
+	}
+	if !reflect.DeepEqual(atomsOf(catBatch), []string{"other-cat/residue"}) {
+		t.Errorf("category target planned %v, want [other-cat/residue]", atomsOf(catBatch))
+	}
+}
+
+// TestPlanOverlaySweepRejectsInvalidTarget: R1.4 — a typo must fail loudly and
+// before any directory is read, not read as "nothing to clean".
+func TestPlanOverlaySweepRejectsInvalidTarget(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+
+	for _, target := range []string{"no-such-category", "test-cat/no-such-pkg", "cat/pkg/extra", "/", "kde-plasma@dev"} {
+		t.Run(target, func(t *testing.T) {
+			if _, err := PlanOverlaySweep(overlayDir, cfgs, target); err == nil {
+				t.Errorf("target %q was accepted", target)
+			} else if !errors.Is(err, ErrInvalidSweepTarget) {
+				t.Errorf("error = %v, want ErrInvalidSweepTarget", err)
+			}
+		})
+	}
+}
+
+// TestPlanOverlaySweepAcceptsARegistryKey: pasting a key from packages.toml is
+// the obvious thing to do; it normalises to the atom, and the path is built
+// from the atom either way (S027-G4).
+func TestPlanOverlaySweepAcceptsARegistryKey(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "test-cat/residue:0")
+	if err != nil {
+		t.Fatalf("registry key as target: %v", err)
+	}
+	if !reflect.DeepEqual(atomsOf(batch), []string{"test-cat/residue"}) {
+		t.Errorf("planned %v, want [test-cat/residue]", atomsOf(batch))
 	}
 }
