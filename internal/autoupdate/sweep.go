@@ -84,7 +84,7 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 		}
 	}
 	if s.ctx == nil {
-		s.ctx = context.Background()
+		s.ctx = context.Background() // SAFE: default parent; replaced by withSweeperContext, which every production caller passes
 	}
 	if s.execCommand == nil {
 		s.execCommand = exec.CommandContext
@@ -598,7 +598,12 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 				results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep, Err: ctx.Err()}
 				return
 			}
-			results[i] = sweepOneDir(s, dir)
+			// nolint:contextcheck — the sweeper was built with THIS ctx
+			// (withSweeperContext above), so runManifest derives its deadline
+			// from it and a cancellation still kills the spawned pkgdev. The
+			// linter cannot see a context carried on a struct, which is the
+			// same shape Applier uses.
+			results[i] = sweepOneDir(s, dir) //nolint:contextcheck
 		}(i, dir)
 	}
 	wg.Wait()
