@@ -48,10 +48,19 @@ path = "version"
 	if pc := checker.Config().Packages[pkg]; !pc.IsEnabled() {
 		t.Errorf("expected %s enabled in memory after reconcile", pkg)
 	}
-	// packages.toml rewritten to enabled = true (comment-preserving edit).
+	// packages.toml reconciled on disk too (comment-preserving edit). Enabled is
+	// spelled by the key's ABSENCE — writing `enabled = true` would state what
+	// the default already says, and the redundant-enabled lint rule reports it.
 	got, _ := os.ReadFile(configPath)
-	if !strings.Contains(string(got), "enabled = true") {
-		t.Errorf("expected packages.toml to carry enabled = true, got:\n%s", got)
+	if strings.Contains(string(got), "enabled") {
+		t.Errorf("expected the enabled assignment to be gone, got:\n%s", got)
+	}
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if pc := cfg.Packages[pkg]; !pc.IsEnabled() {
+		t.Errorf("expected %s enabled on disk after reconcile", pkg)
 	}
 	// And the package is actually processed, not skipped.
 	if !hasItem(res, pkg) {

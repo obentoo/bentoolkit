@@ -647,18 +647,24 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, false, true)
 }
 
-// EnablePackagesInConfig sets `enabled = true` for each named package in the
-// overlay's packages.toml, editing the raw text so comments, ordering, and
-// formatting survive — the sibling of DisablePackagesInConfig used to revive an
-// orphaned entry whose ebuild has reappeared (or whose upstream has overtaken
-// ::gentoo). For each package it locates the [section] whose table name equals
-// the package and rewrites an existing `enabled = ...` assignment to
-// `enabled = true`. Unlike disable it inserts nothing when the key is absent: a
-// package with no `enabled` field is already enabled by default (see
-// PackageConfig.IsEnabled), so adding the line would only churn the file.
-// Packages whose section is absent are skipped silently. The write is atomic
-// (temp file + rename) and preserves the original file mode; an empty package
-// list, or a run that changes nothing, leaves the file untouched.
+// EnablePackagesInConfig re-enables each named package in the overlay's
+// packages.toml by DELETING its `enabled` assignment, editing the raw text so
+// comments, ordering, and formatting survive — the sibling of
+// DisablePackagesInConfig used to revive an orphaned entry whose ebuild has
+// reappeared (or whose upstream has overtaken ::gentoo).
+//
+// It deletes rather than writing `enabled = true` because an absent key already
+// means enabled (see PackageConfig.IsEnabled), so the assignment states nothing
+// the file did not already say. Writing it is not merely redundant, it is
+// churn that fights the linter: `--lint` reports every `enabled = true` under
+// the redundant-enabled rule and `--lint --fix` deletes it, so a revive and a
+// repair would rewrite each other's work on every cycle. One revive of the KDE
+// 6.7.3 → 6.7.4 batch put 71 such lines into the registry, each one a finding.
+//
+// Packages whose section is absent, or which carry no `enabled` key at all, are
+// left untouched — there is nothing to remove. The write is atomic (temp file +
+// rename) and preserves the original file mode; an empty package list, or a run
+// that changes nothing, leaves the file untouched.
 func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, true, false)
 }
@@ -675,13 +681,23 @@ var versionAssignRegex = regexp.MustCompile(`^(\s*)version\s*=`)
 // setPackagesEnabled is the shared editing policy behind
 // DisablePackagesInConfig (value=false, insertIfAbsent=true) and
 // EnablePackagesInConfig (value=true, insertIfAbsent=false), on top of the
-// section scanner in editPackagesConfigSections. It rewrites each target
-// section's `enabled = ...` assignment to `enabled = <value>`, and — only when
-// insertIfAbsent is set — inserts the key immediately after the header for
-// sections that lack it. Enable leaves an absent key alone because nil already
-// means enabled. The write is atomic (temp file + rename) and preserves the
-// original file mode; an empty package list, or a run that changes nothing,
-// leaves the file untouched.
+// section scanner in editPackagesConfigSections.
+//
+// The two directions are NOT symmetric, because the registry's two states are
+// not spelled the same way. Disabling must be written down: `enabled = false`
+// is the only way to say it, so an existing assignment is rewritten and — when
+// insertIfAbsent is set — the key is inserted after the header. Enabling is the
+// DEFAULT, spelled by the key's absence, so it is expressed by deleting the
+// assignment rather than by writing `enabled = true`. A section that has no
+// `enabled` key is already enabled and is left alone.
+//
+// Writing `enabled = true` would put the file at odds with the linter that
+// reads it: the redundant-enabled rule reports every such line and --lint --fix
+// deletes it, so each revive would undo the previous repair and vice versa.
+//
+// The write is atomic (temp file + rename) and preserves the original file
+// mode; an empty package list, or a run that changes nothing, leaves the file
+// untouched.
 func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent bool) error {
 	if len(pkgs) == 0 {
 		return nil
@@ -701,9 +717,13 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 		for j, line := range body {
 			if !inComments[j] {
 				if m := enabledAssignRegex.FindStringSubmatch(line); m != nil {
-					out = append(out, m[1]+assign)
 					found = true
 					changed = true
+					// Enabling drops the line; disabling rewrites it in place,
+					// keeping the original indentation.
+					if !value {
+						out = append(out, m[1]+assign)
+					}
 					continue
 				}
 			}

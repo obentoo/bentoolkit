@@ -2,10 +2,16 @@ package autoupdate
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
-func TestEnablePackagesInConfigRewritesExisting(t *testing.T) {
+// Enabling DELETES the assignment rather than writing `enabled = true`. An
+// absent key already means enabled, so the assignment would state nothing the
+// file did not already say — and `--lint` reports every `enabled = true` under
+// the redundant-enabled rule, so writing one would put the reviver at odds with
+// the repairer.
+func TestEnablePackagesInConfigDeletesTheAssignment(t *testing.T) {
 	content := `["a/b"]
 enabled = false
 url = "https://x/y"
@@ -18,7 +24,6 @@ path = "v"
 	}
 	got, _ := os.ReadFile(configPath)
 	want := `["a/b"]
-enabled = true
 url = "https://x/y"
 parser = "json"
 path = "v"
@@ -34,6 +39,36 @@ path = "v"
 	}
 	if pc := cfg.Packages["a/b"]; !pc.IsEnabled() {
 		t.Error("expected a/b to be enabled after edit")
+	}
+}
+
+// The whole point of deleting rather than writing: the result must be clean by
+// the linter's own rules. A revive that leaves a finding behind is a revive that
+// the next --lint --fix undoes.
+func TestEnablePackagesInConfigLeavesNoLintFinding(t *testing.T) {
+	content := `["a/b"]
+enabled = false
+url = "https://x/y"
+parser = "json"
+path = "v"
+comments = """
+a/b — npm dist-tags.latest is the stable channel.
+"""
+# END
+`
+	overlay, _ := writePackagesTOML(t, content)
+	if err := EnablePackagesInConfig(overlay, []string{"a/b"}); err != nil {
+		t.Fatalf("EnablePackagesInConfig: %v", err)
+	}
+
+	issues, err := LintPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("lint: %v", err)
+	}
+	for _, i := range issues {
+		if i.Rule == LintRedundantEnabled {
+			t.Errorf("revive produced the finding the repair deletes: %s", i)
+		}
 	}
 }
 
@@ -69,7 +104,7 @@ path = "v"
 }
 
 // Comments, ordering, and a multi-line array value must survive the edit; only
-// the targeted enabled assignment changes.
+// the targeted enabled assignment disappears.
 func TestEnablePackagesInConfigPreservesCommentsAndOrder(t *testing.T) {
 	content := `# top comment
 ["dev-util/claude-code"]
@@ -94,7 +129,6 @@ parser = "json"
 	got, _ := os.ReadFile(configPath)
 	want := `# top comment
 ["dev-util/claude-code"]
-enabled = true
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
 path = "dist-tags.latest"
@@ -113,8 +147,31 @@ parser = "json"
 	}
 }
 
-// Multiple packages in one call: each existing key is rewritten; an absent key
-// is left untouched.
+// An indented assignment disappears along with its indentation, leaving no
+// blank line where it stood.
+func TestEnablePackagesInConfigIndentedAssignment(t *testing.T) {
+	content := `["a/b"]
+  enabled = false
+  url = "https://x/y"
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	if err := EnablePackagesInConfig(overlay, []string{"a/b"}); err != nil {
+		t.Fatalf("EnablePackagesInConfig: %v", err)
+	}
+	got, _ := os.ReadFile(configPath)
+	want := `["a/b"]
+  url = "https://x/y"
+`
+	if string(got) != want {
+		t.Errorf("unexpected output:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	if strings.Contains(string(got), "\n\n") {
+		t.Errorf("deletion left a blank line behind:\n%q", got)
+	}
+}
+
+// Multiple packages in one call: each existing key is deleted; an absent key is
+// left untouched, and a package not named keeps its `enabled = false`.
 func TestEnablePackagesInConfigBatch(t *testing.T) {
 	content := `["a/b"]
 enabled = false
@@ -139,7 +196,6 @@ path = "v"
 	}
 	got, _ := os.ReadFile(configPath)
 	want := `["a/b"]
-enabled = true
 url = "https://x/y"
 parser = "json"
 path = "v"
@@ -205,7 +261,7 @@ path = "v"
 }
 
 // A file with no trailing newline must be reproduced byte-for-byte aside from
-// the rewritten assignment.
+// the deleted assignment.
 func TestEnablePackagesInConfigNoTrailingNewline(t *testing.T) {
 	content := `["a/b"]
 enabled = false
@@ -218,11 +274,49 @@ path = "v"`
 	}
 	got, _ := os.ReadFile(configPath)
 	want := `["a/b"]
-enabled = true
 url = "https://x/y"
 parser = "json"
 path = "v"`
 	if string(got) != want {
 		t.Errorf("trailing newline not preserved:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
+// Disable is unchanged and must stay asymmetric to enable: `enabled = false` is
+// the only way to express disabled, so it is written down — rewritten in place
+// when present, inserted after the header when absent.
+func TestDisablePackagesInConfigStillWritesTheAssignment(t *testing.T) {
+	content := `["a/b"]
+url = "https://x/y"
+
+["c/d"]
+enabled = false
+url = "https://x/z"
+`
+	overlay, configPath := writePackagesTOML(t, content)
+	if err := DisablePackagesInConfig(overlay, []string{"a/b", "c/d"}); err != nil {
+		t.Fatalf("DisablePackagesInConfig: %v", err)
+	}
+	got, _ := os.ReadFile(configPath)
+	want := `["a/b"]
+enabled = false
+url = "https://x/y"
+
+["c/d"]
+enabled = false
+url = "https://x/z"
+`
+	if string(got) != want {
+		t.Errorf("unexpected output:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	cfg, err := LoadPackagesConfig(overlay)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	for _, pkg := range []string{"a/b", "c/d"} {
+		if pc := cfg.Packages[pkg]; pc.IsEnabled() {
+			t.Errorf("%s should be disabled", pkg)
+		}
 	}
 }

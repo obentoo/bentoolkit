@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Reviving a package no longer writes the redundant `enabled = true` that the
+  linter then reports.** Enabling is the registry's DEFAULT, spelled by the
+  key's absence — `EnablePackagesInConfig` already knew that well enough not to
+  *insert* the key when it was missing, but still *rewrote* an existing
+  `enabled = false` into `enabled = true`, which states nothing the file did not
+  already say. Since 0.18.0 that line is a `redundant-enabled` finding and
+  `--lint --fix` deletes it, so a revive and a repair would undo each other on
+  every cycle: one KDE 6.7.3 → 6.7.4 batch revived 71 entries and put 71
+  findings into a registry that had just been cleaned. Enabling now deletes the
+  assignment instead. Disabling is unchanged and deliberately asymmetric —
+  `enabled = false` is the only way to express disabled, so it is still written
+  down.
+
 ## [0.18.0] - 2026-08-03
 
 ### Added
