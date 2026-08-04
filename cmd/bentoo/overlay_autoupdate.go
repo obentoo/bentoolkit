@@ -679,7 +679,9 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	// Grouped by class, each group keeping Reconcile's order (sorted by key,
 	// then by class, then in Gentoo version order) so two runs over an unchanged
 	// overlay print the identical list.
-	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(autoupdate.Divergence) string) {
+	// Returns how many lines the group printed, so a caller can append a
+	// follow-up line only to a group that actually appeared (R7.1).
+	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(autoupdate.Divergence) string) int {
 		var body []string
 		for _, d := range divs {
 			if d.Kind == kind {
@@ -687,25 +689,34 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 			}
 		}
 		if len(body) == 0 {
-			return
+			return 0
 		}
 		fmt.Printf("  %s (%d):\n", heading, len(body))
 		for _, l := range body {
 			fmt.Printf("    %s\n", l)
 		}
 		fmt.Println()
+		return len(body)
 	}
 
-	printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence) string {
+	_ = printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence) string {
 		if d.Pin == "" {
 			return fmt.Sprintf("%-45s (no pin) → %s", d.Key, d.Disk)
 		}
 		return fmt.Sprintf("%-45s %s → %s", d.Key, d.Pin, d.Disk)
 	})
-	printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence) string {
+	unclaimed := printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence) string {
 		return fmt.Sprintf("%-45s %s", d.Key, d.Disk)
 	})
-	printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence) string {
+	if unclaimed > 0 {
+		// R7.1: this report used to end at the finding. Naming the command that
+		// acts on it closes the loop — an unclaimed ebuild is removed by a
+		// sweep, and until story 027 the only sweep ran inside an apply, so a
+		// package already at its upstream version could never reach one.
+		output.Info.Println("  Remove them with: bentoo overlay autoupdate --clean")
+		fmt.Println()
+	}
+	_ = printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence) string {
 		if d.Pin == "" {
 			return fmt.Sprintf("%-45s (no pin)", d.Key)
 		}

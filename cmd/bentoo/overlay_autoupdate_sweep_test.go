@@ -327,3 +327,35 @@ func TestKeptLinesNamesTheClaimingEntry(t *testing.T) {
 		t.Errorf("second line = %q", lines[1])
 	}
 }
+
+// =============================================================================
+// The reconciliation points at the sweep (S027 sub-task 6.1)
+// =============================================================================
+
+// TestDivergenceReportPointsAtTheSweep: R7.1 — the report used to end at the
+// finding. It now names the command that acts on it, but only when there is
+// something to act on.
+func TestDivergenceReportPointsAtTheSweep(t *testing.T) {
+	const pointer = "bentoo overlay autoupdate --clean"
+
+	t.Run("printed after a non-empty unclaimed group", func(t *testing.T) {
+		divs := []autoupdate.Divergence{
+			{Key: "cat/pkg", Kind: autoupdate.UnclaimedEbuild, Disk: "1.0.0"},
+		}
+		out := captureStdout(t, func() { displayDivergences(divs, 0) })
+		if !strings.Contains(out, pointer) {
+			t.Errorf("the unclaimed group did not name the sweep command:\n%s", out)
+		}
+	})
+
+	t.Run("absent when no ebuild is unclaimed", func(t *testing.T) {
+		divs := []autoupdate.Divergence{
+			{Key: "cat/pkg", Kind: autoupdate.StalePin, Pin: "1.0.0", Disk: "2.0.0"},
+			{Key: "cat/other", Kind: autoupdate.NoEbuild, Pin: "1.0.0"},
+		}
+		out := captureStdout(t, func() { displayDivergences(divs, 1) })
+		if strings.Contains(out, pointer) {
+			t.Errorf("the sweep command was suggested with nothing to sweep:\n%s", out)
+		}
+	})
+}
