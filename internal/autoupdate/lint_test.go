@@ -822,6 +822,25 @@ comments = "glslang — doc."
 			absent: LintLegacyBase,
 		},
 		{
+			// An upstream that publishes no version at all says so, and the rule
+			// goes quiet. Without this value the record is indistinguishable from
+			// one whose maintainer simply never declared a source, so the rule
+			// reported it forever with no action its reader could take — which is
+			// how a rule teaches people to ignore the linter.
+			name: "commit tracking that declares there is no base source",
+			content: `["sci-ml/ik_llama-cpp"]
+track = "commit"
+url = "https://api.github.com/repos/ikawrakow/ik_llama.cpp/commits/main"
+parser = "json"
+path = "commit.committer.date"
+commit_sha_path = "sha"
+base_from = "none"
+comments = "ik_llama-cpp — upstream publishes no usable release series."
+# END
+`,
+			absent: LintLegacyBase,
+		},
+		{
 			name:    "a record already in canonical order",
 			content: canonicalRecord,
 			absent:  LintFieldOrder,

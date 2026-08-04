@@ -1208,8 +1208,30 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if cfg.CommitVersionPattern == "" || cfg.CommitMessagePath == "" {
 			return fmt.Errorf("package %s: base_from=\"commit_message\" requires commit_version_pattern and commit_message_path", pkg)
 		}
+	case "none":
+		// The upstream does not version itself at all: no usable tag, no version
+		// in-tree, nothing in the commit titles. The PV base is a constant the
+		// maintainer chose (conventionally "0") and only the snapshot suffix
+		// moves.
+		//
+		// This is a DECLARATION, not the absence of one, and that distinction is
+		// the whole point. An absent base_from is ambiguous — it reads equally as
+		// "nobody got round to declaring the source" and as "there is no source
+		// to declare" — so the lint rule that reports the first cannot help
+		// firing on the second. Saying "none" out loud separates them: the rule
+		// goes quiet here and stays useful everywhere else.
+		//
+		// Unlike the other three it resolves nothing at check time, so declaring
+		// a source alongside it is a contradiction rather than dead weight.
+		if cfg.Track != "commit" {
+			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+		}
+		if cfg.BaseURL != "" || cfg.BasePattern != "" || cfg.BaseTagPattern != "" || cfg.CommitVersionPattern != "" {
+			return fmt.Errorf("package %s: base_from=\"none\" declares there is no base source, "+
+				"so base_url, base_pattern, base_tag_pattern and commit_version_pattern must all be absent", pkg)
+		}
 	default:
-		return fmt.Errorf("package %s: invalid base_from %q: must be \"file\", \"tag\" or \"commit_message\"", pkg, cfg.BaseFrom)
+		return fmt.Errorf("package %s: invalid base_from %q: must be \"file\", \"tag\", \"commit_message\" or \"none\"", pkg, cfg.BaseFrom)
 	}
 	if cfg.BaseTagPattern != "" && cfg.BaseFrom != "tag" {
 		return fmt.Errorf("package %s: base_tag_pattern requires base_from=\"tag\"", pkg)

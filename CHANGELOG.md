@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`base_from = "none"`: an upstream that publishes no version at all can now
+  say so.** `base_from` named where the base version comes from, but had no way
+  to say there is nowhere — and an absent field reads identically as "nobody
+  declared the source" and as "there is no source to declare". The `legacy-base`
+  rule added in 0.18.0 cannot tell those apart, so it reported the second kind
+  forever with no action its reader could take. Across the overlay's 411 records
+  it fired exactly twice, and both were false positives: `sci-ml/ik_llama-cpp`
+  (one tag, `t0002`, a prerelease roughly a year behind an active HEAD) and
+  `sys-apps/asus-ec-sensors` (one stale `v0.1.0`, board support landing as plain
+  commits). Neither has a version in-tree, in a tag, or in a commit title, so
+  the base cannot freeze — nothing is moving for it to fall behind.
+
+  Declaring `"none"` silences the rule for those and keeps it sharp everywhere
+  else. It resolves nothing at check time and forbids `base_url`,
+  `base_pattern`, `base_tag_pattern` and `commit_version_pattern` alongside it,
+  since declaring a source next to "there is no source" is a contradiction
+  rather than dead weight. An absent `base_from` still behaves the same way and
+  still loads — it just cannot say whether that was the intent, which is why the
+  rule keeps reporting it.
+
 ## [0.18.1] - 2026-08-04
 
 ### Fixed

@@ -482,8 +482,9 @@ key becomes `type = "bin"` (or is dropped where `type` is already there), a
 redundant `enabled = true` goes, and fields are reordered. It never guesses —
 an unknown key and a missing `base_from` are reported and left to a human,
 because a wrong name may be a misspelling or a concept that does not exist, and
-choosing between `base_from = "file"`, `"tag"` and `"commit_message"` depends on
-where upstream versions itself.
+choosing between `base_from = "file"`, `"tag"`, `"commit_message"` and `"none"`
+depends on where upstream versions itself — or whether it versions itself at
+all.
 
 The repair is textual: your quoting, spacing and every `comments` block come
 through byte for byte. Before writing it reparses the result and compares it
@@ -612,7 +613,7 @@ suffix_when = '^26\.8\.'            # …applied only to a matching version
 commit_sha_path = "[0].sha"         # REQUIRED with track="commit"
 commit_message_path = "commit.message"
 commit_version_pattern = 'sdk-([0-9.]+)'
-base_from = "file"                  # where the base version lives: file | commit_message
+base_from = "file"                  # where the base lives: file | tag | commit_message | none
 base_url = "https://raw.…/VERSION"  # REQUIRED with base_from="file"
 base_pattern = '^([0-9][0-9.]*)-devel'  # …1 capture group, the base version
 base_tag_pattern = 'vulkan-sdk-([0-9.]+)'  # REQUIRED with base_from="tag"
@@ -663,9 +664,23 @@ secrets stands: reference an env var, never the value.
     slowly enough that the bump stays inside the fetch window. That window is
     measured in commits, not days: `per_page=50` covers ten months of
     Vulkan-Headers but 1.3 days of zed.
-  - Absent — the base is whatever the ebuild already carries, and never moves.
-    Right for upstreams that do not version at all (`0_p<date>`), wrong for
-    everything else.
+  - `"none"` — the upstream publishes no version at all: no usable tag, nothing
+    in-tree, nothing in the commit titles. The base is a constant you chose
+    (conventionally `0`) and only the snapshot suffix moves. It resolves nothing
+    at check time, so `base_url`, `base_pattern`, `base_tag_pattern` and
+    `commit_version_pattern` must all be absent — declaring one alongside it is
+    a contradiction, not dead weight.
+
+    Say it out loud rather than leaving `base_from` off. The two read
+    identically to the checker but not to a human, and `--lint` cannot tell
+    "nobody declared the source" from "there is no source to declare" unless the
+    second says so: `sci-ml/ik_llama-cpp` (one tag, `t0002`, a prerelease a year
+    behind an active HEAD) and `sys-apps/asus-ec-sensors` (one stale `v0.1.0`,
+    board support landing as plain commits) were the only two records the rule
+    reported across 411, and both were right all along.
+  - Absent — the legacy form of `"none"`, kept working for registries written
+    before the field existed. It behaves identically; it just cannot say whether
+    that was the intent, which is why `--lint` reports it.
 
   A declared source that resolves nothing is now a **check failure**, not a
   fallback. Six of the seven entries that carried a `commit_version_pattern`

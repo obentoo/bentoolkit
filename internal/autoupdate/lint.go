@@ -659,12 +659,18 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 		prevName = f.canonical
 	}
 
-	// No repair is offered on purpose (R6.1): "file" or "tag" depends on where
-	// upstream versions itself, which only a human reading that upstream knows.
+	// No repair is offered on purpose (R6.1): which source applies depends on
+	// where upstream versions itself, which only a human reading that upstream
+	// knows.
+	//
+	// Any declared value silences this, `none` included — an upstream that does
+	// not version itself at all is a real case, and one the rule would otherwise
+	// report forever with no action its reader could take. Naming `none` in the
+	// message is what keeps that from reading as a rule to be ignored.
 	if trackCommitLine > 0 && !hasBaseFrom {
 		issues = append(issues, LintIssue{
 			Line: trackCommitLine, Package: rec.name, Rule: LintLegacyBase, Fix: FixNone,
-			Message: `track = "commit" without base_from: the base version is whatever the ebuild already carries and can freeze there unnoticed; declare base_from = "file", "tag" or "commit_message"`,
+			Message: `track = "commit" without base_from: the base version is whatever the ebuild already carries and can freeze there unnoticed; declare base_from = "file", "tag" or "commit_message" — or "none" when upstream publishes no version at all`,
 		})
 	}
 

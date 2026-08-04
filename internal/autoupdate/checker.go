@@ -1328,6 +1328,14 @@ func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
 	// hand. An entry that declares a source and gets nothing back fails the
 	// check — see ErrBaseVersionUnresolved for why silence is not an option.
 	switch {
+	case cfg.BaseFrom == "none":
+		// Declared as having no base source: NewBase stays empty and the base
+		// carried by the current ebuild is kept, which is the correct outcome
+		// rather than a fallback. Handled before the legacy branch below so the
+		// declaration wins outright — validation already rejects the pattern
+		// fields that branch keys on, and a case this explicit cannot be reached
+		// by accident when they are added back.
+
 	case cfg.BaseFrom == "file":
 		base, err := c.resolveBaseFromFile(cfg)
 		if err != nil {

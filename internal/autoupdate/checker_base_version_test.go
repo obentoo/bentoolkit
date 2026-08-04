@@ -68,6 +68,115 @@ edition = "2021"
 `
 
 // =============================================================================
+// base_from = "none"
+// =============================================================================
+
+// TestBaseFromNone_KeepsTheEbuildBase covers the upstream that does not version
+// itself at all: only the snapshot suffix moves, and the PV base is the constant
+// the maintainer chose.
+//
+// The two registry entries this exists for are sci-ml/ik_llama-cpp (one tag,
+// "t0002", a prerelease roughly a year behind an active HEAD) and
+// sys-apps/asus-ec-sensors (one stale tag, v0.1.0, with board support landing as
+// plain commits). Neither has a version in-tree, in a tag, or in a commit title
+// — verified against both upstreams on 2026-08-04 — so there is no source for
+// base_from to name and the base cannot freeze, because nothing is moving for it
+// to fall behind.
+//
+// Before "none" existed these two were the ONLY records the legacy-base rule
+// reported across all 411, and both were false positives: the rule could not
+// tell "nobody declared the source" from "there is no source to declare".
+func TestBaseFromNone_KeepsTheEbuildBase(t *testing.T) {
+	pkg := "sci-ml/ik_llama-cpp"
+
+	cfg := baseCommitCfg()
+	cfg.BaseFrom = "none"
+	// The three source fields validation forbids alongside "none" are absent by
+	// construction here; baseCommitCfg sets none of them.
+	cfg.CommitVersionPattern = ""
+	cfg.CommitMessagePath = ""
+
+	body := makeGHCommits(
+		struct{ sha, date, msg string }{testSHA40, "2026-08-04T09:00:00Z", "iqk: tighten the gemm kernel"},
+	)
+
+	checker := newBaseFileChecker(t, pkg, "0_pre20260718", cfg, body, "")
+	result, err := checker.CheckPackage(pkg, true)
+	if err != nil {
+		t.Fatalf("CheckPackage: %v", err)
+	}
+
+	// The base stays "0" and only the date advances. A resolved base would have
+	// replaced it — that is the difference this case exists to pin.
+	want := "0_pre20260804"
+	if result.UpstreamVersion != want {
+		t.Errorf("UpstreamVersion = %q, want %q", result.UpstreamVersion, want)
+	}
+	if !result.HasUpdate {
+		t.Error("HasUpdate = false, want true: the snapshot date moved")
+	}
+}
+
+// "none" must not fetch a base source. A base_url is rejected at validation, so
+// the only way to prove nothing is fetched is to watch the server: the commits
+// endpoint is hit, the version endpoint never is.
+func TestBaseFromNone_FetchesNoBaseSource(t *testing.T) {
+	pkg := "sys-apps/asus-ec-sensors"
+
+	var versionHits int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/commits", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(makeGHCommits(
+			struct{ sha, date, msg string }{testSHA40, "2026-08-04T09:00:00Z", "add board support"},
+		))
+	})
+	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		versionHits++
+		_, _ = w.Write([]byte("1.2.3"))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	cfg := baseCommitCfg()
+	cfg.BaseFrom = "none"
+	cfg.CommitVersionPattern = ""
+	cfg.CommitMessagePath = ""
+	cfg.URL = server.URL + "/commits"
+
+	overlayDir, configDir := t.TempDir(), t.TempDir()
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(configDir),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+	createTestEbuild(t, overlayDir, pkg, "0_p20260711")
+
+	if _, err := checker.CheckPackage(pkg, true); err != nil {
+		t.Fatalf("CheckPackage: %v", err)
+	}
+	if versionHits != 0 {
+		t.Errorf("base source was fetched %d time(s); \"none\" must resolve nothing", versionHits)
+	}
+}
+
+// A valid "none" record loads: track = "commit", no source field of any kind.
+func TestBaseFromNone_ValidatesAlone(t *testing.T) {
+	cfg := baseCommitCfg()
+	cfg.BaseFrom = "none"
+	cfg.CommitVersionPattern = ""
+	cfg.CommitMessagePath = ""
+	cfg.URL = "https://example.invalid/commits"
+
+	if err := ValidatePackageConfig("sci-ml/ik_llama-cpp", &cfg); err != nil {
+		t.Errorf("a bare base_from=\"none\" must validate, got: %v", err)
+	}
+}
+
+// =============================================================================
 // base_from = "file"
 // =============================================================================
 
@@ -317,6 +426,49 @@ func TestValidateBaseFrom(t *testing.T) {
 				c.BaseFrom = "changelog"
 			},
 			wantErr: "invalid base_from",
+		},
+		// "none" declares that the upstream has no version to read. Declaring a
+		// source alongside it is a contradiction, not dead weight, so each of the
+		// four source fields is rejected on its own.
+		{
+			name: "none with base_url",
+			mutate: func(c *PackageConfig) {
+				c.BaseFrom = "none"
+				c.BaseURL = "https://example.invalid/VERSION"
+			},
+			wantErr: `base_from="none" declares there is no base source`,
+		},
+		{
+			name: "none with base_pattern",
+			mutate: func(c *PackageConfig) {
+				c.BaseFrom = "none"
+				c.BasePattern = `^([0-9.]+)$`
+			},
+			wantErr: `base_from="none" declares there is no base source`,
+		},
+		{
+			// The "none" case is reached before the generic
+			// `base_tag_pattern requires base_from="tag"` check below the switch,
+			// and says the more useful of the two things: the contradiction is
+			// with the declaration, not with a missing companion.
+			name: "none with base_tag_pattern",
+			mutate: func(c *PackageConfig) {
+				c.BaseFrom = "none"
+				c.BaseTagPattern = `^v([0-9.]+)$`
+			},
+			wantErr: `base_from="none" declares there is no base source`,
+		},
+		{
+			// commit_message_path is set too, otherwise the earlier
+			// "commit_version_pattern requires commit_message_path" check fires
+			// first and this case never reaches the switch.
+			name: "none with commit_version_pattern",
+			mutate: func(c *PackageConfig) {
+				c.BaseFrom = "none"
+				c.CommitVersionPattern = `v([0-9.]+)`
+				c.CommitMessagePath = "commit.message"
+			},
+			wantErr: `base_from="none" declares there is no base source`,
 		},
 		{
 			name: "tag without base_tag_pattern",
