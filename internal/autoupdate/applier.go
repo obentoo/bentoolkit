@@ -753,41 +753,25 @@ func (a *Applier) cleanPackageDir(pkg, newVersion string) (sweepPlan, error) {
 			"so nothing here says which ebuilds are kept%s", pkg, wouldRemoveSuffix(plan.WouldRemove))
 	}
 
-	// Execute the plan. Remove is ascending, so a sweep cut short by a failure
-	// still hands back an ascending prefix of what it intended.
-	planned := plan.Remove
-	var removed []string
-	for _, version := range planned {
-		path := a.EbuildPath(pkg, version)
-		if err := os.Remove(path); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				// Already gone: the sweep's goal for this file is met. It is not
-				// counted as a removal, so a directory whose candidates had all
-				// vanished does not trigger a Manifest regeneration for a
-				// change that never happened.
-				continue
-			}
-			plan.Remove = removed
-			return plan, fmt.Errorf("swept %d of %d ebuild(s) from %s, then failed to remove %s: %w",
-				len(removed), len(planned), pkg, path, err)
-		}
-		removed = append(removed, version)
-	}
-	plan.Remove = removed
+	// Execute the plan. The removal loop and the Manifest regeneration live on
+	// sweeper (S027-D3) so the standalone overlay sweep runs the same code rather
+	// than a second implementation of "delete these ebuilds". newVersion is the
+	// version this apply just created, and it is the one that remains in the
+	// directory — which is what the Manifest step needs (S027-G2).
+	return a.sweeper().execute(pkg, plan, newVersion)
+}
 
-	// R4.2: exactly once, after the last removal, and only when a file actually
-	// went away. The Manifest is regenerated so its distfile entries stop
-	// referencing the removed versions; with nothing removed there is nothing to
-	// prune, and the run would only re-fetch distfiles for an untouched
-	// directory.
-	if len(removed) == 0 {
-		return plan, nil
-	}
-	if err := a.runManifest(pkg, newVersion); err != nil {
-		return plan, fmt.Errorf("removed %s from %s but failed to regenerate the Manifest: %w",
-			strings.Join(removed, ", "), pkg, err)
-	}
-	return plan, nil
+// sweeper builds the executor for this applier's overlay, carrying the fields
+// the removal loop and the Manifest step need. Deliberately no fixer: the LLM
+// manifest repair stays behind runManifestWithFix on Applier, so no sweep can
+// reach it (S027-R4.5).
+func (a *Applier) sweeper() *sweeper {
+	return newSweeper(a.overlayPath,
+		withSweeperContext(a.ctx),
+		withSweeperExec(a.execCommand),
+		withSweeperReporter(a.reporter),
+		withSweeperConfigs(a.configs),
+	)
 }
 
 // sweepConfigs returns the registry the sweep plans against — a copy of
@@ -1088,97 +1072,12 @@ func (a *Applier) runQACheck(pkgDir, pkg string) string {
 	return strings.TrimSpace(stdout.String())
 }
 
-// runManifest regenerates the Manifest file with pkgdev. Unlike `ebuild
-// manifest`, pkgdev neither requires root nor writes to the system DISTDIR
-// (/var/cache/distfiles): it digests against a private --distdir we own, so the
-// step works as an unprivileged user without write access to Portage's caches.
-// Command: pkgdev manifest --distdir {tmpdir}  (run from the package directory)
+// runManifest regenerates the Manifest file with pkgdev, delegating to the
+// sweeper that owns the step (S027-D3). It stays on Applier because
+// runManifestWithFix and the apply path both call it, and because keeping the
+// name here left every existing caller and test untouched.
 func (a *Applier) runManifest(pkg, version string) error {
-	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
-	if !ok {
-		return fmt.Errorf("invalid package name format: %s", pkg)
-	}
-
-	// Package directory pkgdev operates in (it discovers the ebuild itself).
-	pkgDir := filepath.Join(a.overlayPath, category, pkgName)
-
-	// Writable distdir we own, so fetching/digesting never touches the system
-	// DISTDIR. Removed when the manifest step returns; distfiles for an upstream
-	// bump are new names absent from any cache, so there is nothing to persist.
-	distdir, err := os.MkdirTemp("", "bentoo-distfiles-")
-	if err != nil {
-		return fmt.Errorf("failed to create temp distdir: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(distdir) }()
-
-	// Serial-gated packages: their distfile cannot be fetched by pkgdev from
-	// SRC_URI, so pre-populate the distdir by submitting the vendor's download
-	// form with the serial. pkgdev then digests the local file. A package
-	// without fetch instructions is a no-op; a configured-but-failing fetch
-	// aborts here with a clear, serial-free error.
-	if err := a.prefetchAuthDistfile(pkg, version, distdir); err != nil {
-		return err
-	}
-
-	// Bound the manifest invocation: derive a child context from the applier's
-	// parent context with a finite deadline so a stalled distfile fetch cannot
-	// hang Apply forever. Cancelling either the parent (SIGINT) or this child
-	// (timeout) kills the spawned process via exec.CommandContext.
-	ctx, cancel := context.WithTimeout(a.ctx, manifestTimeout)
-	defer cancel()
-
-	// Run pkgdev manifest from the package directory.
-	cmd := a.execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
-	cmd.Dir = pkgDir
-
-	// Stream the long manifest run (distfile download + digest) live as TaskLine
-	// events (S010-R1.1; the StreamCapture handles in-place "\r" updates, S010-R1.2). The
-	// task id is pkg so the lines are attributed to the same task the reporter
-	// lifecycle uses (sub-task 3.1). The SAME StreamCapture instance is used for
-	// both stdout and stderr, so exec gives the child a single pipe — the captured
-	// bytes are byte-identical to CombinedOutput's, keeping the error string and
-	// every existing failure test byte-identical (S010-R7.1). Under the default Noop
-	// reporter the TaskLine events are discarded, so behaviour is unchanged (S010-R3.3).
-	sc := tui.NewStreamCapture(a.reporter, pkg, tui.StreamStdout)
-	cmd.Stdout = sc
-	cmd.Stderr = sc
-	runErr := cmd.Run()
-	_ = sc.Close()
-	if runErr != nil {
-		return fmt.Errorf("command failed: %w\nOutput: %s", runErr, sc.Captured())
-	}
-
-	return nil
-}
-
-// prefetchAuthDistfile downloads a serial-gated distfile into distdir when the
-// package's [meta] block configures an authenticated fetch. It is a no-op for
-// packages without that config (the overwhelming majority) and when no config
-// was supplied to the applier at all. The download is bounded by the applier's
-// parent context so SIGINT cancels it, and the serial never appears in logs.
-func (a *Applier) prefetchAuthDistfile(pkg, version, distdir string) error {
-	cfg, ok := a.configs[pkg]
-	if !ok {
-		return nil
-	}
-	spec, enabled, err := parseAuthFetchSpec(cfg.Meta)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrManifestFailed, err)
-	}
-	if !enabled {
-		return nil
-	}
-
-	logger.Info("authenticated fetch: downloading %s distfile for %s (serial via $%s)",
-		pkg, version, spec.serialEnv)
-
-	dest, err := spec.fetchDistfile(a.ctx, version, distdir)
-	if err != nil {
-		return err
-	}
-	logger.Info("authenticated fetch: wrote %s", filepath.Base(dest))
-	return nil
+	return a.sweeper().runManifest(pkg, version)
 }
 
 // runCompile runs a compile test with elevated privileges.
