@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
@@ -116,7 +118,7 @@ func (s *sweeper) ebuildPath(pkg, version string) string {
 //
 // Every failure returns the plan as executed so far, so a caller can report what
 // really happened rather than what was intended.
-func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersion string) (sweepPlan, error) {
+func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersions ...string) (sweepPlan, error) {
 	// Remove is ascending, so a sweep cut short by a failure still hands back an
 	// ascending prefix of what it intended.
 	planned := plan.Remove
@@ -147,7 +149,7 @@ func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersion string) (s
 	if len(removed) == 0 {
 		return plan, nil
 	}
-	if err := s.runManifest(pkg, manifestVersion); err != nil {
+	if err := s.runManifest(pkg, manifestVersions...); err != nil {
 		return plan, fmt.Errorf("removed %s from %s but failed to regenerate the Manifest: %w",
 			strings.Join(removed, ", "), pkg, err)
 	}
@@ -357,7 +359,14 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 
 // runManifest regenerates the Manifest file with pkgdev, from inside the
 // package directory so pkgdev discovers the ebuilds itself.
-func (s *sweeper) runManifest(pkg, version string) error {
+//
+// versions are the versions whose distfiles may need pre-fetching before pkgdev
+// digests them. It is variadic because pkgdev manifests the WHOLE directory:
+// an apply has exactly one new version to pre-fetch, while a sweep can leave
+// several ebuilds behind and every one of them needs its distfile present
+// (S027-G2). Passing none is valid — it simply skips the pre-fetch, which is a
+// no-op for every package without an authenticated-fetch [meta] block.
+func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// Parse package name
 	category, pkgName, ok := splitPkgAtom(pkg)
 	if !ok {
@@ -381,8 +390,10 @@ func (s *sweeper) runManifest(pkg, version string) error {
 	// form with the serial. pkgdev then digests the local file. A package
 	// without fetch instructions is a no-op; a configured-but-failing fetch
 	// aborts here with a clear, serial-free error.
-	if err := s.prefetchAuthDistfile(pkg, version, distdir); err != nil {
-		return err
+	for _, version := range versions {
+		if err := s.prefetchAuthDistfile(pkg, version, distdir); err != nil {
+			return err
+		}
 	}
 
 	// Bound the manifest invocation: derive a child context from the parent
@@ -443,4 +454,215 @@ func (s *sweeper) prefetchAuthDistfile(pkg, version, distdir string) error {
 	}
 	logger.Info("authenticated fetch: wrote %s", filepath.Base(dest))
 	return nil
+}
+
+// SweepDirResult is what actually happened to one package directory.
+type SweepDirResult struct {
+	// Atom is the directory, as a bare "category/package".
+	Atom string
+	// Removed lists the versions that really went away — never what was merely
+	// intended. A report that claims a file still on disk is worse than no
+	// report.
+	Removed []string
+	// Kept mirrors the plan's Keep so a report can name the entry claiming each
+	// surviving version (S027-R6.1).
+	Kept map[string]string
+	// Blocked names the entry that blocked this directory, when there was one.
+	Blocked string
+	// WouldRemove lists what a blocked directory left alone.
+	WouldRemove []string
+	// Err is this directory's failure. It never aborts the batch (S027-R4.4).
+	Err error
+}
+
+// SweepReport is the outcome of an executed batch.
+type SweepReport struct {
+	// Results holds one entry per planned directory, sorted by Atom.
+	Results []SweepDirResult
+	// Removed counts the files that went away across the batch.
+	Removed int
+	// Swept counts directories from which at least one file was removed.
+	Swept int
+	// BlockedN counts directories that removed nothing because they were
+	// blocked.
+	BlockedN int
+	// Failed counts directories whose removal or Manifest step errored.
+	Failed int
+}
+
+// sweepOptions configures an executed batch.
+type sweepOptions struct {
+	concurrency int
+	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	reporter    tui.Reporter
+	configs     map[string]PackageConfig
+}
+
+// SweepOption configures ExecuteOverlaySweep.
+type SweepOption func(*sweepOptions)
+
+// WithSweepConcurrency bounds how many directories are swept at once.
+func WithSweepConcurrency(n int) SweepOption {
+	return func(o *sweepOptions) { o.concurrency = n }
+}
+
+// WithSweepExecCommand injects the command seam (tests, and nothing else).
+func WithSweepExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) SweepOption {
+	return func(o *sweepOptions) { o.execCommand = fn }
+}
+
+// WithSweepReporter routes the Manifest step's streamed output.
+func WithSweepReporter(r tui.Reporter) SweepOption {
+	return func(o *sweepOptions) { o.reporter = r }
+}
+
+// WithSweepPackagesConfig supplies the registry, read only for the [meta] block
+// that drives an authenticated distfile fetch.
+func WithSweepPackagesConfig(cfgs map[string]PackageConfig) SweepOption {
+	return func(o *sweepOptions) { o.configs = cfgs }
+}
+
+// ExecuteOverlaySweep runs an approved batch and returns what happened.
+//
+// # Failure isolation
+//
+// A directory's error is recorded on its own result and never returned as the
+// batch's error (S027-R4.4). One unreadable directory, one locked file or one
+// failing pkgdev must not strand the other ninety-nine — the sweep's whole
+// purpose is clearing an accumulation, and an all-or-nothing batch would make
+// the accumulation permanent.
+//
+// # Why the default is serial
+//
+// concurrency defaults to 1. Parallel `pkgdev manifest` runs are unproven
+// against a repository-level lock or the metadata cache (S027-A3), so a caller
+// that forgets to pass a bound gets the safe behaviour rather than the fast one.
+func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBatch, opts ...SweepOption) SweepReport {
+	o := sweepOptions{concurrency: 1}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	if o.concurrency < 1 {
+		o.concurrency = 1
+	}
+
+	s := newSweeper(overlayPath,
+		withSweeperContext(ctx),
+		withSweeperExec(o.execCommand),
+		withSweeperReporter(o.reporter),
+		withSweeperConfigs(o.configs),
+	)
+
+	results := make([]SweepDirResult, len(batch.Dirs))
+	sem := make(chan struct{}, o.concurrency)
+	var wg sync.WaitGroup
+
+	for i, dir := range batch.Dirs {
+		// Blocked directories are carried into the report untouched, so R5.1 and
+		// R5.2 print from the same structure the plan showed rather than from a
+		// second, differently-computed one.
+		if dir.IsBlocked() {
+			results[i] = SweepDirResult{
+				Atom:        dir.Atom,
+				Kept:        dir.Keep,
+				Blocked:     dir.Blocked,
+				WouldRemove: dir.WouldRemove,
+			}
+			continue
+		}
+		if len(dir.Remove) == 0 {
+			results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep}
+			continue
+		}
+
+		wg.Add(1)
+		go func(i int, dir SweepDirPlan) {
+			defer wg.Done()
+			// Check cancellation BEFORE the select. A select with two ready
+			// cases picks one at random, and an uncontended semaphore is always
+			// ready — so an already-cancelled context would still let some
+			// directories through, which for a command that deletes files means
+			// a SIGINT that removed things anyway.
+			if err := ctx.Err(); err != nil {
+				results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep, Err: err}
+				return
+			}
+			// Cancellable acquire, so a SIGINT arriving mid-batch stops it
+			// between directories instead of mid-removal.
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep, Err: ctx.Err()}
+				return
+			}
+			results[i] = sweepOneDir(s, dir)
+		}(i, dir)
+	}
+	wg.Wait()
+
+	report := SweepReport{Results: results}
+	for _, r := range results {
+		report.Removed += len(r.Removed)
+		if len(r.Removed) > 0 {
+			report.Swept++
+		}
+		if r.Err != nil {
+			report.Failed++
+		} else if r.Blocked != "" || len(r.WouldRemove) > 0 {
+			report.BlockedN++
+		}
+	}
+	return report
+}
+
+// sweepOneDir executes a single directory's plan, choosing the versions the
+// Manifest step pre-fetches.
+func sweepOneDir(s *sweeper, dir SweepDirPlan) SweepDirResult {
+	kept := survivingVersions(dir.Keep)
+	if len(kept) == 0 {
+		// Nothing would remain. The floor rule (S021-R4.3) makes this
+		// unreachable through planSweep, so reaching it means the plan was built
+		// some other way — refuse rather than empty a directory of releases,
+		// which no overlay can recover from on its own.
+		return SweepDirResult{
+			Atom: dir.Atom,
+			Kept: dir.Keep,
+			Err: fmt.Errorf("refusing to sweep %s: the plan keeps no non-live ebuild, "+
+				"so the directory would be left with no release", dir.Atom),
+		}
+	}
+
+	plan := sweepPlan{Keep: dir.Keep, Remove: dir.Remove}
+	executed, err := s.execute(dir.Atom, plan, kept...)
+	return SweepDirResult{
+		Atom:    dir.Atom,
+		Removed: executed.Remove,
+		Kept:    dir.Keep,
+		Err:     err,
+	}
+}
+
+// survivingVersions returns the non-live versions a plan keeps, highest first.
+//
+// Highest first because the Manifest step's pre-fetch is per version and the
+// current release is the one most likely to matter; live ebuilds are excluded
+// because they have no distfile to fetch. Order is total so two runs agree.
+func survivingVersions(keep map[string]string) []string {
+	out := make([]string, 0, len(keep))
+	for v := range keep {
+		if isLiveEbuild("", v) {
+			continue
+		}
+		out = append(out, v)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if c := ebuild.CompareVersions(out[i], out[j]); c != 0 {
+			return c > 0
+		}
+		return out[i] > out[j]
+	})
+	return out
 }

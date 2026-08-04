@@ -3,12 +3,15 @@ package autoupdate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -519,4 +522,208 @@ func TestPlanOverlaySweepAcceptsARegistryKey(t *testing.T) {
 	if !reflect.DeepEqual(atomsOf(batch), []string{"test-cat/residue"}) {
 		t.Errorf("planned %v, want [test-cat/residue]", atomsOf(batch))
 	}
+}
+
+// =============================================================================
+// ExecuteOverlaySweep (S027 sub-tasks 3.1 and 3.2)
+// =============================================================================
+
+// TestExecuteOverlaySweepIsolatesFailures: one locked directory must not strand
+// the rest of the batch (R4.4). The sweep exists to clear an accumulation, and
+// an all-or-nothing batch would make that accumulation permanent.
+func TestExecuteOverlaySweepIsolatesFailures(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not block removal")
+	}
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+
+	locked := filepath.Join(overlayDir, "test-cat", "residue")
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	var runs atomic.Int64
+	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepExecCommand(countingManifestSeam(&runs)))
+
+	var failed, swept int
+	for _, r := range report.Results {
+		if r.Err != nil {
+			failed++
+			if r.Atom != "test-cat/residue" {
+				t.Errorf("unexpected failure on %s: %v", r.Atom, r.Err)
+			}
+		}
+		if len(r.Removed) > 0 {
+			swept++
+		}
+	}
+	if failed != 1 {
+		t.Errorf("failed directories = %d, want 1", failed)
+	}
+	if swept == 0 {
+		t.Error("no directory was swept — one failure stranded the batch")
+	}
+	if report.Failed != failed {
+		t.Errorf("report.Failed = %d, want %d", report.Failed, failed)
+	}
+}
+
+// TestExecuteOverlaySweepLeavesBlockedDirectoriesAlone: R5.1 — a blocked
+// directory is carried into the report untouched, and its files stay on disk.
+func TestExecuteOverlaySweepLeavesBlockedDirectoriesAlone(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+
+	var runs atomic.Int64
+	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepExecCommand(countingManifestSeam(&runs)))
+
+	var found bool
+	for _, r := range report.Results {
+		if r.Atom != "test-cat/blocked" {
+			continue
+		}
+		found = true
+		if len(r.Removed) != 0 {
+			t.Errorf("Removed = %v on a blocked directory", r.Removed)
+		}
+		if len(r.WouldRemove) == 0 {
+			t.Error("WouldRemove is empty on a blocked directory")
+		}
+	}
+	if !found {
+		t.Fatal("the blocked directory is missing from the report")
+	}
+	if report.BlockedN != 1 {
+		t.Errorf("report.BlockedN = %d, want 1", report.BlockedN)
+	}
+	for _, v := range []string{"1.0.0", "2.0.0"} {
+		p := filepath.Join(overlayDir, "test-cat", "blocked", "blocked-"+v+".ebuild")
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("blocked directory lost %s: %v", v, err)
+		}
+	}
+}
+
+// TestExecuteOverlaySweepRespectsConcurrencyBound: the pool never runs more
+// directories at once than it was told to.
+func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+	cfgs := map[string]PackageConfig{}
+	for i := 0; i < 8; i++ {
+		pkg := fmt.Sprintf("test-cat/pkg%d", i)
+		createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+		createTestEbuildFile(t, overlayDir, pkg, "2.0.0")
+		cfgs[pkg] = regEntry("2.0.0", "")
+	}
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	if len(batch.Dirs) != 8 {
+		t.Fatalf("planned %d directories, want 8", len(batch.Dirs))
+	}
+
+	const bound = 3
+	var inFlight, peak atomic.Int64
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		cur := inFlight.Add(1)
+		for {
+			old := peak.Load()
+			if cur <= old || peak.CompareAndSwap(old, cur) {
+				break
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+		inFlight.Add(-1)
+		return exec.CommandContext(ctx, "true")
+	}
+
+	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepConcurrency(bound), WithSweepExecCommand(seam))
+
+	if peak.Load() > bound {
+		t.Errorf("peak concurrency = %d, want <= %d", peak.Load(), bound)
+	}
+	if report.Swept != 8 {
+		t.Errorf("Swept = %d, want 8", report.Swept)
+	}
+	if report.Removed != 8 {
+		t.Errorf("Removed = %d, want 8", report.Removed)
+	}
+}
+
+// TestExecuteOverlaySweepStopsOnCancelledContext: a SIGINT stops the batch
+// rather than continuing to delete.
+func TestExecuteOverlaySweepStopsOnCancelledContext(t *testing.T) {
+	overlayDir, cfgs := sweepFixture(t)
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var runs atomic.Int64
+	report := ExecuteOverlaySweep(ctx, overlayDir, batch,
+		WithSweepExecCommand(countingManifestSeam(&runs)))
+
+	if report.Removed != 0 {
+		t.Errorf("Removed = %d on a cancelled context, want 0", report.Removed)
+	}
+	if report.Failed == 0 {
+		t.Error("a cancelled batch reported no failures")
+	}
+}
+
+// TestSweepManifestVersionIsAKeptVersion is the G2 guard.
+//
+// runManifest forwards its versions to the authenticated-distfile pre-fetch, so
+// handing it a version that was just deleted pre-fetches a file nobody needs and
+// leaves a surviving ebuild's distfile unfetched. The versions must come from
+// Keep, highest non-live first, never from Remove.
+func TestSweepManifestVersionIsAKeptVersion(t *testing.T) {
+	t.Run("highest non-live kept version comes first", func(t *testing.T) {
+		got := survivingVersions(map[string]string{
+			"1.0.0": "cat/pkg", "2.0.0": "cat/pkg", "9999": "",
+		})
+		want := []string{"2.0.0", "1.0.0"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("survivingVersions = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("live-only Keep yields nothing to pre-fetch", func(t *testing.T) {
+		if got := survivingVersions(map[string]string{"9999": ""}); len(got) != 0 {
+			t.Errorf("survivingVersions = %v, want empty", got)
+		}
+	})
+
+	t.Run("a plan keeping nothing is refused, not executed", func(t *testing.T) {
+		overlayDir := filepath.Join(t.TempDir(), "overlay")
+		pkg := "test-cat/only"
+		createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
+		var runs atomic.Int64
+		s := newSweeper(overlayDir, withSweeperExec(countingManifestSeam(&runs)))
+
+		res := sweepOneDir(s, SweepDirPlan{Atom: pkg, Remove: []string{"1.0.0"}, Keep: map[string]string{}})
+		if res.Err == nil {
+			t.Fatal("a plan that keeps nothing was executed")
+		}
+		if _, err := os.Stat(s.ebuildPath(pkg, "1.0.0")); err != nil {
+			t.Errorf("the only release was removed: %v", err)
+		}
+		if runs.Load() != 0 {
+			t.Errorf("manifest runs = %d, want 0", runs.Load())
+		}
+	})
 }
