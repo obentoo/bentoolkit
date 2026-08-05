@@ -26,6 +26,24 @@ type CompareResult struct {
 	LocalVersion  string // Version in Bentoo overlay
 	RemoteVersion string // Version in Gentoo repository
 	Status        CompareStatus
+
+	// The fields below carry the second axis: not what the two versions are —
+	// that is Status, and it is unchanged — but what is known about the package
+	// and what that implies. They are filled from CompareOptions.Divergence,
+	// which the caller supplies; this package reads no registry of its own.
+
+	// Verdict is the recommendation for this package.
+	Verdict Verdict
+	// Patched reports that a registry entry declares a divergence worth keeping.
+	Patched bool
+	// PatchedBy names the registry key that declared it, so a package with
+	// several entries says which one is speaking.
+	PatchedBy string
+	// PatchedReason is the declared text, shown in the report.
+	PatchedReason string
+	// Verified is the outcome of comparing the two ebuilds' bytes. It stays
+	// NotVerified unless a content check ran.
+	Verified Verification
 }
 
 // CompareStatus indicates the comparison result
@@ -62,6 +80,130 @@ func (s CompareStatus) String() string {
 	}
 }
 
+// Divergence is what the caller knows about one atom's relationship to the
+// upstream repository. It is supplied by the caller: this package never reads
+// packages.toml, so internal/overlay keeps zero import edges to
+// internal/autoupdate in either direction.
+//
+// There is deliberately no Known field. Absence from the caller's map IS the
+// unknown state, and it reaches deriveVerdict as its known parameter — a
+// boolean stored beside the map would be a second copy of what the lookup
+// already reports, and a second thing to desynchronise.
+type Divergence struct {
+	// Patched reports that at least one registry entry for this atom declares
+	// a divergence that must survive a bump.
+	Patched bool
+	// Reason is the declared text, shown in the report.
+	Reason string
+	// Entry names the registry key that declared it, so a package with several
+	// entries says which one is speaking.
+	Entry string
+}
+
+// Verdict is the recommendation for one overlay package: not what its versions
+// are (that is CompareStatus) but what should be done about it. The two are
+// separate axes — a package can be up-to-date with ::gentoo and still worth
+// keeping, precisely because it carries a divergence.
+type Verdict int
+
+const (
+	// VerdictKeep means the overlay's copy earns its place.
+	VerdictKeep Verdict = iota
+	// VerdictRedundant means ::gentoo delivers the same or more and we changed
+	// nothing, so the overlay copy is a removal candidate.
+	VerdictRedundant
+	// VerdictNeedsRebase means ::gentoo moved ahead and we carry changes that
+	// must be re-applied on top of the newer ebuild.
+	VerdictNeedsRebase
+	// VerdictUnknown means nothing is recorded about this package, or the
+	// comparison itself failed. Either way no recommendation is supported.
+	VerdictUnknown
+)
+
+// String returns the report's word for the verdict.
+func (v Verdict) String() string {
+	switch v {
+	case VerdictKeep:
+		return "keep"
+	case VerdictRedundant:
+		return "redundant"
+	case VerdictNeedsRebase:
+		return "needs-rebase"
+	case VerdictUnknown:
+		return "unknown"
+	default:
+		// A value with no word — only reachable if a verdict is added without a
+		// case here — reads as "unknown" rather than as a bare integer, matching
+		// CompareStatus.String() above.
+		return "unknown"
+	}
+}
+
+// Verification is the tri-state a content check needs: a Verdict confirmed
+// against the two ebuilds' bytes reads differently from one taken on trust.
+// The check that produces it is wired in separately; the vocabulary lives here
+// with the rest of the compare types.
+type Verification int
+
+const (
+	// NotVerified means no content was compared: no local copy, no upstream
+	// copy at that version, an unreadable file, or versions that differ.
+	NotVerified Verification = iota
+	// VerifiedIdentical means the two ebuilds are byte-for-byte equal.
+	VerifiedIdentical
+	// VerifiedDiffers means the two ebuilds differ.
+	VerifiedDiffers
+)
+
+// deriveVerdict maps the two axes — the version comparison and what the
+// registry records about the package — onto exactly one recommendation. It is
+// a pure, total function of its arguments (no I/O, no receiver, no error path)
+// so the whole policy is one readable table instead of conditions scattered
+// through the report.
+//
+// known is false when the caller's divergence map has no entry for the atom.
+func deriveVerdict(status CompareStatus, div Divergence, known bool) Verdict {
+	// Two whole slices of the table collapse before the per-status rules are
+	// consulted, and they are stated here — first, separately — so that a later
+	// edit to the switch below cannot quietly weaken them:
+	//
+	//   - nothing recorded about the package: silence is not "not patched", and
+	//     reading it that way would confidently recommend deleting an ebuild
+	//     nobody has described yet;
+	//   - the comparison failed: there is no version relationship to reason from.
+	//
+	// Neither can ever yield VerdictRedundant, which is the only verdict that
+	// recommends removing something.
+	if !known || status == StatusError {
+		return VerdictUnknown
+	}
+
+	switch status {
+	case StatusUpToDate:
+		// ::gentoo ships the same version, so the copy earns its place only if
+		// it carries a divergence.
+		if div.Patched {
+			return VerdictKeep
+		}
+		return VerdictRedundant
+	case StatusOutdated:
+		// ::gentoo moved ahead: with no divergence its ebuild supersedes ours;
+		// with one, ours owes a bump plus a re-application of the delta.
+		if div.Patched {
+			return VerdictNeedsRebase
+		}
+		return VerdictRedundant
+	case StatusNewer, StatusNotInRemote:
+		// Ahead of ::gentoo, or ours alone — being ahead or unique is itself the
+		// reason the overlay copy exists, patched or not.
+		return VerdictKeep
+	default:
+		// Unreachable while CompareStatus has its five values. A sixth added
+		// later must not silently inherit a recommendation.
+		return VerdictUnknown
+	}
+}
+
 // CompareOptions configures the comparison behavior
 type CompareOptions struct {
 	// OnlyOutdated filters results to only show outdated packages
@@ -87,6 +229,20 @@ type CompareOptions struct {
 	// (signal.NotifyContext), so cancelling it aborts an in-flight comparison.
 	// When nil it is treated as context.Background() by the consumer.
 	Ctx context.Context
+	// Divergence is what the caller knows about each package, keyed by the bare
+	// "category/package" atom. The caller builds it once, before the comparison
+	// starts, and the comparison only reads it — so it is shared across the
+	// per-package goroutines without a lock.
+	//
+	// Absence from the map IS the unknown state: nothing is recorded about that
+	// package, which is not the same as "recorded as not patched". A nil map
+	// therefore says nothing is known about anything, which is exactly the
+	// degraded mode when the registry cannot be read — and costs no special case.
+	Divergence map[string]Divergence
+	// OverlayPath is the root of the overlay the compared packages were scanned
+	// from. PackageInfo carries only Category/Package/Versions/LatestVersion, so
+	// a check that must open the local ebuild gets its overlay-side root here.
+	OverlayPath string
 }
 
 // CompareReport contains the full comparison report
@@ -99,6 +255,16 @@ type CompareReport struct {
 	NotInRemoteCount int
 	ErrorCount       int
 	Results          []CompareResult
+
+	// Per-Verdict counts sit ALONGSIDE the per-Status counts above and never
+	// replace or restate them: the two answer different questions ("how do the
+	// versions relate?" vs "what should be done about it?"), so every compared
+	// package is counted exactly once on each axis. Deriving either from the
+	// other would silently change what the existing summary lines mean.
+	VerdictKeepCount        int
+	VerdictRedundantCount   int
+	VerdictNeedsRebaseCount int
+	VerdictUnknownCount     int
 }
 
 // githubProviderAdapter adapts a *github.Client to the provider.Provider interface,
@@ -196,7 +362,7 @@ func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, op
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			result := comparePackageWithProvider(p, prov)
+			result := comparePackageWithProvider(p, prov, opts)
 
 			// Filter based on options using switch for clarity.
 			include := false
@@ -226,6 +392,19 @@ func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, op
 				report.NotInRemoteCount++
 			case StatusError:
 				report.ErrorCount++
+			}
+			// The second axis, counted beside the first rather than instead of
+			// it: this package has just been counted once above by Status and is
+			// now counted once here by Verdict.
+			switch result.Verdict {
+			case VerdictKeep:
+				report.VerdictKeepCount++
+			case VerdictRedundant:
+				report.VerdictRedundantCount++
+			case VerdictNeedsRebase:
+				report.VerdictNeedsRebaseCount++
+			case VerdictUnknown:
+				report.VerdictUnknownCount++
 			}
 			if include {
 				report.Results = append(report.Results, result)
@@ -261,8 +440,39 @@ func sortCompareResults(results []CompareResult) {
 	})
 }
 
-// comparePackageWithProvider compares a single package using a Provider
-func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider) CompareResult {
+// comparePackageWithProvider compares a single package using a Provider and
+// annotates the outcome with what the caller knows about that package.
+//
+// The two axes are computed by two functions on purpose. comparePackageVersions
+// below decides Status and is deliberately NOT given opts, so nothing it does
+// can ever come to depend on the registry: the version comparison keeps its
+// current four values and their current meanings by construction, not by
+// convention.
+func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
+	result := comparePackageVersions(pkg, prov)
+
+	// The map is keyed by the bare "category/package" atom. A miss is the
+	// unknown state — nothing is recorded about this package — and it reaches
+	// deriveVerdict as known == false, which no per-status rule can turn into a
+	// recommendation to remove anything. A nil map misses on every package,
+	// which is the whole of the degraded mode.
+	div, known := opts.Divergence[pkg.Category+"/"+pkg.Package]
+	result.Patched = div.Patched
+	if div.Patched {
+		// Only a declared patch has a declaring entry to name; copying these
+		// unconditionally would attribute a patch to a package that has none.
+		result.PatchedBy = div.Entry
+		result.PatchedReason = div.Reason
+	}
+	result.Verdict = deriveVerdict(result.Status, div, known)
+
+	return result
+}
+
+// comparePackageVersions resolves how the local package's latest version relates
+// to the provider's copy. It sets Status and the two version fields, and knows
+// nothing about divergence.
+func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResult {
 	result := CompareResult{
 		Category:     pkg.Category,
 		Package:      pkg.Package,
