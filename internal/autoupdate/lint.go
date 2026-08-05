@@ -35,6 +35,14 @@ const recordEndMarker = "# END"
 // churn bill payable in records, so change it only with a fresh measurement in
 // hand.
 //
+// One field was placed rather than read off the registry: `patched` sits
+// immediately after `type` because both classify the PACKAGE instead of
+// describing how to probe it, and `type`/`series` already form that block.
+// Inserting it cost zero record rewrites — no record carries the field yet —
+// and that zero is exactly why the position had to be chosen deliberately now:
+// the churn bill above falls due on every LATER move, once records do carry
+// it (R1.4).
+//
 // It covers every `toml:` tag of PackageConfig exactly once, which
 // TestCanonicalFieldOrderCoversPackageConfig pins — a field missing from here
 // would silently stop being ordered at all. `binary` is deliberately absent: it
@@ -47,7 +55,7 @@ var CanonicalFieldOrder = []string{
 	"transform", "select", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
-	"headers", "timeout", "meta", "type", "series",
+	"headers", "timeout", "meta", "type", "patched", "series",
 	"aux_var", "aux_pattern", "revision", "version",
 	"fallback_url", "fallback_parser", "fallback_pattern", "llm_prompt",
 	"versions_path", "versions_selector",
@@ -638,7 +646,7 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 	// The rule is that the record's fields form a SUBSEQUENCE of the canonical
 	// order — each rank strictly greater than the one before. Demanding anything
 	// stronger, contiguity for instance, would flag all 411 records: no record
-	// declares more than a fraction of the 37 fields.
+	// declares more than a fraction of the 38 fields.
 	prevRank := -1
 	prevName := ""
 	for _, f := range effective {

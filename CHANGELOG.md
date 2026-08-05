@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`overlay compare` now says what to do, not only what is.** It answered one
+  question — how do the versions compare? — and the operator had to answer a
+  second from memory: does this package carry changes of our own? Without that
+  second answer the first is ambiguous in the most dangerous direction.
+  *up-to-date* means "delete this from the overlay" for a package that merely
+  ran ahead of ::gentoo, and "keep it, it is correct" for one carrying a patch.
+  Same word, opposite actions, and nothing on screen distinguished them.
+
+  A registry entry can now declare `patched = "<reason>"`, and the report gains
+  a second, orthogonal **Verdict** column derived from that declaration plus the
+  version comparison: `keep`, `redundant`, `needs-rebase`, `unknown`. Sections
+  are grouped by it, redundant first, and that section states plainly that
+  removing those packages is a recommendation — nothing is ever deleted,
+  disabled or modified by any verdict. `--only-redundant` and `--only-patched`
+  narrow the report and intersect with the existing `--only-outdated`.
+
+  `unknown` is a verdict rather than a default, and that is the load-bearing
+  choice. Measured against the live overlay on 2026-08-04: 13 of 313 overlay
+  packages have no registry entry at all, and reading their silence as "not
+  patched" would have recommended deleting `sys-devel/binutils` the day
+  ::gentoo reaches 2.47. A recommendation to delete is exactly where a default
+  must not be silent. `patched` is the reason, not a flag — a package marked as
+  diverging without a stated reason cannot be re-applied by whoever bumps it
+  next — so a present-but-whitespace-only value fails validation, the same rule
+  that already rejects an empty `@` label.
+
+  The value is declared, not derived: `overlay diff` is git diff over our own
+  repository and says nothing about ::gentoo, so there was no existing
+  capability to detect divergence. Where a local copy of the compared repository
+  is already on disk the check is free, so the two ebuilds of a matching version
+  are read and compared byte for byte. That produces two findings — a **stale
+  declaration** when identical content still declares a divergence, and an
+  **undeclared divergence** when differing content declares none — and neither
+  can change the verdict. One mechanism decides and the other only checks;
+  letting both decide would leave a disagreement between them with no
+  resolution.
+
+  `Status` is untouched: it keeps its four values, its counts, its sections'
+  numbers and `--only-outdated`, all unchanged. The new column is additive, and
+  a regression test asserting on the rendered output with no divergence
+  information at all is what pins that rather than a claim in prose.
+
+  **A patched package now says so on every run.** The declaration reached the
+  terminal only through a verification finding, and verification needs a local
+  copy of ::gentoo on disk — so on an API-only run a patched package printed
+  exactly like an unpatched one: same `keep` verdict, no mention of the
+  divergence. That is the ambiguity above, one level down. Every patched package
+  now carries a line naming the registry entry that declared it and the declared
+  reason, whether or not the content was checked. The entry key is printed whole
+  because it is what you grep the registry for; the reason is capped, because one
+  entry's prose must not decide the width of the report. A declaration already
+  found stale keeps its warning and is not also restated as fact.
+
+  The summary gained a `Verdicts:` line counting each verdict across the whole
+  scan — not across a filtered view, so `--only-redundant` narrows what you see
+  without rewriting the overlay's own totals.
+
 ## [0.20.0] - 2026-08-05
 
 ### Added

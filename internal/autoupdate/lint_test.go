@@ -415,7 +415,7 @@ func TestSavePackagesConfigRecordModel(t *testing.T) {
 }
 
 // TestSavePackagesConfigEveryField is the round trip the fixture above cannot
-// give: a record that sets ALL 37 fields, saved and read back, compared whole.
+// give: a record that sets ALL 38 fields, saved and read back, compared whole.
 //
 // The two-record fixture above passes even against a broken writer, because it
 // declares no map field and no field whose canonical rank inverts against the
@@ -461,6 +461,7 @@ func TestSavePackagesConfigEveryField(t *testing.T) {
 		Timeout:              60,
 		Meta:                 map[string]string{"fetch_url": "https://example.com/dl", "note": "it's fine"},
 		Type:                 "bin",
+		Patched:              "keeps a wayland-by-default patch ::gentoo does not carry",
 		Series:               `^1\.`,
 		AuxVar:               "MY_BUILD",
 		AuxPattern:           `_([0-9]+)_amd64`,
@@ -504,7 +505,7 @@ func TestSavePackagesConfigEveryField(t *testing.T) {
 }
 
 // A note on why this stops at lintRecordModel rather than running the whole of
-// LintPackagesConfig: a record setting all 37 fields is necessarily invalid
+// LintPackagesConfig: a record setting all 38 fields is necessarily invalid
 // SEMANTICALLY, because several of them are mutually exclusive by design — this
 // one pairs suffix with track = "commit", which ValidatePackageConfig rejects
 // because a snapshot suffix comes from the current ebuild. That is a real rule
@@ -846,7 +847,7 @@ comments = "ik_llama-cpp — upstream publishes no usable release series."
 			absent:  LintFieldOrder,
 		},
 		{
-			// A record declares a handful of the 37 fields, never all of them. The
+			// A record declares a handful of the 38 fields, never all of them. The
 			// rule is subsequence, not contiguity — requiring the latter would
 			// report all 411 records.
 			name: "a sparse record skipping most of the order",

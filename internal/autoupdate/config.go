@@ -53,6 +53,9 @@ var (
 	// but the pinned version does not match the series regex: such an entry
 	// claims an ebuild it can never select.
 	ErrVersionOutsideSeries = errors.New("version does not match series")
+	// ErrEmptyPatchedReason is returned when patched is present but holds only
+	// whitespace: the entry claims a divergence from ::gentoo and describes none.
+	ErrEmptyPatchedReason = errors.New("patched is present but states no reason: the value is the reason, not a flag — say what diverges from ::gentoo, or drop the field")
 )
 
 // validSuffixRegex matches the value accepted by PackageConfig.Suffix: one of
@@ -96,6 +99,21 @@ type PackageConfig struct {
 	// heuristic. Used for reporting and the --only filter; it does not change
 	// apply/compile behavior.
 	Type string `toml:"type,omitempty"`
+	// Patched documents that this entry's ebuild deliberately diverges from
+	// ::gentoo's — a patch, an extra USE flag, a changed dependency — and therefore
+	// must survive every version bump instead of being dropped when ::gentoo
+	// catches up.
+	//
+	// The value is the reason, not a flag: a non-empty string means "diverges" AND
+	// says how. The two are one field because they are never usefully separate — a
+	// package marked as diverging without a stated reason cannot be re-applied by
+	// whoever bumps it next, and the marking is exactly what tells them they must.
+	//
+	// Absent means the ebuild is ::gentoo's apart from its version. That is the
+	// default because it is true of most of the overlay, and because it is the
+	// reading under which an absent field changes nothing for the 411 records that
+	// predate this field.
+	Patched string `toml:"patched,omitempty"`
 	// FallbackURL is an alternative URL to try if primary fails
 	FallbackURL string `toml:"fallback_url,omitempty"`
 	// FallbackParser is the parser type for the fallback URL
@@ -1049,6 +1067,17 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		// valid
 	default:
 		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidType, cfg.Type)
+	}
+
+	// Validate the divergence declaration. `patched` is the reason, not a flag,
+	// so a value that describes nothing claims a divergence it cannot document:
+	// whoever bumps the package next is told they must re-apply something and not
+	// what. This is the empty-"@"-label rule above in another place — a marker
+	// that marks nothing is a typo — and it fails hard for the same reason:
+	// reading it as "diverges" would silently protect the package for no stated
+	// reason. An absent field takes no branch at all and stays valid.
+	if cfg.Patched != "" && strings.TrimSpace(cfg.Patched) == "" {
+		return fmt.Errorf("package %s: %w", pkg, ErrEmptyPatchedReason)
 	}
 
 	// Validate transform rules. A malformed rule (wrong arity or uncompilable
