@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -215,6 +217,16 @@ func runCompare(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// What the overlay declares about itself, resolved once before the comparison
+	// starts so the per-package goroutines only ever read it. An unreadable
+	// registry warns exactly once here and leaves divergence nil, which the
+	// comparator reads as "nothing is known about any package" (R2.5): compare
+	// has never depended on packages.toml and must not start now.
+	divergence, err := buildDivergenceMap(overlayPath)
+	if err != nil {
+		logger.Warn("reading the autoupdate registry: %v; every package's divergence state will be reported as unknown", err)
+	}
+
 	// Compare with upstream
 	logger.Info("Comparing with %s using %s...", repoInfo.Name, prov.GetName())
 
@@ -223,6 +235,8 @@ func runCompare(cmd *cobra.Command, args []string) {
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
 		Concurrency:   compareConcurrency,
 		Ctx:           runCtx,
+		Divergence:    divergence,
+		OverlayPath:   overlayPath,
 		ProgressCallback: func(done, total uint64) {
 			percent := uint64(0)
 			if total > 0 {
@@ -260,6 +274,91 @@ func runCompare(cmd *cobra.Command, args []string) {
 
 	// Print summary
 	printComparisonSummary(report, repoInfo.Name)
+}
+
+// buildDivergenceMap turns the registry into the per-atom view compare needs:
+// one entry per bare "category/package" atom, saying whether any registry entry
+// for that atom declares a divergence from ::gentoo and which entry said so
+// (R2.1, R2.2). It lives here, in cmd/, because this is the only package that
+// already imports both halves — internal/overlay must never learn what TOML is,
+// and internal/autoupdate must never learn what a comparison is (R2.4).
+//
+// An unreadable registry yields (nil, err). The caller warns once and compares
+// with every package unknown (R2.5): refusing to run would make packages.toml a
+// hard dependency of a command that never had one. Absence from the map IS the
+// unknown state, so a nil map needs no special case downstream.
+//
+// Keys are split with autoupdate.SplitPackageKey, never by hand: its own doc
+// comment names "a second, slot-blind copy of the split" as exactly the bug the
+// ":slot" suffix invites, and the path is hot — 90 of 321 registry atoms carry
+// more than one entry. So "net-libs/webkit-gtk:4.1" and
+// "media-libs/gstreamer@stable" both land on their bare atom. A key the split
+// rejects is skipped with a warning naming it; one bad key must not blank the
+// whole map.
+//
+// Keys are visited in sorted order, so when several entries of one atom declare
+// a divergence the entry recorded is the same on every run instead of whatever
+// map iteration happened to yield. For an atom carrying both suffix forms this
+// makes a ":slot" entry win over an "@label" sibling, because ':' (0x3A) sorts
+// before '@' (0x40). That precedence is arbitrary but defined, and it is written
+// down here so the first reader of a mixed atom need not rediscover it.
+//
+// Any patched entry marks the atom, even when its siblings are silent. Failing
+// toward "patched" is the safe direction: it can only ever suppress a removal
+// recommendation, never produce one.
+//
+// The divergence test is strings.TrimSpace(...) != "", not != "". `patched` is a
+// reason rather than a flag, and LoadPackagesConfig never calls
+// ValidatePackageConfig, so the whitespace-only rule that rejects such a value
+// at lint time does not run on this path; without the trim, a value describing
+// nothing would mark an atom.
+//
+// One thing this function deliberately does NOT do is sanitise the key.
+// SplitPackageKey does not either — splitPkgAtom only requires two non-empty
+// "/"-separated parts, so "../x" splits happily — and no validation runs here.
+// What keeps traversal out is that the key is used only as a map key and never
+// to build a filesystem path: the verification step builds its path from the
+// scanned directory names instead. Keep it that way.
+func buildDivergenceMap(overlayPath string) (map[string]overlay.Divergence, error) {
+	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]string, 0, len(cfg.Packages))
+	for key := range cfg.Packages {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	divs := make(map[string]overlay.Divergence, len(keys))
+	for _, key := range keys {
+		category, name, ok := autoupdate.SplitPackageKey(key)
+		if !ok {
+			logger.Warn("registry key %q is not a category/package atom; skipping it", key)
+			continue
+		}
+		// Plain concatenation, not path.Join: this is a map key, not a path, and
+		// Join would quietly normalise a key like "a/../b" into something the
+		// scanner never produces — a difference that would only ever hide a
+		// mismatch.
+		atom := category + "/" + name
+
+		// The zero value is "known to the registry, declares nothing", which is
+		// what a silent entry must record — that is not the same as absent.
+		div := divs[atom]
+		// Trimmed because the stored text is shown verbatim in the report, and
+		// because only a trimmed value distinguishes a stated reason from a
+		// whitespace-only one.
+		if reason := strings.TrimSpace(cfg.Packages[key].Patched); reason != "" && !div.Patched {
+			div.Patched = true
+			div.Reason = reason
+			div.Entry = key
+		}
+		divs[atom] = div
+	}
+
+	return divs, nil
 }
 
 func truncatePkgName(name string, maxLen int) string {
