@@ -42,7 +42,9 @@ type CompareResult struct {
 	// PatchedBy names the registry key that declared it, so a package with
 	// several entries says which one is speaking.
 	PatchedBy string
-	// PatchedReason is the declared text, shown in the report.
+	// PatchedReason is the declared text. It is rendered on the declaration line
+	// beneath the section (formatVerificationFindings' third case), capped at
+	// patchedReasonCap — unlike PatchedBy, which is printed whole.
 	PatchedReason string
 	// Verified is the outcome of comparing the two ebuilds' bytes. It stays
 	// NotVerified unless a content check ran.
@@ -96,7 +98,10 @@ type Divergence struct {
 	// Patched reports that at least one registry entry for this atom declares
 	// a divergence that must survive a bump.
 	Patched bool
-	// Reason is the declared text, shown in the report.
+	// Reason is the declared text. It reaches the report through
+	// CompareResult.PatchedReason and is capped there, not here: this type
+	// carries what the registry said, and the width of a terminal is not its
+	// concern.
 	Reason string
 	// Entry names the registry key that declared it, so a package with several
 	// entries says which one is speaking.
@@ -667,6 +672,18 @@ var verdictSections = []verdictSection{
 // of each package keeps its own column beside the Verdict: the two are separate
 // axes (D2), and the summary line below still counts by Status, exactly as it
 // did when the sections themselves were the status partition.
+//
+// PRECONDITION — an empty report.Results is rendered as "All packages are
+// up-to-date!", and that sentence is only true for a caller that has not
+// narrowed the slice. It IS true for an ordinary run: with the default
+// IncludeSynced == false, a comparison in which every package is synced returns
+// no results at all, which is what TestFormatReportEmpty pins.
+//
+// A caller that FILTERED must therefore test for emptiness itself before calling
+// — runCompare does, via reportEmptyCompare, which can name the filter that
+// emptied the set. This function is given no filter state and could not name one
+// even if it tried, which is why the check belongs to the caller and this is a
+// documented precondition rather than a branch here.
 func FormatReport(report *CompareReport) string {
 	var sb strings.Builder
 
@@ -795,6 +812,20 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 	return sb.String()
 }
 
+// patchedReasonCap bounds the declared reason on a detail line.
+//
+// The two halves of a declaration fail differently, so they are bounded
+// differently. PatchedBy is an identifier the operator greps the registry for
+// and is printed VERBATIM: a shortened key looks usable and is not, which is
+// worse than printing none — the same argument that kept it out of a table
+// column. PatchedReason is unbounded operator prose, so losing its tail costs
+// nothing the registry cannot supply in full, while printing it whole would let
+// one entry's essay decide the width of the entire report.
+//
+// 72 follows the readability caps in calculateColumnWidths: wide enough for a
+// real sentence, narrow enough to leave the line readable beside the table.
+const patchedReasonCap = 72
+
 // formatVerificationFindings renders one line per verification finding, beneath
 // the section's table.
 //
@@ -803,10 +834,21 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 // says) — instead of being stored on CompareResult. There is therefore no third
 // copy that can disagree with the two, and no state to keep in step.
 //
-// Only two of the four combinations say anything (R4.2, R4.3). The other two are
-// silent on purpose: a divergence that is both real and declared is the system
-// working, and a redundancy confirmed by identical bytes is a Verdict that has
-// simply been checked rather than a problem.
+// Only two of the four verification combinations say anything (R4.2, R4.3). The
+// other two are silent on purpose: a divergence that is both real and declared
+// is the system working, and a redundancy confirmed by identical bytes is a
+// Verdict that has simply been checked rather than a problem.
+//
+// A THIRD case (R3.8) renders the declaration itself, and it is what makes a
+// patched package visible at all. Verification needs a local copy of the
+// compared repository; with an API-only provider Verified is always NotVerified,
+// so before this case existed a patched package printed exactly like an
+// unpatched one — same Verdict "keep", no column, no line — and the operator was
+// back to answering "does this carry changes of our own?" from memory.
+//
+// The case ORDER is the whole mechanism: "stale" is tested first, so a
+// declaration already known to be obsolete keeps its warning and is not also
+// restated as fact one line below.
 //
 // Nothing here can change a Verdict (R4.5) — it renders a finished CompareResult
 // into a string.
@@ -829,10 +871,38 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: undeclared divergence — our %s ebuild differs from ::gentoo's, yet no entry declares why\n",
 				r.Category, r.Package, r.LocalVersion))
+		case r.Patched:
+			// R3.8: the declaration, stated wherever it has not already been
+			// contradicted above. This is the common case in practice — every
+			// API-only run reaches it — so it carries the whole weight of R2.2's
+			// "SHALL name the declaring entry in the report".
+			//
+			// Both strings are operator-written text on their way to a terminal,
+			// passed as ARGUMENTS and never as a format string, reaching no shell
+			// and no command.
+			sb.WriteString(output.Sprintf(output.Info,
+				"· %s/%s: patched — declared by %s%s\n",
+				r.Category, r.Package, declaringEntry(r), declaredReason(r)))
 		}
 	}
 
 	return sb.String()
+}
+
+// declaredReason renders the ": <reason>" tail of a declaration line, or "" when
+// there is no reason to state.
+//
+// The empty case is reachable in production, not defensive padding: R1.3 rejects
+// a whitespace-only reason at validation time, but LoadPackagesConfig
+// (config.go:552-567) never calls ValidatePackageConfig, so the compare path
+// sees entries that validation never judged. A dangling colon introducing
+// nothing would read as a truncation bug rather than as the missing text it is.
+func declaredReason(r CompareResult) string {
+	reason := strings.TrimSpace(r.PatchedReason)
+	if reason == "" {
+		return ""
+	}
+	return ": " + truncateString(reason, patchedReasonCap)
 }
 
 // declaringEntry names the registry entry that declared the divergence, falling

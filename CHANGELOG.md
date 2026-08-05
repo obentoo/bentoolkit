@@ -50,6 +50,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a regression test asserting on the rendered output with no divergence
   information at all is what pins that rather than a claim in prose.
 
+  **A patched package now says so on every run.** The declaration reached the
+  terminal only through a verification finding, and verification needs a local
+  copy of ::gentoo on disk — so on an API-only run a patched package printed
+  exactly like an unpatched one: same `keep` verdict, no mention of the
+  divergence. That is the ambiguity above, one level down. Every patched package
+  now carries a line naming the registry entry that declared it and the declared
+  reason, whether or not the content was checked. The entry key is printed whole
+  because it is what you grep the registry for; the reason is capped, because one
+  entry's prose must not decide the width of the report. A declaration already
+  found stale keeps its warning and is not also restated as fact.
+
+  The summary gained a `Verdicts:` line counting each verdict across the whole
+  scan — not across a filtered view, so `--only-redundant` narrows what you see
+  without rewriting the overlay's own totals.
+
 ## [0.20.0] - 2026-08-05
 
 ### Added

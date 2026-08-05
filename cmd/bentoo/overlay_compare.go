@@ -461,9 +461,11 @@ func buildDivergenceMap(overlayPath string) (map[string]overlay.Divergence, erro
 		// The zero value is "known to the registry, declares nothing", which is
 		// what a silent entry must record — that is not the same as absent.
 		div := divs[atom]
-		// Trimmed because the stored text is shown verbatim in the report, and
-		// because only a trimmed value distinguishes a stated reason from a
-		// whitespace-only one.
+		// Trimmed because only a trimmed value distinguishes a stated reason
+		// from a whitespace-only one — R1.3 rejects the latter at validation
+		// time, but LoadPackagesConfig never calls ValidatePackageConfig, so
+		// this path is not protected by it. The report caps this text when it
+		// prints it; what is printed verbatim is the entry key, not the reason.
 		if reason := strings.TrimSpace(cfg.Packages[key].Patched); reason != "" && !div.Patched {
 			div.Patched = true
 			div.Reason = reason
@@ -482,15 +484,79 @@ func truncatePkgName(name string, maxLen int) string {
 	return name[:maxLen-3] + "..."
 }
 
+// printComparisonSummary emits the summary the operator reads after the report.
+//
+// The decision of WHAT to print lives in the two pure builders below and the
+// emission is all that stays here, because logger binds its io.Writer once at
+// first use and exposes no setter (logger.go:44-52) — so a test can reach the
+// builders and cannot reach this. That split is not decoration: these three
+// lines are the half of UB3 that used to be guaranteed by "no task modifies this
+// function", and adding the verdict counts spends that guarantee. It is replaced
+// by overlay_compare_summary_test.go pinning the lines directly, which is the
+// stronger of the two and was simply not reachable before.
+//
+// Each line is emitted with a "%s" format so the rendered bytes are identical to
+// the per-line Printf form this replaced.
 func printComparisonSummary(report *overlay.CompareReport, repoName string) {
-	logger.Info("\nSummary:")
-	logger.Info("  Total packages scanned: %d", report.TotalPackages)
-	logger.Info("  Found in both repos: %d", report.ComparedPackages-report.NotInRemoteCount-report.ErrorCount)
-	logger.Info("  Only in Bentoo: %d", report.NotInRemoteCount)
+	for _, line := range comparisonSummaryLines(report) {
+		logger.Info("%s", line)
+	}
 
+	// Stays on Warn and stays in this position: it is a different level, and
+	// moving it would change what a --quiet run shows.
 	if report.ErrorCount > 0 {
 		logger.Warn("  Errors (API issues): %d", report.ErrorCount)
 	}
+
+	for _, line := range verdictSummaryLines(report) {
+		logger.Info("%s", line)
+	}
+}
+
+// comparisonSummaryLines builds the three pre-existing summary lines, verbatim.
+//
+// UB3 promises these bytes are what they were before the Verdict axis existed.
+func comparisonSummaryLines(report *overlay.CompareReport) []string {
+	return []string{
+		"\nSummary:",
+		fmt.Sprintf("  Total packages scanned: %d", report.TotalPackages),
+		fmt.Sprintf("  Found in both repos: %d", report.ComparedPackages-report.NotInRemoteCount-report.ErrorCount),
+		fmt.Sprintf("  Only in Bentoo: %d", report.NotInRemoteCount),
+	}
+}
+
+// verdictSummaryLines builds the per-Verdict counts (R3.9), or nothing when
+// every count is zero.
+//
+// ONE line naming the axis, rather than four bare labels, for the reason the
+// counter fields carry a Verdict prefix: a bare "Unknown: 5" sitting under
+// "Errors (API issues): 1" reads as a Status count, and keeping the two axes
+// apart is exactly what UB3 is for. Zero counts are dropped so the line states
+// what is there rather than what is not, matching the ErrorCount line above.
+//
+// The counts are read from the REPORT, never recomputed from report.Results:
+// runCompare assigns the filtered slice back to Results before rendering, and
+// this summary answers "what is in the overlay", not "what did you ask to see".
+func verdictSummaryLines(report *overlay.CompareReport) []string {
+	terms := make([]string, 0, 4)
+	for _, t := range []struct {
+		label string
+		count int
+	}{
+		{overlay.VerdictKeep.String(), report.VerdictKeepCount},
+		{overlay.VerdictRedundant.String(), report.VerdictRedundantCount},
+		{overlay.VerdictNeedsRebase.String(), report.VerdictNeedsRebaseCount},
+		{overlay.VerdictUnknown.String(), report.VerdictUnknownCount},
+	} {
+		if t.count > 0 {
+			terms = append(terms, fmt.Sprintf("%s %d", t.label, t.count))
+		}
+	}
+
+	if len(terms) == 0 {
+		return nil
+	}
+	return []string{"  Verdicts: " + strings.Join(terms, " | ")}
 }
 
 // repoTokenName maps a repository name to the environment variable / secrets key
