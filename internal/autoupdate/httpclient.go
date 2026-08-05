@@ -499,7 +499,14 @@ func (c *RetryableHTTPClient) shouldRetry(statusCode int) bool {
 // isTimeoutError checks if an error is a timeout error.
 func isTimeoutError(err error) bool {
 	if err == nil {
+// Provided headers are merged into existing defaults so built-in headers
+// (for example User-Agent) are preserved unless explicitly overridden.
 		return false
+	if c.defaultHeaders == nil {
+		c.defaultHeaders = make(map[string]string)
+	}
+	for k, v := range headers {
+		c.defaultHeaders[k] = v
 	}
 	// Check for context deadline exceeded
 	if errors.Is(err, context.DeadlineExceeded) {
