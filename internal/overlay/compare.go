@@ -612,8 +612,61 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 	return VerifiedDiffers
 }
 
-// FormatReport formats a comparison report for terminal output
-// When synced packages are included, displays them in a separate section with status indicators
+// verdictSection is one Verdict-grouped section of the report: the packages
+// that share a recommendation, under a heading that says what it is.
+type verdictSection struct {
+	verdict Verdict
+	title   string
+	// note is printed ONCE beneath the heading, for the whole section, rather
+	// than on every row. The removal recommendation is one statement about a
+	// group; repeating it per package would turn the advice into wallpaper the
+	// operator learns to skip (R3.7).
+	note        string
+	headerColor *color.Color
+}
+
+// verdictSections fixes which sections exist and the order they print in.
+//
+// Redundant comes FIRST because it is the only group asking the operator to do
+// something; the others follow by how much attention they want. Holding the
+// order as data rather than as a chain of ifs also means an empty group simply
+// never prints — which is exactly what leaves the report silent about removals
+// when nothing is redundant, with no second condition to keep in step.
+//
+// Nothing here deletes, disables or modifies anything (R6.1): the section says
+// what it recommends and stops.
+var verdictSections = []verdictSection{
+	{
+		verdict:     VerdictRedundant,
+		title:       "Redundant Packages (::gentoo ships the same or more)",
+		note:        "→ Recommendation: remove these from the overlay. Nothing is deleted automatically — this is advice to act on.",
+		headerColor: output.Warning,
+	},
+	{
+		verdict:     VerdictNeedsRebase,
+		title:       "Needs Rebase (our changes must be re-applied on top of ::gentoo's version)",
+		headerColor: output.Info,
+	},
+	{
+		verdict:     VerdictKeep,
+		title:       "Keep (the overlay copy earns its place)",
+		headerColor: output.Success,
+	},
+	{
+		verdict:     VerdictUnknown,
+		title:       "Unknown (no recommendation)",
+		note:        "→ Nothing on record describes these packages, or the comparison failed — neither supports advice either way.",
+		headerColor: output.Dim,
+	},
+}
+
+// FormatReport formats a comparison report for terminal output.
+//
+// Packages are GROUPED BY VERDICT — what to do about each one — because that is
+// the question a grouping can answer for a whole section at a time. The Status
+// of each package keeps its own column beside the Verdict: the two are separate
+// axes (D2), and the summary line below still counts by Status, exactly as it
+// did when the sections themselves were the status partition.
 func FormatReport(report *CompareReport) string {
 	var sb strings.Builder
 
@@ -622,64 +675,101 @@ func FormatReport(report *CompareReport) string {
 		return sb.String()
 	}
 
-	// Separate results by status
-	var outdated, synced, other []CompareResult
+	// Group by verdict. Appending in Results order preserves the sort
+	// CompareWithProvider already applied, so rows stay in category/package
+	// order inside each section.
+	byVerdict := make(map[Verdict][]CompareResult, len(verdictSections))
 	for _, r := range report.Results {
-		switch r.Status {
-		case StatusOutdated:
-			outdated = append(outdated, r)
-		case StatusUpToDate:
-			synced = append(synced, r)
-		default:
-			other = append(other, r)
+		byVerdict[r.Verdict] = append(byVerdict[r.Verdict], r)
+	}
+
+	for _, sec := range verdictSections {
+		results := byVerdict[sec.verdict]
+		// Whether it had rows or not, this verdict now has a section: dropping it
+		// from the map leaves behind exactly the verdicts that have none.
+		delete(byVerdict, sec.verdict)
+		if len(results) == 0 {
+			continue
+		}
+		sb.WriteString(formatResultSection(results, sec.title, sec.note, sec.headerColor))
+	}
+
+	// A verdict with no section above — reachable only if a fifth one is added
+	// without listing it in verdictSections — is still printed rather than
+	// silently dropped: the Total below counts every result, so a vanished row
+	// would make the report disagree with its own summary. Results is walked
+	// again instead of the map so the order stays deterministic.
+	var unlisted []CompareResult
+	for _, r := range report.Results {
+		if _, unsectioned := byVerdict[r.Verdict]; unsectioned {
+			unlisted = append(unlisted, r)
 		}
 	}
-
-	// Format outdated section if any
-	if len(outdated) > 0 {
-		sb.WriteString(formatResultSection(outdated, "Outdated Packages (Bentoo < Gentoo)", output.Warning))
+	if len(unlisted) > 0 {
+		sb.WriteString(formatResultSection(unlisted, "Other Packages", "", output.Info))
 	}
 
-	// Format synced section if any
-	if len(synced) > 0 {
-		sb.WriteString(formatResultSection(synced, "Up-to-Date Packages", output.Success))
-	}
-
-	// Format other results (newer, not-in-remote, errors) if any
-	if len(other) > 0 {
-		sb.WriteString(formatResultSection(other, "Other Packages", output.Info))
-	}
-
-	// Summary
-	sb.WriteString("\n")
-	if len(outdated) > 0 {
-		fmt.Fprintf(&sb, "Outdated: %s | ",
-			output.Sprint(output.Warning, fmt.Sprintf("%d", len(outdated))))
-	}
-	if len(synced) > 0 {
-		fmt.Fprintf(&sb, "Up-to-date: %s | ",
-			output.Sprint(output.Success, fmt.Sprintf("%d", len(synced))))
-	}
-	if len(other) > 0 {
-		fmt.Fprintf(&sb, "Other: %s | ",
-			output.Sprint(output.Info, fmt.Sprintf("%d", len(other))))
-	}
-	fmt.Fprintf(&sb, "Total: %d\n", len(report.Results))
+	sb.WriteString(formatStatusSummary(report.Results))
 
 	return sb.String()
 }
 
-// formatResultSection formats a section of results with a header and table
-func formatResultSection(results []CompareResult, title string, headerColor *color.Color) string {
+// formatStatusSummary renders the report's closing line.
+//
+// It counts by STATUS — the same partition, over the same results, producing
+// the same numbers as before the Verdict axis existed (UB3). The sections above
+// are grouped by Verdict, and deriving these counts from that grouping instead
+// would leave the old labels sitting over the new axis's numbers: still
+// plausible, no longer true.
+func formatStatusSummary(results []CompareResult) string {
+	var outdated, synced, other int
+	for _, r := range results {
+		switch r.Status {
+		case StatusOutdated:
+			outdated++
+		case StatusUpToDate:
+			synced++
+		default:
+			other++
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+	if outdated > 0 {
+		fmt.Fprintf(&sb, "Outdated: %s | ",
+			output.Sprint(output.Warning, fmt.Sprintf("%d", outdated)))
+	}
+	if synced > 0 {
+		fmt.Fprintf(&sb, "Up-to-date: %s | ",
+			output.Sprint(output.Success, fmt.Sprintf("%d", synced)))
+	}
+	if other > 0 {
+		fmt.Fprintf(&sb, "Other: %s | ",
+			output.Sprint(output.Info, fmt.Sprintf("%d", other)))
+	}
+	fmt.Fprintf(&sb, "Total: %d\n", len(results))
+
+	return sb.String()
+}
+
+// formatResultSection formats a section of results with a header, an optional
+// section-wide note and a table.
+func formatResultSection(results []CompareResult, title, note string, headerColor *color.Color) string {
 	var sb strings.Builder
 	w := calculateColumnWidths(results)
 
 	// Header
 	sb.WriteString(output.Sprintf(headerColor, "\n%s:\n", title))
-	sb.WriteString(formatTableLineWithStatus(w.pkg, w.cat, w.local, w.remote, w.status, "top"))
-	sb.WriteString(formatTableRowWithStatus(w.pkg, w.cat, w.local, w.remote, w.status,
-		"Package", "Category", "Bentoo Version", "Gentoo Version", "Status", true, nil))
-	sb.WriteString(formatTableLineWithStatus(w.pkg, w.cat, w.local, w.remote, w.status, "mid"))
+	if note != "" {
+		// Passed as an ARGUMENT, never as a format string, like every other
+		// piece of text this report prints.
+		sb.WriteString(output.Sprintf(headerColor, "%s\n", note))
+	}
+	sb.WriteString(formatSectionLine(w, "top"))
+	sb.WriteString(formatSectionRow(w,
+		"Package", "Category", "Bentoo Version", "Gentoo Version", "Status", "Verdict", true, nil, nil))
+	sb.WriteString(formatSectionLine(w, "mid"))
 
 	// Data rows
 	for _, r := range results {
@@ -688,12 +778,13 @@ func formatResultSection(results []CompareResult, title string, headerColor *col
 		local := truncateString(r.LocalVersion, w.local)
 		remote := truncateString(r.RemoteVersion, w.remote)
 		status := truncateString(r.Status.String(), w.status)
-		statusColor := getStatusColor(r.Status)
-		sb.WriteString(formatTableRowWithStatus(w.pkg, w.cat, w.local, w.remote, w.status,
-			pkg, cat, local, remote, status, false, statusColor))
+		verdict := truncateString(r.Verdict.String(), w.verdict)
+		sb.WriteString(formatSectionRow(w,
+			pkg, cat, local, remote, status, verdict, false,
+			getStatusColor(r.Status), getVerdictColor(r.Verdict)))
 	}
 
-	sb.WriteString(formatTableLineWithStatus(w.pkg, w.cat, w.local, w.remote, w.status, "bottom"))
+	sb.WriteString(formatSectionLine(w, "bottom"))
 
 	// Verification findings go BENEATH the table rather than into a column of
 	// it: they name the registry entry that declared the divergence, and a
@@ -760,7 +851,7 @@ func declaringEntry(r CompareResult) string {
 
 // columnWidths holds the calculated column widths for table formatting.
 type columnWidths struct {
-	pkg, cat, local, remote, status int
+	pkg, cat, local, remote, status, verdict int
 }
 
 // calculateColumnWidths computes the optimal column widths for a set of compare results.
@@ -771,7 +862,12 @@ func calculateColumnWidths(results []CompareResult) columnWidths {
 		cat:    8,  // "Category"
 		local:  14, // "Bentoo Version"
 		remote: 14, // "Gentoo Version"
-		status: 13, // "Status"
+		status: 13, // "Status", widened to fit "not-in-remote"
+		// "Verdict", widened to fit "needs-rebase". Unlike a package name, the
+		// four verdict words are a closed vocabulary of at most 12 characters,
+		// so the readability cap below would never bind — the same reason
+		// Status has none.
+		verdict: 12,
 	}
 
 	for _, r := range results {
@@ -789,6 +885,9 @@ func calculateColumnWidths(results []CompareResult) columnWidths {
 		}
 		if len(r.Status.String()) > w.status {
 			w.status = len(r.Status.String())
+		}
+		if len(r.Verdict.String()) > w.verdict {
+			w.verdict = len(r.Verdict.String())
 		}
 	}
 
@@ -821,8 +920,26 @@ func getStatusColor(status CompareStatus) *color.Color {
 	}
 }
 
-// formatTableLineWithStatus creates a horizontal table line with status column
-func formatTableLineWithStatus(pkgW, catW, localW, remoteW, statusW int, position string) string {
+// getVerdictColor returns the appropriate color for a Verdict. Redundant is the
+// warning colour because it is the only verdict that asks for an action.
+func getVerdictColor(verdict Verdict) *color.Color {
+	switch verdict {
+	case VerdictKeep:
+		return output.Success
+	case VerdictRedundant:
+		return output.Warning
+	case VerdictNeedsRebase:
+		return output.Info
+	case VerdictUnknown:
+		return output.Dim
+	default:
+		return nil
+	}
+}
+
+// formatSectionLine creates a horizontal line for the section table (the wide
+// one, carrying both judgement columns: Status and Verdict).
+func formatSectionLine(w columnWidths, position string) string {
 	var left, mid, right, horiz string
 
 	switch position {
@@ -834,33 +951,45 @@ func formatTableLineWithStatus(pkgW, catW, localW, remoteW, statusW int, positio
 		left, mid, right, horiz = "└", "┴", "┘", "─"
 	}
 
-	return fmt.Sprintf("%s%s%s%s%s%s%s%s%s%s%s\n",
-		left, strings.Repeat(horiz, pkgW+2),
-		mid, strings.Repeat(horiz, catW+2),
-		mid, strings.Repeat(horiz, localW+2),
-		mid, strings.Repeat(horiz, remoteW+2),
-		mid, strings.Repeat(horiz, statusW+2), right)
+	var sb strings.Builder
+	sb.WriteString(left)
+	// One entry per column, left to right: adding a column means adding it here
+	// and to formatSectionRow, and nowhere else.
+	for i, width := range []int{w.pkg, w.cat, w.local, w.remote, w.status, w.verdict} {
+		if i > 0 {
+			sb.WriteString(mid)
+		}
+		sb.WriteString(strings.Repeat(horiz, width+2))
+	}
+	sb.WriteString(right)
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
-// formatTableRowWithStatus creates a table row with status column
-func formatTableRowWithStatus(pkgW, catW, localW, remoteW, statusW int, pkg, cat, local, remote, status string, header bool, statusColor *color.Color) string {
+// formatSectionRow creates a row of the section table. Only the two judgement
+// columns are coloured: the facts are printed plain, the reading of them is not.
+func formatSectionRow(w columnWidths, pkg, cat, local, remote, status, verdict string, header bool, statusColor, verdictColor *color.Color) string {
 	if header {
-		format := "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n"
-		row := fmt.Sprintf(format, pkgW, pkg, catW, cat, localW, local, remoteW, remote, statusW, status)
+		format := "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n"
+		row := fmt.Sprintf(format, w.pkg, pkg, w.cat, cat, w.local, local, w.remote, remote, w.status, status, w.verdict, verdict)
 		return output.Sprint(output.Header, row)
 	}
 
-	// Format status with color if provided
-	var statusStr string
-	if statusColor != nil {
-		statusStr = output.Sprintf(statusColor, "%-*s", statusW, status)
-	} else {
-		statusStr = fmt.Sprintf("%-*s", statusW, status)
-	}
+	return fmt.Sprintf("│ %-*s │ %-*s │ %-*s │ %-*s │ %s │ %s │\n",
+		w.pkg, pkg, w.cat, cat, w.local, local, w.remote, remote,
+		paddedCell(status, w.status, statusColor),
+		paddedCell(verdict, w.verdict, verdictColor))
+}
 
-	// Build row with colored status
-	return fmt.Sprintf("│ %-*s │ %-*s │ %-*s │ %-*s │ %s │\n",
-		pkgW, pkg, catW, cat, localW, local, remoteW, remote, statusStr)
+// paddedCell pads a cell to width and then colours it, in that order: padding a
+// string that already carries escape codes would count them toward its width
+// and misalign the table.
+func paddedCell(s string, width int, c *color.Color) string {
+	if c == nil {
+		return fmt.Sprintf("%-*s", width, s)
+	}
+	return output.Sprintf(c, "%-*s", width, s)
 }
 
 // formatTableLine creates a horizontal table line

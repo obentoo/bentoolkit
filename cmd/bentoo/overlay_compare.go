@@ -24,7 +24,13 @@ var (
 	compareTimeout      int
 	compareToken        string
 	compareOnlyOutdated bool
-	compareSync         bool
+	// compareOnlyRedundant and compareOnlyPatched narrow the REPORT, not the
+	// comparison: they are applied to the finished results by
+	// filterCompareResults (D7), unlike compareOnlyOutdated which selects on
+	// Status inside CompareOptions.
+	compareOnlyRedundant bool
+	compareOnlyPatched   bool
+	compareSync          bool
 	// compareConcurrency bounds parallel upstream comparisons (range [1,100])
 	compareConcurrency int
 )
@@ -47,6 +53,9 @@ based on the repository's source URL. Use --clone to force git clone.
 
 By default, all packages are shown (outdated, up-to-date, and newer).
 Use --only-outdated to filter and show only packages that need updates.
+Use --only-redundant to see just the removal candidates, or --only-patched
+to see just the packages an .autoupdate/packages.toml entry declares a
+divergence for. The three filters combine by intersection.
 
 Examples:
   bentoo overlay compare                    # Compare with gentoo (API)
@@ -54,7 +63,9 @@ Examples:
   bentoo overlay compare some-overlay       # Compare with any registered repo
   bentoo overlay compare --clone            # Compare with gentoo (git clone)
   bentoo overlay compare --sync             # Refresh repo list before comparing
-  bentoo overlay compare --only-outdated    # Show only outdated packages`,
+  bentoo overlay compare --only-outdated    # Show only outdated packages
+  bentoo overlay compare --only-redundant   # Show only removal candidates
+  bentoo overlay compare --only-patched     # Show only declared divergences`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runCompare,
 }
@@ -66,6 +77,8 @@ func init() {
 	compareCmd.Flags().IntVar(&compareTimeout, "timeout", 30, "HTTP request timeout in seconds")
 	compareCmd.Flags().StringVar(&compareToken, "token", "", "Auth token for API provider")
 	compareCmd.Flags().BoolVar(&compareOnlyOutdated, "only-outdated", false, "Show only outdated packages (Bentoo < Gentoo)")
+	compareCmd.Flags().BoolVar(&compareOnlyRedundant, "only-redundant", false, "Show only redundant packages (removal candidates)")
+	compareCmd.Flags().BoolVar(&compareOnlyPatched, "only-patched", false, "Show only packages a registry entry declares a divergence for")
 	compareCmd.Flags().BoolVar(&compareSync, "sync", false, "Force refresh of repository list")
 	compareCmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
 	overlayCmd.AddCommand(compareCmd)
@@ -262,9 +275,23 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// Clear progress line
 	fmt.Printf("\r%s\r", "                                                                  ")
 
-	// Display results
+	// Narrow the VIEW, never the computation (D7). The comparison above already
+	// produced the whole picture; only report.Results — the rows the table
+	// prints — is narrowed here, and every counter on report keeps the value the
+	// unfiltered run produced. That is what makes a filtered run and a full run
+	// unable to disagree about a package, and it is why the summary below still
+	// answers "what is in the overlay" rather than "what did you ask to see".
+	//
+	// --only-outdated is deliberately NOT a parameter: it selects on Status
+	// inside CompareOptions above and has already removed its rows, so the
+	// filters compose by intersection without anyone arranging it — each stage
+	// only ever removes.
+	report.Results = filterCompareResults(report.Results, compareOnlyRedundant, compareOnlyPatched)
+
+	// Display results. Nothing left to show is reported BEFORE FormatReport, so
+	// the report never has to explain an emptiness it cannot see the cause of.
 	if len(report.Results) == 0 {
-		logger.Info("%s", output.Sprintf(output.Success, "All packages are up-to-date with %s!", repoInfo.Name))
+		reportEmptyCompare(repoInfo.Name, compareOnlyRedundant, compareOnlyPatched)
 		printComparisonSummary(report, repoInfo.Name)
 		return
 	}
@@ -274,6 +301,93 @@ func runCompare(cmd *cobra.Command, args []string) {
 
 	// Print summary
 	printComparisonSummary(report, repoInfo.Name)
+}
+
+// filterCompareResults narrows a report to the rows the operator asked for.
+// Both flags false returns the input unchanged, order preserved; both true
+// intersects (R5.3). It is a pure function over the finished results rather
+// than a condition inside CompareOptions, so the comparison always computes
+// the whole picture and only the presentation narrows — a filtered run and a
+// full run can therefore never disagree about a package (D7).
+//
+// The two flags select on two different fields, and that difference is the
+// point. --only-redundant reads the Verdict, which is derived: it asks "should
+// this package leave the overlay?". --only-patched reads Patched, which is
+// declared: it asks "did we say we changed something here?". A package can be
+// patched under any verdict, so neither is a rename of the other.
+//
+// --only-outdated is absent by construction: it selects on Status inside
+// CompareWithProvider (UB2), so this function runs on the set that filter
+// already left behind. Every stage only removes rows, which is why combining
+// them is an intersection with nothing to arrange.
+//
+// A matching slice is BUILT rather than compacted in place: filtering with
+// results[:0] would rewrite the caller's backing array, which is the sort of
+// aliasing a "pure narrowing" must not do. There is no error path — a filter
+// that matches nothing is an answer, not a failure, and the caller says so in
+// words.
+func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPatched bool) []overlay.CompareResult {
+	if !onlyRedundant && !onlyPatched {
+		return results
+	}
+
+	filtered := make([]overlay.CompareResult, 0, len(results))
+	for _, r := range results {
+		if onlyRedundant && r.Verdict != overlay.VerdictRedundant {
+			continue
+		}
+		if onlyPatched && !r.Patched {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
+}
+
+// reportEmptyCompare says why the report has no rows to show.
+//
+// "All packages are up-to-date" is a claim only an UNFILTERED run can make.
+// Reached after a filter it is simply false, and misleading in exactly the way
+// this story exists to remove: --only-redundant on an overlay with nothing to
+// remove would print the very same words as on one whose removal candidates the
+// operator never asked to see. A filtered run therefore names the filter that
+// returned nothing, and the success message stays reserved for the run that
+// looked at everything.
+//
+// This is also the ONLY place that CAN name it. FormatReport takes a
+// *CompareReport and never learns which flags were passed, so its own
+// "All packages are up-to-date!" short-circuit could not name a filter even if
+// it wanted to — which is why the caller filters before testing for emptiness:
+// FormatReport is then never reached with an empty result set, and that
+// sentence is off both paths at once.
+func reportEmptyCompare(repoName string, onlyRedundant, onlyPatched bool) {
+	if filters := activeCompareFilters(onlyRedundant, onlyPatched); len(filters) > 0 {
+		// The names are this function's own literals, so joining them into an
+		// ARGUMENT — never into the format string — costs nothing and keeps the
+		// habit intact for the day one of them is not.
+		logger.Info("%s", output.Sprintf(output.Info,
+			"No package matches %s.", strings.Join(filters, " ")))
+		return
+	}
+	logger.Info("%s", output.Sprintf(output.Success, "All packages are up-to-date with %s!", repoName))
+}
+
+// activeCompareFilters names the presentation filters in play, in the order
+// they are declared, so an empty report can say which question returned nothing
+// instead of claiming the overlay is healthy.
+//
+// It names only the filters filterCompareResults applies. --only-outdated is
+// left out on purpose: an empty result set under that flag alone means nothing
+// is outdated, which IS the up-to-date message and must keep printing it.
+func activeCompareFilters(onlyRedundant, onlyPatched bool) []string {
+	var names []string
+	if onlyRedundant {
+		names = append(names, "--only-redundant")
+	}
+	if onlyPatched {
+		names = append(names, "--only-patched")
+	}
+	return names
 }
 
 // buildDivergenceMap turns the registry into the per-atom view compare needs:
