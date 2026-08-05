@@ -435,13 +435,15 @@ type Divergence struct {
 //
 // # What is compared, and what is skipped
 //
-// A disabled (enabled = false) or held (hold = true) entry is skipped: the
-// existing overlay-driven status reconciliation in CheckAll owns those, and
-// R3.5 requires this to leave it alone. Their ebuilds are NOT thereby unclaimed
-// — a switched-off entry still holds its file (see resolveClaims) — so the
-// unclaimed scan below counts every entry of a directory, disabled ones
-// included, while only enabled ones can be the SUBJECT of a divergence. The two
-// functions differ deliberately on this point; do not unify them.
+// A disabled (enabled = false) entry is skipped: the existing overlay-driven
+// status reconciliation in CheckAll owns it, and S021-R3.5 requires this to
+// leave it alone. A held (hold = true) entry is NOT skipped — see the skip
+// itself for why the two were never the same reason (S026-R3.2). A disabled
+// entry's ebuild is NOT thereby unclaimed — a switched-off entry still holds
+// its file (see resolveClaims) — so the unclaimed scan below counts every entry
+// of a directory, disabled ones included, while only enabled ones can be the
+// SUBJECT of a divergence. The two functions differ deliberately on this point;
+// do not unify them.
 //
 // Resolution goes through selectCurrentEbuild, so ":slot" and `series` are
 // filtered by the one implementation the checker and the sweep use (D2). Its
@@ -481,9 +483,21 @@ func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
 
 	for _, key := range sortedKeys(cfgs) {
 		cfg := cfgs[key]
-		// R3.5: the enabled = false reconciliation owns these entries, and a
-		// held entry is a maintainer decision this must not second-guess.
-		if !cfg.IsEnabled() || cfg.IsHeld() {
+		// enabled = false is the ONLY skip here, and the two conditions this
+		// once bundled were never the same reason (S026-R3.2):
+		//
+		//   - a disabled entry is skipped because there is nothing to record —
+		//     that flag is the checker's own bookkeeping for "the ebuild
+		//     vanished from the overlay" — and the overlay-driven status
+		//     reconciliation in CheckAll owns the entry (S026-R3.1, S021-R3.5);
+		//   - a HELD entry is skipped by the CHECKER, which must not auto-bump
+		//     it. That is a statement about fetching a new version, and it says
+		//     nothing about recording the one already on disk: hold means
+		//     "present, but do not auto-bump", so the file IS there and writing
+		//     down which version it is second-guesses no maintainer decision.
+		//     It is therefore compared like any other entry (S026-R1.1) and its
+		//     hold is never written back (S026-R2.1).
+		if !cfg.IsEnabled() {
 			continue
 		}
 		category, pkgName, ok := splitPkgAtom(key)

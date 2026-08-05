@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A held registry entry now records which ebuild it keeps.** The post-check
+  reconciliation fills in each entry's `version` pin from what is on disk, and
+  it skipped `hold = true` entries alongside `enabled = false` ones — a single
+  condition covering two situations that were never the same. A disabled entry
+  is skipped because there is nothing to record; a held entry was skipped to
+  respect a maintainer decision. But `hold` means *"present, but do not
+  auto-bump"*: the ebuild is on disk, and writing down which version it is
+  second-guesses nothing. The consequence was that all three held entries in the
+  registry had no pin and, by construction, never could — no number of `--check`
+  runs would fill one in, and a manual bump of a held package left the registry
+  stale with nothing on screen to say so.
+
+  A held entry is now compared and reported exactly like any other: a
+  disagreement is a stale pin in the same batch and the same confirmation, and a
+  held entry whose directory holds no ebuild lands in the no-ebuild class, which
+  is never written and so cannot erase the pin it still carries. Holding itself
+  is untouched — a held package is still excluded from the check, from
+  auto-disable and from revive, and the reconciliation never writes an entry's
+  `hold` or `enabled` back. Disabled entries stay out, for the reason that
+  actually applies to them.
+
 ## [0.19.0] - 2026-08-04
 
 ### Added
