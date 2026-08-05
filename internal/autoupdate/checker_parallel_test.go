@@ -82,7 +82,18 @@ func buildParallelChecker(t *testing.T, numPkgs int, srvURL string, opts ...Chec
 	names := make([]string, 0, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("cat-%03d/pkg-%03d", i, i)
-		packages[name] = PackageConfig{URL: srvURL, Parser: "json", Path: "version"}
+		// A DISTINCT path per package. These fixtures observe concurrency
+		// through the rate limiter, and story 024's body cache lets only one
+		// read per distinct URL reach the limiter (S024-R2.2) — so packages
+		// sharing a single URL would report a peak of ONE in-flight worker for
+		// a checker running ten, measuring deduplication instead of the
+		// parallelism these tests are named for. Distinct URLs also match the
+		// live registry's shape: 230 distinct URLs across 411 records.
+		packages[name] = PackageConfig{
+			URL:    fmt.Sprintf("%s/pkg-%03d", srvURL, i),
+			Parser: "json",
+			Path:   "version",
+		}
 		createTestEbuild(t, overlayDir, name, "0.9.0")
 		names = append(names, name)
 	}

@@ -265,6 +265,20 @@ type Checker struct {
 	// default 1-hour TTL. It is ignored when a Cache is injected via WithCache,
 	// since that injected Cache carries its own TTL.
 	cacheTTL time.Duration
+	// bodies deduplicates upstream response bodies within this Checker's
+	// lifetime — one command invocation (S024-R2.4). fetchContent consults it
+	// BEFORE the rate-limiter wait, so a read answered from an already-fetched
+	// body costs neither a request nor a token (S024-R2.1, S024-R2.2).
+	//
+	// It is distinct from `cache` above: that one is the on-disk, TTL'd record of
+	// resolved VERSIONS across runs; this one is in-memory, has no TTL, holds raw
+	// response BYTES, and is discarded when the run ends.
+	//
+	// NIL IS THE OFF SWITCH, and it is a supported state rather than a defect:
+	// fetchContent then calls fetchContentUncached directly, which is the
+	// pre-story path byte for byte. NewChecker builds one in the struct literal
+	// below, so deduplication is on by default.
+	bodies *bodyCache
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -459,6 +473,39 @@ func WithCacheTTL(d time.Duration) CheckerOption {
 	}
 }
 
+// WithFetchCache turns per-run deduplication of upstream response bodies on or
+// off. It is ON by default (S024-R7.2) — NewChecker builds a cache in its struct
+// literal — so the only reason to pass this option at all is to turn it OFF.
+//
+// DISABLED IS THE ABSENCE OF A CACHE, not a flag consulted somewhere on the
+// fetch path: false sets the field to nil, and fetchContent then calls
+// fetchContentUncached directly. That is what makes the off switch worth
+// trusting as a bisection tool — the disabled path is not a second
+// implementation to audit, it is the code that shipped before this story, byte
+// for byte, with no join, no sharing and no retention.
+//
+// true INSTALLS a cache only when none is present rather than replacing one that
+// is. The option is therefore idempotent: applying it after the default
+// construction — which is every real call — keeps the single cache already
+// there, along with the bodies and counters it has accumulated. Rebuilding
+// unconditionally would silently discard a run's shared bodies, so that every
+// read taken before the option was applied would be paid for a second time.
+//
+// It cannot fail: a bool has no invalid value. The error in the return type is
+// the CheckerOption signature, not a possibility.
+func WithFetchCache(enabled bool) CheckerOption {
+	return func(c *Checker) error {
+		if !enabled {
+			c.bodies = nil
+			return nil
+		}
+		if c.bodies == nil {
+			c.bodies = newDefaultBodyCache()
+		}
+		return nil
+	}
+}
+
 // NewChecker creates a new checker instance for the given overlay.
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
@@ -471,6 +518,13 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		ctx:         context.Background(), // SAFE: default parent; replaced by WithContext when cmd/ wires signal.NotifyContext
 		opTimeout:   DefaultOpTimeout,
 		concurrency: DefaultConcurrency,
+		// Per-run body deduplication is ON by default (S024-R2.1). It is built
+		// HERE, in the literal, rather than after the options loop, so that
+		// "disabled" can be expressed as the ABSENCE of a cache — an option that
+		// simply sets the field back to nil — instead of a flag threaded through
+		// the fetch path. fetchContent then has one branch on one field, and the
+		// off state is the pre-story code verbatim.
+		bodies: newDefaultBodyCache(),
 	}
 
 	// Apply options first to allow overriding configDir
@@ -1648,7 +1702,62 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 	return parser.ParseLive(ctx)
 }
 
-// fetchContent fetches content from a URL using the HTTP client with retry logic.
+// fetchContent is the single door every upstream read in this package goes
+// through, and therefore the one place per-run deduplication can be installed
+// without touching a caller: base_url, fallback_url and the intra-package
+// auxiliary reads all gain it by already being here (S024-R2.5).
+//
+// It answers a read from a body this run already fetched when one exists, and
+// otherwise delegates to fetchContentUncached — the pre-story path, unchanged.
+//
+// THE RETURNED BODY IS SHARED, NOT COPIED, AND MUST BE TREATED AS READ-ONLY
+// (story 024 assumption A1). Every record that asked for the same fetch identity
+// receives the SAME backing array, so a caller that mutates it corrupts what
+// every other record sees — and does so silently: nothing fails loudly, one
+// package simply starts reporting another package's version. Every consumer
+// downstream of this function reads without mutating today (parseJSON,
+// parseRegex, goquery, htmlquery); a future one that needs to write must copy
+// first. Copying per caller here would reinstate exactly the memory cost the
+// cache exists to remove, so the contract is the mechanism rather than an
+// optimisation layered on top of one.
+//
+// THE LOOKUP PRECEDES THE RATE-LIMITER WAIT, and that ordering is the entire
+// point rather than an implementation detail: the wait lives inside
+// fetchContentUncached, so a read served from a retained body acquires no token
+// (S024-R2.2). At one token per 6 s per host, a hit that still queued for a
+// token would save the request and none of the wall-clock time this exists for.
+// UB1 is preserved by the same arrangement: every request that IS issued still
+// goes through the limiter, at the same interval and burst, because the only way
+// to reach the request is through fetchContentUncached.
+//
+// EACH CALLER'S CLOSURE CAPTURES ITS OWN opTimeout. That is what makes S024-R3.4
+// fall out of the structure instead of needing machinery: a caller released by a
+// leader whose fetch FAILED invokes its own closure, with its own full
+// per-operation budget, and so cannot inherit an already-expired deadline it did
+// not set. Nothing here extends, shares or reuses a context.
+//
+// A nil bodies cache means deduplication is off, and that path is the pre-story
+// behaviour byte for byte — no join, no sharing, no retention.
+//
+// The error is returned exactly as the underlying fetch produced it: bodyCache.do
+// neither caches nor shares a failure, so callers' errors.Is checks against
+// context.Canceled, context.DeadlineExceeded and ErrResponseTooLarge keep holding.
+func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
+	if c.bodies == nil {
+		return c.fetchContentUncached(rawURL, headers, opTimeout)
+	}
+
+	return c.bodies.do(c.ctx, bodyKey(rawURL, headers), func() ([]byte, error) {
+		return c.fetchContentUncached(rawURL, headers, opTimeout)
+	})
+}
+
+// fetchContentUncached fetches content from a URL using the HTTP client with retry logic.
+//
+// It is the fetch itself, with no deduplication of any kind: every call issues a
+// request. It is reached only through fetchContent, which decides whether a
+// request is needed at all; calling it directly would bypass the join and is
+// what the arrangement above exists to make unnecessary.
 //
 // It first gates on the per-host rate limiter (S001-R10.1), waiting on the Checker's
 // parent context (set via WithContext) so the wait is signal-cancellable but
@@ -1669,7 +1778,7 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 // URLs, the configured GitHub token. Passing them through GetWithHeadersContext
 // (rather than the bare GetWithContext) is what actually puts the User-Agent,
 // the Authorization token, and any TOML-declared headers on the wire.
-func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
+func (c *Checker) fetchContentUncached(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -1907,7 +2016,51 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 		return results[i].Package < results[j].Package
 	})
 
+	// One line per run, at DEBUG, reporting what the body deduplication did
+	// (S024-R6.1). It is emitted after wg.Wait above, so every worker has joined
+	// and the figures are final rather than a mid-flight sample.
+	//
+	// CheckAll has a SINGLE exit — the return below — so a plain call here emits
+	// exactly once per run. If a second return is ever added, this must become a
+	// defer at the top of the function; otherwise that new path would silently
+	// report nothing.
+	c.logFetchCacheStats()
+
 	return BatchResult[CheckResult]{Items: results, Failures: failures}
+}
+
+// logFetchCacheStats emits this run's body-deduplication counters ONCE, at
+// DEBUG, and at no other level (S024-R6.1, S024-R6.2, S024-R6.3).
+//
+// DEBUG IS THE CEILING, not a default that could be nudged up later. A miss is
+// the normal state of a cold cache and a refused retention is a memory bound
+// doing its job — neither is a defect, so neither is a warning. The failure this
+// rule exists to prevent is concrete: 411 records at one line per read would
+// push the warnings that do need a human clean off the screen. It is the same
+// reason the figures are summarised once per run instead of per read, and the
+// reason bodyCache itself logs nothing whatsoever.
+//
+// All six counters go on one line, in the order a reader asks about them: what
+// the cache saved (hits, joins), what it still cost (misses, refetches), and
+// what it declined to keep. The two refusals are spelled out per limit rather
+// than summed, because "not retained" without the limit that refused it does not
+// tell an operator which number to raise (S024-R6.2) — and the names say
+// not_retained precisely because a refusal never affects the body its caller
+// received, only whether the next caller must fetch it again.
+//
+// A nil cache emits NOTHING — not a line of zeros. Deduplication is off, so
+// there are no figures to report, and six zeros would read like a cache that ran
+// and achieved nothing rather than one that was never there.
+func (c *Checker) logFetchCacheStats() {
+	if c.bodies == nil {
+		return
+	}
+
+	stats := c.bodies.snapshot()
+	logger.Debug("fetch cache: hits=%d joins=%d misses=%d refetches=%d "+
+		"not_retained_oversize=%d not_retained_budget_full=%d",
+		stats.Hits, stats.Joins, stats.Misses, stats.Refetches,
+		stats.Oversize, stats.BudgetFull)
 }
 
 // Config returns the packages configuration.

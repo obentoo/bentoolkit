@@ -523,6 +523,17 @@ const (
 	DefaultFetchCacheBudget int64 = 64 << 20
 )
 
+// newDefaultBodyCache builds the cache a real run uses, at the limits above.
+//
+// It exists so the two places that install one — NewChecker's struct literal and
+// WithFetchCache(true) — cannot drift apart. "Enabled explicitly" has to mean
+// exactly "enabled by default"; with the limits spelled out at both sites that
+// would hold only by coincidence, and a future edit to one argument list would
+// make an option that claims to be the default quietly install something else.
+func newDefaultBodyCache() *bodyCache {
+	return newBodyCache(DefaultFetchCachePerBody, DefaultFetchCacheBudget)
+}
+
 // admitLocked reports whether a freshly fetched body may be RETAINED for callers
 // that have not arrived yet, and charges it against the run budget when it may.
 // It is the one question both retention paths ask — publish, for the body a
