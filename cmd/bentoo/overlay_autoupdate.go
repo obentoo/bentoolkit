@@ -120,7 +120,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
-	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "Remove the old ebuild after a successful apply, keeping only the new version")
+	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100)")
 	autoupdateCmd.Flags().IntVar(&autoupdateTimeout, "timeout", 0, "per-request HTTP timeout in seconds for --check (0 = use config autoupdate.http_timeout, default 30)")
 	autoupdateCmd.Flags().StringVar(&autoupdateOnly, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
@@ -296,6 +296,15 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateRevive != "":
 		runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
+	case autoupdateClean:
+		// MUST stay below both --apply cases (S027-G6): above them it would
+		// convert every existing `--apply … --clean` invocation into an
+		// overlay-wide sweep. With --apply present those cases match first and
+		// --clean keeps meaning "sweep the directory this apply touched".
+		// The concurrency decision is resolved HERE, where cmd is in scope:
+		// reading autoupdateCmd from inside runSweep would close an
+		// initialization cycle (autoupdateCmd → Run → runSweep → autoupdateCmd).
+		runSweep(runCtx, overlayPath, args, sweepConcurrency(cmd.Flags().Changed("concurrency")))
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
@@ -673,7 +682,9 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	// Grouped by class, each group keeping Reconcile's order (sorted by key,
 	// then by class, then in Gentoo version order) so two runs over an unchanged
 	// overlay print the identical list.
-	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(autoupdate.Divergence) string) {
+	// Returns how many lines the group printed, so a caller can append a
+	// follow-up line only to a group that actually appeared (R7.1).
+	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(autoupdate.Divergence) string) int {
 		var body []string
 		for _, d := range divs {
 			if d.Kind == kind {
@@ -681,25 +692,34 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 			}
 		}
 		if len(body) == 0 {
-			return
+			return 0
 		}
 		fmt.Printf("  %s (%d):\n", heading, len(body))
 		for _, l := range body {
 			fmt.Printf("    %s\n", l)
 		}
 		fmt.Println()
+		return len(body)
 	}
 
-	printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence) string {
+	_ = printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence) string {
 		if d.Pin == "" {
 			return fmt.Sprintf("%-45s (no pin) → %s", d.Key, d.Disk)
 		}
 		return fmt.Sprintf("%-45s %s → %s", d.Key, d.Pin, d.Disk)
 	})
-	printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence) string {
+	unclaimed := printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence) string {
 		return fmt.Sprintf("%-45s %s", d.Key, d.Disk)
 	})
-	printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence) string {
+	if unclaimed > 0 {
+		// R7.1: this report used to end at the finding. Naming the command that
+		// acts on it closes the loop — an unclaimed ebuild is removed by a
+		// sweep, and until story 027 the only sweep ran inside an apply, so a
+		// package already at its upstream version could never reach one.
+		output.Info.Println("  Remove them with: bentoo overlay autoupdate --clean")
+		fmt.Println()
+	}
+	_ = printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence) string {
 		if d.Pin == "" {
 			return fmt.Sprintf("%-45s (no pin)", d.Key)
 		}
