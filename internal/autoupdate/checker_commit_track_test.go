@@ -342,6 +342,21 @@ func TestCheckPackageCommitTrack_SkipsCache(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
+		// The cache this test is about is the ON-DISK version cache, whose TTL
+		// is an hour and which `track = commit` must bypass so a commit-tracked
+		// package is never reported from a stale entry. Story 024 added a
+		// SECOND, unrelated cache — in-memory response bodies, scoped to one
+		// Checker and discarded when the run ends — and it would serve the
+		// second CheckPackage call below from memory, hiding the disk-cache
+		// bypass this test exists to prove.
+		//
+		// Switching it off keeps the two concerns separate rather than
+		// weakening the assertion. It changes nothing about production: CheckAll
+		// calls CheckPackage once per package, so reading one identity twice in
+		// a single run is a shape only this test builds. And sharing a body
+		// fetched seconds earlier in the same run is as fresh as `--force` can
+		// make it either way (S024-UB7).
+		WithFetchCache(false),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)

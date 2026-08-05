@@ -59,7 +59,18 @@ func newSpeedupChecker(tb testing.TB, numPkgs int, perPkg time.Duration, concurr
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("cat-%03d/pkg-%03d", i, i)
 		packages[name] = PackageConfig{
-			URL:    server.URL,
+			// A DISTINCT path per package, which is what makes this fixture
+			// measure parallelism rather than deduplication (S024-R2.1). The
+			// per-package latency below is injected through the rate limiter,
+			// and story 024's body cache lets only ONE read per distinct URL
+			// reach the limiter at all — so with every package sharing a single
+			// URL, 49 of 50 would skip the injected latency entirely and the
+			// serial baseline would collapse from ~5s to ~100ms, reporting a
+			// 1.0x speedup for a checker that parallelises perfectly.
+			//
+			// Distinct URLs are also the shape production actually has: the
+			// live registry holds 230 distinct URLs across 411 records.
+			URL:    fmt.Sprintf("%s/pkg-%03d", server.URL, i),
 			Parser: "json",
 			Path:   "version",
 		}
