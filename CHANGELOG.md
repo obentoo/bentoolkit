@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-05
+
 ### Added
 - **`bentoo overlay autoupdate --clean` now sweeps the overlay on its own,
   without `--apply`.** The post-check reconciliation could already tell you which
