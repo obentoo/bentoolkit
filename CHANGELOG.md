@@ -27,7 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry's pin (see below) means a hand-bumped held package leaves its previous
   ebuild unclaimed — and that ebuild is the fallback `hold` exists to keep. It is
   still reported by `--check`, so nothing becomes invisible; it is simply never
-  removed for you. Clean it by hand if you want it gone.
+  removed for you. The sweep lists those directories under their own **Held**
+  heading rather than passing over them quietly, because `--check` ends its
+  unclaimed list by pointing at `--clean`: a sweep that answered "every ebuild is
+  claimed" would contradict the report that sent you there. Clean it by hand if
+  you want it gone.
+
+  **The sweep runs one directory at a time unless you say otherwise.** The
+  `--concurrency` flag describes parallel checks and applies; it now has to be
+  passed explicitly to widen a sweep. Whether concurrent `pkgdev manifest` runs
+  contend on DISTDIR or on pkgdev's own locking was never measured, and fanning
+  out ten processes that delete files on an unverified assumption is not a
+  default worth having.
 
 ### Fixed
 - **A held registry entry now records which ebuild it keeps.** The post-check

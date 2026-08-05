@@ -66,6 +66,75 @@ version = "2.0.0"
 	return overlayDir
 }
 
+// writeSweepOverlay builds an overlay from a package→versions map plus a
+// literal registry body, so a test that needs a different shape does not have to
+// copy sweepOverlayFixture to change one line.
+func writeSweepOverlay(t *testing.T, pkgs map[string][]string, registry string) string {
+	t.Helper()
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+	for pkg, versions := range pkgs {
+		pkgDir := filepath.Join(overlayDir, pkg)
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", pkg, err)
+		}
+		name := filepath.Base(pkg)
+		for _, v := range versions {
+			body := "EAPI=8\nDESCRIPTION=\"t\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\n"
+			if err := os.WriteFile(filepath.Join(pkgDir, name+"-"+v+".ebuild"), []byte(body), 0o644); err != nil {
+				t.Fatalf("write %s-%s: %v", name, v, err)
+			}
+		}
+	}
+	registryDir := filepath.Join(overlayDir, ".autoupdate")
+	if err := os.MkdirAll(registryDir, 0o755); err != nil {
+		t.Fatalf("mkdir registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(registryDir, "packages.toml"), []byte(registry), 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	return overlayDir
+}
+
+// sweepOverlayFixtureMultiDir gives the batch more than one removable directory,
+// which is what makes a prompt count meaningful.
+func sweepOverlayFixtureMultiDir(t *testing.T) string {
+	t.Helper()
+	return writeSweepOverlay(t,
+		map[string][]string{
+			"test-cat/residue": {"1.0.0", "2.0.0"},
+			"test-cat/other":   {"1.0.0", "2.0.0"},
+		},
+		`["test-cat/residue"]
+url = "https://example.invalid/releases"
+parser = "json"
+path = "version"
+version = "2.0.0"
+
+["test-cat/other"]
+url = "https://example.invalid/releases"
+parser = "json"
+path = "version"
+version = "2.0.0"
+`)
+}
+
+// sweepOverlayFixtureHeldOnly holds residue in exactly one directory, and that
+// directory is held — so the sweep finds an unclaimed ebuild and removes
+// nothing. It is the shape in which "every ebuild is claimed by an entry" would
+// be a lie.
+func sweepOverlayFixtureHeldOnly(t *testing.T) string {
+	t.Helper()
+	return writeSweepOverlay(t,
+		map[string][]string{"test-cat/held": {"1.0.0", "2.0.0"}},
+		`["test-cat/held"]
+url = "https://example.invalid/releases"
+parser = "json"
+path = "version"
+version = "2.0.0"
+hold = true
+`)
+}
+
 func residueExists(t *testing.T, overlayDir, version string) bool {
 	t.Helper()
 	_, err := os.Stat(filepath.Join(overlayDir, "test-cat", "residue", "residue-"+version+".ebuild"))
@@ -106,7 +175,7 @@ func TestRunSweepRejectsInvalidTarget(t *testing.T) {
 	})
 
 	code, exited := captureStdoutExit(t, func() {
-		runSweep(context.Background(), overlayDir, []string{"no-such-category"})
+		runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
 	})
 	if !exited || code == 0 {
 		t.Errorf("exit code = %d, exited = %v; want a non-zero exit", code, exited)
@@ -127,7 +196,7 @@ func TestRunSweepFailsWithoutARegistry(t *testing.T) {
 	setSweepClean(t, true)
 
 	code, exited := captureStdoutExit(t, func() {
-		runSweep(context.Background(), overlayDir, nil)
+		runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !exited || code == 0 {
 		t.Errorf("exit code = %d, exited = %v; want a non-zero exit", code, exited)
@@ -148,7 +217,7 @@ func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil)
+		runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") || !residueExists(t, overlayDir, "2.0.0") {
@@ -177,7 +246,7 @@ func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil)
+		runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") {
@@ -217,13 +286,81 @@ func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil)
+		runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !ran {
 		t.Fatal("--yes did not reach the executor")
 	}
 	if !strings.Contains(out, "claimed by test-cat/residue") {
 		t.Errorf("the report does not name the claiming entry:\n%s", out)
+	}
+}
+
+// TestRunSweepPromptsExactlyOnceForTheBatch is R3.2's missing half. Every other
+// test stubs the confirmation and checks WHETHER it fired; none counted it, so
+// "one confirmation covers the whole batch" was the one listed behaviour of
+// sub-task 5.3 with no assertion behind it. A per-directory prompt is the
+// regression this catches — it is how a batch gate decays into the click-through
+// the story set out to avoid, and it would pass every other test in this file.
+func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
+	overlayDir := sweepOverlayFixtureMultiDir(t)
+	setSweepClean(t, true)
+	setReconcileYes(t, false)
+	setReconcileInteractive(t, func() bool { return true })
+
+	var prompts int
+	setSweepConfirm(t, func(string) bool {
+		prompts++
+		return true
+	})
+
+	var dirsInBatch int
+	setSweepExecutor(t, func(_ context.Context, _ string, batch autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
+		dirsInBatch = len(batch.Dirs)
+		return autoupdate.SweepReport{}
+	})
+
+	captureStdout(t, func() {
+		runSweep(context.Background(), overlayDir, nil, 1)
+	})
+
+	if dirsInBatch < 2 {
+		t.Fatalf("the fixture produced %d candidate director(ies); this test proves nothing below 2", dirsInBatch)
+	}
+	if prompts != 1 {
+		t.Errorf("confirmation fired %d time(s) for %d directories, want exactly 1", prompts, dirsInBatch)
+	}
+}
+
+// TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed guards the
+// contradiction that the held filter would otherwise create: --check ends its
+// unclaimed group by pointing at --clean (R7.1), so a --clean that answers
+// "every ebuild is claimed by an entry" for a held finding tells the operator
+// the opposite of what they were just shown. The ebuild is unclaimed; it is
+// protected.
+func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
+	overlayDir := sweepOverlayFixtureHeldOnly(t)
+	setSweepClean(t, true)
+	setReconcileYes(t, false)
+	setReconcileInteractive(t, func() bool { return false })
+	setSweepConfirm(t, func(string) bool {
+		t.Fatal("a batch with nothing to remove must not prompt")
+		return false
+	})
+	setSweepExecutor(t, func(_ context.Context, _ string, _ autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
+		t.Fatal("the executor must not run when nothing is removable")
+		return autoupdate.SweepReport{}
+	})
+
+	out := captureStdout(t, func() {
+		runSweep(context.Background(), overlayDir, nil, 1)
+	})
+
+	if !strings.Contains(out, "test-cat/held") {
+		t.Errorf("the held directory is not named; the operator cannot tell why nothing happened:\n%s", out)
+	}
+	if strings.Contains(out, "every ebuild is claimed by an entry") {
+		t.Errorf("the sweep claims every ebuild is claimed, contradicting the --check report that sent the operator here:\n%s", out)
 	}
 }
 
@@ -244,7 +381,7 @@ func TestRunSweepNothingToDoDoesNotPrompt(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil)
+		runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !strings.Contains(out, "Nothing to sweep") {
 		t.Errorf("an empty plan did not say so:\n%s", out)

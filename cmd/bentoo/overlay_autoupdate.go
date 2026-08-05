@@ -301,7 +301,10 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		// convert every existing `--apply … --clean` invocation into an
 		// overlay-wide sweep. With --apply present those cases match first and
 		// --clean keeps meaning "sweep the directory this apply touched".
-		runSweep(runCtx, overlayPath, args)
+		// The concurrency decision is resolved HERE, where cmd is in scope:
+		// reading autoupdateCmd from inside runSweep would close an
+		// initialization cycle (autoupdateCmd → Run → runSweep → autoupdateCmd).
+		runSweep(runCtx, overlayPath, args, sweepConcurrency(cmd.Flags().Changed("concurrency")))
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable

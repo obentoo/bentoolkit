@@ -41,7 +41,10 @@ var (
 // byte-identical by construction rather than by care. The overlay auto-commits
 // and pushes, so a wrong removal is a published removal within minutes; that is
 // why the non-interactive path refuses instead of assuming consent.
-func runSweep(ctx context.Context, overlayPath string, args []string) {
+//
+// concurrency is resolved by the caller — see sweepConcurrency below for why it
+// is not read from the flag here.
+func runSweep(ctx context.Context, overlayPath string, args []string, concurrency int) {
 	// A sweep with no registry has no claims, and "no entry claims this" is the
 	// state in which planSweep refuses to remove anything. Failing loudly here
 	// is the honest outcome: the alternative is an empty batch that reads as
@@ -70,7 +73,19 @@ func runSweep(ctx context.Context, overlayPath string, args []string) {
 	if batch.TotalRemove == 0 {
 		// R3.5: there is nothing to confirm. Asking "remove 0 files?" would
 		// train the operator to say yes.
-		output.Info.Println("  Nothing to sweep: every ebuild is claimed by an entry.")
+		//
+		// The reason matters as much as the fact. "Every ebuild is claimed" is
+		// only true when nothing was found at all; saying it after finding
+		// unclaimed ebuilds and declining to touch them — because they are held,
+		// blocked, or the last non-live file of their directory — contradicts
+		// the very report that pointed the operator here (S027-R7.1). The groups
+		// above already list each case; this line only names why the count is 0.
+		switch {
+		case len(batch.SkippedHeld) > 0 || len(batch.Dirs) > 0:
+			output.Info.Println("  Nothing to sweep: every unclaimed ebuild found is protected — see the groups above.")
+		default:
+			output.Info.Println("  Nothing to sweep: every ebuild is claimed by an entry.")
+		}
 		return
 	}
 
@@ -79,10 +94,36 @@ func runSweep(ctx context.Context, overlayPath string, args []string) {
 	}
 
 	report := sweepExecutorFn(ctx, overlayPath, batch,
-		autoupdate.WithSweepConcurrency(autoupdateConcurrency),
+		autoupdate.WithSweepConcurrency(concurrency),
 		autoupdate.WithSweepPackagesConfig(cfg.Packages),
 	)
 	displaySweepReport(report)
+}
+
+// sweepConcurrency returns how many directories the sweep may process at once.
+//
+// It is 1 unless --concurrency was passed explicitly, and that is a deliberate
+// departure from the flag's default of DefaultConcurrency (10). Assumption A3 —
+// "confirm that N concurrent invocations do not collide on DISTDIR or on
+// pkgdev's locking BEFORE enabling R4.3's concurrency" — was never discharged:
+// nothing in this story measured concurrent `pkgdev manifest` runs against one
+// another. ExecuteOverlaySweep already defaults to 1 for that reason, but that
+// default was unreachable in production, because runSweep is its only caller and
+// it forwarded a flag whose own help text describes "parallel checks/applies"
+// and says nothing about sweeps.
+//
+// Running the fan-out anyway would mean shipping ten concurrent processes that
+// delete files, on an assumption the story itself flagged and never checked. An
+// operator who has verified it can still say so with --concurrency.
+//
+// flagWasSet is passed in rather than read from autoupdateCmd here: that command
+// value is initialised with a Run func that reaches this file, so touching it
+// from this package closes an initialization cycle.
+func sweepConcurrency(flagWasSet bool) int {
+	if flagWasSet {
+		return autoupdateConcurrency
+	}
+	return 1
 }
 
 // displaySweepPlan prints the whole batch before anything is removed.
@@ -95,7 +136,7 @@ func displaySweepPlan(batch autoupdate.SweepBatch) {
 	output.Header.Println("Overlay Sweep")
 	fmt.Println()
 
-	if len(batch.Dirs) == 0 && len(batch.PlanErrors) == 0 {
+	if len(batch.Dirs) == 0 && len(batch.PlanErrors) == 0 && len(batch.SkippedHeld) == 0 {
 		output.Info.Println("  No package directory holds an ebuild that no entry claims.")
 		return
 	}
@@ -137,6 +178,15 @@ func displaySweepPlan(batch autoupdate.SweepBatch) {
 				output.Info.Printf("      would have removed: %s\n", strings.Join(d.WouldRemove, ", "))
 			}
 		}
+		fmt.Println()
+	}
+
+	if len(batch.SkippedHeld) > 0 {
+		fmt.Printf("  Held — reported by --check, never swept (%d):\n", len(batch.SkippedHeld))
+		for _, a := range batch.SkippedHeld {
+			fmt.Printf("    %-45s held: clean it by hand if you want it gone\n", a)
+		}
+		output.Info.Println("      A held package's older ebuild is usually the fallback `hold` exists to keep.")
 		fmt.Println()
 	}
 

@@ -204,6 +204,16 @@ type SweepBatch struct {
 	Dirs []SweepDirPlan
 	// PlanErrors holds the directories that could not be planned.
 	PlanErrors []SweepPlanError
+	// SkippedHeld holds the atoms that DO hold an unclaimed ebuild but are not
+	// swept because a held entry covers them, sorted.
+	//
+	// It exists so the tool cannot contradict itself. The reconciliation ends
+	// its unclaimed group by pointing at `--clean` (S027-R7.1), and without this
+	// field a sweep whose only findings were held would answer "every ebuild is
+	// claimed by an entry" — which is false twice over: the ebuild is unclaimed,
+	// and it is being protected rather than overlooked. Skipping quietly is what
+	// makes a safety rule read as a bug.
+	SkippedHeld []string
 	// TotalRemove is the number of files the batch would delete. It counts
 	// Remove only — a blocked directory's WouldRemove is not pending work.
 	TotalRemove int
@@ -349,7 +359,7 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 	// One divergence is emitted per unclaimed FILE; several files can share a
 	// directory, so reduce to unique atoms before planning.
 	seen := make(map[string]bool)
-	var atoms []string
+	var atoms, skippedHeld []string
 	for _, d := range Reconcile(overlayPath, scoped) {
 		if d.Kind != UnclaimedEbuild || seen[d.Key] {
 			continue
@@ -373,14 +383,18 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 		// ebuild would become unclaimed, and the sweep would delete the held
 		// package itself. That is S027-G1, inverted into a worse bug.
 		if atomHasHeldEntry(scoped, d.Key) {
+			// Recorded, never silent: see SweepBatch.SkippedHeld.
+			seen[d.Key] = true
+			skippedHeld = append(skippedHeld, d.Key)
 			continue
 		}
 		seen[d.Key] = true
 		atoms = append(atoms, d.Key)
 	}
 	sort.Strings(atoms)
+	sort.Strings(skippedHeld)
 
-	batch := SweepBatch{}
+	batch := SweepBatch{SkippedHeld: skippedHeld}
 	for _, a := range atoms {
 		plan, err := planSweep(overlayPath, scoped, a)
 		if err != nil {
