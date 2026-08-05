@@ -292,16 +292,42 @@ func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[stri
 	return scoped
 }
 
+// atomHasHeldEntry reports whether any registry entry for atom is held.
+//
+// It asks about the whole DIRECTORY, not one key, because planSweep plans a
+// directory at a time: a held `:9` slot and an active `:10` slot share one set
+// of files, so there is no way to sweep half of it. Any hold over an atom
+// therefore protects the whole directory — the fail-safe side of a choice that
+// deletes files.
+//
+// cfg is copied out of the map before the call because IsHeld has a pointer
+// receiver and a map value is not addressable.
+func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
+	for key, cfg := range cfgs {
+		cat, pkgName, ok := splitPkgAtom(key)
+		if !ok || cat+"/"+pkgName != atom {
+			continue
+		}
+		if cfg.IsHeld() {
+			return true
+		}
+	}
+	return false
+}
+
 // PlanOverlaySweep computes what a sweep would do to every package directory
 // holding an ebuild no entry claims, for the whole overlay or for one target.
 //
 // # Why the candidates come from Reconcile
 //
 // Reconcile already walks the registry and reports exactly this class of
-// finding (UnclaimedEbuild), including its enabled/held filter. Taking the
+// finding (UnclaimedEbuild), including its enabled filter. Taking the
 // candidates from it means what a sweep touches is what `--check` printed —
 // parity by construction rather than by two implementations agreeing (S027-R2.1,
 // S027-R2.2). Its Key for that class is already the bare atom.
+//
+// The one place that parity is deliberately broken is `hold`, and it is broken
+// in the reporting direction only: see the filter below (S026-R1.1, S027-R1.3).
 //
 // # Why the verdict does NOT come from Reconcile
 //
@@ -326,6 +352,27 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 	var atoms []string
 	for _, d := range Reconcile(overlayPath, scoped) {
 		if d.Kind != UnclaimedEbuild || seen[d.Key] {
+			continue
+		}
+		// A held directory is reported by --check and swept by nothing. Story
+		// 026 stopped Reconcile from skipping held entries so their pin could be
+		// recorded, and that made it scan their directories for unclaimed
+		// ebuilds too — a reporting change that would arrive here as a DELETION
+		// candidate if it were not stopped (S026-R1.1).
+		//
+		// It is stopped because `hold` exists precisely for the case that makes
+		// this dangerous: a maintainer bumps a held package by hand and keeps
+		// the previous ebuild as a fallback. --check then pins the new version,
+		// which leaves the old one unclaimed, and sweeping it would eat the
+		// fallback that `hold` was protecting. The apply-time sweep never had
+		// this reach — the applier refuses a held package before any removal —
+		// so this keeps the two sweeps saying the same thing about `hold`.
+		//
+		// The filter is HERE and not in scopeConfigs on purpose: dropping a held
+		// entry from the config map would remove it as a CLAIMANT, its own
+		// ebuild would become unclaimed, and the sweep would delete the held
+		// package itself. That is S027-G1, inverted into a worse bug.
+		if atomHasHeldEntry(scoped, d.Key) {
 			continue
 		}
 		seen[d.Key] = true

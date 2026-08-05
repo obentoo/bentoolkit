@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -365,8 +366,19 @@ func dirIn(t *testing.T, batch SweepBatch, atom string) SweepDirPlan {
 // TestPlanOverlaySweepMatchesReconcileUnclaimedSet is the R2.1 parity guard:
 // what a sweep touches must be exactly what `--check` printed. Two
 // implementations that merely agree today would drift; this pins them.
+//
+// It has exactly ONE exception, and it is subtracted by name below rather than
+// by calling the production filter — a guard that reuses the code it guards
+// proves nothing. Story 026 made Reconcile scan held directories so a held
+// entry's pin could be recorded, which puts their unclaimed ebuilds in the
+// report. The sweep deliberately does not act on them: `hold` protects the
+// hand-kept fallback that pinning the new version leaves unclaimed. So parity
+// is report-side only, and every OTHER drift still fails here.
 func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
+
+	// The fixture's only held entry. Named, not derived.
+	const heldAtom = "test-cat/held"
 
 	var want []string
 	seen := map[string]bool{}
@@ -376,6 +388,12 @@ func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
 			want = append(want, d.Key)
 		}
 	}
+	// Reconcile must still REPORT the held directory — if it stops, story 026
+	// regressed and this test says so instead of silently weakening.
+	if !seen[heldAtom] {
+		t.Fatalf("%s is not in the reconciliation's unclaimed set; the fixture or S026-R1.1 changed", heldAtom)
+	}
+	want = slices.DeleteFunc(want, func(a string) bool { return a == heldAtom })
 	sort.Strings(want)
 
 	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
@@ -401,6 +419,59 @@ func TestPlanOverlaySweepSkipsDisabledAndHeld(t *testing.T) {
 				t.Errorf("%s reached the batch; disabled and held directories are out of scope", atom)
 			}
 		}
+	}
+}
+
+// TestSweepLeavesHeldFallbackOnDisk is the regression guard for the exact
+// scenario `hold` exists to serve, proven at the filesystem rather than in the
+// plan: a maintainer bumps a held package by hand and keeps the previous ebuild
+// as a fallback. Story 026 made --check pin the new version, which leaves the
+// old one unclaimed and put it within a sweep's reach for the first time.
+//
+// Asserting on the plan alone would not catch a later change that re-admits the
+// directory downstream of PlanOverlaySweep, so this runs the executor and looks
+// at the disk.
+func TestSweepLeavesHeldFallbackOnDisk(t *testing.T) {
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+
+	// The hand-bumped held package: 2.0.0 is current, 1.0.0 is the fallback.
+	createTestEbuildFile(t, overlayDir, "test-cat/held", "1.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/held", "2.0.0")
+	// An ordinary directory alongside it, so a green here cannot come from the
+	// sweep doing nothing at all.
+	createTestEbuildFile(t, overlayDir, "test-cat/residue", "1.0.0")
+	createTestEbuildFile(t, overlayDir, "test-cat/residue", "2.0.0")
+
+	held := regEntry("2.0.0", "")
+	held.Hold = true
+	cfgs := map[string]PackageConfig{
+		"test-cat/held":    held,
+		"test-cat/residue": regEntry("2.0.0", ""),
+	}
+
+	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	if err != nil {
+		t.Fatalf("PlanOverlaySweep: %v", err)
+	}
+	var runs atomic.Int64
+	ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+		WithSweepConcurrency(1), WithSweepExecCommand(countingManifestSeam(&runs)))
+
+	exists := func(pkg, version string) bool {
+		name := path.Base(pkg) + "-" + version + ".ebuild"
+		_, err := os.Stat(filepath.Join(overlayDir, pkg, name))
+		return err == nil
+	}
+
+	if !exists("test-cat/held", "1.0.0") {
+		t.Error("the held package's fallback ebuild was deleted; `hold` no longer protects it")
+	}
+	if !exists("test-cat/held", "2.0.0") {
+		t.Error("the held package's current ebuild was deleted")
+	}
+	// The control: the sweep really did run.
+	if exists("test-cat/residue", "1.0.0") {
+		t.Error("test-cat/residue-1.0.0 survived; the sweep did nothing and the assertions above prove nothing")
 	}
 }
 
