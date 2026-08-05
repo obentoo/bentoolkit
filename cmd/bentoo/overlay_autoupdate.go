@@ -102,6 +102,12 @@ var (
 	// which is why the config key is only consulted when the flag was not
 	// passed at all (see resolveAutoupdateDistfileDirs).
 	autoupdateDistfilesCache string
+	// autoupdateNoFetchCache turns OFF the per-run sharing of upstream response
+	// 024 (S024-R7.1). It is an opt-OUT: the default is false, which leaves the
+	// deduplication ON (S024-R7.2). Its reason to exist is bisection — a
+	// suspicious version can be re-checked against an un-deduplicated run to tell
+	// a real upstream change from a sharing bug.
+	autoupdateNoFetchCache bool
 )
 
 // autoupdateDistfileDirs is the answer to "which directories does the Manifest
@@ -166,6 +172,7 @@ Examples:
   bentoo overlay autoupdate --check              Check all packages for updates
   bentoo overlay autoupdate --check net-misc/foo Check specific package
   bentoo overlay autoupdate --check --force      Check ignoring cache
+  bentoo overlay autoupdate --check --no-fetch-cache  Check with one request per read, not one per URL
   bentoo overlay autoupdate --check --yes        Check, then write the registry pins without prompting
   bentoo overlay autoupdate --check --only source Check only source packages
   bentoo overlay autoupdate --check --only bin    Check only binary packages
@@ -225,6 +232,7 @@ func init() {
 	// "--distdir portageq distdir".
 	autoupdateCmd.Flags().StringVar(&autoupdateDistdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
 	autoupdateCmd.Flags().StringVar(&autoupdateDistfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
+	autoupdateCmd.Flags().BoolVar(&autoupdateNoFetchCache, "no-fetch-cache", false, "Fetch each URL per record instead of sharing one response across records that declare it")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -502,6 +510,11 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
 		// the ~220 GitHub/GitLab packages, making a large --concurrency pointless.
 		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		// Share one response across every record that declares the same URL — on
+		// by default (S024-R7.2). --no-fetch-cache turns it off, restoring one
+		// request per read exactly as before story 024, so a suspicious result can
+		// be compared against an un-deduplicated run (S024-R7.1).
+		autoupdate.WithFetchCache(!autoupdateNoFetchCache),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
@@ -1606,12 +1619,12 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 
 // reviveCheckerOptions builds the Checker option set shared by the revive modes.
 // It mirrors runCheck's option set exactly — config dir, context, concurrency,
-// type filter, tuned rate limiter, cache TTL, and the same LLM wiring (with the
-// err-first nil guard) — so a revived package's upstream check behaves
-// identically to a normal --check. The GitHub token is not an option: NewChecker
-// resolves it itself from GITHUB_TOKEN/GH_TOKEN via the secrets chain. The
-// progress callback is omitted: the revive paths drive single-package
-// CheckPackage calls, which never fire it.
+// type filter, tuned rate limiter, cache TTL, fetch-body sharing, and the same
+// LLM wiring (with the err-first nil guard) — so a revived package's upstream
+// check behaves identically to a normal --check. The GitHub token is not an
+// option: NewChecker resolves it itself from GITHUB_TOKEN/GH_TOKEN via the
+// secrets chain. The progress callback is omitted: the revive paths drive
+// single-package CheckPackage calls, which never fire it.
 func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
@@ -1620,6 +1633,11 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpT
 		autoupdate.WithTypeFilter(autoupdateOnly),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
 		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		// Same escape hatch as runCheck (S024-R7.1, R7.2). Setting it HERE is what
+		// covers all three revive Checkers at once — both listing paths and the
+		// apply path build their options through this helper — so the flag cannot
+		// be honoured on --check and silently ignored on a revive.
+		autoupdate.WithFetchCache(!autoupdateNoFetchCache),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
