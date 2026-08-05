@@ -1,8 +1,11 @@
 package overlay
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -451,6 +454,15 @@ func sortCompareResults(results []CompareResult) {
 func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
 	result := comparePackageVersions(pkg, prov)
 
+	// Content verification runs HERE, on a result that so far carries only the
+	// version comparison, and it is deliberately placed above the annotation
+	// below: it therefore cannot read the declaration it is checking, and the
+	// Verdict — computed from Status and the declaration alone — cannot read it
+	// back. One mechanism decides, the other only checks (D4, R4.5), and the
+	// order of these three statements is what makes that structural rather than
+	// a convention someone must remember.
+	result.Verified = verifyAgainstLocalContent(result, prov, opts)
+
 	// The map is keyed by the bare "category/package" atom. A miss is the
 	// unknown state — nothing is recorded about this package — and it reaches
 	// deriveVerdict as known == false, which no per-status rule can turn into a
@@ -518,6 +530,86 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 	}
 
 	return result
+}
+
+// verifyAgainstLocalContent compares the overlay's ebuild against the upstream
+// copy of the same version, byte for byte, and reports which of the three
+// verification states holds (R4.1). It never decides anything: its result is
+// reported beside the Verdict, never instead of it (R4.5).
+//
+// It runs only when all three of the following hold, and any of them failing is
+// simply NotVerified rather than an error (R4.4) — absence of evidence is not
+// evidence, so the declaration stands unverified rather than being contradicted:
+//
+//   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
+//     carries no path, so without it there is no overlay-side file to open;
+//   - the provider has the compared repository on disk, which is exactly the
+//     capability provider.PackageDirProvider names. The git-clone and local
+//     providers satisfy it and the API providers do not; failing that assertion
+//     IS the "API-only" signal, and an API provider could supply content only at
+//     the cost of one extra rate-limited request per package;
+//   - the two versions are equal. Two different versions differ for reasons that
+//     say nothing about whether we changed anything.
+//
+// Both reads are local: this issues no network request and takes no context.
+//
+// The comparison is raw, per the design: a copyright-year bump or a stray
+// trailing newline alone reads as a divergence. Should that show up in practice
+// the answer is a normalisation rule, which is a policy decision of its own —
+// and the failure direction is the safe one, since the finding only ever warns.
+func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) Verification {
+	if opts.OverlayPath == "" {
+		return NotVerified
+	}
+	// An empty version names no ebuild. It is the shape a not-in-remote or failed
+	// comparison leaves behind — where RemoteVersion is empty too, so the
+	// equality below would otherwise hold and send two doomed reads at a file
+	// called "<pkg>-.ebuild".
+	if result.LocalVersion == "" || result.LocalVersion != result.RemoteVersion {
+		return NotVerified
+	}
+
+	dirProv, ok := prov.(provider.PackageDirProvider)
+	if !ok {
+		return NotVerified
+	}
+	// LocalPackagePath rather than a path joined out here: it guards with the
+	// provider's own ensureRepo(), so it holds whether or not the version lookup
+	// happened to run first, and it reports a package the repository does not
+	// carry as an error instead of as a path that fails to open later.
+	upstreamDir, err := dirProv.LocalPackagePath(result.Category, result.Package)
+	if err != nil {
+		return NotVerified
+	}
+
+	// <pkg>-<version>.ebuild is the filename shape both sides use — the same one
+	// the provider's own scan matches when it lists versions. The version is
+	// equal on both sides by the guard above, so one filename serves both reads.
+	filename := result.Package + "-" + result.LocalVersion + ".ebuild"
+
+	// Both paths are built from the CATEGORY AND PACKAGE DIRECTORY NAMES THE
+	// SCANNER FOUND — result.Category/result.Package come from walking the
+	// overlay, and the upstream side is resolved by the provider from those same
+	// two names. Nothing here comes from a registry key, which matters because no
+	// validation runs on that path: SplitPackageKey accepts "../x" happily and
+	// LoadPackagesConfig never calls ValidatePackageConfig. The structure is what
+	// keeps traversal absent, not a sanitiser. Keep it that way.
+	ourPath := filepath.Join(opts.OverlayPath, result.Category, result.Package, filename)
+	theirPath := filepath.Join(upstreamDir, filename)
+
+	ours, err := os.ReadFile(ourPath) //nolint:gosec // path built from scanned overlay directory names, never from registry input
+	if err != nil {
+		return NotVerified
+	}
+	theirs, err := os.ReadFile(theirPath) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
+	if err != nil {
+		return NotVerified
+	}
+
+	if bytes.Equal(ours, theirs) {
+		return VerifiedIdentical
+	}
+	return VerifiedDiffers
 }
 
 // FormatReport formats a comparison report for terminal output
@@ -603,7 +695,67 @@ func formatResultSection(results []CompareResult, title string, headerColor *col
 
 	sb.WriteString(formatTableLineWithStatus(w.pkg, w.cat, w.local, w.remote, w.status, "bottom"))
 
+	// Verification findings go BENEATH the table rather than into a column of
+	// it: they name the registry entry that declared the divergence, and a
+	// column would truncate exactly the identifier the operator needs in order
+	// to find that entry.
+	sb.WriteString(formatVerificationFindings(results))
+
 	return sb.String()
+}
+
+// formatVerificationFindings renders one line per verification finding, beneath
+// the section's table.
+//
+// A finding is DERIVED from the two fields that already carry the facts —
+// Verified (what the two ebuilds' bytes say) and Patched (what the registry
+// says) — instead of being stored on CompareResult. There is therefore no third
+// copy that can disagree with the two, and no state to keep in step.
+//
+// Only two of the four combinations say anything (R4.2, R4.3). The other two are
+// silent on purpose: a divergence that is both real and declared is the system
+// working, and a redundancy confirmed by identical bytes is a Verdict that has
+// simply been checked rather than a problem.
+//
+// Nothing here can change a Verdict (R4.5) — it renders a finished CompareResult
+// into a string.
+func formatVerificationFindings(results []CompareResult) string {
+	var sb strings.Builder
+
+	for _, r := range results {
+		switch {
+		case r.Verified == VerifiedIdentical && r.Patched:
+			// R4.2: the entry describes a divergence that no longer exists, so it
+			// is suppressing a removal recommendation for nothing. Naming the
+			// entry is the point of the line: that is what has to be edited.
+			sb.WriteString(output.Sprintf(output.Warning,
+				"⚠ %s/%s: stale declaration — %s declares a divergence, but the two %s ebuilds are byte-identical\n",
+				r.Category, r.Package, declaringEntry(r), r.LocalVersion))
+		case r.Verified == VerifiedDiffers && !r.Patched:
+			// R4.3: the loud case. Nothing declares this package, so it is about
+			// to be reported as a removal candidate — and its ebuild is not the
+			// one ::gentoo ships.
+			sb.WriteString(output.Sprintf(output.Warning,
+				"⚠ %s/%s: undeclared divergence — our %s ebuild differs from ::gentoo's, yet no entry declares why\n",
+				r.Category, r.Package, r.LocalVersion))
+		}
+	}
+
+	return sb.String()
+}
+
+// declaringEntry names the registry entry that declared the divergence, falling
+// back to the bare atom when the caller supplied a declaration without one — a
+// finding whose subject is blank reads as a bug in the report rather than as the
+// missing entry name it actually is.
+//
+// The name is operator-written text on its way to a terminal. It is passed as an
+// ARGUMENT and never as a format string, and it reaches no shell and no command.
+func declaringEntry(r CompareResult) string {
+	if r.PatchedBy != "" {
+		return r.PatchedBy
+	}
+	return r.Category + "/" + r.Package
 }
 
 // columnWidths holds the calculated column widths for table formatting.
