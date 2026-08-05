@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out ten processes that delete files on an unverified assumption is not a
   default worth having.
 
+### Changed
+- **`--yes` and `--concurrency` now say what a sweep does to them.** `--yes` still
+  described the post-check registry reconciliation as the only thing it approves.
+  It is not: it also authorises a `--lint --fix` repair, and now the deletion of
+  ebuilds by a standalone `--clean` sweep — in an overlay that auto-commits and
+  pushes. The `--clean` help said an unattended sweep needs `--yes`; `--yes` never
+  said it could delete. A flag whose consequence is publication has to carry that
+  where its reader is, not only in the flag that happens to trigger it.
+
+  `--concurrency` now states the exception it already had in the code: it still
+  bounds parallel checks and applies, but a standalone sweep runs one directory at
+  a time unless the flag is passed explicitly.
+
 ### Fixed
 - **A held registry entry now records which ebuild it keeps.** The post-check
   reconciliation fills in each entry's `version` pin from what is on disk, and

@@ -22,15 +22,20 @@ import (
 // sweeper — the extracted executor (S027 sub-task 1.1)
 // =============================================================================
 
-// TestNewSweeperNormalisesNilFields is the G5 guard, and it is deliberately NOT
+// TestSweeperNewNormalisesNilFields is the G5 guard, and it is deliberately NOT
 // a field-inspection test.
+//
+// The name starts with TestSweeper, not TestNewSweeper, on purpose: -run is an
+// unanchored substring regex, so `-run TestSweeper` — the obvious selector for
+// this block, and the one S027 sub-task 1.1 recorded as its evidence — silently
+// skipped a TestNewSweeper… name while appearing to pass. Keep the prefix.
 //
 // A nil ctx does not fail loudly at construction: it panics inside
 // context.WithTimeout on the first Manifest run, which is a production crash for
 // any sweeper built outside NewApplier. So the test builds the sweeper the way a
 // forgetful caller would — supplying only the exec seam, and a nil option for
 // good measure — and then drives the path that would panic.
-func TestNewSweeperNormalisesNilFields(t *testing.T) {
+func TestSweeperNewNormalisesNilFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	pkg := "test-cat/test-pkg"
