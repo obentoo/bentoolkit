@@ -147,7 +147,7 @@ func isEmptyFieldValue(v reflect.Value) bool {
 //
 // Every kind PackageConfig uses is covered — string, bool, *bool, int,
 // map[string]string and [][]string. TestRenderRecordWritesEveryField pins that
-// by rendering a record with all 37 fields set and checking each one came out,
+// by rendering a record with all 38 fields set and checking each one came out,
 // so a field of an unhandled kind fails a test rather than disappearing from the
 // registry in silence.
 func renderTOMLValue(v reflect.Value) (string, bool) {
@@ -233,7 +233,7 @@ func tomlInlineTable(v reflect.Value) string {
 //
 // The rule reads the VALUE, not the field. The registry's own convention is
 // field-driven — a regex field is literal-quoted whether or not it needs to be —
-// and reproducing that would mean a second list, this one naming which of the 37
+// and reproducing that would mean a second list, this one naming which of the 38
 // fields hold regexes, kept in step with the struct by hand. Measured against
 // the real registry, declining to keep that list costs 53 values out of ~1700 a
 // change of quoting style on a full rewrite (5 scalars such as `series = '_pre$'`
