@@ -677,19 +677,38 @@ func TestReconcile(t *testing.T) {
 			// and bury the pins that actually need writing.
 		},
 		{
-			// R3.5: the enabled = false reconciliation owns these entries. This
-			// must neither report them nor — since the directory is never
-			// reached — call their ebuilds unclaimed.
-			name: "a disabled entry and a held entry produce nothing (R3.5)",
+			// S021-R3.5, the half of it that survives: the enabled = false
+			// reconciliation owns this entry. It must neither be reported nor —
+			// since its directory is never reached — have its ebuilds called
+			// unclaimed. That second guarantee is what `want: nil` proves here,
+			// with two ebuilds on disk and a residue that stays invisible.
+			name: "a disabled entry produces nothing (S021-R3.5, S026-R3.1)",
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.1"}},
-				"app-misc/hello":  {{version: "1.0.0"}},
 			},
 			cfgs: map[string]PackageConfig{
-				"net-misc/rclone": offEntry("", ""),  // stale pin AND residue, both invisible
-				"app-misc/hello":  heldEntry("", ""), // a deliberate maintainer decision
+				"net-misc/rclone": offEntry("", ""), // stale pin AND residue, both invisible
 			},
 			want: nil,
+		},
+		{
+			// The other half of that case, and the one story 026 reverses. A held
+			// entry used to be bundled with the disabled one under a single
+			// `want: nil`, on the reading that `hold` made it untouchable. It does
+			// not: `hold` means "present, but do not auto-bump", so the ebuild IS
+			// on disk and recording which one it is second-guesses no maintainer
+			// decision (S026-R1.1). The empty pin against a real ebuild is a stale
+			// pin, exactly as it is for the pinless active entries above.
+			name: "a held entry is reported like any other (S026-R1.1, R1.2)",
+			dirs: map[string][]sweepEbuild{
+				"app-misc/hello": {{version: "1.0.0"}},
+			},
+			cfgs: map[string]PackageConfig{
+				"app-misc/hello": heldEntry("", ""), // held, and therefore pinned
+			},
+			want: []Divergence{
+				{Key: "app-misc/hello", Kind: StalePin, Pin: "", Disk: "1.0.0"},
+			},
 		},
 		{
 			// The other half of R3.5, and the reason resolveClaims does not skip
