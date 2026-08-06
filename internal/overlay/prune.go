@@ -853,3 +853,245 @@ func prunePackageFiles(dir string) ([]string, error) {
 func pruneRegistryKeys(byAtom map[string][]string, category, pkg string) []string {
 	return slices.Clone(byAtom[category+"/"+pkg])
 }
+
+// PruneResult is what happened to one plan the executor attempted.
+type PruneResult struct {
+	// Plan is the plan this result is about, carried whole so the caller can name
+	// the package, and reach its RegistryKeys, without keeping its own index into
+	// the batch it handed over.
+	Plan PrunePlan
+
+	// Removed is true only when os.RemoveAll returned without error. It is the
+	// caller's authority to delete the package's registry entries (design D7):
+	// the entry goes only for a package whose directory actually went.
+	Removed bool
+
+	// Err is why the removal did not happen — a refusal by the guard, or what
+	// os.RemoveAll returned.
+	//
+	// Err is non-nil EXACTLY when Removed is false. The two are one fact seen from
+	// two sides, and a result where they disagree leaves the caller unable to say
+	// whether the package is still on disk — while its next act is deleting that
+	// package's registry entries. A "removed with an error" would orphan the
+	// directory; a "not removed, no error" would orphan the entry.
+	Err error
+}
+
+// ExecutePrune carries out the removals the plan authorised, and no others.
+//
+// It takes the WHOLE batch, Refused included, because the caller has one batch
+// and no reason to split it. Eligible is the authorisation; the BUCKET IS NOT. A
+// loop that walked every bucket and removed what it found would delete exactly
+// the packages the run refused — the worst bug this file can have — so the test
+// is on the plan's own permission and never on the field it was filed under.
+//
+// A plan that is not Eligible produces NO result. The results are a record of
+// ATTEMPTS: the plan report has already told the operator about the refused
+// packages and why (R1.4), and the CLI turns any result carrying an Err into a
+// non-zero exit (R5.5). Emitting a refusal here as a failed result would make
+// every run that merely SAW a non-redundant package exit non-zero, which says
+// "something went wrong" about a scan that worked perfectly.
+//
+// One failure records and continues (R5.5). A batch that aborts halfway leaves
+// the overlay in a state no plan described — some packages gone, some not, and
+// nothing on screen saying where the line was drawn. Every attempt gets its own
+// result and the caller decides the exit code.
+//
+// It returns no error of its own, for the reason PlanPrune and PruneVerification
+// do not: the answer is per package, and a single error return would either hide
+// the successes or invite a caller to read a nil as "all of them went".
+//
+// It does not touch packages.toml. The registry edit happens once, afterwards, in
+// the CLI, and only for the atoms whose directory actually went (design D7) —
+// internal/overlay does not know what TOML is, which is the layer rule 025
+// established.
+func ExecutePrune(batch PruneBatch, opts PruneOptions) []PruneResult {
+	// The root is resolved ONCE, and the per-plan guard measures every target
+	// against that one answer. Re-resolving it per package would not make the check
+	// fresher in any way that matters — the guard's freshness lives in the Lstat of
+	// the TARGET, which does run before every single removal — and it would make it
+	// weaker: if the root were swapped for a symlink mid-batch, re-resolving would
+	// follow the swap and carry the rest of the removals somewhere the plan was
+	// never made about, while the resolved-once root keeps them in the tree that
+	// was actually compared.
+	//
+	// Its failure is still reported per plan, because the caller counts failed
+	// attempts and "the root was unusable" is a different report from "nothing was
+	// planned" (R1.5's distinction, one layer down).
+	root, rootErr := pruneOverlayRoot(opts.OverlayPath)
+
+	// Every bucket is walked, in a fixed order, so that two runs over the same
+	// batch report in the same order. Refused is walked too — not because anything
+	// in it can be removed, but because reaching it and finding nothing eligible is
+	// the property this loop is asserting, and a loop that skipped the bucket would
+	// leave that assertion to a reader's memory.
+	var results []PruneResult
+	for _, plans := range [][]PrunePlan{batch.Identical, batch.Diverging, batch.Refused} {
+		for _, plan := range plans {
+			if !plan.Eligible {
+				continue
+			}
+			if rootErr != nil {
+				results = append(results, PruneResult{Plan: plan, Err: rootErr})
+				continue
+			}
+			results = append(results, executePrunePlan(root, plan))
+		}
+	}
+	return results
+}
+
+// pruneOverlayRoot resolves the root every removal is measured against:
+// absolute, with every symlink component already followed, so that the
+// containment test compares two paths of the same kind. Comparing a resolved
+// target against an unresolved root is how a containment check passes for a path
+// that is not contained.
+//
+// The EMPTY CHECK IS FIRST, and it is not made redundant by the checks below.
+// filepath.Abs("") returns the CURRENT WORKING DIRECTORY with a nil error, so an
+// unset OverlayPath does not fail — it silently renames "the overlay" to
+// "wherever this process was started". <cwd>/<category>/<package> is a real
+// directory two levels below <cwd>, so it would satisfy every other guard in this
+// file; for a tool run from inside a checkout, the directory it takes is
+// somebody's source tree.
+func pruneOverlayRoot(overlayPath string) (string, error) {
+	if overlayPath == "" {
+		return "", errors.New("no overlay path was given, so there is no root to remove anything from")
+	}
+	abs, err := filepath.Abs(overlayPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve the overlay root %q: %w", overlayPath, err)
+	}
+	root, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		// An overlay root that does not resolve is one nothing can be proven
+		// against, and every removal in this file is authorised by being inside it.
+		return "", fmt.Errorf("cannot resolve the overlay root %q: %w", abs, err)
+	}
+	return root, nil
+}
+
+// executePrunePlan removes one package directory, after proving that the path it
+// is about to hand os.RemoveAll is the package the plan named (R5.1).
+//
+// The proof is redone here even though PlanPrune built the same path from the
+// overlay scan, and even though D2 keeps registry keys out of path construction
+// everywhere else. That is not distrust of the planner. The plan arrives as a
+// STRUCT, and a struct can be built by anything: Category and Package are two
+// strings on it, and nothing in the type system says whoever filled them walked
+// the overlay. SplitPackageKey accepts "../x" happily and no validation runs on a
+// registry path — the structure is what keeps traversal absent, not a sanitiser.
+//
+// Everywhere else in this repository a wrong path opens the wrong file and
+// something fails. Here it calls os.RemoveAll. The guard exists to make the class
+// of mistake unrepresentable at the point of no return.
+func executePrunePlan(root string, plan PrunePlan) PruneResult {
+	target, err := prunePackageTarget(root, plan)
+	if err != nil {
+		return PruneResult{Plan: plan, Err: err}
+	}
+
+	// One RemoveAll on the package DIRECTORY, which is R5.1 entire: every ebuild,
+	// Manifest, metadata.xml and the whole files/ tree go with it. PrunePlan.Files
+	// is a report of what that costs and is never joined back into a path — walking
+	// it would rebuild, file by file, a path this function just finished proving.
+	if err := os.RemoveAll(target); err != nil {
+		return PruneResult{Plan: plan, Err: fmt.Errorf("cannot remove %s/%s: %w", plan.Category, plan.Package, err)}
+	}
+	return PruneResult{Plan: plan, Removed: true}
+}
+
+// prunePackageTarget returns the directory to remove, or the reason it will not
+// be removed. root must already be absolute and symlink-resolved.
+//
+// The rule is exact: the target must resolve to a DIRECT CHILD TWO LEVELS DOWN
+// from the root — <root>/<category>/<package>, no more, no fewer, no "..". Two
+// levels is not a stylistic preference; it is the whole shape of a Portage
+// overlay, and any other depth means the plan is describing something that is not
+// a package.
+func prunePackageTarget(root string, plan PrunePlan) (string, error) {
+	if plan.Category == "" || plan.Package == "" {
+		// filepath.Join DROPS empty elements, so a plan missing either name joins to
+		// a bare category directory or to the overlay root itself — and RemoveAll on
+		// the root takes all 314 packages. The containment test below catches both
+		// (one component, or "."), but a plan that names no package is refused by
+		// its own name rather than by the shape of the path it happened to produce.
+		return "", fmt.Errorf("the plan names no package (category %q, package %q)", plan.Category, plan.Package)
+	}
+
+	target := filepath.Join(root, plan.Category, plan.Package)
+
+	// Lstat FIRST, before anything resolves the target, because the answer this
+	// asks for is destroyed by resolution: EvalSymlinks would report the link's
+	// destination and there would be nothing left to refuse.
+	info, err := os.Lstat(target)
+	if err != nil {
+		// A target that cannot be stat'ed is one whose containment cannot be proven.
+		// It is also the case os.RemoveAll answers with nil — it treats an absent
+		// path as success — so letting it through would report a removal that never
+		// happened and hand the caller authority to delete the registry entries of a
+		// package that may still be on disk under a name we got wrong.
+		return "", fmt.Errorf("cannot inspect %s/%s: %w", plan.Category, plan.Package, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		// A symlinked package directory is refused, never followed. os.RemoveAll on
+		// a symlink removes the LINK — but PruneVerification compared the tree the
+		// link points at, which may sit anywhere on the filesystem, so the
+		// authorisation and the deletion would be about two different things: the
+		// real tree survives and the overlay's reference to it is destroyed.
+		// Following it instead is worse — a deletion outside the overlay, authorised
+		// by a comparison of a directory the operator never saw. Neither is
+		// acceptable, so the package is left exactly as it was.
+		return "", fmt.Errorf("%s/%s is a symlink, not a package directory; the comparison that authorised this removal was about the tree it points at, which is not what deleting the link would remove", plan.Category, plan.Package)
+	}
+	if !info.IsDir() {
+		// The plan describes a directory and R5.1 removes one. Whatever this is, the
+		// evidence collected about it was collected about something else.
+		return "", fmt.Errorf("%s/%s is not a directory (mode %s)", plan.Category, plan.Package, info.Mode())
+	}
+
+	// The final component is now known not to be a symlink, but the components
+	// ABOVE it may still be: a symlinked category directory would carry the removal
+	// out of the overlay while every string involved still looked like a package
+	// name. So containment is tested on the RESOLVED path — and the resolved path
+	// is what gets removed, so that the thing checked is the thing that goes.
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve %s/%s: %w", plan.Category, plan.Package, err)
+	}
+
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil {
+		return "", fmt.Errorf("cannot place %s/%s relative to the overlay root %s: %w", plan.Category, plan.Package, root, err)
+	}
+
+	// The comparison has to be on the RESOLVED target against the RESOLVED root,
+	// never on the raw strings: filepath.Join already cleaned "../outside" away
+	// while building the path, so by the time anything can be compared the
+	// traversal is no longer visible as text — only as a location.
+	//
+	// All four conditions are load-bearing and none implies another:
+	//
+	//   - TWO COMPONENTS is the shape of a Portage overlay. One is a category
+	//     directory, three is something inside a package, zero (rel == ".") is the
+	//     overlay root and all 314 packages in it.
+	//   - NO "..", which the count does NOT imply: filepath.Rel answers
+	//     "../outside" for a sibling of the root, two components exactly like a
+	//     legitimate "<category>/<package>".
+	//   - THE PLAN'S OWN NAMES, because "inside the overlay" is not the promise —
+	//     "the package the operator was shown" is. A symlinked category directory
+	//     pointing at another category inside the same root passes every test above
+	//     while removing a package nobody named. This is the symlink argument again
+	//     one level up, and the names are what tell the two apart. It does not make
+	//     the ".." test redundant either: a plan literally carrying Category ".."
+	//     and Package "outside" matches its own names perfectly.
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 || slices.Contains(parts, "..") || parts[0] != plan.Category || parts[1] != plan.Package {
+		return "", fmt.Errorf(
+			"%s/%s resolves to %s, which is not that package directly inside the overlay root %s",
+			plan.Category, plan.Package, resolved, root,
+		)
+	}
+
+	return resolved, nil
+}
