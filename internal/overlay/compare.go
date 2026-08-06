@@ -562,6 +562,12 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // trailing newline alone reads as a divergence. Should that show up in practice
 // the answer is a normalisation rule, which is a policy decision of its own —
 // and the failure direction is the safe one, since the finding only ever warns.
+//
+// PruneVerification (prune.go) asks a different question — whether deleting the
+// overlay's whole package would lose anything, across every shared version and
+// the files/ tree — but the two agree wherever they overlap, since both are
+// bytes.Equal over the same two files. It is separate code precisely so that a
+// removal criterion cannot change what this compare reports.
 func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) Verification {
 	if opts.OverlayPath == "" {
 		return NotVerified
