@@ -969,10 +969,18 @@ func printPrunePlanEntry(plan overlay.PrunePlan, keepRegistry bool) {
 // printPruneRefusals lists the packages no flag on this command can remove, each
 // with the reason it is here.
 //
-// One line per package, with no inventory: a package refused by its verdict was
-// never even listed (R2.5 stops the planner before the directory is read), and
-// the reason is the whole of what the operator came for. Omitting the group
-// entirely would read as "these packages do not exist".
+// One line per package, with no inventory — but for two different reasons, and
+// only one of them is a matter of not having the data. A package refused by its
+// VERDICT was never listed at all: R2.5 stops the planner before the directory
+// is read, which is also what keeps the scan cheap. A package refused as
+// UNVERIFIABLE (R2.3) did pass the verdict gate, so its Versions, Files and
+// RegistryKeys are populated, and they are dropped here on purpose. An inventory
+// answers "what would this removal take", and no removal is on offer for either
+// kind; printing one invites a refusal to be read as a plan.
+//
+// The reason is the whole of what the operator came for. Omitting the group
+// entirely would read as "these packages do not exist", which is the question
+// they ask next about every single one of them.
 func printPruneRefusals(plans []overlay.PrunePlan) {
 	if len(plans) == 0 {
 		return
