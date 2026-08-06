@@ -110,8 +110,21 @@ func writePruneCmdPackage(t *testing.T, root, category, pkg, version, body strin
 	return dir
 }
 
+// prunePatchedReason is the declared reason every patched fixture entry carries,
+// named once so a test can assert that the operator is shown the text the
+// registry actually holds rather than a paraphrase of it.
+const prunePatchedReason = "keeps our wayland patch"
+
 // writePruneRegistryEntries writes a packages.toml holding one record per key.
 // The keys are given whole so a test can carry several entries for one atom.
+//
+// `patched` is a STRING in the schema — the reason itself (config.go:116), not a
+// bool with a separate reason field. It has to be written the way the real
+// registry writes it: decoding is strict, so `patched = true` is a type error and
+// an invented `patched_reason` key is an unknown-field error. Either one makes
+// LoadPackagesConfig fail, which no longer degrades quietly — the command now
+// gates on it — so a fixture with the wrong shape would silently test the
+// unreadable-registry path while claiming to test a declared divergence.
 func writePruneRegistryEntries(t *testing.T, overlayPath string, keys []string, patched bool) {
 	t.Helper()
 	dir := filepath.Join(overlayPath, ".autoupdate")
@@ -126,8 +139,7 @@ func writePruneRegistryEntries(t *testing.T, overlayPath string, keys []string, 
 		b.WriteString("parser = \"regex\"\n")
 		b.WriteString("pattern = 'v([0-9.]+)'\n")
 		if patched {
-			b.WriteString("patched = true\n")
-			b.WriteString("patched_reason = \"keeps our wayland patch\"\n")
+			b.WriteString("patched = \"" + prunePatchedReason + "\"\n")
 		}
 		b.WriteString("# END\n\n")
 	}
