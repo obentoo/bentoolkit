@@ -8,6 +8,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`overlay prune` acts on the redundant verdict — but never on the verdict
+  alone.** `overlay compare` calls 74 packages `redundant` and stops there by
+  design: the verdict is advice, and the report removes nothing. Acting on it
+  meant 74 `rm -rf` calls by hand, in a repository that auto-commits and pushes
+  within minutes, each one also leaving a registry entry the next check would
+  silently disable.
+
+  The new command supplies the tool, and reverses the precedence for its own
+  decision only. A verdict is a statement about *versions* — "::gentoo ships the
+  same or more". Whether deleting our copy loses anything is a statement about
+  *content*, and only a content comparison can make it. Measured against the
+  live overlay on 2026-08-05: of those 74 packages, **8 carry real local changes
+  nobody declared**, `kwin`, `plasma-desktop` and `nodejs` among them. A prune
+  driven by the verdict alone deletes work. So the verdict only selects which
+  packages are worth comparing, and the byte comparison authorises: every version
+  the two trees share must match, and the whole `files/` tree with it. An
+  identical ebuild is not enough on its own — a patch of the same filename with
+  different contents makes an identical ebuild apply *our* patch, not theirs.
+
+  Without `--apply` the command plans and prints: three groups, every package
+  carrying its reason, listing every file that would go and every registry entry
+  that would go with it. The planner has no capability to remove, so "prints a
+  plan and changes nothing" is a property of the structure rather than of a
+  well-placed condition.
+
+  `--apply` asks twice, because the two batches are two decisions. The identical
+  batch loses nothing — every byte is already in ::gentoo — so `--yes` may answer
+  for it. The diverging batch discards work that exists nowhere else, so it is
+  asked separately, naming each package and what removing it takes, and **`--yes`
+  does not answer that one**: a session with no terminal is refused there
+  outright. That flag exists so a scripted run can proceed unattended, and
+  discarding the only copy of something is not a decision a script may take on
+  its own.
+
+  A removal deletes the package directory and then every `packages.toml` entry of
+  that atom — all of them, since 90 of the registry's 321 atoms carry more than
+  one and a half-deleted atom keeps updating a package that is gone. The registry
+  edit runs after the removals and only for the packages whose directory actually
+  went, so the file never claims a removal that did not happen. Every other record
+  is re-emitted byte for byte; a run matching no atom leaves the file untouched
+  rather than rewritten identically, because an mtime change on a file the overlay
+  auto-commits is a commit.
+
+  A package whose registry entry declares `patched` is refused outright and
+  `--include-patched` does not reach it: the declaration already makes the verdict
+  `keep` rather than `redundant`, and this command never removes a package the
+  verdict refused. Clearing a stale declaration stays `overlay analyze`'s
+  business, where the decision leaves a record.
+
+  An API-only provider refuses everything and says so, rather than spending one
+  rate-limited request per package to reach a refusal that was certain beforehand.
+  A run that examined nothing never reports that nothing qualified — the two
+  send an operator to entirely different places, and only one of them means the
+  overlay is clean. `overlay compare` is unchanged: no flag added, no verdict
+  changed, no count changed.
+
 - **`overlay compare` now says what to do, not only what is.** It answered one
   question — how do the versions compare? — and the operator had to answer a
   second from memory: does this package carry changes of our own? Without that

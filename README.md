@@ -451,6 +451,96 @@ bentoo overlay compare my-overlay
 bentoo overlay compare gentoo-gitlab --clone
 ```
 
+#### Prune Redundant Packages
+
+`overlay compare` recommends; `overlay prune` acts on the recommendation — but
+never on the recommendation alone.
+
+```bash
+# Plan the whole overlay. Removes nothing.
+bentoo overlay prune
+
+# Restrict the plan
+bentoo overlay prune app-editors
+bentoo overlay prune app-editors/zed
+
+# Carry the plan out
+bentoo overlay prune --apply
+```
+
+**The verdict does not authorise the removal.** A verdict is a statement about
+*versions*: "::gentoo ships the same or more". Whether deleting our copy loses
+anything is a statement about *content*. Measured on the live overlay: of the 74
+packages `compare` calls `redundant`, **8 carry real local changes nobody
+declared** — `kwin`, `plasma-desktop` and `nodejs` among them. A prune driven by
+the verdict alone deletes work.
+
+So the verdict only selects the candidates, and a byte comparison decides: every
+version the two trees share must match, and the whole `files/` tree with it.
+`Manifest` and `metadata.xml` are never compared — the first holds distfile
+hashes that differ by revision, the second differs by maintainer on every
+package we carry.
+
+The plan prints three groups, and every package in them carries its reason:
+
+| Group | What it is | Removed by |
+|---|---|---|
+| Identical | our copy holds nothing of ours | `--apply` |
+| Diverging | an **undeclared** difference the byte comparison found | `--apply --include-patched` |
+| Refused | no flag on this command removes these | nothing |
+
+**A package whose registry entry declares `patched` is Refused, not Diverging.**
+The declaration already makes `overlay compare` call it `keep` rather than
+`redundant`, and this command never removes a package the verdict refused —
+`--include-patched` does not reach it. If such a copy is genuinely obsolete,
+clear its declaration first; that is `overlay analyze`'s business, and it leaves
+a record of the decision.
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--apply` | Carry out the plan | false (plan only) |
+| `--include-patched` | Also remove undeclared divergence, discarding that work | false |
+| `--keep-registry` | Leave `.autoupdate/packages.toml` untouched | false |
+| `--yes` | Skip the identical batch's confirmation | false |
+
+The provider flags (`--clone`, `--cache-dir`, `--no-cache`, `--timeout`,
+`--token`, `--sync`) are inherited from `overlay compare`.
+
+**`--yes` does not cover `--include-patched`.** The two batches are two
+decisions, and `--apply` asks about them separately. `--yes` answers for the
+identical batch, which loses nothing — every byte is already in ::gentoo, so the
+worst case is a re-sync. It does **not** answer for the diverging batch, and a
+session with no terminal is refused there outright, `--yes` or not: that flag
+exists so a scripted run can proceed unattended, and discarding the only copy of
+something is not a decision a script may take on its own.
+
+A removal deletes the whole package directory and then every
+`.autoupdate/packages.toml` entry of that atom — all of them, since 90 of the
+registry's 321 atoms carry more than one, and a half-deleted atom keeps updating
+a package that is gone. The registry edit runs **after** the removals and only
+for the packages whose directory actually went, so the file never claims a
+removal that did not happen. One failed removal does not stop the rest; the run
+reports it and exits non-zero.
+
+**A local ::gentoo tree is required.** An API provider has no content to
+authorise anything with, and fetching it would cost one rate-limited request per
+package. Such a run refuses everything and says so, rather than comparing ~300
+packages to reach a refusal that was certain beforehand:
+
+```yaml
+# ~/.config/bentoo/config.yaml
+repositories:
+  gentoo:
+    provider: local
+    path: /var/db/repos/gentoo
+```
+
+Nothing here commits or pushes. The overlay's own automation publishes, and a
+prune that also committed would remove the window in which a wrong removal is
+still local.
+
 #### Autoupdate
 
 Check for new upstream versions and apply them automatically:
@@ -1193,6 +1283,7 @@ bentoolkit/
 │   ├── overlay_init.go         # overlay init command
 │   ├── overlay_log.go          # overlay log command
 │   ├── overlay_manifest.go     # overlay manifest command
+│   ├── overlay_prune.go        # overlay prune command
 │   ├── overlay_push.go         # overlay push command
 │   ├── overlay_rename.go       # overlay rename command
 │   ├── overlay_status.go       # overlay status command
