@@ -445,8 +445,14 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 // The first says "you are done". The second says "run it again differently". A
 // single "nothing to prune" says the first while meaning the second.
 //
-// The exact wording is the implementer's; what is pinned is that the two runs do
-// not print the same thing, and that each names its own situation.
+// "Nothing was examined" then has two shapes of its own, and they send the
+// operator to two different places: the run COULD not look (no local ::gentoo
+// tree — change the provider), or there was NOTHING to look at (the overlay
+// holds no package — changing the provider would not help). Both are covered
+// here, because a shared message that fits both fits neither.
+//
+// The exact wording is the implementer's; what is pinned is that the three runs
+// do not print the same thing, and that each names its own situation.
 //
 // _Requirements: R1.5, R2.6_
 func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *testing.T) {
@@ -462,7 +468,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		})
 	}
 
-	var qualified, examined string
+	var qualified, examined, empty string
 
 	t.Run("nothing qualified", func(t *testing.T) {
 		// The package is compared and found to carry a local change, so it is
@@ -486,7 +492,47 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		}
 	})
 
+	t.Run("nothing was examined — the overlay holds no package", func(t *testing.T) {
+		// The other shape of "nothing was examined": there was nothing to look
+		// at. The run returns before the provider is ever resolved, so the
+		// API-only arm's advice — point bentoo at an on-disk ::gentoo — would be
+		// worse than silence here. Swapping the provider cannot conjure a package
+		// that does not exist, and an operator who follows that instruction spends
+		// the afternoon fixing something that was never broken.
+		overlayPath := setupTestOverlay(t)
+
+		withFakeGentoo(t, &fakePruneAPIOnly{})
+		setOverlayPruneFlags(t, false, false, false, false)
+		forbidOverlayPruneRemoval(t)
+
+		var code int
+		empty = captureStdout(t, func() {
+			code = withExitIntercept(func() {
+				runPrune(context.Background(), overlayPath, nil, &config.Config{})
+			})
+		})
+
+		if code > 0 {
+			t.Errorf("exit code = %d, want 0; an empty overlay is a correct answer to a reasonable question, not a failure", code)
+		}
+		low := strings.ToLower(empty)
+		if !strings.Contains(low, "examin") {
+			t.Errorf("an empty overlay does not say that nothing was EXAMINED:\n%s", empty)
+		}
+		if strings.Contains(low, "qualif") {
+			t.Errorf("an empty overlay reports R1.5's 'nothing qualified' half, which claims packages WERE compared and found unremovable. There were none to compare:\n%s", empty)
+		}
+		if strings.Contains(low, "--clone") || strings.Contains(low, "provider") {
+			t.Errorf("an empty overlay is sent to fix its provider. The provider is never resolved on this path, so that advice cannot change the outcome:\n%s", empty)
+		}
+	})
+
 	if qualified != "" && examined != "" && qualified == examined {
 		t.Errorf("both runs printed the same thing, so R1.5's distinction is not made:\n%s", qualified)
+	}
+	// The two "nothing was examined" runs must differ too: same half of R1.5,
+	// different instruction to the operator.
+	if examined != "" && empty != "" && examined == empty {
+		t.Errorf("the no-local-tree run and the empty-overlay run printed the same thing, so the operator is given one instruction for two situations only one of it fits:\n%s", empty)
 	}
 }

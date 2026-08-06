@@ -121,6 +121,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scan — not across a filtered view, so `--only-redundant` narrows what you see
   without rewriting the overlay's own totals.
 
+### Fixed
+- **The prune's refusal list explained itself with a reason that covered only
+  half of what it prints.** Its doc comment justified showing no per-package
+  inventory with "a package refused by its verdict was never even listed" — true
+  of a verdict refusal, which stops the planner before the directory is ever
+  read, and false of an unverifiable one, which passes the verdict gate and does
+  build a full inventory that is then dropped deliberately. The decision was
+  right; the record of it described a smaller set than the code covers, which is
+  how a correct comment turns into a wrong answer for whoever reads it next.
+  Output is byte-identical — nothing about the command's behaviour changed.
+
+  Alongside it, "nothing was examined" is now tested in both of its shapes. The
+  suite covered the run that COULD not look — no local ::gentoo tree on disk, so
+  point bentoo at one — and not the run with NOTHING to look at, an overlay
+  holding no package at all. There, that same advice sends an operator off to fix
+  a provider that was never the problem. The two runs must not print the same
+  thing, and now a test fails if they do.
+
 ## [0.20.0] - 2026-08-05
 
 ### Added
