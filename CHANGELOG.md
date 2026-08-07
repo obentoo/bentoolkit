@@ -122,6 +122,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without rewriting the overlay's own totals.
 
 ### Fixed
+- **`overlay autoupdate` downloaded every distfile into RAM, then sent the
+  resulting failure to an LLM.** The manifest step hardcoded its distdir to
+  `os.MkdirTemp("")` — `os.TempDir()`, a 31 GB **tmpfs** on the host where this
+  was measured — so a bump's distfiles were written into memory, several packages
+  at a time, on a machine already 11 GB into swap. `make.conf` meanwhile pointed
+  `DISTDIR` at disk, and the sibling `overlay manifest` command has taken a
+  configurable, persistent distdir all along. Two packages failed with
+  `Cannot write to '…' (Success)` — wget's message when a write fails with
+  `errno == 0`, the shape ENOSPC takes on tmpfs.
+
+  Both ebuilds were correct, and the LLM fixer was invoked anyway: 10 minutes and
+  up to 30 turns per package, holding `Bash(wget *)` and `Bash(pkgdev *)`, whose
+  only available conclusion is that `SRC_URI` is wrong. Both packages then applied
+  cleanly on a later run **with nothing changed** — the fixer was billed against
+  quota for a condition that had already stopped existing, while holding the tools
+  to edit a correct ebuild in a repository that auto-commits and pushes.
+
+  The distdir now resolves `--distdir` → `autoupdate.distdir` → `portageq distdir`
+  → `/var/cache/distfiles`, and never consults `os.TempDir()`. An unwritable
+  directory is a hard failure that names the path, not a silent retreat.
+
+  Sharing the host's real `DISTDIR` buys reuse and gives up isolation, so three
+  rules the old per-run temp dir enforced structurally are now explicit: a
+  distfile present under a name the current `Manifest` does not list is
+  **quarantined** rather than digested (a truncated download must never become a
+  published checksum — portage's default `FETCHCOMMAND` writes straight to the
+  final name); a failed fetch removes **only** artefacts that run created; and a
+  per-distfile lock serialises the sweep's concurrent workers. A directory bentoo
+  did not create is never removed.
+
+  Separately, a failure is now **classified from observable state** — is the
+  distdir still writable, is there free space, is an expected artefact zero-length
+  — and never from message text. That last point is not hypothetical: this host
+  runs `LC_MESSAGES=pt_BR.UTF-8`, so a classifier grepping `Cannot write to`
+  answers "repairable" the moment a child process stops inheriting a C locale.
+  An environment failure now reports that the cause was the environment and not
+  the ebuild, and the fixer is **never constructed** — whether the verdict comes
+  from that classification or from the pre-flight, which answers "this distdir
+  cannot be prepared" and "another writer holds this distfile" before `pkgdev`
+  is spawned at all. Uncertain still means repairable, so a wrong classification
+  costs one fixer call and never a repair that exists today.
+
+  Both fixers additionally record which model they used and whether it was an
+  **alias** — the default `sonnet` is one, and an alias resolves to a different
+  model over time, so a record that hides it invites the wrong conclusion when a
+  bad edit is audited months later.
+
+  **Known limitation:** `pkgdev` does not participate in portage's `distlocks`,
+  verified rather than assumed — see the README. A sweep run concurrently with an
+  `emerge` fetching the same distfile is not serialised against it.
+
+  `overlay manifest` is unchanged, deliberately: it keeps its own documented
+  default of a throwaway temporary directory needing no `sudo`.
+
 - **The prune's refusal list explained itself with a reason that covered only
   half of what it prints.** Its doc comment justified showing no per-package
   inventory with "a package refused by its verdict was never even listed" — true

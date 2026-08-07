@@ -19,6 +19,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -85,12 +86,76 @@ var (
 	// artifact — the overlay it lives in auto-commits and pushes — so a flag that
 	// defaulted to true would turn every piped or scripted --check into a release.
 	autoupdateYes bool
+	// autoupdateDistdir is --distdir: the directory `pkgdev manifest` is given
+	// as --distdir, under the same name and with the same meaning `overlay
+	// manifest` uses (S030-R1.3). Empty means "not named", which lets
+	// autoupdate.distdir and then the host's own DISTDIR answer instead.
+	autoupdateDistdir string
+	// autoupdateDistfilesCache is --distfiles-cache: the read-only cache
+	// consulted before a download, again under `overlay manifest`'s name. Its
+	// default IS that command's default; the empty string disables the lookup,
+	// which is why the config key is only consulted when the flag was not
+	// passed at all (see resolveAutoupdateDistfileDirs).
+	autoupdateDistfilesCache string
 )
+
+// autoupdateDistfileDirs is the answer to "which directories does the Manifest
+// step work in", resolved ONCE in runAutoupdate and read by every mode that can
+// reach that step (--apply, --apply all, --revive, --clean).
+//
+// It is resolved there, and not at each call site, because the two inputs are
+// only both in scope there: the parsed config (appCtx.Config) and the *cobra
+// command, which is the only thing that can tell an unpassed --distfiles-cache
+// from one explicitly set to the empty string. It is carried in a package
+// variable rather than threaded through four signatures for the same reason
+// sweepConcurrency is passed in rather than read from autoupdateCmd — reaching
+// back into that command value from the files those functions live in closes an
+// initialization cycle.
+//
+// The zero value is the safe one: no distdir named (the host's own DISTDIR
+// answers) and no cache (no directory is read).
+type autoupdateDistfileDirs struct {
+	// Distdir is the --distdir flag, the highest rung of the precedence.
+	Distdir string
+	// ConfiguredDistdir is autoupdate.distdir, consulted only when Distdir is
+	// empty. The precedence itself lives in distfiles.Resolve, which is handed
+	// both rungs — this type does not re-implement it.
+	ConfiguredDistdir string
+	// Cache is the effective read-only distfiles cache, already reduced to one
+	// value because there is no second-chance rung below it: "" means the
+	// lookup is off.
+	Cache string
+}
+
+var autoupdateDirs autoupdateDistfileDirs
 
 var autoupdateCmd = &cobra.Command{
 	Use:   "autoupdate [package]",
 	Short: "Check and apply ebuild version updates",
 	Long: `Automatically check upstream sources for new versions and apply updates.
+
+Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):
+
+  --distdir            Directory pkgdev downloads into and digests from. It
+                       defaults to the DISTDIR this machine's own package
+                       manager reports (portageq distdir, itself normally
+                       /var/cache/distfiles) — NOT to a temporary directory, so
+                       a distfile fetched here is a distfile the next run and
+                       the package manager both reuse. Set it in the config file
+                       as autoupdate.distdir; this flag wins over that key.
+  --distfiles-cache    Read-only cache consulted before downloading: a file
+                       already there is symlinked into the working distdir
+                       instead of fetched again. Nothing is ever written back
+                       to it. Defaults to /var/cache/distfiles, and passing ""
+                       disables the lookup. Set it in the config file as
+                       autoupdate.distfiles_cache; this flag wins over that key.
+
+  The two default to the same directory, which makes the lookup a no-op — there
+  is nothing to link when the cache IS the working distdir. They differ once you
+  point --distdir somewhere else, and that is when the cache starts paying off.
+
+  Both names, and both meanings, are the ones ` + "`bentoo overlay manifest`" + ` already
+  uses.
 
 Examples:
   bentoo overlay autoupdate --check              Check all packages for updates
@@ -110,7 +175,9 @@ Examples:
   bentoo overlay autoupdate --revive all          Revive every revivable orphan
   bentoo overlay autoupdate --lint                Check packages.toml against the record model
   bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff
-  bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)`,
+  bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)
+  bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory
+  bentoo overlay autoupdate --apply all --distfiles-cache ""       Never reuse a cached distfile`,
 	Run: runAutoupdate,
 }
 
@@ -135,7 +202,84 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateFix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix it rewrites packages.toml, in an overlay that auto-commits and pushes")
 
+	// The two distfile directories. The names are byte-identical to `overlay
+	// manifest`'s and so is what they mean; the DEFAULT of --distdir is not,
+	// and cannot be, because the two commands genuinely differ there. An unset
+	// --distdir on `overlay manifest` means a temporary directory discarded
+	// after the run (that command needs no sudo, and its help says so). Here it
+	// means the DISTDIR the host names, because a temporary one is the defect
+	// this whole path was rewritten to remove: on the machine it was measured
+	// on, /tmp is a tmpfs, so every distfile a bump fetched went into RAM.
+	// Copying that command's help string verbatim would make this flag describe
+	// behaviour this command does not have (S030-R1.3 asks for one vocabulary,
+	// not one sentence).
+	// No back-quoted words in either usage string — see the --fix note above:
+	// pflag reads the first one as the flag's value placeholder and strips the
+	// quotes, so "portageq distdir" in back-quotes would render this as
+	// "--distdir portageq distdir".
+	autoupdateCmd.Flags().StringVar(&autoupdateDistdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
+	autoupdateCmd.Flags().StringVar(&autoupdateDistfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
+
 	overlayCmd.AddCommand(autoupdateCmd)
+}
+
+// resolveAutoupdateDistfileDirs decides which directories the Manifest step
+// works in: the --distdir flag and autoupdate.distdir, handed on as the two
+// rungs distfiles.Resolve consumes, plus the one effective read-only cache.
+//
+// # Why the cache needs cacheFlagWasSet and the distdir does not
+//
+// An unset --distdir is the empty string and so is an explicit --distdir "";
+// both mean "I am not naming one", so the config key can simply answer when the
+// flag is empty. The cache is the opposite: "" is a MEANING there — it disables
+// the lookup, which is how `overlay manifest` documents it — so "the flag is
+// empty" cannot be read as "the flag is absent". pflag's Changed is the only
+// thing that distinguishes them, and a flag that was passed always wins.
+//
+// # Why only the config values are validated
+//
+// A relative path typed at a shell is unambiguous: it resolves against the
+// directory the operator is standing in. The same string in a config file
+// resolves against whatever directory the process happened to start in, which
+// for a long-running sweep is arbitrary — so a relative autoupdate.distdir is
+// rejected with a warning naming the key, rather than silently creating a
+// download directory somewhere unpredictable. "~" is fine; it is expanded
+// downstream.
+func resolveAutoupdateDistfileDirs(cfg *config.Config, cacheFlagWasSet bool) autoupdateDistfileDirs {
+	dirs := autoupdateDistfileDirs{Distdir: autoupdateDistdir}
+
+	var configuredCache string
+	if cfg != nil {
+		dirs.ConfiguredDistdir = sanitizeConfiguredDir("autoupdate.distdir", cfg.Autoupdate.GetDistdir())
+		configuredCache = sanitizeConfiguredDir("autoupdate.distfiles_cache", cfg.Autoupdate.GetDistfilesCache())
+	}
+
+	switch {
+	case cacheFlagWasSet:
+		dirs.Cache = autoupdateDistfilesCache
+	case configuredCache != "":
+		dirs.Cache = configuredCache
+	default:
+		dirs.Cache = autoupdateDistfilesCache // the flag's own default
+	}
+	return dirs
+}
+
+// sanitizeConfiguredDir validates a directory path that arrived from the config
+// file — external input reaching a filesystem operation. It returns the path, or
+// "" (treated everywhere as "not configured") after warning which key was
+// ignored and why. Silence would be the wrong outcome twice over: the operator
+// would believe the key took effect, and the run would use a different directory
+// from the one the file names.
+func sanitizeConfiguredDir(key, path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+		return path
+	}
+	logger.Warn("ignoring %s = %q: a directory in the config file must be an absolute path (or start with ~), because a relative one resolves against whatever directory this process was started in", key, path)
+	return ""
 }
 
 // tuiEnabledForApply is the apply-path gate: it defers entirely to tui.Enabled
@@ -279,6 +423,12 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// 3600-second default — so the duration here is always positive and safe
 	// to pass to WithCacheTTL inside runCheck.
 	cacheTTL := time.Duration(appCtx.Config.Autoupdate.GetCacheTTL()) * time.Second
+
+	// Resolve the two distfile directories once, here, where both the config and
+	// the *cobra.Command are in scope (S030-R1.3). Every mode that regenerates a
+	// Manifest reads the result; a mode that does not (--check, --list, --lint)
+	// simply never looks at it.
+	autoupdateDirs = resolveAutoupdateDistfileDirs(appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
 
 	// Handle different modes
 	switch {
@@ -1039,6 +1189,19 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 	return autoupdate.WithApplierFixer(fixer)
 }
 
+// applierDistfileOptions carries the resolved distfile directories into every
+// Applier this command builds, so --apply, --apply all and --revive all reach
+// the Manifest step with the same two directories (S030-R1.3). One helper rather
+// than three copies of the same two lines: a mode that silently missed them
+// would fall back to the host's DISTDIR with no cache, which looks like working
+// software.
+func applierDistfileOptions() []autoupdate.ApplierOption {
+	return []autoupdate.ApplierOption{
+		autoupdate.WithApplierDistdir(autoupdateDirs.Distdir, autoupdateDirs.ConfiguredDistdir),
+		autoupdate.WithApplierDistfilesCache(autoupdateDirs.Cache),
+	}
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
@@ -1060,6 +1223,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
+	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1143,6 +1307,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		autoupdate.WithApplierPendingList(pending),
 		applierFixerOption(llmCfg),
 	}
+	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1632,10 +1797,12 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir,
-		autoupdate.WithApplierContext(ctx),
-		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		autoupdate.WithApplierPendingList(pending),
+		append([]autoupdate.ApplierOption{
+			autoupdate.WithApplierContext(ctx),
+			autoupdate.WithApplierClean(autoupdateClean),
+			autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+			autoupdate.WithApplierPendingList(pending),
+		}, applierDistfileOptions()...)...,
 	)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)

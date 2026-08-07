@@ -174,7 +174,11 @@ loop:
 		// path returns result, nil), so the gate is checkErr==nil && version!="",
 		// NOT checkRes.Error (which may hold a non-fatal cache warning).
 		if checkErr == nil && checkRes != nil && checkRes.UpstreamVersion != "" {
-			fmt.Printf("✔ %s fixed: %s (resolved upstream %s)\n", pkg, res.Summary, checkRes.UpstreamVersion)
+			// Name the model that made the edit; FormatModelUsed says "model
+			// alias ..." when the configured model was an alias, because an
+			// alias resolves to a different model over time (S030-R4.1/R4.2).
+			fmt.Printf("✔ %s fixed using %s: %s (resolved upstream %s)\n",
+				pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, checkRes.UpstreamVersion)
 			if checkRes.NotComparable {
 				fmt.Printf("  warning: %s extracted version %q is not orderable against the current version; the parser may need more work\n", pkg, checkRes.UpstreamVersion)
 			}
@@ -187,7 +191,11 @@ loop:
 		if checkRes != nil && checkRes.Error != nil {
 			newErr = checkRes.Error
 		}
-		fmt.Printf("  %s still failing after fix: %s\n  error: %v\n", pkg, res.Summary, newErr)
+		// The still-failing line carries the model record too: an edit the
+		// operator may choose to KEEP is exactly the one an audit will come
+		// back to (S030-R4.1).
+		fmt.Printf("  %s still failing after fix using %s: %s\n  error: %v\n",
+			pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, newErr)
 		fmt.Print("Keep the edit anyway? [y/N] ")
 		if readAnswer(reader) == "y" {
 			// User chose to keep a still-failing edit (R5.3).

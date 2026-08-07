@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -194,6 +195,16 @@ type Applier struct {
 	// terminal for the prompt and tee the raw output to the TTY and a capture
 	// buffer. A nil override is normalized back to the CombinedOutput default.
 	runAttached func(cmd *exec.Cmd) ([]byte, error)
+	// distdir, configuredDistdir and distfilesCache are carried, unread, from
+	// the CLI to the sweeper this applier builds for the Manifest step: the
+	// --distdir flag, autoupdate.distdir, and the read-only cache named by
+	// --distfiles-cache / autoupdate.distfiles_cache (S030-R1.3). Nothing on
+	// Applier interprets them — see sweeper() and runManifest, which own the
+	// precedence — and all three empty is the production default that lands on
+	// the host's own DISTDIR with no cache lookup.
+	distdir           string
+	configuredDistdir string
+	distfilesCache    string
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -325,6 +336,26 @@ func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOptio
 		}
 		a.runAttached = fn
 	}
+}
+
+// WithApplierDistdir supplies the two configurable rungs of the distdir the
+// Manifest step gives pkgdev: explicit is the --distdir flag, configured is
+// autoupdate.distdir from the config file (S030-R1.3). Both empty — what a
+// caller that omits this option gets — is the production default: the DISTDIR
+// the host's own package manager reports (S030-R1.2).
+func WithApplierDistdir(explicit, configured string) ApplierOption {
+	return func(a *Applier) {
+		a.distdir = explicit
+		a.configuredDistdir = configured
+	}
+}
+
+// WithApplierDistfilesCache supplies the read-only distfiles cache the Manifest
+// step reuses already downloaded files from (--distfiles-cache /
+// autoupdate.distfiles_cache). Empty disables the lookup, and empty is what a
+// caller that omits this option gets.
+func WithApplierDistfilesCache(dir string) ApplierOption {
+	return func(a *Applier) { a.distfilesCache = dir }
 }
 
 // NewApplier creates a new applier instance for the given overlay.
@@ -771,6 +802,11 @@ func (a *Applier) sweeper() *sweeper {
 		withSweeperExec(a.execCommand),
 		withSweeperReporter(a.reporter),
 		withSweeperConfigs(a.configs),
+		// Both distfile directories reach the Manifest step through here, which
+		// is the only path Applier has to it: runManifest delegates to this
+		// sweeper (S030-R1.3).
+		withSweeperDistdir(a.distdir, a.configuredDistdir),
+		withSweeperDistfilesCache(a.distfilesCache),
 	)
 }
 
@@ -961,8 +997,11 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 // configured, performs a single agentic repair-and-retry:
 //
 //  1. Run `pkgdev manifest`; on success, return nil (no fix needed).
-//  2. If no fixer is wired, return the original error (legacy fail-fast).
-//  3. Otherwise invoke the fixer to edit the ebuild in place, then re-run
+//  2. Classify the failure. When it belongs to the machine and not to the
+//     ebuild, report that and return — no fixer is constructed or invoked
+//     (S030-R3.3/R3.4; see refuseFixOnEnvironmentFailure).
+//  3. If no fixer is wired, return the original error (legacy fail-fast).
+//  4. Otherwise invoke the fixer to edit the ebuild in place, then re-run
 //     `pkgdev manifest` ONCE. That second run — bentoo's own, not the agent's
 //     self-report — is the authoritative success check:
 //     - success  → record result.Fixed/FixSummary and return nil.
@@ -977,6 +1016,14 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	if firstErr == nil {
 		return nil
 	}
+
+	// The gate (S030-D6). It sits between the failed manifest and everything
+	// that would set a fix attempt up, because the cheapest fixer invocation is
+	// the one that never happens.
+	if envErr := a.refuseFixOnEnvironmentFailure(pkg, version, firstErr); envErr != nil {
+		return envErr
+	}
+
 	if a.fixer == nil {
 		return firstErr
 	}
@@ -1021,8 +1068,16 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 
 	result.Fixed = true
 	result.FixSummary = fixRes.Summary
-	logger.Info("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary)
-	a.reporter.Log("info", fmt.Sprintf("LLM fixer repaired %s-%s: %s", pkg, version, fixRes.Summary))
+	// Name the model that made the edit, and SAY SO when it was an alias
+	// (S030-R4.1/R4.2). FormatModelUsed renders "model alias \"opus\"" rather
+	// than a bare "opus", because the same alias resolves to a different model
+	// over time: an audit of a bad edit months from now must not read the bare
+	// word as a pinned identity. One string feeds both sinks so the operator's
+	// log and the TUI report can never drift apart.
+	fixLine := fmt.Sprintf("LLM fixer repaired %s-%s using %s: %s",
+		pkg, version, FormatModelUsed(fixRes.Model), fixRes.Summary)
+	logger.Info("%s", fixLine)
+	a.reporter.Log("info", fixLine)
 
 	// Advisory QA gate: the manifest re-run proves the distfile fetches and
 	// digests, but not that the agent's edit is QA-clean. Run pkgcheck (when
@@ -1034,6 +1089,127 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
 	}
 	return nil
+}
+
+// refuseFixOnEnvironmentFailure decides whether a failed manifest step is one
+// the LLM fixer must never see, and it is the whole of S030-D6.
+//
+// It returns a non-nil error ONLY for an environment verdict: the apply fails
+// with it, and the caller returns before anything constructs a fix attempt
+// (S030-R3.3). The error names the package, states that the cause was the
+// environment and NOT the ebuild, gives the reason the classifier observed, and
+// carries what `pkgdev manifest` printed — everything R3.4 asks be reported. For
+// every other verdict it returns nil, which means "carry on", and today's path
+// runs unchanged down to the authoritative re-run of pkgdev that decides success.
+//
+// # Why refuse at all
+//
+// An LLM fixer handed a machine failure has exactly one repair available to it —
+// rewrite SRC_URI — so it spends ten minutes and up to thirty turns concluding
+// that a correct ebuild is wrong, and this repository commits and pushes on its
+// own. The measured case is sharper still: both packages applied on a later run
+// with nothing changed (S030-M3a). The fixer was billed against quota for a
+// condition that had already stopped existing.
+//
+// The precedent is promptRegistryFixes, which already refuses to offer a repair
+// unless the failure wraps ErrFetchFailed (cmd/bentoo/overlay_autoupdate_fixregistry.go:89).
+// This is the same rule moved to the manifest path, keyed on a classification
+// rather than on a single sentinel.
+//
+// # Why it runs before the `a.fixer == nil` early return
+//
+// The verdict is a fact about the failure, not about the configuration: an
+// operator whose distdir filled up needs to read that it was the distdir whether
+// or not an LLM happens to be wired, or the same failure gets a different
+// diagnosis on two machines and the one without a fixer hand-edits an ebuild
+// that was never broken. Nothing is spent to get it — the classifier only
+// observes state that is already there — and on a healthy machine the verdict is
+// "repairable" and the error is returned byte-for-byte as before.
+//
+// # When there is nothing to classify
+//
+// Some failures raised before pkgdev ran are genuinely unanswerable — an invalid
+// package atom says nothing about any machine — and those still fall through.
+// R3.5 makes an unanswerable check mean "repairable": a wrong classification
+// must cost a wasted fixer invocation, never a lost repair.
+//
+// A distdir that could not be prepared is NOT one of them, and treating it as
+// one was this gate's original defect (found by `stories validate 030`). Probe
+// answers that question definitively, before pkgdev is ever spawned, and R3.1
+// requires the answer to reach here. See environmentVerdict.
+func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr error) error {
+	verdict := environmentVerdict(firstErr)
+	if verdict == nil {
+		return nil
+	}
+
+	// Reported here, not returned quietly: the apply's own error reaches the
+	// summary at the end of a batch, while this line lands next to the package it
+	// belongs to in a run that keeps going.
+	envErr := fmt.Errorf("%s-%s: %w (the LLM fixer was not invoked: the only repair available to it is to rewrite the ebuild, and the ebuild is not what failed)",
+		pkg, version, verdict)
+	warnLogf("%s", envErr.Error())
+	a.reporter.Log("warn", envErr.Error())
+	return envErr
+}
+
+// environmentVerdict returns an ErrManifestEnvironment-wrapped verdict when the
+// failure is the machine's rather than the ebuild's, and nil when the ebuild
+// still might be at fault.
+//
+// There are two ways to reach a verdict, and they are not interchangeable.
+//
+// # Before pkgdev ran
+//
+// The manifest step refuses to start on a distdir it could not prepare
+// (S030-R1.4) or on distfiles another writer holds (S030-R2.4). Both are
+// answered, by observation, before the ebuild is read by anything — so neither
+// is a statement about the ebuild, and R3.5's "uncertain means repairable" has
+// nothing to say about them: nothing was uncertain.
+//
+// Missing this was the original gap. The pre-flight failure carries no
+// *manifestRunError — that type is built only where pkgdev itself fails — so a
+// gate keyed on the type alone let every one of these through. On a host whose
+// invoking user is outside group `portage` (S030-M2) that meant the whole batch
+// went to the fixer, and the fixer's own sandbox distdir (see runManifestWithFix)
+// is a writable temp dir, so the agent could not even reproduce the failure: its
+// one remaining conclusion is that SRC_URI is wrong, on an ebuild that is not.
+//
+// The two sentinels are kept apart because they are different news for the
+// operator, exactly as distfiles.ErrDistfileLocked's own documentation asks:
+// a held distfile is transient and the next run gets it, while an unwritable
+// distdir will still be unwritable next time. The decision about the fixer is
+// the same for both — it is not invoked — and it is the wrapped message that
+// differs.
+//
+// # After pkgdev ran
+//
+// The state pkgdev actually ran in, recovered rather than re-derived: by now the
+// distdir precedence could answer differently, and classifying against a
+// directory the failure never saw would be worse than not classifying.
+func environmentVerdict(firstErr error) error {
+	if errors.Is(firstErr, distfiles.ErrDistdirNotWritable) ||
+		errors.Is(firstErr, distfiles.ErrDistfileLocked) {
+		// Wrapped, not replaced: %w keeps both the sentinel above and everything
+		// under it reachable, so the operator still reads which directory or
+		// which distfile, and which process held it.
+		return fmt.Errorf("%w: %w", ErrManifestEnvironment, firstErr)
+	}
+
+	var runErr *manifestRunError
+	if !errors.As(firstErr, &runErr) {
+		return nil
+	}
+
+	// firstErr, not runErr.Err: the classifier wraps what it is handed, so the
+	// whole chain stays reachable to errors.Is/errors.As under the verdict. The
+	// nil SpaceFunc is the production seam — it normalises to the real statfs
+	// query inside ClassifyManifestFailure, it does NOT disable the check.
+	verdict := ClassifyManifestFailure(runErr.Distdir, firstErr, runErr.Expected, nil)
+	if !errors.Is(verdict, ErrManifestEnvironment) {
+		return nil
+	}
+	return verdict
 }
 
 // runQACheck runs `pkgcheck scan` against pkg as an advisory, read-only QA pass

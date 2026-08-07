@@ -16,7 +16,8 @@
 // system guidance, the -p instruction builder, and the --add-dir/cwd target are
 // new. The envelope (claudeCodeEnvelope), formatFixerError, resolveBare,
 // claudeAvailable, DefaultClaudeCodeModel, DefaultManifestFixTimeout, the
-// manifestFix* wait-delay/turn constants, ErrClaudeCodeUnavailable, and the
+// manifestFix* wait-delay/turn constants, ErrClaudeCodeUnavailable, isModelAlias
+// (the single alias rule behind both results' ModelIsAlias flag), and the
 // lookPath seam are all reused from the package, never redefined.
 //
 // As with the manifest fixer, a nil error is NOT proof the entry now extracts: the
@@ -96,6 +97,13 @@ type RegistryFixResult struct {
 	Summary string
 	// CostUSD is the reported spend for the invocation, when the CLI provides it.
 	CostUSD float64
+	// Model is the exact string this invocation passed to the CLI's --model
+	// (S030-R4.1), i.e. the RESOLVED model, not the configured one.
+	Model string
+	// ModelIsAlias reports that Model is a CLI alias ("sonnet", "opus") rather
+	// than a pinned identifier (S030-R4.2). Derived from isModelAlias — the same
+	// single rule the manifest fixer uses, never a second copy.
+	ModelIsAlias bool
 }
 
 // RegistryFixer is the optional capability an LLM provider may implement to repair
@@ -358,11 +366,18 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 	// and never the API key. runCtx.Err() captures both a timeout
 	// (DeadlineExceeded) and a parent cancellation (Canceled).
 	if runErr != nil || jsonErr != nil || env.IsError {
-		return RegistryFixResult{}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
+		// As in FixManifest, the model record travels on the failure path too:
+		// S030-R4.1 records what was invoked, not only what succeeded.
+		return RegistryFixResult{
+			Model:        f.model,
+			ModelIsAlias: isModelAlias(f.model),
+		}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
 	}
 
 	return RegistryFixResult{
-		Summary: strings.TrimSpace(env.Result),
-		CostUSD: env.TotalCostUSD,
+		Summary:      strings.TrimSpace(env.Result),
+		CostUSD:      env.TotalCostUSD,
+		Model:        f.model,
+		ModelIsAlias: isModelAlias(f.model),
 	}, nil
 }

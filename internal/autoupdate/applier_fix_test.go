@@ -3,11 +3,15 @@ package autoupdate
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 )
 
 // TestApply_ManifestFix_Recovers exercises the happy path: the first `pkgdev
@@ -334,5 +338,517 @@ func TestSubstituteCommitHash_TrulyMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no commit hash variable") {
 		t.Errorf("error = %v, want it to name the missing variable", err)
+	}
+}
+
+// =============================================================================
+// The gate: an environment failure never reaches the LLM fixer
+// (S030 sub-task 4.2 — R3.3, R3.4, R3.6)
+//
+// The run this exists for failed two packages on `Cannot write to
+// '/tmp/bentoo-distfiles-…' (Success)` — a statement about a filesystem. Both
+// ebuilds were correct, and both applied on a later run with nothing changed
+// (M3a). The fixer was invoked anyway: ten minutes and up to thirty turns per
+// package, holding wget and pkgdev, and its only reachable conclusion is that
+// SRC_URI is wrong. This repository commits and pushes on its own, so that is
+// how a correct ebuild gets edited and published.
+//
+// The tests below pin the gate at the one place that decides: between the failed
+// manifest and the fix attempt, in runManifestWithFix.
+// =============================================================================
+
+// stubExhaustedDistdirSpace makes the classifier's free-space check answer "no
+// room left at all" for the rest of the test, and restores the real query after.
+//
+// It replaces defaultSpaceQuery rather than filling a real filesystem, which is
+// the only other way to reach this verdict. Two things follow from WHICH seam it
+// replaces. The gate passes a nil SpaceFunc, as production must; a nil one
+// normalises to defaultSpaceQuery inside ClassifyManifestFailure instead of
+// disabling the check — so a stub that is never consulted would mean the gate
+// had turned free-space checking off, and these tests would go green on a gate
+// that had stopped looking. And nothing here touches a real distdir: the
+// verdict comes from an answer, not from a full disk.
+func stubExhaustedDistdirSpace(t *testing.T) {
+	t.Helper()
+	orig := defaultSpaceQuery
+	defaultSpaceQuery = func(string) (uint64, error) { return 0, nil }
+	t.Cleanup(func() { defaultSpaceQuery = orig })
+}
+
+// productionManifestFailure is what `pkgdev manifest` printed on the run this
+// story was measured on. The parenthesised "(Success)" is errno 0 — the write
+// failed and nothing set an error — and the sentence names a directory, not a
+// URL. It is used verbatim so the tests can assert the operator still reads it
+// even though the fixer never ran.
+const productionManifestFailure = "Cannot write to '/tmp/bentoo-distfiles-4f2a/godot-4.7.tar.xz' (Success)"
+
+// pkgdevFailsPrinting returns an exec seam whose `pkgdev` calls print out and
+// exit non-zero; every other command succeeds. out is passed as an ARGUMENT to
+// sh, never interpolated into the script, so quotes inside it cannot change what
+// the shell runs.
+func pkgdevFailsPrinting(out string) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' "$0"; exit 1`, out)
+	}
+}
+
+// gatePkg is one pending bump for newGateApplier.
+type gatePkg struct{ name, from, to string }
+
+// newGateApplier builds an applier over a fresh overlay carrying one pending
+// bump per pkg, with a fixer double and a recording reporter attached — the
+// harness the four gate tests share. The fixer is always wired, because "the
+// fixer was available and was not used" is the claim under test.
+func newGateApplier(t *testing.T, seam func(ctx context.Context, name string, arg ...string) *exec.Cmd, pkgs ...gatePkg) (*Applier, *fakeFixer, *recordingReporter) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pending, err := NewPendingList(configDir)
+	if err != nil {
+		t.Fatalf("NewPendingList: %v", err)
+	}
+	for _, p := range pkgs {
+		createTestEbuildFile(t, overlayDir, p.name, p.from)
+		pending.Add(PendingUpdate{
+			Package:        p.name,
+			CurrentVersion: p.from,
+			NewVersion:     p.to,
+			Status:         StatusPending,
+		})
+	}
+
+	fixer := &fakeFixer{summary: "rewrote SRC_URI"}
+	rec := &recordingReporter{}
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(seam),
+		WithApplierFixer(fixer),
+		WithApplierReporter(rec),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+	return applier, fixer, rec
+}
+
+// TestEnvironmentFailureSkipsTheManifestFixer is R3.3, and it is the point of
+// the story: with a fixer wired and willing, an environment failure must not
+// reach it — not the invocation, and not the announcement that precedes it.
+func TestEnvironmentFailureSkipsTheManifestFixer(t *testing.T) {
+	stubExhaustedDistdirSpace(t)
+
+	pkg := "dev-games/godot"
+	applier, fixer, rec := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	result, err := applier.Apply(pkg, false)
+	if err == nil || result == nil || result.Success {
+		t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
+	}
+
+	if fixer.called != 0 {
+		t.Errorf("the fixer ran %d time(s); an environment failure must never reach it (R3.3)", fixer.called)
+	}
+	if result.Fixed {
+		t.Error("result.Fixed = true, but nothing was fixed")
+	}
+	if result.FixSummary != "" {
+		t.Errorf("FixSummary = %q, want empty: no fix was attempted", result.FixSummary)
+	}
+	// The stages the fix attempt emits are its footprint on the reporter. Their
+	// absence says the attempt was not merely unsuccessful — it was never set up.
+	for _, ev := range rec.snapshot() {
+		if strings.Contains(ev, "llm-fix") || strings.Contains(ev, "re-check") {
+			t.Errorf("reporter recorded %q; the fix attempt must not even be announced", ev)
+		}
+	}
+}
+
+// TestEnvironmentFailureReportsCauseAsEnvironment is R3.4. A refusal that says
+// nothing is worse than the fixer running: the operator is left with a failed
+// package, no diagnosis, and a correct ebuild that now looks suspect. So the
+// report must name the package, say the cause was the environment and NOT the
+// ebuild, and still carry what pkgdev printed.
+//
+// Note the boundary this deliberately does not assert: Apply re-wraps with
+// "%w: %v" (ErrManifestFailed and then the text), so ErrManifestEnvironment is
+// not reachable with errors.Is from Apply's error. The TEXT survives that
+// boundary, which is what an operator reads, and that is what is pinned here.
+func TestEnvironmentFailureReportsCauseAsEnvironment(t *testing.T) {
+	stubExhaustedDistdirSpace(t)
+	warns := captureWarnLogs(t)
+
+	pkg := "dev-games/godot"
+	applier, _, rec := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	_, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("expected the apply to fail")
+	}
+
+	// Every clause R3.4 asks for, checked on the error the apply fails with.
+	for _, want := range []string{
+		pkg + "-4.7",                    // which package
+		"not on the ebuild",             // the cause, stated as a negative too
+		"no usable free space",          // which observation reached that verdict
+		"the LLM fixer was not invoked", // what was skipped, and that it was deliberate
+		productionManifestFailure,       // the underlying error, verbatim
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("apply error is missing %q\n  got: %v", want, err)
+		}
+	}
+
+	// The same statement has to reach the operator where a batch shows it: the
+	// warn sink and the reporter, not only the returned error.
+	if !anyContains(warns.all(), "not on the ebuild") {
+		t.Errorf("nothing was logged about the cause; warnings = %v", warns.all())
+	}
+	if !anyContains(rec.snapshot(), "not on the ebuild") {
+		t.Errorf("the reporter was told nothing about the cause; events = %v", rec.snapshot())
+	}
+}
+
+// TestRepairableFailureStillInvokesTheFixer is the other half of the gate, and
+// the one a wrong classification would quietly destroy: on a healthy machine
+// nothing is observably wrong with the environment, so the verdict is
+// "repairable" and today's path runs untouched — fixer invoked, and the
+// AUTHORITATIVE second run of pkgdev, not the agent's self-report, deciding
+// success. A gate that answered "environment" too eagerly would gate away a
+// repair that exists, which R3.5 forbids.
+func TestRepairableFailureStillInvokesTheFixer(t *testing.T) {
+	// No space stub here, on purpose: the real query runs against a real, healthy
+	// temporary distdir and finds nothing to complain about.
+	pkgdevCalls := 0
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		pkgdevCalls++
+		if pkgdevCalls == 1 {
+			return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' "$0"; exit 1`, "SRC_URI is unreachable: 404")
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+
+	pkg := "dev-games/godot"
+	applier, fixer, rec := newGateApplier(t, seam, gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("expected the repaired apply to succeed: err=%v result=%+v", err, result)
+	}
+	if fixer.called != 1 {
+		t.Errorf("fixer called %d times, want exactly 1", fixer.called)
+	}
+	if !result.Fixed || result.FixSummary != fixer.summary {
+		t.Errorf("Fixed=%v FixSummary=%q, want true / %q", result.Fixed, result.FixSummary, fixer.summary)
+	}
+	// Two pkgdev runs: the one that failed, and the one that decided success.
+	if pkgdevCalls != 2 {
+		t.Errorf("pkgdev ran %d time(s), want 2 — the authoritative re-run must still happen", pkgdevCalls)
+	}
+	assertOrder(t, rec.snapshot(),
+		"TaskStage:"+pkg+":manifest",
+		"TaskStage:"+pkg+":llm-fix",
+		"TaskStage:"+pkg+":re-check",
+	)
+}
+
+// TestEnvironmentFailureContinuesTheBatchAndExitsNonZero is R3.6, tested where
+// each half is actually real.
+//
+// Continuation is the applier's: one package's environment failure must leave
+// nothing latched behind it, so the next package applies normally. That is
+// asserted here, with two packages through one applier.
+//
+// The exit code is NOT the applier's and is not asserted here, because asserting
+// it here would assert nothing. A failed apply returns a non-nil error with
+// Success == false — the exact shape applyAllPackages tallies
+// (cmd/bentoo/overlay_autoupdate.go, the concurrent worker's `if err != nil`),
+// and runApplyAll then calls osExit(1) whenever that tally is above zero. An
+// environment failure is a failed apply like any other, so it already rides that
+// path; TestApplyAllPackagesCountsFailures pins the tally and this test pins the
+// shape it counts. No machinery was added for R3.6 — that is the finding.
+func TestEnvironmentFailureContinuesTheBatchAndExitsNonZero(t *testing.T) {
+	stubExhaustedDistdirSpace(t)
+
+	// The first pkgdev call fails (the environment-failed package, applied
+	// first); every later call succeeds, so the package after it is healthy.
+	calls := 0
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		calls++
+		if calls == 1 {
+			return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' "$0"; exit 1`, productionManifestFailure)
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+
+	failed, healthy := "dev-games/godot", "dev-libs/foo"
+	applier, fixer, _ := newGateApplier(t, seam,
+		gatePkg{failed, "4.7_rc3", "4.7"},
+		gatePkg{healthy, "1.0", "1.1"})
+
+	badResult, badErr := applier.Apply(failed, false)
+	if badErr == nil || badResult == nil || badResult.Success {
+		t.Fatalf("the environment failure must fail the apply: err=%v result=%+v", badErr, badResult)
+	}
+	// The shape the batch counts, and the only thing the exit code is derived
+	// from: a non-nil error and an unsuccessful result.
+	if badResult.Error == nil {
+		t.Error("result.Error is nil on a failed apply; the batch summary would show it as fine")
+	}
+
+	goodResult, goodErr := applier.Apply(healthy, false)
+	if goodErr != nil || goodResult == nil || !goodResult.Success {
+		t.Fatalf("the batch did not continue past the environment failure: err=%v result=%+v", goodErr, goodResult)
+	}
+	if fixer.called != 0 {
+		t.Errorf("the fixer ran %d time(s) across the batch; the environment failure must not have reached it", fixer.called)
+	}
+}
+
+// anyContains reports whether any of lines contains want.
+func anyContains(lines []string, want string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// =============================================================================
+// The pre-flight's verdict reaches the gate (S030 sub-task 7.1)
+//
+// `stories validate 030` found R3.1 half-implemented. The verification shipped —
+// the probe fails loudly and names the path — but the failure it raises carries
+// no *manifestRunError, and that type was the gate's only entry condition, so
+// every pre-flight failure walked straight past it into a fixer invocation.
+//
+// These tests pin the half that was missing. The one that matters most is the
+// negative at the end: over-gating would cost a repair that exists today, which
+// R3.5 forbids, so "the fixer is skipped" is only correct next to a case that
+// proves it still runs.
+// =============================================================================
+
+// withResolveDistdir swaps the package's distdir resolver for one test.
+//
+// The suite's init() already replaced the production resolver with a sandboxed
+// one (see sweep_manifest_test.go); this restores THAT, not distfiles.Resolve,
+// so a test cannot leave the package pointed at the host's DISTDIR.
+func withResolveDistdir(t *testing.T, fn func(explicit, configured string) (distfiles.Dir, error)) {
+	t.Helper()
+	prev := resolveDistdir
+	resolveDistdir = fn
+	t.Cleanup(func() { resolveDistdir = prev })
+}
+
+// unwritableDistdirError is the error shape sweep.runManifest returns when the
+// pre-flight refuses the resolved directory, built the way Probe builds it so
+// the sentinel sits under the same number of wraps as in production.
+func unwritableDistdirError(dir string) error {
+	return fmt.Errorf("%w: distdir %s: %w", ErrManifestFailed,
+		dir, fmt.Errorf("%w: %s: %w", distfiles.ErrDistdirNotWritable, dir, fs.ErrPermission))
+}
+
+// TestUnwritableDistdirPreflightSkipsTheManifestFixer is R3.1's second clause,
+// and it is the defect validation found: an unwritable distdir is answered by
+// Probe BEFORE pkgdev is spawned, so it is never a statement about the ebuild.
+//
+// The host this matters on is the one M2 measures: an invoking user outside
+// group `portage` cannot write /var/cache/distfiles, and before this the whole
+// batch went to the fixer at ten minutes and thirty turns each.
+func TestUnwritableDistdirPreflightSkipsTheManifestFixer(t *testing.T) {
+	dir := t.TempDir()
+	withResolveDistdir(t, func(string, string) (distfiles.Dir, error) {
+		return distfiles.Dir{Path: dir}, unwritableDistdirError(dir)
+	})
+
+	pkg := "dev-games/godot"
+	applier, fixer, rec := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	result, err := applier.Apply(pkg, false)
+	if err == nil || result == nil || result.Success {
+		t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
+	}
+
+	if fixer.called != 0 {
+		t.Errorf("the fixer ran %d time(s); a distdir that failed the pre-flight must never reach it (R3.1, R3.3)", fixer.called)
+	}
+	if result.Fixed {
+		t.Error("result.Fixed = true, but nothing was fixed")
+	}
+	// The announcement is the fixer's footprint even when the call itself is
+	// cheap: an operator reading "invoking LLM fixer" for an unwritable
+	// directory learns the wrong thing about their machine.
+	for _, ev := range rec.snapshot() {
+		if strings.Contains(ev, "llm-fix") || strings.Contains(ev, "re-check") {
+			t.Errorf("reporter recorded %q; the fix attempt must not even be announced", ev)
+		}
+	}
+}
+
+// TestUncreatableDistdirSkipsTheManifestFixer drives the REAL distfiles.Resolve,
+// not a stub, so it proves the whole chain: MkdirAll fails, Resolve wraps the
+// sentinel around it, sweep.runManifest wraps that, and the gate still finds it.
+//
+// It is the rung R1.4 names alongside writability ("does not exist, cannot be
+// created, or is not writable") and the one a sentinel-only reading would have
+// missed, because expandAndCreate's error carried no sentinel at all.
+//
+// ENOTDIR is the failure used because it needs no privileges and behaves the
+// same as root — os.Chmod(dir, 0500) does not, which is why probe_test.go has to
+// skip those subtests for euid 0.
+func TestUncreatableDistdirSkipsTheManifestFixer(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("regular file"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// A path UNDER a regular file: every component after it is uncreatable.
+	target := filepath.Join(blocker, "distfiles")
+	withResolveDistdir(t, func(string, string) (distfiles.Dir, error) {
+		return distfiles.Resolve(target, "")
+	})
+
+	pkg := "dev-games/godot"
+	applier, fixer, _ := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	_, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("expected the apply to fail")
+	}
+	if fixer.called != 0 {
+		t.Errorf("the fixer ran %d time(s); a distdir that could not be created is the machine's fault, not the ebuild's (R1.4, R3.3)", fixer.called)
+	}
+	// R1.4's other half: the operator is told WHICH directory.
+	if !strings.Contains(err.Error(), target) {
+		t.Errorf("the error does not name the directory it could not prepare\n  want substring: %s\n  got: %v", target, err)
+	}
+}
+
+// TestLockedDistfileSkipsTheManifestFixer covers the second sentinel. Its own
+// documentation (internal/common/distfiles/lock.go) says it exists so "D5's
+// classifier must be able to tell them apart without reading either message",
+// and nothing consulted it before 7.1.
+//
+// This drives refuseFixOnEnvironmentFailure directly rather than a whole Apply,
+// and the reason is mechanical: producing a real ErrDistfileLocked means holding
+// the lock until a second writer gives up, and that bound (lockWait) is two
+// minutes and unexported, so this package cannot shorten it. What IS end-to-end
+// is the error's shape — it is built exactly as sweep.runManifest builds it, so
+// the wrap depth the gate has to see through is the production one.
+func TestLockedDistfileSkipsTheManifestFixer(t *testing.T) {
+	applier, _, rec := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{"dev-games/godot", "4.7_rc3", "4.7"})
+
+	distdir := t.TempDir()
+	held := fmt.Errorf("%w: claiming the distfiles for dev-games/godot in %s: %w",
+		ErrManifestFailed, distdir,
+		fmt.Errorf("%w: godot-4.7.tar.xz in %s is held by pid 4242", distfiles.ErrDistfileLocked, distdir))
+
+	envErr := applier.refuseFixOnEnvironmentFailure("dev-games/godot", "4.7", held)
+	if envErr == nil {
+		t.Fatal("refuseFixOnEnvironmentFailure returned nil; a distfile another writer holds is not something an LLM can repair (R3.3)")
+	}
+	if !errors.Is(envErr, ErrManifestEnvironment) {
+		t.Errorf("the refusal does not carry ErrManifestEnvironment: %v", envErr)
+	}
+	// The wrapped chain has to survive, or the operator loses the only two facts
+	// worth acting on: which distfile, and who holds it.
+	if !errors.Is(envErr, distfiles.ErrDistfileLocked) {
+		t.Errorf("the refusal lost distfiles.ErrDistfileLocked: %v", envErr)
+	}
+	if !strings.Contains(envErr.Error(), "pid 4242") {
+		t.Errorf("the refusal dropped the holder from the message: %v", envErr)
+	}
+	if !anyContains(rec.snapshot(), "not on the ebuild") {
+		t.Errorf("the reporter was told nothing about the cause; events = %v", rec.snapshot())
+	}
+}
+
+// TestPreflightRefusalStatesTheCauseWasTheEnvironment is R3.4 on the pre-flight
+// path. The post-pkgdev path already had this
+// (TestEnvironmentFailureReportsCauseAsEnvironment); a refusal that says nothing
+// leaves the operator with a failed package, no diagnosis, and a correct ebuild
+// that now looks suspect.
+func TestPreflightRefusalStatesTheCauseWasTheEnvironment(t *testing.T) {
+	warns := captureWarnLogs(t)
+	dir := t.TempDir()
+	withResolveDistdir(t, func(string, string) (distfiles.Dir, error) {
+		return distfiles.Dir{Path: dir}, unwritableDistdirError(dir)
+	})
+
+	pkg := "dev-games/godot"
+	applier, _, rec := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	_, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("expected the apply to fail")
+	}
+
+	for _, want := range []string{
+		pkg + "-4.7",                    // which package
+		"not on the ebuild",             // the cause, stated as a negative too
+		"distdir is not writable",       // which observation reached that verdict
+		dir,                             // and which directory
+		"the LLM fixer was not invoked", // what was skipped, and that it was deliberate
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("apply error is missing %q\n  got: %v", want, err)
+		}
+	}
+
+	if !anyContains(warns.all(), "not on the ebuild") {
+		t.Errorf("nothing was logged about the cause; warnings = %v", warns.all())
+	}
+	if !anyContains(rec.snapshot(), "not on the ebuild") {
+		t.Errorf("the reporter was told nothing about the cause; events = %v", rec.snapshot())
+	}
+}
+
+// TestNonEnvironmentPreflightFailureStillReachesTheFixer is the negative that
+// makes the four above meaningful, and it is R3.5 stated as a test: a failure
+// before pkgdev that names no machine condition is still UNANSWERED, and an
+// unanswered check must mean "repairable".
+//
+// Without this, the cheapest way to pass every test in this file would be to
+// refuse the fixer whenever pkgdev did not run — which would silently delete a
+// repair path that works today.
+func TestNonEnvironmentPreflightFailureStillReachesTheFixer(t *testing.T) {
+	withResolveDistdir(t, func(string, string) (distfiles.Dir, error) {
+		// No sentinel: something went wrong that says nothing about the machine.
+		return distfiles.Dir{}, fmt.Errorf("%w: something unclassifiable", ErrManifestFailed)
+	})
+
+	pkg := "dev-games/godot"
+	applier, fixer, _ := newGateApplier(t,
+		pkgdevFailsPrinting(productionManifestFailure),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	if _, err := applier.Apply(pkg, false); err == nil {
+		t.Fatal("expected the apply to fail: the re-run fails too")
+	}
+	if fixer.called != 1 {
+		t.Errorf("the fixer ran %d time(s), want 1; an unclassifiable failure must keep today's repair path (R3.5)", fixer.called)
 	}
 }

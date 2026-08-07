@@ -96,6 +96,11 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 	report := sweepExecutorFn(ctx, overlayPath, batch,
 		autoupdate.WithSweepConcurrency(concurrency),
 		autoupdate.WithSweepPackagesConfig(cfg.Packages),
+		// The same two directories every other mode uses, resolved once in
+		// runAutoupdate (S030-R1.3). A standalone sweep regenerates Manifests
+		// too, so it downloads distfiles too.
+		autoupdate.WithSweepDistdir(autoupdateDirs.Distdir, autoupdateDirs.ConfiguredDistdir),
+		autoupdate.WithSweepDistfilesCache(autoupdateDirs.Cache),
 	)
 	displaySweepReport(report)
 }
