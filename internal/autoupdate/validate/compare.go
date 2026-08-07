@@ -33,10 +33,13 @@ const (
 )
 
 // Finding is one thing the gate has to say about an ebuild.
+//
+// The json tags are the wire contract — see EbuildResult for why they are
+// written out rather than inherited from the Go field names.
 type Finding struct {
-	Gate     string
-	Severity Severity
-	Detail   string
+	Gate     string   `json:"gate"`
+	Severity Severity `json:"severity"`
+	Detail   string   `json:"detail"`
 }
 
 // Compare subtracts the two option sets and returns the findings.

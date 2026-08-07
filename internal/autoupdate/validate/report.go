@@ -24,14 +24,26 @@ const (
 // the whole story rests on — a skip nobody can read is a pass — so it is
 // asserted in tests and enforced by the constructors below rather than left to
 // whoever writes the next call site.
+//
+// # The json tags are the contract
+//
+// `overlay validate --json` is the first JSON surface in this CLI, so there is
+// no precedent to inherit and these names are established here. They are
+// written out explicitly rather than left to Go's field names for one reason: a
+// rename on the Go side must not silently rename the wire key under a consumer
+// who has already shipped a jq expression against it.
+//
+// Only the fields that are genuinely absent carry omitempty. Package, Version,
+// Options, QA and Findings are always present, so a consumer never has to tell
+// "missing" from "empty" for them.
 type EbuildResult struct {
-	Package  string
-	Version  string
-	Options  Outcome
-	QA       Outcome
-	Reason   string
-	Sources  []string
-	Findings []Finding
+	Package  string    `json:"package"`
+	Version  string    `json:"version"`
+	Options  Outcome   `json:"options"`
+	QA       Outcome   `json:"qa"`
+	Reason   string    `json:"reason,omitempty"`
+	Sources  []string  `json:"sources"`
+	Findings []Finding `json:"findings"`
 }
 
 // Report is one whole run.
@@ -41,9 +53,28 @@ type EbuildResult struct {
 // still produced a report — an empty one — and the command has to exit 2 while
 // still rendering something (R5.7).
 type Report struct {
-	Overlay           string
-	Results           []EbuildResult
-	UnmatchedSelector string
+	Overlay           string         `json:"overlay"`
+	Results           []EbuildResult `json:"results"`
+	UnmatchedSelector string         `json:"unmatched_selector,omitempty"`
+}
+
+// Normalized returns a copy whose nil slices are empty ones, so the JSON
+// document carries `[]` rather than `null`. A consumer piping this into
+// `jq '.results[].findings[]'` should not have to special-case the difference
+// between "no findings" and "the key was nil in Go".
+func (r Report) Normalized() Report {
+	out := r
+	out.Results = make([]EbuildResult, len(r.Results))
+	for i, res := range r.Results {
+		if res.Sources == nil {
+			res.Sources = []string{}
+		}
+		if res.Findings == nil {
+			res.Findings = []Finding{}
+		}
+		out.Results[i] = res
+	}
+	return out
 }
 
 // ExitCode returns the process exit code for the run.

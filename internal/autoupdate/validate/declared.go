@@ -63,7 +63,12 @@ func OptionsFromArchive(ctx context.Context, archive string) (Declared, error) {
 
 	prefix, ok := projectRoot(members)
 	if !ok {
-		return Declared{}, fmt.Errorf("%s: %w", archive, ErrBuildSystemUndetermined)
+		// Name what WAS found rather than only what was not. "SKIPPED: build
+		// system is cmake" tells the operator this archive is out of scope by
+		// design (R4.2); "SKIPPED: undetermined" tells them the gate could not
+		// tell (R4.3). Both are honest, and they call for different actions —
+		// collapsing them into one message loses that.
+		return Declared{}, fmt.Errorf("%s: %w%s", archive, ErrBuildSystemUndetermined, detectedSystem(members))
 	}
 
 	var declared Declared
@@ -162,6 +167,57 @@ func projectRoot(members []string) (string, bool) {
 		return "", true
 	}
 	return best + "/", true
+}
+
+// buildSystemMarkers maps a marker file to the build system it names. Only
+// files a build system REQUIRES at its project root are listed: a marker that
+// merely often accompanies one would turn this from an observation into the
+// guess R4.3 refuses to make.
+var buildSystemMarkers = []struct{ file, system string }{
+	{"CMakeLists.txt", "cmake"},
+	{"configure.ac", "autotools"},
+	{"configure.in", "autotools"},
+	{"configure", "a configure script"},
+	{"Cargo.toml", "cargo"},
+	{"setup.py", "python setuptools"},
+	{"pyproject.toml", "python (PEP 517)"},
+	{"go.mod", "go modules"},
+	{"CMakePresets.json", "cmake"},
+	{"Makefile.am", "automake"},
+	{"Makefile", "make"},
+	{"SConstruct", "scons"},
+	{"waf", "waf"},
+}
+
+// detectedSystem returns ", but <system> was found" when the archive carries a
+// marker for a build system this gate does not read, or "" when it carries none
+// this knows about.
+//
+// It is deliberately shallow. Reading a CMake or Autotools option surface is
+// out of scope (story Out of Scope), so all this has to do is let the report
+// distinguish "out of scope" from "could not tell" — the two SKIPPED reasons
+// R4.2 and R4.3 ask for. It never changes an outcome and never overrides the
+// sentinel.
+func detectedSystem(members []string) string {
+	best, bestDepth := "", -1
+	for _, m := range members {
+		base := path.Base(m)
+		for _, marker := range buildSystemMarkers {
+			if base != marker.file {
+				continue
+			}
+			// Shallowest wins, so a vendored Makefile deep inside a tree does
+			// not outrank the marker at the project root.
+			depth := strings.Count(m, "/")
+			if bestDepth == -1 || depth < bestDepth {
+				best, bestDepth = marker.system, depth
+			}
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return ", but " + best + " was found: reading its options is out of scope"
 }
 
 // pickOptionFile returns the option file inside dir, honouring the
