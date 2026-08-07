@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
@@ -86,6 +87,21 @@ type ApplyResult struct {
 	Error error
 	// LogPath is the path to the compile log if compilation failed
 	LogPath string
+	// IsolationVerified reports whether the compile gate PROVED it could create
+	// a network namespace before building. It is false when the compile did not
+	// run at all.
+	//
+	// It exists because a compile-gate pass used to claim more than it had. The
+	// gate never checked: Portage reports network-sandbox in FEATURES, creating
+	// the namespace needs privilege an ordinary user does not have, and Portage
+	// says nothing when the unshare fails. So a green could mean "built with the
+	// network cut off" or "built with full network access", and nothing printed
+	// told them apart.
+	IsolationVerified bool
+	// IsolationReason says why isolation could not be verified, and is empty
+	// exactly when IsolationVerified is true. On a run skipped by
+	// --require-isolation it is the reason the compile never happened.
+	IsolationReason string
 	// CleanedOldVersion is the highest version whose ebuild --clean removed. It
 	// is the single-version view of CleanRemoved, kept because callers that
 	// print one "Removed: pkg-X.ebuild" line predate the sweep; empty when clean
@@ -174,6 +190,17 @@ type Applier struct {
 	// purely for tests that need to force a write failure without a real
 	// registry (S021-R2.4). Production callers never supply this option.
 	setVersionsFn func(overlayPath string, pins map[string]string) error
+	// isolationProbe measures whether this process can create a network
+	// namespace, so a compile-gate pass can state the fidelity it actually
+	// verified rather than the one Portage's FEATURES implies. Defaults to
+	// validate.ProbeIsolation; injectable via WithApplierIsolationProbe.
+	isolationProbe func() (bool, string)
+	// requireIsolation, when true, makes the compile gate SKIP rather than run
+	// unisolated: an unisolated compile after the operator asked for isolation
+	// produces exactly the meaningless green they asked to avoid. Set via
+	// WithApplierRequireIsolation (the --require-isolation CLI flag); never a
+	// config key, per the story's Constraints.
+	requireIsolation bool
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
@@ -239,6 +266,29 @@ func WithLogsDir(dir string) ApplierOption {
 func WithConfirmFunc(fn func(prompt string) bool) ApplierOption {
 	return func(a *Applier) {
 		a.confirmFunc = fn
+	}
+}
+
+// WithApplierIsolationProbe replaces the network-namespace probe the compile
+// gate measures with. It defaults to validate.ProbeIsolation; tests supply
+// their own so both answers are reachable without privilege and without root.
+func WithApplierIsolationProbe(fn func() (bool, string)) ApplierOption {
+	return func(a *Applier) {
+		if fn != nil {
+			a.isolationProbe = fn
+		}
+	}
+}
+
+// WithApplierRequireIsolation makes the compile gate REFUSE to run unisolated.
+//
+// It is a field and not a configuration key on purpose (story 031
+// Constraints): the configuration block that would own such a key is deferred
+// to a later story, and a registry key is expensive to move once written. So
+// the knob exists as the --require-isolation CLI flag and nowhere else.
+func WithApplierRequireIsolation(require bool) ApplierOption {
+	return func(a *Applier) {
+		a.requireIsolation = require
 	}
 }
 
@@ -379,8 +429,11 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		logsDir:     logsDir,
 		confirmFunc: defaultConfirmFunc,
 		execCommand: exec.CommandContext,
-		ctx:         context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
-		reporter:    tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
+		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
+		// tests so both answers are reachable without privilege.
+		isolationProbe: validate.ProbeIsolation,
+		ctx:            context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
+		reporter:       tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
 		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
@@ -613,7 +666,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// Run compile test if requested
 	if compile {
 		a.reporter.TaskStage(pkg, "compile")
-		logPath, err := a.runCompile(pkg, newVersion)
+		logPath, err := a.runCompile(pkg, newVersion, result)
 		if err != nil {
 			result.Error = err
 			result.LogPath = logPath
@@ -1299,7 +1352,34 @@ func (a *Applier) runManifest(pkg, version string) error {
 // runCompile runs a compile test with elevated privileges.
 // It prompts for user confirmation before executing.
 // Returns the log path if compilation fails.
-func (a *Applier) runCompile(pkg, version string) (string, error) {
+//
+// # What story 031 added here, and what it deliberately did not
+//
+// It added a LABEL and a SKIP. Before running anything, the isolation probe
+// measures whether this process can create a network namespace, and the answer
+// is carried onto the result so a pass can state its own fidelity: a compile
+// that succeeded without a namespace is still a pass, but it is no longer
+// printed as the same pass as one that had it (R7.2, R7.3). With
+// --require-isolation and no namespace available, the compile does not happen
+// at all and the result says why (R7.4) — running it anyway would produce
+// exactly the meaningless green the operator asked to avoid.
+//
+// Everything else is untouched (R7.5). The confirmation prompt, the sudo/doas
+// requirement, the runAttached seam and both existing success and failure
+// conditions are exactly as they were; the probe sits ahead of all of them and
+// the only new exit is the skip.
+func (a *Applier) runCompile(pkg, version string, result *ApplyResult) (string, error) {
+	// Measured before the prompt: asking the operator to confirm a compile that
+	// --require-isolation will refuse to run would be a question with no
+	// consequence.
+	isolated, reason := a.isolationProbe()
+	result.IsolationVerified = isolated
+	result.IsolationReason = reason
+
+	if !isolated && a.requireIsolation {
+		return "", nil
+	}
+
 	// Prompt for confirmation
 	prompt := fmt.Sprintf("Run compile test for %s-%s with elevated privileges?", pkg, version)
 	if !a.confirmFunc(prompt) {
