@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-07
+
 ### Added
 - **`overlay prune` acts on the redundant verdict — but never on the verdict
   alone.** `overlay compare` calls 74 packages `redundant` and stops there by
