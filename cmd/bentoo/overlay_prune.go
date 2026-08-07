@@ -78,6 +78,12 @@ var (
 	// rather than a live path — it holds the line if the verdict ever stops
 	// disqualifying a declaration. Clearing a stale declaration is `overlay
 	// analyze`'s business, and doing it there leaves a record this flag would not.
+	//
+	// R6 narrowed the reach once more, and this half IS a live path: a divergence
+	// the planner proves originates in the overlay is refused outright, so it never
+	// reaches the bucket this flag acts on. Measured on 2026-08-07 that is 3 of the
+	// 8 undeclared divergences the overlay carries — net-libs/nodejs,
+	// kde-plasma/spectacle and kde-plasma/kdeplasma-addons.
 	pruneIncludePatched bool
 	// pruneKeepRegistry is --keep-registry: remove the package directories and
 	// leave .autoupdate/packages.toml alone. The plan says which of the two it is,
@@ -115,6 +121,11 @@ Packages carrying an UNDECLARED difference — one the byte comparison found and
 nobody wrote down — are printed under their own heading and left alone unless
 --include-patched says otherwise.
 
+One kind of undeclared difference no flag reaches: the kind the overlay's own
+content PROVES is ours, because our ebuild applies a patch ::gentoo does not
+ship for that package. Such a package is refused outright and the refusal names
+the file. ::gentoo never had it, so there would be nothing to restore it from.
+
 A package whose registry entry DECLARES 'patched' is refused outright, and no
 flag here reaches it. The declaration already makes 'overlay compare' call it
 'keep' rather than 'redundant', and this command never removes a package the
@@ -145,7 +156,7 @@ Examples:
 
 func init() {
 	pruneCmd.Flags().BoolVar(&pruneApply, "apply", false, "Carry out the plan (default: plan only, remove nothing)")
-	pruneCmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, "Also remove packages carrying an UNDECLARED difference, discarding that work (a declared 'patched' entry is refused regardless)")
+	pruneCmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)")
 	pruneCmd.Flags().BoolVar(&pruneKeepRegistry, "keep-registry", false, "Leave .autoupdate/packages.toml untouched")
 	pruneCmd.Flags().BoolVar(&pruneYes, "yes", false, "Skip the identical batch's confirmation (never the diverging one)")
 	overlayCmd.AddCommand(pruneCmd)
