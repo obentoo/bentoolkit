@@ -275,6 +275,23 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// Clear progress line
 	fmt.Printf("\r%s\r", "                                                                  ")
 
+	// What the overlay's own content proves about WHO wrote each difference. Two
+	// symmetric ebuilds cannot say it, so this reads the files/ tree beside them
+	// and annotates the finished report: an ebuild referencing a file ::gentoo
+	// does not ship carries something upstream never had.
+	//
+	// It runs HERE, between the comparison and the filter, for two reasons. After
+	// the comparison because it must not join the 10-way concurrency inside it
+	// (nothing here is concurrent, and the report it annotates is already sorted),
+	// and before the filter because annotation is part of producing the report,
+	// not of presenting it — a --only-redundant run must not reach a different
+	// conclusion about a package than a full one.
+	//
+	// It cannot fail: every way of not knowing is recorded as "unproved", which is
+	// also what an API-only provider leaves on every package, so this costs
+	// nothing and says nothing when the compared repository is not on disk.
+	overlay.AnnotateAuthorship(report, prov, opts)
+
 	// Narrow the VIEW, never the computation (D7). The comparison above already
 	// produced the whole picture; only report.Results — the rows the table
 	// prints — is narrowed here, and every counter on report keeps the value the

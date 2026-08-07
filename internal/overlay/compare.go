@@ -63,6 +63,23 @@ type CompareResult struct {
 	// the operator can, at a glance, once the size is on the line.
 	DiffAdded   int
 	DiffRemoved int
+
+	// Authorship is what the overlay's own CONTENT proves about where the
+	// difference came from. The two ebuilds' bytes cannot say it — they are
+	// symmetric — but the files/ tree beside them can, so this is filled by
+	// AnnotateAuthorship (authorship.go) after the comparison, never by it.
+	//
+	// AuthorshipUnproved, the zero value, means THE REPORT CANNOT TELL. It is
+	// never a finding of "the change is upstream's": ::gentoo revises ebuilds in
+	// place without a revbump, so a difference nothing here proves may still be
+	// entirely ours and merely unprovable from the files. Reading unproved as
+	// "not ours" would authorise exactly the removal this check exists to stop.
+	Authorship Authorship
+	// ProvedBy names the file that proves it, relative to the package directory
+	// ("files/<name>"), so the operator can confirm the claim by looking instead
+	// of re-deriving the path from what ${FILESDIR} expands to (R2.2). It is
+	// empty whenever Authorship is unproved: there is then no file to name.
+	ProvedBy string
 }
 
 // CompareStatus indicates the comparison result
@@ -175,6 +192,30 @@ const (
 	VerifiedIdentical
 	// VerifiedDiffers means the two ebuilds differ.
 	VerifiedDiffers
+)
+
+// Authorship is what the two package directories prove about WHO WROTE the
+// difference — a different question from Verification, which only says that a
+// difference exists. Verification compares two symmetric files and so can never
+// answer it; the overlay's files/ tree sometimes can.
+//
+// The vocabulary lives here with the rest of the compare types, exactly as
+// Verification does, while the pass that fills it is wired in separately
+// (AnnotateAuthorship, authorship.go).
+type Authorship int
+
+const (
+	// AuthorshipUnproved means nothing in the content proves where the
+	// difference came from. It is the ZERO VALUE by construction, so every
+	// result nobody examined — the identical ones, every API-only run — reads as
+	// "cannot tell" rather than as a claim about anybody. It is NEVER "the
+	// change is upstream's" (R2.3).
+	AuthorshipUnproved Authorship = iota
+	// AuthorshipOverlay means our ebuild references a file under ${FILESDIR}
+	// that ::gentoo does not provide for that package. A reference to a patch
+	// upstream never had cannot have been inherited from upstream, which is the
+	// one thing two ebuilds and two directories can prove between them (R2.1).
+	AuthorshipOverlay
 )
 
 // deriveVerdict maps the two axes — the version comparison and what the
@@ -558,19 +599,11 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // verification states holds (R4.1). It never decides anything: its result is
 // reported beside the Verdict, never instead of it (R4.5).
 //
-// It runs only when all three of the following hold, and any of them failing is
-// simply NotVerified rather than an error (R4.4) — absence of evidence is not
-// evidence, so the declaration stands unverified rather than being contradicted:
-//
-//   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
-//     carries no path, so without it there is no overlay-side file to open;
-//   - the provider has the compared repository on disk, which is exactly the
-//     capability provider.PackageDirProvider names. The git-clone and local
-//     providers satisfy it and the API providers do not; failing that assertion
-//     IS the "API-only" signal, and an API provider could supply content only at
-//     the cost of one extra rate-limited request per package;
-//   - the two versions are equal. Two different versions differ for reasons that
-//     say nothing about whether we changed anything.
+// It runs only when the package resolves on both sides (resolvePackagePaths,
+// which states the three conditions and why each one is a condition) and both
+// ebuilds read. Any of that failing is simply NotVerified rather than an error
+// (R4.4) — absence of evidence is not evidence, so the declaration stands
+// unverified rather than being contradicted.
 //
 // Both reads are local: this issues no network request and takes no context.
 //
@@ -585,50 +618,16 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // bytes.Equal over the same two files. It is separate code precisely so that a
 // removal criterion cannot change what this compare reports.
 func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) contentCheck {
-	if opts.OverlayPath == "" {
-		return contentCheck{}
-	}
-	// An empty version names no ebuild. It is the shape a not-in-remote or failed
-	// comparison leaves behind — where RemoteVersion is empty too, so the
-	// equality below would otherwise hold and send two doomed reads at a file
-	// called "<pkg>-.ebuild".
-	if result.LocalVersion == "" || result.LocalVersion != result.RemoteVersion {
-		return contentCheck{}
-	}
-
-	dirProv, ok := prov.(provider.PackageDirProvider)
+	paths, ok := resolvePackagePaths(result, prov, opts)
 	if !ok {
 		return contentCheck{}
 	}
-	// LocalPackagePath rather than a path joined out here: it guards with the
-	// provider's own ensureRepo(), so it holds whether or not the version lookup
-	// happened to run first, and it reports a package the repository does not
-	// carry as an error instead of as a path that fails to open later.
-	upstreamDir, err := dirProv.LocalPackagePath(result.Category, result.Package)
+
+	ours, err := os.ReadFile(paths.ourEbuild()) //nolint:gosec // path built from scanned overlay directory names, never from registry input
 	if err != nil {
 		return contentCheck{}
 	}
-
-	// <pkg>-<version>.ebuild is the filename shape both sides use — the same one
-	// the provider's own scan matches when it lists versions. The version is
-	// equal on both sides by the guard above, so one filename serves both reads.
-	filename := result.Package + "-" + result.LocalVersion + ".ebuild"
-
-	// Both paths are built from the CATEGORY AND PACKAGE DIRECTORY NAMES THE
-	// SCANNER FOUND — result.Category/result.Package come from walking the
-	// overlay, and the upstream side is resolved by the provider from those same
-	// two names. Nothing here comes from a registry key, which matters because no
-	// validation runs on that path: SplitPackageKey accepts "../x" happily and
-	// LoadPackagesConfig never calls ValidatePackageConfig. The structure is what
-	// keeps traversal absent, not a sanitiser. Keep it that way.
-	ourPath := filepath.Join(opts.OverlayPath, result.Category, result.Package, filename)
-	theirPath := filepath.Join(upstreamDir, filename)
-
-	ours, err := os.ReadFile(ourPath) //nolint:gosec // path built from scanned overlay directory names, never from registry input
-	if err != nil {
-		return contentCheck{}
-	}
-	theirs, err := os.ReadFile(theirPath) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
+	theirs, err := os.ReadFile(paths.upstreamEbuild()) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
 	if err != nil {
 		return contentCheck{}
 	}
@@ -651,10 +650,97 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 // It exists so verifyAgainstLocalContent can report the magnitude without
 // growing a second return value that every non-differing path would have to
 // spell out as zero. The zero contentCheck is NotVerified with no magnitude,
-// which is exactly what each of that function's six early exits means.
+// which is exactly what each of that function's early exits means: the package
+// failing to resolve on both sides, or either ebuild failing to read.
 type contentCheck struct {
 	state          Verification
 	added, removed int
+}
+
+// packagePaths locates one compared package on both sides: the overlay
+// directory holding our copy, the upstream directory the provider resolved, and
+// the ebuild filename the two of them share at the compared version.
+type packagePaths struct {
+	ourDir      string
+	upstreamDir string
+	// ebuildName is <pkg>-<version>.ebuild, the filename shape both sides use —
+	// the same one the provider's own scan matches when it lists versions. One
+	// name serves both sides because resolvePackagePaths only returns when the
+	// two versions are equal.
+	ebuildName string
+}
+
+// ourEbuild and upstreamEbuild are the two files at the compared version.
+func (p packagePaths) ourEbuild() string      { return filepath.Join(p.ourDir, p.ebuildName) }
+func (p packagePaths) upstreamEbuild() string { return filepath.Join(p.upstreamDir, p.ebuildName) }
+
+// resolvePackagePaths locates one compared package on both sides. ok is false
+// when any part of that cannot be had.
+//
+// It is ONE resolution in ONE place because two passes need exactly these
+// strings: verifyAgainstLocalContent above, which reads both ebuilds, and
+// AnnotateAuthorship (authorship.go), which reads ours and looks for the files
+// it references under upstream's files/. Resolved twice, they would be two
+// things to keep in step, and the one that drifted would report on a package it
+// had never opened.
+//
+// A false ok is never an error in either caller, and both read it as the same
+// thing — nothing is known. The content check reports NotVerified (R4.4) and the
+// authorship check reports unproved (R2.3). Three conditions must hold, each
+// failing for its own reason:
+//
+//   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
+//     carries no path, so without it there is no overlay-side file to open;
+//   - the two versions are equal. Two different versions differ for reasons that
+//     say nothing about whether we changed anything. An EMPTY version is refused
+//     by the same guard for a second reason: it names no ebuild at all, and it
+//     is the shape a not-in-remote or failed comparison leaves behind — where
+//     RemoteVersion is empty too, so the equality would otherwise hold and send
+//     doomed reads at a file called "<pkg>-.ebuild";
+//   - the provider has the compared repository on disk, which is exactly the
+//     capability provider.PackageDirProvider names. The git-clone and local
+//     providers satisfy it and the API providers do not; failing that assertion
+//     IS the "API-only" signal, and an API provider could supply content only at
+//     the cost of one extra rate-limited request per package.
+//
+// Everything here is local: it issues no network request and takes no context.
+func resolvePackagePaths(result CompareResult, prov provider.Provider, opts CompareOptions) (packagePaths, bool) {
+	if opts.OverlayPath == "" {
+		return packagePaths{}, false
+	}
+	if result.LocalVersion == "" || result.LocalVersion != result.RemoteVersion {
+		return packagePaths{}, false
+	}
+
+	dirProv, ok := prov.(provider.PackageDirProvider)
+	if !ok {
+		return packagePaths{}, false
+	}
+	// LocalPackagePath rather than a path joined out here: it guards with the
+	// provider's own ensureRepo(), so it holds whether or not the version lookup
+	// happened to run first, and it reports a package the repository does not
+	// carry as an error instead of as a path that fails to open later.
+	upstreamDir, err := dirProv.LocalPackagePath(result.Category, result.Package)
+	if err != nil {
+		return packagePaths{}, false
+	}
+
+	// Both directories are built from the CATEGORY AND PACKAGE DIRECTORY NAMES
+	// THE SCANNER FOUND — result.Category/result.Package come from walking the
+	// overlay, and the upstream side is resolved by the provider from those same
+	// two names. Nothing here comes from a registry key, which matters because no
+	// validation runs on that path: SplitPackageKey accepts "../x" happily and
+	// LoadPackagesConfig never calls ValidatePackageConfig. The structure is what
+	// keeps traversal absent, not a sanitiser. Keep it that way — including in
+	// whatever is joined ONTO these directories: the ebuild name below is built
+	// from the same two scanned strings, and the only other thing appended to
+	// them anywhere is a filename the ebuild's own text spells out, which
+	// ebuildFilesdirRefs refuses to let escape ${FILESDIR}.
+	return packagePaths{
+		ourDir:      filepath.Join(opts.OverlayPath, result.Category, result.Package),
+		upstreamDir: upstreamDir,
+		ebuildName:  result.Package + "-" + result.LocalVersion + ".ebuild",
+	}, true
 }
 
 // diffLineCounts reports how many lines ours holds that theirs does not, and
@@ -923,22 +1009,29 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 const patchedReasonCap = 72
 
 // undeclaredDivergenceCaveat is the sentence formatVerificationFindings prints
-// once beneath a section that reported at least one undeclared divergence. It is
-// a package-level constant so a test can assert on it without copying the wording.
+// once beneath a section that reported at least one UNPROVED undeclared
+// divergence. It is a package-level constant so a test can assert on it without
+// copying the wording.
 const undeclaredDivergenceCaveat = "  ↳ a difference is not proof of authorship: ::gentoo also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring."
 
 // formatVerificationFindings renders one line per verification finding, beneath
 // the section's table.
 //
-// A finding is DERIVED from the two fields that already carry the facts —
-// Verified (what the two ebuilds' bytes say) and Patched (what the registry
-// says) — instead of being stored on CompareResult. There is therefore no third
-// copy that can disagree with the two, and no state to keep in step.
+// A finding is DERIVED from the fields that already carry the facts — Verified
+// (what the two ebuilds' bytes say), Patched (what the registry says) and
+// Authorship (what the overlay's files/ tree proves) — instead of being stored
+// on CompareResult. There is therefore no further copy that can disagree with
+// them, and no state to keep in step.
 //
 // Only two of the four verification combinations say anything (R4.2, R4.3). The
 // other two are silent on purpose: a divergence that is both real and declared
 // is the system working, and a redundancy confirmed by identical bytes is a
 // Verdict that has simply been checked rather than a problem.
+//
+// The loud one of the two then splits on Authorship (R2.2, R2.3). It is one
+// finding with two things to say: the content either proved the difference
+// originates here — in which case the line names the file that proves it — or it
+// did not, which is not a finding about ::gentoo.
 //
 // A THIRD case (R3.8) renders the declaration itself, and it is what makes a
 // patched package visible at all. Verification needs a local copy of the
@@ -947,9 +1040,12 @@ const undeclaredDivergenceCaveat = "  ↳ a difference is not proof of authorshi
 // unpatched one — same Verdict "keep", no column, no line — and the operator was
 // back to answering "does this carry changes of our own?" from memory.
 //
-// The case ORDER is the whole mechanism: "stale" is tested first, so a
-// declaration already known to be obsolete keeps its warning and is not also
-// restated as fact one line below.
+// The case ORDER is the whole mechanism, twice over. "stale" is tested first, so
+// a declaration already known to be obsolete keeps its warning and is not also
+// restated as fact one line below. And the PROVED undeclared case is tested
+// before the unproved one, which is only a narrowing of it: a package whose
+// authorship the content settled must not fall through to the sentence that says
+// nobody knows.
 //
 // Nothing here can change a Verdict (R4.5) — it renders a finished CompareResult
 // into a string.
@@ -958,7 +1054,10 @@ func formatVerificationFindings(results []CompareResult) string {
 	// Counted so the caveat below can print once for the whole section, on the
 	// same argument that keeps the removal recommendation out of every row: a
 	// sentence repeated eight times is a sentence nobody reads the ninth time.
-	undeclared := 0
+	//
+	// UNPROVED findings, not undeclared ones. The caveat exists to qualify an
+	// ambiguity, and a proved divergence no longer has one.
+	unproved := 0
 
 	for _, r := range results {
 		switch {
@@ -969,15 +1068,35 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: stale declaration — %s declares a divergence, but the two %s ebuilds are byte-identical\n",
 				r.Category, r.Package, declaringEntry(r), r.LocalVersion))
+		case r.Verified == VerifiedDiffers && !r.Patched && r.Authorship == AuthorshipOverlay:
+			// R2.2: the same finding as below, except that the overlay's own
+			// content settled the question the two ebuilds could not. Our ebuild
+			// references a file ::gentoo does not ship for this package, and a
+			// reference to a file upstream never had cannot have been inherited
+			// from upstream.
+			//
+			// The line therefore STATES the proof rather than decorating the
+			// warning with a filename. It says what removal would cost — this is
+			// the package `prune` is about to offer to delete — and it names the
+			// file, package-relative and verbatim, so the claim is confirmed with
+			// one `ls` instead of a re-derivation of what ${FILESDIR} expands to.
+			//
+			// ProvedBy comes from ebuild TEXT, so it is passed as an ARGUMENT and
+			// never as a format string, exactly like every other piece of text this
+			// report prints. It is NOT counted below: nothing here is ambiguous.
+			sb.WriteString(output.Sprintf(output.Warning,
+				"⚠ %s/%s: undeclared divergence (+%d/-%d), proved ours — our %s ebuild references %s, which ::gentoo does not ship, so removing this package would discard work of our own that no entry declares\n",
+				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion, r.ProvedBy))
 		case r.Verified == VerifiedDiffers && !r.Patched:
 			// R4.3: the loud case. Nothing declares this package, so it is about
 			// to be reported as a removal candidate — and its ebuild is not the
 			// one ::gentoo ships.
 			//
-			// The line carries the SIZE of the difference and stops there. Whose
-			// change it is cannot be read off two files, and the sentence beneath
-			// the section says so once rather than hedging on every row.
-			undeclared++
+			// The line carries the SIZE of the difference and stops there. Nothing
+			// in the content proved whose change it is — which is not a finding
+			// that the change is ::gentoo's (R2.3) — and the sentence beneath the
+			// section says so once rather than hedging on every row.
+			unproved++
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: undeclared divergence (+%d/-%d) — our %s ebuild differs from ::gentoo's, and no entry declares why\n",
 				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion))
@@ -1011,7 +1130,15 @@ func formatVerificationFindings(results []CompareResult) string {
 	// a side. Declaring `patched` on a package that is merely stale would record a
 	// divergence that does not exist and suppress its removal recommendation
 	// permanently — the failure this sentence is here to prevent.
-	if undeclared > 0 {
+	//
+	// Where the content PROVED authorship there is no such ambiguity, and the
+	// caveat is then false about the very finding it sits under: a report that
+	// qualifies what it has established teaches the operator to discount both. A
+	// section whose divergences are all proved therefore prints no caveat — but
+	// one unproved finding among them is enough to keep it, because a proof about
+	// one package says nothing about the next. On the live overlay the section
+	// holds three proved and five unproved, so it still prints.
+	if unproved > 0 {
 		// Passed as an ARGUMENT, never as a format string, like every other piece
 		// of text this report prints.
 		sb.WriteString(output.Sprintf(output.Warning, "%s\n", undeclaredDivergenceCaveat))
