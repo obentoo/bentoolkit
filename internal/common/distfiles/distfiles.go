@@ -317,10 +317,57 @@ func Probe(dir string) error {
 //
 // This is a library: the absence is reported by returning "", never logged.
 func hostDistdir() string {
+	return portageqPath("distdir")
+}
+
+// TempRoot returns the directory a THROWAWAY distdir should be created under —
+// the host's own PORTAGE_TMPDIR — or "" when the question cannot be answered.
+//
+// "" is not a failure and not a sentinel: it is exactly what os.MkdirTemp takes
+// to mean "use os.TempDir()", so a caller writes
+//
+//	os.MkdirTemp(distfiles.TempRoot(), "…")
+//
+// and gets the disk-backed answer where one exists and today's behaviour where
+// it does not.
+//
+// # Why this exists next to Resolve rather than inside it
+//
+// Resolve answers "where does this host KEEP its distfiles" (R1.2) and its
+// answer is shared, persistent and not ours to delete. This answers a different
+// question — "where may we make a directory that is ours, that we will delete,
+// and that must not be RAM". The LLM manifest fixer needs the second: it is
+// given a private distdir so its self-verification never touches the system
+// DISTDIR, and that privacy is the point, so Resolve's answer would be wrong.
+//
+// What was wrong was the ROOT. os.MkdirTemp("") means os.TempDir(), which on the
+// host S030 was measured on is a 31 GB tmpfs — the same defect R1.1 removes from
+// the manifest step, on a second path the story's tasks did not reach. Note that
+// reading the environment is not enough: PORTAGE_TMPDIR is set in make.conf and
+// is NOT exported into an ordinary user process, so os.Getenv returns "" here
+// and would silently land back on the tmpfs. Only portageq can answer.
+func TempRoot() string {
+	return portageqPath("envvar", "PORTAGE_TMPDIR")
+}
+
+// portageqPath runs one portageq query that is expected to print a single
+// absolute path, and returns "" for every way that question can go unanswered:
+// portageq absent, a non-zero exit, the timeout expiring, empty output, or
+// output that is not an absolute path.
+//
+// None of those is an error. "Unanswered" is a legitimate state — a non-portage
+// host has no portageq at all — and its consequence is the caller's next rung,
+// not a failed run (R1.2). Requiring an absolute path is what keeps a
+// diagnostic, a warning or a stray word from being mistaken for a directory: a
+// relative path is meaningless here anyway, since we do not know portage's
+// working directory.
+//
+// This is a library: the absence is reported by returning "", never logged.
+func portageqPath(arg ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), portageqTimeout)
 	defer cancel()
 
-	out, err := execCommand(ctx, "portageq", "distdir").Output()
+	out, err := execCommand(ctx, "portageq", arg...).Output()
 	if err != nil {
 		return ""
 	}

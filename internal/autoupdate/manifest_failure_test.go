@@ -770,10 +770,19 @@ func TestClassifyDefaultSpaceQueryUsesStatfs(t *testing.T) {
 //
 // # How the other side is observed
 //
-// distfileName is unexported, so this asserts its BEHAVIOUR through the one
-// exported function whose output reveals it: LockFetch skips a name that does
-// not reduce, so a lock file appears in the directory if and only if the name
-// was accepted, and its filename carries the reduced name back.
+// distfileName is unexported, so this asserts its BEHAVIOUR through an exported
+// function whose output reveals it: LockFetch skips a name that does not reduce,
+// so a lock file appears in the directory if and only if the name was accepted,
+// and its filename carries the reduced name back.
+//
+// The limit of that inference, stated plainly because it is easy to over-read:
+// the subject is whatever reduction LockFetch APPLIES, which today is
+// distfileName. Quarantine and RecordFetchScope call the same function, and
+// Quarantine is the consequential one — it RENAMES files, where this side only
+// Lstats. If a refactor ever gave LockFetch its own inline reduction, this test
+// would keep passing while Quarantine's drifted. Should that happen, move the
+// oracle to Quarantine (observe which files it moves) rather than deleting this.
+// It is also a 13-input spot check, not a sweep of the domain.
 func TestDistfileNameReductionsAgreeAcrossPackages(t *testing.T) {
 	// Inputs chosen to separate the two implementations rather than to be
 	// representative. The backslash case is the one that matters most on Linux:

@@ -22,6 +22,17 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
+// fixSandboxRoot is the seam the LLM manifest fixer's private distdir is created
+// under, a variable for the same reason resolveDistdir is one in sweep.go: the
+// production value asks the host a question, and a test must be able to answer it
+// without a portageq on the machine running the suite.
+//
+// It returns a ROOT for os.MkdirTemp, not a directory to use — "" is a valid
+// answer and means "os.TempDir()", which is what a host without portageq gets.
+//
+// Only tests replace it.
+var fixSandboxRoot = distfiles.TempRoot
+
 // manifestTimeout bounds a single `pkgdev manifest` invocation. The manifest
 // step touches the network (fetching SRC_URI distfiles to digest), so it gets a
 // generous-but-finite budget; without it a stalled fetch would hang Apply
@@ -1035,8 +1046,17 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	}
 
 	// Writable distdir the agent can pass to `pkgdev manifest --distdir` while it
-	// self-verifies, so its checks never touch the system DISTDIR.
-	distdir, err := os.MkdirTemp("", "bentoo-fix-distfiles-")
+	// self-verifies, so its checks never touch the system DISTDIR. Private and
+	// removed on return — that part is the point and does not change.
+	//
+	// The ROOT it is made under does. An empty root means os.TempDir(), which on
+	// the host S030 was measured on is a 31 GB tmpfs, so the agent's own
+	// verification downloads landed in RAM — the very defect R1.1 removes from
+	// the manifest step, on a second path no task in 1-6 reached. fixSandboxRoot
+	// asks the host for PORTAGE_TMPDIR and answers "" when it cannot, which is
+	// what os.MkdirTemp already means by "use the default": a host without
+	// portageq keeps exactly today's behaviour.
+	distdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
 	if err != nil {
 		// Can't give the agent a private distdir; don't attempt the fix.
 		return fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
@@ -1162,10 +1182,30 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 // # Before pkgdev ran
 //
 // The manifest step refuses to start on a distdir it could not prepare
-// (S030-R1.4) or on distfiles another writer holds (S030-R2.4). Both are
-// answered, by observation, before the ebuild is read by anything — so neither
-// is a statement about the ebuild, and R3.5's "uncertain means repairable" has
-// nothing to say about them: nothing was uncertain.
+// (S030-R1.4) and on a distfile another writer still holds when the wait runs
+// out (S030-R2.4). Both are answered, by observation, before the ebuild is read
+// by anything — so neither is a statement about the ebuild, and R3.5's
+// "uncertain means repairable" has nothing to say about them: nothing was
+// uncertain.
+//
+// # What this does NOT cover, and why it is not fixed here
+//
+// Three more pre-pkgdev refusals are equally the machine's and still fall
+// through to the fixer: a Quarantine that could not stat or rename
+// (sweep.go, via internal/common/distfiles/quarantine.go), and the three
+// non-timeout error returns in acquireLock — the lock file could not be
+// created, taken, or inspected (internal/common/distfiles/lock.go). None of
+// them carries a sentinel, so none of them is recognisable here.
+//
+// Adding a fourth errors.Is is deliberately NOT the fix. This gate was already
+// keyed on one condition and missed the pre-flight; keying it on an enumeration
+// means every future step that can refuse is a clause somebody must remember to
+// add, and the rung that gets forgotten is the one that invokes an agent
+// against a machine fault. The shape that closes all of them at once is to mark
+// the PHASE rather than the cause — every refusal raised while preparing the
+// shared directory is, by construction, not a verdict about an ebuild pkgdev
+// never read. That is a change to this gate's contract and belongs in its own
+// story, not bolted on here.
 //
 // Missing this was the original gap. The pre-flight failure carries no
 // *manifestRunError — that type is built only where pkgdev itself fails — so a

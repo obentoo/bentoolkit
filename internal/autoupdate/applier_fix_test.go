@@ -754,6 +754,11 @@ func TestUncreatableDistdirSkipsTheManifestFixer(t *testing.T) {
 // minutes and unexported, so this package cannot shorten it. What IS end-to-end
 // is the error's shape — it is built exactly as sweep.runManifest builds it, so
 // the wrap depth the gate has to see through is the production one.
+//
+// The consequence of that choice, so nobody reads more into a green than is
+// there: this is a SHAPE test. If sweep.go:547 ever changed its inner `%w` to
+// `%v`, production would stop carrying the sentinel and this test would stay
+// green. `%w` is what it uses today; a change there needs its own assertion.
 func TestLockedDistfileSkipsTheManifestFixer(t *testing.T) {
 	applier, _, rec := newGateApplier(t,
 		pkgdevFailsPrinting(productionManifestFailure),
@@ -850,5 +855,88 @@ func TestNonEnvironmentPreflightFailureStillReachesTheFixer(t *testing.T) {
 	}
 	if fixer.called != 1 {
 		t.Errorf("the fixer ran %d time(s), want 1; an unclassifiable failure must keep today's repair path (R3.5)", fixer.called)
+	}
+}
+
+// =============================================================================
+// The fixer's sandbox is not made in RAM (S030 sub-task 7.4)
+// =============================================================================
+
+// TestManifestFixSandboxIsMadeUnderTheHostTempRoot is S030-R1.1 applied to the
+// second distdir on this path.
+//
+// R1.1 says the autoupdate manifest step must not default its distdir to
+// os.TempDir(). Tasks 1-6 removed that default from sweep.runManifest and left it
+// standing here, where the LLM fixer is handed a private directory to verify its
+// own repair in. The measured host's os.TempDir() is a 31 GB tmpfs, so the
+// agent's verification downloads went into RAM.
+//
+// The privacy is deliberate and unchanged — the agent must not be turned loose on
+// the system DISTDIR, holding Bash(wget *) and none of the lock or quarantine
+// machinery sweep.runManifest wraps around a shared directory. Only the ROOT
+// moves.
+func TestManifestFixSandboxIsMadeUnderTheHostTempRoot(t *testing.T) {
+	root := t.TempDir()
+	prev := fixSandboxRoot
+	fixSandboxRoot = func() string { return root }
+	t.Cleanup(func() { fixSandboxRoot = prev })
+
+	pkg := "dev-games/godot"
+	applier, fixer, _ := newGateApplier(t,
+		pkgdevFailsPrinting("some failure a fixer could plausibly repair"),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	if _, err := applier.Apply(pkg, false); err == nil {
+		t.Fatal("expected the apply to fail: the re-run fails too")
+	}
+	if fixer.called != 1 {
+		t.Fatalf("the fixer ran %d time(s), want 1; this test is about the distdir it was GIVEN", fixer.called)
+	}
+
+	got := fixer.lastReq.DistDir
+	if got == "" {
+		t.Fatal("the fixer was given no distdir at all")
+	}
+	if filepath.Dir(got) != root {
+		t.Errorf("the fixer's distdir was made under %q, want %q\n"+
+			"an empty root means os.TempDir(), which is the tmpfs S030-R1.1 exists to stop using",
+			filepath.Dir(got), root)
+	}
+
+	// And it is still private and still cleaned up: the root must hold nothing
+	// once the apply returns.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("the sandbox survived the apply: %v; it is created per-fix and removed on return", entries)
+	}
+}
+
+// TestManifestFixSandboxFallsBackWhenTheHostCannotAnswer is the Unchanged
+// Behavior half. A machine with no portageq — a CI runner, a non-Gentoo
+// developer box — gets "" from the root query, and "" is precisely what
+// os.MkdirTemp already means by "use the default". Nothing about today's
+// behaviour may depend on the query succeeding.
+func TestManifestFixSandboxFallsBackWhenTheHostCannotAnswer(t *testing.T) {
+	prev := fixSandboxRoot
+	fixSandboxRoot = func() string { return "" }
+	t.Cleanup(func() { fixSandboxRoot = prev })
+
+	pkg := "dev-games/godot"
+	applier, fixer, _ := newGateApplier(t,
+		pkgdevFailsPrinting("some failure a fixer could plausibly repair"),
+		gatePkg{pkg, "4.7_rc3", "4.7"})
+
+	if _, err := applier.Apply(pkg, false); err == nil {
+		t.Fatal("expected the apply to fail")
+	}
+	if fixer.called != 1 {
+		t.Fatalf("the fixer ran %d time(s), want 1", fixer.called)
+	}
+	if got := fixer.lastReq.DistDir; filepath.Dir(got) != os.TempDir() {
+		t.Errorf("with an unanswerable root the sandbox went to %q, want it under os.TempDir() (%q): "+
+			"an unanswered query must cost nothing, not fail the apply", filepath.Dir(got), os.TempDir())
 	}
 }

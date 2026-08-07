@@ -158,11 +158,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs `LC_MESSAGES=pt_BR.UTF-8`, so a classifier grepping `Cannot write to`
   answers "repairable" the moment a child process stops inheriting a C locale.
   An environment failure now reports that the cause was the environment and not
-  the ebuild, and the fixer is **never constructed** — whether the verdict comes
-  from that classification or from the pre-flight, which answers "this distdir
-  cannot be prepared" and "another writer holds this distfile" before `pkgdev`
-  is spawned at all. Uncertain still means repairable, so a wrong classification
-  costs one fixer call and never a repair that exists today.
+  the ebuild, and the fixer is **never constructed** — whether that verdict comes
+  from the classification or from the pre-flight, which answers "this distdir
+  cannot be prepared" and "another writer still holds this distfile" before
+  `pkgdev` is spawned at all. Uncertain still means repairable, so a wrong
+  classification costs one fixer call and never a repair that exists today —
+  which is also why a handful of rarer pre-flight refusals still reach the
+  fixer rather than being guessed at.
+
+  The private distdir the fixer verifies its own repair in is no longer made in
+  `os.TempDir()` either; it now goes under the host's `PORTAGE_TMPDIR`, falling
+  back to today's behaviour on a machine that cannot answer.
 
   Both fixers additionally record which model they used and whether it was an
   **alias** — the default `sonnet` is one, and an alias resolves to a different

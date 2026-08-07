@@ -537,3 +537,89 @@ func TestResolveCreationFailureCarriesErrDistdirNotWritable(t *testing.T) {
 		}
 	})
 }
+
+// =============================================================================
+// TempRoot — the root a THROWAWAY distdir is made under (S030 sub-task 7.4)
+// =============================================================================
+
+// TestTempRootAsksThePackageManagerForPortageTmpdir pins the query itself.
+//
+// The argv matters as much as the answer: `portageq envvar PORTAGE_TMPDIR` is a
+// different question from `portageq distdir`, and asking the wrong one would
+// return the shared, persistent download directory for a caller that is about to
+// create a private directory and then delete it.
+func TestTempRootAsksThePackageManagerForPortageTmpdir(t *testing.T) {
+	call := stubPortageqOutput(t, "/var/tmp\n")
+
+	if got := TempRoot(); got != "/var/tmp" {
+		t.Errorf("TempRoot() = %q, want %q", got, "/var/tmp")
+	}
+	if want := "portageq envvar PORTAGE_TMPDIR"; call.argv() != want {
+		t.Errorf("TempRoot asked %q, want %q", call.argv(), want)
+	}
+}
+
+// TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered is the contract that lets
+// the caller write os.MkdirTemp(TempRoot(), …) with no branch of its own.
+//
+// "" is not a failure here and must never become one: os.MkdirTemp already reads
+// it as "use os.TempDir()", so an unanswerable query leaves the caller with
+// exactly the behaviour it had before this function existed. Returning an error
+// instead would force every caller to decide again, and a caller that got that
+// decision wrong would fail an apply over a machine that simply has no portageq.
+func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
+	t.Run("portageq is not installed", func(t *testing.T) {
+		stubPortageqUnavailable(t)
+		if got := TempRoot(); got != "" {
+			t.Errorf("TempRoot() = %q, want \"\" so os.MkdirTemp falls back to its default", got)
+		}
+	})
+
+	t.Run("the answer is not an absolute path", func(t *testing.T) {
+		// A relative path is meaningless: portage's working directory is unknown.
+		stubPortageqOutput(t, "var/tmp\n")
+		if got := TempRoot(); got != "" {
+			t.Errorf("TempRoot() = %q, want \"\": a relative answer is not a directory", got)
+		}
+	})
+
+	t.Run("the answer is empty", func(t *testing.T) {
+		stubPortageqOutput(t, "\n")
+		if got := TempRoot(); got != "" {
+			t.Errorf("TempRoot() = %q, want \"\"", got)
+		}
+	})
+
+	t.Run("the query times out", func(t *testing.T) {
+		stubPortageqTimeout(t, time.Millisecond)
+		stubPortageqExec(t, "sleep", "5")
+		if got := TempRoot(); got != "" {
+			t.Errorf("TempRoot() = %q, want \"\"", got)
+		}
+	})
+}
+
+// TestTempRootAndHostDistdirAskDifferentQuestions guards the refactor that gave
+// them a shared implementation.
+//
+// portageqPath is now one function behind two callers, and the only thing left
+// separating them is the argv each passes. A copy-paste that pointed TempRoot at
+// "distdir" would still return an absolute path, still pass every test above,
+// and would hand the LLM fixer the host's real DISTDIR to write into — the one
+// directory the sandbox exists to keep it out of.
+func TestTempRootAndHostDistdirAskDifferentQuestions(t *testing.T) {
+	distdirCall := stubPortageqOutput(t, "/var/cache/distfiles\n")
+	_ = hostDistdir()
+	distdirArgv := distdirCall.argv()
+
+	tempCall := stubPortageqOutput(t, "/var/tmp\n")
+	_ = TempRoot()
+	tempArgv := tempCall.argv()
+
+	if distdirArgv == tempArgv {
+		t.Fatalf("hostDistdir and TempRoot ask the SAME question (%q); the fixer sandbox would be created inside the host's DISTDIR", distdirArgv)
+	}
+	if distdirArgv != "portageq distdir" {
+		t.Errorf("hostDistdir asked %q, want %q", distdirArgv, "portageq distdir")
+	}
+}
