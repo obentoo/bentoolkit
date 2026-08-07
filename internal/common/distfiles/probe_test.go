@@ -2,8 +2,10 @@ package distfiles
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -28,39 +30,109 @@ func assertNamesTheDirectory(t *testing.T, err error, dir string) {
 	if err == nil {
 		t.Fatalf("no error to inspect; expected a failure naming %q", dir)
 	}
-	under := regexp.MustCompile(regexp.QuoteMeta(dir) + `/\S+`)
-	stripped := under.ReplaceAllString(err.Error(), "<a file under it>")
-	if !strings.Contains(stripped, dir) {
+	if !namesTheDirectory(err, dir) {
 		t.Errorf("the failure must name the directory itself (R1.4), not only the probe file inside it; err = %v", err)
 	}
 }
 
-// denyFileWrites lowers this process's file-size limit to zero, so creating a
-// file still succeeds while writing any byte into it fails. It returns a
-// restore function that is safe to call more than once, and also registers it
-// as cleanup so a failed assertion cannot leave the limit in place.
+// namesTheDirectory is the rule assertNamesTheDirectory applies, split out so
+// the helper child in runDenyWritesHelperChild — which has no *testing.T —
+// enforces the SAME one rather than a second, drifting copy.
+func namesTheDirectory(err error, dir string) bool {
+	if err == nil {
+		return false
+	}
+	under := regexp.MustCompile(regexp.QuoteMeta(dir) + `/\S+`)
+	stripped := under.ReplaceAllString(err.Error(), "<a file under it>")
+	return strings.Contains(stripped, dir)
+}
+
+// denyWritesHelperDirEnv doubles as the switch and the payload: when it is
+// set, this binary is a helper child rather than a test run, and its value is
+// the directory to probe. See runDenyWritesHelperChild.
+const denyWritesHelperDirEnv = "BENTOO_TEST_DENY_WRITES_DIR"
+
+// runDenyWritesHelperChild stages "the file is created and the bytes are
+// refused" by lowering RLIMIT_FSIZE to zero, then asserts Probe's whole
+// contract and reports through its exit status.
 //
-// This reproduces, deterministically and without root, the shape of the failure
-// this whole story is about: on the full tmpfs the sweep was downloading into,
-// the file appeared and the bytes did not. Nothing is asserted while the limit
-// is down — the calls are made, the limit is restored, and only then does the
-// test report.
-func denyFileWrites(t *testing.T) func() {
-	t.Helper()
+// # Why a child process, when the limit could just be raised again
+//
+// RLIMIT_FSIZE is per PROCESS, and inside a test binary the testing package is
+// a second writer to a file nobody wrote deliberately: `go test` passes
+// -test.testlogfile whenever it may cache the result, and every os.Open the
+// test performs is appended to that log. Probe opens a file — that IS the
+// subject — so the append happens while the limit is down, and if the log's
+// buffer flushes in that window the write fails with EFBIG. Every test still
+// PASSes and the package still FAILs, on a line that names neither the test
+// nor the code:
+//
+//	PASS
+//	testing: can't write /tmp/go-build…/testlog.txt: file too large
+//	FAIL    github.com/obentoo/bentoolkit/internal/common/distfiles
+//
+// Whether the flush lands in the window depends on how much the run logged
+// before it, so it is environment-shaped: it survived this repository's own
+// host and `act`, and failed on a stock GitHub runner. Shrinking the window
+// cannot fix it, because the file operation inside the window is the one being
+// tested.
+//
+// TestMain routes here before m.Run(), so the child has no testing harness and
+// therefore no testlog to corrupt. The assertions still run in Go against the
+// real error value — errors.Is on a sentinel, not a string match on a message,
+// which is the distinction S030-M5 exists to make — and only the verdict
+// crosses the process boundary, as an exit status.
+func runDenyWritesHelperChild(dir string) int {
+	fail := func(format string, args ...any) int {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+		return 1
+	}
+
 	var orig syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &orig); err != nil {
-		t.Skipf("skipping: cannot read RLIMIT_FSIZE on this system (%v), so a write that fails "+
-			"after a successful create cannot be staged here", err)
+		// Cannot stage the failure here. Not an error: the parent reads exit 0
+		// as "nothing contradicted the contract", and a platform that cannot
+		// lower the limit has not contradicted anything.
+		fmt.Fprintf(os.Stderr, "skipping: cannot read RLIMIT_FSIZE (%v)\n", err)
+		return 0
 	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 0, Max: orig.Max}); err != nil {
-		t.Skipf("skipping: cannot lower RLIMIT_FSIZE on this system (%v)", err)
+		fmt.Fprintf(os.Stderr, "skipping: cannot lower RLIMIT_FSIZE (%v)\n", err)
+		return 0
 	}
-	var once sync.Once
-	restore := func() {
-		once.Do(func() { _ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &orig) })
+
+	probeErr := Probe(dir)
+	entries, readErr := os.ReadDir(dir)
+
+	// Restored before anything is reported, so the diagnostics below can be
+	// written even though the assertions were made under the limit.
+	_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &orig)
+
+	if probeErr == nil {
+		return fail("Probe(%q) error = nil while no byte can be written; creating an inode is not evidence that the directory is usable", dir)
 	}
-	t.Cleanup(restore)
-	return restore
+	if !errors.Is(probeErr, ErrDistdirNotWritable) {
+		return fail("errors.Is(err, ErrDistdirNotWritable) = false for %v", probeErr)
+	}
+	if !errors.Is(probeErr, syscall.EFBIG) {
+		return fail("the underlying write error must survive the wrap; errors.Is(err, EFBIG) = false for %v", probeErr)
+	}
+	if !namesTheDirectory(probeErr, dir) {
+		return fail("the error does not name %q in its own right: %v", dir, probeErr)
+	}
+	// The file it managed to create must still be taken away: the failure path
+	// runs in the host's shared DISTDIR too.
+	if readErr != nil {
+		return fail("read %q: %v", dir, readErr)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		return fail("a probe whose write failed left %d entry/entries behind: %v", len(entries), names)
+	}
+	return 0
 }
 
 // makeUnwritableDir returns a directory the invoking user cannot write into,
@@ -165,30 +237,17 @@ func TestProbeFailsWithErrDistdirNotWritableOnReadOnlyDir(t *testing.T) {
 		// which wget reported as "Cannot write to '…' (Success)". A probe that
 		// only created an empty file would call that directory usable and hand
 		// the download straight back to the tmpfs.
+		//
+		// Every assertion runs in a CHILD PROCESS, and that is not incidental
+		// — see runDenyWritesHelperChild for why an in-process version breaks
+		// the test binary rather than the code under test.
 		dir := t.TempDir()
 
-		restore := denyFileWrites(t)
-		err := Probe(dir)
-		entries, readErr := os.ReadDir(dir)
-		restore()
-
-		if err == nil {
-			t.Fatal("Probe() error = nil while no byte can be written; creating an inode is not evidence that the directory is usable")
-		}
-		if !errors.Is(err, ErrDistdirNotWritable) {
-			t.Errorf("errors.Is(err, ErrDistdirNotWritable) = false for %v", err)
-		}
-		assertNamesTheDirectory(t, err, dir)
-		if !errors.Is(err, syscall.EFBIG) {
-			t.Errorf("the underlying write error must survive the wrap; errors.Is(err, EFBIG) = false for %v", err)
-		}
-		// The file it managed to create must still be taken away: the failure
-		// path runs in the host's shared DISTDIR too.
-		if readErr != nil {
-			t.Fatalf("read %q: %v", dir, readErr)
-		}
-		if len(entries) != 0 {
-			t.Errorf("a probe whose write failed left %d entry/entries behind: %v", len(entries), entries)
+		cmd := exec.Command(os.Args[0])
+		cmd.Env = append(os.Environ(), denyWritesHelperDirEnv+"="+dir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("the deny-writes child failed: %v\n%s", err, out)
 		}
 	})
 

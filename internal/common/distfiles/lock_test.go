@@ -49,6 +49,11 @@ func TestMain(m *testing.M) {
 	if distdir := os.Getenv(lockHelperDistdirEnv); distdir != "" {
 		os.Exit(runLockHelperChild(distdir))
 	}
+	// The second child mode, for the same reason as the first: something that
+	// cannot be done inside a running test binary. See probe_test.go.
+	if dir := os.Getenv(denyWritesHelperDirEnv); dir != "" {
+		os.Exit(runDenyWritesHelperChild(dir))
+	}
 	os.Exit(m.Run())
 }
 
