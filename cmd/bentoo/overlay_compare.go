@@ -503,7 +503,7 @@ func truncatePkgName(name string, maxLen int) string {
 
 // printComparisonSummary emits the summary the operator reads after the report.
 //
-// The decision of WHAT to print lives in the two pure builders below and the
+// The decision of WHAT to print lives in the pure builders below and the
 // emission is all that stays here, because logger binds its io.Writer once at
 // first use and exposes no setter (logger.go:44-52) — so a test can reach the
 // builders and cannot reach this. That split is not decoration: these three
@@ -526,6 +526,14 @@ func printComparisonSummary(report *overlay.CompareReport, repoName string) {
 	}
 
 	for _, line := range verdictSummaryLines(report) {
+		logger.Info("%s", line)
+	}
+
+	// Emitted BESIDE the counts, never folded into them: it qualifies what they
+	// cover, and a line that carries its own caveat is one the eye stops reading
+	// as a count. It also has to survive the counts being silent — the caveat is
+	// about the numbers above, so it prints only when they do.
+	for _, line := range verdictScopeLines(report) {
 		logger.Info("%s", line)
 	}
 }
@@ -574,6 +582,59 @@ func verdictSummaryLines(report *overlay.CompareReport) []string {
 		return nil
 	}
 	return []string{"  Verdicts: " + strings.Join(terms, " | ")}
+}
+
+// verdictScopeLines says what the verdict counts cover and how many of the
+// packages they count have no row anywhere in the report (R4.1, R4.2), or
+// nothing when every counted package is listed.
+//
+// The counts and the tables disagree on screen, and until this line nothing said
+// why. Measured against ::gentoo on the live overlay: the verdict line reports
+// keep 231 above a keep table holding 155 rows, and `--only-outdated` reports 318
+// verdicts above no table at all, because every package is up-to-date and the
+// report is empty. Both numbers are right — the counts are computed over the
+// whole scan on purpose (D7) while Results is only the view — but a total larger
+// than what is on screen with nothing explaining it reads as a defect, and an
+// operator who counts the rows to check it concludes the tool is broken.
+//
+// The universe is the SUM OF THE COUNTERS rather than ComparedPackages or
+// TotalPackages, which is what makes the sentence checkable: the number named
+// here is the number the terms on the line above add up to. Any run that reaches
+// this point has all three equal — every compared package increments exactly one
+// verdict counter, and a scan cut short by a signal aborts before the summary
+// prints — so the choice shows up only in a report built by hand, where naming a
+// total the printed counts do not add up to would be the wrong answer. It also
+// makes the silence fall out: no verdict counts, no line to qualify them.
+//
+// What is unlisted is measured against the ROWS, never against NotInRemoteCount.
+// The two agree on a default run — runCompare never sets IncludeNotInRemote, so
+// the Bentoo-only packages are the only ones counted without a row, 84 of 318 in
+// the measurement above — and they part company the moment a filter narrows the
+// view: the same scan under --only-redundant prints 74 rows, leaving 244 packages
+// unlisted while NotInRemoteCount still reads 84. Every result does reach a table
+// (FormatReport sections every verdict and prints any leftover under "Other
+// Packages"), so len(Results) is exactly the count the operator can check by eye.
+//
+// Zero prints nothing, on the same terms as the zero verdict terms above: with
+// the counts and the tables in agreement there is nothing to reconcile. A
+// negative difference is unreachable from a real report and is silent for the
+// same reason.
+//
+// It says how many are unlisted and not WHICH: listing the Bentoo-only packages
+// is a separate decision about what a default run prints, and this line has to
+// stay true under a filter, where the missing rows are the operator's own doing.
+func verdictScopeLines(report *overlay.CompareReport) []string {
+	counted := report.VerdictKeepCount + report.VerdictRedundantCount +
+		report.VerdictNeedsRebaseCount + report.VerdictUnknownCount
+
+	unlisted := counted - len(report.Results)
+	if unlisted <= 0 {
+		return nil
+	}
+
+	return []string{fmt.Sprintf(
+		"  Verdicts count every package scanned, not the rows above: %d of %d have no row in any table.",
+		unlisted, counted)}
 }
 
 // repoTokenName maps a repository name to the environment variable / secrets key
