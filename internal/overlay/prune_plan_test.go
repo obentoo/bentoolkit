@@ -112,6 +112,29 @@ func planTrees(t *testing.T, category, pkg, version, ourBody, theirBody string) 
 	}
 }
 
+// shipUpstreamWaylandPatch writes, on ::gentoo's side, the patch
+// pruneEbuildOurs references — which is what keeps this file's differing fixture
+// an UNPROVED divergence.
+//
+// Without it the fixture proves its own authorship and R6.1 refuses the package
+// outright: our ebuild applies files/wayland.patch and ::gentoo ships no such
+// file, so the difference cannot have been inherited from ::gentoo. That row is
+// prune_authorship_test.go's; the tests here are about the row below it, an
+// undeclared divergence nothing attributes to anybody. Writing the patch upstream
+// is the copied-ebuild shape that produces it — the reference came from ::gentoo
+// along with the rest of the file, so it says nothing about who changed what.
+//
+// The ebuilds still differ, and PruneVerification reports that difference before
+// it ever compares the two files/ trees, so the reason these tests assert on is
+// unaffected.
+func shipUpstreamWaylandPatch(t *testing.T, prov *pruneRecordingProvider) {
+	t.Helper()
+	writePruneFile(t,
+		filepath.Join(prov.root, pruneCat, prunePkg),
+		filepath.Join(pruneFilesDir, "wayland.patch"),
+		"upstream patch\n")
+}
+
 // onlyPlan fails unless exactly one plan is in the bucket, and returns it.
 func onlyPlan(t *testing.T, bucket []PrunePlan, name string) PrunePlan {
 	t.Helper()
@@ -303,6 +326,7 @@ func TestPlanPrunePatchedGoesToDivergingEvenWhenIdentical(t *testing.T) {
 // _Requirements: R2.2, R4.1, R4.2_
 func TestPlanPruneDifferingContentIsRefusedWithReason(t *testing.T) {
 	overlayRoot, prov := planTrees(t, pruneCat, prunePkg, "1.0", pruneEbuildOurs, pruneEbuildStock)
+	shipUpstreamWaylandPatch(t, prov)
 	res := planResult(pruneCat, prunePkg, "1.0", VerdictRedundant)
 
 	batch := PlanPrune([]CompareResult{res}, prov, PruneOptions{OverlayPath: overlayRoot})
@@ -320,6 +344,7 @@ func TestPlanPruneDifferingContentIsRefusedWithReason(t *testing.T) {
 
 	t.Run("--include-patched makes it eligible", func(t *testing.T) {
 		overlayRoot, prov := planTrees(t, pruneCat, prunePkg, "1.0", pruneEbuildOurs, pruneEbuildStock)
+		shipUpstreamWaylandPatch(t, prov)
 
 		batch := PlanPrune([]CompareResult{res}, prov, PruneOptions{OverlayPath: overlayRoot, IncludePatched: true})
 

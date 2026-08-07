@@ -425,7 +425,8 @@ type PruneClass int
 
 const (
 	// PruneRefused means no run of this command may remove the package: its
-	// verdict is not redundant, or its content could not be compared at all. It is
+	// verdict is not redundant, its content could not be compared at all, or the
+	// overlay's own content PROVES the difference originates here (R6.1). It is
 	// the ZERO VALUE for the same reason ContentUnverifiable is: a PrunePlan
 	// nobody filled in must not read as permission to delete.
 	PruneRefused PruneClass = iota
@@ -435,8 +436,11 @@ const (
 	PruneIdentical
 	// PruneDiverging means the package is redundant BY VERSION but something of
 	// ours is in it — either a declared `patched` entry or an undeclared
-	// difference the byte comparison found. Only --include-patched may act on it
-	// (R4.1).
+	// difference the byte comparison found — AND nothing proves who wrote that
+	// difference. Only --include-patched may act on it (R4.1); a difference the
+	// content proves is ours is refused outright instead (R6.1), because the flag
+	// says "I accept discarding local work" and cannot say it about work the
+	// report has just named the file for.
 	PruneDiverging
 )
 
@@ -569,7 +573,8 @@ const pruneNoLocalTreeReason = "the provider exposes no local tree to compare ag
 //     is 025's finding to report and the operator's to clear; overruling it here
 //     on our own reading of the bytes would settle that disagreement in the one
 //     direction that cannot be undone.
-//  3. Only then does content decide (R2.1, R2.2, R2.3).
+//  3. Only then does content decide (R2.1, R2.2, R2.3) — and where the content
+//     also PROVES the difference is ours, no flag may act on it (R6.1).
 //
 // Every step can only move a package AWAY from a removal, never towards one,
 // which is why they compose: the answer is the strictest step's answer.
@@ -594,7 +599,7 @@ func PlanPrune(results []CompareResult, prov provider.Provider, opts PruneOption
 
 	var batch PruneBatch
 	for _, result := range results {
-		plan := planPrunePackage(result, dirProv, opts)
+		plan := planPrunePackage(result, prov, dirProv, opts)
 		switch plan.Class {
 		case PruneIdentical:
 			batch.Identical = append(batch.Identical, plan)
@@ -623,7 +628,15 @@ func PlanPrune(results []CompareResult, prov provider.Provider, opts PruneOption
 // makes R2.5 observable as an ABSENCE OF WORK — a non-redundant package produces
 // no directory listing, no provider lookup and no read — rather than as a message
 // printed after the work was done anyway.
-func planPrunePackage(result CompareResult, dirProv provider.PackageDirProvider, opts PruneOptions) PrunePlan {
+//
+// Both provider values are the SAME object seen through two interfaces, and both
+// are parameters rather than one being re-derived here: dirProv is the capability
+// PlanPrune already asserted once for the whole run, and prov is what
+// proveAuthorship needs, since it re-resolves the package through
+// resolvePackagePaths — the one path construction shared with `overlay compare`
+// (compare.go), which is what stops the two commands building different paths for
+// the same package.
+func planPrunePackage(result CompareResult, prov provider.Provider, dirProv provider.PackageDirProvider, opts PruneOptions) PrunePlan {
 	plan := PrunePlan{Category: result.Category, Package: result.Package}
 
 	// STEP 1 — the verdict, before anything is looked at.
@@ -663,8 +676,54 @@ func planPrunePackage(result CompareResult, dirProv provider.PackageDirProvider,
 		return plan
 	}
 
-	plan.decide(classifyPrune(result, PruneVerification(ourDir, theirDir, result.Package), opts.IncludePatched))
+	content := PruneVerification(ourDir, theirDir, result.Package)
+
+	// R6.1/R6.2 — and the planner asks the question itself rather than expecting
+	// the answer on its input. `overlay compare` fills Authorship by running
+	// AnnotateAuthorship over its finished report (authorship.go); `overlay prune`
+	// calls CompareWithProvider and nothing else, so every result arriving here
+	// carries the zero AuthorshipUnproved. A refusal that depended on a caller
+	// having remembered a separate pass is a refusal the live command does not
+	// make — measured on 2026-08-07, that gap left all three proved packages
+	// (net-libs/nodejs, kde-plasma/spectacle, kde-plasma/kdeplasma-addons) planned
+	// for removal under --include-patched.
+	//
+	// It is proveAuthorship — the same function AnnotateAuthorship calls, not a
+	// second reading of the same files. Two notions of what proves authorship
+	// would let `compare` name a file as ours while `prune` deleted it.
+	//
+	// Only where there IS a divergence, and only when the result does not already
+	// carry a proof: an existing one is honoured rather than recomputed, so this
+	// step can add a refusal and can never take one away. result is a value
+	// parameter, so what is written here stays inside this plan and never reaches
+	// back into the caller's report.
+	if pruneDivergence(result, content) && result.Authorship != AuthorshipOverlay {
+		result.Authorship, result.ProvedBy = proveAuthorship(result, prov, CompareOptions{OverlayPath: opts.OverlayPath})
+	}
+
+	plan.decide(classifyPrune(result, content, opts.IncludePatched))
 	return plan
+}
+
+// pruneDivergence reports whether this package holds a divergence at all: one a
+// registry entry declares, or one the byte comparison found.
+//
+// It is the question "is there anything here whose authorship there is something
+// to attribute?", and one predicate answers it for both places that ask —
+// planPrunePackage, which pays for the authorship check only when the answer is
+// yes, and classifyPrune, which refuses only where there is a divergence to
+// refuse. Written twice, the check that RUNS and the row that READS it could come
+// to disagree about which packages they are about.
+//
+// An UNVERIFIABLE result is not a divergence. Nothing was compared, so nothing is
+// known in either direction, and such a package is already refused by row 1 of
+// classifyPrune's table with the reason R2.3 asks for — which is the reason the
+// operator needs, not a second one about a file.
+func pruneDivergence(result CompareResult, content Content) bool {
+	if content.Result == ContentUnverifiable {
+		return false
+	}
+	return result.Patched || content.Result == ContentDiffers
 }
 
 // pruneDecision is the answer to "what may this run do about this package",
@@ -715,15 +774,16 @@ func pruneStatedReason(reason string) string {
 	return reason
 }
 
-// classifyPrune applies R2's table to a package the verdict already let through.
-// It is read TOP TO BOTTOM, first match wins:
+// classifyPrune applies R2's and R6's table to a package the verdict already let
+// through. It is read TOP TO BOTTOM, first match wins:
 //
 //  1. content unverifiable  -> Refused, never eligible (R2.3)
-//  2. `patched` declared    -> Diverging, eligible only with --include-patched (R2.4)
-//  3. content differs       -> Diverging, likewise (R2.2)
-//  4. identical, undeclared -> Identical, eligible (R2.1)
+//  2. divergence proved ours-> Refused, never eligible (R6.1, R6.2)
+//  3. `patched` declared    -> Diverging, eligible only with --include-patched (R2.4)
+//  4. content differs       -> Diverging, likewise (R2.2)
+//  5. identical, undeclared -> Identical, eligible (R2.1)
 //
-// Row 1 sits above row 2 even though the declaration is the earlier FILTER,
+// Row 1 sits above row 3 even though the declaration is the earlier FILTER,
 // because the two can hold at once and then the stricter class has to win. R4.1
 // names R2.2 and R2.4 as the refusals --include-patched may override and
 // pointedly not R2.3: a flag can say "I know I am discarding local work", and no
@@ -731,7 +791,24 @@ func pruneStatedReason(reason string) string {
 // patched-and-unverifiable package in Diverging would make it removable under the
 // flag, so it goes to Refused.
 //
-// Row 2 above row 3 is R2.4's "regardless of content": identical bytes never
+// ROW 2 IS THE SAME ARGUMENT ONE STEP FURTHER, and it is why it sits ABOVE both
+// diverging rows rather than beside them. Those two rows are exactly what
+// --include-patched acts on, and a package whose files PROVE the difference
+// originates here is work that exists in no other tree: ::gentoo cannot restore
+// it, because ::gentoo never had it. The flag means "I accept discarding local
+// work"; it cannot mean that about work the report has this instant named the
+// file for (R6.1). Below row 1 because an unverifiable package was never
+// compared, and R2.3's reason is the one that sends the operator to the right
+// tree.
+//
+// Row 2 requires a DIVERGENCE, via pruneDivergence, and that condition is
+// load-bearing rather than defensive. An identical package holds nothing to
+// attribute — every byte of it is in ::gentoo — and a stale ${FILESDIR}
+// reference in an ebuild both trees share would otherwise refuse it. 66 of the 74
+// packages the live plan would remove are in that batch, so a refusal leaking
+// there stops `prune` removing anything at all.
+//
+// Row 3 above row 4 is R2.4's "regardless of content": identical bytes never
 // promote a declared package into the removable batch, and when the bytes differ
 // as well the reason names both.
 func classifyPrune(result CompareResult, content Content, includePatched bool) pruneDecision {
@@ -740,6 +817,10 @@ func classifyPrune(result CompareResult, content Content, includePatched bool) p
 		// the operator to be told WHICH of the two unverifiable reasons applies, and
 		// a reason reworded per call site cannot be recognised in a report.
 		return refusedPrune(content.Reason)
+	}
+
+	if pruneDivergence(result, content) && result.Authorship == AuthorshipOverlay {
+		return refusedPrune(provedPruneReason(result))
 	}
 
 	if result.Patched {
@@ -759,6 +840,41 @@ func classifyPrune(result CompareResult, content Content, includePatched bool) p
 	default:
 		return refusedPrune("the content check returned no usable answer")
 	}
+}
+
+// provedPruneReason says why a proved package is refused, and NAMES THE FILE
+// that proves it (R6.2).
+//
+// The file is the whole of what this reason adds. "Something of ours is in this
+// package" is what the plan already said before R6; what the operator cannot get
+// anywhere else is the one name that settles it — a patch our ebuild applies and
+// ::gentoo does not ship for that package cannot have been inherited from
+// ::gentoo. It is spelled package-relative ("files/<name>") because the line
+// already carries the atom, so the operator confirms the claim by pasting the
+// name after the package directory rather than by re-deriving what ${FILESDIR}
+// expands to.
+//
+// "no registry entry declares it" is stated only when there is no declaration,
+// and it is the actionable half: an undeclared divergence is precisely the work
+// this command was about to discard, and `overlay analyze` is where a declaration
+// gets written. It names no flag, matching pruneNoLocalTreeReason — internal/
+// overlay does not know what the operator can type, and the section this prints
+// under already says no flag on the command reaches these.
+func provedPruneReason(result CompareResult) string {
+	if result.ProvedBy == "" {
+		// Unreachable through proveAuthorship, which fills both fields from the same
+		// answer — but results arrive as STRUCTS, and a struct can be built by
+		// anything. A proof with no file to name still refuses: R6.2 is owed an
+		// answer either way, and of the two ways to be wrong here only one of them
+		// deletes something.
+		return "the divergence is proved to originate in the overlay, but the proving file was not recorded (this is a bug in the prune planner)"
+	}
+
+	reason := fmt.Sprintf("our ebuild applies %s, which ::gentoo does not ship: this divergence originates in the overlay", result.ProvedBy)
+	if !result.Patched {
+		reason += ", and no registry entry declares it"
+	}
+	return reason
 }
 
 // patchedPruneReason says why a declared package is set apart, and what actually
