@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -49,6 +50,19 @@ type CompareResult struct {
 	// Verified is the outcome of comparing the two ebuilds' bytes. It stays
 	// NotVerified unless a content check ran.
 	Verified Verification
+	// DiffAdded and DiffRemoved are the line counts of that difference, ours
+	// against upstream's: added is what our ebuild has and ::gentoo's does not.
+	// They are meaningful ONLY when Verified == VerifiedDiffers and are zero
+	// otherwise — a check that did not run has no magnitude to report, and a
+	// byte-identical pair has none to find.
+	//
+	// They exist because the bare fact "differs" cannot be acted on. A one-line
+	// difference is almost always ::gentoo revising an ebuild in place, without a
+	// revbump, after we copied it; a four-hundred-line one is work of our own. The
+	// report cannot tell those two apart — see formatVerificationFindings — but
+	// the operator can, at a glance, once the size is on the line.
+	DiffAdded   int
+	DiffRemoved int
 }
 
 // CompareStatus indicates the comparison result
@@ -466,7 +480,9 @@ func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts Co
 	// back. One mechanism decides, the other only checks (D4, R4.5), and the
 	// order of these three statements is what makes that structural rather than
 	// a convention someone must remember.
-	result.Verified = verifyAgainstLocalContent(result, prov, opts)
+	check := verifyAgainstLocalContent(result, prov, opts)
+	result.Verified = check.state
+	result.DiffAdded, result.DiffRemoved = check.added, check.removed
 
 	// The map is keyed by the bare "category/package" atom. A miss is the
 	// unknown state — nothing is recorded about this package — and it reaches
@@ -568,21 +584,21 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // the files/ tree — but the two agree wherever they overlap, since both are
 // bytes.Equal over the same two files. It is separate code precisely so that a
 // removal criterion cannot change what this compare reports.
-func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) Verification {
+func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) contentCheck {
 	if opts.OverlayPath == "" {
-		return NotVerified
+		return contentCheck{}
 	}
 	// An empty version names no ebuild. It is the shape a not-in-remote or failed
 	// comparison leaves behind — where RemoteVersion is empty too, so the
 	// equality below would otherwise hold and send two doomed reads at a file
 	// called "<pkg>-.ebuild".
 	if result.LocalVersion == "" || result.LocalVersion != result.RemoteVersion {
-		return NotVerified
+		return contentCheck{}
 	}
 
 	dirProv, ok := prov.(provider.PackageDirProvider)
 	if !ok {
-		return NotVerified
+		return contentCheck{}
 	}
 	// LocalPackagePath rather than a path joined out here: it guards with the
 	// provider's own ensureRepo(), so it holds whether or not the version lookup
@@ -590,7 +606,7 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 	// carry as an error instead of as a path that fails to open later.
 	upstreamDir, err := dirProv.LocalPackagePath(result.Category, result.Package)
 	if err != nil {
-		return NotVerified
+		return contentCheck{}
 	}
 
 	// <pkg>-<version>.ebuild is the filename shape both sides use — the same one
@@ -610,17 +626,91 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 
 	ours, err := os.ReadFile(ourPath) //nolint:gosec // path built from scanned overlay directory names, never from registry input
 	if err != nil {
-		return NotVerified
+		return contentCheck{}
 	}
 	theirs, err := os.ReadFile(theirPath) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
 	if err != nil {
-		return NotVerified
+		return contentCheck{}
 	}
 
 	if bytes.Equal(ours, theirs) {
-		return VerifiedIdentical
+		return contentCheck{state: VerifiedIdentical}
 	}
-	return VerifiedDiffers
+
+	// bytes.Equal above is what DECIDES; the line counts only describe. They are
+	// computed after it, from the same two buffers, so a diff that failed to
+	// produce a single edit — impossible for two unequal buffers, but not worth
+	// depending on — could never turn a difference into an identity.
+	added, removed := diffLineCounts(theirs, ours)
+	return contentCheck{state: VerifiedDiffers, added: added, removed: removed}
+}
+
+// contentCheck is one content comparison's finding: the verification state and,
+// when the two ebuilds differ, the size of that difference.
+//
+// It exists so verifyAgainstLocalContent can report the magnitude without
+// growing a second return value that every non-differing path would have to
+// spell out as zero. The zero contentCheck is NotVerified with no magnitude,
+// which is exactly what each of that function's six early exits means.
+type contentCheck struct {
+	state          Verification
+	added, removed int
+}
+
+// diffLineCounts reports how many lines ours holds that theirs does not, and
+// vice versa, as a real line diff rather than a count of differing bytes.
+//
+// The argument ORDER is the report's point of view: theirs is the "before" and
+// ours the "after", so added is what our overlay carries on top of ::gentoo's
+// ebuild — the same orientation as `diff -u <gentoo> <ours>`, which is what an
+// operator checking the finding by hand will run.
+//
+// udiff.Lines is already this repository's diff (cmd/bentoo/overlay_autoupdate_lintfix.go
+// renders the registry repair with it), so this adds no dependency and no second
+// notion of what a line difference is. Each Edit replaces the byte range
+// [Start,End) of before with New, and udiff.Lines aligns those ranges to line
+// boundaries, so counting the lines on each side of every edit yields the totals.
+//
+// THE ORIENTATION MATCHES `diff`; THE MAGNITUDE NEED NOT. lcs.DiffLines stops
+// searching for a minimal edit script after maxDiffs = 100 (lcs/old.go) and
+// returns a valid but larger one past that point. Measured on
+// net-libs/nodejs-26.7.0, our biggest real divergence: this reports +622/-254
+// where GNU diff reports +430/-62. Both are correct edit scripts — the line
+// totals reconcile either way — but only the small ones agree.
+//
+// That is acceptable HERE and would not be elsewhere, because of what the number
+// is for. The question it answers is "one line, or hundreds?", and it is asked
+// precisely to separate a copy that fell behind from work of our own. A count
+// inflated at the top of that range still answers it; an operator who wants the
+// exact edit script runs `diff -u`, which is what the caveat beneath the finding
+// tells them to do anyway. Nothing downstream computes on these values.
+//
+// Neither count is a verdict and neither feeds one: a large diff does not
+// authorise anything and a small one forbids nothing. See CompareResult.DiffAdded.
+func diffLineCounts(theirs, ours []byte) (added, removed int) {
+	for _, e := range udiff.Lines(string(theirs), string(ours)) {
+		removed += countLines(string(theirs)[e.Start:e.End])
+		added += countLines(e.New)
+	}
+	return added, removed
+}
+
+// countLines counts the lines in a diff fragment.
+//
+// A fragment is line-aligned and therefore normally ends in "\n", which would
+// make a plain Count off by nothing — but the LAST fragment of a file with no
+// trailing newline does not, and that line is still a line. An empty fragment is
+// zero lines, not one: it is the shape of a pure insertion's "before" side, and
+// counting it as a line would report a removal that did not happen.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 // verdictSection is one Verdict-grouped section of the report: the packages
@@ -832,6 +922,11 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 // real sentence, narrow enough to leave the line readable beside the table.
 const patchedReasonCap = 72
 
+// undeclaredDivergenceCaveat is the sentence formatVerificationFindings prints
+// once beneath a section that reported at least one undeclared divergence. It is
+// a package-level constant so a test can assert on it without copying the wording.
+const undeclaredDivergenceCaveat = "  ↳ a difference is not proof of authorship: ::gentoo also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring."
+
 // formatVerificationFindings renders one line per verification finding, beneath
 // the section's table.
 //
@@ -860,6 +955,10 @@ const patchedReasonCap = 72
 // into a string.
 func formatVerificationFindings(results []CompareResult) string {
 	var sb strings.Builder
+	// Counted so the caveat below can print once for the whole section, on the
+	// same argument that keeps the removal recommendation out of every row: a
+	// sentence repeated eight times is a sentence nobody reads the ninth time.
+	undeclared := 0
 
 	for _, r := range results {
 		switch {
@@ -874,9 +973,14 @@ func formatVerificationFindings(results []CompareResult) string {
 			// R4.3: the loud case. Nothing declares this package, so it is about
 			// to be reported as a removal candidate — and its ebuild is not the
 			// one ::gentoo ships.
+			//
+			// The line carries the SIZE of the difference and stops there. Whose
+			// change it is cannot be read off two files, and the sentence beneath
+			// the section says so once rather than hedging on every row.
+			undeclared++
 			sb.WriteString(output.Sprintf(output.Warning,
-				"⚠ %s/%s: undeclared divergence — our %s ebuild differs from ::gentoo's, yet no entry declares why\n",
-				r.Category, r.Package, r.LocalVersion))
+				"⚠ %s/%s: undeclared divergence (+%d/-%d) — our %s ebuild differs from ::gentoo's, and no entry declares why\n",
+				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion))
 		case r.Patched:
 			// R3.8: the declaration, stated wherever it has not already been
 			// contradicted above. This is the common case in practice — every
@@ -890,6 +994,27 @@ func formatVerificationFindings(results []CompareResult) string {
 				"· %s/%s: patched — declared by %s%s\n",
 				r.Category, r.Package, declaringEntry(r), declaredReason(r)))
 		}
+	}
+
+	// The caveat the counts above cannot state on their own, printed once and
+	// only where it applies.
+	//
+	// "Our ebuild differs" is symmetric and the report reads it as an accusation:
+	// the operator changed something and failed to declare it. That is only half
+	// the truth. ::gentoo revises ebuilds IN PLACE — a fix landing under the same
+	// version, with no revbump — so a copy taken last week can differ today
+	// without anyone here having touched it, and the version comparison, which
+	// sees two equal version strings, cannot notice. Direction is not recoverable
+	// from two files; it needs history, which this check does not have.
+	//
+	// So the report says what it knows and names the ambiguity instead of picking
+	// a side. Declaring `patched` on a package that is merely stale would record a
+	// divergence that does not exist and suppress its removal recommendation
+	// permanently — the failure this sentence is here to prevent.
+	if undeclared > 0 {
+		// Passed as an ARGUMENT, never as a format string, like every other piece
+		// of text this report prints.
+		sb.WriteString(output.Sprintf(output.Warning, "%s\n", undeclaredDivergenceCaveat))
 	}
 
 	return sb.String()

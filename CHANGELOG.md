@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **An undeclared divergence now says how large it is, and stops implying who
+  caused it.** The finding read `our 6.7.4 ebuild differs from ::gentoo's, yet no
+  entry declares why` — symmetric in fact, an accusation in effect. It is only
+  half the truth: ::gentoo revises ebuilds *in place*, under the same version and
+  with no revbump, so a copy taken last week can differ today without anyone here
+  having touched it. The version comparison sees two equal version strings and
+  cannot notice, and direction is not recoverable from two files.
+
+  Measured on the live overlay, the eight findings were not one thing but two.
+  Four were a single line — `PYTHON_COMPAT` revised upstream on `breeze-gtk`,
+  `drkonqi`, `kwin` and `plasma-firewall` — where our copy had simply fallen
+  behind. One was `net-libs/nodejs`, hundreds of lines of slotting work of our
+  own. Both printed the identical sentence.
+
+  Each finding now carries the size of the difference — `undeclared divergence
+  (+1/-1)` against `(+622/-254)` — which separates the two at a glance, and the
+  section prints one caveat naming the ambiguity the counts cannot resolve. The
+  failure this prevents is declaring `patched` on a package that carries nothing
+  of ours: a declaration is what suppresses a removal recommendation permanently,
+  so a false one is not a harmless note.
+
+  The counts come from `udiff.Lines`, already this repository's diff — no new
+  dependency, and no second notion of what a line difference is. They match
+  `diff`'s orientation but not always its magnitude: `lcs.DiffLines` stops
+  searching for a minimal edit script after 100 diffs, so a large divergence
+  reports a larger count than GNU diff would. That is acceptable for a number
+  whose only question is "one line, or hundreds?", and nothing downstream
+  computes on it. No verdict changed, and no removal criterion moved.
+
 ## [0.21.0] - 2026-08-07
 
 ### Added
