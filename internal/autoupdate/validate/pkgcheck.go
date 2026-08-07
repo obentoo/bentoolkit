@@ -113,11 +113,10 @@ func decodePkgcheckStream(out []byte) ([]Finding, error) {
 }
 
 // diagnostic renders pkgcheck's stderr for a reason line, or nothing when it
-// said nothing. It is flattened to one line so a skip stays one record.
+// said nothing.
 func diagnostic(stderr string) string {
-	trimmed := strings.TrimSpace(stderr)
-	if trimmed == "" {
-		return ""
+	if flat := flattenDiagnostic(stderr); flat != "" {
+		return ": " + flat
 	}
-	return ": " + strings.Join(strings.Fields(trimmed), " ")
+	return ""
 }

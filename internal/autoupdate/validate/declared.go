@@ -128,45 +128,68 @@ func readOptions(ctx context.Context, archive, member, subproject string) ([]Opt
 	return opts, nil
 }
 
-// projectRoot returns the directory prefix of the archive's top-level project,
-// with its trailing slash, and whether one was found at all.
+// projectRoot returns the directory prefix of the archive's project root, with
+// its trailing slash, and whether the archive is a Meson project at all.
 //
-// The root is located by its meson.build, taking the SHALLOWEST one: a release
-// tarball wraps everything in a <name>-<version>/ directory, and every
-// subprojects/<name>/ below it has a meson.build of its own. Depth is what
-// separates the project from its subprojects without hardcoding the wrapper's
-// name.
+// # meson.build must be AT the root, not merely somewhere
+//
+// This was measured the hard way. An earlier version took the shallowest
+// meson.build wherever it sat, and on the live overlay that made net-libs/
+// webkit-gtk — a CMake package — report 89 error findings. WebKit vendors
+// third-party code that uses Meson, so the archive does carry a meson.build,
+// several directories down; the gate adopted it as the project root and then
+// compared webkit's CMake `-DENABLE_*=` cache variables against an unrelated
+// subproject's option file. Every one came out undeclared.
+//
+// That is the exact failure this story keeps naming: the first false error is
+// what gets a gate switched off, and 89 of them would have done it on the first
+// run. So the rule is positional, not existential — a Meson project declares
+// itself with a meson.build at ITS OWN ROOT, and an archive without one there
+// is reported undetermined (R4.3) with whatever marker WAS found named beside
+// it (R4.2), rather than validated against a file that belongs to someone else.
 func projectRoot(members []string) (string, bool) {
-	var best string
-	var bestDepth int
-	found := false
-
+	prefix := archiveRoot(members)
 	for _, m := range members {
-		if path.Base(m) != "meson.build" {
+		if m == prefix+"meson.build" {
+			return prefix, true
+		}
+	}
+	return "", false
+}
+
+// archiveRoot returns the single top-level directory every member sits under,
+// with its trailing slash, or "" when the members are not wrapped in one.
+//
+// A release tarball wraps everything in <name>-<version>/, which is the case
+// that matters. An archive with several top-level entries has no wrapper, and
+// its root is the archive itself.
+func archiveRoot(members []string) string {
+	var top string
+	for _, m := range members {
+		head, _, _ := strings.Cut(strings.TrimSuffix(m, "/"), "/")
+		if head == "" {
 			continue
 		}
-		dir := path.Dir(m)
-		if dir == "." {
-			dir = "" // meson.build sits at the archive root: no wrapper directory.
+		if top == "" {
+			top = head
+			continue
 		}
-		depth := 0
-		if dir != "" {
-			depth = strings.Count(dir, "/") + 1
-		}
-		// A tie is broken lexicographically, so the answer does not depend on
-		// the order tar happened to store the members in.
-		if !found || depth < bestDepth || (depth == bestDepth && dir < best) {
-			best, bestDepth, found = dir, depth, true
+		if head != top {
+			return "" // more than one top-level entry: no wrapper directory.
 		}
 	}
-
-	if !found {
-		return "", false
+	if top == "" {
+		return ""
 	}
-	if best == "" {
-		return "", true
+	// One top-level NAME is not yet a wrapper — an archive holding a single
+	// file has one too. It is a wrapper only once something lives inside it.
+	prefix := top + "/"
+	for _, m := range members {
+		if strings.HasPrefix(m, prefix) && len(m) > len(prefix) {
+			return prefix
+		}
 	}
-	return best + "/", true
+	return ""
 }
 
 // buildSystemMarkers maps a marker file to the build system it names. Only

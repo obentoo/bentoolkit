@@ -78,6 +78,12 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	// is only ever READ from: Locate creates nothing and proves nothing
 	// writable, which is what lets a validate run work against the portage-owned
 	// DISTDIR the invoking user cannot write (design D2).
+	//
+	//nolint:contextcheck // Locate mirrors Resolve's context-free signature by
+	// design (D2) — they are siblings and diverging on this would be worse than
+	// the gap. Its only child process is a portageq query bounded by the
+	// distfiles package's own timeout, on the last rung of the precedence, and
+	// it is reached at most once per run.
 	distdir, haveDistdir := distfiles.Locate(opts.Distdir, "")
 
 	qa := map[string]qaResult{}
@@ -147,7 +153,7 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 			"no distdir could be located, so there is no archive to read the upstream options from")
 	}
 
-	archive, err := findDistfile(target.dir, distdir)
+	archive, err := findDistfile(target.dir, distdir, target.version)
 	if err != nil {
 		return skippedResult(target.atom, target.version, err.Error())
 	}
@@ -164,26 +170,62 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 	return comparedResult(target.atom, target.version, declared, passed)
 }
 
-// findDistfile returns the path of the first distfile the package's Manifest
-// names that is actually present in distdir.
+// findDistfile returns the path of the distfile belonging to THIS ebuild
+// version, among those the package's Manifest names and distdir actually holds.
 //
-// A Manifest naming several distfiles is ordinary — a package with patches or
-// bundled subprojects has one line per file — and the FIRST present one is the
-// source archive in every layout measured. The error names every candidate, so
-// a skip says which files were looked for rather than only that none was found.
-func findDistfile(pkgDir, distdir string) (string, error) {
+// # Why the version has to be part of the question
+//
+// One Manifest serves the whole package directory, so a directory holding
+// 1.28.6 and 1.29.2 names both tarballs. Taking the first present one — which
+// this did until the golden test caught it — validated the 1.29.2 ebuild
+// against the 1.28.6 archive, where aalib and libcaca are still declared, and
+// reported a PASS for exactly the bump this gate exists to reject. A wrong
+// archive is worse than no archive: it produces a confident answer to a
+// question nobody asked.
+//
+// # The three cases, and why the last one refuses to guess
+//
+//   - Exactly one candidate present: it is the one. This covers packages whose
+//     distfile carries no version at all, such as a commit-hash snapshot.
+//   - Several present and exactly one carrying the version string: it is the
+//     one, and this is the ordinary multi-version package directory.
+//   - Anything else — several carrying the version, or none — is reported as
+//     SKIPPED naming the candidates. Picking the shortest, or the first, would
+//     be a guess, and a guess here is indistinguishable from a measurement in
+//     the report it produces.
+func findDistfile(pkgDir, distdir, version string) (string, error) {
 	names := distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 	if len(names) == 0 {
 		return "", errors.New("the package's Manifest names no distfile, so there is no archive to read")
 	}
+
+	var present []string
 	for _, name := range names {
 		path := filepath.Join(distdir, name)
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
+			present = append(present, name)
 		}
 	}
-	return "", fmt.Errorf("no distfile named by the Manifest is present in %s: %s",
-		distdir, strings.Join(names, ", "))
+
+	switch len(present) {
+	case 0:
+		return "", fmt.Errorf("no distfile named by the Manifest is present in %s: %s",
+			distdir, strings.Join(names, ", "))
+	case 1:
+		return filepath.Join(distdir, present[0]), nil
+	}
+
+	var matching []string
+	for _, name := range present {
+		if strings.Contains(name, version) {
+			matching = append(matching, name)
+		}
+	}
+	if len(matching) == 1 {
+		return filepath.Join(distdir, matching[0]), nil
+	}
+	return "", fmt.Errorf("cannot tell which of %d distfiles in %s belongs to version %s: %s",
+		len(present), distdir, version, strings.Join(present, ", "))
 }
 
 // attachQA adds the package's pkgcheck findings to a result.

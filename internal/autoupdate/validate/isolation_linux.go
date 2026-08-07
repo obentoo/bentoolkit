@@ -43,9 +43,17 @@ func attemptNetNS() error {
 		return fmt.Errorf("locating this executable to probe with: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), netNSProbeTimeout)
+	// ProbeIsolation takes no context by design (D6): it answers a question
+	// about THIS process rather than about a request, so the probe owns its own
+	// deadline. netNSProbeTimeout bounds the child, and nothing here outlives
+	// the call.
+	ctx, cancel := context.WithTimeout(context.Background(), netNSProbeTimeout) // SAFE: no caller context by design (D6); bounded by netNSProbeTimeout
 	defer cancel()
 
+	// The only "variable" here is our own path from os.Executable(). Nothing
+	// external reaches this call — no argument comes from an ebuild, an archive
+	// or a flag — and the probe measures the fork, not what the child does.
+	//nolint:gosec // G204: the binary is this process's own, via os.Executable()
 	cmd := exec.CommandContext(ctx, self, "--version")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

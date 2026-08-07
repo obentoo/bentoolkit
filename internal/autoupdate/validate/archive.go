@@ -143,10 +143,27 @@ func runTar(ctx context.Context, archive, what string, args ...string) ([]byte, 
 	}
 
 	if err := cmd.Wait(); err != nil {
-		if diag := strings.TrimSpace(stderr.String()); diag != "" {
+		// tar's diagnostics are flattened to ONE line. They routinely run to
+		// four or five ("Error is not recoverable", "Child returned status 2",
+		// …), and this error becomes an EbuildResult.Reason, which the text
+		// report prints as the line under its ebuild. A multi-line reason
+		// breaks that layout and every line-oriented reader of it.
+		if diag := flattenDiagnostic(stderr.String()); diag != "" {
 			return nil, fmt.Errorf("%s %s: tar failed: %w: %s", what, archive, err, diag)
 		}
 		return nil, fmt.Errorf("%s %s: tar failed: %w", what, archive, err)
 	}
 	return out, nil
+}
+
+// flattenDiagnostic collapses an external tool's stderr onto one line.
+//
+// Every diagnostic in this package ends up in an EbuildResult.Reason, and the
+// text report prints a reason as the single line under its ebuild. tar and
+// pkgcheck both emit several lines when they fail, so without this a skip
+// silently becomes five records where the report expects one — and every
+// line-oriented consumer of that report reads four of them as findings with no
+// ebuild attached.
+func flattenDiagnostic(stderr string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(stderr)), " ")
 }
