@@ -803,14 +803,123 @@ func countLines(s string) int {
 // that share a recommendation, under a heading that says what it is.
 type verdictSection struct {
 	verdict Verdict
-	title   string
+	// title and note are what the section prints when it is rendered UNDIVIDED,
+	// which for three of the four sections is always.
+	title string
 	// note is printed ONCE beneath the heading, for the whole section, rather
 	// than on every row. The removal recommendation is one statement about a
 	// group; repeating it per package would turn the advice into wallpaper the
 	// operator learns to skip (R3.7).
 	note        string
 	headerColor *color.Color
+	// split, where non-nil, is the pair of headings this section takes when a
+	// content check divided it in two. See splitHeadings.
+	split *splitHeadings
 }
+
+// splitHeadings is the two headings a section prints instead of its own when a
+// content check divided it: one over the packages the check cleared, one over the
+// rest (R3.1, R3.2).
+//
+// It hangs off verdictSection as a POINTER, and nil — every section but the
+// redundant one — means "this is never divided". The alternative was an
+// `if sec.verdict == VerdictRedundant` inside FormatReport's loop, and the comment
+// on verdictSections below argues against exactly that: what each section says and
+// when it says it is held as DATA precisely so that a section is described in one
+// place, rather than half here and half in a condition somewhere else. A section
+// that never splits then costs one nil field and no branch anyone has to remember.
+//
+// It carries WORDING only. Which package belongs to which group is
+// splitRedundantSection's, and this type could not answer it — which is what keeps
+// the arrangement of the report separate from the reading of the evidence.
+type splitHeadings struct {
+	// identicalTitle/identicalNote head the group the content check cleared. Once
+	// a section splits, this note is the only removal recommendation in the report.
+	identicalTitle, identicalNote string
+	// differingTitle/differingNote head the rest — the packages whose ebuilds
+	// differ AND the packages no check reached, which is why neither string may
+	// claim that all of them differ.
+	differingTitle, differingNote string
+}
+
+// The redundant section's three headings and four notes.
+//
+// They are constants rather than literals inside verdictSections because the
+// split prints two tables where the section used to print one, and each piece has
+// to be recognisable on its own: the removal recommendation is asserted ABSENT
+// from the group the content check did not clear, and a sentence that exists only
+// inline cannot be named by the test that checks it. Same reason
+// undeclaredDivergenceCaveat is a constant.
+const (
+	// redundantTitle heads the section when it is NOT divided — R3.4's case,
+	// which is every run without a local ::gentoo tree to read. It is
+	// byte-identical to what it has always printed: this story changes nothing
+	// about what such a run can know.
+	redundantTitle = "Redundant Packages (::gentoo ships the same or more)"
+
+	// The two halves of a divided section. Each says what the CONTENT CHECK found,
+	// because that is what puts a package under one heading rather than the other.
+	// The verdict cannot: it is the same for every row of both tables (R3.5).
+	redundantIdenticalTitle = "Redundant Packages — the content check cleared these (our ebuild is ::gentoo's, byte for byte)"
+	// True of a package that was never COMPARED as much as of one that differs,
+	// because both land in this group (splitRedundantSection says why). "did not
+	// clear these" covers both; "these differ" would be a false statement about
+	// every unchecked one, and the unchecked ones are the reason the wording is
+	// worth arguing about — the live section holds none today.
+	redundantDifferingTitle = "Redundant Packages — the content check did not clear these"
+)
+
+const (
+	// redundantRemovalAdvice is the removal recommendation itself, and the only
+	// place this report spells one. Both notes that carry it are BUILT from it, so
+	// the two cannot drift apart, and it can be asserted absent from the table it
+	// no longer covers — which is the entire point of the split.
+	redundantRemovalAdvice = "→ Recommendation: remove these from the overlay"
+
+	// redundantPruneAdvice names the command that acts on the recommendation
+	// (R3.3). It is appended to every note that carries one, because a
+	// recommendation the operator can only follow with `rm -r` is one they follow
+	// with `rm -r`.
+	//
+	// `overlay prune` is the right thing to point at because it reads MORE than
+	// this report did. The check behind these tables compared ONE file — the ebuild
+	// at the compared version (resolvePackagePaths) — while prune compares every
+	// version the two trees share plus the whole files/ tree, and refuses outright
+	// a package it could not compare. So the command the advice names is stricter
+	// than the advice, which is the only direction that is safe.
+	redundantPruneAdvice = "Nothing is deleted here: act on it with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+
+	// redundantIdenticalNote is the recommendation where the content supports it:
+	// the same advice as ever, now covering only the packages a byte comparison
+	// cleared.
+	redundantIdenticalNote = redundantRemovalAdvice +
+		" — at the compared version our ebuild is byte-identical to ::gentoo's, so this copy holds nothing of ours. " +
+		redundantPruneAdvice
+
+	// redundantUncheckedNote is R3.4's: the same recommendation, resting on the
+	// version alone, saying so. Before it existed, an API-only run's advice read
+	// exactly like advice the bytes had confirmed.
+	redundantUncheckedNote = redundantRemovalAdvice +
+		". No content was checked in this run — nothing compared our ebuilds against ::gentoo's, so this rests on the " +
+		"version alone and cannot say whether a copy holds work of ours. " +
+		redundantPruneAdvice
+
+	// redundantUncheckedCase is the half of the note below that speaks for a
+	// package no check reached. It is a constant of its own because the group holds
+	// both kinds and only this clause covers the second one: a note rewritten
+	// without it would assert a difference for every row beneath it, and the test
+	// that catches that names this string.
+	redundantUncheckedCase = "or nothing compared the two"
+
+	// redundantDifferingNote recommends no removal and states what is unresolved
+	// (R3.2). It carries no advice to remove anything — not even a negated one,
+	// which is the form a hurried reader turns back into permission — and it names
+	// both of the group's cases rather than the loud one only.
+	redundantDifferingNote = "→ No removal advice for these: ::gentoo ships the version, but the content check did not clear them — " +
+		"either our ebuild differs from ::gentoo's, " + redundantUncheckedCase +
+		". What is unresolved is whether this copy holds work of ours; only a diff settles it, and where the two " +
+		"differ the finding beneath the table says by how much."
+)
 
 // verdictSections fixes which sections exist and the order they print in.
 //
@@ -824,10 +933,21 @@ type verdictSection struct {
 // what it recommends and stops.
 var verdictSections = []verdictSection{
 	{
-		verdict:     VerdictRedundant,
-		title:       "Redundant Packages (::gentoo ships the same or more)",
-		note:        "→ Recommendation: remove these from the overlay. Nothing is deleted automatically — this is advice to act on.",
+		verdict: VerdictRedundant,
+		// The undivided pair is R3.4's: what the section prints when no content was
+		// checked, which is every API-only run.
+		title:       redundantTitle,
+		note:        redundantUncheckedNote,
 		headerColor: output.Warning,
+		// The only section a content check can divide, because it is the only one
+		// whose heading asks for anything. A recommendation is exactly what must
+		// not cover a package the evidence does not reach.
+		split: &splitHeadings{
+			identicalTitle: redundantIdenticalTitle,
+			identicalNote:  redundantIdenticalNote,
+			differingTitle: redundantDifferingTitle,
+			differingNote:  redundantDifferingNote,
+		},
 	},
 	{
 		verdict:     VerdictNeedsRebase,
@@ -845,6 +965,83 @@ var verdictSections = []verdictSection{
 		note:        "→ Nothing on record describes these packages, or the comparison failed — neither supports advice either way.",
 		headerColor: output.Dim,
 	},
+}
+
+// splitRedundantSection divides the redundant section into the packages a
+// content check cleared for removal and the packages it did not (R3.1, R3.2).
+// split is false when NO result in the section carries a verification, and the
+// caller then renders the section undivided, stating that no content was checked
+// (R3.4).
+//
+// It exists because the section as it stands cannot be acted on. Measured on the
+// live overlay: `overlay compare` recommends removing 74 packages and warns,
+// beneath that very table, that 8 of them differ from ::gentoo in content. The
+// recommendation never says which 8 to skip and the warning never says which 66
+// are safe, so an operator who follows the advice deletes work of ours and an
+// operator who heeds the warning follows none of the advice. Splitting the group
+// is what makes the removal recommendation cover only what was checked.
+//
+// It groups on Verified and on nothing else. Authorship is filled only where
+// Verified == VerifiedDiffers (AnnotateAuthorship, authorship.go), so every
+// identical result and every unchecked one carries the zero AuthorshipUnproved
+// and could not tell the two groups apart; and the two degrade TOGETHER — with no
+// provider.PackageDirProvider, Verified is NotVerified and Authorship is unproved
+// on every package at once, which is the API-provider case split reports.
+//
+// A package the check never reached joins DIFFERING, which is the one judgement
+// call the requirements leave open and is settled by what each heading says.
+// R3.1's group is the packages whose compared ebuilds ARE identical, under a
+// heading that recommends removal: a package nobody compared is not in that set,
+// and listing it there would have the report vouch for a check it never ran.
+// R3.2's group recommends nothing and states what is unresolved, which is exactly
+// true of a package no check reached. The costs are as asymmetric here as they are
+// in proveAuthorship: one package parked under "unresolved" costs a manual diff,
+// while one unchecked package under "safe to remove" advises deleting something
+// nobody looked at. It changes no live number today — all 74 redundant packages
+// are up-to-date at equal versions, so all 74 are checked, 66 identical and 8
+// differing — but a redundant package that is merely OUTDATED is never content-
+// compared (resolvePackagePaths refuses two different versions) and would land
+// here the moment one appears.
+//
+// The groups are BUILT rather than partitioned in place. results is the caller's
+// slice — FormatReport's own byVerdict entry — and an in-place partition would
+// rewrite its backing array, leaving the section holding one package twice and
+// missing another. A function that only groups must not be able to do that.
+//
+// It decides nothing (R3.5, inherited from 025 R4.5). Every Verdict is read and
+// none is written; the declaration in the registry and the version comparison
+// keep deciding, exactly as they do with this grouping absent.
+func splitRedundantSection(results []CompareResult) (identical, differing []CompareResult, split bool) {
+	// Whether to split at all is asked FIRST, over the whole section, because it
+	// is a question about the run rather than about any package: either the
+	// comparison had ::gentoo's files to read or it did not. Deriving it from the
+	// groups afterwards — "differing is empty, so nothing was checked" — would
+	// read an all-identical section as an unchecked one and drop the removal
+	// recommendation on 66 packages that had just been cleared.
+	for _, r := range results {
+		if r.Verified != NotVerified {
+			split = true
+			break
+		}
+	}
+	if !split {
+		// Both groups nil, and the caller has the whole section already. Returning
+		// the section in one of them would let a caller that ignored split render a
+		// heading — either heading — over packages nothing is known about.
+		return nil, nil, false
+	}
+
+	for _, r := range results {
+		if r.Verified == VerifiedIdentical {
+			identical = append(identical, r)
+			continue
+		}
+		differing = append(differing, r)
+	}
+	// Appending in results order preserves the category/package sort
+	// CompareWithProvider applied, so both tables read in the order the single
+	// table did.
+	return identical, differing, true
 }
 
 // FormatReport formats a comparison report for terminal output.
@@ -886,11 +1083,16 @@ func FormatReport(report *CompareReport) string {
 		results := byVerdict[sec.verdict]
 		// Whether it had rows or not, this verdict now has a section: dropping it
 		// from the map leaves behind exactly the verdicts that have none.
+		//
+		// It is dropped for a section rendered as TWO tables on exactly the same
+		// terms — the verdict has been printed, however many tables it took. Skipping
+		// the delete on that path would send all 74 redundant packages through the
+		// "unlisted" fallback below and print every one of them a second time.
 		delete(byVerdict, sec.verdict)
 		if len(results) == 0 {
 			continue
 		}
-		sb.WriteString(formatResultSection(results, sec.title, sec.note, sec.headerColor))
+		sb.WriteString(formatVerdictSection(sec, results))
 	}
 
 	// A verdict with no section above — reachable only if a fifth one is added
@@ -910,6 +1112,53 @@ func FormatReport(report *CompareReport) string {
 
 	sb.WriteString(formatStatusSummary(report.Results))
 
+	return sb.String()
+}
+
+// formatVerdictSection renders one verdict's results: two tables where a content
+// check divided the section, one table where it did not.
+//
+// The division is what makes the redundant section ACTIONABLE. Measured on the
+// live overlay, the one table it used to print recommended removing 74 packages
+// and then warned, beneath itself, that 8 of them differ from ::gentoo in content
+// — two true sentences the operator could act on neither of, because neither said
+// which 8. Rendered as two tables, the recommendation covers the 66 the bytes
+// cleared and the other 8 stand under a heading that recommends nothing.
+//
+// EVERY package the section held is still printed (R3.5): the split moves rows
+// between tables and removes none, and nothing here reads or writes a Verdict.
+//
+// Both tables keep the SECTION's colour. A second colour would read as a second
+// verdict, and there is only one: every row of both tables is `redundant`, which
+// is exactly what the two notes are there to qualify.
+func formatVerdictSection(sec verdictSection, results []CompareResult) string {
+	if sec.split == nil {
+		return formatResultSection(results, sec.title, sec.note, sec.headerColor)
+	}
+
+	identical, differing, split := splitRedundantSection(results)
+	if !split {
+		// R3.4: nothing was compared, so there is nothing to divide the section by,
+		// and sec.note is the one that says so. Dividing it anyway would print
+		// "the content check cleared these" over packages nobody opened.
+		return formatResultSection(results, sec.title, sec.note, sec.headerColor)
+	}
+
+	var sb strings.Builder
+	// The cleared group first, for the reason the redundant section itself comes
+	// first: it is the one asking the operator to do something.
+	//
+	// An EMPTY group prints nothing at all, on the same terms as a verdict no
+	// package carries. That is what makes an all-differing section print no removal
+	// recommendation anywhere in the report, rather than a recommendation over an
+	// empty table — and each table sizes its own columns (calculateColumnWidths is
+	// per-section), so neither is padded to the other's widest package name.
+	if len(identical) > 0 {
+		sb.WriteString(formatResultSection(identical, sec.split.identicalTitle, sec.split.identicalNote, sec.headerColor))
+	}
+	if len(differing) > 0 {
+		sb.WriteString(formatResultSection(differing, sec.split.differingTitle, sec.split.differingNote, sec.headerColor))
+	}
 	return sb.String()
 }
 
