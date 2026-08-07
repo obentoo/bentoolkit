@@ -185,13 +185,25 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	// Pin globals for this run.
 	origCheck, origApply, origCompile, origConc :=
 		autoupdateCheck, autoupdateApply, autoupdateCompile, autoupdateConcurrency
+	origDistdir := autoupdateDistdir
 	autoupdateCheck = false
 	autoupdateApply = pkg
 	autoupdateCompile = false
 	autoupdateConcurrency = autoupdate.DefaultConcurrency
+	// Name a distdir. Unset, the manifest step resolves the HOST's one
+	// (S030-R1.2) and the pre-flight refuses it on any machine where
+	// /var/cache/distfiles is absent and uncreatable — a CI runner, a
+	// non-Gentoo box. That refusal is correct (S030-R1.4) but it is fatal to
+	// what THIS test measures: the apply would fail in milliseconds, having
+	// never spawned the blocking `pkgdev` stub, so runAutoupdate returns and
+	// tears its signal handler down before the SIGTERM below is sent. The
+	// signal then meets the default disposition and kills the test binary —
+	// which reads as `signal: terminated`, not as an assertion failure.
+	autoupdateDistdir = t.TempDir()
 	defer func() {
 		autoupdateCheck, autoupdateApply, autoupdateCompile, autoupdateConcurrency =
 			origCheck, origApply, origCompile, origConc
+		autoupdateDistdir = origDistdir
 	}()
 
 	done := make(chan struct{})

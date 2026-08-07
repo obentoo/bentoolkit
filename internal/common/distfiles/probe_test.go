@@ -320,10 +320,21 @@ func TestResolveReturnsErrorRatherThanFallingBackWhenUnwritable(t *testing.T) {
 		if dir.Path == DefaultCache {
 			t.Error("Resolve fell back to DefaultCache after the probe failed")
 		}
-		tmp := os.TempDir()
-		sep := string(os.PathSeparator)
-		if dir.Path == tmp || strings.HasPrefix(dir.Path, strings.TrimRight(tmp, sep)+sep) {
-			t.Errorf("Resolve fell back into os.TempDir() (%q): %q — that is the tmpfs this story removes", tmp, dir.Path)
+		// Only meaningful once the path has actually CHANGED, which is what a
+		// fallback is. The fixture itself lives under t.TempDir(), and whether
+		// that sits inside os.TempDir() depends on the machine: t.TempDir()
+		// honours GOTMPDIR, so on a host that sets it — as this story's own
+		// tasks.md tells the reader to, to keep the Go linker off a full /tmp —
+		// `locked` is outside os.TempDir(), while on a stock CI runner it is
+		// inside it. Testing the location unconditionally therefore passes
+		// vacuously in the first case and fails a correct implementation in the
+		// second, which is exactly what it did.
+		if dir.Path != locked {
+			tmp := os.TempDir()
+			sep := string(os.PathSeparator)
+			if dir.Path == tmp || strings.HasPrefix(dir.Path, strings.TrimRight(tmp, sep)+sep) {
+				t.Errorf("Resolve fell back into os.TempDir() (%q): %q — that is the tmpfs this story removes", tmp, dir.Path)
+			}
 		}
 
 		// Created must stay false on the error path, so the deferred Cleanup a

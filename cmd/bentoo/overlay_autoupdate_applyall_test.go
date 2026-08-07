@@ -64,6 +64,19 @@ func setupApplyAllTest(t *testing.T, n int, factory func(context.Context, string
 	applier, err := autoupdate.NewApplier(overlayDir, configDir,
 		autoupdate.WithApplierPendingList(pending),
 		autoupdate.WithExecCommand(factory),
+		// Name a distdir, or the manifest step resolves the HOST's one
+		// (S030-R1.2: `portageq distdir`, normally /var/cache/distfiles) and
+		// this test probes, locks and quarantines inside a directory that
+		// belongs to the whole machine. On a runner where that path is neither
+		// present nor creatable by an unprivileged user, the pre-flight refuses
+		// it — correctly, per S030-R1.4 — and every apply here fails.
+		//
+		// internal/autoupdate gets this property structurally, from the
+		// resolveDistdir seam its own suite installs in an init()
+		// (sweep_manifest_test.go). That seam is unexported and cannot reach
+		// across the package boundary, so a cmd/bentoo test has to say it out
+		// loud through the public option instead.
+		autoupdate.WithApplierDistdir(t.TempDir(), ""),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
