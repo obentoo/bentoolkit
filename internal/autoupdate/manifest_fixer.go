@@ -110,6 +110,71 @@ type ManifestFixResult struct {
 	Summary string
 	// CostUSD is the reported spend for the invocation, when the CLI provides it.
 	CostUSD float64
+	// Model is the exact string this invocation passed to the CLI's --model
+	// (S030-R4.1). It records what RAN, not what was configured: an empty
+	// cfg.Model resolves to DefaultClaudeCodeModel and that resolved value is
+	// what lands here.
+	Model string
+	// ModelIsAlias reports that Model is one of the CLI's aliases ("sonnet",
+	// "opus") rather than a pinned identifier ("claude-opus-4-8"). It matters
+	// because an alias resolves to a DIFFERENT model over time, so a record
+	// that omits it implies a precision it does not have (S030-R4.2). Derived
+	// from isModelAlias — the single rule shared with the registry fixer.
+	ModelIsAlias bool
+}
+
+// pinnedModelPrefix is the prefix every pinned Claude model identifier carries
+// ("claude-opus-4-8", "claude-3-5-sonnet-20241022"). The CLI's aliases are bare
+// words instead ("sonnet", "opus", "haiku"), which is what makes alias detection
+// a property of the STRING rather than a lookup.
+const pinnedModelPrefix = "claude-"
+
+// isModelAlias reports whether model is one of the CLI's aliases rather than a
+// pinned model identifier. It is the SINGLE rule behind the ModelIsAlias flag on
+// both ManifestFixResult and RegistryFixResult and behind FormatModelUsed, so a
+// stored flag and a log line rendered from the same model can never disagree.
+//
+// The rule: a model counts as PINNED only when it is confidently pinned — it
+// carries the "claude-" prefix AND at least one digit, the version component
+// every real identifier ends with. Everything else is reported as an alias.
+//
+// The asymmetry is deliberate. A false positive (calling a pinned id an alias)
+// costs one over-cautious word in a log line. A false negative (calling an alias
+// pinned) produces a record that implies more precision than it has — "opus"
+// today and "opus" in six months are different models, and a record that did not
+// say "alias" invites exactly the wrong conclusion when someone audits a bad
+// edit months later. S030-R4.2's harm is the second one, so the predicate errs
+// toward "alias".
+func isModelAlias(model string) bool {
+	m := strings.TrimSpace(model)
+	if !strings.HasPrefix(m, pinnedModelPrefix) {
+		return true
+	}
+	return !strings.ContainsAny(strings.TrimPrefix(m, pinnedModelPrefix), "0123456789")
+}
+
+// FormatModelUsed renders the model a fixer used as an operator-facing phrase.
+// It is the library's contribution to logging and nothing more: the library
+// RETURNS the string, `main` and the handlers decide to print it.
+//
+//	"claude-opus-4-8" -> `model "claude-opus-4-8"`
+//	"opus"            -> `model alias "opus"`   (S030-R4.2: the word "alias" IS the point)
+//	""                -> `model unknown`        (the fixer reported none)
+//
+// It derives the alias flag from isModelAlias itself instead of taking it as an
+// argument, so the phrase can never contradict the ModelIsAlias flag on the
+// result it was rendered from. The model string is its ONLY input, so no key,
+// token or credential can reach its output (S030-R4.3).
+func FormatModelUsed(model string) string {
+	m := strings.TrimSpace(model)
+	switch {
+	case m == "":
+		return "model unknown"
+	case isModelAlias(m):
+		return fmt.Sprintf("model alias %q", m)
+	default:
+		return fmt.Sprintf("model %q", m)
+	}
 }
 
 // ManifestFixer is the optional capability an LLM provider may implement to repair
@@ -475,11 +540,19 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// is unchanged (S009-UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
 	// and a parent cancellation (Canceled), since runCtx derives from ctx.
 	if runErr != nil || jsonErr != nil || env.IsError {
-		return ManifestFixResult{}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
+		// The model record travels on the FAILURE path too: S030-R4.1 records what
+		// was invoked, and an invocation that failed still spent a model call and
+		// may have left a half-finished edit behind.
+		return ManifestFixResult{
+			Model:        f.model,
+			ModelIsAlias: isModelAlias(f.model),
+		}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
 	}
 
 	return ManifestFixResult{
-		Summary: strings.TrimSpace(env.Result),
-		CostUSD: env.TotalCostUSD,
+		Summary:      strings.TrimSpace(env.Result),
+		CostUSD:      env.TotalCostUSD,
+		Model:        f.model,
+		ModelIsAlias: isModelAlias(f.model),
 	}, nil
 }

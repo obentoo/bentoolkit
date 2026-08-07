@@ -1203,6 +1203,63 @@ export BENTOO_DISABLE_HTTP2=1
 
 With `BENTOO_DISABLE_HTTP2=1` the transport falls back to HTTP/1.1 only.
 
+### Distfiles
+
+Applying an update regenerates the package's `Manifest`, which means `pkgdev`
+downloads and digests the new distfile. Two flags choose where that happens —
+the same two names, with the same meaning, that `bentoo overlay manifest`
+already uses:
+
+| Flag | Config key | Default |
+|---|---|---|
+| `--distdir` | `autoupdate.distdir` | the DISTDIR this machine's own package manager reports (`portageq distdir`, normally `/var/cache/distfiles`) |
+| `--distfiles-cache` | `autoupdate.distfiles_cache` | `/var/cache/distfiles` |
+
+The flag wins over the config key. Note the default is **not** a temporary
+directory: a distfile fetched by one run is a distfile the next run and every
+`emerge` can reuse. Pass `--distdir` to work somewhere else, and
+`--distfiles-cache ""` to disable the cache lookup (only the flag can disable
+it — an empty config key is indistinguishable from an absent one).
+
+A relative path in either **config key** is refused, because it would resolve
+against whatever directory the process happened to start in. Flags stay
+permissive.
+
+Because that directory is shared with the host rather than private to the run:
+
+- A distfile already present under a name the package's current `Manifest`
+  lists is reused, not downloaded again.
+- A distfile present under a name the `Manifest` does **not** list cannot be
+  verified, so it is **moved aside** — not deleted — and reported. Portage's
+  default `FETCHCOMMAND` writes straight to the final filename, so a download
+  killed midway leaves a truncated file under the name a digest would otherwise
+  bless.
+- A failed fetch removes only what that run created. A file that was already
+  there is never touched, whoever wrote it.
+- Each distfile is locked for the duration of the `pkgdev` run that needs it, so
+  the sweep's concurrent workers — and two `bentoo` runs sharing a distdir —
+  cannot fetch the same file at once.
+- A directory bentoo did not create is never removed.
+
+#### Running a sweep at the same time as `emerge`
+
+The locking above covers bentoo against itself. It does **not** extend to
+portage.
+
+Portage serialises its own downloads with `FEATURES=distlocks`, which is enabled
+by default — it takes an advisory lock on a sidecar named
+`.<distfile>.portage_lockfile`. But `pkgdev`, the tool bentoo calls to generate
+manifests, does not take that lock. It fetches through pkgcore, which implements
+no distfile locking at all and does not recognise `distlocks` (the setting is
+not disobeyed so much as unheard of). A sweep and an `emerge` that want the same
+distfile at the same moment are therefore **not** serialised against each other,
+and whichever finishes second can be left with a corrupt or truncated download.
+
+This is a limitation of `pkgdev`, not something bentoo can fix from the outside;
+coordinating with another package manager's internal locking is not a promise
+this tool makes. If it matters to you, avoid running an autoupdate sweep while an
+`emerge` is fetching, or give the sweep a directory of its own with `--distdir`.
+
 ### Filesystem assumptions
 
 Cache files and the apply-log are written with mode `0600` (owner read/write

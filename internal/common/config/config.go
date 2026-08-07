@@ -59,6 +59,18 @@ type AutoupdateConfig struct {
 	HTTPTimeout int          `yaml:"http_timeout"` // Per-request HTTP timeout in seconds (default: 30)
 	LLM         LLMConfig    `yaml:"llm"`          // LLM provider configuration
 	Search      SearchConfig `yaml:"search"`       // Search provider configuration
+	// Distdir is the directory `pkgdev manifest` is given as --distdir on the
+	// autoupdate path — the same name and the same meaning the `overlay
+	// manifest` command's --distdir already has (S030-R1.3). Unset (the
+	// default) means the host's own DISTDIR is used, which is what
+	// `portageq distdir` reports.
+	Distdir string `yaml:"distdir,omitempty"`
+	// DistfilesCache is the read-only distfiles cache consulted before a
+	// download, again under the name `overlay manifest` already uses
+	// (S030-R1.3). Unset means the built-in default (/var/cache/distfiles).
+	// The cache is only ever read from: files are symlinked into the working
+	// distdir, never written back.
+	DistfilesCache string `yaml:"distfiles_cache,omitempty"`
 }
 
 // LLMConfig holds LLM provider configuration for autoupdate
@@ -525,4 +537,36 @@ func (c *AutoupdateConfig) GetHTTPTimeout() int {
 		return DefaultHTTPTimeout
 	}
 	return c.HTTPTimeout
+}
+
+// GetDistdir returns autoupdate.distdir with surrounding whitespace removed, or
+// "" when the key is unset.
+//
+// Whitespace is stripped rather than preserved because this value becomes a
+// DIRECTORY that distfiles are downloaded into: " /var/cache/distfiles" is a
+// typo in a hand-edited YAML file, not a request for a directory whose name
+// begins with a space. "" is returned unchanged and means "not configured" —
+// the caller then falls through to the next rung of the precedence, never to a
+// path this function invented.
+func (c *AutoupdateConfig) GetDistdir() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Distdir)
+}
+
+// GetDistfilesCache returns autoupdate.distfiles_cache with surrounding
+// whitespace removed, or "" when the key is unset.
+//
+// Unlike GetCacheTTL and GetHTTPTimeout this deliberately does NOT substitute a
+// default: the flag layer owns that decision, because there the difference
+// between "unset" and "set to the empty string" is observable (pflag's Changed)
+// and the empty string is the documented way to DISABLE the cache. Answering
+// with a default here would make a config file unable to express anything the
+// flag can.
+func (c *AutoupdateConfig) GetDistfilesCache() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.DistfilesCache)
 }

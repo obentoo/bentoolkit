@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -38,7 +39,11 @@ const DefaultManifestJobs = 10
 // DefaultDistfilesCache is the system path queried, when readable, to skip
 // re-downloading distfiles already present in the portage cache. Used as the
 // default for ManifestOptions.DistfilesCache.
-const DefaultDistfilesCache = "/var/cache/distfiles"
+//
+// The value lives in internal/common/distfiles alongside the resolution logic
+// that consumes it; it is re-exported here under the name the CLI has always
+// used for the --distfiles-cache flag default.
+const DefaultDistfilesCache = distfiles.DefaultCache
 
 // ManifestScope identifies one or more packages to regenerate Manifests for.
 //
@@ -212,7 +217,16 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		return updates
 	}
 
-	distdir, cleanup, err := resolveDistdir(opts.Distdir)
+	// ResolveOrTemp, not Resolve: this command documents in its own --help that
+	// an unset --distdir means a throwaway temporary directory, which is what
+	// lets it run without sudo. distfiles.Resolve implements the autoupdate
+	// path's precedence instead (host DISTDIR by default) and would silently
+	// change that promise.
+	//
+	// The resolved directory carries its own provenance: Cleanup removes it
+	// only when this process created it, so a caller-supplied --distdir (which
+	// may be the host's real DISTDIR) survives the run.
+	dir, err := distfiles.ResolveOrTemp(opts.Distdir)
 	if err != nil {
 		for i := range updates {
 			updates[i].Success = false
@@ -220,12 +234,13 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		}
 		return updates
 	}
-	defer cleanup()
+	defer dir.Cleanup()
+	distdir := dir.Path
 
 	// Resolve the distfiles cache once: a missing or unreadable directory
 	// silently disables the optimization for the whole run, so workers don't
 	// repeatedly stat a path that doesn't exist.
-	cacheDir := resolveDistfilesCache(opts.DistfilesCache, distdir)
+	cacheDir := distfiles.ResolveCache(opts.DistfilesCache, distdir)
 
 	jobs := opts.Jobs
 	if jobs <= 0 {
@@ -297,7 +312,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 	// degrades to a no-op.
 	var distNames []string
 	if cacheDir != "" {
-		distNames = parseManifestDistFilenames(manifestPath)
+		distNames = distfiles.ParseManifestDistFilenames(manifestPath)
 	}
 
 	var backupPath string
@@ -319,7 +334,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 	// which is goroutine-safe (R7.4).
 	sc := tui.NewStreamCapture(rep, id, tui.StreamStdout)
 	if cacheDir != "" && len(distNames) > 0 {
-		reused := prepopulateFromCache(distdir, cacheDir, distNames)
+		reused := distfiles.PrepopulateFromCache(distdir, cacheDir, distNames)
 		u.Reused = reused
 		if reused > 0 {
 			fmt.Fprintf(sc, "[bentoo] reused %d distfile(s) from %s\n", reused, cacheDir)
@@ -408,120 +423,6 @@ func FormatManifestResult(result *ManifestResult, dryRun bool) string {
 	}
 
 	return sb.String()
-}
-
-// resolveDistdir returns the directory pkgdev should use for downloads,
-// alongside a cleanup function. When userDir is empty, a temporary directory
-// is created and the cleanup removes it. When userDir is set, it is expanded
-// (~ and absolute path) and created if missing; the cleanup is a no-op so the
-// directory persists across runs.
-func resolveDistdir(userDir string) (string, func(), error) {
-	noop := func() {}
-
-	if userDir == "" {
-		tmp, err := os.MkdirTemp("", "bentoo-distfiles-")
-		if err != nil {
-			return "", noop, fmt.Errorf("failed to create temp distdir: %w", err)
-		}
-		return tmp, func() { _ = os.RemoveAll(tmp) }, nil
-	}
-
-	expanded := userDir
-	if strings.HasPrefix(expanded, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", noop, fmt.Errorf("failed to expand %q: %w", userDir, err)
-		}
-		expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
-	}
-	abs, err := filepath.Abs(expanded)
-	if err != nil {
-		return "", noop, fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
-	}
-	if err := os.MkdirAll(abs, 0o750); err != nil {
-		return "", noop, fmt.Errorf("failed to create distdir %q: %w", abs, err)
-	}
-	return abs, noop, nil
-}
-
-// resolveDistfilesCache validates the configured cache directory once per run.
-// Returns the absolute path when the directory exists and is a real directory
-// distinct from distdir, or "" when prepopulation should be skipped (cache
-// disabled, missing, unreadable, or pointing at the same path as distdir).
-func resolveDistfilesCache(userDir, distdir string) string {
-	if userDir == "" {
-		return ""
-	}
-	expanded := userDir
-	if strings.HasPrefix(expanded, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
-		}
-	}
-	abs, err := filepath.Abs(expanded)
-	if err != nil {
-		return ""
-	}
-	info, err := os.Stat(abs)
-	if err != nil || !info.IsDir() {
-		return ""
-	}
-	if distAbs, err := filepath.Abs(distdir); err == nil && distAbs == abs {
-		// Cache and working distdir are the same path — pkgdev already
-		// reuses files in place, no symlinks needed.
-		return ""
-	}
-	return abs
-}
-
-// parseManifestDistFilenames extracts the filenames listed on `DIST <name> ...`
-// lines of a Gentoo Manifest. Missing files, read errors, or malformed lines
-// yield an empty slice — prepopulation treats this as "nothing to reuse".
-func parseManifestDistFilenames(manifestPath string) []string {
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] != "DIST" {
-			continue
-		}
-		name := fields[1]
-		// Reject path traversal: filenames in Manifest are basenames by
-		// spec — anything else means the file is malformed (or hostile).
-		if name == "" || strings.ContainsAny(name, "/\\") {
-			continue
-		}
-		names = append(names, name)
-	}
-	return names
-}
-
-// prepopulateFromCache symlinks each cached distfile into distdir so pkgdev
-// can validate it locally instead of re-downloading. Returns the count of
-// successfully linked files. Files already present in distdir, missing from
-// the cache, or causing symlink errors are silently skipped — pkgdev will
-// download them as a fallback.
-func prepopulateFromCache(distdir, cacheDir string, names []string) int {
-	reused := 0
-	for _, name := range names {
-		src := filepath.Join(cacheDir, name)
-		if _, err := os.Stat(src); err != nil {
-			continue
-		}
-		dst := filepath.Join(distdir, name)
-		if _, err := os.Lstat(dst); err == nil {
-			// Already present (concurrent worker, or persistent distdir).
-			continue
-		}
-		if err := os.Symlink(src, dst); err != nil {
-			continue
-		}
-		reused++
-	}
-	return reused
 }
 
 // isPackageDir reports whether the path looks like a valid package directory
