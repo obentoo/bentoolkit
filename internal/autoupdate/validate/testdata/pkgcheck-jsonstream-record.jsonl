@@ -1,0 +1,8 @@
+{"__class__":"BadDescription","category":"dev-util","package":"cargo-deny","version":"0.20.2","msg":"over 80 chars in length","pkg_desc":null}
+{"__class__":"BadFilename","category":"media-libs","package":"lcevc_dec","version":"4.2.0","filenames":["4.2.0.tar.gz"]}
+{"__class__":"BetterCompressionUri","category":"dev-util","package":"mesa_clc","version":"26.3.0_pre20260807","line":"https://gitlab.freedesktop.org/${PN}/${PN}/-/archive/${GIT_COMMIT}/mesa-${GIT_COMMIT}.tar.gz","lineno":24,"replacement":".tar.bz2"}
+{"__class__":"DeprecatedEclass","category":"dev-util","package":"mesa_clc","version":"26.3.0_pre20260807","eclass":"llvm-r1","replacement":"llvm-r2.eclass"}
+{"__class__":"DeprecatedInsinto","category":"dev-util","package":"antigravity-hub-bin","version":"2.5.0.5471848641724416","line":"insinto /usr/share/applications","lineno":73,"cmd":"domenu or newmenu from desktop.eclass"}
+{"__class__":"EmptyGlobalAssignment","category":"dev-util","package":"antigravity-hub-bin","version":"2.5.0.5471848641724416","line":"BDEPEND=\"\"","lineno":42}
+{"__class__":"ExcessiveLineLength","category":"media-libs","package":"lcevc_dec","version":"4.2.0","lines":[30]}
+{"__class__":"MissingInherits","category":"dev-util","package":"mesa_clc","version":"26.3.0_pre20260807","eclass":"llvm-r2","lineno":68,"usage":"llvm-r2_pkg_setup"}

@@ -40,6 +40,11 @@ var (
 	autoupdateForce bool
 	// autoupdateCompile runs compile test after apply
 	autoupdateCompile bool
+	// autoupdateRequireIsolation is --require-isolation. It reaches the Applier
+	// as a field and never as a config key: the configuration block that would
+	// own such a key is deferred to a later story, and a registry key is
+	// expensive to move once written (story 031 Constraints).
+	autoupdateRequireIsolation bool
 	// autoupdateClean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
 	autoupdateClean bool
@@ -187,6 +192,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
+	autoupdateCmd.Flags().BoolVar(&autoupdateRequireIsolation, "require-isolation", false, "With --compile: SKIP the compile test rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
 	autoupdateCmd.Flags().IntVar(&autoupdateTimeout, "timeout", 0, "per-request HTTP timeout in seconds for --check (0 = use config autoupdate.http_timeout, default 30)")
@@ -1220,6 +1226,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
@@ -1301,6 +1308,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
 		// share one in-memory source of truth.
@@ -1475,6 +1483,7 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 
 	if result.Success {
 		output.Success.Println("    Status:  Success")
+		displayCompileIsolation(result)
 		if result.Fixed {
 			output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
 		}
@@ -1508,6 +1517,32 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
 		}
 	}
+}
+
+// displayCompileIsolation states how much the compile gate actually verified.
+//
+// It prints nothing when no compile ran — there is no fidelity to report about
+// a step that did not happen — and nothing extra when the namespace was
+// verified, since a plain "Success" already means what it says (R7.2).
+//
+// The two lines it does print exist because the gate used to claim more than it
+// had. Portage reports network-sandbox in FEATURES whether or not the namespace
+// was created, creating one needs privilege an ordinary user does not have, and
+// Portage warns about neither. So a green could mean "built with the network
+// cut off" or "built with full network access", and nothing distinguished them
+// (R7.3). The skip line is the same honesty one step further: with
+// --require-isolation the compile did not run, and saying "Success" without
+// saying that would be the same lie in a new place (R7.4).
+func displayCompileIsolation(result *autoupdate.ApplyResult) {
+	if !autoupdateCompile || result.IsolationVerified || result.IsolationReason == "" {
+		return
+	}
+	if autoupdateRequireIsolation {
+		output.Warning.Println("    Compile: SKIPPED (--require-isolation, and no network namespace)")
+	} else {
+		output.Warning.Println("    Compile: PASS (unverified isolation)")
+	}
+	output.Info.Printf("    Reason:  %s\n", result.IsolationReason)
 }
 
 // displayCleanReport prints what the --clean sweep did to the package
@@ -1800,6 +1835,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		append([]autoupdate.ApplierOption{
 			autoupdate.WithApplierContext(ctx),
 			autoupdate.WithApplierClean(autoupdateClean),
+			autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 			autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 			autoupdate.WithApplierPendingList(pending),
 		}, applierDistfileOptions()...)...,

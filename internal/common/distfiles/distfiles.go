@@ -189,6 +189,64 @@ func Resolve(explicit, configured string) (Dir, error) {
 	return Dir{Path: abs, Created: created}, nil
 }
 
+// Locate reports the distdir to READ from, and whether there is one at all.
+//
+// # Why this exists next to Resolve rather than inside it
+//
+// Resolve answers a different question — "where does this host keep its
+// distfiles, and may we write there" — and answers it with two side effects:
+// expandAndCreate CREATES the directory, and Probe PROVES it writable by
+// writing a file into it. Both are right for `overlay manifest`, which is about
+// to download into that directory. Both are wrong for a read-only gate.
+//
+// A gate that only opens archives already on disk needs no write permission, so
+// a DISTDIR owned by portage and not writable by the invoking user is perfectly
+// usable to it — and this repository has already had to remove three tests that
+// assumed otherwise. Nor may it conjure a directory: a DISTDIR that does not
+// exist is an ANSWER ("there is nothing here to read"), which the caller turns
+// into an outcome that says so, rather than a directory to create and then find
+// empty.
+//
+// So this shares Resolve's PRECEDENCE — explicit, then configured, then the
+// host's own `portageq distdir` — and shares nothing else. There is deliberately
+// no DefaultCache rung and no temporary-directory fallback: each would name a
+// directory holding no distfiles and turn "I could not look" into "I looked and
+// found nothing", which is the class of silent pass this gate exists to remove.
+//
+// Do not fold this back into Resolve (design D2). They differ in exactly the two
+// side effects that matter, and unifying them would either stop the manifest
+// step creating its distdir or start the validate gate writing to one it was
+// asked only to read.
+//
+// found is false when no rung named a candidate, when the candidate does not
+// exist, or when it is not a directory. A Stat error other than not-exist is
+// false too: the caller's question is "can I read here", not "why not".
+func Locate(explicit, configured string) (string, bool) {
+	candidate := explicit
+	if candidate == "" {
+		candidate = configured
+	}
+	// Asked only once the two rungs above are silent. A higher rung consulting
+	// the host is a precedence bug even when it happens to return the right
+	// path, which is why the tests count this call rather than only checking it.
+	if candidate == "" {
+		candidate = hostDistdir()
+	}
+	if candidate == "" {
+		return "", false
+	}
+
+	abs, err := expandPath(candidate)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	return abs, true
+}
+
 // ResolveOrTemp returns the directory `overlay manifest` gives pkgdev as
 // --distdir, keeping the default that command documents in its own --help: an
 // unset --distdir means a temporary directory discarded after the run, which is
@@ -381,6 +439,30 @@ func portageqPath(arg ...string) string {
 	return path
 }
 
+// expandPath turns a user-written distdir into an absolute one, expanding "~"
+// and resolving a relative path against the working directory. It touches the
+// filesystem only to ask where "~" is.
+//
+// It is split out of expandAndCreate so that Locate can share the expansion
+// without sharing the creation. Two notions of what "~/distfiles" means would
+// be a bug waiting for the day they disagree, and the error strings stay here
+// so both callers keep wording a failure the same way.
+func expandPath(userDir string) (string, error) {
+	expanded := userDir
+	if strings.HasPrefix(expanded, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to expand %q: %w", userDir, err)
+		}
+		expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
+	}
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
+	}
+	return abs, nil
+}
+
 // expandAndCreate is the one implementation both entry points share: it expands
 // "~" and relative paths, makes sure the directory exists, and reports whether
 // this call is the one that created it.
@@ -392,17 +474,9 @@ func portageqPath(arg ...string) string {
 // On failure it returns the absolute path when it got that far, so the caller
 // can name the directory it could not prepare.
 func expandAndCreate(userDir string) (string, bool, error) {
-	expanded := userDir
-	if strings.HasPrefix(expanded, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", false, fmt.Errorf("failed to expand %q: %w", userDir, err)
-		}
-		expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
-	}
-	abs, err := filepath.Abs(expanded)
+	abs, err := expandPath(userDir)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
+		return "", false, err
 	}
 	// Whether the directory is already there has to be asked BEFORE creating
 	// it: this is the only moment the answer exists, and it is what decides

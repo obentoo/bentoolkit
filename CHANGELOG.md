@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`overlay validate`: a read-only gate that asks whether an ebuild still
+  matches the source it points at.** `overlay autoupdate --apply` proves the
+  tarball hashes, and with `--compile` that the package builds. Between those
+  sits the failure class that produced obentoo/bentoo#33: the version moved, the
+  ebuild did not, and nothing asked whether the ebuild still fit. Upstream
+  removed `aalib` and `libcaca` from `gst-plugins-qt6` at 1.29; the ebuild kept
+  passing `-Daalib=` and `-Dlibcaca=`, and every check stayed green.
+
+  The gate reads the build options the upstream archive declares, reads the ones
+  the ebuild passes, and subtracts. No build, no privilege, no network, no
+  model: the archive is already on disk, put there by the manifest step. The
+  archive is never unpacked either — `tar -xO` sends the members it parses to
+  stdout, which makes archive path traversal structurally impossible rather than
+  something a check has to catch, and leaves the overlay byte-identical by
+  construction. `--json` writes the whole report as one document, and exit codes
+  are 0 clean / 1 an error finding / 2 a selector the overlay does not hold.
+
+  **An outcome names its own reach.** A gate that could not run says SKIPPED and
+  why, never a silent pass — a missing distfile, a build system that is not
+  Meson, an unreadable ebuild. That is the whole design, and the measurement
+  below is why it matters more than the findings.
+
+  **Measured across the whole overlay — 407 ebuild versions, on a host whose
+  DISTDIR holds few of their distfiles.** The gate read both sides for **4** of
+  them and **403 reported SKIPPED with a reason**: 255 because the distfile is
+  not on this host, 69 because the build system is not Meson (cmake, make,
+  cargo, automake — each named), 47 because `tar` cannot read the archive at all
+  (`.deb`, plain `.gz`, AppImage), 19 because several distfiles are present and
+  none uniquely matches the version, and 13 because the Manifest names no
+  distfile. **Unresolvable option names: 0 of the 4 the gate reached, and 0 of
+  the 407 it examined.** The share is stated with both denominators because
+  neither alone is honest — the interesting number here is not the zero, it is
+  that this gate's reach is a function of what DISTDIR happens to hold.
+
+  Two false-positive classes were found by building the gate and pointing it at
+  the real tree, and both are worth recording because each would have got the
+  gate switched off on its first run:
+
+  - A package directory's Manifest names every version's distfile, so picking
+    the first present one validated the 1.29.2 ebuild against the **1.28.6**
+    archive — where the removed options are still declared — and reported a PASS
+    for exactly the bump this exists to reject. The distfile is now chosen by
+    the version, and an ambiguous match is a SKIPPED rather than a guess.
+  - `meson.build` had to be at the archive's project ROOT, not merely somewhere
+    inside it. WebKit and Node both vendor third-party code that uses Meson; the
+    gate adopted a vendored subproject as the project root and compared their
+    CMake and GYP `-D` options against it. That produced **89 false errors** on
+    `net-libs/webkit-gtk` and one unearned PASS on `net-libs/nodejs`. All three
+    are now SKIPPED naming the build system actually found.
+
+  `pkgcheck` findings ride in the same report and never touch the exit code: the
+  overlay carries pre-existing QA findings unrelated to any bump, and letting
+  them decide the status would fail the whole tree. They are all carried at
+  `info`, because across 95 captured records the JsonStream reporter emits **no
+  level field at all** — inferring one from the message text would be a guess
+  wearing a severity's clothes. Capturing those records also explained why the
+  design could not observe one: pkgcheck's GitAddon raises on this overlay's
+  history, prints a traceback to stderr, writes nothing to stdout and exits 0,
+  so a package with findings looked clean. The scan now runs with
+  `--cache=-git`.
+
+### Fixed
+- **A compile-gate pass now states the isolation it actually verified.** The
+  gate printed a plain green whenever the build succeeded, and could not have
+  done otherwise: Portage reports `network-sandbox` in FEATURES, creating the
+  namespace needs privilege an ordinary user does not have, and Portage warns
+  about neither. A green therefore meant either "built with the network cut off"
+  or "built with full network access", and nothing printed told them apart.
+  Measured on the development host as euid 1000: `unshare --net true` fails with
+  EPERM, so every pass there was claiming more than it had.
+
+  `ProbeIsolation` measures instead of inferring, because inferring is the
+  defect. It starts a short-lived child with the namespace requested at fork
+  time and reads the kernel's answer — `clone(CLONE_NEWNET)` without
+  `CAP_SYS_ADMIN` fails before the child exists. Unsharing in-process was
+  rejected: Go multiplexes goroutines onto OS threads and cannot reliably retire
+  one left in a foreign namespace. A non-Linux fallback reports `undetermined`,
+  and undetermined is treated exactly like a denial — a probe that could not run
+  has proved nothing.
+
+  A success without a verified namespace now renders `PASS (unverified
+  isolation)` followed by the reason, and the new `--require-isolation` flag
+  leaves the compile unrun rather than producing a green worth nothing. Nothing
+  else moved: the confirmation prompt, the `sudo`/`doas` requirement and both
+  existing success and failure conditions are unchanged, and the pre-existing
+  compile-gate tests pass untouched.
+
 ## [0.22.0] - 2026-08-08
 
 ### Fixed
