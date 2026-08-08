@@ -20,10 +20,29 @@ import (
 	"testing"
 )
 
+// stubPkgcheckPresent makes the binary lookup succeed for the rest of the test.
+//
+// Stubbing execCommand alone is not enough: PkgcheckFindings consults lookPath
+// FIRST and returns SKIPPED when it fails, so on a host without pkgcheck the
+// stubbed command is never reached and a test pinning a ran-and-succeeded
+// outcome fails. That is host-dependence, not a finding — the development host
+// is Gentoo and ships /usr/bin/pkgcheck, the CI runner is Ubuntu and does not,
+// so these tests passed locally and failed on the runner. Both seams are stubbed
+// together so the outcome is a property of the code, not of the machine.
+func stubPkgcheckPresent(t *testing.T) {
+	t.Helper()
+	orig := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	t.Cleanup(func() { lookPath = orig })
+}
+
 // stubValidateExec points the package exec seam at `printf`, so the stubbed
-// command emits stdout exactly and exits 0.
+// command emits stdout exactly and exits 0. The binary lookup is stubbed
+// present alongside it: this helper's whole meaning is "pkgcheck ran and
+// produced this".
 func stubValidateExec(t *testing.T, stdout string) {
 	t.Helper()
+	stubPkgcheckPresent(t)
 	orig := execCommand
 	execCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "printf", "%s", stdout)
@@ -32,8 +51,14 @@ func stubValidateExec(t *testing.T, stdout string) {
 }
 
 // stubValidateExecFailing points the seam at a command that exits non-zero.
+//
+// The lookup is stubbed present here too, and it is load-bearing rather than
+// symmetry: without it, a host missing pkgcheck reaches SKIPPED through the
+// absent-binary branch, so TestPkgcheckFindings_FailedInvocationIsSkipped would
+// pass while proving nothing about a failed invocation.
 func stubValidateExecFailing(t *testing.T) {
 	t.Helper()
+	stubPkgcheckPresent(t)
 	orig := execCommand
 	execCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "false")
