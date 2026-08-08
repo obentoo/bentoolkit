@@ -33,6 +33,10 @@ var (
 	compareSync          bool
 	// compareConcurrency bounds parallel upstream comparisons (range [1,100])
 	compareConcurrency int
+	// compareNoReview turns the model off (R5.6). It is the ONLY flag here that
+	// suppresses work rather than narrowing a view, and it suppresses the only
+	// work that leaves this machine to something other than a package registry.
+	compareNoReview bool
 )
 
 var compareCmd = &cobra.Command{
@@ -57,6 +61,12 @@ Use --only-redundant to see just the removal candidates, or --only-patched
 to see just the packages an .autoupdate/packages.toml entry declares a
 divergence for. The three filters combine by intersection.
 
+Where a package differs from upstream and nothing declares why, a local model
+(the claude CLI, on your own subscription) reads both ebuilds and says what the
+difference does and which side it came from. It is commentary: the verdicts and
+the removal recommendations are the same with or without it, nothing it says is
+written to a file, and --no-review contacts no model at all.
+
 Examples:
   bentoo overlay compare                    # Compare with gentoo (API)
   bentoo overlay compare guru               # Compare with GURU (API)
@@ -65,7 +75,8 @@ Examples:
   bentoo overlay compare --sync             # Refresh repo list before comparing
   bentoo overlay compare --only-outdated    # Show only outdated packages
   bentoo overlay compare --only-redundant   # Show only removal candidates
-  bentoo overlay compare --only-patched     # Show only declared divergences`,
+  bentoo overlay compare --only-patched     # Show only declared divergences
+  bentoo overlay compare --no-review        # Contact no model`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runCompare,
 }
@@ -81,6 +92,7 @@ func init() {
 	compareCmd.Flags().BoolVar(&compareOnlyPatched, "only-patched", false, "Show only packages a registry entry declares a divergence for")
 	compareCmd.Flags().BoolVar(&compareSync, "sync", false, "Force refresh of repository list")
 	compareCmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
+	compareCmd.Flags().BoolVar(&compareNoReview, "no-review", false, "Contact no model; print the report without commentary")
 	overlayCmd.AddCommand(compareCmd)
 }
 
@@ -291,6 +303,28 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// also what an API-only provider leaves on every package, so this costs
 	// nothing and says nothing when the compared repository is not on disk.
 	overlay.AnnotateAuthorship(report, prov, opts)
+
+	// What a MODEL makes of the differences the report cannot settle: where each
+	// one came from, what it does, and — where it is ours — the `patched` text
+	// that would declare it (R5.2-R5.4). It is commentary and nothing else: the
+	// grouping, the Verdicts and the removal recommendations are the same whether
+	// it ran or not (R5.8).
+	//
+	// It runs HERE, beside AnnotateAuthorship and on the SAME opts value, for two
+	// reasons. The same opts is what lets it re-read the same two files the
+	// comparison read — it resolves them through the same resolvePackagePaths —
+	// and running before the filter keeps the annotation part of PRODUCING the
+	// report rather than of presenting it, so a --only-redundant run cannot reach
+	// a different conclusion about a package than a full one. It runs after
+	// authorship because a proof from the overlay's own content outranks a guess,
+	// and the report prints them in that order.
+	//
+	// A nil reviewer makes the whole pass a no-op, which is how `--no-review`
+	// (R5.6) and a machine with no `claude` installed (R5.5) reach ONE path
+	// instead of two conditions that could disagree. Nothing here can fail the
+	// run: every way of not getting a reading costs one warning and the report is
+	// printed unchanged.
+	overlay.AnnotateReviews(report, compareDivergenceReviewer(runCtx, compareNoReview), prov, opts)
 
 	// Narrow the VIEW, never the computation (D7). The comparison above already
 	// produced the whole picture; only report.Results — the rows the table

@@ -89,6 +89,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   how many have no row in any table, as a relation that can be checked against
   the tables above it. The three pre-existing summary lines are untouched.
 
+- **A model now explains each undeclared divergence, without being allowed to
+  decide anything.** The report could say a divergence exists and how large it
+  is, but not what it *does* — and "read both ebuilds yourself" is the work the
+  report exists to avoid. A local model (the `claude` CLI, on your own
+  subscription) reads the two ebuilds and prints, beneath the finding, which side
+  the difference came from and a one-line summary of what it does. Where it
+  reads the divergence as ours, it also proposes the text for a `patched`
+  declaration. Nothing writes it: the proposal is text on a terminal, and
+  applying it stays a decision you make.
+
+  Measured on the live overlay: 10 undeclared divergences, 10 notes — 4 read as
+  ::gentoo's, 3 as ours, 3 as both sides having moved.
+
+  That the model is commentary rather than a verdict is not a disclaimer, it is
+  observable. It reads `spectacle`, `binutils` and `binutils-libs` as ours; the
+  content proof from the `files/` tree names `spectacle`, `nodejs` and
+  `kdeplasma-addons`. The two agree on exactly one package out of six. Had the
+  classification been wired to a decision, it would have moved `nodejs` — 622
+  added lines of slotting work — out of the proved group on nothing but a
+  reading, and moved two packages into it that no file proves. So it annotates
+  and the report decides, and that separation is now an executed test rather
+  than an intention: the same fixture rendered with and without a reviewer
+  yields byte-identical tables, verdict counters and removal recommendations,
+  with the difference confined to commentary lines. Five deliberate mutations
+  confirm the test bites, including one — a counter moved by the review pass —
+  that the rendered output alone cannot see, because the summary counts are
+  printed outside the report.
+
+  Every failure costs nothing. No CLI, `--no-review`, an error, a timeout or
+  unparseable output all reach the same nil-reviewer path and print exactly
+  today's report, with at most one warning. `--no-review` contacts no model at
+  all — measured at 0.08s against 43s for the reviewed run. Classifications are
+  cached under the two ebuilds' content hashes with no expiry, because the key
+  *is* the content: when either file changes the key changes and the old entry
+  becomes unreachable, so an expiry could only discard a still-correct answer.
+
+  `internal/overlay` still imports no `internal/autoupdate` symbol. The package
+  declares its own narrow `DivergenceReviewer` interface and `cmd/bentoo` builds
+  the adapter over the CLI client — the one new import edge, in the one place
+  that already imports both halves. Model-produced text is passed as an argument
+  everywhere it is printed, never as a format string.
+
 ### Changed
 - **An undeclared divergence now says how large it is, and stops implying who
   caused it.** The finding read `our 6.7.4 ebuild differs from ::gentoo's, yet no

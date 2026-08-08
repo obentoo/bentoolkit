@@ -80,6 +80,21 @@ type CompareResult struct {
 	// of re-deriving the path from what ${FILESDIR} expands to (R2.2). It is
 	// empty whenever Authorship is unproved: there is then no file to name.
 	ProvedBy string
+	// Review is a MODEL's reading of an undeclared divergence: printed beside the
+	// finding and never an input to anything this report decides (R5.8). It sits
+	// on the result for the reason Authorship does — the pass that fills it
+	// (AnnotateReviews, review.go) runs after the comparison and writes back onto
+	// the report the caller is holding — and it is deliberately a THIRD field
+	// beside Authorship rather than a widening of it: Authorship is what the
+	// overlay's content PROVES, this is what a model SAYS, and a type that could
+	// hold either would let one be read as the other.
+	//
+	// The zero ReviewNote means NOTHING WAS SAID, exactly as AuthorshipUnproved
+	// does: every result no review reached — every `--no-review` run, every run
+	// with no `claude` on PATH, every package whose reviewer errored, and every
+	// finding that is not an undeclared divergence — carries it, and the renderer
+	// prints nothing for it.
+	Review ReviewNote
 }
 
 // CompareStatus indicates the comparison result
@@ -1257,11 +1272,45 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 // real sentence, narrow enough to leave the line readable beside the table.
 const patchedReasonCap = 72
 
+// isUndeclaredDivergence reports whether a result is the finding this report
+// calls an undeclared divergence: the two ebuilds differ and no registry entry
+// says why.
+//
+// It is ONE predicate in ONE place because two things ask it — the two loud arms
+// of formatVerificationFindings below, and AnnotateReviews (review.go), which
+// submits exactly this set to the model (R5.1). Spelled twice, they would be two
+// things to keep in step, and the one that drifted would either ask a model
+// about a package the report never warned about or print commentary under a
+// finding that does not exist.
+//
+// It reads neither DiffAdded nor DiffRemoved, and must not: the size of a
+// difference decides nothing (R1.3, compare_diff_counts_fence_test.go).
+func isUndeclaredDivergence(r CompareResult) bool {
+	return r.Verified == VerifiedDiffers && !r.Patched
+}
+
 // undeclaredDivergenceCaveat is the sentence formatVerificationFindings prints
 // once beneath a section that reported at least one UNPROVED undeclared
 // divergence. It is a package-level constant so a test can assert on it without
 // copying the wording.
 const undeclaredDivergenceCaveat = "  ↳ a difference is not proof of authorship: ::gentoo also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring."
+
+// The two openings a model's reading is printed under, indented beneath the
+// finding they qualify.
+//
+// Both SAY WHOSE WORDS FOLLOW, and that is the whole reason they are worded at
+// all. Everything else in this report is something the tool established: two
+// files compared byte for byte, a registry entry consulted, a filename stat'ed.
+// What comes after these two openings is a guess by a language model. An
+// operator who cannot tell the two apart will act on the wrong one — and the
+// line that invites an action, "declare this patched", is the guess.
+//
+// They are constants so a test can name them without copying the wording, on the
+// same argument that made undeclaredDivergenceCaveat one.
+const (
+	reviewReadingLead  = "  ↳ model reading, not a finding of this report: "
+	reviewProposalLead = "  ↳ proposed declaration, nothing here writes it — apply it yourself: "
+)
 
 // formatVerificationFindings renders one line per verification finding, beneath
 // the section's table.
@@ -1317,7 +1366,7 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: stale declaration — %s declares a divergence, but the two %s ebuilds are byte-identical\n",
 				r.Category, r.Package, declaringEntry(r), r.LocalVersion))
-		case r.Verified == VerifiedDiffers && !r.Patched && r.Authorship == AuthorshipOverlay:
+		case isUndeclaredDivergence(r) && r.Authorship == AuthorshipOverlay:
 			// R2.2: the same finding as below, except that the overlay's own
 			// content settled the question the two ebuilds could not. Our ebuild
 			// references a file ::gentoo does not ship for this package, and a
@@ -1336,7 +1385,11 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: undeclared divergence (+%d/-%d), proved ours — our %s ebuild references %s, which ::gentoo does not ship, so removing this package would discard work of our own that no entry declares\n",
 				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion, r.ProvedBy))
-		case r.Verified == VerifiedDiffers && !r.Patched:
+			// The model's reading of this same difference, beneath the finding it is
+			// about (R5.2-R5.4). It renders nothing when no review ran, which is
+			// every run without one.
+			sb.WriteString(reviewCommentary(r))
+		case isUndeclaredDivergence(r):
 			// R4.3: the loud case. Nothing declares this package, so it is about
 			// to be reported as a removal candidate — and its ebuild is not the
 			// one ::gentoo ships.
@@ -1349,6 +1402,12 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: undeclared divergence (+%d/-%d) — our %s ebuild differs from ::gentoo's, and no entry declares why\n",
 				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion))
+			// The reading is printed here for the same reason the caveat is printed
+			// below: this is the ambiguous finding, and a model's guess at the
+			// direction is exactly what the operator has otherwise to establish by
+			// hand. It qualifies the ambiguity — it does not resolve it, which is
+			// why the caveat still prints beneath the section.
+			sb.WriteString(reviewCommentary(r))
 		case r.Patched:
 			// R3.8: the declaration, stated wherever it has not already been
 			// contradicted above. This is the common case in practice — every
@@ -1424,6 +1483,101 @@ func declaringEntry(r CompareResult) string {
 		return r.PatchedBy
 	}
 	return r.Category + "/" + r.Package
+}
+
+// reviewCommentary renders a model's reading of one finding — where the
+// difference came from (R5.2), what it does (R5.3), and, only where it is ours,
+// the `patched` text that would declare it (R5.4). It returns "" when there is
+// nothing to print, which is every run no review reached.
+//
+// EVERY MODEL-PRODUCED STRING IS AN ARGUMENT and never a format string, exactly
+// like ProvedBy, PatchedReason and every other piece of text this report prints.
+// It reaches a terminal and nothing else: no shell, no command, no file.
+//
+// It writes NO FILE. R5.4 proposes; the operator applies. The overlay repository
+// auto-commits and pushes within minutes, so a declaration this program wrote
+// would be published before anyone could read it.
+//
+// Nothing here can change a Verdict, a count or which table a package sits in
+// (R5.8): it turns one finished CompareResult into a string, and the string is
+// two lines the report would otherwise not have printed.
+func reviewCommentary(r CompareResult) string {
+	note := r.Review
+	// The same judgement the annotator applies (reviewNoteSpeaks, review.go), held
+	// on this side too: a note missing its classification or its summary has
+	// answered neither R5.2 nor R5.3, and a finding-shaped line stating nothing is
+	// worse than no line. A note that arrived by some other route — a hand-edited
+	// cache, a later caller — is refused here on the same terms.
+	prose := reviewOriginProse(note.Origin)
+	if !reviewNoteSpeaks(note) || prose == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(output.Sprintf(output.Dim, "%s%s — %s\n", reviewReadingLead, prose, oneLine(note.Summary)))
+
+	// R5.4 attaches a proposal to ONE classification. `both` is deliberately not
+	// it: a copy that carries work of ours AND has fallen behind ::gentoo needs the
+	// rebase first, and declaring `patched` on it would record the whole difference
+	// as intentional, permanently suppressing the recommendation for the half that
+	// is merely stale. ReviewNote.Declaration already says it is empty unless the
+	// origin is the overlay; this refuses to print one regardless, so a model that
+	// fills the field in anyway cannot get it onto the line.
+	if note.Origin != OriginOverlay {
+		return sb.String()
+	}
+	declaration := truncateString(oneLine(note.Declaration), patchedReasonCap)
+	if declaration == "" {
+		// An overlay-origin note with nothing to propose. The reading above still
+		// stands; an empty proposal line would read as a truncation bug.
+		return sb.String()
+	}
+	// Capped by the SAME mechanism as the operator's own declared reason
+	// (declaredReason, one function up), not by a second one: an unbounded
+	// proposal would let a model's essay decide the width of the whole report.
+	sb.WriteString(output.Sprintf(output.Dim, "%s%s\n", reviewProposalLead, declaration))
+
+	return sb.String()
+}
+
+// reviewOriginProse is the report's sentence for a classification, or "" for one
+// that says nothing.
+//
+// It is built HERE rather than by ReviewOrigin.String() because the two serve
+// different readers. The four words String() returns — unknown, overlay,
+// upstream, both — are this feature's wire and storage vocabulary: the cache
+// persists one with no expiry, and the CLI adapter decodes one from the model's
+// reply. Changing them would change what every note already on disk means.
+// "::gentoo" is what an operator calls upstream, and it appears in no stored
+// file.
+func reviewOriginProse(o ReviewOrigin) string {
+	switch o {
+	case OriginOverlay:
+		return "originates in the overlay"
+	case OriginUpstream:
+		return "originates in ::gentoo"
+	case OriginBoth:
+		return "originates on both sides"
+	default:
+		// OriginUnknown, and any value a later constant adds without a sentence
+		// here. Both mean the report has nothing to say, and reviewCommentary
+		// prints nothing rather than a line about an origin nobody defined.
+		return ""
+	}
+}
+
+// oneLine collapses every run of whitespace into a single space, so a model's
+// prose occupies exactly the one line the report gave it.
+//
+// This is not cosmetic. The report's STRUCTURE is its lines — "⚠ " opens a
+// finding this tool stands behind — so a summary carrying a newline would print
+// a second line indistinguishable from one, about a package that need not even
+// exist. Model output reaches a terminal, and the terminal reads lines.
+//
+// strings.Fields splits on every kind of whitespace, which is what makes a
+// carriage return and a tab as harmless as a newline.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // columnWidths holds the calculated column widths for table formatting.

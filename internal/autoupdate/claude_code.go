@@ -396,6 +396,30 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	return env.Result, nil
 }
 
+// AskJSON runs ONE schema-constrained round trip through the `claude` CLI and
+// returns the model's reply verbatim, exactly as the envelope carried it.
+//
+// It is the EXPORTED spelling of run, and it exists so a caller outside this
+// package can reach the CLI without rebuilding the parts of run that are not
+// about its own question. Those parts are the security-relevant ones: the
+// instruction travels in -p while content is piped on stdin (AD8), the child
+// environment is resolved by childEnv — which in non-bare mode STRIPS every
+// inherited API key so the CLI falls back to its own logged-in session — and the
+// invocation is bound to c.ctx with c.timeout. All three are unexported, so a
+// second call site spelling its own exec.Command would be a second, divergent
+// answer to each of them.
+//
+// The reply is returned UNTOUCHED. Callers with a schema know what shape they
+// asked for; ExtractVersion and AnalyzeContent above each normalize for their
+// own, and doing it here would impose one of those on everybody.
+//
+// Its one production caller today is the divergence-review adapter in
+// cmd/bentoo/overlay_compare_review.go, which asks for a three-field JSON object
+// describing how two ebuilds differ.
+func (c *ClaudeCodeClient) AskJSON(instruction string, content []byte, schema string) (string, error) {
+	return c.run(instruction, content, schema)
+}
+
 // buildVersionInstruction builds the static instruction for version extraction.
 // The page content is NOT embedded (it is piped on stdin); the caller's prompt is
 // appended as extra guidance when non-empty (S003-R1.2).
