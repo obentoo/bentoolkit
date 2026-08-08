@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-08
+
 ### Fixed
 - **`overlay prune --include-patched` no longer discards work the content proves
   is ours.** The flag says "I accept discarding local work". It cannot mean that
