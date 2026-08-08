@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -49,6 +50,51 @@ type CompareResult struct {
 	// Verified is the outcome of comparing the two ebuilds' bytes. It stays
 	// NotVerified unless a content check ran.
 	Verified Verification
+	// DiffAdded and DiffRemoved are the line counts of that difference, ours
+	// against upstream's: added is what our ebuild has and ::gentoo's does not.
+	// They are meaningful ONLY when Verified == VerifiedDiffers and are zero
+	// otherwise — a check that did not run has no magnitude to report, and a
+	// byte-identical pair has none to find.
+	//
+	// They exist because the bare fact "differs" cannot be acted on. A one-line
+	// difference is almost always ::gentoo revising an ebuild in place, without a
+	// revbump, after we copied it; a four-hundred-line one is work of our own. The
+	// report cannot tell those two apart — see formatVerificationFindings — but
+	// the operator can, at a glance, once the size is on the line.
+	DiffAdded   int
+	DiffRemoved int
+
+	// Authorship is what the overlay's own CONTENT proves about where the
+	// difference came from. The two ebuilds' bytes cannot say it — they are
+	// symmetric — but the files/ tree beside them can, so this is filled by
+	// AnnotateAuthorship (authorship.go) after the comparison, never by it.
+	//
+	// AuthorshipUnproved, the zero value, means THE REPORT CANNOT TELL. It is
+	// never a finding of "the change is upstream's": ::gentoo revises ebuilds in
+	// place without a revbump, so a difference nothing here proves may still be
+	// entirely ours and merely unprovable from the files. Reading unproved as
+	// "not ours" would authorise exactly the removal this check exists to stop.
+	Authorship Authorship
+	// ProvedBy names the file that proves it, relative to the package directory
+	// ("files/<name>"), so the operator can confirm the claim by looking instead
+	// of re-deriving the path from what ${FILESDIR} expands to (R2.2). It is
+	// empty whenever Authorship is unproved: there is then no file to name.
+	ProvedBy string
+	// Review is a MODEL's reading of an undeclared divergence: printed beside the
+	// finding and never an input to anything this report decides (R5.8). It sits
+	// on the result for the reason Authorship does — the pass that fills it
+	// (AnnotateReviews, review.go) runs after the comparison and writes back onto
+	// the report the caller is holding — and it is deliberately a THIRD field
+	// beside Authorship rather than a widening of it: Authorship is what the
+	// overlay's content PROVES, this is what a model SAYS, and a type that could
+	// hold either would let one be read as the other.
+	//
+	// The zero ReviewNote means NOTHING WAS SAID, exactly as AuthorshipUnproved
+	// does: every result no review reached — every `--no-review` run, every run
+	// with no `claude` on PATH, every package whose reviewer errored, and every
+	// finding that is not an undeclared divergence — carries it, and the renderer
+	// prints nothing for it.
+	Review ReviewNote
 }
 
 // CompareStatus indicates the comparison result
@@ -161,6 +207,30 @@ const (
 	VerifiedIdentical
 	// VerifiedDiffers means the two ebuilds differ.
 	VerifiedDiffers
+)
+
+// Authorship is what the two package directories prove about WHO WROTE the
+// difference — a different question from Verification, which only says that a
+// difference exists. Verification compares two symmetric files and so can never
+// answer it; the overlay's files/ tree sometimes can.
+//
+// The vocabulary lives here with the rest of the compare types, exactly as
+// Verification does, while the pass that fills it is wired in separately
+// (AnnotateAuthorship, authorship.go).
+type Authorship int
+
+const (
+	// AuthorshipUnproved means nothing in the content proves where the
+	// difference came from. It is the ZERO VALUE by construction, so every
+	// result nobody examined — the identical ones, every API-only run — reads as
+	// "cannot tell" rather than as a claim about anybody. It is NEVER "the
+	// change is upstream's" (R2.3).
+	AuthorshipUnproved Authorship = iota
+	// AuthorshipOverlay means our ebuild references a file under ${FILESDIR}
+	// that ::gentoo does not provide for that package. A reference to a patch
+	// upstream never had cannot have been inherited from upstream, which is the
+	// one thing two ebuilds and two directories can prove between them (R2.1).
+	AuthorshipOverlay
 )
 
 // deriveVerdict maps the two axes — the version comparison and what the
@@ -466,7 +536,9 @@ func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts Co
 	// back. One mechanism decides, the other only checks (D4, R4.5), and the
 	// order of these three statements is what makes that structural rather than
 	// a convention someone must remember.
-	result.Verified = verifyAgainstLocalContent(result, prov, opts)
+	check := verifyAgainstLocalContent(result, prov, opts)
+	result.Verified = check.state
+	result.DiffAdded, result.DiffRemoved = check.added, check.removed
 
 	// The map is keyed by the bare "category/package" atom. A miss is the
 	// unknown state — nothing is recorded about this package — and it reaches
@@ -542,19 +614,11 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // verification states holds (R4.1). It never decides anything: its result is
 // reported beside the Verdict, never instead of it (R4.5).
 //
-// It runs only when all three of the following hold, and any of them failing is
-// simply NotVerified rather than an error (R4.4) — absence of evidence is not
-// evidence, so the declaration stands unverified rather than being contradicted:
-//
-//   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
-//     carries no path, so without it there is no overlay-side file to open;
-//   - the provider has the compared repository on disk, which is exactly the
-//     capability provider.PackageDirProvider names. The git-clone and local
-//     providers satisfy it and the API providers do not; failing that assertion
-//     IS the "API-only" signal, and an API provider could supply content only at
-//     the cost of one extra rate-limited request per package;
-//   - the two versions are equal. Two different versions differ for reasons that
-//     say nothing about whether we changed anything.
+// It runs only when the package resolves on both sides (resolvePackagePaths,
+// which states the three conditions and why each one is a condition) and both
+// ebuilds read. Any of that failing is simply NotVerified rather than an error
+// (R4.4) — absence of evidence is not evidence, so the declaration stands
+// unverified rather than being contradicted.
 //
 // Both reads are local: this issues no network request and takes no context.
 //
@@ -568,21 +632,104 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 // the files/ tree — but the two agree wherever they overlap, since both are
 // bytes.Equal over the same two files. It is separate code precisely so that a
 // removal criterion cannot change what this compare reports.
-func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) Verification {
-	if opts.OverlayPath == "" {
-		return NotVerified
+func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) contentCheck {
+	paths, ok := resolvePackagePaths(result, prov, opts)
+	if !ok {
+		return contentCheck{}
 	}
-	// An empty version names no ebuild. It is the shape a not-in-remote or failed
-	// comparison leaves behind — where RemoteVersion is empty too, so the
-	// equality below would otherwise hold and send two doomed reads at a file
-	// called "<pkg>-.ebuild".
+
+	ours, err := os.ReadFile(paths.ourEbuild()) //nolint:gosec // path built from scanned overlay directory names, never from registry input
+	if err != nil {
+		return contentCheck{}
+	}
+	theirs, err := os.ReadFile(paths.upstreamEbuild()) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
+	if err != nil {
+		return contentCheck{}
+	}
+
+	if bytes.Equal(ours, theirs) {
+		return contentCheck{state: VerifiedIdentical}
+	}
+
+	// bytes.Equal above is what DECIDES; the line counts only describe. They are
+	// computed after it, from the same two buffers, so a diff that failed to
+	// produce a single edit — impossible for two unequal buffers, but not worth
+	// depending on — could never turn a difference into an identity.
+	added, removed := diffLineCounts(theirs, ours)
+	return contentCheck{state: VerifiedDiffers, added: added, removed: removed}
+}
+
+// contentCheck is one content comparison's finding: the verification state and,
+// when the two ebuilds differ, the size of that difference.
+//
+// It exists so verifyAgainstLocalContent can report the magnitude without
+// growing a second return value that every non-differing path would have to
+// spell out as zero. The zero contentCheck is NotVerified with no magnitude,
+// which is exactly what each of that function's early exits means: the package
+// failing to resolve on both sides, or either ebuild failing to read.
+type contentCheck struct {
+	state          Verification
+	added, removed int
+}
+
+// packagePaths locates one compared package on both sides: the overlay
+// directory holding our copy, the upstream directory the provider resolved, and
+// the ebuild filename the two of them share at the compared version.
+type packagePaths struct {
+	ourDir      string
+	upstreamDir string
+	// ebuildName is <pkg>-<version>.ebuild, the filename shape both sides use —
+	// the same one the provider's own scan matches when it lists versions. One
+	// name serves both sides because resolvePackagePaths only returns when the
+	// two versions are equal.
+	ebuildName string
+}
+
+// ourEbuild and upstreamEbuild are the two files at the compared version.
+func (p packagePaths) ourEbuild() string      { return filepath.Join(p.ourDir, p.ebuildName) }
+func (p packagePaths) upstreamEbuild() string { return filepath.Join(p.upstreamDir, p.ebuildName) }
+
+// resolvePackagePaths locates one compared package on both sides. ok is false
+// when any part of that cannot be had.
+//
+// It is ONE resolution in ONE place because two passes need exactly these
+// strings: verifyAgainstLocalContent above, which reads both ebuilds, and
+// AnnotateAuthorship (authorship.go), which reads ours and looks for the files
+// it references under upstream's files/. Resolved twice, they would be two
+// things to keep in step, and the one that drifted would report on a package it
+// had never opened.
+//
+// A false ok is never an error in either caller, and both read it as the same
+// thing — nothing is known. The content check reports NotVerified (R4.4) and the
+// authorship check reports unproved (R2.3). Three conditions must hold, each
+// failing for its own reason:
+//
+//   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
+//     carries no path, so without it there is no overlay-side file to open;
+//   - the two versions are equal. Two different versions differ for reasons that
+//     say nothing about whether we changed anything. An EMPTY version is refused
+//     by the same guard for a second reason: it names no ebuild at all, and it
+//     is the shape a not-in-remote or failed comparison leaves behind — where
+//     RemoteVersion is empty too, so the equality would otherwise hold and send
+//     doomed reads at a file called "<pkg>-.ebuild";
+//   - the provider has the compared repository on disk, which is exactly the
+//     capability provider.PackageDirProvider names. The git-clone and local
+//     providers satisfy it and the API providers do not; failing that assertion
+//     IS the "API-only" signal, and an API provider could supply content only at
+//     the cost of one extra rate-limited request per package.
+//
+// Everything here is local: it issues no network request and takes no context.
+func resolvePackagePaths(result CompareResult, prov provider.Provider, opts CompareOptions) (packagePaths, bool) {
+	if opts.OverlayPath == "" {
+		return packagePaths{}, false
+	}
 	if result.LocalVersion == "" || result.LocalVersion != result.RemoteVersion {
-		return NotVerified
+		return packagePaths{}, false
 	}
 
 	dirProv, ok := prov.(provider.PackageDirProvider)
 	if !ok {
-		return NotVerified
+		return packagePaths{}, false
 	}
 	// LocalPackagePath rather than a path joined out here: it guards with the
 	// provider's own ensureRepo(), so it holds whether or not the version lookup
@@ -590,51 +737,204 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 	// carry as an error instead of as a path that fails to open later.
 	upstreamDir, err := dirProv.LocalPackagePath(result.Category, result.Package)
 	if err != nil {
-		return NotVerified
+		return packagePaths{}, false
 	}
 
-	// <pkg>-<version>.ebuild is the filename shape both sides use — the same one
-	// the provider's own scan matches when it lists versions. The version is
-	// equal on both sides by the guard above, so one filename serves both reads.
-	filename := result.Package + "-" + result.LocalVersion + ".ebuild"
-
-	// Both paths are built from the CATEGORY AND PACKAGE DIRECTORY NAMES THE
-	// SCANNER FOUND — result.Category/result.Package come from walking the
+	// Both directories are built from the CATEGORY AND PACKAGE DIRECTORY NAMES
+	// THE SCANNER FOUND — result.Category/result.Package come from walking the
 	// overlay, and the upstream side is resolved by the provider from those same
 	// two names. Nothing here comes from a registry key, which matters because no
 	// validation runs on that path: SplitPackageKey accepts "../x" happily and
 	// LoadPackagesConfig never calls ValidatePackageConfig. The structure is what
-	// keeps traversal absent, not a sanitiser. Keep it that way.
-	ourPath := filepath.Join(opts.OverlayPath, result.Category, result.Package, filename)
-	theirPath := filepath.Join(upstreamDir, filename)
+	// keeps traversal absent, not a sanitiser. Keep it that way — including in
+	// whatever is joined ONTO these directories: the ebuild name below is built
+	// from the same two scanned strings, and the only other thing appended to
+	// them anywhere is a filename the ebuild's own text spells out, which
+	// ebuildFilesdirRefs refuses to let escape ${FILESDIR}.
+	return packagePaths{
+		ourDir:      filepath.Join(opts.OverlayPath, result.Category, result.Package),
+		upstreamDir: upstreamDir,
+		ebuildName:  result.Package + "-" + result.LocalVersion + ".ebuild",
+	}, true
+}
 
-	ours, err := os.ReadFile(ourPath) //nolint:gosec // path built from scanned overlay directory names, never from registry input
-	if err != nil {
-		return NotVerified
+// diffLineCounts reports how many lines ours holds that theirs does not, and
+// vice versa, as a real line diff rather than a count of differing bytes.
+//
+// The argument ORDER is the report's point of view: theirs is the "before" and
+// ours the "after", so added is what our overlay carries on top of ::gentoo's
+// ebuild — the same orientation as `diff -u <gentoo> <ours>`, which is what an
+// operator checking the finding by hand will run.
+//
+// udiff.Lines is already this repository's diff (cmd/bentoo/overlay_autoupdate_lintfix.go
+// renders the registry repair with it), so this adds no dependency and no second
+// notion of what a line difference is. Each Edit replaces the byte range
+// [Start,End) of before with New, and udiff.Lines aligns those ranges to line
+// boundaries, so counting the lines on each side of every edit yields the totals.
+//
+// THE ORIENTATION MATCHES `diff`; THE MAGNITUDE NEED NOT. lcs.DiffLines stops
+// searching for a minimal edit script after maxDiffs = 100 (lcs/old.go) and
+// returns a valid but larger one past that point. Measured on
+// net-libs/nodejs-26.7.0, our biggest real divergence: this reports +622/-254
+// where GNU diff reports +430/-62. Both are correct edit scripts — the line
+// totals reconcile either way — but only the small ones agree.
+//
+// That is acceptable HERE and would not be elsewhere, because of what the number
+// is for. The question it answers is "one line, or hundreds?", and it is asked
+// precisely to separate a copy that fell behind from work of our own. A count
+// inflated at the top of that range still answers it; an operator who wants the
+// exact edit script runs `diff -u`, which is what the caveat beneath the finding
+// tells them to do anyway. Nothing downstream computes on these values.
+//
+// Neither count is a verdict and neither feeds one: a large diff does not
+// authorise anything and a small one forbids nothing. See CompareResult.DiffAdded.
+func diffLineCounts(theirs, ours []byte) (added, removed int) {
+	for _, e := range udiff.Lines(string(theirs), string(ours)) {
+		removed += countLines(string(theirs)[e.Start:e.End])
+		added += countLines(e.New)
 	}
-	theirs, err := os.ReadFile(theirPath) //nolint:gosec // path resolved by the provider from scanned directory names, never from registry input
-	if err != nil {
-		return NotVerified
-	}
+	return added, removed
+}
 
-	if bytes.Equal(ours, theirs) {
-		return VerifiedIdentical
+// countLines counts the lines in a diff fragment.
+//
+// A fragment is line-aligned and therefore normally ends in "\n", which would
+// make a plain Count off by nothing — but the LAST fragment of a file with no
+// trailing newline does not, and that line is still a line. An empty fragment is
+// zero lines, not one: it is the shape of a pure insertion's "before" side, and
+// counting it as a line would report a removal that did not happen.
+func countLines(s string) int {
+	if s == "" {
+		return 0
 	}
-	return VerifiedDiffers
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 // verdictSection is one Verdict-grouped section of the report: the packages
 // that share a recommendation, under a heading that says what it is.
 type verdictSection struct {
 	verdict Verdict
-	title   string
+	// title and note are what the section prints when it is rendered UNDIVIDED,
+	// which for three of the four sections is always.
+	title string
 	// note is printed ONCE beneath the heading, for the whole section, rather
 	// than on every row. The removal recommendation is one statement about a
 	// group; repeating it per package would turn the advice into wallpaper the
 	// operator learns to skip (R3.7).
 	note        string
 	headerColor *color.Color
+	// split, where non-nil, is the pair of headings this section takes when a
+	// content check divided it in two. See splitHeadings.
+	split *splitHeadings
 }
+
+// splitHeadings is the two headings a section prints instead of its own when a
+// content check divided it: one over the packages the check cleared, one over the
+// rest (R3.1, R3.2).
+//
+// It hangs off verdictSection as a POINTER, and nil — every section but the
+// redundant one — means "this is never divided". The alternative was an
+// `if sec.verdict == VerdictRedundant` inside FormatReport's loop, and the comment
+// on verdictSections below argues against exactly that: what each section says and
+// when it says it is held as DATA precisely so that a section is described in one
+// place, rather than half here and half in a condition somewhere else. A section
+// that never splits then costs one nil field and no branch anyone has to remember.
+//
+// It carries WORDING only. Which package belongs to which group is
+// splitRedundantSection's, and this type could not answer it — which is what keeps
+// the arrangement of the report separate from the reading of the evidence.
+type splitHeadings struct {
+	// identicalTitle/identicalNote head the group the content check cleared. Once
+	// a section splits, this note is the only removal recommendation in the report.
+	identicalTitle, identicalNote string
+	// differingTitle/differingNote head the rest — the packages whose ebuilds
+	// differ AND the packages no check reached, which is why neither string may
+	// claim that all of them differ.
+	differingTitle, differingNote string
+}
+
+// The redundant section's three headings and four notes.
+//
+// They are constants rather than literals inside verdictSections because the
+// split prints two tables where the section used to print one, and each piece has
+// to be recognisable on its own: the removal recommendation is asserted ABSENT
+// from the group the content check did not clear, and a sentence that exists only
+// inline cannot be named by the test that checks it. Same reason
+// undeclaredDivergenceCaveat is a constant.
+const (
+	// redundantTitle heads the section when it is NOT divided — R3.4's case,
+	// which is every run without a local ::gentoo tree to read. It is
+	// byte-identical to what it has always printed: this story changes nothing
+	// about what such a run can know.
+	redundantTitle = "Redundant Packages (::gentoo ships the same or more)"
+
+	// The two halves of a divided section. Each says what the CONTENT CHECK found,
+	// because that is what puts a package under one heading rather than the other.
+	// The verdict cannot: it is the same for every row of both tables (R3.5).
+	redundantIdenticalTitle = "Redundant Packages — the content check cleared these (our ebuild is ::gentoo's, byte for byte)"
+	// True of a package that was never COMPARED as much as of one that differs,
+	// because both land in this group (splitRedundantSection says why). "did not
+	// clear these" covers both; "these differ" would be a false statement about
+	// every unchecked one, and the unchecked ones are the reason the wording is
+	// worth arguing about — the live section holds none today.
+	redundantDifferingTitle = "Redundant Packages — the content check did not clear these"
+)
+
+const (
+	// redundantRemovalAdvice is the removal recommendation itself, and the only
+	// place this report spells one. Both notes that carry it are BUILT from it, so
+	// the two cannot drift apart, and it can be asserted absent from the table it
+	// no longer covers — which is the entire point of the split.
+	redundantRemovalAdvice = "→ Recommendation: remove these from the overlay"
+
+	// redundantPruneAdvice names the command that acts on the recommendation
+	// (R3.3). It is appended to every note that carries one, because a
+	// recommendation the operator can only follow with `rm -r` is one they follow
+	// with `rm -r`.
+	//
+	// `overlay prune` is the right thing to point at because it reads MORE than
+	// this report did. The check behind these tables compared ONE file — the ebuild
+	// at the compared version (resolvePackagePaths) — while prune compares every
+	// version the two trees share plus the whole files/ tree, and refuses outright
+	// a package it could not compare. So the command the advice names is stricter
+	// than the advice, which is the only direction that is safe.
+	redundantPruneAdvice = "Nothing is deleted here: act on it with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+
+	// redundantIdenticalNote is the recommendation where the content supports it:
+	// the same advice as ever, now covering only the packages a byte comparison
+	// cleared.
+	redundantIdenticalNote = redundantRemovalAdvice +
+		" — at the compared version our ebuild is byte-identical to ::gentoo's, so this copy holds nothing of ours. " +
+		redundantPruneAdvice
+
+	// redundantUncheckedNote is R3.4's: the same recommendation, resting on the
+	// version alone, saying so. Before it existed, an API-only run's advice read
+	// exactly like advice the bytes had confirmed.
+	redundantUncheckedNote = redundantRemovalAdvice +
+		". No content was checked in this run — nothing compared our ebuilds against ::gentoo's, so this rests on the " +
+		"version alone and cannot say whether a copy holds work of ours. " +
+		redundantPruneAdvice
+
+	// redundantUncheckedCase is the half of the note below that speaks for a
+	// package no check reached. It is a constant of its own because the group holds
+	// both kinds and only this clause covers the second one: a note rewritten
+	// without it would assert a difference for every row beneath it, and the test
+	// that catches that names this string.
+	redundantUncheckedCase = "or nothing compared the two"
+
+	// redundantDifferingNote recommends no removal and states what is unresolved
+	// (R3.2). It carries no advice to remove anything — not even a negated one,
+	// which is the form a hurried reader turns back into permission — and it names
+	// both of the group's cases rather than the loud one only.
+	redundantDifferingNote = "→ No removal advice for these: ::gentoo ships the version, but the content check did not clear them — " +
+		"either our ebuild differs from ::gentoo's, " + redundantUncheckedCase +
+		". What is unresolved is whether this copy holds work of ours; only a diff settles it, and where the two " +
+		"differ the finding beneath the table says by how much."
+)
 
 // verdictSections fixes which sections exist and the order they print in.
 //
@@ -648,10 +948,21 @@ type verdictSection struct {
 // what it recommends and stops.
 var verdictSections = []verdictSection{
 	{
-		verdict:     VerdictRedundant,
-		title:       "Redundant Packages (::gentoo ships the same or more)",
-		note:        "→ Recommendation: remove these from the overlay. Nothing is deleted automatically — this is advice to act on.",
+		verdict: VerdictRedundant,
+		// The undivided pair is R3.4's: what the section prints when no content was
+		// checked, which is every API-only run.
+		title:       redundantTitle,
+		note:        redundantUncheckedNote,
 		headerColor: output.Warning,
+		// The only section a content check can divide, because it is the only one
+		// whose heading asks for anything. A recommendation is exactly what must
+		// not cover a package the evidence does not reach.
+		split: &splitHeadings{
+			identicalTitle: redundantIdenticalTitle,
+			identicalNote:  redundantIdenticalNote,
+			differingTitle: redundantDifferingTitle,
+			differingNote:  redundantDifferingNote,
+		},
 	},
 	{
 		verdict:     VerdictNeedsRebase,
@@ -669,6 +980,83 @@ var verdictSections = []verdictSection{
 		note:        "→ Nothing on record describes these packages, or the comparison failed — neither supports advice either way.",
 		headerColor: output.Dim,
 	},
+}
+
+// splitRedundantSection divides the redundant section into the packages a
+// content check cleared for removal and the packages it did not (R3.1, R3.2).
+// split is false when NO result in the section carries a verification, and the
+// caller then renders the section undivided, stating that no content was checked
+// (R3.4).
+//
+// It exists because the section as it stands cannot be acted on. Measured on the
+// live overlay: `overlay compare` recommends removing 74 packages and warns,
+// beneath that very table, that 8 of them differ from ::gentoo in content. The
+// recommendation never says which 8 to skip and the warning never says which 66
+// are safe, so an operator who follows the advice deletes work of ours and an
+// operator who heeds the warning follows none of the advice. Splitting the group
+// is what makes the removal recommendation cover only what was checked.
+//
+// It groups on Verified and on nothing else. Authorship is filled only where
+// Verified == VerifiedDiffers (AnnotateAuthorship, authorship.go), so every
+// identical result and every unchecked one carries the zero AuthorshipUnproved
+// and could not tell the two groups apart; and the two degrade TOGETHER — with no
+// provider.PackageDirProvider, Verified is NotVerified and Authorship is unproved
+// on every package at once, which is the API-provider case split reports.
+//
+// A package the check never reached joins DIFFERING, which is the one judgement
+// call the requirements leave open and is settled by what each heading says.
+// R3.1's group is the packages whose compared ebuilds ARE identical, under a
+// heading that recommends removal: a package nobody compared is not in that set,
+// and listing it there would have the report vouch for a check it never ran.
+// R3.2's group recommends nothing and states what is unresolved, which is exactly
+// true of a package no check reached. The costs are as asymmetric here as they are
+// in proveAuthorship: one package parked under "unresolved" costs a manual diff,
+// while one unchecked package under "safe to remove" advises deleting something
+// nobody looked at. It changes no live number today — all 74 redundant packages
+// are up-to-date at equal versions, so all 74 are checked, 66 identical and 8
+// differing — but a redundant package that is merely OUTDATED is never content-
+// compared (resolvePackagePaths refuses two different versions) and would land
+// here the moment one appears.
+//
+// The groups are BUILT rather than partitioned in place. results is the caller's
+// slice — FormatReport's own byVerdict entry — and an in-place partition would
+// rewrite its backing array, leaving the section holding one package twice and
+// missing another. A function that only groups must not be able to do that.
+//
+// It decides nothing (R3.5, inherited from 025 R4.5). Every Verdict is read and
+// none is written; the declaration in the registry and the version comparison
+// keep deciding, exactly as they do with this grouping absent.
+func splitRedundantSection(results []CompareResult) (identical, differing []CompareResult, split bool) {
+	// Whether to split at all is asked FIRST, over the whole section, because it
+	// is a question about the run rather than about any package: either the
+	// comparison had ::gentoo's files to read or it did not. Deriving it from the
+	// groups afterwards — "differing is empty, so nothing was checked" — would
+	// read an all-identical section as an unchecked one and drop the removal
+	// recommendation on 66 packages that had just been cleared.
+	for _, r := range results {
+		if r.Verified != NotVerified {
+			split = true
+			break
+		}
+	}
+	if !split {
+		// Both groups nil, and the caller has the whole section already. Returning
+		// the section in one of them would let a caller that ignored split render a
+		// heading — either heading — over packages nothing is known about.
+		return nil, nil, false
+	}
+
+	for _, r := range results {
+		if r.Verified == VerifiedIdentical {
+			identical = append(identical, r)
+			continue
+		}
+		differing = append(differing, r)
+	}
+	// Appending in results order preserves the category/package sort
+	// CompareWithProvider applied, so both tables read in the order the single
+	// table did.
+	return identical, differing, true
 }
 
 // FormatReport formats a comparison report for terminal output.
@@ -710,11 +1098,16 @@ func FormatReport(report *CompareReport) string {
 		results := byVerdict[sec.verdict]
 		// Whether it had rows or not, this verdict now has a section: dropping it
 		// from the map leaves behind exactly the verdicts that have none.
+		//
+		// It is dropped for a section rendered as TWO tables on exactly the same
+		// terms — the verdict has been printed, however many tables it took. Skipping
+		// the delete on that path would send all 74 redundant packages through the
+		// "unlisted" fallback below and print every one of them a second time.
 		delete(byVerdict, sec.verdict)
 		if len(results) == 0 {
 			continue
 		}
-		sb.WriteString(formatResultSection(results, sec.title, sec.note, sec.headerColor))
+		sb.WriteString(formatVerdictSection(sec, results))
 	}
 
 	// A verdict with no section above — reachable only if a fifth one is added
@@ -734,6 +1127,53 @@ func FormatReport(report *CompareReport) string {
 
 	sb.WriteString(formatStatusSummary(report.Results))
 
+	return sb.String()
+}
+
+// formatVerdictSection renders one verdict's results: two tables where a content
+// check divided the section, one table where it did not.
+//
+// The division is what makes the redundant section ACTIONABLE. Measured on the
+// live overlay, the one table it used to print recommended removing 74 packages
+// and then warned, beneath itself, that 8 of them differ from ::gentoo in content
+// — two true sentences the operator could act on neither of, because neither said
+// which 8. Rendered as two tables, the recommendation covers the 66 the bytes
+// cleared and the other 8 stand under a heading that recommends nothing.
+//
+// EVERY package the section held is still printed (R3.5): the split moves rows
+// between tables and removes none, and nothing here reads or writes a Verdict.
+//
+// Both tables keep the SECTION's colour. A second colour would read as a second
+// verdict, and there is only one: every row of both tables is `redundant`, which
+// is exactly what the two notes are there to qualify.
+func formatVerdictSection(sec verdictSection, results []CompareResult) string {
+	if sec.split == nil {
+		return formatResultSection(results, sec.title, sec.note, sec.headerColor)
+	}
+
+	identical, differing, split := splitRedundantSection(results)
+	if !split {
+		// R3.4: nothing was compared, so there is nothing to divide the section by,
+		// and sec.note is the one that says so. Dividing it anyway would print
+		// "the content check cleared these" over packages nobody opened.
+		return formatResultSection(results, sec.title, sec.note, sec.headerColor)
+	}
+
+	var sb strings.Builder
+	// The cleared group first, for the reason the redundant section itself comes
+	// first: it is the one asking the operator to do something.
+	//
+	// An EMPTY group prints nothing at all, on the same terms as a verdict no
+	// package carries. That is what makes an all-differing section print no removal
+	// recommendation anywhere in the report, rather than a recommendation over an
+	// empty table — and each table sizes its own columns (calculateColumnWidths is
+	// per-section), so neither is padded to the other's widest package name.
+	if len(identical) > 0 {
+		sb.WriteString(formatResultSection(identical, sec.split.identicalTitle, sec.split.identicalNote, sec.headerColor))
+	}
+	if len(differing) > 0 {
+		sb.WriteString(formatResultSection(differing, sec.split.differingTitle, sec.split.differingNote, sec.headerColor))
+	}
 	return sb.String()
 }
 
@@ -832,18 +1272,64 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 // real sentence, narrow enough to leave the line readable beside the table.
 const patchedReasonCap = 72
 
+// isUndeclaredDivergence reports whether a result is the finding this report
+// calls an undeclared divergence: the two ebuilds differ and no registry entry
+// says why.
+//
+// It is ONE predicate in ONE place because two things ask it — the two loud arms
+// of formatVerificationFindings below, and AnnotateReviews (review.go), which
+// submits exactly this set to the model (R5.1). Spelled twice, they would be two
+// things to keep in step, and the one that drifted would either ask a model
+// about a package the report never warned about or print commentary under a
+// finding that does not exist.
+//
+// It reads neither DiffAdded nor DiffRemoved, and must not: the size of a
+// difference decides nothing (R1.3, compare_diff_counts_fence_test.go).
+func isUndeclaredDivergence(r CompareResult) bool {
+	return r.Verified == VerifiedDiffers && !r.Patched
+}
+
+// undeclaredDivergenceCaveat is the sentence formatVerificationFindings prints
+// once beneath a section that reported at least one UNPROVED undeclared
+// divergence. It is a package-level constant so a test can assert on it without
+// copying the wording.
+const undeclaredDivergenceCaveat = "  ↳ a difference is not proof of authorship: ::gentoo also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring."
+
+// The two openings a model's reading is printed under, indented beneath the
+// finding they qualify.
+//
+// Both SAY WHOSE WORDS FOLLOW, and that is the whole reason they are worded at
+// all. Everything else in this report is something the tool established: two
+// files compared byte for byte, a registry entry consulted, a filename stat'ed.
+// What comes after these two openings is a guess by a language model. An
+// operator who cannot tell the two apart will act on the wrong one — and the
+// line that invites an action, "declare this patched", is the guess.
+//
+// They are constants so a test can name them without copying the wording, on the
+// same argument that made undeclaredDivergenceCaveat one.
+const (
+	reviewReadingLead  = "  ↳ model reading, not a finding of this report: "
+	reviewProposalLead = "  ↳ proposed declaration, nothing here writes it — apply it yourself: "
+)
+
 // formatVerificationFindings renders one line per verification finding, beneath
 // the section's table.
 //
-// A finding is DERIVED from the two fields that already carry the facts —
-// Verified (what the two ebuilds' bytes say) and Patched (what the registry
-// says) — instead of being stored on CompareResult. There is therefore no third
-// copy that can disagree with the two, and no state to keep in step.
+// A finding is DERIVED from the fields that already carry the facts — Verified
+// (what the two ebuilds' bytes say), Patched (what the registry says) and
+// Authorship (what the overlay's files/ tree proves) — instead of being stored
+// on CompareResult. There is therefore no further copy that can disagree with
+// them, and no state to keep in step.
 //
 // Only two of the four verification combinations say anything (R4.2, R4.3). The
 // other two are silent on purpose: a divergence that is both real and declared
 // is the system working, and a redundancy confirmed by identical bytes is a
 // Verdict that has simply been checked rather than a problem.
+//
+// The loud one of the two then splits on Authorship (R2.2, R2.3). It is one
+// finding with two things to say: the content either proved the difference
+// originates here — in which case the line names the file that proves it — or it
+// did not, which is not a finding about ::gentoo.
 //
 // A THIRD case (R3.8) renders the declaration itself, and it is what makes a
 // patched package visible at all. Verification needs a local copy of the
@@ -852,14 +1338,24 @@ const patchedReasonCap = 72
 // unpatched one — same Verdict "keep", no column, no line — and the operator was
 // back to answering "does this carry changes of our own?" from memory.
 //
-// The case ORDER is the whole mechanism: "stale" is tested first, so a
-// declaration already known to be obsolete keeps its warning and is not also
-// restated as fact one line below.
+// The case ORDER is the whole mechanism, twice over. "stale" is tested first, so
+// a declaration already known to be obsolete keeps its warning and is not also
+// restated as fact one line below. And the PROVED undeclared case is tested
+// before the unproved one, which is only a narrowing of it: a package whose
+// authorship the content settled must not fall through to the sentence that says
+// nobody knows.
 //
 // Nothing here can change a Verdict (R4.5) — it renders a finished CompareResult
 // into a string.
 func formatVerificationFindings(results []CompareResult) string {
 	var sb strings.Builder
+	// Counted so the caveat below can print once for the whole section, on the
+	// same argument that keeps the removal recommendation out of every row: a
+	// sentence repeated eight times is a sentence nobody reads the ninth time.
+	//
+	// UNPROVED findings, not undeclared ones. The caveat exists to qualify an
+	// ambiguity, and a proved divergence no longer has one.
+	unproved := 0
 
 	for _, r := range results {
 		switch {
@@ -870,13 +1366,48 @@ func formatVerificationFindings(results []CompareResult) string {
 			sb.WriteString(output.Sprintf(output.Warning,
 				"⚠ %s/%s: stale declaration — %s declares a divergence, but the two %s ebuilds are byte-identical\n",
 				r.Category, r.Package, declaringEntry(r), r.LocalVersion))
-		case r.Verified == VerifiedDiffers && !r.Patched:
+		case isUndeclaredDivergence(r) && r.Authorship == AuthorshipOverlay:
+			// R2.2: the same finding as below, except that the overlay's own
+			// content settled the question the two ebuilds could not. Our ebuild
+			// references a file ::gentoo does not ship for this package, and a
+			// reference to a file upstream never had cannot have been inherited
+			// from upstream.
+			//
+			// The line therefore STATES the proof rather than decorating the
+			// warning with a filename. It says what removal would cost — this is
+			// the package `prune` is about to offer to delete — and it names the
+			// file, package-relative and verbatim, so the claim is confirmed with
+			// one `ls` instead of a re-derivation of what ${FILESDIR} expands to.
+			//
+			// ProvedBy comes from ebuild TEXT, so it is passed as an ARGUMENT and
+			// never as a format string, exactly like every other piece of text this
+			// report prints. It is NOT counted below: nothing here is ambiguous.
+			sb.WriteString(output.Sprintf(output.Warning,
+				"⚠ %s/%s: undeclared divergence (+%d/-%d), proved ours — our %s ebuild references %s, which ::gentoo does not ship, so removing this package would discard work of our own that no entry declares\n",
+				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion, r.ProvedBy))
+			// The model's reading of this same difference, beneath the finding it is
+			// about (R5.2-R5.4). It renders nothing when no review ran, which is
+			// every run without one.
+			sb.WriteString(reviewCommentary(r))
+		case isUndeclaredDivergence(r):
 			// R4.3: the loud case. Nothing declares this package, so it is about
 			// to be reported as a removal candidate — and its ebuild is not the
 			// one ::gentoo ships.
+			//
+			// The line carries the SIZE of the difference and stops there. Nothing
+			// in the content proved whose change it is — which is not a finding
+			// that the change is ::gentoo's (R2.3) — and the sentence beneath the
+			// section says so once rather than hedging on every row.
+			unproved++
 			sb.WriteString(output.Sprintf(output.Warning,
-				"⚠ %s/%s: undeclared divergence — our %s ebuild differs from ::gentoo's, yet no entry declares why\n",
-				r.Category, r.Package, r.LocalVersion))
+				"⚠ %s/%s: undeclared divergence (+%d/-%d) — our %s ebuild differs from ::gentoo's, and no entry declares why\n",
+				r.Category, r.Package, r.DiffAdded, r.DiffRemoved, r.LocalVersion))
+			// The reading is printed here for the same reason the caveat is printed
+			// below: this is the ambiguous finding, and a model's guess at the
+			// direction is exactly what the operator has otherwise to establish by
+			// hand. It qualifies the ambiguity — it does not resolve it, which is
+			// why the caveat still prints beneath the section.
+			sb.WriteString(reviewCommentary(r))
 		case r.Patched:
 			// R3.8: the declaration, stated wherever it has not already been
 			// contradicted above. This is the common case in practice — every
@@ -890,6 +1421,35 @@ func formatVerificationFindings(results []CompareResult) string {
 				"· %s/%s: patched — declared by %s%s\n",
 				r.Category, r.Package, declaringEntry(r), declaredReason(r)))
 		}
+	}
+
+	// The caveat the counts above cannot state on their own, printed once and
+	// only where it applies.
+	//
+	// "Our ebuild differs" is symmetric and the report reads it as an accusation:
+	// the operator changed something and failed to declare it. That is only half
+	// the truth. ::gentoo revises ebuilds IN PLACE — a fix landing under the same
+	// version, with no revbump — so a copy taken last week can differ today
+	// without anyone here having touched it, and the version comparison, which
+	// sees two equal version strings, cannot notice. Direction is not recoverable
+	// from two files; it needs history, which this check does not have.
+	//
+	// So the report says what it knows and names the ambiguity instead of picking
+	// a side. Declaring `patched` on a package that is merely stale would record a
+	// divergence that does not exist and suppress its removal recommendation
+	// permanently — the failure this sentence is here to prevent.
+	//
+	// Where the content PROVED authorship there is no such ambiguity, and the
+	// caveat is then false about the very finding it sits under: a report that
+	// qualifies what it has established teaches the operator to discount both. A
+	// section whose divergences are all proved therefore prints no caveat — but
+	// one unproved finding among them is enough to keep it, because a proof about
+	// one package says nothing about the next. On the live overlay the section
+	// holds three proved and five unproved, so it still prints.
+	if unproved > 0 {
+		// Passed as an ARGUMENT, never as a format string, like every other piece
+		// of text this report prints.
+		sb.WriteString(output.Sprintf(output.Warning, "%s\n", undeclaredDivergenceCaveat))
 	}
 
 	return sb.String()
@@ -923,6 +1483,101 @@ func declaringEntry(r CompareResult) string {
 		return r.PatchedBy
 	}
 	return r.Category + "/" + r.Package
+}
+
+// reviewCommentary renders a model's reading of one finding — where the
+// difference came from (R5.2), what it does (R5.3), and, only where it is ours,
+// the `patched` text that would declare it (R5.4). It returns "" when there is
+// nothing to print, which is every run no review reached.
+//
+// EVERY MODEL-PRODUCED STRING IS AN ARGUMENT and never a format string, exactly
+// like ProvedBy, PatchedReason and every other piece of text this report prints.
+// It reaches a terminal and nothing else: no shell, no command, no file.
+//
+// It writes NO FILE. R5.4 proposes; the operator applies. The overlay repository
+// auto-commits and pushes within minutes, so a declaration this program wrote
+// would be published before anyone could read it.
+//
+// Nothing here can change a Verdict, a count or which table a package sits in
+// (R5.8): it turns one finished CompareResult into a string, and the string is
+// two lines the report would otherwise not have printed.
+func reviewCommentary(r CompareResult) string {
+	note := r.Review
+	// The same judgement the annotator applies (reviewNoteSpeaks, review.go), held
+	// on this side too: a note missing its classification or its summary has
+	// answered neither R5.2 nor R5.3, and a finding-shaped line stating nothing is
+	// worse than no line. A note that arrived by some other route — a hand-edited
+	// cache, a later caller — is refused here on the same terms.
+	prose := reviewOriginProse(note.Origin)
+	if !reviewNoteSpeaks(note) || prose == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(output.Sprintf(output.Dim, "%s%s — %s\n", reviewReadingLead, prose, oneLine(note.Summary)))
+
+	// R5.4 attaches a proposal to ONE classification. `both` is deliberately not
+	// it: a copy that carries work of ours AND has fallen behind ::gentoo needs the
+	// rebase first, and declaring `patched` on it would record the whole difference
+	// as intentional, permanently suppressing the recommendation for the half that
+	// is merely stale. ReviewNote.Declaration already says it is empty unless the
+	// origin is the overlay; this refuses to print one regardless, so a model that
+	// fills the field in anyway cannot get it onto the line.
+	if note.Origin != OriginOverlay {
+		return sb.String()
+	}
+	declaration := truncateString(oneLine(note.Declaration), patchedReasonCap)
+	if declaration == "" {
+		// An overlay-origin note with nothing to propose. The reading above still
+		// stands; an empty proposal line would read as a truncation bug.
+		return sb.String()
+	}
+	// Capped by the SAME mechanism as the operator's own declared reason
+	// (declaredReason, one function up), not by a second one: an unbounded
+	// proposal would let a model's essay decide the width of the whole report.
+	sb.WriteString(output.Sprintf(output.Dim, "%s%s\n", reviewProposalLead, declaration))
+
+	return sb.String()
+}
+
+// reviewOriginProse is the report's sentence for a classification, or "" for one
+// that says nothing.
+//
+// It is built HERE rather than by ReviewOrigin.String() because the two serve
+// different readers. The four words String() returns — unknown, overlay,
+// upstream, both — are this feature's wire and storage vocabulary: the cache
+// persists one with no expiry, and the CLI adapter decodes one from the model's
+// reply. Changing them would change what every note already on disk means.
+// "::gentoo" is what an operator calls upstream, and it appears in no stored
+// file.
+func reviewOriginProse(o ReviewOrigin) string {
+	switch o {
+	case OriginOverlay:
+		return "originates in the overlay"
+	case OriginUpstream:
+		return "originates in ::gentoo"
+	case OriginBoth:
+		return "originates on both sides"
+	default:
+		// OriginUnknown, and any value a later constant adds without a sentence
+		// here. Both mean the report has nothing to say, and reviewCommentary
+		// prints nothing rather than a line about an origin nobody defined.
+		return ""
+	}
+}
+
+// oneLine collapses every run of whitespace into a single space, so a model's
+// prose occupies exactly the one line the report gave it.
+//
+// This is not cosmetic. The report's STRUCTURE is its lines — "⚠ " opens a
+// finding this tool stands behind — so a summary carrying a newline would print
+// a second line indistinguishable from one, about a package that need not even
+// exist. Model output reaches a terminal, and the terminal reads lines.
+//
+// strings.Fields splits on every kind of whitespace, which is what makes a
+// carriage return and a tab as harmless as a newline.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // columnWidths holds the calculated column widths for table formatting.

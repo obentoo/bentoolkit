@@ -7,6 +7,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`overlay prune --include-patched` no longer discards work the content proves
+  is ours.** The flag says "I accept discarding local work". It cannot mean that
+  about work the report has just named the file for: a patch our ebuild applies
+  and ::gentoo does not ship for that package exists in no other tree, so
+  ::gentoo cannot restore it — it never had it. Such a package is now refused
+  outright, and the refusal names the proving file.
+
+  Measured on the live overlay, plan only: the removal set goes from 74 packages
+  to 71. The three that leave it are `net-libs/nodejs`, `kde-plasma/spectacle`
+  and `kde-plasma/kdeplasma-addons`; nothing joins it. The identical batch — 66
+  packages, the safe-removal path — is byte-identical before and after, and the
+  five unproved divergences keep their class, reason and inventory exactly.
+
+  The planner asks the authorship question itself rather than expecting the
+  answer on its input. `overlay compare` annotates its finished report, but
+  `overlay prune` calls the comparison and nothing else, so every result
+  arriving at the planner carried "unproved" — and all three proved packages
+  were being planned for removal under the flag. It calls the same function the
+  compare path calls: two notions of what proves authorship would let `compare`
+  name a file as ours while `prune` deleted it.
+
+  The refusal requires a divergence, which is load-bearing rather than
+  defensive. An identical package holds nothing to attribute, and a stale
+  `${FILESDIR}` reference in an ebuild both trees share would otherwise refuse
+  it — 66 of the 74 packages the plan would remove are in that batch, so a
+  refusal leaking there stops `prune` removing anything at all.
+
+### Added
+- **A divergence is now reported as proved ours where the content proves it, and
+  the file that proves it is named.** Two ebuilds are symmetric and say nothing
+  about who caused a difference; the `files/` tree beside them sometimes does.
+  An ebuild referencing a `${FILESDIR}` file ::gentoo does not ship carries
+  something upstream never had.
+
+  Measured on the live overlay — 318 packages scanned, 8 verified as differing —
+  `net-libs/nodejs`, `kde-plasma/spectacle` and `kde-plasma/kdeplasma-addons`
+  come back proved, each naming its patch; the five remaining `+1/-1` packages
+  stay unproved. `nodejs` is the case that justifies checking each filename
+  rather than asking whether upstream ships *a* paxmarking patch: ::gentoo has
+  them for 20.6.0, 22.12.0 and 24.1.0, but not for 26.5.1.
+
+  Unproved is never a finding that the change is ::gentoo's, only that the
+  report cannot tell — so the section caveat now prints only where an unproved
+  finding exists. A caveat printed over a divergence the content settled is
+  false about the finding it sits under, and teaches the operator to discount
+  both.
+
+  The resolver refuses what it cannot resolve rather than guessing. Globs and
+  brace expansions name a set, `..` escapes leave the directory, unknown
+  variables need the ebuild's environment, and a commented-out reference is not
+  a reference. Each of those, taken literally, is a filename no repository has —
+  and the miss would be reported as proof. Likewise only a genuine "does not
+  exist" counts as absence: reading a permission error as "upstream lacks it"
+  would manufacture a proof out of a failure to look.
+
+- **The redundant section separates what is safe to remove from what is not.**
+  It recommended removing 74 packages and warned, beneath the table, that 8 of
+  them differ in content. Both statements were true and neither was actionable:
+  the recommendation did not say which 8 to skip, so following it discarded work
+  and doubting it discarded the advice.
+
+  It now renders as two tables — 66 packages under the recommendation and 8
+  under a heading that recommends nothing and says what is unresolved. The
+  cleared group states its evidence and names `bentoo overlay prune` as the
+  command that acts on it safely, saying what that command decides on: every
+  version the two trees share plus the whole `files/` tree, never the verdict
+  alone. Without a content check the section stays one undivided table and says
+  that nothing was checked.
+
+  A package no content check reached joins the second group, never the first:
+  listing an unchecked package under a removal recommendation has the report
+  vouch for a check that never ran.
+
+- **The summary says which packages the verdict counts are counted over.** It
+  reported 231 `keep` against 155 `keep` rows on screen and explained neither. A
+  count larger than what is printed reads as a defect unless the report states
+  its universe, so the operator either distrusts the number or hunts for missing
+  rows. The summary now states that the counts cover every scanned package and
+  how many have no row in any table, as a relation that can be checked against
+  the tables above it. The three pre-existing summary lines are untouched.
+
+- **A model now explains each undeclared divergence, without being allowed to
+  decide anything.** The report could say a divergence exists and how large it
+  is, but not what it *does* — and "read both ebuilds yourself" is the work the
+  report exists to avoid. A local model (the `claude` CLI, on your own
+  subscription) reads the two ebuilds and prints, beneath the finding, which side
+  the difference came from and a one-line summary of what it does. Where it
+  reads the divergence as ours, it also proposes the text for a `patched`
+  declaration. Nothing writes it: the proposal is text on a terminal, and
+  applying it stays a decision you make.
+
+  Measured on the live overlay: 10 undeclared divergences, 10 notes — 4 read as
+  ::gentoo's, 3 as ours, 3 as both sides having moved.
+
+  That the model is commentary rather than a verdict is not a disclaimer, it is
+  observable. It reads `spectacle`, `binutils` and `binutils-libs` as ours; the
+  content proof from the `files/` tree names `spectacle`, `nodejs` and
+  `kdeplasma-addons`. The two agree on exactly one package out of six. Had the
+  classification been wired to a decision, it would have moved `nodejs` — 622
+  added lines of slotting work — out of the proved group on nothing but a
+  reading, and moved two packages into it that no file proves. So it annotates
+  and the report decides, and that separation is now an executed test rather
+  than an intention: the same fixture rendered with and without a reviewer
+  yields byte-identical tables, verdict counters and removal recommendations,
+  with the difference confined to commentary lines. Five deliberate mutations
+  confirm the test bites, including one — a counter moved by the review pass —
+  that the rendered output alone cannot see, because the summary counts are
+  printed outside the report.
+
+  Every failure costs nothing. No CLI, `--no-review`, an error, a timeout or
+  unparseable output all reach the same nil-reviewer path and print exactly
+  today's report, with at most one warning. `--no-review` contacts no model at
+  all — measured at 0.08s against 43s for the reviewed run. Classifications are
+  cached under the two ebuilds' content hashes with no expiry, because the key
+  *is* the content: when either file changes the key changes and the old entry
+  becomes unreachable, so an expiry could only discard a still-correct answer.
+
+  `internal/overlay` still imports no `internal/autoupdate` symbol. The package
+  declares its own narrow `DivergenceReviewer` interface and `cmd/bentoo` builds
+  the adapter over the CLI client — the one new import edge, in the one place
+  that already imports both halves. Model-produced text is passed as an argument
+  everywhere it is printed, never as a format string.
+
+### Changed
+- **An undeclared divergence now says how large it is, and stops implying who
+  caused it.** The finding read `our 6.7.4 ebuild differs from ::gentoo's, yet no
+  entry declares why` — symmetric in fact, an accusation in effect. It is only
+  half the truth: ::gentoo revises ebuilds *in place*, under the same version and
+  with no revbump, so a copy taken last week can differ today without anyone here
+  having touched it. The version comparison sees two equal version strings and
+  cannot notice, and direction is not recoverable from two files.
+
+  Measured on the live overlay, the eight findings were not one thing but two.
+  Four were a single line — `PYTHON_COMPAT` revised upstream on `breeze-gtk`,
+  `drkonqi`, `kwin` and `plasma-firewall` — where our copy had simply fallen
+  behind. One was `net-libs/nodejs`, hundreds of lines of slotting work of our
+  own. Both printed the identical sentence.
+
+  Each finding now carries the size of the difference — `undeclared divergence
+  (+1/-1)` against `(+622/-254)` — which separates the two at a glance, and the
+  section prints one caveat naming the ambiguity the counts cannot resolve. The
+  failure this prevents is declaring `patched` on a package that carries nothing
+  of ours: a declaration is what suppresses a removal recommendation permanently,
+  so a false one is not a harmless note.
+
+  The counts come from `udiff.Lines`, already this repository's diff — no new
+  dependency, and no second notion of what a line difference is. They match
+  `diff`'s orientation but not always its magnitude: `lcs.DiffLines` stops
+  searching for a minimal edit script after 100 diffs, so a large divergence
+  reports a larger count than GNU diff would. That is acceptable for a number
+  whose only question is "one line, or hundreds?", and nothing downstream
+  computes on it. No verdict changed, and no removal criterion moved.
+
 ## [0.21.0] - 2026-08-07
 
 ### Added

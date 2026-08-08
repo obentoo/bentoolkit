@@ -92,13 +92,19 @@ func TestFormatReportVerdict(t *testing.T) {
 			"binutils": "unknown",
 		}
 		for pkg, word := range wantVerdictWord {
-			line := lineContaining(low, pkg)
-			if line == "" {
-				t.Errorf("no row for %s in the report.\n--- report ---\n%s", pkg, out)
+			// The package's TABLE ROW, not the first line mentioning its name.
+			// The two were the same thing until the report's prose grew: a note
+			// saying a copy holds "work of ours" is the first line containing
+			// "ours", and this assertion then read a sentence and demanded a
+			// verdict of it. tableRows matches the first column of a row, so it
+			// cannot pick up prose, a finding, or a longer package name.
+			rows := tableRows(low, pkg)
+			if len(rows) != 1 {
+				t.Errorf("the report holds %d table rows for %s, want exactly 1.\n--- report ---\n%s", len(rows), pkg, out)
 				continue
 			}
-			if !strings.Contains(line, word) {
-				t.Errorf("row for %s reads %q; it must state the verdict %q", pkg, strings.TrimSpace(line), word)
+			if !strings.Contains(rows[0], word) {
+				t.Errorf("row for %s reads %q; it must state the verdict %q", pkg, strings.TrimSpace(rows[0]), word)
 			}
 		}
 	})
@@ -120,11 +126,15 @@ func TestFormatReportVerdict(t *testing.T) {
 		}
 		positions := make(map[Verdict][]int)
 		for _, o := range order {
-			idx := strings.Index(low, o.pkg)
-			if idx < 0 {
-				t.Fatalf("no row for %s in the report.\n--- report ---\n%s", o.pkg, out)
+			// Positioned by the package's ROW, for the reason given above: the
+			// first occurrence of a package's NAME can now be a sentence in
+			// another section's note, and a span measured from that would report
+			// a grouping failure that the table does not have.
+			rows := tableRows(low, o.pkg)
+			if len(rows) != 1 {
+				t.Fatalf("the report holds %d table rows for %s, want exactly 1.\n--- report ---\n%s", len(rows), o.pkg, out)
 			}
-			positions[o.verdict] = append(positions[o.verdict], idx)
+			positions[o.verdict] = append(positions[o.verdict], strings.Index(low, rows[0]))
 		}
 		// A group is contiguous when no OTHER verdict's row sits between its
 		// first and last row.
@@ -180,12 +190,9 @@ func TestFormatReportVerdict(t *testing.T) {
 	})
 }
 
-// lineContaining returns the first line of s that contains sub, or "".
-func lineContaining(s, sub string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if strings.Contains(line, sub) {
-			return line
-		}
-	}
-	return ""
-}
+// lineContaining is deliberately GONE. It returned the first line of the report
+// containing a package's name, which stopped being that package's row the moment
+// a section note contained an ordinary English word that is also a fixture's
+// package name ("...whether a copy holds work of ours" and app-misc/ours). Both
+// callers now use tableRows (compare_redundant_split_test.go), which matches the
+// first column of a table row and therefore cannot match prose.
