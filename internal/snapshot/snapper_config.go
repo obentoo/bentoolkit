@@ -35,11 +35,14 @@ import (
 // has to deal with a leftover one.
 const snapshotsDirName = ".snapshots"
 
-// statPath and readDirPath are the filesystem seams used to classify a leftover
-// .snapshots. They are package vars (the lookPath/warnLogf seam pattern) so
-// tests decide what exists rather than inheriting the developer's filesystem: a real
+// statPath, readDirPath, removePath and readFilePath are the filesystem seams
+// used to classify a leftover .snapshots and to decide whether removing it is
+// safe. They are package vars (the lookPath/warnLogf seam pattern) so tests
+// decide what exists rather than inheriting the developer's filesystem: a real
 // /home/.snapshots on the host would otherwise turn the "leftover" case into
-// the "nothing there" one and assert nothing.
+// the "nothing there" one and assert nothing, and the developer's own
+// /proc/self/mounts — read through readFilePath — would decide the outcome of
+// the mount-point guard.
 var (
 	statPath     = os.Stat
 	readDirPath  = os.ReadDir
@@ -251,9 +254,9 @@ func clearEmptySnapshotsDir(ctx context.Context, run Runner, dir, subvolume stri
 	if table, declared := declaredMountpoint(dir); declared {
 		return fmt.Errorf("%s is a mount point (named in %s) but no snapper config covers %s: "+
 			"refusing to remove it — it reads as empty while unmounted, and removing it breaks "+
-			"the mount; either unmount it and drop its /etc/fstab entry so snapper can create "+
-			"its own %s, or leave the mount in place and manage this subvolume with "+
-			"`snapper -c %s ...` by hand",
+			"the mount; either unmount it and drop the /etc/fstab entry if it has one, so "+
+			"snapper can create its own %s, or leave the mount in place and manage this "+
+			"subvolume with `snapper -c %s ...` by hand",
 			dir, table, subvolume, snapshotsDirName, snapperConfigName(subvolume))
 	}
 	if _, err := run.Run(ctx, "btrfs", []string{"subvolume", "delete", dir}, nil); err == nil {
