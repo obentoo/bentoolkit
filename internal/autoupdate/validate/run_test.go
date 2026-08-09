@@ -57,6 +57,21 @@ func onlyResult(t *testing.T, r Report) EbuildResult {
 	return r.Results[0]
 }
 
+// gateOf returns the named gate's result, failing when the run never reported
+// it. Absence is a failure and not a zero value on purpose: a gate that produced
+// no GateResult at all has said nothing, and reading that as an empty outcome is
+// the "clean report that means we did not look" this story removes.
+func gateOf(t *testing.T, res EbuildResult, name string) GateResult {
+	t.Helper()
+	for _, gate := range res.Gates {
+		if gate.Gate == name {
+			return gate
+		}
+	}
+	t.Fatalf("%s-%s reports no %q gate: %+v", res.Package, res.Version, name, res.Gates)
+	return GateResult{}
+}
+
 // TestRun_AbsentDistdirSkipsWithAReason is R4.1 at the coarsest level: with no
 // distdir at all, nothing can be read, and every ebuild says so.
 func TestRun_AbsentDistdirSkipsWithAReason(t *testing.T) {
@@ -70,10 +85,11 @@ func TestRun_AbsentDistdirSkipsWithAReason(t *testing.T) {
 	}
 
 	res := onlyResult(t, got)
-	if res.Options != "SKIPPED" {
-		t.Errorf("Options outcome: got %q, want SKIPPED", res.Options)
+	options := gateOf(t, res, GateOptions)
+	if options.Outcome != OutcomeSkipped {
+		t.Errorf("options gate outcome: got %q, want SKIPPED", options.Outcome)
 	}
-	if res.Reason == "" {
+	if options.Reason == "" {
 		t.Error("SKIPPED with no reason — the operator cannot tell this from a pass")
 	}
 }
@@ -90,11 +106,12 @@ func TestRun_AbsentDistfileNamesIt(t *testing.T) {
 	}
 
 	res := onlyResult(t, got)
-	if res.Options != "SKIPPED" {
-		t.Fatalf("Options outcome: got %q, want SKIPPED", res.Options)
+	options := gateOf(t, res, GateOptions)
+	if options.Outcome != OutcomeSkipped {
+		t.Fatalf("options gate outcome: got %q, want SKIPPED", options.Outcome)
 	}
-	if !strings.Contains(res.Reason, distfile) {
-		t.Errorf("reason %q does not name the absent distfile %q", res.Reason, distfile)
+	if !strings.Contains(options.Reason, distfile) {
+		t.Errorf("reason %q does not name the absent distfile %q", options.Reason, distfile)
 	}
 }
 
@@ -114,10 +131,11 @@ func TestRun_NonMesonBuildSystemNamesIt(t *testing.T) {
 	}
 
 	res := onlyResult(t, got)
-	if res.Options != "SKIPPED" {
-		t.Fatalf("Options outcome: got %q, want SKIPPED", res.Options)
+	options := gateOf(t, res, GateOptions)
+	if options.Outcome != OutcomeSkipped {
+		t.Fatalf("options gate outcome: got %q, want SKIPPED", options.Outcome)
 	}
-	if res.Reason == "" {
+	if options.Reason == "" {
 		t.Fatal("SKIPPED with no reason")
 	}
 }
@@ -141,8 +159,9 @@ func TestRun_UnreadableEbuildSkipsWithTheReadError(t *testing.T) {
 	}
 
 	res := onlyResult(t, got)
-	if res.Options != "SKIPPED" || res.Reason == "" {
-		t.Errorf("got outcome %q reason %q, want SKIPPED with a reason", res.Options, res.Reason)
+	options := gateOf(t, res, GateOptions)
+	if options.Outcome != OutcomeSkipped || options.Reason == "" {
+		t.Errorf("got outcome %q reason %q, want SKIPPED with a reason", options.Outcome, options.Reason)
 	}
 }
 

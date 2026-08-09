@@ -68,8 +68,8 @@ pre-existing QA findings unrelated to any bump, and letting them decide the
 status would fail the whole tree and reduce this command to noise.
 
 Exit codes:
-  0  every option-gate outcome was PASS or SKIPPED
-  1  at least one option-gate finding of severity error
+  0  every gate outcome was PASS or SKIPPED
+  1  at least one finding of severity error, from any gate but pkgcheck's
   2  the selector names something the overlay does not hold
 
 Examples:
@@ -209,24 +209,38 @@ func renderValidateText(report validate.Report) {
 
 	var failed, passed, skipped, qaFindings int
 	for _, res := range report.Results {
-		switch res.Options {
+		// One column, five gates: the headline is the WORST of them, so a
+		// configure failure can never hide behind an option-gate pass. The
+		// per-gate outcomes follow on the same line, because R4.4 asks for each
+		// gate's own answer and not just the summary of them.
+		worst := res.WorstOutcome()
+		switch worst {
 		case validate.OutcomeFailed:
 			failed++
 		case validate.OutcomePass:
 			passed++
-		case validate.OutcomeSkipped:
+		default:
+			// SKIPPED, and anything nobody set. Counting the leftovers here is
+			// what keeps the three tallies summing to the number of ebuilds.
 			skipped++
 		}
 
-		outcomeColor(res.Options).Printf("  %-14s", string(res.Options))
+		outcomeColor(worst).Printf("  %-14s", string(worst))
 		output.Package.Printf("%s-%s", res.Package, res.Version)
-		if res.QA != "" {
-			output.Dim.Printf("   qa=%s", string(res.QA))
+		if summary := gateSummary(res.Gates); summary != "" {
+			output.Dim.Printf("   %s", summary)
 		}
 		fmt.Println()
 
-		if res.Reason != "" {
-			output.Dim.Printf("      reason: %s\n", res.Reason)
+		// Every gate names its OWN reason, prefixed by the gate it belongs to
+		// (R4.4, R5.3). One shared reason line is what this replaces, and it was
+		// wrong in the ordinary case: an option gate skipping for a missing
+		// distfile and a QA gate skipping for a missing pkgcheck are two facts,
+		// and the operator has to act on a different one of them each time.
+		for _, gate := range res.Gates {
+			if gate.Reason != "" {
+				output.Dim.Printf("      %s: %s\n", gate.Gate, gate.Reason)
+			}
 		}
 
 		// info findings are counted here and printed in full only by --json.
@@ -242,20 +256,23 @@ func renderValidateText(report validate.Report) {
 		// written in full by --json. This is a rendering choice about the human
 		// surface, not a filter on what the gate reports.
 		var infos int
-		for _, f := range res.Findings {
-			if f.Gate == validate.GateQA {
-				qaFindings++
+		for _, gate := range res.Gates {
+			for _, f := range gate.Findings {
+				if f.Gate == validate.GateQA {
+					qaFindings++
+				}
+				// Only the OPTION gate's infos are collapsed into the count,
+				// since that is what the line below describes. pkgcheck findings
+				// are also carried at info — its records have no level at all —
+				// and folding them in here would make the number claim
+				// something it is not.
+				if f.Gate == validate.GateOptions && f.Severity == validate.SeverityInfo {
+					infos++
+					continue
+				}
+				severityColor(f.Severity).Printf("      %-8s", string(f.Severity))
+				fmt.Println(f.Detail)
 			}
-			// Only the OPTION gate's infos are collapsed into the count, since
-			// that is what the line below describes. pkgcheck findings are also
-			// carried at info — its records have no level at all — and folding
-			// them in here would make the number claim something it is not.
-			if f.Gate == validate.GateOptions && f.Severity == validate.SeverityInfo {
-				infos++
-				continue
-			}
-			severityColor(f.Severity).Printf("      %-8s", string(f.Severity))
-			fmt.Println(f.Detail)
 		}
 		if infos > 0 {
 			output.Dim.Printf("      info:   %d option(s) upstream declares and this ebuild does not pass — see --json\n", infos)
@@ -275,6 +292,21 @@ func renderValidateText(report validate.Report) {
 		output.Dim.Println("pkgcheck findings are all reported at info: its JsonStream records carry no level,\n" +
 			"and inferring one from the message text would be a guess. They never affect the exit code.")
 	}
+}
+
+// gateSummary renders every gate's own outcome on one line, as
+// `options=PASS qa=SKIPPED`.
+//
+// It lists ALL of them, including the one the headline already shows. The
+// repetition is the point: R4.4 asks for each gate's outcome separately, and a
+// summary that dropped the worst gate would leave the reader deducing which of
+// the five the headline came from.
+func gateSummary(gates []validate.GateResult) string {
+	parts := make([]string, 0, len(gates))
+	for _, gate := range gates {
+		parts = append(parts, gate.Gate+"="+string(gate.Outcome))
+	}
+	return strings.Join(parts, " ")
 }
 
 // outcomeColor keeps the three outcomes visually distinct, so SKIPPED is never

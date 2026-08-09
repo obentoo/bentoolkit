@@ -103,10 +103,15 @@ func TestOverlayValidate_UnknownSelectorExitsTwo(t *testing.T) {
 func TestOverlayValidate_ErrorFindingExitsOne(t *testing.T) {
 	stubValidateRunner(t, validate.Report{
 		Results: []validate.EbuildResult{{
-			Package:  "media-plugins/gst-plugins-qt6",
-			Version:  "1.29.2",
-			Options:  "FAILED",
-			Findings: []validate.Finding{{Gate: "options", Severity: "error", Detail: "-Daalib= is undeclared upstream"}},
+			Package: "media-plugins/gst-plugins-qt6",
+			Version: "1.29.2",
+			Gates: []validate.GateResult{{
+				Gate:    validate.GateOptions,
+				Outcome: validate.OutcomeFailed,
+				Findings: []validate.Finding{
+					{Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is undeclared upstream"},
+				},
+			}},
 		}},
 	})
 

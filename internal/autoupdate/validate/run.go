@@ -242,11 +242,20 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 //
 // An ebuild the option gate skipped has already reported why; adding a QA
 // section to it would spend the scan without changing what the operator has to
-// do next. This also keeps a skipped result's single Reason field unambiguous —
-// it holds the reason the OPTION gate skipped, never two reasons spliced.
+// do next.
+//
+// # The QA gate now explains itself
+//
+// This used to write its reason into the result's single shared Reason field,
+// overwriting whatever the option gate had put there — so two gates skipping for
+// different causes rendered as one, and the cause the operator read was decided
+// by write order. The reason now rides on the QA gate itself, beside the outcome
+// it explains, which is what makes both readable at once (R4.4).
 func attachQA(ctx context.Context, res *EbuildResult, target ebuildTarget, cache map[string]qaResult) {
-	if res.Options == OutcomeSkipped {
-		return
+	for _, gate := range res.Gates {
+		if gate.Gate == GateOptions && gate.Outcome == OutcomeSkipped {
+			return
+		}
 	}
 
 	got, seen := cache[target.dir]
@@ -256,9 +265,10 @@ func attachQA(ctx context.Context, res *EbuildResult, target ebuildTarget, cache
 		cache[target.dir] = got
 	}
 
-	res.QA = got.outcome
-	res.Findings = append(res.Findings, got.findings...)
-	if got.outcome == OutcomeSkipped {
-		res.Reason = got.reason
-	}
+	res.Gates = append(res.Gates, GateResult{
+		Gate:     GateQA,
+		Outcome:  got.outcome,
+		Reason:   got.reason,
+		Findings: got.findings,
+	})
 }

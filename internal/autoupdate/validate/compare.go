@@ -24,12 +24,28 @@ const (
 	SeverityInfo Severity = "info"
 )
 
-// Gate names which check produced a finding. It exists so Report.ExitCode can
-// select on it: pkgcheck findings ride in the same report and must never move
-// the exit code (D8).
+// Gate names which check produced a finding, and which check a GateResult
+// answers for. It exists so Report.ExitCode can select on it: pkgcheck findings
+// ride in the same report and must never move the exit code (D8).
+//
+// # The names are the ladder's own names
+//
+// patches, configure and compile are spelled exactly as Depth.String spells the
+// rungs they belong to. That is deliberate: a report saying `depth=configure`
+// and a gate named `configure` are talking about the same thing, and an
+// operator should not have to learn two vocabularies for one ladder.
+//
+// qa and review are the two that name no rung, because neither is one. pkgcheck
+// runs beside the ladder and is advisory (D8); the reviewer raises scrutiny and
+// never decides (R7.6). Their findings are reported like any other and are the
+// only ones that cannot fail a bump.
 const (
-	GateOptions = "options"
-	GateQA      = "qa"
+	GateOptions   = "options"
+	GateQA        = "qa"
+	GatePatches   = "patches"
+	GateConfigure = "configure"
+	GateCompile   = "compile"
+	GateReview    = "review"
 )
 
 // Finding is one thing the gate has to say about an ebuild.

@@ -89,13 +89,14 @@ func TestGolden_TheBumpThatBrokeIsRejected(t *testing.T) {
 	}
 
 	bad := resultFor(t, got, "1.29.2")
-	if bad.Options != "FAILED" {
-		t.Fatalf("1.29.2 outcome: got %q, want FAILED — this is issue #33 and the gate exists to catch it", bad.Options)
+	options := gateOf(t, bad, GateOptions)
+	if options.Outcome != OutcomeFailed {
+		t.Fatalf("1.29.2 outcome: got %q, want FAILED — this is issue #33 and the gate exists to catch it", options.Outcome)
 	}
 
 	var details []string
-	for _, f := range bad.Findings {
-		if f.Gate == "options" && f.Severity == "error" {
+	for _, f := range options.Findings {
+		if f.Gate == GateOptions && f.Severity == SeverityError {
 			details = append(details, f.Detail)
 		}
 	}
@@ -123,11 +124,13 @@ func TestGolden_ThePreviousVersionStillPasses(t *testing.T) {
 	}
 
 	good := resultFor(t, got, "1.28.6")
-	if good.Options != "PASS" {
-		t.Errorf("1.28.6 outcome: got %q (reason %q), want PASS — upstream still declares every option it passes", good.Options, good.Reason)
+	options := gateOf(t, good, GateOptions)
+	if options.Outcome != OutcomePass {
+		t.Errorf("1.28.6 outcome: got %q (reason %q), want PASS — upstream still declares every option it passes",
+			options.Outcome, options.Reason)
 	}
-	for _, f := range good.Findings {
-		if f.Gate == "options" && f.Severity == "error" {
+	for _, f := range options.Findings {
+		if f.Severity == SeverityError {
 			t.Errorf("1.28.6 produced an error finding: %q", f.Detail)
 		}
 	}
@@ -150,7 +153,7 @@ func TestGolden_RunsWithAnUnwritableDistdir(t *testing.T) {
 		t.Fatalf("Run against a read-only distdir: %v", err)
 	}
 
-	if resultFor(t, got, "1.29.2").Options != "FAILED" {
+	if gateOf(t, resultFor(t, got, "1.29.2"), GateOptions).Outcome != OutcomeFailed {
 		t.Error("the gate lost its verdict when the distdir was not writable; reading a distfile needs no write permission")
 	}
 }
