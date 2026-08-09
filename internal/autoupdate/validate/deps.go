@@ -122,6 +122,21 @@ func (d BuildDeps) binaryLookup() func(name string) (string, error) {
 	return lookPath
 }
 
+// attachedRunner is the runner a build must use, normalised the same way again.
+//
+// Its default is exactly cmd.CombinedOutput, which is the applier's own default
+// for the compile it already runs: the log a failed gate retains is therefore
+// byte-identical to the one that shipped before this package existed. A caller
+// that has to stream the child to a real terminal — a privileged build prompting
+// for a password cannot have its stdout captured into a pipe — substitutes its
+// own and hands back the transcript.
+func (d BuildDeps) attachedRunner() func(cmd *exec.Cmd) ([]byte, error) {
+	if d.RunAttached != nil {
+		return d.RunAttached
+	}
+	return func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() }
+}
+
 // DependenciesSatisfied asks Portage whether this host could build the staged
 // candidate at all, and reports every package that would have to be installed
 // first (R5, R6).

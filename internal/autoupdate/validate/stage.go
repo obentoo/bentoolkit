@@ -553,26 +553,17 @@ var buildGates = map[Depth]string{
 // THE LADDER IS CUMULATIVE, so a compile-deep request whose tree never appeared
 // reports patches, configure AND compile — three gates that were going to run and
 // now cannot, each said out loud, because an unreported gate is indistinguishable
-// from one that passed. It walks depthLadder instead of switching on d, so a rung
-// added to the ladder is a rung this covers, and the ladder's shallowest-first
-// declaration is what makes the returned order the order they would have run in.
+// from one that passed. Which gates those are is eachBuildGate's answer, shared
+// with the runner that reports them when they DO run: the set a depth owes an
+// outcome for must not depend on whether the run happened.
 //
 // A depth below DepthPatches covers no build gate and correctly yields nothing:
 // an options-deep run never needed a staged tree, so nothing was taken from it.
 func skippedGates(d Depth, reason string) []GateResult {
 	var gates []GateResult
-	for _, rung := range depthLadder {
-		if rung > d {
-			// depthLadder is declared shallowest first, and that ordering is the
-			// contract Depth states; see depth.go.
-			break
-		}
-		gate, isBuild := buildGates[rung]
-		if !isBuild {
-			continue
-		}
+	eachBuildGate(d, func(gate string, _ buildPhase) {
 		gates = append(gates, GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: reason})
-	}
+	})
 	return gates
 }
 
