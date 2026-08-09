@@ -31,7 +31,11 @@ package validate
 // hashTree comes from golden_test.go and is reused, never reimplemented.
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -288,5 +292,244 @@ func TestStage_DirectoriesAreNotWorldReadable(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o750 {
 		t.Errorf("the staged tree is mode %04o, want 0750 — the mode the applier already uses for logs/", perm)
+	}
+}
+
+// unwritableStagingRoot returns a directory nothing may create inside, and
+// restores its mode afterwards so t.TempDir's own cleanup can remove it.
+func unwritableStagingRoot(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: an unwritable directory is writable to root, so this would pass for the wrong reason (this is also why it is never validated under `act`)")
+	}
+	root := filepath.Join(t.TempDir(), "staging")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatalf("creating the staging root: %v", err)
+	}
+	if err := os.Chmod(root, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o750) })
+	return root
+}
+
+// TestStage_UnwritableRootIsATypedErrorNamingTheRoot is the first half of R3.9:
+// the failure is recognisable by type and readable by a human. Both, because the
+// caller matches on the type and the operator reads the string.
+func TestStage_UnwritableRootIsATypedErrorNamingTheRoot(t *testing.T) {
+	overlay := sourceOverlay(t)
+	root := unwritableStagingRoot(t)
+
+	staged, err := Stage(stagedFor(t, overlay, root, "EAPI=8\n"))
+
+	if err == nil {
+		t.Fatalf("Stage returned %q and no error against an unwritable staging root; "+
+			"a tree that was never built must not read as one that was", staged)
+	}
+	if !errors.Is(err, ErrStageUnpreparable) {
+		t.Errorf("the error %v does not wrap ErrStageUnpreparable; the caller would have to match on message text to recognise it", err)
+	}
+	if !strings.Contains(err.Error(), root) {
+		t.Errorf("the error %q does not name the staging root it could not prepare (%q)", err, root)
+	}
+	if staged != "" {
+		t.Errorf("Stage returned the path %q alongside its error; a half-made tree handed back is a tree somebody will use", staged)
+	}
+}
+
+// TestStage_UnpreparableTreeAttemptsNoBuild is the second half, and the one
+// worth watching a seam for: with no tree there is nothing to build FROM, so an
+// `ebuild` invocation here would run against whatever path was passed — in the
+// worst case the published overlay itself.
+func TestStage_UnpreparableTreeAttemptsNoBuild(t *testing.T) {
+	overlay := sourceOverlay(t)
+	root := unwritableStagingRoot(t)
+
+	var spawned []string
+	orig := execCommand
+	execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		spawned = append(spawned, name+" "+strings.Join(arg, " "))
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { execCommand = orig })
+
+	if _, err := Stage(stagedFor(t, overlay, root, "EAPI=8\n")); err == nil {
+		t.Fatal("Stage succeeded against an unwritable staging root")
+	}
+
+	if len(spawned) != 0 {
+		t.Errorf("a staging failure spawned %v; R3.9 asks for no build at all", spawned)
+	}
+}
+
+// TestStage_UnpreparableTreeIsNotAPanic pins the third outcome nobody asks for.
+// A sweep over the whole registry must survive one package's unpreparable tree,
+// and a panic takes the other forty with it.
+func TestStage_UnpreparableTreeIsNotAPanic(t *testing.T) {
+	overlay := sourceOverlay(t)
+	root := unwritableStagingRoot(t)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Stage panicked on an unpreparable tree (%v); one package's failure must not end the sweep", r)
+		}
+	}()
+
+	if _, err := Stage(stagedFor(t, overlay, root, "EAPI=8\n")); err == nil {
+		t.Fatal("Stage succeeded against an unwritable staging root")
+	}
+}
+
+// TestStage_UnpreparableTreeLeavesTheOverlayAlone keeps the failure path inside
+// the same promise as the success path: nothing is written to the tree that
+// publishes itself, including when staging gives up.
+func TestStage_UnpreparableTreeLeavesTheOverlayAlone(t *testing.T) {
+	overlay := sourceOverlay(t)
+	root := unwritableStagingRoot(t)
+	before := hashTree(t, overlay)
+
+	if _, err := Stage(stagedFor(t, overlay, root, "EAPI=8\n")); err == nil {
+		t.Fatal("Stage succeeded against an unwritable staging root")
+	}
+
+	if after := hashTree(t, overlay); after != before {
+		t.Errorf("a failed staging modified the published overlay: %s -> %s", before, after)
+	}
+}
+
+// TestStage_UnpreparableTreeSkipsEveryBuildGate is what the caller does with the
+// typed error, and it is the assertion R3.9 is actually about: every gate above
+// `options` reports SKIPPED, each carrying the reason, and the static gates are
+// untouched because they never needed a staged tree.
+//
+// See the ordering note in this file's header: this case needs GateResult
+// (sub-task 5.1) and Depth (sub-task 1.2).
+func TestStage_UnpreparableTreeSkipsEveryBuildGate(t *testing.T) {
+	const reason = "the staged tree could not be prepared: /var/lib/bentoo/staging: permission denied"
+
+	gates := skippedGates(DepthCompile, reason)
+
+	if len(gates) == 0 {
+		t.Fatal("skippedGates produced no gates; a depth that could not be reached still has to report the gates it covers")
+	}
+
+	want := map[string]bool{GatePatches: false, GateConfigure: false, GateCompile: false}
+	for _, g := range gates {
+		if g.Gate == GateOptions || g.Gate == GateQA {
+			t.Errorf("the static %s gate was reported as skipped by a STAGING failure; it never needed a staged tree", g.Gate)
+			continue
+		}
+		if _, expected := want[g.Gate]; !expected {
+			t.Errorf("unexpected gate %q in a staging-failure result", g.Gate)
+			continue
+		}
+		want[g.Gate] = true
+
+		if g.Outcome != OutcomeSkipped {
+			t.Errorf("%s gate: got %q, want SKIPPED — the gate did not run, so it cannot have passed or failed", g.Gate, g.Outcome)
+		}
+		if g.Reason == "" {
+			t.Errorf("%s gate reports SKIPPED with no reason; a skip nobody can read is a pass", g.Gate)
+		}
+		if !strings.Contains(g.Reason, "staged tree") {
+			t.Errorf("%s gate's reason %q does not say the staged tree was the problem", g.Gate, g.Reason)
+		}
+		if len(g.Findings) != 0 {
+			t.Errorf("%s gate carries %d finding(s) from a gate that never ran", g.Gate, len(g.Findings))
+		}
+	}
+	for gate, seen := range want {
+		if !seen {
+			t.Errorf("the %s gate is missing from the result; an unreported gate is indistinguishable from one that passed", gate)
+		}
+	}
+
+	// A shallower request reports fewer gates: nothing above the selected depth
+	// is claimed, not even as a skip.
+	shallow := skippedGates(DepthPatches, reason)
+	for _, g := range shallow {
+		if g.Gate == GateConfigure || g.Gate == GateCompile {
+			t.Errorf("a patches-depth request reported the %s gate; a depth reports the gates it covers and no others", g.Gate)
+		}
+	}
+}
+
+// TestStage_UnpreparableTreeIsNeverPromoted is R3.10, and it closes a hole the
+// two rules either side of it composed into.
+//
+// R3.3 promotes a candidate once every gate up to the selected depth reports
+// PASS **or SKIPPED**. R3.9 turns a staging failure into SKIPPED for every gate
+// above `options`. Read together and with nothing between them, a bump whose
+// staged tree could not be built satisfies R3.3 VACUOUSLY — every build gate
+// skipped, therefore nothing failed, therefore publish — and the overlay that
+// auto-commits and pushes receives a candidate no gate ever looked at. R3.4
+// forbids exactly that from the other direction: what is published is what was
+// validated, and here nothing was.
+//
+// So a staging failure is not merely a skip; it withdraws the bump from
+// promotion. The decision is a pure function of the gates and the staging error,
+// which is what lets it be asserted here rather than only through the applier.
+//
+// This case pins `PromotionDecision(gates []GateResult, stageErr error) (bool, string)`.
+// Its composition with the real Apply — overlay hash unchanged, no pin written —
+// is asserted in internal/autoupdate/applier_gates_test.go (sub-task 12.1),
+// because promotion itself lives on the other side of the import edge.
+func TestStage_UnpreparableTreeIsNeverPromoted(t *testing.T) {
+	const reason = "the staged tree could not be prepared: /var/lib/bentoo/staging: permission denied"
+	stageErr := fmt.Errorf("%w: %s", ErrStageUnpreparable, "/var/lib/bentoo/staging: permission denied")
+
+	promote, why := PromotionDecision(skippedGates(DepthCompile, reason), stageErr)
+
+	if promote {
+		t.Fatal("a bump whose staged tree could not be prepared was cleared for promotion; every build gate SKIPPED satisfies " +
+			"R3.3's \"PASS or SKIPPED\" vacuously, and the published overlay would receive a candidate no gate ever read (R3.10)")
+	}
+	if why == "" {
+		t.Error("the refusal carries no reason; the operator sees a bump that did not publish and no statement of why")
+	}
+	if !strings.Contains(why, "staged tree") {
+		t.Errorf("the refusal %q does not say the staged tree was the problem", why)
+	}
+}
+
+// TestPromotionDecision_SkippedGatesStillPromoteWhenStagingSucceeded is the
+// other side of the same function, and it is what stops R3.10 from being
+// over-read into "any skip blocks promotion". A gate skipped because this host
+// cannot answer — unsatisfied dependencies, no privilege — is exactly what R3.3
+// means to allow, and R3.12 requires that bump to be promoted with its unreached
+// depth named. Only a STAGING failure withdraws the bump.
+func TestPromotionDecision_SkippedGatesStillPromoteWhenStagingSucceeded(t *testing.T) {
+	gates := []GateResult{
+		{Gate: GateOptions, Outcome: OutcomePass},
+		{Gate: GatePatches, Outcome: OutcomeSkipped, Reason: "dev-libs/unsatisfied-1.0 is not installed"},
+		{Gate: GateConfigure, Outcome: OutcomeSkipped, Reason: "dev-libs/unsatisfied-1.0 is not installed"},
+	}
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if !promote {
+		t.Errorf("a bump whose build gates were skipped for want of an installed dependency was refused (%q); "+
+			"that is the case R3.3 exists to allow, and R3.12 promotes it with the unreached depth named", why)
+	}
+}
+
+// TestPromotionDecision_AFailedGateBlocksPromotion keeps the obvious case
+// nailed down beside the subtle ones, since all three now go through one
+// function.
+func TestPromotionDecision_AFailedGateBlocksPromotion(t *testing.T) {
+	gates := []GateResult{
+		{Gate: GateOptions, Outcome: OutcomePass},
+		{Gate: GateConfigure, Outcome: OutcomeFailed, Findings: []Finding{{
+			Gate: GateConfigure, Severity: SeverityError, Detail: `meson.build:1:0: ERROR: Unknown option: "aalib".`,
+		}}},
+	}
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if promote {
+		t.Fatal("a bump whose configure gate FAILED was cleared for promotion")
+	}
+	if !strings.Contains(why, "configure") {
+		t.Errorf("the refusal %q does not name the gate that failed", why)
 	}
 }

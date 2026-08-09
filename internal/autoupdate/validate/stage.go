@@ -56,6 +56,23 @@ var carriedRepoDirs = []string{"eclass", "profiles"}
 // Portage default the published one falls back to.
 var carriedLayoutKeys = []string{"thin-manifests", "sign-manifests", "profile-formats"}
 
+// ErrStageUnpreparable reports that a staged tree could not be built, whatever
+// the cause: a missing overlay, a malformed atom, a staging root nothing may
+// write into, a disk that filled halfway through the copy.
+//
+// IT IS A SENTINEL SO THE CALLER CAN RECOGNISE THE FAILURE BY TYPE, and that is
+// not tidiness. What the caller does with it is R3.10 — withdraw the bump from
+// promotion (see PromotionDecision) — so a caller that recognised it by matching
+// message text would keep working exactly until somebody improved the wording,
+// at which point unvalidated bumps would quietly start publishing again.
+// errors.Is survives a reworded message; strings.Contains does not.
+//
+// ONE SENTINEL COVERS EVERY CAUSE, on purpose. The cause is still named, in the
+// wrapped error's own message, because the operator has to fix it — but no
+// caller has to enumerate the ways staging can fail in order to react to staging
+// having failed.
+var ErrStageUnpreparable = errors.New("the staged tree could not be prepared")
+
 // StageRequest is everything Stage needs to materialise one candidate.
 //
 // Overlay is the published overlay the staged tree is built FROM. Staging only
@@ -132,7 +149,31 @@ type StageRequest struct {
 // must generate it. Nor does anything else in the package directory, including
 // the previously published ebuilds — a single-package repository holding one
 // version is what makes a gate's answer unambiguous.
-func Stage(req StageRequest) (stagedRoot string, err error) {
+//
+// EVERY FAILURE IS ONE FAILURE (R3.9). Whatever goes wrong, Stage returns an
+// error wrapping ErrStageUnpreparable and an EMPTY path — never a half-made tree
+// handed back alongside the error saying it is half-made, because a path handed
+// back is a path somebody will build in.
+func Stage(req StageRequest) (string, error) {
+	stagedRoot, err := stage(req)
+	if err != nil {
+		// The sentinel is applied HERE, at the single boundary, rather than at
+		// each of the fourteen error returns inside stage. Both spellings satisfy
+		// R3.9 today; only this one still satisfies it after the fifteenth is
+		// added, because it leaves no site where the sentinel can be forgotten.
+		// The wrapped cause keeps its own words — including the path it could not
+		// prepare — so the type is for the caller and the message is for the
+		// operator, and neither is paying for the other.
+		return "", fmt.Errorf("%w: %w", ErrStageUnpreparable, err)
+	}
+	return stagedRoot, nil
+}
+
+// stage is Stage's body, minus the sentinel. It reports causes in their own
+// words, and Stage is its only caller: keeping the two apart is what lets "every
+// failure path wraps ErrStageUnpreparable" be a property of the code rather than
+// a habit of whoever last edited it.
+func stage(req StageRequest) (stagedRoot string, err error) {
 	overlayRoot := strings.TrimSpace(req.Overlay)
 	stagingRoot := strings.TrimSpace(req.StagingRoot)
 	version := strings.TrimSpace(req.Version)
@@ -484,4 +525,138 @@ func stagedRepoName(pkg, version string) string {
 // directory, exactly as it was handed to Stage.
 func writeCandidate(stagedRoot, category, pkg, version string, body []byte) error {
 	return writeStagedFile(filepath.Join(stagedRoot, category, pkg), pkg+"-"+version+".ebuild", body)
+}
+
+// buildGates names the gate each rung of the ladder ADDS, for the rungs that
+// need a staged tree to answer at all.
+//
+// options and qa are absent, and their absence is the rule rather than an
+// oversight: both read files that already exist — the ebuild's own text and the
+// published package directory — so a tree that was never built takes nothing
+// away from them. Reporting them as skipped for a tree they never wanted would
+// blame the wrong thing, and would bury the option gate's real PASS or FAILED
+// under a skip. review is absent for the same reason: it reads, it does not
+// build.
+var buildGates = map[Depth]string{
+	DepthPatches:   GatePatches,
+	DepthConfigure: GateConfigure,
+	DepthCompile:   GateCompile,
+}
+
+// skippedGates reports one SKIPPED gate, carrying reason, for every build gate
+// depth d covers — and for no other gate (R3.9).
+//
+// It is the gate-level analogue of report.go's skippedResult, down to taking the
+// reason as a required argument instead of leaving it a settable field: that is
+// how "SKIPPED always carries a reason" stays structural rather than remembered.
+//
+// THE LADDER IS CUMULATIVE, so a compile-deep request whose tree never appeared
+// reports patches, configure AND compile — three gates that were going to run and
+// now cannot, each said out loud, because an unreported gate is indistinguishable
+// from one that passed. It walks depthLadder instead of switching on d, so a rung
+// added to the ladder is a rung this covers, and the ladder's shallowest-first
+// declaration is what makes the returned order the order they would have run in.
+//
+// A depth below DepthPatches covers no build gate and correctly yields nothing:
+// an options-deep run never needed a staged tree, so nothing was taken from it.
+func skippedGates(d Depth, reason string) []GateResult {
+	var gates []GateResult
+	for _, rung := range depthLadder {
+		if rung > d {
+			// depthLadder is declared shallowest first, and that ordering is the
+			// contract Depth states; see depth.go.
+			break
+		}
+		gate, isBuild := buildGates[rung]
+		if !isBuild {
+			continue
+		}
+		gates = append(gates, GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: reason})
+	}
+	return gates
+}
+
+// PromotionDecision answers the one question that must be settled before a bump
+// is written into the published overlay: may this candidate be promoted, and if
+// not, why not. It is pure — no filesystem, no clock, no process — so the rule
+// can be asserted directly instead of only through a real promotion.
+//
+// # Why this exists, rather than "no gate FAILED" written at the call site
+//
+// R3.3 promotes once every gate up to the selected depth reports PASS OR
+// SKIPPED. R3.9 turns a staging failure into SKIPPED for every build gate. Put
+// those two side by side with nothing in between and a bump whose tree could
+// never be built satisfies R3.3 VACUOUSLY: every build gate skipped, therefore
+// nothing failed, therefore publish — and the overlay that auto-commits and
+// pushes receives a candidate no gate ever read. R3.4 forbids that from the
+// other direction: what is published is what was validated, and here nothing
+// was. So a staging failure does not merely skip, it WITHDRAWS the bump (R3.10).
+//
+// # And why that does not become "any skip blocks promotion"
+//
+// A gate skipped because THIS HOST could not answer — an unsatisfied dependency,
+// no privilege to build — is precisely the case R3.3 exists to allow, and R3.12
+// promotes that bump with the depth it did not reach named. Only stageErr
+// withdraws it. The argument list is the distinction: a skip is data about a
+// gate, a staging failure is an error about the tree every gate needed, and they
+// arrive separately for exactly that reason.
+//
+// # What this deliberately does NOT decide
+//
+// Whether the gates COVER the selected depth. It is not given the depth, so a
+// gate that never ran and was never appended is invisible here; producing one
+// GateResult per covered gate belongs to whoever ran them, and skippedGates is
+// how a staging failure discharges it. Judging a list is a different question
+// from judging whether the list was assembled.
+//
+// The QA gate is skipped over for the same reason Report.ExitCode and
+// WorstOutcome skip it (D8): the overlay carries pre-existing pkgcheck findings
+// that have nothing to do with any bump, and letting them decide promotion would
+// stop every bump in the tree on a metadata.xml DOCTYPE typo.
+//
+// The bool is the decision; the string only ever explains it, and is non-empty
+// in BOTH directions so that no caller can read a promotion out of an empty
+// reason.
+func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
+	if stageErr != nil {
+		// The refusal states the cause in this package's own words rather than
+		// deferring to the error's, so it names the staged tree whatever wording
+		// the wrapped cause happens to carry. The cause rides along because the
+		// operator is the one who has to fix it.
+		return false, fmt.Sprintf("not promoted: the staged tree could not be prepared, so no build gate ever read this candidate (%v)", stageErr)
+	}
+
+	var failed, skipped []string
+	for _, gate := range gates {
+		if gate.Gate == GateQA {
+			// The one gate that never decides — the same exclusion, for the same
+			// D8 reason, that Report.ExitCode and WorstOutcome already make.
+			continue
+		}
+		switch gate.Outcome {
+		case OutcomeFailed:
+			failed = append(failed, gate.Gate)
+		case OutcomeSkipped:
+			skipped = append(skipped, gate.Gate)
+		}
+	}
+
+	switch {
+	case len(failed) > 0:
+		return false, fmt.Sprintf("not promoted: %s reported FAILED", gateList(failed))
+	case len(skipped) > 0:
+		return true, fmt.Sprintf("promoted: every gate reported PASS or SKIPPED, and %s did not run — see each gate's own reason", gateList(skipped))
+	default:
+		return true, "promoted: every gate reported PASS"
+	}
+}
+
+// gateList names one or more gates for a sentence a human reads: "the configure
+// gate", "the patches, configure gates". It exists so the refusal and the
+// promotion statement cannot drift into two spellings of the same list.
+func gateList(names []string) string {
+	if len(names) == 1 {
+		return "the " + names[0] + " gate"
+	}
+	return "the " + strings.Join(names, ", ") + " gates"
 }
