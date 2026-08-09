@@ -533,3 +533,52 @@ func TestPromotionDecision_AFailedGateBlocksPromotion(t *testing.T) {
 		t.Errorf("the refusal %q does not name the gate that failed", why)
 	}
 }
+
+// TestStage_CarriesThePackageFilesDirectory closes the gap sub-task 7.1 made
+// visible. R3.8 is written about eclasses and profiles because those are the
+// repository-level resources; ${FILESDIR} is the package-level one, and the
+// patch gate cannot tell the difference.
+//
+// Before this, an ebuild carrying PATCHES=( "${FILESDIR}"/foo.patch ) staged
+// without its files/ died in src_prepare — and RunBuildGates attributes a
+// failure to the last phase that started, so the patches gate reported FAILED.
+// A confident false failure, on exactly the class of package (patched bumps)
+// the gate exists for.
+func TestStage_CarriesThePackageFilesDirectory(t *testing.T) {
+	overlay := sourceOverlay(t)
+	patch := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6", "files", "qt6-detection.patch")
+	if err := os.MkdirAll(filepath.Dir(patch), 0o755); err != nil {
+		t.Fatalf("laying out files/: %v", err)
+	}
+	const body = "--- a/meson.build\n+++ b/meson.build\n"
+	if err := os.WriteFile(patch, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the patch: %v", err)
+	}
+
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "files", "qt6-detection.patch"))
+	if err != nil {
+		t.Fatalf("the staged tree cannot resolve ${FILESDIR}: %v; src_prepare would die and the patches gate would report FAILED for a bump that is fine", err)
+	}
+	if string(got) != body {
+		t.Errorf("the staged patch is %q, want the overlay's bytes (%q)", got, body)
+	}
+}
+
+// TestStage_AbsentFilesDirectoryIsNotAnError keeps the common case common: most
+// ebuilds carry no patches at all, and staging one must not start failing.
+func TestStage_AbsentFilesDirectoryIsNotAnError(t *testing.T) {
+	overlay := sourceOverlay(t)
+
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v — an overlay whose package has no files/ is the ordinary case", err)
+	}
+	if _, err := os.Stat(filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "files")); err == nil {
+		t.Error("staging invented a files/ directory the overlay does not have")
+	}
+}

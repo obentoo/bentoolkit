@@ -242,6 +242,24 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 
+	// The package's own files/ travels with the candidate. R3.8 names eclasses
+	// and profiles because those are the REPOSITORY-level resources a staged
+	// tree has to resolve; ${FILESDIR} is the PACKAGE-level one, and the patch
+	// gate cannot tell the difference.
+	//
+	// Leave it behind and an ebuild carrying PATCHES=( "${FILESDIR}"/foo.patch )
+	// dies in src_prepare — and RunBuildGates attributes a failure to the last
+	// phase that started, so the patches gate reports FAILED. That is a
+	// confident false failure about a bump that is fine, on exactly the class of
+	// package the patch gate exists for.
+	//
+	// carryRepoDir treats an absent source as nothing to do, which is the
+	// ordinary case: most ebuilds carry no patches at all.
+	pkgFiles := filepath.Join(category, pkg, "files")
+	if err := carryRepoDir(filepath.Join(overlayRoot, pkgFiles), filepath.Join(stagedRoot, pkgFiles)); err != nil {
+		return "", fmt.Errorf("carrying %s from overlay %s into staged tree %s: %w", pkgFiles, overlayRoot, stagedRoot, err)
+	}
+
 	return stagedRoot, nil
 }
 
