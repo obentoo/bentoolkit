@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -183,10 +184,25 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 // archive is worse than no archive: it produces a confident answer to a
 // question nobody asked.
 //
-// # The three cases, and why the last one refuses to guess
+// # The single-present shortcut had the same defect, in reverse
 //
-//   - Exactly one candidate present: it is the one. This covers packages whose
-//     distfile carries no version at all, such as a commit-hash snapshot.
+// "Exactly one distfile present, so it must be mine" is only true when nothing
+// distinguishes the versions. With a directory holding 1.28.6 and 1.29.2 and a
+// distdir holding only 1.29.2's archive, the shortcut handed 1.29.2's tarball to
+// the 1.28.6 ebuild and reported FAILED — naming aalib and libcaca, options
+// 1.28.6 really does declare. A false FAILED is worse than a false PASS here: it
+// blames an ebuild that is correct, and that is how a gate gets switched off.
+//
+// # The cases, and why two of them refuse to guess
+//
+//   - One present, its name carrying this ebuild's version: it is the one
+//     (R12.1).
+//   - One present and no name in the Manifest carrying any version at all: it
+//     is the one (R12.2). This is the snapshot and commit-hash naming scheme —
+//     with no version anywhere in the names there is no other release for the
+//     file to belong to, and this is the case the shortcut exists to serve.
+//   - One present, but the Manifest does distinguish versions and this name is
+//     not this ebuild's: SKIPPED naming the file declined (R12.3).
 //   - Several present and exactly one carrying the version string: it is the
 //     one, and this is the ordinary multi-version package directory.
 //   - Anything else — several carrying the version, or none — is reported as
@@ -212,9 +228,20 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 		return "", fmt.Errorf("no distfile named by the Manifest is present in %s: %s",
 			distdir, strings.Join(names, ", "))
 	case 1:
-		return filepath.Join(distdir, present[0]), nil
+		// Safe when this file is this ebuild's (R12.1), or when no name in the
+		// Manifest tells releases apart at all (R12.2). Otherwise the shortcut is
+		// a guess, and it declines by name (R12.3).
+		only := present[0]
+		if carriesVersion(only, version) || !anyNameCarriesAVersion(names) {
+			return filepath.Join(distdir, only), nil
+		}
+		return "", fmt.Errorf("the only distfile present in %s is %s, which does not belong to version %s; "+
+			"reading it would answer about a different release", distdir, only, version)
 	}
 
+	// Exact rather than carriesVersion: with several archives present a revision
+	// suffix can be the ONLY thing telling two names apart, and this branch is
+	// not what R12 changes.
 	var matching []string
 	for _, name := range present {
 		if strings.Contains(name, version) {
@@ -226,6 +253,46 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 	}
 	return "", fmt.Errorf("cannot tell which of %d distfiles in %s belongs to version %s: %s",
 		len(present), distdir, version, strings.Join(present, ", "))
+}
+
+var (
+	// revisionSuffix is Gentoo's -rN package revision.
+	revisionSuffix = regexp.MustCompile(`-r[0-9]+$`)
+
+	// versionInDistfileName matches a version-looking token in a distfile name:
+	// a numeric run, optionally dotted and optionally v-prefixed, bounded by a
+	// separator or the name's edge on BOTH sides.
+	//
+	// Both boundaries earn their place, and a commit-hash snapshot shows why.
+	// Without the left one, `deadbeefcafe1234.tar.gz` reads as versioned because
+	// the hash ends in digits followed by a dot. Without the right one,
+	// `pkg-1a2b3c4d.tar.gz` reads as versioned or not depending on whether the
+	// hash happens to start with a digit — an answer no operator could predict.
+	versionInDistfileName = regexp.MustCompile(`(^|[-_])v?[0-9]+(\.[0-9]+)*([._-]|$)`)
+)
+
+// carriesVersion reports whether a distfile's name carries this ebuild's
+// version (R12.1).
+//
+// The revision is stripped first. `-rN` counts Gentoo-side rebuilds of the SAME
+// upstream tarball, so it never appears in the distfile's name; requiring it
+// would make every revbumped ebuild in the overlay decline to validate. That is
+// a false SKIP, and a gate that skips silently is as useless as one that lies.
+func carriesVersion(name, version string) bool {
+	return strings.Contains(name, revisionSuffix.ReplaceAllString(version, ""))
+}
+
+// anyNameCarriesAVersion reports whether the Manifest distinguishes releases by
+// name at all (R12.2). When it does not, one present distfile is the only
+// candidate there could be and the shortcut is safe; when it does, taking a name
+// that is not this ebuild's is a guess.
+func anyNameCarriesAVersion(names []string) bool {
+	for _, name := range names {
+		if versionInDistfileName.MatchString(name) {
+			return true
+		}
+	}
+	return false
 }
 
 // attachQA adds the package's pkgcheck findings to a result.

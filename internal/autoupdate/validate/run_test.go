@@ -255,3 +255,153 @@ func linkInto(t *testing.T, src, dst string) {
 		t.Fatalf("writing %q: %v", dst, err)
 	}
 }
+
+// manifestNaming rewrites the package's Manifest so a case can control exactly
+// which names it declares. It is a local detail of these four cases rather than
+// a shared helper, because every other test in the package wants overlayWith's
+// single-distfile Manifest.
+func manifestNaming(t *testing.T, pkgDir string, names ...string) {
+	t.Helper()
+	var sb strings.Builder
+	for _, n := range names {
+		sb.WriteString("DIST " + n + " 100 BLAKE2B ab SHA512 cd\n")
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("writing Manifest: %v", err)
+	}
+}
+
+// TestRun_OnlyTheNewerDistfilePresentSkipsTheOlderEbuild is the observed bug,
+// end to end through Run: the golden overlay holds both versions, the distdir
+// holds only 1.29.2's archive, and 1.28.6 must decline to answer.
+//
+// SKIPPED and not FAILED is the whole point. FAILED here is a lie about an
+// ebuild that is correct, and it is the kind of lie that gets a gate switched
+// off.
+func TestRun_OnlyTheNewerDistfilePresentSkipsTheOlderEbuild(t *testing.T) {
+	overlay, distdir := goldenOverlay(t)
+	older := filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz")
+	if err := os.Remove(older); err != nil {
+		t.Fatalf("removing the 1.28.6 distfile: %v", err)
+	}
+
+	got, err := Run(context.Background(), Options{Overlay: overlay, Distdir: distdir})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Surface adjusted for sub-task 5.1's Gates model: this fragment was
+	// authored against EbuildResult.Options/.Reason, which 5.1 replaced with
+	// one GateResult per gate. Every assertion below is the one that was
+	// authored; only the accessor moved.
+	res := gateOf(t, resultFor(t, got, "1.28.6"), GateOptions)
+	if res.Outcome == OutcomeFailed {
+		t.Fatalf("1.28.6 reported FAILED with only the 1.29.2 archive on disk (reason %q); "+
+			"the gate answered about the wrong tarball and blamed an ebuild that is correct", res.Reason)
+	}
+	if res.Outcome != OutcomeSkipped {
+		t.Fatalf("1.28.6 outcome: got %q, want SKIPPED — the archive belonging to this version is not present", res.Outcome)
+	}
+	if !strings.Contains(res.Reason, "gst-plugins-good-1.29.2.tar.gz") {
+		t.Errorf("reason %q does not name the distfile that was declined; the operator cannot tell which archive was refused", res.Reason)
+	}
+
+	// The other half: 1.29.2 still has its own archive and must keep failing for
+	// the real reason. A fix that turns everything into SKIPPED is not a fix.
+	newer := gateOf(t, resultFor(t, got, "1.29.2"), GateOptions)
+	if newer.Outcome != OutcomeFailed {
+		t.Errorf("1.29.2 outcome: got %q, want FAILED — its own archive is present and declares neither aalib nor libcaca", newer.Outcome)
+	}
+}
+
+// TestFindDistfile_SinglePresentCarryingTheVersionIsRead is R12.1: the
+// shortcut is safe when the one file present is this ebuild's.
+func TestFindDistfile_SinglePresentCarryingTheVersionIsRead(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild, "gst-plugins-good-1.28.6.tar.gz")
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	manifestNaming(t, pkgDir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz")
+
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{"gst-plugins-good-1.28.6/meson.build": "project('x')\n"})
+	linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz"))
+
+	got, err := findDistfile(pkgDir, distdir, "1.28.6")
+	if err != nil {
+		t.Fatalf("findDistfile: %v — the one distfile present carries this ebuild's version", err)
+	}
+	if filepath.Base(got) != "gst-plugins-good-1.28.6.tar.gz" {
+		t.Errorf("read %q, want the 1.28.6 archive", got)
+	}
+}
+
+// TestFindDistfile_SinglePresentOfAnotherVersionIsDeclined is R12.3, the unit
+// view of the bug above.
+func TestFindDistfile_SinglePresentOfAnotherVersionIsDeclined(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild, "gst-plugins-good-1.28.6.tar.gz")
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	manifestNaming(t, pkgDir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz")
+
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{"gst-plugins-good-1.29.2/meson.build": "project('x')\n"})
+	linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.gz"))
+
+	got, err := findDistfile(pkgDir, distdir, "1.28.6")
+
+	if err == nil {
+		t.Fatalf("findDistfile returned %q for version 1.28.6 with only the 1.29.2 archive present; "+
+			"a versioned sibling in the Manifest means the single-present shortcut is a guess", got)
+	}
+	if !strings.Contains(err.Error(), "gst-plugins-good-1.29.2.tar.gz") {
+		t.Errorf("the refusal %q does not name the distfile it declined to read", err)
+	}
+}
+
+// TestFindDistfile_UnversionedManifestNamesKeepTheShortcut is R12.2, and it is
+// the case that stops the fix from breaking snapshot packages: when NO distfile
+// the Manifest names carries any version, there is nothing to compare against
+// and the single present file is the only candidate there is.
+func TestFindDistfile_UnversionedManifestNamesKeepTheShortcut(t *testing.T) {
+	const snapshot = "deadbeefcafe1234.tar.gz"
+	overlay := overlayWith(t, "dev-libs/snapshotpkg", "0_p20260809", "inherit meson\n", snapshot)
+	pkgDir := filepath.Join(overlay, "dev-libs", "snapshotpkg")
+
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{"snapshotpkg/meson.build": "project('x')\n"})
+	linkInto(t, archive, filepath.Join(distdir, snapshot))
+
+	got, err := findDistfile(pkgDir, distdir, "0_p20260809")
+	if err != nil {
+		t.Fatalf("findDistfile: %v — a commit-hash distfile carries no version, so there is nothing to disagree with", err)
+	}
+	if filepath.Base(got) != snapshot {
+		t.Errorf("read %q, want %q", got, snapshot)
+	}
+}
+
+// TestFindDistfile_SeveralPresentKeepTheirBehaviour is the Unchanged Behaviour
+// guard: the two multi-present branches are not what this sub-task changes.
+func TestFindDistfile_SeveralPresentKeepTheirBehaviour(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild, "gst-plugins-good-1.28.6.tar.gz")
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	manifestNaming(t, pkgDir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz")
+
+	distdir := t.TempDir()
+	for _, name := range []string{"gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz"} {
+		archive := buildTarGz(t, map[string]string{"x/meson.build": "project('x')\n"})
+		linkInto(t, archive, filepath.Join(distdir, name))
+	}
+
+	got, err := findDistfile(pkgDir, distdir, "1.29.2")
+	if err != nil {
+		t.Fatalf("findDistfile with both present: %v — exactly one name carries 1.29.2", err)
+	}
+	if filepath.Base(got) != "gst-plugins-good-1.29.2.tar.gz" {
+		t.Errorf("read %q, want the 1.29.2 archive", got)
+	}
+
+	// And none present is still a named refusal, not a silent pick.
+	empty := t.TempDir()
+	if _, err := findDistfile(pkgDir, empty, "1.29.2"); err == nil {
+		t.Error("findDistfile answered from an empty distdir")
+	}
+}
