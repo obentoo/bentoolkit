@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-08
+
 ### Added
 - **`overlay validate`: a read-only gate that asks whether an ebuild still
   matches the source it points at.** `overlay autoupdate --apply` proves the
