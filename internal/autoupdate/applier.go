@@ -156,6 +156,20 @@ type ApplyResult struct {
 	// edit may have introduced so a human can review before committing. Empty when
 	// pkgcheck is absent, reported nothing, or no fix was applied.
 	QASummary string
+	// StagedPath is the staged tree this bump was validated in: the
+	// single-package repository validate.Stage built, which by construction lives
+	// OUTSIDE the published overlay.
+	//
+	// It is set as soon as the tree exists and is kept whatever happens next,
+	// because it is what makes a failure inspectable (S033-R3.6): the operator can
+	// read the exact ebuild the gates read and re-run a gate by hand, without
+	// repeating the work that produced it. Retention is expressed by the path
+	// itself — one tree per package and version — so there is no index to consult
+	// and nothing to unlock.
+	//
+	// Empty when no staged tree was built: an apply that ran without a staging
+	// root, or one that failed before staging.
+	StagedPath string
 }
 
 // Applier handles update application for packages.
@@ -243,6 +257,17 @@ type Applier struct {
 	distdir           string
 	configuredDistdir string
 	distfilesCache    string
+	// stagingRoot is the directory the staged trees are built under — in
+	// production <configDir>/staging (S033-D1). Non-empty is what turns the whole
+	// staged pipeline on: the candidate is materialised there instead of in the
+	// published overlay, every gate reads it there, and the overlay is written
+	// exactly once, by promotion, at the end (S033-R3.2).
+	//
+	// Empty is the pre-staging path, byte for byte what every release before story
+	// 033 did, and it is what a caller that omits WithApplierStagingRoot gets. The
+	// three construction sites in cmd/ are wired by sub-task 12.1, which is also
+	// where the gates that make the staged path worth taking are inserted.
+	stagingRoot string
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -419,6 +444,26 @@ func WithApplierDistfilesCache(dir string) ApplierOption {
 	return func(a *Applier) { a.distfilesCache = dir }
 }
 
+// WithApplierStagingRoot points the applier at the directory its staged trees are
+// built under, and by doing so turns the staged pipeline on: the candidate is
+// materialised outside the published overlay, every gate reads it there, and the
+// overlay is written exactly once, by promotion, after the gates have passed
+// (S033-R3.2, S033-R3.3).
+//
+// An empty (or blank) root is ignored, exactly as WithApplierFixer ignores a nil
+// fixer and for the same reason: the caller that does not supply one keeps the
+// behaviour it has always had — the candidate written straight into the overlay
+// and rolled back on failure — rather than getting a half-configured pipeline. The
+// production root is <configDir>/staging (S033-D1); Stage never picks one itself,
+// because the path is where the retention rule is recorded.
+func WithApplierStagingRoot(dir string) ApplierOption {
+	return func(a *Applier) {
+		if root := strings.TrimSpace(dir); root != "" {
+			a.stagingRoot = root
+		}
+	}
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -583,98 +628,114 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, newVersion))
 	}
 
-	// Copy ebuild to new version
-	if err := a.copyEbuild(pkg, currentVersion, newVersion); err != nil {
-		result.Error = fmt.Errorf("failed to copy ebuild: %w", err)
-		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			// Log but don't override the original error
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
-		}
-		return result, result.Error
-	}
-
-	// For snapshot packages tracked by commit (track="commit"), substitute the
-	// commit hash variable in the copied ebuild so the SRC_URI points to the
-	// correct tarball. This must happen before pkgdev manifest, which fetches
-	// the URL built from the variable.
-	if update.CommitHash != "" {
-		dstEbuild := a.EbuildPath(pkg, newVersion)
-		if err := substituteCommitHash(dstEbuild, update.CommitHash); err != nil {
-			result.Error = fmt.Errorf("failed to substitute commit hash: %w", err)
-			if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
-			}
-			return result, result.Error
-		}
-	}
-
-	// For packages declaring aux_var/aux_pattern, substitute the free-text
-	// auxiliary variable (e.g. MY_BUILD="esr-bbNN") captured at check time. Like
-	// the commit-hash step above, this must precede the manifest step because the
-	// variable typically feeds the SRC_URI. The aux_var name comes from config;
-	// the value travels in the pending update.
-	if update.AuxValue != "" {
-		dstEbuild := a.EbuildPath(pkg, newVersion)
-		varName := a.configs[pkg].AuxVar
-		if err := substituteAuxVar(dstEbuild, varName, update.AuxValue); err != nil {
-			result.Error = fmt.Errorf("failed to substitute aux var: %w", err)
-			if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
-			}
-			return result, result.Error
-		}
-	}
-
-	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any
-	// later step (manifest, status update, compile) fails, that file is an
-	// orphan and must be removed so the overlay is not left half-applied.
-	// The cleanup keyed on result.Error so it only fires on failure, and it
-	// must never replace the original error with a removal error.
-	dstPath := a.EbuildPath(pkg, newVersion)
+	// From here to promotion nothing writes into the published overlay, and
+	// promotion is the last thing this function does. Everything in between is
+	// preparation and gates, and R3.2 says the overlay must stay byte-identical
+	// while any of them runs.
+	//
+	// rollbackPublished is that promise's counterweight. It stays nil until this
+	// apply has actually placed something in the published overlay, and then undoes
+	// exactly what was placed. It REPLACES the unconditional "remove one path"
+	// rollback this function used to register right after copyEbuild: that was
+	// correct while the candidate was written into the overlay first, and is wrong
+	// the moment the candidate lives in a staged tree, where the published path does
+	// not exist yet and the tree that does exist must be RETAINED (R3.6), not
+	// removed.
+	var rollbackPublished publishedUndo
 	defer func() {
-		if result == nil || result.Error == nil {
+		if result == nil || result.Error == nil || rollbackPublished == nil {
 			return
 		}
-		if err := os.Remove(dstPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			// Rollback failed: keep the original error, just record the
-			// cleanup miss so the orphan ebuild can be found and removed.
-			logger.Warn(
-				"failed to roll back orphan ebuild %s for %s (%s) after apply failure: %v "+
-					"(original apply error preserved: %v)",
-				dstPath, pkg, newVersion, err, result.Error)
-		}
+		rollbackPublished(result.Error)
 	}()
+
+	// Materialise the candidate where the gates will read it: in a staged tree
+	// outside the overlay when a staging root was configured, in the published
+	// overlay otherwise.
+	// Only the pre-staging branch arms the rollback, and it arms it with the one
+	// path it just wrote. The staged branch leaves it nil, because after it there
+	// is still nothing in the published overlay to take back.
+	var (
+		cand    candidatePaths
+		prepErr error
+	)
+	if a.stagingRoot == "" {
+		cand, rollbackPublished, prepErr = a.prepareInOverlay(pkg, currentVersion, newVersion, update)
+	} else {
+		cand, prepErr = a.prepareInStagingTree(pkg, currentVersion, newVersion, update, result)
+	}
+	if prepErr != nil {
+		return a.failApply(pkg, result, prepErr)
+	}
 
 	// Run manifest command. When a fixer is wired, a failure here triggers a
 	// single agentic repair-and-retry before the apply is declared failed; the
-	// outcome (including whether a fix was applied) is recorded on result.
+	// outcome (including whether a fix was applied) is recorded on result. On the
+	// staged path this is `pkgdev manifest` inside the staged tree against a
+	// private distdir, so no directory the host shares changes while it runs.
 	a.reporter.TaskStage(pkg, "manifest")
-	if err := a.runManifestWithFix(pkg, newVersion, result); err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrManifestFailed, err)
-		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
-		}
-		return result, result.Error
+	if err := a.runManifestWithFix(cand, pkg, newVersion, result); err != nil {
+		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, err))
 	}
 
-	// Update status to validated
+	// The static gates — the Meson option gate and the advisory QA scan — are
+	// inserted HERE by sub-task 12.1, reporting into gates. The slot is left
+	// explicit rather than implied because StatusValidated below has been moved to
+	// sit after it, and a gate added above that line instead of below it would
+	// silently undo the move.
+	var gates []validate.GateResult
+
+	// Update status to validated.
+	//
+	// MOVED (S033-D13, protocol §5.7): this used to be written the moment the
+	// manifest step returned. It now sits after the static gates, and the state's
+	// MEANING NARROWS with the move — it says "passed the static gates", not "ready
+	// to publish" and, on the staged path, no longer "the ebuild is in the
+	// overlay". A bump can sit at `validated` having failed a later gate and never
+	// been promoted, and the column `--list` renders has to be read that way.
 	if err := a.pending.SetStatus(pkg, StatusValidated, ""); err != nil {
 		result.Error = fmt.Errorf("failed to update status: %w", err)
 		return result, result.Error
 	}
 
-	// Run compile test if requested
+	// Run compile test if requested. It runs against cand's repository, which on
+	// the staged path is the staged tree: a gate that built out of the published
+	// overlay would be reading a candidate that is not there yet.
 	if compile {
 		a.reporter.TaskStage(pkg, "compile")
-		logPath, err := a.runCompile(pkg, newVersion, result)
+		logPath, err := a.runCompile(cand, pkg, newVersion, result)
 		if err != nil {
-			result.Error = err
 			result.LogPath = logPath
-			if err := a.pending.SetStatus(pkg, StatusFailed, err.Error()); err != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
-			}
-			return result, result.Error
+			return a.failApply(pkg, result, err)
 		}
+	}
+
+	// R3.3: the candidate may be published only once every gate up to the selected
+	// depth has reported PASS or SKIPPED. The rule lives in one pure function so it
+	// is asserted directly rather than only through a real promotion, and so that a
+	// gate added above cannot reach the overlay without passing through it.
+	//
+	// The staging error is nil by construction: a tree that could not be prepared
+	// already withdrew the bump in prepareInStagingTree (R3.10), so a promotion
+	// decision is only ever reached WHERE a staged tree exists — which is R3.3's
+	// second half.
+	if ok, reason := validate.PromotionDecision(gates, nil); !ok {
+		return a.failApply(pkg, result, errors.New(reason))
+	}
+
+	// The published overlay's first and only write of this apply (R3.4). On the
+	// pre-staging path there is nothing to promote: copyEbuild already put the
+	// candidate there and `pkgdev manifest` already regenerated the Manifest in
+	// place.
+	if cand.staged {
+		promoted, err := a.promote(cand, pkg, newVersion)
+		if err != nil {
+			return a.failApply(pkg, result, err)
+		}
+		// Armed only now: from this point a failure DOES have something published
+		// to take back, and promotion's own rollback is what knows the difference
+		// between the ebuild (remove it) and the Manifest (restore it).
+		rollbackPublished = promoted
 	}
 
 	result.Success = true
@@ -691,11 +752,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 
 	// S021-R2.1: record the version that just landed on disk as the one this
-	// registry entry keeps. Reached only here, past copyEbuild, past the manifest
-	// step and past the compile test, because the registry must never claim a
-	// file that is not there: `--clean` removes every ebuild no entry claims, so
-	// a pin written ahead of the file would aim that rule at the only ebuild
-	// present and a failed update would become a deleted package (S021-R2.2).
+	// registry entry keeps. Reached only here, past the manifest step, past the
+	// compile test and — since story 033 — past a COMPLETED promotion, because the
+	// registry must never claim a file that is not there: `--clean` removes every
+	// ebuild no entry claims, so a pin written ahead of the file would aim that
+	// rule at the only ebuild present and a failed update would become a deleted
+	// package (S021-R2.2). "Validated but not promoted" is the case story 033 adds
+	// to that list, and it reaches this line by exactly one route — it does not:
+	// every way of not being promoted returns above through failApply.
 	// The value written is newVersion — what was applied — never the pending
 	// entry's upstream target, which stays pending.json's business alone
 	// (S021-UB4). An overlay with no packages.toml gets a warning here and no
@@ -735,6 +799,147 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	}
 
 	return result, nil
+}
+
+// failApply records err as this apply's outcome and mirrors it into
+// pending.json, returning the pair every failing path of Apply returns.
+//
+// It exists because that three-line dance was repeated at seven exits and the
+// repetition was load-bearing: result.Error must be set BEFORE the function
+// returns, because the deferred rollback keys on it, and a SetStatus that itself
+// fails must be appended to the original error rather than replacing it. One
+// helper is one place for both rules.
+func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyResult, error) {
+	result.Error = err
+	if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
+		// Keep the original error; just say that the status could not be recorded.
+		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+	}
+	return result, result.Error
+}
+
+// prepareInOverlay materialises the candidate the way every release before story
+// 033 did: the new version's ebuild is copied into the PUBLISHED package directory
+// and the per-package substitutions are applied to it there.
+//
+// It is kept for exactly one reason — a caller that supplied no staging root gets
+// the behaviour it has always had, byte for byte, until sub-task 12.1 wires the
+// staging root into the three construction sites in cmd/.
+//
+// The rollback is RETURNED rather than registered, so that the point at which it
+// becomes active stays exactly where it was: a substitution failure below returns
+// before Apply arms it, which is pre-existing behaviour (an orphan ebuild is left
+// behind by a failed substitution) that this story does not silently change.
+func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, update *PendingUpdate) (candidatePaths, publishedUndo, error) {
+	if err := a.copyEbuild(pkg, currentVersion, newVersion); err != nil {
+		return candidatePaths{}, nil, fmt.Errorf("failed to copy ebuild: %w", err)
+	}
+
+	cand, err := publishedCandidate(a.overlayPath, pkg, newVersion)
+	if err != nil {
+		return candidatePaths{}, nil, err
+	}
+	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
+		return candidatePaths{}, nil, err
+	}
+
+	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any later
+	// step (manifest, status update, compile) fails, that file is an orphan and
+	// must be removed so the overlay is not left half-applied.
+	return cand, orphanEbuildUndo(cand.ebuildPath, pkg, newVersion), nil
+}
+
+// prepareInStagingTree materialises the candidate in a tree of its own, outside
+// the published overlay, and returns where the gates will find it (R3, R3.1).
+//
+// Nothing here writes into the overlay: the source ebuild is READ out of it and
+// the candidate is written into the staged tree. That is the whole difference from
+// prepareInOverlay, and it is what lets R3.2 be stated as "the overlay is
+// byte-identical while any gate runs" rather than as "it is put back afterwards".
+//
+// A staged tree that could not be built WITHDRAWS the bump (R3.10) instead of
+// letting it through as "no gate failed": every build gate would report SKIPPED,
+// nothing would have FAILED, and a candidate no gate ever read would be published.
+// validate.PromotionDecision documents that vacuity at length; this function is
+// where it is denied, by failing before any gate is consulted.
+func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, update *PendingUpdate, result *ApplyResult) (candidatePaths, error) {
+	srcPath := a.EbuildPath(pkg, currentVersion)
+	if srcPath == "" {
+		return candidatePaths{}, fmt.Errorf("invalid package name format: %s", pkg)
+	}
+	body, err := os.ReadFile(srcPath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// Same sentinel copyEbuild reports, so a caller that recognises a missing
+		// source ebuild keeps recognising it on either path.
+		return candidatePaths{}, fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+	case err != nil:
+		return candidatePaths{}, fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
+	}
+
+	// The refusal copyEbuild makes, taken here so that a bump which can never be
+	// published does not first spend a manifest run and a build proving itself. It
+	// is deliberately not the only place it is taken: promotion re-checks, because
+	// the gates in between take minutes and a check that old describes a package
+	// directory that may have moved on.
+	if err := refuseExistingEbuild(a.EbuildPath(pkg, newVersion), pkg, newVersion); err != nil {
+		return candidatePaths{}, err
+	}
+
+	stagedRoot, err := validate.Stage(validate.StageRequest{
+		Overlay:     a.overlayPath,
+		StagingRoot: a.stagingRoot,
+		Atom:        pkg,
+		Version:     newVersion,
+		EbuildBytes: body,
+	})
+	if err != nil {
+		// The ErrStageUnpreparable sentinel survives the wrap, which is the point
+		// of it: the caller reacts to staging having failed without enumerating the
+		// ways it can.
+		return candidatePaths{}, fmt.Errorf("staging %s-%s for validation: %w", pkg, newVersion, err)
+	}
+	// R3.6: named on the result the moment it exists, so it is named even when
+	// everything after this fails. A retained tree nobody can find is not an
+	// inspectable failure.
+	result.StagedPath = stagedRoot
+
+	cand, err := stagedCandidate(stagedRoot, pkg, newVersion)
+	if err != nil {
+		return candidatePaths{}, err
+	}
+	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
+		return candidatePaths{}, err
+	}
+	return cand, nil
+}
+
+// applySubstitutions rewrites the per-package variables the checker captured into
+// the candidate ebuild, wherever that candidate currently lives.
+//
+// Both substitutions must precede the manifest step, because the variable they
+// write typically feeds SRC_URI and the manifest step fetches the URL built from
+// it. Taking the path as an argument rather than recomputing it from a.overlayPath
+// is what lets the staged candidate be the one edited: an edit applied to the
+// published tree here would be an unvalidated write into the overlay, and a staged
+// tree validated without the substitution would prove the wrong file.
+func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpdate) error {
+	// Snapshot packages tracked by commit (track="commit"): point SRC_URI's
+	// commit-hash variable at the correct tarball.
+	if update.CommitHash != "" {
+		if err := substituteCommitHash(ebuildPath, update.CommitHash); err != nil {
+			return fmt.Errorf("failed to substitute commit hash: %w", err)
+		}
+	}
+	// Packages declaring aux_var/aux_pattern: the free-text auxiliary variable
+	// (e.g. MY_BUILD="esr-bbNN"). The aux_var NAME comes from config; the value
+	// travels in the pending update.
+	if update.AuxValue != "" {
+		if err := substituteAuxVar(ebuildPath, a.configs[pkg].AuxVar, update.AuxValue); err != nil {
+			return fmt.Errorf("failed to substitute aux var: %w", err)
+		}
+	}
+	return nil
 }
 
 // applySummary derives the short, one-line summary handed to the reporter's
@@ -1075,8 +1280,13 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 //
 // Exactly one fix attempt is made per apply: the agent iterates internally (bounded
 // by its --max-turns), so there is no external retry loop here.
-func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) error {
-	firstErr := a.runManifest(pkg, version)
+//
+// Every path here is scoped to cand, never to a.overlayPath: on the staged path the
+// manifest runs in the staged tree and the fixer edits the staged ebuild, so a fix
+// attempt is itself covered by R3.2 — an agent rewriting SRC_URI must not be doing
+// it inside a repository that commits and pushes itself.
+func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, result *ApplyResult) error {
+	firstErr := a.runManifestFor(cand, pkg, version)
 	if firstErr == nil {
 		return nil
 	}
@@ -1092,7 +1302,7 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		return firstErr
 	}
 
-	pkgDir := pkgDirFor(a.overlayPath, pkg)
+	pkgDir := cand.pkgDir
 	if pkgDir == "" {
 		// Malformed name: nothing the fixer can scope to; surface the original error.
 		return firstErr
@@ -1124,7 +1334,7 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 		Package:       pkg,
 		Version:       version,
 		PkgDir:        pkgDir,
-		EbuildPath:    a.EbuildPath(pkg, version),
+		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       distdir,
 	})
@@ -1135,7 +1345,7 @@ func (a *Applier) runManifestWithFix(pkg, version string, result *ApplyResult) e
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
 	// self-report.
 	a.reporter.TaskStage(pkg, "re-check")
-	if secondErr := a.runManifest(pkg, version); secondErr != nil {
+	if secondErr := a.runManifestFor(cand, pkg, version); secondErr != nil {
 		return fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
 	}
 
@@ -1349,6 +1559,20 @@ func (a *Applier) runManifest(pkg, version string) error {
 	return a.sweeper().runManifest(pkg, version)
 }
 
+// runManifestFor regenerates the Manifest of whichever tree the candidate is in.
+//
+// The two are not the same call with a different directory: the staged one drops
+// LockFetch, Quarantine and RecordFetchScope and runs against a private distdir,
+// because those three defend a directory the whole machine shares and pointing
+// them at a staged tree would have a validation run rearrange the host's DISTDIR.
+// sweep_staged.go carries the full argument.
+func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) error {
+	if cand.staged {
+		return a.sweeper().runStagedManifest(cand.pkgDir, pkg, version)
+	}
+	return a.runManifest(pkg, version)
+}
+
 // runCompile runs a compile test with elevated privileges.
 // It prompts for user confirmation before executing.
 // Returns the log path if compilation fails.
@@ -1368,7 +1592,17 @@ func (a *Applier) runManifest(pkg, version string) error {
 // requirement, the runAttached seam and both existing success and failure
 // conditions are exactly as they were; the probe sits ahead of all of them and
 // the only new exit is the skip.
-func (a *Applier) runCompile(pkg, version string, result *ApplyResult) (string, error) {
+//
+// # What story 033 added, and what it deliberately did not
+//
+// The ebuild it builds and the repository it builds from are now TOLD to it
+// (cand) instead of recomputed from a.overlayPath. On the staged path that is the
+// staged tree, which is what keeps the compile gate inside S033-R3.2: a build
+// reading the published overlay would be reading a candidate that has not been
+// published yet, and running it there is precisely the "unvalidated ebuild sitting
+// in a tree that auto-commits" this story removes. Nothing else about the gate
+// changes.
+func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	// Measured before the prompt: asking the operator to confirm a compile that
 	// --require-isolation will refuse to run would be a question with no
 	// consequence.
@@ -1392,20 +1626,19 @@ func (a *Applier) runCompile(pkg, version string, result *ApplyResult) (string, 
 		return "", err
 	}
 
-	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
-	if !ok {
+	// The ebuild to build, and the repository to build it from. `ebuild` discovers
+	// the repository from the path it is given and from its working directory, so
+	// cmd.Dir is what decides which tree the build reads.
+	ebuildPath := cand.ebuildPath
+	if ebuildPath == "" {
 		return "", fmt.Errorf("invalid package name format: %s", pkg)
 	}
-
-	// Build ebuild path
-	ebuildPath := filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
 
 	// Run compile test: sudo/doas ebuild <path> clean compile. The command is
 	// bound to the applier's parent context so a SIGINT or deadline kills the
 	// spawned process.
 	cmd := a.execCommand(a.ctx, privTool, "ebuild", ebuildPath, "clean", "compile")
-	cmd.Dir = a.overlayPath
+	cmd.Dir = cand.repoRoot
 
 	// Execute through the runAttached seam rather than StreamCapture: the
 	// privileged child needs the real TTY for the sudo/doas password prompt
@@ -1486,13 +1719,15 @@ func (a *Applier) LogsDir() string {
 	return a.logsDir
 }
 
-// EbuildPath returns the full path to an ebuild file.
+// EbuildPath returns the full path to an ebuild file in the PUBLISHED overlay,
+// or "" when pkg is not a well-formed category/package. It delegates so that the
+// filename an ebuild carries is built in exactly one place (candidateIn).
 func (a *Applier) EbuildPath(pkg, version string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
-	if !ok {
+	cand, err := publishedCandidate(a.overlayPath, pkg, version)
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(a.overlayPath, category, pkgName, fmt.Sprintf("%s-%s.ebuild", pkgName, version))
+	return cand.ebuildPath
 }
 
 // SeedFromGentoo copies the current ::gentoo package directory (srcPkgDir) into
