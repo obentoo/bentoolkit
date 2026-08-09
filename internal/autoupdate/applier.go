@@ -160,15 +160,22 @@ type ApplyResult struct {
 	// single-package repository validate.Stage built, which by construction lives
 	// OUTSIDE the published overlay.
 	//
-	// It is set as soon as the tree exists and is kept whatever happens next,
-	// because it is what makes a failure inspectable (S033-R3.6): the operator can
-	// read the exact ebuild the gates read and re-run a gate by hand, without
-	// repeating the work that produced it. Retention is expressed by the path
-	// itself — one tree per package and version — so there is no index to consult
-	// and nothing to unlock.
+	// It is set as soon as the tree exists and kept through every failure, because
+	// it is what makes a failure inspectable (S033-R3.6): the operator can read the
+	// exact ebuild the gates read and re-run a gate by hand, without repeating the
+	// work that produced it. Retention is expressed by the path itself — one tree
+	// per package and version — so there is no index to consult and nothing to
+	// unlock. The reports name it: applySummary appends it to the failure line, and
+	// the CLI prints it under "Staged:".
 	//
-	// Empty when no staged tree was built: an apply that ran without a staging
-	// root, or one that failed before staging.
+	// A COMPLETED promotion clears it again. The staged tree has served its purpose
+	// once its bytes are in the overlay, and naming a path beside a success invites
+	// the operator to go and read a tree that says nothing the overlay does not
+	// already say — while the field's meaning stays the single one worth carrying:
+	// "here is the evidence of what went wrong".
+	//
+	// Empty, therefore, in three cases: a successful apply, an apply that ran
+	// without a staging root, and one that failed before staging.
 	StagedPath string
 }
 
@@ -740,6 +747,20 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 
 	result.Success = true
 
+	// R3.6, the other direction: the retained tree is a FAILURE's evidence, so the
+	// path is dropped the moment there is no failure to explain. Cleared here and
+	// not earlier because this line is where success is finally decided — every way
+	// of not being promoted has already returned through failApply, carrying the
+	// path with it — and not later because nothing below can turn this apply back
+	// into a failure: the pending delete, the registry pin and the --clean sweep all
+	// report their misses as warnings and deliberately leave Success true.
+	//
+	// The tree itself is left on disk. Removing it would be a filesystem operation
+	// whose failure this path has no honest way to report, and it would buy nothing:
+	// the next attempt at this same package and version restages over it (R3.7), so
+	// what is left is one directory per version, not a growing pile per run.
+	result.StagedPath = ""
+
 	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
 	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (via the package warnLogf sink so tests
@@ -945,12 +966,21 @@ func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpda
 // applySummary derives the short, one-line summary handed to the reporter's
 // TaskDone for an apply. It is purely cosmetic (the reporter only renders it):
 // on success the new version (noting an LLM fix when one happened), on an
-// obsolete prune the reason, and otherwise the failure's error text. A nil
-// result yields the empty string.
+// obsolete prune the reason, and otherwise the failure's error text followed by
+// the staged tree that failure left behind. A nil result yields the empty string.
+//
+// Naming the tree here is the second half of R3.6, and it is the half that makes
+// the first half worth having: a tree retained on disk that no report points at is
+// not an inspectable failure, it is a directory the operator will only find by
+// going looking for it — which is exactly the "re-run the bump from scratch to see
+// what happened" cost retention exists to remove. A success names nothing, because
+// a promoted bump clears StagedPath.
 func applySummary(result *ApplyResult) string {
-	switch {
-	case result == nil:
+	if result == nil {
 		return ""
+	}
+
+	switch {
 	case result.Success:
 		if result.Fixed {
 			return result.NewVersion + " (fixed)"
@@ -960,11 +990,23 @@ func applySummary(result *ApplyResult) string {
 		return result.ObsoleteReason
 	case result.Held:
 		return "held (hold = true)"
-	case result.Error != nil:
-		return result.Error.Error()
-	default:
-		return ""
 	}
+
+	// What is left is a failure. Its error text is the summary — except that
+	// failApply is the only route here and it always records one, so the empty
+	// fallback is a defence against a future exit that forgets, not a live case.
+	summary := ""
+	if result.Error != nil {
+		summary = result.Error.Error()
+	}
+	if result.StagedPath == "" {
+		return summary
+	}
+	note := "staged tree kept at " + result.StagedPath
+	if summary == "" {
+		return note
+	}
+	return summary + " (" + note + ")"
 }
 
 // resolveCurrentVersion returns the highest-version, non-live ebuild version

@@ -338,3 +338,150 @@ func TestApplierPromote_FailureDuringPromotionRemovesThePublishedEbuild(t *testi
 			"and --clean deletes those", candidate)
 	}
 }
+
+// TestApplierRetain_FailedBumpKeepsItsTreeOnDisk is the first half of R3.6. The
+// tree is retained rather than cleaned up, which is the opposite of what the
+// fixer's private distdir does — and deliberately so: that one is scratch, this
+// one is evidence.
+func TestApplierRetain_FailedBumpKeepsItsTreeOnDisk(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t)
+
+	result, _ := applier.Apply(pkg, false)
+
+	if result.Success {
+		t.Fatal("every child process failed and the apply still reported success")
+	}
+	if result.StagedPath == "" {
+		t.Fatal("a failed bump carries no StagedPath")
+	}
+
+	info, err := os.Stat(result.StagedPath)
+	if err != nil {
+		t.Fatalf("the staged tree %q was removed after the failure: %v — R3.6 retains it so the failure can be inspected without repeating the work",
+			result.StagedPath, err)
+	}
+	if !info.IsDir() {
+		t.Errorf("StagedPath %q is not a directory", result.StagedPath)
+	}
+
+	// The candidate itself has to be in there, or the retained tree answers no
+	// question the operator would ask of it.
+	candidate := filepath.Join(result.StagedPath, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+	if _, err := os.Stat(candidate); err != nil {
+		t.Errorf("the retained tree holds no candidate ebuild at %q: %v", candidate, err)
+	}
+}
+
+// TestApplierRetain_TheStagedPathReachesTheReport is the second half. A field
+// nothing renders is a field the next refactor deletes.
+func TestApplierRetain_TheStagedPathReachesTheReport(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t)
+
+	result, _ := applier.Apply(pkg, false)
+
+	if result.StagedPath == "" {
+		t.Fatal("a failed bump carries no StagedPath")
+	}
+	summary := applySummary(result)
+	if !strings.Contains(summary, result.StagedPath) {
+		t.Errorf("the failure summary %q does not name the retained staged tree %q; "+
+			"a tree nobody is told about is not inspectable (R3.6)", summary, result.StagedPath)
+	}
+}
+
+// TestApplierRetain_SuccessCarriesNoStagedPath keeps the field honest in the
+// other direction. A promoted bump's staged tree has served its purpose, and
+// printing a path beside a success invites the operator to go and read a tree
+// that says nothing they do not already know from the overlay.
+func TestApplierRetain_SuccessCarriesNoStagedPath(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("the apply failed with every child succeeding: %v", result.Error)
+	}
+
+	if result.StagedPath != "" {
+		t.Errorf("a successful apply reports StagedPath %q; the retained tree is a failure's evidence, not a success's", result.StagedPath)
+	}
+	if summary := applySummary(result); strings.Contains(summary, "staging") {
+		t.Errorf("the success summary %q mentions staging; the operator has nothing to inspect", summary)
+	}
+}
+
+// TestApplierRetain_SecondFailureReplacesTheFirstTree is R3.7 seen from the
+// retention side, and it is the assertion that keeps a nightly sweep from
+// filling the config directory: one tree per package and version, holding the
+// LATEST attempt.
+//
+// The second attempt's bytes are what an operator reads, so "exactly one tree"
+// is not enough on its own — the surviving tree must be the new one.
+func TestApplierRetain_SecondFailureReplacesTheFirstTree(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t)
+
+	first, _ := applier.Apply(pkg, false)
+	if first.StagedPath == "" {
+		t.Fatal("the first failed bump carries no StagedPath")
+	}
+
+	// Mark the first tree so the second run's replacement is observable. The
+	// marker sits beside the candidate rather than inside it, so it cannot be
+	// mistaken for a change the applier made.
+	marker := filepath.Join(first.StagedPath, ".first-attempt")
+	if err := os.WriteFile(marker, []byte("attempt one"), 0o600); err != nil {
+		t.Fatalf("marking the first staged tree: %v", err)
+	}
+
+	// The pending entry survives a failed apply, so the same bump can be
+	// retried; that retry is what R3.7 is about.
+	second, _ := applier.Apply(pkg, false)
+	if second.StagedPath == "" {
+		t.Fatal("the second failed bump carries no StagedPath")
+	}
+
+	if second.StagedPath != first.StagedPath {
+		t.Errorf("the second attempt staged into %q and the first into %q; retention is one tree per package AND version, "+
+			"and the path itself is what expresses it", second.StagedPath, first.StagedPath)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the first attempt's tree survived into the second run; restaging is RemoveAll followed by a fresh build, " +
+			"or a stale file from a previous failure is read as evidence about this one")
+	}
+
+	// Exactly one tree under <staging>/<category>/<package>, whatever the two
+	// runs did.
+	versionsDir := filepath.Dir(second.StagedPath)
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		t.Fatalf("reading %q: %v", versionsDir, err)
+	}
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("two failures for the same package and version left %d trees (%v), want exactly 1", len(entries), names)
+	}
+}
+
+// TestApplierRetain_TwoFailuresStillLeaveTheOverlayUntouched re-states 4.1's
+// claim across a retry, which is the shape a real sweep has: the same bump fails
+// on Monday and again on Tuesday, and the published overlay is the same tree it
+// was on Sunday.
+func TestApplierRetain_TwoFailuresStillLeaveTheOverlayUntouched(t *testing.T) {
+	applier, overlayDir, pkg, _, pins := promoteFixture(t)
+	before := hashOverlayTree(t, overlayDir)
+
+	applier.Apply(pkg, false) //nolint:errcheck // the failure is the fixture
+	applier.Apply(pkg, false) //nolint:errcheck // the failure is the fixture
+
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the published overlay changed across two failed attempts: %s -> %s", before, after)
+	}
+	if len(pins) != 0 {
+		t.Errorf("a pin was written for a bump that failed twice: %v", pins)
+	}
+}

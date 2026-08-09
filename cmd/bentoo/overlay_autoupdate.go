@@ -1467,7 +1467,8 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 // It is a no-op when result is nil. Otherwise it prints the package and
 // version transition, then reports status (obsolete, held, success, or failure)
 // plus any available details such as obsolete reason, LLM fix/QA summary,
-// cleaned old-version info/warnings, and failure log path.
+// cleaned old-version info/warnings, and — on a failure — the log path and the
+// staged tree the failed bump left behind.
 func displayApplyResult(result *autoupdate.ApplyResult) {
 	if result == nil {
 		return
@@ -1528,6 +1529,19 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		if result.LogPath != "" {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
+		}
+		if result.StagedPath != "" {
+			// S033-R3.6's second half, at the operator's end of it: the bump was
+			// validated in a tree of its own outside the overlay, that tree is kept
+			// when the bump is not promoted, and this line is what makes it findable.
+			// Without it the tree still survives, but the only way to see the ebuild
+			// the gates actually read is to run the whole bump again.
+			//
+			// Failure branch only, and that is not merely where it happens to sit: a
+			// promoted bump clears StagedPath precisely so no success ever points at
+			// a tree whose bytes are already in the overlay.
+			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+			output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
 		}
 	}
 }
@@ -1949,6 +1963,13 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 		detail := err.Error()
 		if applyResult != nil && applyResult.LogPath != "" {
 			detail = fmt.Sprintf("%v (log: %s)", err, applyResult.LogPath)
+		}
+		// S033-R3.6: a revive whose bump failed kept its staged tree exactly like any
+		// other failed apply, and this outcome line is the only report the operator
+		// gets for it — displayApplyResult never runs on this path. A tree named in no
+		// report is a tree found only by going looking for it.
+		if applyResult != nil && applyResult.StagedPath != "" {
+			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
 		}
 		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
 	}
