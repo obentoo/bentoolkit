@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -245,6 +246,10 @@ func stubSnapshotsDirSeams(t *testing.T, entries []string, existing ...string) *
 	t.Helper()
 	origStat, origRead, origRemove := statPath, readDirPath, removePath
 	t.Cleanup(func() { statPath, readDirPath, removePath = origStat, origRead, origRemove })
+	// No mount table by default, for the same reason the others are stubbed: the
+	// developer's real /proc/self/mounts would decide the outcome of the
+	// mount-point guard instead of the test.
+	stubMountTables(t, nil)
 
 	present := make(map[string]bool, len(existing))
 	for _, p := range existing {
@@ -266,6 +271,24 @@ func stubSnapshotsDirSeams(t *testing.T, entries []string, existing ...string) *
 		return nil
 	}
 	return &removed
+}
+
+// stubMountTables makes the mount tables read as the content given per path, so
+// a test states what the host declares rather than inheriting it. A path absent
+// from the map does not exist, which is how the guard sees a host with neither
+// file — and keying by path is what lets a test say "fstab declares it but it is
+// not mounted", the case the guard exists for.
+func stubMountTables(t *testing.T, tables map[string]string) {
+	t.Helper()
+	orig := readFilePath
+	t.Cleanup(func() { readFilePath = orig })
+	readFilePath = func(name string) ([]byte, error) {
+		content, ok := tables[name]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return []byte(content), nil
+	}
 }
 
 // snapperMock returns a Runner answering `list-configs` with the coverage map
@@ -489,6 +512,83 @@ func TestProvision_FallsBackToUnlinkWhenBtrfsDeleteFails(t *testing.T) {
 	}
 	if len(*removed) != 1 || (*removed)[0] != "/home/.snapshots" {
 		t.Errorf("unlink fallback did not run: %v", *removed)
+	}
+}
+
+// TestProvision_RefusesToRemoveDeclaredMountpoint: the leftover .snapshots is a
+// separately mounted subvolume that is currently UNMOUNTED — the classic
+// @snapshots in fstab. ReadDir sees an empty directory and the removal path
+// would clear it, destroying no snapshot but breaking the mount point, so the
+// next boot cannot mount it. The guard refuses before touching anything and
+// names the file that declares it (018 R6).
+func TestProvision_RefusesToRemoveDeclaredMountpoint(t *testing.T) {
+	removed := stubSnapshotsDirSeams(t, nil, "/home/.snapshots") // exists, reads as empty
+	stubMountTables(t, map[string]string{
+		// Declared, and deliberately absent from the live table: unmounted is the
+		// case ReadDir cannot tell apart from "leftover empty directory".
+		"/etc/fstab": "# comment\n" +
+			"UUID=abc /home/.snapshots btrfs subvol=@snapshots,noatime 0 0\n",
+	})
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
+	mock := snapperMock(t, nil) // not covered: provisioning would otherwise run
+
+	err := ensureSnapperConfigs(context.Background(), cfg, mock)
+	if err == nil {
+		t.Fatal("ensureSnapperConfigs cleared a declared mount point")
+	}
+	if !strings.Contains(err.Error(), "/etc/fstab") {
+		t.Errorf("error does not name the table that declares the mount: %v", err)
+	}
+	if len(*removed) != 0 {
+		t.Errorf("a declared mount point was unlinked: %v", *removed)
+	}
+	if btrfs := snapperArgs(mock, "btrfs"); len(btrfs) != 0 {
+		t.Errorf("btrfs was invoked against a declared mount point: %v", btrfs)
+	}
+	for _, args := range snapperArgs(mock, "snapper") {
+		if len(args) > 2 && args[2] == "create-config" {
+			t.Errorf("create-config ran despite the aborted provisioning: %v", args)
+		}
+	}
+}
+
+// TestEnsureSnapperConfigs_WarnsWhenConfigNameDiverges: snapper covers the
+// subvolume under a name bentoo would not have chosen — an operator-made config.
+// create-config must not run (snapper would refuse: already covered) and the
+// managed keys go to the name snapper actually holds, not the derived one, or
+// set-config would fail against a config that does not exist. The divergence is
+// warned about because `snapshot create`/`list` derive the name from the
+// subvolume and will not find this config (018 R7).
+func TestEnsureSnapperConfigs_WarnsWhenConfigNameDiverges(t *testing.T) {
+	stubSnapshotsDirSeams(t, nil, "/home/.snapshots")
+	var warnings []string
+	origWarn := warnLogf
+	t.Cleanup(func() { warnLogf = origWarn })
+	warnLogf = func(format string, args ...interface{}) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
+
+	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
+	mock := snapperMock(t, map[string]string{"/home": "operator-home"})
+
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+		t.Fatalf("ensureSnapperConfigs: %v", err)
+	}
+
+	var set []string
+	for _, args := range snapperArgs(mock, "snapper") {
+		if len(args) > 2 && args[2] == "create-config" {
+			t.Errorf("create-config ran against an already-covered subvolume: %v", args)
+		}
+		if len(args) > 2 && args[2] == "set-config" {
+			set = args
+		}
+	}
+	if len(set) < 2 || set[1] != "operator-home" {
+		t.Errorf("set-config went to %v, not to the config snapper actually holds", set)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "operator-home") {
+		t.Errorf("the name divergence was not reported to the operator: %v", warnings)
 	}
 }
 
