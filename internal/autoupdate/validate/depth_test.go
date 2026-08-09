@@ -39,6 +39,7 @@ var theLadder = []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, D
 func TestDepth_OrderingHoldsUnderLessThan(t *testing.T) {
 	for i := 1; i < len(theLadder); i++ {
 		prev, cur := theLadder[i-1], theLadder[i]
+		//nolint:staticcheck // QF1001: the negation is deliberate. `prev < cur` IS the contract, and reading it under a `!` says "the thing we require did not hold". De Morgan's `prev >= cur` states the failure instead of the requirement, which is the wrong way round in a test that exists to pin the requirement.
 		if !(prev < cur) {
 			t.Errorf("%v is not less than %v; the ladder is an order and `max(floor, proposed)` depends on it", prev, cur)
 		}
@@ -46,6 +47,7 @@ func TestDepth_OrderingHoldsUnderLessThan(t *testing.T) {
 
 	// And transitively, so no pair is left to chance: the shallowest is below
 	// the deepest by more than one step.
+	//nolint:staticcheck // QF1001: see the note above — the requirement is stated positively and negated, not restated as its own failure.
 	if !(DepthNone < DepthCompile) {
 		t.Errorf("DepthNone (%v) is not below DepthCompile (%v)", DepthNone, DepthCompile)
 	}
