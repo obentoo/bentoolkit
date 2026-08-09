@@ -1,0 +1,487 @@
+package validate
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// stagedDirMode is the mode every directory of a staged tree carries. It is the
+// mode the applier already uses for its logs/ directory (applier.go:471) and it
+// is chosen here for the same reason: a staged tree holds a candidate nobody has
+// reviewed yet and, once a fixer runs against it, whatever that fixer wrote.
+// Neither belongs in a world-readable directory.
+const stagedDirMode fs.FileMode = 0o750
+
+// stagedFileMode is the mode for the files staging WRITES — the candidate, the
+// layout and the repo name. Files COPIED out of the overlay keep the mode they
+// had there instead, because a copy that quietly changed a file's mode would
+// make the staged repository differ from the published one in a way nobody
+// asked for. Nothing is lost by the asymmetry: the 0750 directory above a file
+// is what decides who can reach it at all.
+const stagedFileMode fs.FileMode = 0o600
+
+// stagedRepoPrefix opens every staged repository's name. It is a fixed,
+// recognisable prefix so that a name appearing in emerge or pkgcheck output is
+// immediately identifiable as a validation artefact rather than a repository
+// anyone configured, and so that the generated name cannot collide with a real
+// overlay's by accident.
+const stagedRepoPrefix = "bentoolkit-staging"
+
+// stagedMasters is the only masters line a staged tree ever declares. See the
+// D2 note on Stage for why the published overlay is deliberately NOT a master.
+const stagedMasters = "masters = gentoo"
+
+// carriedRepoDirs are the overlay directories copied wholesale into the staged
+// tree so that the candidate can resolve what the published overlay defines
+// (R3.8): the eclasses it inherits and the profiles that describe the
+// repository. Design M-C measured them at 32 KB and 56 KB, which is what makes
+// copying them per package-version a non-question.
+var carriedRepoDirs = []string{"eclass", "profiles"}
+
+// carriedLayoutKeys are the layout.conf properties that travel from the
+// published overlay into the staged one, in this order.
+//
+// It is a whitelist, not a filter, and that is the point: copying the source
+// layout wholesale would carry `masters` (which D2 replaces) and could carry a
+// `repo-name` (which would reinstate the duplicate name the staged tree exists
+// to avoid). These three change how Portage digests and reads a repository, so a
+// staged tree that dropped them would validate a bump under rules the published
+// overlay does not use. A key the source does not set is not invented here: its
+// absence is carried too, so the staged repository falls back to exactly the
+// Portage default the published one falls back to.
+var carriedLayoutKeys = []string{"thin-manifests", "sign-manifests", "profile-formats"}
+
+// StageRequest is everything Stage needs to materialise one candidate.
+//
+// Overlay is the published overlay the staged tree is built FROM. Staging only
+// ever reads it (R3.1); the candidate is never written there, which is the whole
+// point of validating somewhere else.
+//
+// StagingRoot is the directory the staged trees live under. Stage does not
+// choose it — the caller does, in production <configDir>/staging (design D1).
+// A function that picked its own root could not be pointed elsewhere for a dry
+// run, and the path is the only place the retention rule is recorded: there is
+// no index file and no lock, which is what lets several packages be staged
+// concurrently without coordination.
+//
+// Atom is the full category/package, e.g. "media-plugins/gst-plugins-qt6".
+// Version is the PV, e.g. "1.29.2"; together they name the ebuild file.
+//
+// EbuildBytes is the candidate's body, written verbatim. Staging must not
+// reformat or regenerate what the gates are about to judge, or a gate result
+// would describe a file that never existed anywhere else.
+type StageRequest struct {
+	Overlay, StagingRoot, Atom, Version string
+	EbuildBytes                         []byte
+}
+
+// Stage builds a self-consistent single-package Portage repository holding one
+// candidate ebuild and returns its root, <StagingRoot>/<category>/<package>/
+// <version> (R3, R3.1). The returned directory is itself a repository: it
+// carries the overlay's eclass/ and profiles/, a metadata/layout.conf, its own
+// profiles/repo_name, and the candidate at <category>/<package>/
+// <package>-<version>.ebuild.
+//
+// THE TREE MAY NEVER LIVE UNDER THE OVERLAY ROOT, AND THAT IS NOT A PREFERENCE.
+// ScanOverlay walks the overlay category/package deep (run.go:64, and again
+// through selectTargets at run.go:107) and Reconcile reports every ebuild no
+// registry pin claims as an UnclaimedEbuild, which PlanOverlaySweep turns into a
+// deletion candidate (sweep.go:404-422). A staged candidate parked anywhere
+// under the overlay root is by construction unclaimed — the registry pins the
+// published version, not the one being proved. So `overlay autoupdate --clean`
+// would delete the staging directory, and `overlay validate` would report the
+// candidate as a defect of the published overlay. The staging tree would be
+// eaten by the very tool that created it. Stage therefore refuses a StagingRoot
+// that resolves inside the overlay rather than trusting its callers to remember.
+//
+// WHY THE STAGED TREE MASTERS ONTO gentoo AND NOT ONTO THE OVERLAY (design D2).
+// Naming the overlay as a master would resolve it through repos.conf to
+// /var/db/repos/bentoo — the DEPLOYED copy, which syncs from origin and so lags
+// the working tree by however long the commit/push/sync cycle takes. Validating
+// a new ebuild against a stale eclass is the same class of error as validating
+// it against the wrong tarball, which story 031 already had to fix once. Hence
+// `masters = gentoo` plus local COPIES of eclass/ and profiles/: the eclasses
+// the candidate inherits are then the ones in the tree being validated, byte for
+// byte, and nothing about the answer depends on when the last sync ran.
+//
+// WHY THE STAGED repo_name DIFFERS, AND WHY IT IS WRITTEN LAST. The published
+// repository's name is already registered with Portage, and two repositories
+// answering to one name is a repository-level conflict, not a cosmetic clash.
+// The staged name is derived from the package and version, so it is unique per
+// staged tree and points at the bump under test when it shows up in tool output.
+// It is written AFTER the profiles/ copy on purpose: the copy brings the
+// overlay's own repo_name with it and would otherwise clobber the staged one,
+// re-creating the exact conflict this avoids.
+//
+// RESTAGING REPLACES (R3.7). Staging the same package and version again removes
+// the retained tree and rebuilds it, returning the same path. Retention is one
+// tree per package-version and the path is what expresses it, so a second
+// attempt must not accumulate a second directory. This is also why the applier's
+// copyEbuild is not reused for the candidate: it refuses an existing destination
+// with ErrEbuildExists (applier.go:953), the exact opposite of the rule here,
+// and would hard-fail on the second staging of the same bump.
+//
+// WHAT STAGING DELIBERATELY DOES NOT COPY. The published package directory's
+// Manifest does not travel: it describes the tarballs of the versions already
+// published and has no entry for the candidate's, so the gate that needs one
+// must generate it. Nor does anything else in the package directory, including
+// the previously published ebuilds — a single-package repository holding one
+// version is what makes a gate's answer unambiguous.
+func Stage(req StageRequest) (stagedRoot string, err error) {
+	overlayRoot := strings.TrimSpace(req.Overlay)
+	stagingRoot := strings.TrimSpace(req.StagingRoot)
+	version := strings.TrimSpace(req.Version)
+
+	if overlayRoot == "" {
+		return "", fmt.Errorf("staging %s-%s: no overlay given to copy eclasses and profiles from", req.Atom, version)
+	}
+	if stagingRoot == "" {
+		return "", fmt.Errorf("staging %s-%s: no staging root given; Stage never picks one, because the path is where the retention rule is recorded (D1)", req.Atom, version)
+	}
+	if len(req.EbuildBytes) == 0 {
+		return "", fmt.Errorf("staging %s-%s: no ebuild body given; an empty candidate stages a tree whose gates fail for a reason that has nothing to do with the bump", req.Atom, version)
+	}
+
+	category, pkg, err := splitStagedAtom(req.Atom)
+	if err != nil {
+		return "", err
+	}
+	if err := usableAsPathElement("version", version); err != nil {
+		return "", fmt.Errorf("staging %s: %w", req.Atom, err)
+	}
+
+	// The overlay is checked before anything is created, so a mistyped overlay
+	// path fails as a mistyped overlay path instead of quietly producing a tree
+	// with no eclasses that fails a gate three steps later.
+	info, err := os.Stat(overlayRoot)
+	if err != nil {
+		return "", fmt.Errorf("reading the published overlay %s: %w", overlayRoot, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("the published overlay %s is not a directory", overlayRoot)
+	}
+
+	stagedRoot = filepath.Join(stagingRoot, category, pkg, version)
+	if err := ensureOutsideOverlay(overlayRoot, stagedRoot); err != nil {
+		return "", err
+	}
+
+	// R3.7: replace, never accumulate. RemoveAll on a path that does not exist
+	// is a no-op, so the first staging and every restaging take one code path.
+	if err := os.RemoveAll(stagedRoot); err != nil {
+		return "", fmt.Errorf("removing the retained staged tree %s: %w", stagedRoot, err)
+	}
+	if err := mkdirStaged(stagedRoot); err != nil {
+		return "", err
+	}
+
+	// R3.8: the eclasses and profiles of the published overlay, resolvable from
+	// the staged tree because they are in it.
+	for _, dir := range carriedRepoDirs {
+		if err := carryRepoDir(filepath.Join(overlayRoot, dir), filepath.Join(stagedRoot, dir)); err != nil {
+			return "", fmt.Errorf("carrying %s/ from overlay %s into staged tree %s: %w", dir, overlayRoot, stagedRoot, err)
+		}
+	}
+
+	if err := writeStagedLayout(overlayRoot, stagedRoot); err != nil {
+		return "", err
+	}
+
+	// After the profiles/ copy, never before: see the repo_name note above.
+	if err := writeStagedRepoName(stagedRoot, pkg, version); err != nil {
+		return "", err
+	}
+
+	if err := writeCandidate(stagedRoot, category, pkg, version, req.EbuildBytes); err != nil {
+		return "", err
+	}
+
+	return stagedRoot, nil
+}
+
+// splitStagedAtom reads "category/package" into its two halves.
+//
+// Both halves become directory names, so both are checked for the shapes that
+// would let a malformed atom write outside the staged tree. The atom reaches
+// Stage from the registry, which is a file a maintainer edits by hand; a typo
+// there should produce a named error, not a directory in an unexpected place.
+func splitStagedAtom(atom string) (category, pkg string, err error) {
+	category, pkg, found := strings.Cut(strings.TrimSpace(atom), "/")
+	if !found {
+		return "", "", fmt.Errorf("staging %q: an atom must be category/package", atom)
+	}
+	if err := usableAsPathElement("category", category); err != nil {
+		return "", "", fmt.Errorf("staging %q: %w", atom, err)
+	}
+	if err := usableAsPathElement("package", pkg); err != nil {
+		return "", "", fmt.Errorf("staging %q: %w", atom, err)
+	}
+	return category, pkg, nil
+}
+
+// usableAsPathElement refuses the values that would make a joined path mean
+// something other than "one directory named this": empty, the two relative
+// directory names, a separator of either flavour, and a NUL byte.
+func usableAsPathElement(kind, value string) error {
+	switch {
+	case value == "":
+		return fmt.Errorf("the %s is empty", kind)
+	case value == "." || value == "..":
+		return fmt.Errorf("the %s is %q, which names a directory other than itself", kind, value)
+	case strings.ContainsAny(value, `/\`) || strings.ContainsRune(value, 0):
+		return fmt.Errorf("the %s %q contains a path separator, so it cannot be one directory name", kind, value)
+	}
+	return nil
+}
+
+// ensureOutsideOverlay is the deletion hazard, enforced rather than hoped for.
+// See the note on Stage: an ebuild under the overlay root is an ebuild
+// `--clean` deletes.
+func ensureOutsideOverlay(overlayRoot, stagedRoot string) error {
+	overlayAbs, err := filepath.Abs(overlayRoot)
+	if err != nil {
+		return fmt.Errorf("resolving the overlay path %s: %w", overlayRoot, err)
+	}
+	stagedAbs, err := filepath.Abs(stagedRoot)
+	if err != nil {
+		return fmt.Errorf("resolving the staged tree path %s: %w", stagedRoot, err)
+	}
+	if stagedAbs == overlayAbs || strings.HasPrefix(stagedAbs, overlayAbs+string(os.PathSeparator)) {
+		return fmt.Errorf("the staged tree %s would sit inside the published overlay %s, where the candidate is an unclaimed ebuild that `overlay autoupdate --clean` deletes; stage outside the overlay", stagedAbs, overlayAbs)
+	}
+	return nil
+}
+
+// mkdirStaged creates dir and any missing parent with the staging mode, then
+// sets that mode on dir itself.
+//
+// The second step is not redundant. MkdirAll subtracts the process umask, so
+// without it the mode of a staged tree would depend on the shell that launched
+// the run — a maintainer with a stricter umask would get a different tree from
+// the same command, and the one mode this package states as a rule would be the
+// one thing it did not control.
+func mkdirStaged(dir string) error {
+	if err := os.MkdirAll(dir, stagedDirMode); err != nil {
+		return fmt.Errorf("creating staged directory %s: %w", dir, err)
+	}
+	//nolint:gosec // G302: 0750 is deliberate and is the mode the applier already uses for logs/; see stagedDirMode.
+	if err := os.Chmod(dir, stagedDirMode); err != nil {
+		return fmt.Errorf("setting mode %04o on staged directory %s: %w", stagedDirMode.Perm(), dir, err)
+	}
+	return nil
+}
+
+// carryRepoDir copies one of the overlay's repository directories into the
+// staged tree.
+//
+// A source directory that does not exist is not an error: an overlay with no
+// eclass/ has no eclasses to make resolvable, and refusing to stage such a
+// package would fail a bump over a directory it never needed. The overlay root
+// itself was checked by the caller, so this cannot silently swallow a mistyped
+// overlay path.
+func carryRepoDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", src, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+
+	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walking %s: %w", path, err)
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return fmt.Errorf("relating %s to %s: %w", path, src, err)
+		}
+		target := filepath.Join(dst, rel)
+
+		switch {
+		case entry.IsDir():
+			return mkdirStaged(target)
+		case entry.Type()&fs.ModeSymlink != 0:
+			// Profiles legitimately use symlinks. The link is recreated as a
+			// link rather than dereferenced, so a relative link keeps pointing
+			// at the staged copy of its target instead of reaching back into
+			// the published overlay.
+			link, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("reading the link %s: %w", path, err)
+			}
+			if err := os.Symlink(link, target); err != nil {
+				return fmt.Errorf("recreating the link %s -> %s at %s: %w", path, link, target, err)
+			}
+			return nil
+		case entry.Type().IsRegular():
+			return copyRegularFile(path, target)
+		default:
+			// A socket, device or fifo in a repository directory is not
+			// something staging can meaningfully copy, and a tree that is
+			// quietly incomplete fails a gate for a reason nobody can trace.
+			return fmt.Errorf("%s is a %s, which staging cannot copy into a repository", path, entry.Type())
+		}
+	})
+}
+
+// copyRegularFile copies src to dst, keeping the source's permission bits. dst
+// is created exclusively: the staged tree was removed and rebuilt, so a
+// destination that already exists means two sources claim one path, which is
+// worth an error rather than a silent last-writer-wins.
+func copyRegularFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", src, err)
+	}
+
+	in, err := os.Open(src) //nolint:gosec // the path comes from walking the overlay being staged, not from input
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", src, err)
+	}
+	defer in.Close() //nolint:errcheck
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", dst, err)
+	}
+	defer out.Close() //nolint:errcheck
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", dst, err)
+	}
+	return nil
+}
+
+// writeStagedLayout writes the staged metadata/layout.conf: the masters line D2
+// requires, followed by the properties carried from the published overlay.
+//
+// A published overlay with no layout.conf carries nothing, which is correct
+// rather than lenient — there is nothing to disagree with.
+func writeStagedLayout(overlayRoot, stagedRoot string) error {
+	source := filepath.Join(overlayRoot, "metadata", "layout.conf")
+	carried, err := carriedLayout(source)
+	if err != nil {
+		return err
+	}
+
+	var body strings.Builder
+	body.WriteString("# Generated for validating one candidate ebuild. Not a published repository.\n")
+	body.WriteString(stagedMasters + "\n")
+	for _, line := range carried {
+		body.WriteString(line + "\n")
+	}
+
+	return writeStagedFile(filepath.Join(stagedRoot, "metadata"), "layout.conf", []byte(body.String()))
+}
+
+// writeStagedFile writes one of the files staging generates, creating its
+// directory with the staging mode first.
+//
+// Any file already at that path is REMOVED rather than truncated, and that is
+// the whole reason this is one helper instead of three call sites: profiles/
+// arrives from the published overlay with its own repo_name in it, and
+// os.WriteFile onto an existing file keeps that file's mode. Truncating would
+// leave a generated file wearing the mode it inherited from the overlay, which
+// is not a mode this package chose.
+func writeStagedFile(dir, name string, body []byte) error {
+	if err := mkdirStaged(dir); err != nil {
+		return err
+	}
+
+	path := filepath.Join(dir, name)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("removing the carried %s before writing the staged one: %w", path, err)
+	}
+	if err := os.WriteFile(path, body, stagedFileMode); err != nil {
+		return fmt.Errorf("writing the staged %s: %w", path, err)
+	}
+	return nil
+}
+
+// carriedLayout reads the published overlay's layout.conf and returns the
+// carried properties, normalised to "key = value" and ordered by
+// carriedLayoutKeys so that two runs over one overlay produce identical bytes.
+//
+// The reader is deliberately narrow: it understands "key = value" and
+// hash-comments, and ignores everything else. A line this cannot read is a line
+// Portage will read, and staging is not the place to have an opinion about it.
+func carriedLayout(path string) ([]string, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // the path is metadata/layout.conf under the overlay being staged
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the overlay layout %s: %w", path, err)
+	}
+
+	values := make(map[string]string)
+	for line := range strings.Lines(string(raw)) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+
+	var carried []string
+	for _, key := range carriedLayoutKeys {
+		if value, ok := values[key]; ok {
+			carried = append(carried, key+" = "+value)
+		}
+	}
+	return carried, nil
+}
+
+// writeStagedRepoName writes profiles/repo_name. It is called after the
+// profiles/ copy, which brings the published overlay's own repo_name with it:
+// see the note on Stage.
+func writeStagedRepoName(stagedRoot, pkg, version string) error {
+	return writeStagedFile(filepath.Join(stagedRoot, "profiles"), "repo_name", []byte(stagedRepoName(pkg, version)+"\n"))
+}
+
+// stagedRepoName derives the staged repository's name from the package and
+// version it holds.
+//
+// Portage accepts letters, digits, underscore and dash in a repository name, so
+// every other character — a version's dots, most obviously — is folded to an
+// underscore. Deriving the name rather than fixing it means two staged trees
+// never share a name either, which matters because a validation run registers
+// the staged repository with Portage and a duplicate name is a conflict
+// regardless of which two repositories collide.
+func stagedRepoName(pkg, version string) string {
+	raw := stagedRepoPrefix + "-" + pkg + "-" + version
+
+	var name strings.Builder
+	name.Grow(len(raw))
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			name.WriteRune(r)
+		default:
+			name.WriteRune('_')
+		}
+	}
+	return name.String()
+}
+
+// writeCandidate writes the candidate ebuild into the staged tree's package
+// directory, exactly as it was handed to Stage.
+func writeCandidate(stagedRoot, category, pkg, version string, body []byte) error {
+	return writeStagedFile(filepath.Join(stagedRoot, category, pkg), pkg+"-"+version+".ebuild", body)
+}

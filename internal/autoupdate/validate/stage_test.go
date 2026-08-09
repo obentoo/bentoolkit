@@ -1,0 +1,292 @@
+package validate
+
+// Authored for story 033, sub-task 2.1 — R3, R3.1, R3.7, R3.8.
+//
+// WHERE THE TREE MAY NOT LIVE, AND WHY THAT IS A TEST. `ScanOverlay` walks
+// category/package two levels deep (run.go:64,107) and `planSweep`
+// (sweep.go:404-422) enumerates every ebuild no registry pin claims. A staged
+// ebuild parked anywhere under the overlay root is therefore an unclaimed
+// ebuild, which `overlay autoupdate --clean` DELETES and `overlay validate`
+// reports. The staging directory would be eaten by the very tool that created
+// it, so "the staging root is never inside the overlay" is asserted rather than
+// documented.
+//
+// WHY THE TREE MASTERS ONTO `gentoo` ALONE (design D2). `masters = bentoo`
+// resolves — through repos.conf, to /var/db/repos/bentoo, the DEPLOYED copy.
+// That copy syncs from origin and so lags the working tree by however long the
+// auto-commit/push/sync cycle takes. Validating a new ebuild against a stale
+// eclass is the same class of error as validating it against the wrong tarball,
+// which story 031 already had to fix once. So the staged tree carries COPIES of
+// eclass/ (32 KB) and profiles/ (56 KB) and declares `masters = gentoo`.
+//
+// WHY repo_name MUST DIFFER. The published repo's name is already registered
+// with Portage and a duplicate is a repository-level conflict.
+//
+// Measured (design M-C): a staged skeleton plus one package is 24 KB, which is
+// what makes R3.7's one-tree-per-package-version retention a non-question.
+//
+// This file pins `StageRequest{Overlay, StagingRoot, Atom, Version, EbuildBytes}`
+// and `Stage(StageRequest) (string, error)`.
+//
+// hashTree comes from golden_test.go and is reused, never reimplemented.
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const sourceRepoName = "bentoo"
+
+// sourceOverlay lays out an overlay that looks like the real one where it
+// matters: a repo_name, a layout.conf, an eclass the staged build must be able
+// to inherit, a profiles file, and one package directory.
+func sourceOverlay(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	write := func(rel, body string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("laying out %q: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("writing %q: %v", rel, err)
+		}
+	}
+
+	write("profiles/repo_name", sourceRepoName+"\n")
+	write("profiles/categories", "media-plugins\n")
+	write("metadata/layout.conf", "masters = gentoo\nthin-manifests = true\nsign-manifests = false\nprofile-formats = portage-2\n")
+	// The eclass that exists only in this overlay: if the staged tree cannot
+	// resolve it, the gate cannot build the package that motivated the story.
+	write("eclass/gstreamer-meson.eclass", "# @ECLASS: gstreamer-meson.eclass\n")
+	write("media-plugins/gst-plugins-qt6/gst-plugins-qt6-1.28.6.ebuild", "EAPI=8\ninherit gstreamer-meson\n")
+	write("media-plugins/gst-plugins-qt6/Manifest", "DIST gst-plugins-good-1.28.6.tar.xz 100 BLAKE2B ab SHA512 cd\n")
+
+	return root
+}
+
+// stagedFor is the request every case starts from.
+func stagedFor(t *testing.T, overlay, stagingRoot, body string) StageRequest {
+	t.Helper()
+	return StageRequest{
+		Overlay:     overlay,
+		StagingRoot: stagingRoot,
+		Atom:        "media-plugins/gst-plugins-qt6",
+		Version:     "1.29.2",
+		EbuildBytes: []byte(body),
+	}
+}
+
+// TestStage_TreeCarriesEverythingPortageNeeds is R3.8: the eclasses and profiles
+// of the published overlay have to be resolvable from the staged tree, or the
+// gate cannot build an ebuild that inherits one.
+func TestStage_TreeCarriesEverythingPortageNeeds(t *testing.T) {
+	overlay := sourceOverlay(t)
+	stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+	const body = "EAPI=8\ninherit gstreamer-meson\n# 1.29.2 candidate\n"
+	staged, err := Stage(stagedFor(t, overlay, stagingRoot, body))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	for _, rel := range []string{
+		"profiles/repo_name",
+		"metadata/layout.conf",
+		"eclass/gstreamer-meson.eclass",
+		"profiles/categories",
+		filepath.Join("media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild"),
+	} {
+		if _, err := os.Stat(filepath.Join(staged, rel)); err != nil {
+			t.Errorf("the staged tree is missing %s: %v", rel, err)
+		}
+	}
+
+	got, err := os.ReadFile(filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the staged candidate: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("the staged candidate is %q, want the bytes handed to Stage (%q)", got, body)
+	}
+}
+
+// TestStage_RepoNameDiffersFromThePublishedOne is D2's first consequence: the
+// published name is already registered with Portage and a duplicate is a
+// repository-level conflict.
+func TestStage_RepoNameDiffersFromThePublishedOne(t *testing.T) {
+	overlay := sourceOverlay(t)
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(staged, "profiles", "repo_name"))
+	if err != nil {
+		t.Fatalf("reading the staged repo_name: %v", err)
+	}
+	name := strings.TrimSpace(string(raw))
+
+	if name == sourceRepoName {
+		t.Errorf("the staged tree calls itself %q, the same name the published overlay is registered under; "+
+			"a duplicate repo name is a Portage-level conflict", name)
+	}
+	if name == "" {
+		t.Error("the staged tree has an empty repo_name")
+	}
+}
+
+// TestStage_MastersOntoGentooAndNotTheDeployedCopy is D2's second consequence,
+// and the one with teeth: `masters = bentoo` resolves to /var/db/repos/bentoo,
+// which lags the tree being validated.
+func TestStage_MastersOntoGentooAndNotTheDeployedCopy(t *testing.T) {
+	overlay := sourceOverlay(t)
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(staged, "metadata", "layout.conf"))
+	if err != nil {
+		t.Fatalf("reading the staged layout.conf: %v", err)
+	}
+	layout := string(raw)
+
+	var masters string
+	for _, line := range strings.Split(layout, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "masters") {
+			masters = strings.TrimSpace(line)
+		}
+	}
+	if masters == "" {
+		t.Fatalf("the staged layout.conf declares no masters:\n%s", layout)
+	}
+	if !strings.Contains(masters, "gentoo") {
+		t.Errorf("masters line %q does not master onto gentoo", masters)
+	}
+	if strings.Contains(masters, sourceRepoName) {
+		t.Errorf("masters line %q resolves %q through repos.conf to the DEPLOYED copy, which lags the tree being validated (D2)",
+			masters, sourceRepoName)
+	}
+	// The overlay's own layout properties travel with it, or the staged build
+	// digests differently from the published one.
+	for _, want := range []string{"thin-manifests", "sign-manifests", "profile-formats"} {
+		if !strings.Contains(layout, want) {
+			t.Errorf("the staged layout.conf does not carry %s from the source overlay", want)
+		}
+	}
+}
+
+// TestStage_RestagingReplacesRatherThanAccumulates is R3.7. copyEbuild cannot be
+// reused for this: it refuses an existing destination with ErrEbuildExists
+// (applier.go:953), which is the exact opposite of the rule here and would
+// hard-fail on the second staging of the same bump.
+func TestStage_RestagingReplacesRatherThanAccumulates(t *testing.T) {
+	overlay := sourceOverlay(t)
+	stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+	first, err := Stage(stagedFor(t, overlay, stagingRoot, "EAPI=8\n# first attempt\n"))
+	if err != nil {
+		t.Fatalf("first Stage: %v", err)
+	}
+	second, err := Stage(stagedFor(t, overlay, stagingRoot, "EAPI=8\n# second attempt\n"))
+	if err != nil {
+		t.Fatalf("second Stage: %v — restaging the same package and version must replace, not refuse", err)
+	}
+
+	if first != second {
+		t.Errorf("the two stagings of the same package and version returned different trees (%q, %q); "+
+			"retention is one tree per package-version and the path itself expresses it", first, second)
+	}
+
+	// Exactly one tree under <stagingRoot>/<category>/<package>.
+	versions := filepath.Join(stagingRoot, "media-plugins", "gst-plugins-qt6")
+	entries, err := os.ReadDir(versions)
+	if err != nil {
+		t.Fatalf("reading %q: %v", versions, err)
+	}
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("staging the same bump twice left %d trees (%v), want exactly 1", len(entries), names)
+	}
+
+	got, err := os.ReadFile(filepath.Join(second, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the restaged candidate: %v", err)
+	}
+	if !strings.Contains(string(got), "second attempt") {
+		t.Errorf("the restaged candidate holds %q; the second call's bytes must win", got)
+	}
+}
+
+// TestStage_NeverPlacesTheTreeInsideTheOverlay is the deletion hazard, asserted.
+func TestStage_NeverPlacesTheTreeInsideTheOverlay(t *testing.T) {
+	overlay := sourceOverlay(t)
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	stagedAbs, err := filepath.Abs(staged)
+	if err != nil {
+		t.Fatalf("resolving %q: %v", staged, err)
+	}
+	overlayAbs, err := filepath.Abs(overlay)
+	if err != nil {
+		t.Fatalf("resolving %q: %v", overlay, err)
+	}
+	if strings.HasPrefix(stagedAbs, overlayAbs+string(os.PathSeparator)) || stagedAbs == overlayAbs {
+		t.Errorf("the staged tree %q is inside the published overlay %q; ScanOverlay would see an unclaimed ebuild and --clean would delete it",
+			stagedAbs, overlayAbs)
+	}
+}
+
+// TestStage_LeavesTheSourceOverlayByteIdentical is R3.1 read strictly. Staging
+// COPIES out of the overlay; nothing it does may write back into the tree that
+// publishes itself.
+func TestStage_LeavesTheSourceOverlayByteIdentical(t *testing.T) {
+	overlay := sourceOverlay(t)
+	before := hashTree(t, overlay)
+
+	if _, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n# candidate\n")); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	if after := hashTree(t, overlay); after != before {
+		t.Errorf("staging modified the published overlay: %s -> %s", before, after)
+	}
+	// Specifically: the candidate must not appear in the overlay's own package
+	// directory, which is where copyEbuild would have put it.
+	candidate := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+	if _, err := os.Stat(candidate); err == nil {
+		t.Errorf("staging wrote the candidate into the published overlay at %q", candidate)
+	}
+}
+
+// TestStage_DirectoriesAreNotWorldReadable pins the mode the applier already
+// uses for logs/ (applier.go:471). The staged tree holds an unreviewed candidate
+// and, during a fix, whatever an agent wrote into it.
+func TestStage_DirectoriesAreNotWorldReadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: umask and ownership assertions pass for the wrong reason")
+	}
+	overlay := sourceOverlay(t)
+	staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	info, err := os.Stat(staged)
+	if err != nil {
+		t.Fatalf("stat %q: %v", staged, err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o750 {
+		t.Errorf("the staged tree is mode %04o, want 0750 — the mode the applier already uses for logs/", perm)
+	}
+}
