@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // snapper_config.go — provisioning snapper configs through snapper's own API
@@ -34,16 +35,61 @@ import (
 // has to deal with a leftover one.
 const snapshotsDirName = ".snapshots"
 
-// statPath and readDirPath are the filesystem seams used to classify a leftover
-// .snapshots. They are package vars (the lookPath/warnLogf seam pattern) so
-// tests decide what exists rather than inheriting the developer's filesystem: a real
+// statPath, readDirPath, removePath and readFilePath are the filesystem seams
+// used to classify a leftover .snapshots and to decide whether removing it is
+// safe. They are package vars (the lookPath/warnLogf seam pattern) so tests
+// decide what exists rather than inheriting the developer's filesystem: a real
 // /home/.snapshots on the host would otherwise turn the "leftover" case into
-// the "nothing there" one and assert nothing.
+// the "nothing there" one and assert nothing, and the developer's own
+// /proc/self/mounts — read through readFilePath — would decide the outcome of
+// the mount-point guard.
 var (
-	statPath    = os.Stat
-	readDirPath = os.ReadDir
-	removePath  = os.Remove
+	statPath     = os.Stat
+	readDirPath  = os.ReadDir
+	removePath   = os.Remove
+	readFilePath = os.ReadFile
 )
+
+// mountTables are the two files that answer "is this path a mount point?", and
+// both are needed: the kernel's live table names what is mounted right now, and
+// fstab names what the operator declared. A separately mounted @snapshots that
+// happens to be UNMOUNTED appears in fstab only — and to ReadDir it looks like
+// an ordinary empty directory, which is exactly the one that must not be
+// removed. Deleting it destroys no snapshot (those live in the real subvolume)
+// but breaks the mount point, so the next boot fails to mount it.
+var mountTables = []string{"/proc/self/mounts", "/etc/fstab"}
+
+// mountFieldUnescape decodes the octal escapes both mount tables use for
+// characters that would otherwise split a field.
+var mountFieldUnescape = strings.NewReplacer(
+	`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+
+// declaredMountpoint reports which table declares dir as a mount point, if any.
+// An unreadable table is skipped rather than fatal: the check exists to refuse
+// a destructive removal, and a missing /etc/fstab must not block provisioning a
+// host that has none.
+func declaredMountpoint(dir string) (string, bool) {
+	for _, table := range mountTables {
+		data, err := readFilePath(table)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			if filepath.Clean(mountFieldUnescape.Replace(fields[1])) == dir {
+				return table, true
+			}
+		}
+	}
+	return "", false
+}
 
 // managedSnapperKeys returns the key/value pairs bentoo owns in a snapper
 // config, in apply order:
@@ -180,17 +226,20 @@ func provisionSnapperConfig(ctx context.Context, run Runner, name, subvolume str
 // clearEmptySnapshotsDir removes a .snapshots that no config claims, so
 // create-config can make its own (018 R4).
 //
-// It removes ONLY an empty one. A .snapshots holding entries holds snapshots,
-// and deleting it would destroy backups to fix a configuration problem — never
-// a trade bentoo makes on its own. That case aborts with the command the
-// operator can run instead.
+// It removes ONLY an empty one, and only when "empty" means what it looks like.
+// Two cases are refused instead:
+//
+//   - a .snapshots holding entries holds snapshots, and deleting it would
+//     destroy backups to fix a configuration problem — never a trade bentoo
+//     makes on its own;
+//   - a .snapshots that any mount table declares as a mount point, because an
+//     unmounted @snapshots reads as empty and removing it silently breaks the
+//     mount (018 R6).
 //
 // Removal goes through `btrfs subvolume delete` first, since that is what
 // create-config makes it. A plain directory (or one on a filesystem where that
-// fails) falls back to a directory unlink. When neither works the path is
-// almost always a separately mounted subvolume — the classic @snapshots in
-// fstab — which is reported as such, because no amount of retrying will unmount
-// it.
+// fails) falls back to a directory unlink. A failure past both guards is
+// reported with the operator's way out, because no amount of retrying fixes it.
 func clearEmptySnapshotsDir(ctx context.Context, run Runner, dir, subvolume string) error {
 	entries, err := readDirPath(dir)
 	if err != nil {
@@ -201,6 +250,14 @@ func clearEmptySnapshotsDir(ctx context.Context, run Runner, dir, subvolume stri
 			"refusing to delete snapshots; run `snapper -c %s create-config %s` by hand "+
 			"after moving them aside",
 			dir, len(entries), subvolume, snapperConfigName(subvolume), subvolume)
+	}
+	if table, declared := declaredMountpoint(dir); declared {
+		return fmt.Errorf("%s is a mount point (named in %s) but no snapper config covers %s: "+
+			"refusing to remove it — it reads as empty while unmounted, and removing it breaks "+
+			"the mount; either unmount it and drop the /etc/fstab entry if it has one, so "+
+			"snapper can create its own %s, or leave the mount in place and manage this "+
+			"subvolume with `snapper -c %s ...` by hand",
+			dir, table, subvolume, snapshotsDirName, snapperConfigName(subvolume))
 	}
 	if _, err := run.Run(ctx, "btrfs", []string{"subvolume", "delete", dir}, nil); err == nil {
 		return nil

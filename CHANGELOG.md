@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`snapshot apply` no longer removes a `.snapshots` that is a mount point.**
+  Provisioning a snapper config clears a leftover `.snapshots` when it is empty,
+  because `create-config` refuses to run while one exists and offers no way to
+  skip creating its own. "Empty" was decided by listing the directory — and a
+  separately mounted `@snapshots`, the arrangement `snapper` itself suggests,
+  lists as empty whenever it is not mounted. The removal destroyed no snapshot
+  (those live in the real subvolume) but took the mount point with it, so the
+  next `mount` failed on a path that no longer existed.
+
+  The removal is now refused for any path named in `/proc/self/mounts` or
+  `/etc/fstab` — what is mounted now, and what the operator declared — and the
+  error names the table it was found in, so the fix is visible from the message
+  rather than inferred. Both tables are consulted because they answer different
+  halves of the question: an unmounted entry appears only in `fstab`, and that
+  is exactly the case a content listing cannot tell apart from a stale leftover.
+  An unreadable table is skipped rather than fatal: the check exists to refuse a
+  destructive removal, not to require a host to own an `fstab`.
+
 ## [0.23.0] - 2026-08-08
 
 ### Added
