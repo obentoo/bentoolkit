@@ -450,3 +450,202 @@ func TestRunBuildGates_CompileDepthRunsTheCompilePhaseAndNamesItsReach(t *testin
 		t.Errorf("the compile PASS reason %q does not state that a compile pass does not cover the install phase (R6.4)", got.Reason)
 	}
 }
+
+// unverifiedIsolationLabel is story 031's wording, kept verbatim so the two
+// gates cannot drift into describing the same fidelity in two ways.
+const unverifiedIsolationLabel = "unverified isolation"
+
+// reasonsOf flattens every gate's reason, which is where a gate states its own
+// reach.
+func reasonsOf(gates []GateResult) string {
+	var parts []string
+	for _, g := range gates {
+		parts = append(parts, string(g.Gate)+": "+g.Reason)
+	}
+	return strings.Join(parts, " | ")
+}
+
+// TestRunBuildGates_NoNamespaceStillRunsAndSaysSo is R6.6 and D11 together: the
+// default does not move, and the pass names the fidelity it actually had.
+func TestRunBuildGates_NoNamespaceStillRunsAndSaysSo(t *testing.T) {
+	spy := &buildSpy{}
+	deps := buildSeam(spy, configureOKLog, nil)
+	deps.IsolationProbe = func() (bool, string) {
+		return false, "unshare(CLONE_NEWNET): operation not permitted"
+	}
+
+	req := buildRequestFor(t, DepthConfigure)
+	req.RequireIsolation = false
+
+	gates, err := RunBuildGates(context.Background(), req, deps)
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if spy.spawns != 1 {
+		t.Fatalf("spawned %d processes; with isolation unavailable and not required the gate still runs (D11)", spy.spawns)
+	}
+	if got := gateNamed(t, gates, GateConfigure); got.Outcome != OutcomePass {
+		t.Errorf("configure gate: got %q, want PASS — a missing namespace does not make a clean configure fail", got.Outcome)
+	}
+	if all := reasonsOf(gates); !strings.Contains(all, unverifiedIsolationLabel) {
+		t.Errorf("no gate carries the %q label: %s\n"+
+			"a pass that cannot name its own fidelity is the defect story 031 removed", unverifiedIsolationLabel, all)
+	}
+}
+
+// TestRunBuildGates_VerifiedIsolationCarriesNoLabel keeps the label from
+// becoming noise on the hosts where the gate really is isolated.
+func TestRunBuildGates_VerifiedIsolationCarriesNoLabel(t *testing.T) {
+	spy := &buildSpy{}
+	deps := buildSeam(spy, configureOKLog, nil) // its probe grants the namespace
+
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthConfigure), deps)
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if all := reasonsOf(gates); strings.Contains(all, unverifiedIsolationLabel) {
+		t.Errorf("a verified-isolation run carries the %q label: %s", unverifiedIsolationLabel, all)
+	}
+}
+
+// TestRunBuildGates_RequireIsolationSkipsAndSpawnsNothing is R6.2. Running an
+// unisolated build after the operator demanded isolation would produce exactly
+// the meaningless green they asked to avoid, so the build must not happen at
+// all — asserted by watching the seam, not by reading the outcome.
+//
+// And the skip is a REPORTED outcome with a reason: applier.go:1379-1381's
+// `("", nil)` silent skip is the one behaviour this story explicitly does not
+// copy, because the caller cannot tell it from a pass.
+func TestRunBuildGates_RequireIsolationSkipsAndSpawnsNothing(t *testing.T) {
+	spy := &buildSpy{}
+	deps := buildSeam(spy, configureOKLog, nil)
+	deps.IsolationProbe = func() (bool, string) {
+		return false, "unshare(CLONE_NEWNET): operation not permitted"
+	}
+
+	req := buildRequestFor(t, DepthConfigure)
+	req.RequireIsolation = true
+
+	gates, err := RunBuildGates(context.Background(), req, deps)
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v; a refused build is a reported outcome, not an aborted run", err)
+	}
+
+	if spy.spawns != 0 {
+		t.Errorf("spawned %d processes although isolation was required and unavailable", spy.spawns)
+	}
+	for _, name := range []string{GatePatches, GateConfigure} {
+		got := gateNamed(t, gates, name)
+		if got.Outcome != OutcomeSkipped {
+			t.Errorf("%s gate: got %q, want SKIPPED", name, got.Outcome)
+		}
+		if got.Reason == "" {
+			t.Errorf("%s gate reports SKIPPED with no reason", name)
+		}
+		if !strings.Contains(strings.ToLower(got.Reason), "isolation") {
+			t.Errorf("%s gate's reason %q does not name isolation as the cause", name, got.Reason)
+		}
+	}
+}
+
+// TestRunBuildGates_ChildGetsAnAllowListedEnvironment is R6.3, and the evidence
+// behind it is concrete: a stray variable from an interactive shell broke a
+// configure inside emerge. The child gets a named set, not whatever the operator
+// happened to export.
+func TestRunBuildGates_ChildGetsAnAllowListedEnvironment(t *testing.T) {
+	const stray = "BENTOO_STRAY_VARIABLE"
+	t.Setenv(stray, "this must not reach the build")
+	t.Setenv("PORTAGE_TMPDIR", "/var/tmp/portage-under-test")
+
+	spy := &buildSpy{}
+
+	if _, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthConfigure), buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if spy.envAtSpawn == nil {
+		t.Fatal("cmd.Env was never set, so the child inherits the invoking shell's environment wholesale (R6.3)")
+	}
+	for _, kv := range spy.envAtSpawn {
+		if strings.HasPrefix(kv, stray+"=") {
+			t.Errorf("the child environment carries %q; only an allow-listed set may cross into the build", kv)
+		}
+	}
+
+	// The allow-list has to be a list, not an empty set: a build with no PATH
+	// cannot run, and PORTAGE_* is what points it at the scratch tree.
+	joined := strings.Join(spy.envAtSpawn, "\n")
+	for _, want := range []string{"PATH=", "PORTAGE_TMPDIR="} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the child environment is missing %s; the allow-list is PATH, HOME, TERM, PORTAGE_*, FEATURES, MAKEOPTS and DISTDIR", want)
+		}
+	}
+	// And the parent's own environment is untouched — the gate builds a child
+	// env, it does not mutate this process.
+	if os.Getenv(stray) == "" {
+		t.Error("the parent process's environment was modified; the gate must build the child's env, never edit its own")
+	}
+}
+
+// TestRunBuildGates_NoPrivilegeToolOnTheUnprivilegedPath is R6.1 and the direct
+// consequence of M-B: membership in `portage` was measured sufficient, so
+// reaching for sudo or doas would make an unattended sweep prompt for a password
+// it can never receive.
+func TestRunBuildGates_NoPrivilegeToolOnTheUnprivilegedPath(t *testing.T) {
+	spy := &buildSpy{}
+
+	if _, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthConfigure), buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	for _, name := range spy.names {
+		if name == "sudo" || name == "doas" {
+			t.Errorf("the gate spawned %q on the unprivileged path; the whole unpack/prepare/configure cycle was measured to run as the invoking user (M-B)", name)
+		}
+	}
+	for _, looked := range spy.lookedUp {
+		if looked == "sudo" || looked == "doas" {
+			t.Errorf("the gate looked up the privilege tool %q although the unprivileged path was available", looked)
+		}
+	}
+	if len(spy.argv) > 0 {
+		if first := spy.argv[0]; len(first) > 0 && (first[0] == "ebuild") {
+			t.Errorf("argv %v looks like `<privtool> ebuild …`; the unprivileged invocation runs ebuild directly", first)
+		}
+	}
+}
+
+// TestRunBuildGates_PrivilegeUnobtainableIsSkippedNotFailed is R6.2's other
+// half: when escalation IS required and cannot be had without a human, the gate
+// reports SKIPPED naming why rather than failing the whole sweep. `sudo -n`
+// prompting is the measured condition (M-B), so a sweep must survive it.
+func TestRunBuildGates_PrivilegeUnobtainableIsSkippedNotFailed(t *testing.T) {
+	spy := &buildSpy{}
+	deps := buildSeam(spy, configureOKLog, nil)
+	deps.LookPath = func(name string) (string, error) {
+		spy.lookedUp = append(spy.lookedUp, name)
+		if name == "sudo" || name == "doas" {
+			return "", os.ErrNotExist
+		}
+		return "/usr/bin/" + name, nil
+	}
+	deps.IsolationProbe = func() (bool, string) { return false, "unshare(CLONE_NEWNET): operation not permitted" }
+
+	req := buildRequestFor(t, DepthConfigure)
+	req.RequireIsolation = true // the only reason to need privilege at all
+
+	gates, err := RunBuildGates(context.Background(), req, deps)
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v; an unobtainable privilege is a reported outcome, not a failed run", err)
+	}
+
+	got := gateNamed(t, gates, GateConfigure)
+	if got.Outcome == OutcomeFailed {
+		t.Error("the gate reported FAILED because privilege could not be obtained; that blames the ebuild for the host")
+	}
+	if got.Outcome != OutcomeSkipped || got.Reason == "" {
+		t.Errorf("configure gate: got %q with reason %q, want SKIPPED naming why", got.Outcome, got.Reason)
+	}
+}

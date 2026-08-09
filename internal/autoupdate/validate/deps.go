@@ -122,6 +122,22 @@ func (d BuildDeps) binaryLookup() func(name string) (string, error) {
 	return lookPath
 }
 
+// isolationProbe is the isolation measurement a build must use, normalised the
+// same way again — and the reason it is a seam at all is that BOTH answers are
+// unreachable on any single host: the maintainer's machine is denied a network
+// namespace (design M-B), and a machine that is granted one can never exercise
+// the label the other produces.
+//
+// Its default is validate.ProbeIsolation, the same probe story 031 measures the
+// compile gate with, so the label a build gate prints and the label the applier
+// prints cannot come to disagree about this host.
+func (d BuildDeps) isolationProbe() func() (bool, string) {
+	if d.IsolationProbe != nil {
+		return d.IsolationProbe
+	}
+	return ProbeIsolation
+}
+
 // attachedRunner is the runner a build must use, normalised the same way again.
 //
 // Its default is exactly cmd.CombinedOutput, which is the applier's own default

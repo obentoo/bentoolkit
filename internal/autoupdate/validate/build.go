@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,12 +25,13 @@ import (
 // could only quote Portage, and quoting Portage here means showing somebody a
 // repository they have never heard of.
 //
-// # RequireIsolation is declared here and honoured by the isolation policy
+// # RequireIsolation is honoured by the isolation policy below
 //
-// It is present from the start, unread by this file, for the same reason all
-// four of BuildDeps' seams are: the policy that consumes it lands next, and a
-// struct that grows a field later is a struct whose every call site has to be
-// revisited. Declaring it now costs nothing and keeps the request's shape fixed.
+// It is read by RunBuildGates itself: with isolation required and unavailable,
+// NOTHING IS SPAWNED and every covered gate reports SKIPPED naming why. A flag
+// that a caller can set and no code reads is worse than an absent flag — the
+// operator believes a build was refused when it in fact ran — so the policy and
+// the field land together.
 type BuildRequest struct {
 	// StagedRoot is the staged repository Stage produced — the repo root, the
 	// directory holding profiles/ and the candidate's category directory. It is
@@ -85,6 +87,51 @@ const excerptLines = 12
 // reason into a page. The COUNT is always exact.
 const patchNamesShown = 6
 
+// labelUnverifiedIsolation is story 031's OWN wording for a pass that ran
+// without a proven network namespace, reused verbatim rather than reworded
+// (R6.6). The applier prints it as `Compile: PASS (unverified isolation)` and the
+// --require-isolation flag's help text quotes it; a second phrasing here would
+// have one tool describe the same fidelity two ways, and an operator grepping a
+// sweep for the weaker passes would find half of them.
+const labelUnverifiedIsolation = "unverified isolation"
+
+// buildEnvAllowed is the whole set of environment variables that crosses into
+// the build child by NAME (R6.3), and buildEnvAllowedPrefix the one family that
+// crosses by prefix.
+//
+// # Why an allow-list and not a deny-list
+//
+// The evidence is concrete: a stray variable exported in an interactive shell
+// broke a configure inside `emerge`. A deny-list can only remove the variables
+// somebody already knew to name, so the next stray one gets through and the gate
+// reports a FAILED that the operator's shell manufactured — the exact class of
+// wrong answer this whole story exists to remove. An allow-list fails the other
+// way: a variable the build genuinely needed is missing, which shows up as a
+// reproducible failure on every host rather than as one machine's mystery.
+//
+// Each entry earns its place. PATH finds the toolchain; HOME is where Portage
+// and the compilers put their caches; TERM keeps the child's output legible when
+// it is attached to a real terminal; PORTAGE_* carries the whole staged-build
+// configuration, PORTAGE_TMPDIR and PORTAGE_REPOSITORIES above all; FEATURES and
+// MAKEOPTS are the two knobs an operator legitimately overrides per run; DISTDIR
+// points the fetch at the scratch directory a staged run uses instead of the
+// host's shared one (D3).
+//
+// Nothing here is a secret, and that is deliberate: an allow-list is also the
+// mechanism that keeps a token exported in the invoking shell out of a child
+// whose log this package retains on disk.
+var buildEnvAllowed = []string{"PATH", "HOME", "TERM", "FEATURES", "MAKEOPTS", "DISTDIR"}
+
+// buildEnvAllowedPrefix is the family that crosses whole: every variable Portage
+// itself reads is spelled PORTAGE_something, and enumerating them would be a
+// list that goes stale the next time Portage adds one.
+const buildEnvAllowedPrefix = "PORTAGE_"
+
+// privilegeTools are the escalation tools, doas before sudo — the same order and
+// the same preference as the applier's detectPrivilegeTool, so the two cannot
+// name different tools on one host.
+var privilegeTools = []string{"doas", "sudo"}
+
 // RunBuildGates runs the staged candidate's build phases ONCE and reports the
 // patches, configure and compile gates from that single run (R4, R5, R6).
 //
@@ -120,6 +167,24 @@ const patchNamesShown = 6
 // covered. Applier.runCompile returns ("", nil) when it declines to build, and a
 // caller cannot tell that from a pass — that silence is the defect this package
 // exists to remove, and it is deliberately not reproduced.
+//
+// # Unprivileged, allow-listed, and honest about the isolation it had
+//
+// The build runs AS THE INVOKING USER (R6.1). Measured on the maintainer's host
+// (design M-B): membership in `portage` carries the whole unpack → prepare →
+// configure cycle, and `sudo -n` on that same host answers "interactive
+// authentication is required". So escalation is not the safety it looks like —
+// it is a sweep that stops at a password prompt at three in the morning.
+//
+// The one thing privilege would buy is a network namespace, and this gate does
+// not buy it: when isolation is REQUIRED and the probe cannot create one, no
+// process is spawned at all and every covered gate reports SKIPPED naming the
+// reason (R6.2). When it is not required — the default, unmoved from story 031
+// (R6.6, D11) — the build runs and every PASS says out loud that it ran with
+// `unverified isolation`.
+//
+// The child's environment is an allow-list rather than the operator's shell
+// (R6.3); see buildEnvAllowed for what crosses and why.
 //
 // # The error return is about the REQUEST, never about the build
 //
@@ -171,6 +236,16 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 
 	label := reportLabel{pv: atom + "-" + version, stagedRepo: stagedRepoNameAt(stagedRoot, pkg, version)}
 
+	// Measured BEFORE anything is looked up or spawned, exactly where story 031
+	// put it: a build --require-isolation will refuse must not first cost this
+	// host a lookup, a fetch or a question. The answer is needed on both paths —
+	// it refuses the run on one and labels the pass on the other.
+	isolated, isolationReason := deps.isolationProbe()()
+	if !isolated && req.RequireIsolation {
+		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
+		return skippedGates(req.Depth, label.clean(refused)), nil
+	}
+
 	// A host with no Portage produces NO ANSWER, never a cheerful one — the same
 	// rule DependenciesSatisfied applies to `emerge`, and the reason the lookup
 	// is a seam of its own.
@@ -179,12 +254,27 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err))), nil
 	}
 
+	// `ebuild` is invoked DIRECTLY, as the user who started the sweep — no sudo,
+	// no doas (R6.1). Measured (design M-B): membership in `portage` is enough
+	// for the whole unpack → prepare → configure cycle, while `sudo -n` on that
+	// same host answers "interactive authentication is required". So escalating
+	// would not buy a build that works, it would buy a sweep that stops at a
+	// password prompt nobody is there to answer.
+	//
 	// `ebuild` discovers the repository from the path it is given and from its
 	// working directory, so Dir is what decides which tree is built: the staged
 	// one, never the published overlay (R3.2).
 	cmd := deps.commandFactory()(ctx, "ebuild",
 		filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String())
 	cmd.Dir = stagedRoot
+
+	// R6.3. Set HERE rather than left to the runner, because a nil cmd.Env means
+	// "inherit os.Environ() wholesale" — the allow-list has to be installed on the
+	// command itself or it is not installed at all. It also survives a runner that
+	// rebinds the child's streams, which is what the TUI's RunAttached does
+	// (overlay_autoupdate.go): that override touches Stdout, Stderr and Stdin and
+	// never Env, so what is set here is what the child gets.
+	cmd.Env = allowedBuildEnv(os.Environ())
 
 	output, runErr := deps.attachedRunner()(cmd)
 
@@ -195,7 +285,13 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// build. The retained bytes stay exactly as the child produced them — see
 	// reportLabel for the same report/evidence asymmetry stated for D13.
 	transcript := stripANSI(string(output))
-	run := buildRun{label: label, trace: tracePhases(transcript), transcript: transcript, runErr: runErr}
+	run := buildRun{
+		label:        label,
+		trace:        tracePhases(transcript),
+		transcript:   transcript,
+		runErr:       runErr,
+		fidelityNote: isolationFidelityNote(isolated, isolationReason),
+	}
 	if runErr != nil {
 		run.logNote = retainedLogNote(req.LogDir, atom, version, output)
 	}
@@ -235,6 +331,110 @@ func eachBuildGate(d Depth, visit func(gate string, phase buildPhase)) {
 		}
 		visit(gate, phase)
 	}
+}
+
+// allowedBuildEnv is the environment the build child receives: the allow-listed
+// variables of the parent's, and nothing else (R6.3).
+//
+// It NEVER returns nil, and that is the whole contract. os/exec reads a nil Env
+// as "inherit the parent's", so a filter that returned nil on a host where none
+// of the allow-listed variables happened to be set would hand the child exactly
+// the shell this function exists to keep out of it — the failure would be silent
+// and would look like the feature working.
+//
+// The parent's own environment is read and not touched. A gate that exported or
+// unset anything here would be changing the process every other gate, and the
+// operator's own next command, runs in.
+func allowedBuildEnv(parent []string) []string {
+	env := make([]string, 0, len(buildEnvAllowed))
+	for _, kv := range parent {
+		name, _, assigned := strings.Cut(kv, "=")
+		if assigned && buildEnvAllows(name) {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
+
+// buildEnvAllows reports whether one variable NAME crosses into the build.
+func buildEnvAllows(name string) bool {
+	if strings.HasPrefix(name, buildEnvAllowedPrefix) {
+		return true
+	}
+	return slices.Contains(buildEnvAllowed, name)
+}
+
+// availablePrivilegeTool names the escalation tool this host has, or "" when it
+// has none.
+//
+// It is asked ONLY on the path that has already decided to skip, and it is asked
+// through the LookPath seam rather than by running anything: `sudo -n` was
+// measured to PROMPT on the maintainer's host (design M-B), so a probe that ran
+// it would be the very interactive stop this gate exists to avoid. What the
+// answer buys is the operator's next step — "install one" and "run this
+// attended" are different instructions — not a different outcome.
+func availablePrivilegeTool(look func(name string) (string, error)) string {
+	for _, tool := range privilegeTools {
+		if _, err := look(tool); err == nil {
+			return tool
+		}
+	}
+	return ""
+}
+
+// isolationRefusedReason is the sentence every gate carries when the run asked
+// for isolation this host cannot provide (R6.2).
+//
+// It is a SKIP and never a FAILED: the ebuild was not measured and nothing about
+// it is known, so reporting a failure would blame a bump for a kernel policy.
+// And it is never a silent one — applier.go's runCompile returns ("", nil) here,
+// which a caller cannot tell from a pass, and that silence is the defect this
+// package removes rather than reproduces.
+//
+// The reason names three things, because an operator who cannot act on it will
+// simply turn the flag off: what was demanded, what the kernel actually said,
+// and the two ways forward.
+func isolationRefusedReason(pv, probeReason, privTool string) string {
+	reason := fmt.Sprintf("isolation was required for %s and this host could not provide it, so no build phase was run", pv)
+	if probeReason = strings.TrimSpace(probeReason); probeReason != "" {
+		reason += ": " + probeReason
+	}
+
+	reason += "; creating a network namespace needs privilege this process does not have"
+	if privTool == "" {
+		reason += ", and neither doas nor sudo is installed here, so it could not be obtained at all"
+	} else {
+		reason += fmt.Sprintf(", and the gate does not run %s for it: an unattended sweep cannot answer a password prompt", privTool)
+	}
+
+	return reason + fmt.Sprintf(". Either run this where the namespace can be created, or drop --require-isolation to build anyway with every pass labelled %q", labelUnverifiedIsolation)
+}
+
+// isolationFidelityNote is the sentence a PASS carries when the run happened
+// without a verified network namespace — story 031's label, applied to the build
+// gates (R6.6, D11).
+//
+// # Why the run happens at all
+//
+// The default does not move (D11): `unshare --net` is denied to an ordinary user
+// on the maintainer's host, so requiring isolation by default would turn every
+// build gate on that machine into a SKIPPED and the feature inert where it was
+// written. The pass is kept AND qualified instead, which is what makes the weaker
+// default honest rather than quiet.
+//
+// It returns "" on a verified run, so the label stays a signal: a sentence
+// printed under every gate on every host is one nobody reads.
+func isolationFidelityNote(isolated bool, probeReason string) string {
+	if isolated {
+		return ""
+	}
+
+	note := "; this ran with " + labelUnverifiedIsolation +
+		", so the build could reach the network and the pass does not prove the sources came from DISTDIR alone"
+	if probeReason = strings.TrimSpace(probeReason); probeReason != "" {
+		note += " — " + probeReason
+	}
+	return note
 }
 
 // buildPhase is one `ebuild` phase, ordered as Portage runs them so that "the
@@ -414,17 +614,34 @@ type buildRun struct {
 	// none. It is computed once for the run, because one invocation produces one
 	// log however many gates cite it.
 	logNote string
+
+	// fidelityNote is the sentence a PASS from an unisolated run carries, empty
+	// when isolation was verified. One invocation has ONE fidelity, so every gate
+	// derived from it says the same thing about it.
+	fidelityNote string
 }
 
 // gateFor derives one gate's outcome from the run's markers, and is the ONE
-// place the D13 re-labelling is applied.
+// place the D13 re-labelling and the isolation label are applied.
 //
 // It is a funnel rather than a call in each branch for the same reason Stage
 // applies its sentinel at a single boundary: a branch added later cannot forget
 // what it never had to remember. Every reason and every finding leaves this
 // function translated, on the clean path as well as the failing one.
+//
+// # Why only a PASS is labelled
+//
+// The label answers an OVERCLAIM: a build that ran with the network reachable
+// proved less than one that did not, and a pass is the only outcome that claims
+// to have proved anything (R6.6, story 031's rule). A FAILED gate is not made
+// less true by an unisolated run — if anything the network made it easier to
+// pass — and a SKIPPED gate measured nothing to qualify. Putting the sentence on
+// all three would turn the signal into decoration on every line of every report.
 func (r buildRun) gateFor(gate string, phase buildPhase) GateResult {
 	result := r.derive(gate, phase)
+	if result.Outcome == OutcomePass {
+		result.Reason += r.fidelityNote
+	}
 
 	result.Reason = r.label.clean(result.Reason)
 	for i := range result.Findings {
