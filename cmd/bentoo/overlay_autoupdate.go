@@ -40,10 +40,13 @@ var (
 	autoupdateForce bool
 	// autoupdateCompile runs compile test after apply
 	autoupdateCompile bool
-	// autoupdateRequireIsolation is --require-isolation. It reaches the Applier
-	// as a field and never as a config key: the configuration block that would
-	// own such a key is deferred to a later story, and a registry key is
-	// expensive to move once written (story 031 Constraints).
+	// autoupdateRequireIsolation is --require-isolation. Story 031 kept the
+	// setting out of the registry because a registry key is expensive to move
+	// once written (story 031 Constraints); story 033 added the block that owns
+	// it instead — autoupdate.validate.require_isolation in config.yaml, where
+	// an unknown key is a warning on stderr rather than a silently disabled
+	// record. That key defaults to false, so this flag stays the way the
+	// stricter behaviour is asked for on a run.
 	autoupdateRequireIsolation bool
 	// autoupdateClean removes the old ebuild after a successful apply, keeping
 	// only the newly created version

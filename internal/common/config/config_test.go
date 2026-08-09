@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
@@ -49,11 +50,13 @@ func genConfig() gopter.Gen {
 				User:  values[2].(string),
 				Email: values[3].(string),
 			},
-			// LoadFrom normalizes an unset llm.bare to "auto", so the generated
-			// (pre-save) config must already carry the normalized value for the
+			// LoadFrom normalizes an unset llm.bare to "auto" AND materializes
+			// the shipped autoupdate.validate.packages overrides, so the
+			// generated (pre-save) config must already carry both for the
 			// save->load identity round-trip to hold.
 			Autoupdate: AutoupdateConfig{
-				LLM: LLMConfig{Bare: "auto"},
+				LLM:      LLMConfig{Bare: "auto"},
+				Validate: ValidateConfig{Packages: DefaultPackageOverrides()},
 			},
 		}
 	})
@@ -484,6 +487,10 @@ func genAutoupdateConfig() gopter.Gen {
 				Provider:  values[4].(string),
 				APIKeyEnv: values[5].(string),
 			},
+			// Same reason as genConfig above: LoadFrom materializes the shipped
+			// per-package validation overrides, so an identity round-trip needs
+			// them on the generated side too.
+			Validate: ValidateConfig{Packages: DefaultPackageOverrides()},
 		}
 	})
 }
@@ -2037,5 +2044,336 @@ func TestLLMConfigNormalizeHelper(t *testing.T) {
 		if c.Bare != tt.want {
 			t.Errorf("normalize() with Bare=%q => %q, want %q", tt.in, c.Bare, tt.want)
 		}
+	}
+}
+
+// writeValidateConfig writes a config.yaml holding the given autoupdate body and
+// loads it, returning the parsed Config and everything LoadFrom wrote to stderr.
+//
+// Stderr is captured rather than ignored because half this sub-task's contract
+// IS the warning: an unknown key must be reported and must not be fatal, and
+// those two are only observable together.
+func writeValidateConfig(t *testing.T, body string) (*Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the config: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+
+	cfg, loadErr := LoadFrom(path)
+
+	os.Stderr = orig
+	_ = w.Close()
+	var sb strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := r.Read(buf)
+		sb.Write(buf[:n])
+		if readErr != nil {
+			break
+		}
+	}
+	_ = r.Close()
+
+	if loadErr != nil {
+		t.Fatalf("LoadFrom: %v — a configuration problem is a warning, never a refusal to start", loadErr)
+	}
+	return cfg, sb.String()
+}
+
+const minimalValidateConfigYAML = "overlay:\n  path: /var/db/repos/bentoo\n  remote: origin\n"
+
+// TestValidateConfig_AbsentBlockYieldsTheDocumentedDefaults is the case every
+// existing host is in, and every value below is asserted BY VALUE rather than as
+// "some default exists".
+//
+// The table is not the implementer's to choose. Task 12.1 asserts that a
+// series-crossing bump runs the configure gate and a patch bump does not, and
+// that sentence is true for exactly one default table. Leave any row to taste
+// and the two sub-tasks disagree without either of them being wrong.
+func TestValidateConfig_AbsentBlockYieldsTheDocumentedDefaults(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML)
+	v := &cfg.Autoupdate.Validate
+
+	// The depth table. revision and patch are cheap and stop at the static
+	// gate; series and major earn a configure. `compile` is deliberately not a
+	// default for anything — see the case below.
+	for class, want := range map[string]string{
+		"revision": "options",
+		"patch":    "options",
+		"series":   "configure",
+		"major":    "configure",
+	} {
+		if got := v.GetDepthForClass(class); got != want {
+			t.Errorf("GetDepthForClass(%q) = %q, want %q — task 12.1's series-vs-patch assertion is true for this table and no other",
+				class, got, want)
+		}
+	}
+
+	// R6.6 / D11: story 031's default survives becoming a key. `unshare --net`
+	// is denied on the host this was measured on (M-B), so a default of true
+	// turns every build gate into a SKIPPED and makes the feature inert on the
+	// machine it was written for.
+	if v.GetRequireIsolation() {
+		t.Error("require_isolation defaults to true; that makes every build gate SKIPPED on the maintainer's own host")
+	}
+
+	// D6 / R3.12: a host that cannot resolve a bump's dependencies still
+	// publishes, with the unreached depth named. require_proof is the opt-in
+	// for hosts where that is not acceptable, and it is OFF by default for the
+	// same reason require_isolation is.
+	if v.GetRequireProof() {
+		t.Error("require_proof defaults to true; an ordinary workstation rarely holds every build dependency, " +
+			"so that default refuses most bumps for a reason that says nothing about them (R3.12)")
+	}
+
+	// The two LLM capabilities are off until --llm is given. Configuration
+	// SUBTRACTS from the flag and never adds to it, so defaulting these to true
+	// would be a config file spending money on a run nobody asked to be
+	// expensive.
+	if v.GetReview() {
+		t.Error("review defaults to true; the capabilities are enabled by --llm, and config can only switch one of them back off (R7.1/R7.2)")
+	}
+	if v.GetFixOnFailure() {
+		t.Error("fix_on_failure defaults to true; see review above")
+	}
+
+	// The timeout exists because 10.1 and 11.1 consume it: it bounds the
+	// reviewer and the build fixer. An unbounded agent hangs a sweep.
+	if got := v.GetTimeout(); got != 3600*time.Second {
+		t.Errorf("GetTimeout() = %v, want 1h — the budget the reviewer (10.1) and the build fixer (11.1) run under", got)
+	}
+}
+
+// TestValidateConfig_CompileIsNeverADefaultDepth is the row that is easiest to
+// get wrong in the generous direction. A default of compile for major bumps
+// would look thorough and would make an unattended sweep spend hours on the
+// first `>=1.0` upstream ever ships — the protocol's own warning is that
+// validating everything at compile depth does not become expensive, it becomes
+// ignored.
+func TestValidateConfig_CompileIsNeverADefaultDepth(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML)
+	v := &cfg.Autoupdate.Validate
+
+	for _, class := range []string{"revision", "patch", "series", "major"} {
+		if got := v.GetDepthForClass(class); got == "compile" {
+			t.Errorf("class %q defaults to compile; the ladder's expensive rung is opt-in through --depth, --compile or an "+
+				"override with a stated reason, never a default", class)
+		}
+	}
+}
+
+// TestValidateConfig_TierCOverridesShipAsOrdinaryOverrides pins how the four
+// packages nobody wants to build are expressed. They are per-package overrides
+// carrying their reason, not a second mechanism — so R2.5 (an override needs a
+// reason) and R2.6 (an override that lowers the depth is reported as skipped by
+// policy) apply to them exactly as they do to anything an operator writes.
+//
+// A hardcoded tier list would sit outside both rules and would be invisible in
+// the report that says why a bump was not validated.
+func TestValidateConfig_TierCOverridesShipAsOrdinaryOverrides(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML)
+	v := &cfg.Autoupdate.Validate
+
+	for _, pkg := range []string{
+		"www-client/chromium",
+		"app-office/libreoffice",
+		"net-libs/webkit-gtk",
+		"dev-lang/ghc",
+	} {
+		override, ok := v.Packages[pkg]
+		if !ok {
+			t.Errorf("%s ships with no override; without one an unattended sweep can select a build depth for it", pkg)
+			continue
+		}
+		if override.Depth != "none" {
+			t.Errorf("%s ships at depth %q, want none", pkg, override.Depth)
+		}
+		if override.Reason == "" {
+			t.Errorf("%s ships without a reason; R2.5 reports a reasonless override as invalid, and a shipped default "+
+				"must not be the one entry that breaks its own rule", pkg)
+		}
+	}
+
+	if errs := v.OverrideErrors(); len(errs) != 0 {
+		t.Errorf("the shipped overrides do not satisfy the rule they are subject to: %v", errs)
+	}
+}
+
+// TestValidateConfig_NilReceiverAnswersDefaults follows GetDistdir's discipline
+// (config.go:557): a getter reached through a nil pointer answers the default
+// rather than panicking, because the config is threaded through call sites that
+// predate this block.
+func TestValidateConfig_NilReceiverAnswersDefaults(t *testing.T) {
+	var v *ValidateConfig
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("a getter panicked on a nil receiver (%v); GetDistdir already answers the empty string for one, and every call site here predates this block", r)
+		}
+	}()
+
+	if v.GetRequireIsolation() {
+		t.Error("a nil ValidateConfig reports require_isolation true")
+	}
+	if v.GetRequireProof() {
+		t.Error("a nil ValidateConfig reports require_proof true")
+	}
+	if got := v.GetDepthForClass("series"); got != "configure" {
+		t.Errorf("a nil ValidateConfig answers %q for a series crossing, want configure", got)
+	}
+}
+
+// TestValidateConfig_PartialBlockLeavesTheRestAtDefault is what makes the block
+// usable at all. An operator who wants one thing must not have to restate the
+// other five, and a half-written block must not zero what it does not mention.
+func TestValidateConfig_PartialBlockLeavesTheRestAtDefault(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML+
+		"autoupdate:\n"+
+		"  validate:\n"+
+		"    require_isolation: true\n")
+	v := &cfg.Autoupdate.Validate
+
+	if !v.GetRequireIsolation() {
+		t.Error("require_isolation: true was not read")
+	}
+	if got := v.GetDepthForClass("revision"); got != "options" {
+		t.Errorf("setting require_isolation moved the revision depth to %q; a partial block leaves the rest at default", got)
+	}
+	if got := v.GetDepthForClass("series"); got != "configure" {
+		t.Errorf("setting require_isolation moved the series depth to %q", got)
+	}
+	if v.GetReview() {
+		t.Error("setting require_isolation enabled the reviewer; an unrelated key must not move another default")
+	}
+	if got := v.GetTimeout(); got != 3600*time.Second {
+		t.Errorf("setting require_isolation moved the timeout to %v", got)
+	}
+}
+
+// TestValidateConfig_DepthsAreReadPerClass pins the shape an operator writes.
+func TestValidateConfig_DepthsAreReadPerClass(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML+
+		"autoupdate:\n"+
+		"  validate:\n"+
+		"    depths:\n"+
+		"      revision: none\n"+
+		"      patch: options\n"+
+		"      series: configure\n"+
+		"      major: compile\n")
+	v := &cfg.Autoupdate.Validate
+
+	for class, want := range map[string]string{
+		"revision": "none",
+		"patch":    "options",
+		"series":   "configure",
+		"major":    "compile",
+	} {
+		if got := v.GetDepthForClass(class); got != want {
+			t.Errorf("GetDepthForClass(%q) = %q, want %q", class, got, want)
+		}
+	}
+	// An unconfigured class still answers, so the resolver never has to handle
+	// an empty string.
+	if got := v.GetDepthForClass("not-a-class"); got == "" {
+		t.Error("an unknown class resolves to the empty string; the resolver would then have no depth to fall back to")
+	}
+}
+
+// TestValidateConfig_UnknownKeyWarnsAndIsNotFatal is exactly the failure mode
+// that decided D10. In packages.toml the equivalent typo silently auto-disables
+// a record; here it is a line on stderr and the run continues.
+func TestValidateConfig_UnknownKeyWarnsAndIsNotFatal(t *testing.T) {
+	cfg, stderr := writeValidateConfig(t, minimalValidateConfigYAML+
+		"autoupdate:\n"+
+		"  validate:\n"+
+		"    require_isolaton: true\n") // deliberate typo
+
+	if cfg == nil {
+		t.Fatal("an unknown key under validate: prevented the config from loading; it is a warning, never fatal")
+	}
+	if stderr == "" {
+		t.Fatal("an unknown key under validate: produced no warning; the strict re-decode covers this block through probeConfig's reuse of AutoupdateConfig")
+	}
+	if !strings.Contains(stderr, "require_isolaton") {
+		t.Errorf("the warning %q does not quote the unknown key, so the operator cannot find the typo", stderr)
+	}
+	// And the real key keeps its default rather than picking up the typo's
+	// value, which would be the worst of both worlds.
+	if cfg.Autoupdate.Validate.GetRequireIsolation() {
+		t.Error("the misspelled key was applied anyway")
+	}
+}
+
+// TestValidateConfig_OverrideCarriesItsReason is R2.4. An override's reason is
+// reported beside the outcome, so a bump validated at a shallower depth than
+// policy asked for can always say on whose authority.
+func TestValidateConfig_OverrideCarriesItsReason(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML+
+		"autoupdate:\n"+
+		"  validate:\n"+
+		"    packages:\n"+
+		"      www-client/chromium:\n"+
+		"        depth: none\n"+
+		"        reason: eight hours of compile for a browser we do not patch\n")
+	v := &cfg.Autoupdate.Validate
+
+	if errs := v.OverrideErrors(); len(errs) != 0 {
+		t.Fatalf("a complete override was reported invalid: %v", errs)
+	}
+	override, ok := v.Packages["www-client/chromium"]
+	if !ok {
+		t.Fatalf("the override was not read: %+v", v.Packages)
+	}
+	if override.Depth != "none" {
+		t.Errorf("override depth = %q, want %q", override.Depth, "none")
+	}
+	if !strings.Contains(override.Reason, "eight hours") {
+		t.Errorf("override reason = %q; the stated reason is reported beside the outcome (R2.4)", override.Reason)
+	}
+}
+
+// TestValidateConfig_OverrideWithoutAReasonIsInvalidAndNamesThePackage is R2.5.
+// An override that lowers the depth is the one input that can quietly reduce how
+// much a bump is checked, so the operator has to have written down why — and the
+// diagnostic has to say WHICH package, since a registry has forty of them.
+func TestValidateConfig_OverrideWithoutAReasonIsInvalidAndNamesThePackage(t *testing.T) {
+	cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML+
+		"autoupdate:\n"+
+		"  validate:\n"+
+		"    packages:\n"+
+		"      www-client/chromium:\n"+
+		"        depth: none\n"+
+		"      media-plugins/gst-plugins-qt6:\n"+
+		"        depth: compile\n"+
+		"        reason: the package this story exists for\n")
+
+	errs := cfg.Autoupdate.Validate.OverrideErrors()
+
+	if len(errs) == 0 {
+		t.Fatal("an override with no reason was accepted; R2.5 reports the configuration as invalid")
+	}
+	var joined []string
+	for _, e := range errs {
+		joined = append(joined, e.Error())
+	}
+	all := strings.Join(joined, " | ")
+	if !strings.Contains(all, "www-client/chromium") {
+		t.Errorf("the diagnostic %q does not name the package whose override is invalid", all)
+	}
+	if strings.Contains(all, "gst-plugins-qt6") {
+		t.Errorf("the diagnostic %q blames the package whose override IS complete", all)
+	}
+	// Invalid is reported, not fatal: the rest of the config still loads, the
+	// same way an unknown key does.
+	if got := cfg.Autoupdate.Validate.Packages["media-plugins/gst-plugins-qt6"].Depth; got != "compile" {
+		t.Errorf("one invalid override discarded the valid ones (gst depth = %q)", got)
 	}
 }

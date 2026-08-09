@@ -219,8 +219,11 @@ type Applier struct {
 	// requireIsolation, when true, makes the compile gate SKIP rather than run
 	// unisolated: an unisolated compile after the operator asked for isolation
 	// produces exactly the meaningless green they asked to avoid. Set via
-	// WithApplierRequireIsolation (the --require-isolation CLI flag); never a
-	// config key, per the story's Constraints.
+	// WithApplierRequireIsolation, which is the only way in: whether the value
+	// came from the --require-isolation flag or from the config key story 033
+	// added for it (autoupdate.validate.require_isolation, default false), it
+	// arrives through that option, so this field stays the single input the
+	// gate reads.
 	requireIsolation bool
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
@@ -314,10 +317,13 @@ func WithApplierIsolationProbe(fn func() (bool, string)) ApplierOption {
 
 // WithApplierRequireIsolation makes the compile gate REFUSE to run unisolated.
 //
-// It is a field and not a configuration key on purpose (story 031
-// Constraints): the configuration block that would own such a key is deferred
-// to a later story, and a registry key is expensive to move once written. So
-// the knob exists as the --require-isolation CLI flag and nowhere else.
+// Story 031 kept this out of configuration (its Constraints): a registry key is
+// expensive to move once written, and the block that would own the setting did
+// not exist yet. Story 033 added that block — autoupdate.validate.require_isolation
+// in config.yaml, where an unknown key is a warning rather than a silently
+// disabled record, defaulting to false so 031's behaviour is unchanged
+// (S033-R6.6). This option remains the only way the value reaches the Applier,
+// from the flag or from that key alike.
 func WithApplierRequireIsolation(require bool) ApplierOption {
 	return func(a *Applier) {
 		a.requireIsolation = require
