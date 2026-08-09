@@ -69,6 +69,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a package with findings looked clean. The scan now runs with
   `--cache=-git`.
 
+- **`overlay autoupdate --check` now fetches each upstream URL once per run.**
+  A full check issued **425 HTTP requests to fetch 230 distinct URLs**. The 195
+  surplus were not a rounding error: 170 of them asked `gitlab.freedesktop.org`
+  for the *same* GStreamer tag listing, once per plugin package, and the
+  per-host rate limiter — one request every 6 seconds — turned that into
+  **18.4 minutes of queue for a single 33.7 KB document**.
+
+  Each distinct URL is now fetched once and the same body handed to every entry
+  that asked for it. No registry field is added, no record is edited, and no
+  entry's meaning changes.
+
+  Two reads share a fetch only when the requests they would issue are
+  byte-identical: the identity is the URL about to be requested plus a digest of
+  the headers the record declared, joined by a NUL byte because no URL can
+  contain one and therefore none can spell the boundary itself. Range is the
+  sharp edge — a record asking for a window near the front of a large file must
+  never be handed the whole file, or another record's window — so a differing
+  header set is a different identity and gets its own request.
+
+  Getting this wrong in the collapsing direction would not be a lost
+  optimisation, it would be one entry silently receiving another entry's bytes.
+  So the guarantee is that no entry's outcome depends on another's: a failure,
+  a cancellation or a memory bound reached changes when a request is issued,
+  never what a record concludes. `--no-fetch-cache` turns the sharing off and
+  reproduces the old un-deduplicated run, which is what makes a suspicious
+  version bisectable — it separates a real upstream change from a sharing bug.
+
 ### Fixed
 - **A compile-gate pass now states the isolation it actually verified.** The
   gate printed a plain green whenever the build succeeded, and could not have
