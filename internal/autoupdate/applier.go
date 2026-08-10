@@ -1035,8 +1035,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// already withdrew the bump in prepareInStagingTree (R3.10), so a promotion
 	// decision is only ever reached WHERE a staged tree exists — which is R3.3's
 	// second half.
+	//
+	// The refusal is enriched with the failing gates' own error findings before it
+	// leaves here (refusalWithFindings): PromotionDecision names the gate, and an
+	// apply's only channel to the operator is this one error — "the options gate
+	// reported FAILED" without the option it found would send them off to diff two
+	// tarballs by hand, which is the work this story replaces.
 	if ok, reason := validate.PromotionDecision(gates, nil); !ok {
-		return a.failApply(pkg, result, errors.New(reason))
+		return a.failApply(pkg, result, refusalWithFindings(reason, gates))
 	}
 
 	// The published overlay's first and only write of this apply (R3.4). On the

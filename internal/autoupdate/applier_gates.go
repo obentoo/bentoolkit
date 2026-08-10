@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -165,6 +166,22 @@ func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []val
 		return nil
 	}
 
+	// The one input validate.Run cannot derive for itself on this path: WHICH
+	// upstream archive belongs to the candidate. See lendPublishedDistNames — the
+	// staged tree is a fresh single-package repository, and without a Manifest
+	// naming an archive the option gate reports SKIPPED and R3.3 publishes the
+	// bump on the strength of a gate that read nothing.
+	restore, err := a.lendPublishedDistNames(cand, pkg, version)
+	if err != nil {
+		return []validate.GateResult{{
+			Gate:    validate.GateOptions,
+			Outcome: validate.OutcomeSkipped,
+			Reason: fmt.Sprintf("the staged tree of %s-%s names no upstream archive and none could be named for it, "+
+				"so the option gate had nothing to read: %v", pkg, version, err),
+		}}
+	}
+	defer restore()
+
 	report, err := validate.Run(a.ctx, validate.Options{
 		Overlay:  cand.repoRoot,
 		Distdir:  a.staticGateDistdir(),
@@ -205,6 +222,156 @@ func (a *Applier) staticGateDistdir() string {
 		return a.distdir
 	}
 	return a.configuredDistdir
+}
+
+// lendPublishedDistNames makes the staged package directory name the archives
+// this package's releases are published under, for the length of the static
+// gates and no longer. It returns the undo, which is always safe to call.
+//
+// # Without it the gate cannot run at all, and a skip here PUBLISHES
+//
+// validate's findDistfile answers "which tarball is this ebuild's" out of the
+// package directory's Manifest, and validate.Stage deliberately does not carry
+// the published one across (stage.go: it describes the versions already
+// published, not the candidate). The staged tree's own Manifest is written by
+// the manifest step — `pkgdev manifest`, a CHILD PROCESS behind the execCommand
+// seam. Whenever that child returns success without writing one, the staged
+// directory holds no Manifest, the option gate reports SKIPPED ("the package's
+// Manifest names no distfile"), and R3.3 promotes on SKIPPED.
+//
+// That is the worst shape this story has to remove: not a gate that failed to
+// decide, a gate that never read anything, one step in front of the overlay that
+// auto-commits and pushes. It is exactly how obentoo/bentoo#33 reached the tree —
+// every check green, nothing measured.
+//
+// # Why the published Manifest is a legitimate source of the NAMES
+//
+// It is a name lookup and never a hash check. The gate opens the archive and
+// reads meson.options out of it, so the answer is decided by the archive's
+// CONTENTS; a wrong name yields a wrong answer, which is precisely why
+// findDistfile still has to find exactly one present name carrying THIS version
+// before it reads a byte, and reports what it declined otherwise (R12). The
+// published Manifest is the same record presentArchive already consults for the
+// reviewer and the same one the manifest step derives its prefetch names from, so
+// this adds no new notion of which file belongs to a package.
+//
+// # Why it is LENT and not given
+//
+// The bytes go away again the moment the static gates are done, because the build
+// gates run next and Portage VERIFIES a Manifest: a file describing other
+// releases' tarballs would turn a fine ebuild into a digest mismatch — a
+// confident FAILED about a bump that is correct, which is how a gate gets
+// switched off. Nothing is lent when the staged tree already names a distfile,
+// which is every run whose manifest step really ran.
+func (a *Applier) lendPublishedDistNames(cand candidatePaths, pkg, version string) (func(), error) {
+	noop := func() {}
+	if !cand.staged {
+		return noop, nil
+	}
+
+	stagedManifest := filepath.Join(cand.pkgDir, "Manifest")
+	if len(distfiles.ParseManifestDistFilenames(stagedManifest)) > 0 {
+		return noop, nil
+	}
+
+	published, err := publishedCandidate(a.overlayPath, pkg, version)
+	if err != nil {
+		return noop, fmt.Errorf("naming the published package directory of %s: %w", pkg, err)
+	}
+	dist := manifestDistLines(filepath.Join(published.pkgDir, "Manifest"))
+	if dist == "" {
+		// Nothing to lend, and that is not a failure to report here: the option
+		// gate below says exactly what it could not find, which is the sentence
+		// the operator needs.
+		return noop, nil
+	}
+
+	// 0o600, matching validate's own stagedFileMode rather than a published
+	// Manifest's 0o644: this file lives in the staged tree, whose whole stance is
+	// that nothing outside this apply reads it (stage.go's stagedDirMode/
+	// stagedFileMode), and a published Manifest is not what it is.
+	if err := os.WriteFile(stagedManifest, []byte(dist), 0o600); err != nil {
+		return noop, fmt.Errorf("naming %s-%s's upstream archives in its staged tree: %w", pkg, version, err)
+	}
+	return func() {
+		if err := os.Remove(stagedManifest); err != nil {
+			// Not fatal to this apply — the gates already have their answer — but
+			// it must not be silent: the build gates run next against a Manifest
+			// bentoo wrote, and Portage would report a digest mismatch for a bump
+			// that may be perfectly fine.
+			warnLogf("the Manifest lent to the option gate of %s-%s could not be removed from %s: %v "+
+				"(a build gate reading it would report a digest mismatch for a bump that may be fine)",
+				pkg, version, stagedManifest, err)
+		}
+	}, nil
+}
+
+// manifestDistLines returns a Manifest's DIST records and nothing else, or ""
+// when there are none or the file cannot be read.
+//
+// Only DIST travels. An AUX, EBUILD or MISC record describes a file that is not
+// in the staged tree at all — Stage copies the candidate ebuild and files/ and
+// nothing else — so carrying one across would describe something absent.
+//
+// An unreadable Manifest answers "" rather than an error for the same reason
+// lendPublishedDistNames' caller does not abort on it: a package whose published
+// Manifest cannot be read is a package the option gate reports on in its own
+// words, and two error paths for one condition would give the operator two
+// different sentences about it.
+func manifestDistLines(manifestPath string) string {
+	body, err := os.ReadFile(manifestPath) //nolint:gosec // the path is derived from the overlay this applier was constructed for
+	if err != nil {
+		return ""
+	}
+	var out strings.Builder
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(line, "DIST ") {
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
+}
+
+// refusalWithFindings turns PromotionDecision's verdict into the sentence the
+// operator actually reads, by appending WHAT the failing gates found.
+//
+// PromotionDecision is pure and names only the gate — "not promoted: the options
+// gate reported FAILED" — and that is right for a decision function: the findings
+// are data on the report, and the standalone command renders them from there.
+// An apply has no such report to render. Its whole outcome reaches the operator
+// through one error string and one summary line, so a refusal that named only the
+// gate would leave them to go and diff two tarballs by hand — which is the work
+// this story exists to replace.
+//
+// Error findings only, and deduplicated: a warning or an info did not decide
+// anything, and repeating one detail per gate that carried it would bury the
+// option name under the repetition.
+func refusalWithFindings(reason string, gates []validate.GateResult) error {
+	var details []string
+	seen := map[string]bool{}
+	for _, gate := range gates {
+		// The QA gate never decides (D8), so its findings cannot be part of why
+		// this bump was refused — PromotionDecision skipped it for the same reason.
+		if gate.Gate == validate.GateQA || gate.Outcome != validate.OutcomeFailed {
+			continue
+		}
+		for _, finding := range gate.Findings {
+			detail := strings.TrimSpace(finding.Detail)
+			if finding.Severity != validate.SeverityError || detail == "" || seen[detail] {
+				continue
+			}
+			seen[detail] = true
+			details = append(details, detail)
+		}
+	}
+	if len(details) == 0 {
+		// A gate can fail without a finding — a build gate reports its cause in
+		// its Reason. The verdict alone is then the whole truth, and inventing a
+		// colon with nothing after it would only look like a lost message.
+		return errors.New(reason)
+	}
+	return fmt.Errorf("%s: %s", reason, strings.Join(details, "; "))
 }
 
 // reviewBump asks the optional LLM reviewer to read the two versions' build
