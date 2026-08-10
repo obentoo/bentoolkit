@@ -1197,10 +1197,13 @@ func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyR
 // the behaviour it has always had, byte for byte, until sub-task 12.1 wires the
 // staging root into the three construction sites in cmd/.
 //
-// The rollback is RETURNED rather than registered, so that the point at which it
-// becomes active stays exactly where it was: a substitution failure below returns
-// before Apply arms it, which is pre-existing behaviour (an orphan ebuild is left
-// behind by a failed substitution) that this story does not silently change.
+// The rollback is RETURNED rather than registered, so Apply arms it only once this
+// function has succeeded. That leaves a window this function must close itself: a
+// substitution failure returns an error and NO rollback, so there is nothing for
+// Apply to arm and the ebuild copied one line earlier survives in the published
+// tree. That is how sys-apps/asus-ec-sensors-0_p20260809 was left behind — carrying
+// the previous version's COMMIT=, with no Manifest entry and no md5-cache — and,
+// because this overlay auto-commits and pushes, published in that state.
 func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, update *PendingUpdate) (candidatePaths, publishedUndo, error) {
 	if err := a.copyEbuild(pkg, currentVersion, newVersion); err != nil {
 		return candidatePaths{}, nil, fmt.Errorf("failed to copy ebuild: %w", err)
@@ -1210,14 +1213,21 @@ func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, updat
 	if err != nil {
 		return candidatePaths{}, nil, err
 	}
-	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
-		return candidatePaths{}, nil, err
-	}
 
 	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any later
 	// step (manifest, status update, compile) fails, that file is an orphan and
 	// must be removed so the overlay is not left half-applied.
-	return cand, orphanEbuildUndo(cand.ebuildPath, pkg, newVersion), nil
+	undo := orphanEbuildUndo(cand.ebuildPath, pkg, newVersion)
+
+	// Run it HERE rather than handing it back, because a failing substitution is
+	// the one caller that never gets to. Handing back both an error and a rollback
+	// would only move the same trap to Apply, which arms nothing on an error path.
+	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
+		undo(err)
+		return candidatePaths{}, nil, err
+	}
+
+	return cand, undo, nil
 }
 
 // prepareInStagingTree materialises the candidate in a tree of its own, outside
@@ -1597,22 +1607,33 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 }
 
 // substituteCommitHash replaces the commit-hash variable assignment in an
-// ebuild with newHash. It handles the three variable names used in the overlay:
+// ebuild with newHash. It handles the four variable names used in the overlay:
 //
 //	EGIT_COMMIT="<sha>"   (vulkan-*, spirv-*)
 //	GIT_COMMIT="<sha>"    (glslang, modemmanager)
 //	BUILD_ID="<sha>"      (cursor — version-tracked; SHA is part of the SRC_URI)
+//	COMMIT="<sha>"        (asus-ec-sensors)
 //	COMMIT=<sha>          (sqlitebrowser — no quotes)
 //
+// COMMIT is spelled BOTH ways on purpose. It used to appear only in the unquoted
+// pattern, written from the one package that omits the quotes, and the quoted
+// pattern listed the other three names — so COMMIT="<sha>" fell through the gap
+// between them and was reported as "no commit hash variable found" against an
+// ebuild whose COMMIT= line is right there. That failure lands AFTER the ebuild
+// has been copied, which is how it left an orphan in the published overlay.
+//
 // The substitution is deliberately narrow (anchored to known variable names +
-// 40-hex-char SHA) so it cannot accidentally corrupt other content.
+// 40-hex-char SHA) so it cannot accidentally corrupt other content. The
+// alternation needs no left-hand boundary: the whole matched assignment is
+// captured in group 1 and written back verbatim, so a match that starts at the
+// COMMIT inside EGIT_COMMIT still reproduces the EGIT_ prefix untouched.
 func substituteCommitHash(ebuildPath, newHash string) error {
 	content, err := os.ReadFile(ebuildPath)
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
 	}
 
-	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID)=")[0-9a-f]{40}(")`)
+	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID|COMMIT)=")[0-9a-f]{40}(")`)
 	reBare := regexp.MustCompile(`(COMMIT=)[0-9a-f]{40}\b`)
 
 	// "Nothing changed" has two very different causes, and conflating them

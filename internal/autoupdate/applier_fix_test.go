@@ -324,6 +324,133 @@ func TestSubstituteCommitHash_AlreadyCorrect(t *testing.T) {
 	}
 }
 
+// TestApply_SubstitutionFailureLeavesNoOrphan pins the second half of the
+// asus-ec-sensors incident. The substitution runs AFTER the ebuild has been copied
+// into the published package directory, and prepareInOverlay used to return the
+// failure without the rollback — so Apply had nothing to arm and the copy stayed.
+// In the overlay that produced this test, the leftover ebuild was then
+// auto-committed and pushed: a new version pinning the OLD commit, with no
+// Manifest entry, so any emerge of it fails on the digest.
+//
+// The failure is provoked the way the real one arose: a pending update carrying a
+// CommitHash against an ebuild that declares no commit variable at all.
+func TestApply_SubstitutionFailureLeavesNoOrphan(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	configDir := filepath.Join(tmpDir, "config")
+
+	pkg := "sys-apps/demo"
+	oldVersion := "0_p20260711"
+	newVersion := "0_p20260809"
+
+	createTestEbuildFile(t, overlayDir, pkg, oldVersion)
+
+	pending, _ := NewPendingList(configDir)
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: oldVersion,
+		NewVersion:     newVersion,
+		CommitHash:     "bc99a094bd926ae7b5ab8643947ce1438c950720",
+		Status:         StatusPending,
+	})
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(mockExecCommandSuccess),
+	)
+	if err != nil {
+		t.Fatalf("NewApplier: %v", err)
+	}
+
+	result, applyErr := applier.Apply(pkg, false)
+	if applyErr == nil || result.Success {
+		t.Fatal("expected the substitution to fail on an ebuild with no commit variable")
+	}
+	if !strings.Contains(applyErr.Error(), "no commit hash variable") {
+		t.Errorf("error = %v, want the missing-variable failure", applyErr)
+	}
+
+	// The whole point: nothing of the failed apply survives in the overlay.
+	orphan := applier.EbuildPath(pkg, newVersion)
+	if _, statErr := os.Stat(orphan); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("orphan ebuild %s survived a failed substitution (stat: %v)", orphan, statErr)
+	}
+	// And the version it was bumped FROM is untouched.
+	if _, statErr := os.Stat(applier.EbuildPath(pkg, oldVersion)); statErr != nil {
+		t.Errorf("the source ebuild was disturbed by the rollback: %v", statErr)
+	}
+}
+
+// TestSubstituteCommitHash_QuotedCOMMIT covers the spelling that fell between the
+// two patterns: COMMIT= WITH quotes. The unquoted pattern was the only one that
+// named COMMIT and it requires the SHA to start right after the "=", while the
+// quoted pattern listed the other three names — so sys-apps/asus-ec-sensors, whose
+// ebuild pins COMMIT="<sha>", was told its commit variable did not exist.
+func TestSubstituteCommitHash_QuotedCOMMIT(t *testing.T) {
+	const (
+		oldSHA = "503d0d3d3858f463973f2cfce4a3aa0173567500"
+		newSHA = "bc99a094bd926ae7b5ab8643947ce1438c950720"
+	)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "asus-ec-sensors-0_p20260809.ebuild")
+	body := "EAPI=8\nCOMMIT=\"" + oldSHA + "\"\n" +
+		"SRC_URI=\"https://github.com/zeule/${PN}/archive/${COMMIT}.tar.gz -> ${P}.tar.gz\"\n" +
+		"S=\"${WORKDIR}/${PN}-${COMMIT}\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := substituteCommitHash(path, newSHA); err != nil {
+		t.Fatalf("substituteCommitHash on COMMIT=\"<sha>\": %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if strings.Contains(string(got), oldSHA) {
+		t.Error("the previous SHA survived; SRC_URI would still fetch the old tarball")
+	}
+	if !strings.Contains(string(got), "COMMIT=\""+newSHA+"\"") {
+		t.Errorf("COMMIT= was not rewritten to the new SHA:\n%s", got)
+	}
+}
+
+// TestSubstituteCommitHash_QuotedCOMMITKeepsPrefix pins the one hazard of adding a
+// bare COMMIT to the quoted alternation: a match may start at the COMMIT inside
+// EGIT_COMMIT/GIT_COMMIT. That is harmless only because group 1 is written back
+// verbatim, so the prefix is reproduced rather than eaten — which is a property of
+// the replacement, not of the alternation, and therefore worth a test.
+func TestSubstituteCommitHash_QuotedCOMMITKeepsPrefix(t *testing.T) {
+	const (
+		oldSHA = "503d0d3d3858f463973f2cfce4a3aa0173567500"
+		newSHA = "bc99a094bd926ae7b5ab8643947ce1438c950720"
+	)
+	for _, varName := range []string{"EGIT_COMMIT", "GIT_COMMIT", "BUILD_ID", "COMMIT"} {
+		t.Run(varName, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "demo-1.0.ebuild")
+			body := "EAPI=8\n" + varName + "=\"" + oldSHA + "\"\n"
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if err := substituteCommitHash(path, newSHA); err != nil {
+				t.Fatalf("substituteCommitHash: %v", err)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read back: %v", err)
+			}
+			want := "EAPI=8\n" + varName + "=\"" + newSHA + "\"\n"
+			if string(got) != want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+}
+
 // TestSubstituteCommitHash_TrulyMissing keeps the real error reachable.
 func TestSubstituteCommitHash_TrulyMissing(t *testing.T) {
 	dir := t.TempDir()
