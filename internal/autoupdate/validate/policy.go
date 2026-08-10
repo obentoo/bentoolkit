@@ -1,6 +1,9 @@
 package validate
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // This file is the one place that answers "how deep does this bump go, and
 // why". The second half of that sentence is not decoration: a report that says
@@ -22,6 +25,12 @@ import "fmt"
 // and never as validated (R2.6), because a bump that received fewer gates than
 // policy asked for did not prove more cheaply, it proved less, and the proved
 // column is the one number this whole story is about.
+//
+// THE BUMP REVIEWER IS NOT A FIFTH LEVEL OF THAT LIST. Its proposal arrives
+// after ResolveDepth has already answered, from a caller in internal/autoupdate,
+// and is combined with that answer by Escalate — which may only RAISE it (R7.5).
+// It is named here so a reader does not go hunting for it inside ResolveDepth,
+// and so nobody moves it in there, where it would inherit the authority to lower.
 
 // typeBinary is the resolved package type that carries R2.3.
 //
@@ -252,6 +261,70 @@ func overrideReason(override DepthOverride) string {
 		return "no reason stated"
 	}
 	return override.Reason
+}
+
+// Escalate combines the depth policy already resolved — the floor — with a depth
+// the bump reviewer proposes, answering the depth to validate at and the case
+// for it (R7, R7.5).
+//
+// THE RULE IS max(floor, proposed), AND IT IS ONE-WAY. A reviewer reads a diff;
+// it does not carry the authority an operator's flag carries, so it may buy more
+// scrutiny and may never sell any. There is deliberately no code path here by
+// which a proposal below the floor takes effect. The ladder's integer ordering
+// (see depth.go) is what makes that max mean "the deeper of the two", which is
+// also why reordering those constants would silently change this answer.
+//
+// IT TAKES PRIMITIVES, NOT autoupdate.BumpReviewReport, AND MUST KEEP DOING SO.
+// That type lives in internal/autoupdate, which already imports this package
+// (applier.go), so accepting it here is an import CYCLE — a build failure, not a
+// layering preference. The caller unpacks the report and passes the two values.
+// Its ProposedDepth is a pointer precisely so "proposed nothing" and "proposed
+// none" stay different facts, and the caller therefore reaches this function
+// only when that pointer is non-nil.
+//
+// A PROPOSAL THAT RAISES DEPTH AND STATES NO REASON IS REFUSED rather than
+// applied silently, for the same reason a reasonless lowering override is (see
+// applyOverride): R7.5 reports the reviewer's stated reason BESIDE the raised
+// depth, and a depth an operator cannot account for is a depth they will switch
+// off. With no error in the signature, refusal has exactly one observable form —
+// the floor is returned and the reason says why the proposal did not apply.
+//
+// The reason names the reviewer ONLY when the reviewer actually decided
+// something. A proposal at or below the floor changed nothing, and crediting it
+// would turn "escalated by review" into a count of agreements rather than of
+// gates actually added.
+func Escalate(floor, proposed Depth, reason string) (Depth, string) {
+	if proposed <= floor {
+		return floor, floorStands(floor, proposed)
+	}
+
+	// Trimmed rather than compared against "": a reason made of spaces reports
+	// nothing an operator can act on, and would print as an empty quotation
+	// beside the raised depth, which is worse than saying it was refused.
+	if strings.TrimSpace(reason) == "" {
+		return floor, fmt.Sprintf("reviewer proposal refused: it raises %s to %s without stating a reason, which a raised depth must carry (R7.5), so the %s depth stands",
+			floor, proposed, floor)
+	}
+
+	// The reviewer's words travel verbatim, as an override's do: the report
+	// quotes whoever asked for the extra gate rather than paraphrasing them.
+	return proposed, fmt.Sprintf("reviewer escalation (%s, above the %s depth policy chose): %s", proposed, floor, reason)
+}
+
+// floorStands explains a proposal that decided nothing, and says which of the two
+// ways it decided nothing — agreeing with policy and being overruled by it are
+// the same depth but not the same fact.
+//
+// It quotes NEITHER the proposal's reasoning NOR the reviewer, because a
+// proposal that was not applied must not read as though it were: a report saying
+// "the upstream diff looks harmless to me" beside a compile depth invites the
+// operator to believe the reviewer chose it.
+func floorStands(floor, proposed Depth) string {
+	if proposed < floor {
+		return fmt.Sprintf("policy: the %s depth stands; a shallower proposal of %s does not lower it, because nothing short of an explicit operator flag may",
+			floor, proposed)
+	}
+	return fmt.Sprintf("policy: the %s depth stands; the proposal matched it and decided nothing", floor)
 }
 
 // ClassifyForDepth classifies a bump for ResolveDepth without offering the

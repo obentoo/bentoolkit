@@ -315,3 +315,142 @@ func TestResolveDepth_EveryDecisionNamesItsDecidingInput(t *testing.T) {
 		}
 	}
 }
+
+// policyFloor is the depth policy chooses for a class, which is what a reviewer
+// proposal is measured against.
+func policyFloor(t *testing.T, class Class) Depth {
+	t.Helper()
+	return ResolveDepth(requestFor(class)).Depth
+}
+
+// TestEscalate_AboveTheFloorRaisesAndCarriesTheReason is R7.5's positive half:
+// the reading bought more scrutiny, and the report can say who asked for it and
+// why.
+func TestEscalate_AboveTheFloorRaisesAndCarriesTheReason(t *testing.T) {
+	floor := policyFloor(t, ClassPatch) // policy: options
+	if floor != DepthOptions {
+		t.Fatalf("fixture drift: a patch bump resolved to %v, want DepthOptions", floor)
+	}
+
+	depth, reason := Escalate(floor, DepthConfigure, "upstream renamed two meson options between these versions")
+
+	if depth != DepthConfigure {
+		t.Errorf("depth = %v, want DepthConfigure — the proposal is above the floor", depth)
+	}
+	if !strings.Contains(reason, "renamed two meson options") {
+		t.Errorf("reason %q does not carry the reviewer's stated reason (R7.5)", reason)
+	}
+	if !strings.Contains(strings.ToLower(reason), "review") {
+		t.Errorf("reason %q does not name the reviewer as the input that raised the depth; the operator must be able to tell "+
+			"an escalation from a policy decision", reason)
+	}
+}
+
+// TestEscalate_BelowTheFloorIsIgnoredAndTheFloorIsReported is the half with
+// teeth, and it asserts the RETURNED DEPTH rather than merely that nothing blew
+// up: an implementation that returned the proposal while logging a complaint
+// would satisfy a weaker test and lose the invariant entirely.
+func TestEscalate_BelowTheFloorIsIgnoredAndTheFloorIsReported(t *testing.T) {
+	floor := policyFloor(t, ClassMajor) // policy: compile
+	if floor != DepthCompile {
+		t.Fatalf("fixture drift: a major bump resolved to %v, want DepthCompile", floor)
+	}
+
+	depth, reason := Escalate(floor, DepthOptions, "the upstream diff looks harmless to me")
+
+	if depth != DepthCompile {
+		t.Fatalf("depth = %v, want DepthCompile — a reviewer may raise the depth and may NEVER lower it (R7.5)", depth)
+	}
+	if strings.Contains(reason, "harmless") {
+		t.Errorf("reason %q carries the reasoning of a proposal that was not applied; a proposal that decided nothing must not "+
+			"appear to have decided something", reason)
+	}
+}
+
+// TestEscalate_EqualToTheFloorIsNotAnEscalation keeps the report honest about
+// who decided. A reviewer that agrees with policy changed nothing, and crediting
+// it would make an escalation count meaningless.
+func TestEscalate_EqualToTheFloorIsNotAnEscalation(t *testing.T) {
+	floor := policyFloor(t, ClassSeries) // policy: configure
+
+	depth, reason := Escalate(floor, DepthConfigure, "agreed, the series crossing warrants a configure")
+
+	if depth != floor {
+		t.Errorf("depth moved from %v to %v on a proposal that matched the floor", floor, depth)
+	}
+	if strings.Contains(strings.ToLower(reason), "review") {
+		t.Errorf("reason %q credits the reviewer for a depth policy had already chosen", reason)
+	}
+}
+
+// TestEscalate_AReasonlessProposalIsRejected is the other half of R7.5. A depth
+// the operator cannot account for is a depth they will disable.
+//
+// With no error in the signature, "rejected" has exactly one observable form:
+// the floor is returned, and the reason says why the proposal was not applied.
+func TestEscalate_AReasonlessProposalIsRejected(t *testing.T) {
+	floor := policyFloor(t, ClassPatch)
+
+	depth, reason := Escalate(floor, DepthCompile, "")
+
+	if depth != floor {
+		t.Fatalf("depth = %v for a proposal carrying no reason, want the untouched floor %v — R7.5 reports the reviewer's "+
+			"stated reason beside the raised depth, and there is nothing here to report", depth, floor)
+	}
+	if reason == "" {
+		t.Error("the decision carries no reason at all; it should still say what policy chose, and ideally that a proposal was discarded")
+	}
+}
+
+// TestEscalate_NeverLowersTheDepthForAnyPairing is the invariant swept over the
+// whole matrix: every floor policy can produce, against every depth a reviewer
+// can propose. Twenty pairings, one rule.
+//
+// This is the case that would catch a `min` where a `max` belongs, an inverted
+// comparison, or an off-by-one in the ladder's ordering — none of which the
+// worked examples above would necessarily hit.
+func TestEscalate_NeverLowersTheDepthForAnyPairing(t *testing.T) {
+	floors := map[Class]Depth{
+		ClassRevision: policyFloor(t, ClassRevision),
+		ClassPatch:    policyFloor(t, ClassPatch),
+		ClassSeries:   policyFloor(t, ClassSeries),
+		ClassMajor:    policyFloor(t, ClassMajor),
+	}
+
+	for class, floor := range floors {
+		for _, proposed := range []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, DepthCompile} {
+			depth, reason := Escalate(floor, proposed, "a stated reason, so the proposal is well-formed")
+
+			if depth < floor {
+				t.Errorf("class %v: a proposal of %v LOWERED the depth from %v to %v; no input other than an explicit "+
+					"operator flag may reduce depth (R7.5)", class, proposed, floor, depth)
+			}
+			if proposed > floor && depth != proposed {
+				t.Errorf("class %v: a proposal of %v above the floor %v produced %v; max(floor, proposed) is the rule",
+					class, proposed, floor, depth)
+			}
+			if proposed <= floor && depth != floor {
+				t.Errorf("class %v: a proposal of %v at or below the floor %v produced %v; the floor stands",
+					class, proposed, floor, depth)
+			}
+			if reason == "" {
+				t.Errorf("class %v, proposal %v: the decision carries no reason", class, proposed)
+			}
+		}
+	}
+}
+
+// TestEscalate_TakesNoTypeFromTheAutoupdatePackage is the import-cycle decision
+// asserted rather than trusted. It is a compile-time property, so the assertion
+// is a compile-time one: the function is referenced through a variable of its
+// exact primitive signature, and any drift towards accepting a report type
+// stops the package from building here first, with this comment next to it.
+func TestEscalate_TakesNoTypeFromTheAutoupdatePackage(t *testing.T) {
+	//nolint:staticcheck // QF1011: the explicit type IS the assertion. Inferring it from Escalate makes the declaration vacuous, and this line exists to break the build the moment the signature drifts toward accepting autoupdate.BumpReviewReport — which would be an import cycle.
+	var _ func(Depth, Depth, string) (Depth, string) = Escalate
+
+	// And a sanity call, so the signature is not merely satisfiable but used.
+	if depth, _ := Escalate(DepthOptions, DepthCompile, "the reviewer found a build-system change"); depth != DepthCompile {
+		t.Errorf("depth = %v, want DepthCompile", depth)
+	}
+}
