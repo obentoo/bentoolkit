@@ -373,11 +373,17 @@ func truncateDiagnostic(s string) string {
 	return truncateMiddle(s, diagnosticsBudget, "diagnostic")
 }
 
-// buildFixInstruction renders the static-but-parameterized instruction handed to
-// the agent in -p. It states the goal (make `pkgdev manifest` pass), the package
-// facts, the failure output, and the guardrails (preserve PN/PV; don't invent
-// URLs; verify the real upstream release path; finish with a one-line summary).
-func buildFixInstruction(req ManifestFixRequest) string {
+// buildManifestFixInstruction renders the static-but-parameterized instruction
+// handed to the agent in -p. It states the goal (make `pkgdev manifest` pass), the
+// package facts, the failure output, and the guardrails (preserve PN/PV; don't
+// invent URLs; verify the real upstream release path; finish with a one-line
+// summary).
+//
+// It was called buildFixInstruction until story 033 gave the BUILD fixer
+// (build_fixer.go) that name for its own instruction builder: "build" there names
+// the failing gate, not the verb. Go has no overloading, so the manifest one is
+// now spelled out — which is the clearer name of the two anyway.
+func buildManifestFixInstruction(req ManifestFixRequest) string {
 	var sb strings.Builder
 	sb.WriteString("You are fixing a Gentoo ebuild whose manifest generation failed during an automated version bump. ")
 	sb.WriteString("Your goal: edit the ebuild so that `pkgdev manifest --distdir ")
@@ -503,7 +509,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	runCtx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 
-	instruction := buildFixInstruction(req)
+	instruction := buildManifestFixInstruction(req)
 	args := f.buildFixArgs(instruction, req.PkgDir)
 
 	cmd := f.execCommand(runCtx, "claude", args...)
