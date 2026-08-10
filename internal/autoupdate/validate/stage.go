@@ -561,8 +561,15 @@ var buildGates = map[Depth]string{
 	DepthCompile:   GateCompile,
 }
 
-// skippedGates reports one SKIPPED gate, carrying reason, for every build gate
+// SkippedGates reports one SKIPPED gate, carrying reason, for every build gate
 // depth d covers — and for no other gate (R3.9).
+//
+// It is EXPORTED because the applier is a second caller (S033-12.1): the
+// dependency pre-check decides, before anything is spawned, that this host
+// cannot answer, and the set of gates that then owe an outcome must be the same
+// set RunBuildGates would have reported. A caller assembling that list itself
+// would be a second walk of the ladder, and the bug would be a gate reported
+// when it skips and absent when it runs.
 //
 // It is the gate-level analogue of report.go's skippedResult, down to taking the
 // reason as a required argument instead of leaving it a settable field: that is
@@ -577,7 +584,7 @@ var buildGates = map[Depth]string{
 //
 // A depth below DepthPatches covers no build gate and correctly yields nothing:
 // an options-deep run never needed a staged tree, so nothing was taken from it.
-func skippedGates(d Depth, reason string) []GateResult {
+func SkippedGates(d Depth, reason string) []GateResult {
 	var gates []GateResult
 	eachBuildGate(d, func(gate string, _ buildPhase) {
 		gates = append(gates, GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: reason})

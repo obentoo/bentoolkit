@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -143,6 +144,30 @@ type autoupdateDistfileDirs struct {
 
 var autoupdateDirs autoupdateDistfileDirs
 
+// autoupdateValidate is the staged-bump validation policy this run applies:
+// the depth table translated out of config, plus the two switches that decide
+// what an unproved bump means (S033-R2, R3.13).
+//
+// It is resolved ONCE, in runAutoupdate, where both the config and the
+// *cobra.Command are in scope — exactly as autoupdateDirs is, and for the same
+// reason: three Applier construction sites need the same answer, and a mode that
+// silently missed it would validate nothing while looking like working software.
+type autoupdateValidatePolicy struct {
+	// Policy is the per-class depth table and the per-package overrides.
+	Policy validate.DepthPolicy
+	// Depth is --depth, nil when the operator did not type it. A POINTER because
+	// `none` is a depth an operator may legitimately ask for, and a zero value
+	// indistinguishable from "unset" is the one confusion that switches
+	// validation off in silence.
+	Depth *validate.Depth
+	// RequireIsolation and RequireProof are the config keys behind
+	// --require-isolation and R3.13's refusal.
+	RequireIsolation bool
+	RequireProof     bool
+}
+
+var autoupdateValidate autoupdateValidatePolicy
+
 var autoupdateCmd = &cobra.Command{
 	Use:   "autoupdate [package]",
 	Short: "Check and apply ebuild version updates",
@@ -202,6 +227,15 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
+	// --depth is read OFF THE COMMAND rather than bound to a package variable
+	// (newValidateCmd's convention): the value is a rung of a ladder that has to
+	// be parsed and rejected by name, and a package variable would carry one
+	// invocation's depth into the next inside a single test binary.
+	//
+	// It is what gives S033-R2.7 a surface at all. Without it the resolver would
+	// be answering a question nobody could ask, and `--compile` would be the only
+	// way to reach a build gate.
+	autoupdateCmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure or compile, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRequireIsolation, "require-isolation", false, "With --compile: SKIP the compile test rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
@@ -446,6 +480,18 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Manifest reads the result; a mode that does not (--check, --list, --lint)
 	// simply never looks at it.
 	autoupdateDirs = resolveAutoupdateDistfileDirs(appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
+
+	// The staged-bump validation policy, resolved here for the same reason and in
+	// the same place as the distfile directories above (S033-R2). A --depth that
+	// does not name a rung is fatal BEFORE any package work: it is a typo the
+	// operator must fix, and silently validating at the class depth instead would
+	// be the run they did not ask for.
+	autoupdateValidate, err = resolveAutoupdateValidatePolicy(appCtx.Config, cmd)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+		return
+	}
 
 	// Handle different modes
 	switch {
@@ -1224,6 +1270,116 @@ func applierDistfileOptions() []autoupdate.ApplierOption {
 	}
 }
 
+// resolveAutoupdateValidatePolicy translates `autoupdate.validate` and the
+// --depth flag into what the Applier reads (S033-R2, R2.2, R2.4, R2.7, R6.6,
+// R3.13).
+//
+// # Why the translation lives here and not in validate
+//
+// internal/autoupdate/validate deliberately knows nothing about the config
+// package — the import already runs the other way — so the depth table crosses
+// as validate's own types and the STRINGS are turned into rungs here, by
+// validate.ParseDepth, which rejects a typo by name. Doing it anywhere else would
+// put the ladder's vocabulary in two places and the copy would be the stale one.
+//
+// # An unusable override is reported, never fatal
+//
+// A per-package override with no reason, or with a depth that names no rung, is
+// logged and DROPPED, which leaves that package at its class depth — the safe
+// direction, since an override is the one input that can quietly reduce how much
+// a bump is checked. One bad entry must not cost the operator the rest of the
+// file, which is the treatment an unknown config key already gets.
+//
+// Only --depth is fatal: it is this invocation's explicit instruction, and
+// running at some other depth than the one that was typed is a different run.
+func resolveAutoupdateValidatePolicy(cfg *config.Config, cmd *cobra.Command) (autoupdateValidatePolicy, error) {
+	validateCfg := &cfg.Autoupdate.Validate
+
+	policy := autoupdateValidatePolicy{
+		Policy: validate.DepthPolicy{
+			ByClass:   map[validate.Class]validate.Depth{},
+			Overrides: map[string]validate.DepthOverride{},
+		},
+		// --require-isolation stays a flag OR the key: story 031's flag was the
+		// only way in until story 033 gave the setting a home, and neither
+		// supersedes the other.
+		RequireIsolation: autoupdateRequireIsolation || validateCfg.GetRequireIsolation(),
+		RequireProof:     validateCfg.GetRequireProof(),
+	}
+
+	for class, name := range map[validate.Class]string{
+		validate.ClassRevision: "revision",
+		validate.ClassPatch:    "patch",
+		validate.ClassSeries:   "series",
+		validate.ClassMajor:    "major",
+	} {
+		// GetDepthForClass returns the configured value VERBATIM and never the
+		// empty string, so a typo reaches ParseDepth and is rejected by name here
+		// rather than silently repaired in the config layer.
+		spelled := validateCfg.GetDepthForClass(name)
+		depth, err := validate.ParseDepth(spelled)
+		if err != nil {
+			logger.Warn("autoupdate.validate.depths.%s: %v; that class keeps its shipped default instead", name, err)
+			continue
+		}
+		policy.Policy.ByClass[class] = depth
+	}
+
+	for _, err := range validateCfg.OverrideErrors() {
+		logger.Warn("%v", err)
+	}
+	for pkg, override := range validateCfg.Packages {
+		if strings.TrimSpace(override.Reason) == "" {
+			continue // already reported by OverrideErrors above
+		}
+		depth, err := validate.ParseDepth(override.Depth)
+		if err != nil {
+			logger.Warn("autoupdate.validate.packages.%s: %v; the override is ignored and %s keeps its class depth", pkg, err, pkg)
+			continue
+		}
+		policy.Policy.Overrides[pkg] = validate.DepthOverride{Depth: depth, Reason: override.Reason}
+	}
+
+	spelled, err := cmd.Flags().GetString("depth")
+	if err != nil {
+		return policy, fmt.Errorf("reading --depth: %w", err)
+	}
+	if spelled == "" {
+		return policy, nil
+	}
+	depth, err := validate.ParseDepth(spelled)
+	if err != nil {
+		return policy, fmt.Errorf("--depth: %w", err)
+	}
+	policy.Depth = &depth
+	return policy, nil
+}
+
+// applierValidateOptions carries the resolved validation policy into every
+// Applier this command builds, so --apply, --apply all and --revive all reach the
+// gates with the same depth table, the same staging root and the same two
+// switches (S033-12.1).
+//
+// One helper rather than three copies of the same six lines: a mode that silently
+// missed them would apply bumps with no gate at all, which — unlike a missing
+// distdir — looks exactly like success.
+//
+// The staging root is <configDir>/staging (S033-D1). It is what turns the whole
+// staged pipeline on: without it the candidate is written straight into the
+// published overlay and no gate runs, which is every release before this one.
+func applierValidateOptions(configDir string) []autoupdate.ApplierOption {
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, "staging")),
+		autoupdate.WithApplierValidatePolicy(autoupdateValidate.Policy),
+		autoupdate.WithApplierRequireIsolation(autoupdateValidate.RequireIsolation),
+		autoupdate.WithApplierRequireProof(autoupdateValidate.RequireProof),
+	}
+	if autoupdateValidate.Depth != nil {
+		opts = append(opts, autoupdate.WithApplierDepth(*autoupdateValidate.Depth))
+	}
+	return opts
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
@@ -1242,11 +1398,11 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierDistfileOptions()...)
+	opts = append(opts, applierValidateOptions(configDir)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1324,7 +1480,6 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
 		// share one in-memory source of truth.
@@ -1332,6 +1487,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierDistfileOptions()...)
+	opts = append(opts, applierValidateOptions(configDir)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1365,12 +1521,18 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // failures (an Apply returning a non-nil error). It is the concurrency seam of
 // runApplyAll.
 //
-// With compile == true the applies run serially: the compile step prompts for
-// confirmation and runs under sudo, and interleaving those across goroutines
-// would scramble the prompts. Otherwise the applies are dispatched across a
-// bounded worker pool (mirroring overlay.RegenerateManifests) so each Apply's
-// slow, network-bound `pkgdev manifest` step overlaps. concurrency caps the live
-// workers and is clamped to [1, len(updates)].
+// It runs serially for either of two reasons. With compile == true the compile
+// step prompts for confirmation and runs under sudo, and interleaving those
+// across goroutines would scramble the prompts. Since story 033 it is also
+// serial when any of these bumps resolves to a validation depth above `options`
+// (D14) — a rule about machine resources rather than about prompts, and the
+// reason it is asked of the Applier: the depth a bump gets is the applier's
+// decision, and a second copy of that logic here would be a copy that drifts.
+//
+// Otherwise the applies are dispatched across a bounded worker pool (mirroring
+// overlay.RegenerateManifests) so each Apply's slow, network-bound `pkgdev
+// manifest` step overlaps. concurrency caps the live workers and is clamped to
+// [1, len(updates)].
 //
 // Concurrency safety: the Applier's pending list and reporter are mutex-guarded,
 // each Apply's file work is scoped to its own package directory, and workers
@@ -1379,12 +1541,20 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
 	results := make([]*autoupdate.ApplyResult, len(updates))
 
-	// --compile path: serial, so the confirmation prompt and sudo invocation of
-	// each compile step are not interleaved across goroutines.
-	if compile {
+	// Serial when the compile step will prompt and escalate, and — since story
+	// 033 — when ANY of these bumps resolves to a depth that starts a build
+	// (D14). The second rule has nothing to do with prompts: concurrent builds
+	// contend for CPU and for space under PORTAGE_TMPDIR, measured at 60 MB for
+	// one gst configure, and a worker pool multiplies that on a machine that was
+	// never asked. Depths none and options keep the pool, which is every run whose
+	// bumps are revisions and patches.
+	if compile || applier.SerialApplyRequired(updates) {
 		failures := 0
 		for i, u := range updates {
-			result, err := applier.Apply(u.Package, true)
+			// `compile`, not a literal true: this branch is now reached for two
+			// different reasons, and a depth-driven serial run must not acquire the
+			// privileged compile step the operator never asked for.
+			result, err := applier.Apply(u.Package, compile)
 			if err != nil {
 				failures++
 			}
@@ -1393,7 +1563,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		return results, failures
 	}
 
-	// Non-compile path: a bounded worker pool over an index queue. Workers write
+	// Concurrent path: a bounded worker pool over an index queue. Workers write
 	// results[i] at distinct indices (no lock) and tally failures atomically.
 	jobs := concurrency
 	if jobs < 1 {
@@ -1866,15 +2036,19 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		return
 	}
 
-	applier, err := autoupdate.NewApplier(overlayPath, configDir,
-		append([]autoupdate.ApplierOption{
-			autoupdate.WithApplierContext(ctx),
-			autoupdate.WithApplierClean(autoupdateClean),
-			autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
-			autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-			autoupdate.WithApplierPendingList(pending),
-		}, applierDistfileOptions()...)...,
-	)
+	reviveOpts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPendingList(pending),
+	}
+	reviveOpts = append(reviveOpts, applierDistfileOptions()...)
+	// R3 reaches the revive path through the same option block as the two apply
+	// paths, which is what keeps a second entry point from growing a second,
+	// gate-free way into the published overlay.
+	reviveOpts = append(reviveOpts, applierValidateOptions(configDir)...)
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
 		osExit(1)

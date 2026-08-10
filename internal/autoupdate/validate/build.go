@@ -271,14 +271,14 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	isolated, isolationReason := deps.isolationProbe()()
 	if !isolated && req.RequireIsolation {
 		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
-		return skippedGates(req.Depth, label.clean(refused)), nil
+		return SkippedGates(req.Depth, label.clean(refused)), nil
 	}
 
 	// A host with no Portage produces NO ANSWER, never a cheerful one — the same
 	// rule DependenciesSatisfied applies to `emerge`, and the reason the lookup
 	// is a seam of its own.
 	if _, err := deps.binaryLookup()("ebuild"); err != nil {
-		return skippedGates(req.Depth, label.clean(fmt.Sprintf(
+		return SkippedGates(req.Depth, label.clean(fmt.Sprintf(
 			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err))), nil
 	}
 

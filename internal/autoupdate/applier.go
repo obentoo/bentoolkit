@@ -181,6 +181,28 @@ type ApplyResult struct {
 	// Empty, therefore, in three cases: a successful apply, an apply that ran
 	// without a staging root, and one that failed before staging.
 	StagedPath string
+	// DepthRequested is how far this bump was ASKED to be validated: the depth
+	// class, tier, configuration and the operator's flags resolved to (S033-R2,
+	// R2.2, R2.7), raised by a reviewer escalation where one applied (R7.5).
+	//
+	// It is a string and not a validate.Depth for the reason
+	// validate.EbuildResult states: Depth is an int whose ORDERING is its
+	// contract, so it would reach a report as a number and force every reader to
+	// carry the ladder to interpret it. The spelling here is the one `--depth`
+	// accepts and Depth.String prints.
+	DepthRequested string
+	// DepthReached is how far validation ACTUALLY got — the deepest rung whose
+	// own gate reported PASS, never deeper than DepthRequested.
+	//
+	// The pair is the R4 rule ("an outcome names its own reach") applied to the
+	// ladder itself: a bump promoted with its build gates skipped for want of an
+	// installed dependency has DepthRequested "configure" and DepthReached
+	// short of it, so nobody can read the green as "it builds" (R3.12).
+	DepthReached string
+	// DepthReason names the input that decided the depth, and — when the two
+	// depths differ — why validation stopped short, naming the atoms or the host
+	// condition that stopped it. It is never empty on a staged apply.
+	DepthReason string
 }
 
 // Applier handles update application for packages.
@@ -289,6 +311,37 @@ type Applier struct {
 	// three construction sites in cmd/ are wired by sub-task 12.1, which is also
 	// where the gates that make the staged path worth taking are inserted.
 	stagingRoot string
+	// validatePolicy is the configured depth table and its per-package
+	// exceptions, translated out of autoupdate.validate by whoever built the
+	// Applier (validate.DepthPolicy documents why the translation is the
+	// caller's job). The zero value is not "no validation": classDepth answers
+	// the deepest rung for a class it has no row for, because failing to
+	// configure a depth is not evidence that a bump is small.
+	validatePolicy validate.DepthPolicy
+	// flagDepth is `--depth`, nil when the operator did not type it. It is a
+	// POINTER because DepthNone is a depth an operator may legitimately ask for,
+	// and a zero value indistinguishable from "unset" is the one confusion that
+	// switches validation off in silence (validate.DepthRequest.FlagDepth).
+	flagDepth *validate.Depth
+	// requireProof refuses to promote a bump whose build gates were SKIPPED
+	// (S033-R3.13). It is the opt-in counterweight to R3.12: false — the default
+	// — publishes such a bump with the depth it did not reach named, because a
+	// host that lacks a build dependency says nothing about the bump and
+	// refusing every one of them would make the feature inert on an ordinary
+	// workstation.
+	requireProof bool
+	// reviewer, when non-nil, reads the two versions' build-declaration
+	// difference and may ask for MORE validation than policy chose (S033-R7,
+	// R7.5). Its proposal is advisory and one-way: validate.Escalate combines it
+	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
+	// nil skips the review entirely.
+	reviewer BumpReviewer
+	// lookPath answers "is this tool installed at all" for the build gates,
+	// which ask it before spawning so an absent Portage is reported as a named
+	// SKIP rather than as an opaque failure. It defaults to exec.LookPath and is
+	// replaced together with execCommand — see WithExecCommand for why the two
+	// are one seam and not two.
+	lookPath func(name string) (string, error)
 }
 
 // ApplierOption is a functional option for configuring Applier
@@ -344,9 +397,23 @@ func WithApplierRequireIsolation(require bool) ApplierOption {
 // WithExecCommand sets a custom context-aware exec.Command function for testing.
 // The function mirrors exec.CommandContext so injected commands also observe
 // context cancellation.
+//
+// It replaces the PATH LOOKUP as well, and the two are deliberately one seam.
+// The build gates ask whether `ebuild` and `emerge` exist before spawning them,
+// so that a host with no Portage reports a named SKIP instead of an opaque
+// failure. Leaving that question on the real PATH while the command itself is
+// substituted would let the HOST decide whether the substituted child ever runs
+// — `ebuild` exists on a Gentoo box and nowhere else — so the same code would
+// take different branches on different machines for reasons that have nothing to
+// do with the bump under test. A caller that has replaced how a child process is
+// CREATED has replaced the process layer entire; this makes that true.
 func WithExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ApplierOption {
 	return func(a *Applier) {
+		if fn == nil {
+			return
+		}
 		a.execCommand = fn
+		a.lookPath = func(name string) (string, error) { return name, nil }
 	}
 }
 
@@ -506,6 +573,69 @@ func WithApplierStagingRoot(dir string) ApplierOption {
 	}
 }
 
+// WithApplierValidatePolicy supplies the configured depth table and its
+// per-package exceptions, which is how far each class of bump is validated
+// (S033-R2, R2.2, R2.4).
+//
+// The policy is expressed in the validate package's own types rather than in
+// config's strings, so translating `autoupdate.validate` — including rejecting a
+// mistyped depth by name through validate.ParseDepth — belongs to the caller. A
+// zero policy is not "no validation": a class with no configured row falls
+// through to the deepest rung, because failing to configure a depth is not
+// evidence that a bump is small.
+func WithApplierValidatePolicy(policy validate.DepthPolicy) ApplierOption {
+	return func(a *Applier) {
+		a.validatePolicy = policy
+	}
+}
+
+// WithApplierDepth is `--depth`: the one input allowed to REPLACE the class, the
+// package tier and configuration alike, in either direction (S033-R2.7).
+//
+// It is the only lowering that is not reported as a skip, because the operator
+// typing it is looking at one package and knows something the policy does not.
+// A caller that omits this option leaves the pointer nil, which is how "the
+// operator asked for nothing" stays distinguishable from "the operator asked for
+// none" — the one confusion that switches validation off in silence.
+func WithApplierDepth(depth validate.Depth) ApplierOption {
+	return func(a *Applier) {
+		a.flagDepth = &depth
+	}
+}
+
+// WithApplierRequireProof refuses to promote a bump whose build gates were
+// SKIPPED (S033-R3.13), for a host where an unproved publish is not acceptable —
+// a builder box, or a maintainer who would rather the sweep stopped than shipped
+// something unbuilt.
+//
+// It is the opt-in counterweight to R3.12 and not its contradiction: the default
+// publishes such a bump with the depth it did not reach NAMED, because "this host
+// lacks a build dependency" says nothing about the bump, and turning every one of
+// those into a refusal would make the feature inert for exactly the reason D11
+// refuses to require isolation by default.
+func WithApplierRequireProof(require bool) ApplierOption {
+	return func(a *Applier) {
+		a.requireProof = require
+	}
+}
+
+// WithApplierBumpReviewer wires an LLM bump reviewer into the applier. It reads
+// the difference between the two versions' upstream build declarations and may
+// ask for MORE validation than policy chose (S033-R7, R7.5); validate.Escalate
+// applies the proposal and can only ever raise the depth.
+//
+// A nil reviewer is ignored, exactly as WithApplierFixer ignores a nil fixer and
+// for the same reason: a provider that could not be constructed leaves the
+// applier as it was rather than half-configured, so "no LLM was asked for" and
+// "the LLM could not be built" produce the same, predictable run.
+func WithApplierBumpReviewer(reviewer BumpReviewer) ApplierOption {
+	return func(a *Applier) {
+		if reviewer != nil {
+			a.reviewer = reviewer
+		}
+	}
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -519,8 +649,11 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
 		// tests so both answers are reachable without privilege.
 		isolationProbe: validate.ProbeIsolation,
-		ctx:            context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
-		reporter:       tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
+		// SAFE: the real PATH lookup the build gates ask before spawning;
+		// replaced together with execCommand (see WithExecCommand).
+		lookPath: exec.LookPath,
+		ctx:      context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
+		reporter: tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
 		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
@@ -670,6 +803,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, newVersion))
 	}
 
+	// R2/R2.2/R2.7: how deep this bump is validated, and on whose authority.
+	// Resolved HERE, before anything is staged, for two reasons: the report can
+	// then name the depth even for a bump whose tree was never built, and every
+	// gate below reads one decision rather than each re-deriving its own.
+	depth := a.depthFor(pkg, currentVersion, newVersion)
+	result.DepthRequested = depth.Depth.String()
+	result.DepthReason = depth.Reason
+
 	// From here to promotion nothing writes into the published overlay, and
 	// promotion is the last thing this function does. Everything in between is
 	// preparation and gates, and R3.2 says the overlay must stay byte-identical
@@ -720,12 +861,13 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, err))
 	}
 
-	// The static gates — the Meson option gate and the advisory QA scan — are
-	// inserted HERE by sub-task 12.1, reporting into gates. The slot is left
-	// explicit rather than implied because StatusValidated below has been moved to
-	// sit after it, and a gate added above that line instead of below it would
-	// silently undo the move.
-	var gates []validate.GateResult
+	// The static gates — the Meson option gate and the advisory QA scan (story
+	// 031's gate, reused verbatim). They read files that already exist, so they
+	// cost no build and can sit ahead of StatusValidated below. That placement is
+	// the whole point of the slot: a gate added ABOVE that line instead of below
+	// it would silently undo sub-task 4.1's move, and the state's meaning —
+	// "passed the static gates" — would quietly go back to "the manifest ran".
+	gates := a.runStaticGates(cand, pkg, newVersion)
 
 	// Update status to validated.
 	//
@@ -740,6 +882,27 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		return result, result.Error
 	}
 
+	// R7: the optional bump reviewer, after the static gates and before anything
+	// is built — it reads a diff and may only ask for MORE gates, never fewer.
+	// A run with no reviewer wired passes the policy depth straight through.
+	depth = a.reviewBump(cand, pkg, currentVersion, newVersion, depth, &gates)
+	result.DepthRequested = depth.Depth.String()
+	result.DepthReason = depth.Reason
+
+	// The build gates, at the depth selected above (R3, R5, R6). They are the
+	// generalisation of the compile gate below, so the two never both run: with
+	// --compile the shipped gate keeps its prompt, its privilege and its repair
+	// path, and running the depth gates beside it would build the same tree twice.
+	if !compile {
+		a.reporter.TaskStage(pkg, "build gates")
+		buildGates, buildErr := a.runBuildGates(cand, pkg, newVersion, depth.Depth, result)
+		gates = append(gates, buildGates...)
+		if buildErr != nil {
+			a.recordDepthReached(result, gates, depth.Depth)
+			return a.failApply(pkg, result, buildErr)
+		}
+	}
+
 	// Run compile test if requested. It runs against cand's repository, which on
 	// the staged path is the staged tree: a gate that built out of the published
 	// overlay would be reading a candidate that is not there yet.
@@ -748,8 +911,22 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		logPath, err := a.runCompile(cand, pkg, newVersion, result)
 		if err != nil {
 			result.LogPath = logPath
+			a.recordDepthReached(result, gates, depth.Depth)
 			return a.failApply(pkg, result, err)
 		}
+		gates = append(gates, a.compileGateResult(cand, pkg, newVersion, result)...)
+	}
+
+	// R3.12 in one line: the outcome states its own reach, and says why it stops
+	// where it does, whether or not this apply is about to succeed.
+	a.recordDepthReached(result, gates, depth.Depth)
+
+	// R3.13: a host that asked for proof does not get a publish built on skips.
+	// It is deliberately NOT folded into PromotionDecision: that function's rule
+	// is R3.3's ("PASS or SKIPPED promotes"), and this is the operator subtracting
+	// from it, which is a different authority and belongs where it can be seen.
+	if err := a.refuseUnproved(gates, pkg, newVersion, depth.Depth); err != nil {
+		return a.failApply(pkg, result, err)
 	}
 
 	// R3.3: the candidate may be published only once every gate up to the selected

@@ -407,7 +407,7 @@ func TestStage_UnpreparableTreeLeavesTheOverlayAlone(t *testing.T) {
 func TestStage_UnpreparableTreeSkipsEveryBuildGate(t *testing.T) {
 	const reason = "the staged tree could not be prepared: /var/lib/bentoo/staging: permission denied"
 
-	gates := skippedGates(DepthCompile, reason)
+	gates := SkippedGates(DepthCompile, reason)
 
 	if len(gates) == 0 {
 		t.Fatal("skippedGates produced no gates; a depth that could not be reached still has to report the gates it covers")
@@ -446,7 +446,7 @@ func TestStage_UnpreparableTreeSkipsEveryBuildGate(t *testing.T) {
 
 	// A shallower request reports fewer gates: nothing above the selected depth
 	// is claimed, not even as a skip.
-	shallow := skippedGates(DepthPatches, reason)
+	shallow := SkippedGates(DepthPatches, reason)
 	for _, g := range shallow {
 		if g.Gate == GateConfigure || g.Gate == GateCompile {
 			t.Errorf("a patches-depth request reported the %s gate; a depth reports the gates it covers and no others", g.Gate)
@@ -478,7 +478,7 @@ func TestStage_UnpreparableTreeIsNeverPromoted(t *testing.T) {
 	const reason = "the staged tree could not be prepared: /var/lib/bentoo/staging: permission denied"
 	stageErr := fmt.Errorf("%w: %s", ErrStageUnpreparable, "/var/lib/bentoo/staging: permission denied")
 
-	promote, why := PromotionDecision(skippedGates(DepthCompile, reason), stageErr)
+	promote, why := PromotionDecision(SkippedGates(DepthCompile, reason), stageErr)
 
 	if promote {
 		t.Fatal("a bump whose staged tree could not be prepared was cleared for promotion; every build gate SKIPPED satisfies " +
