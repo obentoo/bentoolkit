@@ -76,6 +76,34 @@ const (
 	markerDoneCompile    = ">>> Source compiled."
 )
 
+// SourcePrepareStarted reports whether a build transcript shows that src_prepare
+// had BEGUN — that the run got as far as the first phase the ebuild itself
+// drives.
+//
+// It is exported for one caller: the applier's build-fix gate, which has to
+// decide whether a failed build is the ebuild's fault before it is allowed to
+// hand it to an agent (S033-R8.5, design D6). That gate asks the question this
+// package already answers, and it asks it HERE rather than grepping for the
+// marker itself, because a marker spelled in two packages is a marker that can
+// drift in one of them — and the drift would be silent in both directions.
+//
+// The predicate is deliberately the START of prepare and not `>>> Source
+// prepared.`, because design D6 states the rule as "a failure before
+// `>>> Source prepared.` — IN SETUP OR UNPACK — is a host or distfile fault;
+// from `prepare` onward it is the ebuild's". A patch that no longer applies
+// fails BETWEEN the two markers, and it is the ebuild's fault: derive() above
+// already reports exactly that (a phase that started and never finished is where
+// the bump died, so the patches gate reads FAILED, not SKIPPED). Keying the gate
+// on the DONE marker instead would refuse a repair for the single most common
+// breakage a version bump produces.
+//
+// The transcript is read with ANSI escapes removed, for the reason stripANSI
+// gives: Portage colours these markers whenever a terminal is attached, and the
+// applier's compile gate attaches a real one (S010-R4.1).
+func SourcePrepareStarted(transcript string) bool {
+	return strings.Contains(stripANSI(transcript), markerStartPrepare)
+}
+
 // excerptLines bounds how much of a failed run's tail is quoted into findings.
 // The whole log is retained and named, so this is a summary and not the
 // evidence: a compile that failed after ten thousand lines must not put ten

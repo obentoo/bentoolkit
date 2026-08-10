@@ -143,9 +143,13 @@ type ApplyResult struct {
 	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
 	// obsolete. Empty unless Obsolete is true.
 	ObsoleteReason string
-	// Fixed indicates the first manifest attempt failed and was recovered by the
-	// LLM manifest fixer (the ebuild was edited and a re-run of `pkgdev manifest`
-	// then succeeded). Only meaningful on the success path.
+	// Fixed indicates a gate failed and was recovered by an LLM fixer: the ebuild
+	// was edited and BENTOO'S OWN re-run of that same gate then succeeded. Two
+	// gates can set it — the manifest step (`pkgdev manifest`) and, since story
+	// 033, the build gate — and in both cases the flag records the re-run's
+	// verdict, never the agent's self-report (S033-R8.2). A bump whose re-run
+	// still failed leaves this false, because a "fixed" flag on something still
+	// broken is worse than no flag. Only meaningful on the success path.
 	Fixed bool
 	// FixSummary is the fixer's one-line description of what it changed in the
 	// ebuild. Empty unless Fixed is true.
@@ -242,6 +246,13 @@ type Applier struct {
 	// between versions) before the Applier re-runs the manifest to confirm. Set
 	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
 	fixer ManifestFixer
+	// buildFixer, when non-nil, is invoked when the build gate fails for a reason
+	// attributable to the ebuild (a patch that no longer applies, a configure
+	// option upstream dropped): it drives an LLM agent to repair the STAGED ebuild,
+	// after which the applier re-runs the same gate and that re-run — never the
+	// agent's self-report — decides the outcome (S033-R8.1, S033-R8.2). Set via
+	// WithApplierBuildFixer; nil keeps the original fail-fast behaviour.
+	buildFixer BuildFixer
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
@@ -404,6 +415,24 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.fixer = fixer
+		}
+	}
+}
+
+// WithApplierBuildFixer wires an LLM build fixer into the applier. When the build
+// gate fails for a reason attributable to the ebuild, the applier asks the fixer
+// to repair the STAGED ebuild and then re-runs the same gate to decide
+// (S033-R8.1, S033-R8.2). A nil fixer is ignored, preserving the fail-fast
+// behaviour.
+//
+// The nil discipline is WithApplierFixer's, deliberately and to the letter: a
+// provider that could not be constructed leaves the applier exactly as it was
+// rather than half-configured, so "no LLM was asked for" and "the LLM could not
+// be built" produce the same, predictable run.
+func WithApplierBuildFixer(fixer BuildFixer) ApplierOption {
+	return func(a *Applier) {
+		if fixer != nil {
+			a.buildFixer = fixer
 		}
 	}
 }
@@ -1648,8 +1677,13 @@ func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) error
 // staged tree, which is what keeps the compile gate inside S033-R3.2: a build
 // reading the published overlay would be reading a candidate that has not been
 // published yet, and running it there is precisely the "unvalidated ebuild sitting
-// in a tree that auto-commits" this story removes. Nothing else about the gate
-// changes.
+// in a tree that auto-commits" this story removes.
+//
+// It also added the REPAIR path. A failure no longer ends the gate outright: when
+// the failure is attributable to the ebuild and a build fixer is wired, an agent
+// edits the staged ebuild and this same gate runs again, with the RE-RUN deciding
+// (S033-R8.1, S033-R8.2). Everything up to the first failure is unchanged, and a
+// run with no fixer wired still ends exactly where it used to.
 func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	// Measured before the prompt: asking the operator to confirm a compile that
 	// --require-isolation will refuse to run would be a question with no
@@ -1677,32 +1711,238 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 	// The ebuild to build, and the repository to build it from. `ebuild` discovers
 	// the repository from the path it is given and from its working directory, so
 	// cmd.Dir is what decides which tree the build reads.
-	ebuildPath := cand.ebuildPath
-	if ebuildPath == "" {
+	if cand.ebuildPath == "" {
 		return "", fmt.Errorf("invalid package name format: %s", pkg)
 	}
 
-	// Run compile test: sudo/doas ebuild <path> clean compile. The command is
-	// bound to the applier's parent context so a SIGINT or deadline kills the
-	// spawned process.
-	cmd := a.execCommand(a.ctx, privTool, "ebuild", ebuildPath, "clean", "compile")
-	cmd.Dir = cand.repoRoot
-
-	// Execute through the runAttached seam rather than StreamCapture: the
-	// privileged child needs the real TTY for the sudo/doas password prompt
-	// (S010-R4.1), which is incompatible with capturing its stdout/stderr into a
-	// StreamCapture pipe. The default seam is exactly cmd.CombinedOutput, so the
-	// compile log written below is byte-identical to the pre-TUI behaviour
-	// (S010-R3.3/S010-R7.1); the TUI override (sub-task 4.1) releases the terminal and tees
-	// the raw output to the TTY plus a capture buffer fed back here as output.
-	output, err := a.runAttached(cmd)
-	if err != nil {
-		// Save log to file
-		logPath := a.saveCompileLog(pkg, version, output)
-		return logPath, fmt.Errorf("%w: %v", ErrCompileFailed, err)
+	first := a.compileOnce(cand, pkg, version, privTool)
+	if first.err == nil {
+		return "", nil
 	}
 
+	return a.repairBuildAndRerun(cand, pkg, version, privTool, first, result)
+}
+
+// compileGatePhase is the `ebuild` phase the compile gate runs.
+//
+// It is spelled as validate.GateCompile rather than as a bare "compile" to state
+// an invariant R8.2 rests on: the gate NAMED to the fixer and the phase the
+// authoritative re-run actually runs are the same thing. A fixer told it must fix
+// the configure gate, followed by a re-run of a shallower phase, would produce a
+// green that proves nothing about the failure it claims to have repaired.
+const compileGatePhase = validate.GateCompile
+
+// buildAttempt is one invocation of the build child: what it printed, where its
+// log was retained on failure, and how it failed. A nil err is a passing build.
+type buildAttempt struct {
+	// transcript is the child's captured output — the evidence the attribution
+	// gate reasons from and the log the fixer is given.
+	transcript string
+	// logPath is the retained compile log, empty unless the attempt failed.
+	logPath string
+	// err is the failure, already wrapped in ErrCompileFailed, or nil.
+	err error
+}
+
+// compileOnce spawns the build child EXACTLY ONCE and, on failure, retains its
+// log.
+//
+// It is the single place this gate's argv is spelled, and that is what makes
+// R8.2's "the SAME gate is re-run" a property of the code rather than a promise:
+// the authoritative re-run after a repair calls this same function with the same
+// candidate, so it cannot drift to a shallower phase where a successful prepare
+// would clear a configure failure.
+//
+// The seam and the log are story 010's, unchanged: the privileged child needs the
+// real TTY for the sudo/doas password prompt (S010-R4.1), which rules out
+// capturing its streams through a StreamCapture pipe, and the default runAttached
+// is exactly cmd.CombinedOutput so the retained log stays byte-identical to the
+// pre-TUI behaviour (S010-R3.3/S010-R7.1).
+func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string) buildAttempt {
+	// sudo/doas ebuild <path> clean compile, bound to the applier's parent context
+	// so a SIGINT or deadline kills the spawned process.
+	cmd := a.execCommand(a.ctx, privTool, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
+	cmd.Dir = cand.repoRoot
+
+	output, err := a.runAttached(cmd)
+	attempt := buildAttempt{transcript: string(output)}
+	if err != nil {
+		attempt.logPath = a.saveCompileLog(pkg, version, output)
+		attempt.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+	}
+	return attempt
+}
+
+// repairBuildAndRerun is what happens after the build gate has failed once: the
+// failure is attributed, and only if it is the EBUILD's does an agent get to see
+// it — after which this gate runs again and that re-run is the verdict
+// (S033-R8.1, S033-R8.2, S033-R8.5).
+//
+// # The order, and why the gate is asked twice
+//
+// The attribution gate runs on FREE evidence first — the transcript this run
+// already holds — and its verdict is reported whether or not a fixer is wired.
+// That is refuseFixOnEnvironmentFailure's argument (applier.go:1450) and its
+// precondition in one: the verdict is a fact about the failure and not about the
+// configuration, and it may be taken unconditionally exactly while nothing is
+// spent to get it, or two machines would give the same failure two diagnoses.
+//
+// The two rungs that DO spend something — a pretend `emerge -p` resolve, and a
+// probe write into PORTAGE_TMPDIR — are asked only once a fixer is about to be
+// invoked, because their whole purpose is to be cheaper than the agent
+// invocation they prevent. The rungs are always evaluated in design D6's order;
+// only which of them have evidence to speak from changes.
+//
+// One consequence, stated so it is not mistaken for a bug: a free verdict
+// PRE-EMPTS a paid one, because the paid evidence is never gathered — that is the
+// saving. So a build that both died in unpack and lacked its dependencies is
+// reported as the phase, not as the dependencies. Both are the machine's, the
+// action is identical (no fixer), and only the sentence the operator reads
+// differs.
+//
+// # Exactly one attempt, and no counter here
+//
+// The attempt bound is enforced inside FixBuild (R8.4) — a bound only the caller
+// remembers is not a bound — and this gate makes one attempt per apply, the same
+// shape runManifestWithFix has: the agent iterates internally under its own
+// --max-turns, and every extra external attempt costs a FULL rebuild, which for a
+// real package is measured in hours.
+func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privTool string, first buildAttempt, result *ApplyResult) (string, error) {
+	// The free rungs. Reported to every operator, LLM or not.
+	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, buildFaultEvidence{transcript: first.transcript}); machineErr != nil {
+		return first.logPath, machineErr
+	}
+
+	if a.buildFixer == nil {
+		return first.logPath, first.err
+	}
+
+	// R8.3/D7: the agent is only ever pointed at a STAGED tree. On the pre-staging
+	// path the candidate lives in the published overlay — the repository that
+	// auto-commits and pushes — and handing an agent Edit access there is the exact
+	// thing this story's staging boundary exists to prevent. FixBuild would refuse
+	// it too (ErrBuildFixScope), but refusing before anything is constructed keeps
+	// the boundary visible at the call site rather than only inside the callee.
+	if !cand.staged {
+		return first.logPath, first.err
+	}
+
+	// The paid rungs, now that the alternative is a full agent invocation.
+	paid := buildFaultEvidence{
+		transcript:  first.transcript,
+		deps:        a.buildDependencyAnswer(cand, pkg, version),
+		buildTmpdir: fixSandboxRoot(),
+	}
+	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, paid); machineErr != nil {
+		return first.logPath, machineErr
+	}
+
+	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
+	logger.Info("%s", fixLine)
+	a.reporter.TaskStage(pkg, "llm-build-fix")
+	a.reporter.Log("info", fixLine)
+
+	fixRes, fixErr := a.buildFixer.FixBuild(a.ctx, BuildFixRequest{
+		Package:    pkg,
+		Version:    version,
+		Gate:       compileGatePhase,
+		StagedDir:  cand.repoRoot,
+		EbuildPath: cand.ebuildPath,
+		BuildLog:   first.transcript,
+		// One attempt per apply; FixBuild owns the bound (R8.4) and this states
+		// which try it is rather than counting tries here.
+		Attempt: 1,
+	})
+	switch {
+	case errors.Is(fixErr, ErrBuildFixAttemptsExhausted):
+		// "We stopped on purpose" is different news from "the agent failed", and
+		// the operator acts on it differently: nothing is wrong with the machine.
+		return first.logPath, fmt.Errorf("%w (the build fixer stopped on purpose: %w)", first.err, fixErr)
+	case fixErr != nil:
+		return first.logPath, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
+	}
+
+	// An empty summary is the agent reporting NO CHANGE (see BuildFixResult.Summary),
+	// and a re-run of an untouched tree can only reproduce the failure it already
+	// produced — at the price of a whole second build. So the original failure
+	// stands, unedited. The bias is deliberate: this path can only ever refuse to
+	// clear a failure, never clear one on an edit nobody confirmed.
+	summary := strings.TrimSpace(fixRes.Summary)
+	if summary == "" {
+		return first.logPath, fmt.Errorf("%w (the build fixer reported no change, so the %s gate was not re-run)", first.err, compileGatePhase)
+	}
+
+	// R8.2. The authoritative re-run: bentoo's own build of the same phase, never
+	// the agent's account of what it did.
+	a.reporter.TaskStage(pkg, "re-check")
+	second := a.compileOnce(cand, pkg, version, privTool)
+	if second.err != nil {
+		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
+			first.err, compileGatePhase, second.err)
+	}
+
+	result.Fixed = true
+	result.FixSummary = summary
+	// Name the model that made the edit, and SAY SO when it was an alias
+	// (S030-R4.1/R4.2) — the same one string into both sinks that the manifest fix
+	// path uses, so the operator's log and the TUI report cannot drift apart.
+	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
+		pkg, version, FormatModelUsed(fixRes.Model), summary)
+	logger.Info("%s", repaired)
+	a.reporter.Log("info", repaired)
 	return "", nil
+}
+
+// refuseBuildFixOnMachineFault decides whether a failed build is one the build
+// fixer must never see, and reports it when it is (S033-R8.5).
+//
+// It returns a non-nil error ONLY for a machine verdict: the apply fails with it,
+// and the caller returns before anything constructs a fix attempt. For every other
+// verdict it returns nil, meaning "carry on" — down to the fixer and, past it, to
+// the re-run that decides.
+//
+// It is refuseFixOnEnvironmentFailure's counterpart for the build gate, and it is
+// deliberately a separate function rather than a second caller of it: that one
+// classifies through environmentVerdict, which a build failure falls straight
+// through (see build_failure.go for why that would silently reinstate story 030's
+// defect on this path).
+func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildAttempt, ev buildFaultEvidence) error {
+	verdict := buildFaultVerdict(ev)
+	if verdict == nil {
+		return nil
+	}
+
+	// Reported here, not returned quietly: the apply's own error reaches the
+	// summary at the end of a batch, while this line lands next to the package it
+	// belongs to in a run that keeps going.
+	machineErr := fmt.Errorf("%s-%s: %w (%w; the build fixer was not invoked: the only repair available to it is to edit the ebuild, and the ebuild is not what failed)",
+		pkg, version, first.err, verdict)
+	warnLogf("%s", machineErr.Error())
+	a.reporter.Log("warn", machineErr.Error())
+	return machineErr
+}
+
+// buildDependencyAnswer asks Portage whether this host could build the staged
+// candidate at all, flattened into the shape the attribution gate reads.
+//
+// An UNDETERMINED answer — no Portage, a resolve that failed, a staged tree that
+// is not there — becomes the zero value, which the classifier reads as "this rung
+// has nothing to say" and not as "a dependency is missing". That is R3.5's bargain
+// applied here: a question this host could not answer must cost at most a wasted
+// fixer invocation, never a repair that was available.
+//
+// Only the exec seam is injected. LookPath is deliberately left at the validate
+// package's own default, so a host with no `emerge` reaches the undetermined
+// branch through the real absence rather than through a substitute.
+func (a *Applier) buildDependencyAnswer(cand candidatePaths, pkg, version string) buildDependencyAnswer {
+	ok, missing, err := validate.DependenciesSatisfied(a.ctx, cand.repoRoot, pkg, version, validate.BuildDeps{
+		ExecCommand: a.execCommand,
+	})
+	if err != nil {
+		logger.Debug("build fix gate: could not determine whether %s-%s's build dependencies are satisfied: %v", pkg, version, err)
+		return buildDependencyAnswer{}
+	}
+	return buildDependencyAnswer{determined: true, satisfied: ok, missing: missing}
 }
 
 // detectPrivilegeTool detects whether sudo or doas is available.

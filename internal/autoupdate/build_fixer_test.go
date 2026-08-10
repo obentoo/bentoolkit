@@ -25,6 +25,10 @@ package autoupdate
 // reimplemented.
 
 import (
+	"context"
+	"errors"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -160,5 +164,292 @@ func TestBuildFixMaxAttempts_IsBounded(t *testing.T) {
 	if buildFixMaxAttempts > 3 {
 		t.Errorf("buildFixMaxAttempts = %d; each attempt is a full agent invocation plus an authoritative re-run of the gate",
 			buildFixMaxAttempts)
+	}
+}
+
+// buildFixSpy records every invocation so "the fixer was never reached" is
+// observable rather than inferred from the outcome.
+type buildFixSpy struct {
+	calls  []BuildFixRequest
+	result BuildFixResult
+	err    error
+}
+
+func (s *buildFixSpy) FixBuild(_ context.Context, req BuildFixRequest) (BuildFixResult, error) {
+	s.calls = append(s.calls, req)
+	return s.result, s.err
+}
+
+// buildRun is one scripted invocation of the build child: what it printed and
+// whether it failed. A slice of them is a run and its re-run, in order.
+type buildRun struct {
+	output string
+	err    error
+}
+
+// buildFixFixture wires an applier whose build child is scripted. Each
+// runAttached call consumes the next buildRun; the argv of every invocation is
+// recorded so "the SAME phase was re-run" is checkable.
+type buildFixHarness struct {
+	applier *Applier
+	pkg     string
+	spy     *buildFixSpy
+	argv    [][]string
+	runs    int
+}
+
+func buildFixFixture(t *testing.T, spy *buildFixSpy, script ...buildRun) *buildFixHarness {
+	t.Helper()
+	tmp := t.TempDir()
+	overlayDir := filepath.Join(tmp, "overlay")
+	configDir := filepath.Join(tmp, "config")
+	const pkg = "media-plugins/gst-plugins-qt6"
+
+	createTestEbuildFile(t, overlayDir, pkg, "1.28.6")
+
+	pending, err := NewPendingList(configDir)
+	if err != nil {
+		t.Fatalf("creating pending list: %v", err)
+	}
+	pending.Add(PendingUpdate{
+		Package:        pkg,
+		CurrentVersion: "1.28.6",
+		NewVersion:     "1.29.2",
+		Status:         StatusPending,
+	})
+
+	h := &buildFixHarness{pkg: pkg, spy: spy}
+
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		// Only the build child is scripted; `pkgdev manifest` and friends
+		// succeed so the run reaches the gates.
+		if name == "ebuild" || containsArg(arg, "ebuild") {
+			h.argv = append(h.argv, append([]string{name}, arg...))
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+	attached := func(cmd *exec.Cmd) ([]byte, error) {
+		idx := h.runs
+		h.runs++
+		if idx >= len(script) {
+			t.Fatalf("the build child ran %d times; the script has %d entries", h.runs, len(script))
+		}
+		return []byte(script[idx].output), script[idx].err
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(seam),
+		WithApplierRunAttached(attached),
+		WithConfirmFunc(func(string) bool { return true }),
+		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
+		WithApplierBuildFixer(spy),
+		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
+	)
+	if err != nil {
+		t.Fatalf("creating applier: %v", err)
+	}
+	h.applier = applier
+	return h
+}
+
+// The three build logs this sub-task classifies. They reuse the phase markers
+// design M-A measured; the strings live here rather than in the validate package
+// because this file asserts about ATTRIBUTION, not about parsing.
+const (
+	preparedThenConfigureFails = ">>> Source unpacked in /var/tmp/portage/work\n" +
+		">>> Preparing source in /var/tmp/portage/work/src ...\n" +
+		">>> Source prepared.\n" +
+		">>> Configuring source in /var/tmp/portage/work/src ...\n" +
+		"meson.build:1:0: ERROR: Unknown option: \"aalib\".\n" +
+		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n"
+
+	failsDuringUnpack = ">>> Unpacking source...\n" +
+		">>> Unpacking gst-plugins-good-1.29.2.tar.xz to /var/tmp/portage/work\n" +
+		"tar: Unexpected EOF in archive\n" +
+		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (unpack phase):\n"
+
+	failsOutOfDisk = ">>> Source unpacked in /var/tmp/portage/work\n" +
+		">>> Preparing source in /var/tmp/portage/work/src ...\n" +
+		">>> Source prepared.\n" +
+		">>> Configuring source in /var/tmp/portage/work/src ...\n" +
+		"cc: error: unable to write output: No space left on device\n" +
+		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n"
+
+	cleanCompile = ">>> Source unpacked in /var/tmp/portage/work\n" +
+		">>> Preparing source in /var/tmp/portage/work/src ...\n" +
+		">>> Source prepared.\n" +
+		">>> Configuring source in /var/tmp/portage/work/src ...\n" +
+		">>> Source configured.\n" +
+		">>> Compiling source in /var/tmp/portage/work/src ...\n" +
+		">>> Source compiled.\n"
+)
+
+// TestBuildFixer_OutOfDiskIsReportedAndNeverReachesTheModel is R8.5 and the
+// reason environmentVerdict is not reused: it would call this repairable, and
+// the agent's only available repair is to rewrite an ebuild that is fine.
+func TestBuildFixer_OutOfDiskIsReportedAndNeverReachesTheModel(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "should never be called"}}
+	h := buildFixFixture(t, spy, buildRun{output: failsOutOfDisk, err: errors.New("exit status 1")})
+
+	result, _ := h.applier.Apply(h.pkg, true)
+
+	if len(spy.calls) != 0 {
+		t.Errorf("the fixer was invoked %d time(s) for an out-of-disk failure; a machine fault is never handed to a model (R8.5)", len(spy.calls))
+	}
+	if result.Success {
+		t.Fatal("an out-of-disk build reported success")
+	}
+	if result.Error == nil {
+		t.Fatal("an out-of-disk build carried no error")
+	}
+	// R8.5 asks that the failure be REPORTED, and reported as the machine's.
+	msg := result.Error.Error()
+	if !strings.Contains(strings.ToLower(msg), "space") {
+		t.Errorf("the error %q does not say what the machine ran out of; the operator cannot act on it", msg)
+	}
+}
+
+// TestBuildFixer_UnpackFailureNeverReachesTheModel is design D6's phase rule.
+// A failure before `>>> Source prepared.` happened in setup or unpack, which is
+// a host or distfile fault — story 030's recorded lesson is to mark the phase
+// rather than enumerate causes.
+func TestBuildFixer_UnpackFailureNeverReachesTheModel(t *testing.T) {
+	spy := &buildFixSpy{}
+	h := buildFixFixture(t, spy, buildRun{output: failsDuringUnpack, err: errors.New("exit status 1")})
+
+	result, _ := h.applier.Apply(h.pkg, true)
+
+	if len(spy.calls) != 0 {
+		t.Errorf("the fixer was invoked for a failure that happened before %q; nothing about the ebuild had been exercised yet",
+			">>> Source prepared.")
+	}
+	if result.Success {
+		t.Error("a build that failed during unpack reported success")
+	}
+}
+
+// TestBuildFixer_ConfigureFailureIsHandedToTheModel is R8.1 — the positive
+// case, without which the three refusals above could be satisfied by never
+// invoking the fixer at all.
+func TestBuildFixer_ConfigureFailureIsHandedToTheModel(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "dropped -Daalib= and -Dlibcaca="}}
+	h := buildFixFixture(t, spy,
+		buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")},
+		buildRun{output: cleanCompile}, // the authoritative re-run succeeds
+	)
+
+	result, _ := h.applier.Apply(h.pkg, true)
+
+	if len(spy.calls) != 1 {
+		t.Fatalf("the fixer was invoked %d time(s) for a configure failure, want exactly 1 (R8.1)", len(spy.calls))
+	}
+	req := spy.calls[0]
+	if req.Package != h.pkg || req.Version != "1.29.2" {
+		t.Errorf("the fix request names %s-%s, want %s-1.29.2", req.Package, req.Version, h.pkg)
+	}
+	if !strings.Contains(req.BuildLog, "aalib") {
+		t.Error("the fix request carries no build log naming the failure; the agent would be guessing")
+	}
+	// R8.3: everything the fixer may touch is inside the staged tree.
+	if req.StagedDir == "" {
+		t.Error("the fix request carries no staged directory to scope the agent to")
+	}
+	if req.EbuildPath != "" && !strings.HasPrefix(filepath.Clean(req.EbuildPath), filepath.Clean(req.StagedDir)) {
+		t.Errorf("the ebuild handed to the fixer (%q) is outside the staged tree (%q)", req.EbuildPath, req.StagedDir)
+	}
+	if !result.Success {
+		t.Errorf("the re-run succeeded and the apply still failed: %v", result.Error)
+	}
+}
+
+// TestBuildFixer_TheRerunDecidesNotTheAgentsSelfReport is R8.2, and it is the
+// invariant the manifest fixer already proves. The agent says it repaired the
+// ebuild; the re-run says otherwise; FAILED is the answer.
+func TestBuildFixer_TheRerunDecidesNotTheAgentsSelfReport(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "removed the unknown meson options"}}
+	h := buildFixFixture(t, spy,
+		buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")},
+		buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")}, // still broken
+	)
+
+	result, _ := h.applier.Apply(h.pkg, true)
+
+	if len(spy.calls) == 0 {
+		t.Fatal("the fixer was never invoked, so this case proves nothing about its self-report")
+	}
+	if result.Success {
+		t.Fatal("the apply succeeded on the agent's word alone; the re-run is the verdict, never the model (R8.2)")
+	}
+	if result.Error == nil {
+		t.Error("a bump whose re-run still failed carries no error")
+	}
+	// The claim must not survive into the report either: a "fixed" flag on a
+	// bump that is still broken is worse than no flag.
+	if result.Fixed {
+		t.Error("result.Fixed is true although the re-run still failed")
+	}
+}
+
+// TestBuildFixer_TheSameGateIsRerun pins which phase the authoritative re-run
+// runs. Re-running a SHALLOWER phase would let a configure failure be cleared by
+// a successful prepare — a green that proves nothing about the failure it claims
+// to have repaired.
+func TestBuildFixer_TheSameGateIsRerun(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "edited the staged ebuild"}}
+	h := buildFixFixture(t, spy,
+		buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")},
+		buildRun{output: cleanCompile},
+	)
+
+	if _, err := h.applier.Apply(h.pkg, true); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if h.runs != 2 {
+		t.Fatalf("the build child ran %d time(s); one failing run plus one authoritative re-run is 2", h.runs)
+	}
+	if len(h.argv) < 2 {
+		t.Fatalf("only %d build invocation(s) were recorded", len(h.argv))
+	}
+	first, second := strings.Join(h.argv[0], " "), strings.Join(h.argv[1], " ")
+	if phaseOf(first) != phaseOf(second) {
+		t.Errorf("the re-run ran phase %q after a failure in phase %q; the same phase must decide (R8.2)\nfirst:  %s\nsecond: %s",
+			phaseOf(second), phaseOf(first), first, second)
+	}
+	if spy.calls[0].Gate == "" {
+		t.Error("the fix request does not name the gate that failed, so the re-run cannot be matched to it")
+	}
+}
+
+// phaseOf returns the deepest ebuild phase named in an argv string. It is a test
+// helper and deliberately dumb: the phases are a closed set.
+func phaseOf(argv string) string {
+	for _, phase := range []string{"compile", "configure", "prepare", "unpack"} {
+		if strings.Contains(argv, phase) {
+			return phase
+		}
+	}
+	return ""
+}
+
+// TestBuildFixer_NoFixerWiredKeepsTheFailFastBehaviour is the Unchanged
+// Behaviour guard: without --llm the gates still decide, and a failed build is
+// still a failed apply. A story that adds a repair path must not change what
+// happens when nobody asked for one.
+func TestBuildFixer_NoFixerWiredKeepsTheFailFastBehaviour(t *testing.T) {
+	spy := &buildFixSpy{}
+	h := buildFixFixture(t, spy, buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")})
+	// Re-wire without the fixer: a nil BuildFixer must be ignored exactly as
+	// WithApplierFixer ignores one (applier.go:365).
+	WithApplierBuildFixer(nil)(h.applier)
+
+	result, _ := h.applier.Apply(h.pkg, true)
+
+	if result.Success {
+		t.Error("a failing configure reported success with no fixer wired")
+	}
+	if h.runs != 1 {
+		t.Errorf("the build child ran %d time(s) with no fixer wired; there is nothing to re-run", h.runs)
 	}
 }
