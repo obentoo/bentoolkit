@@ -112,6 +112,16 @@ var (
 	// suspicious version can be re-checked against an un-deduplicated run to tell
 	// a real upstream change from a sharing bug.
 	autoupdateNoFetchCache bool
+	// autoupdateLLM is --llm: the operator's consent to spend an agent on this
+	// run. ONE flag enables BOTH staged-bump capabilities — the bump reviewer and
+	// the build fixer (S033-R7.1) — because two names to turn one feature on is a
+	// tax on the operator, not a choice they wanted.
+	//
+	// Configuration only ever SUBTRACTS from it: `autoupdate.validate.review` or
+	// `fix_on_failure` set to false switches that one back off (S033-R7.2), while
+	// neither key can enable anything on a run where this flag is absent. The
+	// direction matters — the flag is where the cost is consented to.
+	autoupdateLLM bool
 )
 
 // autoupdateDistfileDirs is the answer to "which directories does the Manifest
@@ -167,6 +177,16 @@ type autoupdateValidatePolicy struct {
 }
 
 var autoupdateValidate autoupdateValidatePolicy
+
+// autoupdateValidateCfg is the `autoupdate.validate` block VERBATIM, kept beside
+// the resolved policy above and for the same reason: it is read where the config
+// is no longer in scope.
+//
+// It is the raw block and not a second resolved value because the two LLM keys are
+// tri-state (*bool) and the distinction survives all the way to the decision —
+// "unset" and "false" mean different things to --llm (see llmCapabilities), so
+// flattening them here would be flattening exactly what R7.2 needs.
+var autoupdateValidateCfg config.ValidateConfig
 
 var autoupdateCmd = &cobra.Command{
 	Use:   "autoupdate [package]",
@@ -270,6 +290,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateDistdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
 	autoupdateCmd.Flags().StringVar(&autoupdateDistfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoFetchCache, "no-fetch-cache", false, "Fetch each URL per record instead of sharing one response across records that declare it")
+	autoupdateCmd.Flags().BoolVar(&autoupdateLLM, "llm", false, "With --apply: let the configured claude-code agent take part in validation. It enables BOTH capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and proceeds exactly as it would have without the flag")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -492,6 +513,9 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		osExit(1)
 		return
 	}
+	// The same block, unresolved, for the two --llm capabilities: their keys are
+	// tri-state and only mean something next to the flag (S033-R7.2).
+	autoupdateValidateCfg = appCtx.Config.Autoupdate.Validate
 
 	// Handle different modes
 	switch {
@@ -1403,6 +1427,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	}
 	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1488,6 +1513,10 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	}
 	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, applierValidateOptions(configDir)...)
+	// One Applier serves the whole batch, so the two agents are constructed ONCE
+	// here — a per-package construction would warn once per package on a host with
+	// no claude CLI, and pay the PATH lookup as many times.
+	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
