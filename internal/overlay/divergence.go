@@ -726,6 +726,141 @@ func dropWhenLiveVersion(version string) bool {
 	return false
 }
 
+// candidateExitPlaceholder is what a candidate's `drop-when:` line carries, and
+// the fact that it is NOT a condition is the entire point of it.
+//
+// The tool knows THAT the two ebuilds differ; it does not know when the
+// difference stops being wanted. That is a decision, and D6 says a condition
+// nobody decided must never be evaluated: a machine-checkable one written here
+// would be answered by EvaluateDropWhen on the very next run and would retire
+// the divergence on the tool's own authority — "retired with no cause", arriving
+// through the candidate generator instead of through a maintainer's ebuild.
+//
+// So it is deliberately outside the closed vocabulary. Pasted unedited, it comes
+// back from EvaluateDropWhen as unevaluated, which is the report line that says a
+// human must look — the honest answer while nobody has decided anything.
+//
+// It also names no axis word. `gentoo-inherits` would have been the obvious
+// example to offer, and printing it on the OPTIONS candidate would have put the
+// word "inherit" in a block about something else.
+const candidateExitPlaceholder = "TODO: state when this divergence stops applying, or delete this line"
+
+// candidateContinuation opens the second line of a candidate — the comment mark
+// and the indent that sets it under the tag, in the shape §7 proposed and D5
+// adopted: `#`, three blanks, then the key.
+const candidateContinuation = "#   "
+
+// CandidateDeclarations proposes one `# BENTOO-DIVERGENCE:` block per structural
+// difference that no declaration covers (R3.5).
+//
+// On today's overlay this is the whole output: the registry declares ZERO
+// divergences, so every difference in every package is undeclared and the first
+// run's real product is not a realignment but a set of declarations somebody can
+// accept. The second run is the cheap one.
+//
+// # It returns text, and writes nothing (R3.6)
+//
+// The blocks come back as strings for a human to paste. That is not tidiness: the
+// overlay auto-commits and pushes within minutes, so a declaration this function
+// wrote would be a declaration it PUBLISHED, with nobody having read it. R3.5
+// emits candidates; a maintainer accepts them. Nothing here opens a file at all,
+// in any branch.
+//
+// # No model, no reviewer, no provider
+//
+// A candidate is built from the axis and the deterministic finding ALONE, and the
+// signature is the guarantee rather than a promise: none of the three is a
+// parameter, so none can be reached. It has to be that way in both directions —
+// group 3 declares no dependency on group 5, and under `--no-review` there is no
+// model description in existence, so a candidate that needed one would be
+// unsatisfiable on the run that most needs the output. Enriching these blocks with
+// the model's words belongs where the model already is.
+//
+// The consequence is that the block states WHAT diverges, not why. "ours passes 85
+// build options, ::gentoo's passes 2" is a fact, and the reason it is acceptable
+// is the maintainer's to write — which is what "accept or EDIT" means. What the
+// candidate saves is the transcription, and it is enough: a block a maintainer has
+// to go and research before pasting is not a candidate.
+//
+// # One candidate per axis, and declared axes are silent
+//
+// Per axis rather than per package, because a package diverging on both its
+// inherit line and its option list has made two decisions, and one blanket
+// declaration covering both would retire them together the day either one
+// expires.
+//
+// An axis a declaration already covers produces nothing (R3.1): re-proposing what
+// the ebuild already says trains a maintainer to skip the section, and then the one
+// real candidate in it goes unread too. An EXPIRED declaration is the exception and
+// gets its candidate back (R3.3) — the day a reason runs out must not be the day
+// its divergence goes quiet forever.
+//
+// The axis is matched with strings.EqualFold, because the two are spelled in two
+// cases by the two documents that define them and DeclaredDivergence.Axis keeps
+// the maintainer's spelling verbatim.
+//
+// _Requirements: R3, R3.5, R3.6_
+func CandidateDeclarations(axes []AxisFinding, declared []DeclaredDivergence) []string {
+	var candidates []string
+	for _, finding := range axes {
+		// A finding missing either half would render a tag ParseDivergences reports
+		// as malformed, and proposing text that is broken on arrival is worse than
+		// proposing nothing.
+		if finding.Axis == "" || finding.Detail == "" {
+			continue
+		}
+		if candidateCovered(finding.Axis, declared) {
+			continue
+		}
+		candidates = append(candidates, candidateBlock(finding))
+	}
+	return candidates
+}
+
+// candidateCovered reports whether a declaration already answers for this axis.
+//
+// Expiry is read, not computed: EvaluateDeclarations decides it against the
+// ::gentoo tree, and this only asks. A caller that skipped that pass hands in
+// declarations with Expired false throughout, which reports every one of them as
+// covering its axis — the same answer the parser's own output means.
+func candidateCovered(axis string, declared []DeclaredDivergence) bool {
+	for _, declaration := range declared {
+		if declaration.Expired {
+			// Expired is undeclared from here on (R3.3, D7): the divergence rejoins
+			// the queue, so it earns a fresh candidate.
+			continue
+		}
+		if strings.EqualFold(declaration.Axis, axis) {
+			return true
+		}
+	}
+	return false
+}
+
+// candidateBlock renders one finding as the two-line declaration D5 adopted:
+//
+//	# BENTOO-DIVERGENCE: INHERIT: ::gentoo inherits gstreamer-meson; ours inherits meson
+//	#   drop-when: TODO: state when this divergence stops applying, or delete this line
+//
+// The axis is upper-cased to match §7's spelling of the tag. Nothing else is
+// rewritten, and what comes out parses back through ParseDivergences as exactly
+// one well-formed declaration — a candidate that would not survive being pasted is
+// not one.
+//
+// The detail is flattened onto a single line for the same reason: the whole block
+// is a COMMENT, and a newline inside it would paste a bare line of prose into a
+// bash script.
+func candidateBlock(finding AxisFinding) string {
+	// Named as the two lines the parser itself reads — a tag line and its
+	// continuation — rather than as one format string, so what is emitted here
+	// and what divergencesInText looks for stay legibly the same two things.
+	tag := fmt.Sprintf("# %s %s: %s",
+		divergenceTag, strings.ToUpper(finding.Axis), strings.Join(strings.Fields(finding.Detail), " "))
+	exit := fmt.Sprintf("%s%s %s",
+		candidateContinuation, divergenceDropWhenKey, candidateExitPlaceholder)
+	return tag + "\n" + exit
+}
+
 // dropWhenBaselineEbuild picks the ebuild to read for a question about
 // ::gentoo's own version of a package: the newest RELEASE it carries, or the
 // newest of what it carries when every one of them is live. It is only ever

@@ -28,7 +28,11 @@
 package overlay
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -523,5 +527,215 @@ func TestDropWhenReadsNoGitHistory(t *testing.T) {
 	met, checkable := EvaluateDropWhen("gentoo-version >= 2.47", tree, dropWhenBinutils)
 	if !checkable || !met {
 		t.Errorf("EvaluateDropWhen = (met=%v, checkable=%v) on a tree with no .git, want (true, true) — the answer is in the ebuild filenames, not in a history the real tree does not have", met, checkable)
+	}
+}
+
+// MERGE FRAGMENT — story 034, sub-task 3.3 (candidate declarations).
+//
+// Target file: internal/overlay/divergence_test.go  (APPEND, after 3.1's fragment)
+// Reused and never re-declared: `writeVerifyEbuild` (compare_verification_test.go),
+// `parseDivEbuild` and the `parseDiv*` bodies (3.1's fragment), `dropWhenTree`
+// (3.2's fragment).
+//
+// Pinned contract:
+//
+//	func CandidateDeclarations(axes []AxisFinding, declared []DeclaredDivergence) []string
+//
+// It takes the deterministic findings and what is already declared, and returns
+// pasteable `# BENTOO-DIVERGENCE:` blocks. It takes NO model, NO reviewer and NO
+// provider, and that is the requirement rather than an accident: group 3
+// declares no dependency on group 5, group 5 depends on group 3, and under
+// `--no-review` there is no model description in existence. A candidate that
+// needed one would be unsatisfiable in both cases. Task 5.1 enriches these
+// blocks with the model's description where the model already is.
+//
+// It also returns STRINGS rather than writing them. R3.6 writes nothing without
+// approval, and on this overlay writing is publishing: the repository
+// auto-commits and pushes within minutes. "Emit a candidate" therefore means
+// "print text a maintainer can paste", and the byte-identical fixture assertion
+// below is what keeps it that way.
+
+// candidateAxes are the deterministic findings the gst pair produces (M-D),
+// standing in for whatever CompareAxes returns on the day.
+func candidateAxes() []AxisFinding {
+	return []AxisFinding{
+		{Axis: "inherit", Detail: "::gentoo inherits gstreamer-meson; ours inherits meson python-any-r1 xdg-utils"},
+		{Axis: "options", Detail: "ours passes 85 build options, ::gentoo's passes 2"},
+	}
+}
+
+// candidateTreeHash fingerprints a directory tree — sorted relative paths, each
+// followed by the bytes at it — so "no file was written on any path" is a claim
+// about the tree rather than about the one file someone thought to check.
+func candidateTreeHash(t *testing.T, root string) string {
+	t.Helper()
+	var paths []string
+	if err := filepath.Walk(root, func(path string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		paths = append(paths, rel)
+		return nil
+	}); err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	sort.Strings(paths)
+
+	sum := sha256.New()
+	for _, rel := range paths {
+		sum.Write([]byte(rel))
+		sum.Write([]byte{0})
+		info, statErr := os.Stat(filepath.Join(root, rel))
+		if statErr != nil {
+			t.Fatalf("stat %s: %v", rel, statErr)
+		}
+		if info.IsDir() {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(root, rel))
+		if readErr != nil {
+			t.Fatalf("read %s: %v", rel, readErr)
+		}
+		sum.Write(data)
+		sum.Write([]byte{0})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// TestCandidateDeclarationsOnePerUndeclaredAxis is R3.5, and the count is per
+// AXIS rather than per package on purpose: a package diverging on both its
+// inherit line and its option list has made two decisions, and one blanket
+// declaration covering both would retire them together the day either one
+// expires.
+//
+// _Requirements: R3, R3.5_
+func TestCandidateDeclarationsOnePerUndeclaredAxis(t *testing.T) {
+	got := CandidateDeclarations(candidateAxes(), nil)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates for two undeclared axes, want 2:\n%s", len(got), strings.Join(got, "\n---\n"))
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"inherit", "options", "gstreamer-meson", "85"} {
+		if !strings.Contains(strings.ToLower(joined), strings.ToLower(want)) {
+			t.Errorf("no candidate mentions %q; a block the maintainer has to research before pasting is not a candidate:\n%s", want, joined)
+		}
+	}
+	for i, block := range got {
+		if !strings.Contains(block, "# BENTOO-DIVERGENCE:") {
+			t.Errorf("candidate %d does not carry the tag it is meant to become (%q); it must be pasteable into the ebuild as-is (D5):\n%s", i, "# BENTOO-DIVERGENCE:", block)
+		}
+	}
+}
+
+// TestCandidateDeclarationsSkipWhatIsAlreadyDeclared is R3.1 seen from this
+// side: a decision with a reason is not re-litigated every run. Re-proposing a
+// declaration the ebuild already carries trains the maintainer to ignore the
+// section, and then the one real candidate in it goes unread too.
+//
+// _Requirements: R3, R3.1, R3.5_
+func TestCandidateDeclarationsSkipWhatIsAlreadyDeclared(t *testing.T) {
+	declared := []DeclaredDivergence{{
+		Axis:   "inherit",
+		Reason: "gstreamer-meson does not handle the qt6 option list",
+	}}
+
+	got := CandidateDeclarations(candidateAxes(), declared)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1 — the inherit axis is already declared and only the options axis is not:\n%s", len(got), strings.Join(got, "\n---\n"))
+	}
+	if strings.Contains(strings.ToLower(got[0]), "inherit") {
+		t.Errorf("the surviving candidate re-proposes the declared inherit axis:\n%s", got[0])
+	}
+	if !strings.Contains(strings.ToLower(got[0]), "options") {
+		t.Errorf("the surviving candidate is not the undeclared options axis:\n%s", got[0])
+	}
+
+	// An EXPIRED declaration is treated as undeclared from then on (R3.3), so it
+	// gets a candidate again. Without this the day a reason runs out is the day
+	// the divergence goes quiet permanently.
+	expired := []DeclaredDivergence{{
+		Axis:     "inherit",
+		Reason:   "until ::gentoo ships 1.29",
+		DropWhen: "gentoo-version >= 1.29",
+		Expired:  true,
+	}}
+	if again := CandidateDeclarations(candidateAxes(), expired); len(again) != 2 {
+		t.Errorf("got %d candidates with an EXPIRED inherit declaration, want 2; an expired declaration is treated as undeclared (R3.3):\n%s", len(again), strings.Join(again, "\n---\n"))
+	}
+}
+
+// TestCandidateDeclarationsNeedNoModel is the dependency assertion. Group 3
+// declares no dependency on group 5, and `--no-review` produces no description
+// at all — so a candidate built from a model's words would be unsatisfiable
+// twice over.
+//
+// PATH is emptied, so there is no `claude` to reach even if something tried.
+//
+// _Requirements: R3, R3.5_
+func TestCandidateDeclarationsNeedNoModel(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	got := CandidateDeclarations(candidateAxes(), nil)
+
+	if len(got) == 0 {
+		t.Fatal("no candidates with PATH empty; the first run's real output is these blocks, and it must not depend on a provider being configured (--no-review still produces them)")
+	}
+	// The signature is the other half of the assertion: a reviewer is not
+	// merely unused here, it is not a parameter. If one is ever added, this
+	// file stops compiling, which is the intended alarm.
+	//nolint:staticcheck // QF1011: the explicit type IS the assertion. Inferred from CandidateDeclarations the declaration is vacuous, and this line exists to stop the build the moment a reviewer or a provider becomes a parameter. Same case, same resolution, as validate/policy_test.go:449 — and the sibling assertion at authorship_test.go:320 escapes the check only by being package-level.
+	var _ func([]AxisFinding, []DeclaredDivergence) []string = CandidateDeclarations
+}
+
+// TestCandidateDeclarationsInventNoExitCondition ties 3.3 to 3.2's refusal to
+// guess. A candidate may carry a `drop-when:` placeholder for a human to fill,
+// but it must never fabricate a CHECKABLE one: a machine-evaluable condition
+// nobody decided would retire the divergence on a date nobody chose, which is
+// D6's "retired with no cause" arriving through the candidate generator.
+//
+// _Requirements: R3, R3.2, R3.5_
+func TestCandidateDeclarationsInventNoExitCondition(t *testing.T) {
+	tree := dropWhenTree(t, "2.46")
+
+	for _, block := range CandidateDeclarations(candidateAxes(), nil) {
+		for _, line := range strings.Split(block, "\n") {
+			_, cond, found := strings.Cut(line, "drop-when:")
+			if !found {
+				continue
+			}
+			cond = strings.TrimSpace(cond)
+			if _, checkable := EvaluateDropWhen(cond, tree, "media-libs/gst-plugins-qt6"); checkable {
+				t.Errorf("a candidate proposes the machine-checkable condition %q, which nobody decided; the tool would then retire this divergence on its own authority (D6). A placeholder a human fills is fine — a checkable condition is not", cond)
+			}
+		}
+	}
+}
+
+// TestCandidateDeclarationsWriteNothing is R3.6, asserted over the whole tree.
+//
+// This is not defensive tidiness. The overlay auto-commits and pushes, so a
+// declaration written by the tool is a declaration PUBLISHED by the tool, with
+// no one having read it. The story's own Out of Scope says the same thing:
+// R3.5 emits candidates, a human accepts them.
+//
+// _Requirements: R3, R3.6_
+func TestCandidateDeclarationsWriteNothing(t *testing.T) {
+	root := t.TempDir()
+	writeVerifyEbuild(t, root, "media-libs", "gst-plugins-qt6", "1.29.2", parseDivNoTag)
+	before := candidateTreeHash(t, root)
+
+	got := CandidateDeclarations(candidateAxes(), nil)
+	if len(got) == 0 {
+		t.Fatal("no candidates were produced, so this test would prove nothing about what producing them writes")
+	}
+
+	if after := candidateTreeHash(t, root); after != before {
+		t.Errorf("the fixture overlay changed (hash %s -> %s) while emitting candidates; the overlay auto-commits, so a written declaration is a published one (R3.6)", before, after)
 	}
 }
