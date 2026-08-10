@@ -361,3 +361,314 @@ func TestMissingTreeAndUnreadableEbuildAreDifferentOutcomes(t *testing.T) {
 		t.Error("Unexamined is empty for the unreadable ebuild, so the per-package state was reported as nothing at all")
 	}
 }
+
+// MERGE FRAGMENT — story 034, sub-task 6.2 (packages ::gentoo does not carry).
+//
+// Target file: internal/overlay/baseline_test.go  (APPEND, after 1.2's fragment)
+// Reused and never re-declared: `baselineTree`, `baselineAtom`,
+// `baselineCategory`, `baselinePkg`, `baselineEbuildBody` (1.1's fragment),
+// `writeVerifyEbuild` (compare_verification_test.go), `needsRealignVerdict`
+// (5.1's fragment).
+//
+// Pinned contract:
+//
+//	type LocalRepo struct {
+//	    Name, Path string
+//	    Available  bool // its CONTENTS are on disk here; "registered" is not "available"
+//	}
+//	type OtherRepo struct {
+//	    Name, Version string
+//	    Checked       bool // false: not consulted. Never "does not carry it".
+//	}
+//	func OtherRepositories(atom string, repos []LocalRepo) []OtherRepo
+//
+//	// on CompareResult
+//	Others []OtherRepo // renders nothing at its zero value, like every field 6.3 adds
+//
+// That last field is a GAP this fragment closes rather than copies. design.md's
+// carrier lists Baseline, Axes, Classified, Declarations and RealignVerdict, and
+// task 6.3 adds exactly those — but 6.2 produces per-package rows for the other
+// repositories and there is nowhere on the result to put them. Either 6.3 grows
+// a sixth field or 6.2's output reaches the report by some route the design does
+// not describe; the first is the smaller change and is what is pinned here.
+//
+// `Checked` is the whole sub-task in one field. ~428 repositories are resolvable
+// by name and almost none of them are on disk; asking about 84 packages across
+// all of them would be thousands of network lookups in a stage the story
+// promises is offline. So a repository that was not consulted is reported as NOT
+// CHECKED, and a bool that only said "carries / does not carry" could not express
+// that — which is why the assertions below test the three-way outcome and not
+// just the two-way one.
+
+const otherRepoAtom = "app-editors/zed"
+
+// otherRepoTree writes a repository carrying app-editors/zed at one version.
+func otherRepoTree(t *testing.T, version string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeVerifyEbuild(t, root, "app-editors", "zed", version, "EAPI=8\nDESCRIPTION=\"Zed editor\"\n")
+	return root
+}
+
+// TestOtherRepositoriesAreInformativeOnly is R6.1 and R6.2 together. Knowing
+// that GURU packages something we package alone is useful; treating GURU as a
+// baseline is not, because a repository outside ::gentoo has not been through
+// the same review and its quality varies per repository.
+//
+// The "no proposal" half is asserted through `needsRealignVerdict`, the same
+// predicate task 5.1 uses to decide who the model is asked about. Asserting on
+// the predicate rather than on rendered text means an informative row cannot
+// become a proposal by some later change to the renderer.
+//
+// _Requirements: R6, R6.1, R6.2_
+func TestOtherRepositoriesAreInformativeOnly(t *testing.T) {
+	guru := otherRepoTree(t, "0.150.0")
+
+	got := OtherRepositories(otherRepoAtom, []LocalRepo{{Name: "guru", Path: guru, Available: true}})
+
+	if len(got) != 1 {
+		t.Fatalf("got %d rows, want 1 — GURU carries the package and that is worth reporting: %+v", len(got), got)
+	}
+	if got[0].Name != "guru" || got[0].Version != "0.150.0" {
+		t.Errorf("row is %+v, want guru at 0.150.0", got[0])
+	}
+	if !got[0].Checked {
+		t.Error("Checked is false for a repository whose contents were read; the report would say 'not checked' about the one repository it did check")
+	}
+
+	// No ::gentoo baseline, so no realignment is ever proposed — R1.3 and R6.2
+	// reaching the same conclusion by different routes.
+	res := CompareResult{
+		Category: "app-editors", Package: "zed",
+		Baseline: Baseline{Found: false},
+		Others:   got,
+	}
+	if needsRealignVerdict(res) {
+		t.Error("a package carried only by another repository is queued for a realignment verdict; R6.2 makes another repository informative only, and a proposal built from one would realign towards a tree nobody reviewed")
+	}
+}
+
+// TestOtherRepositoriesNameEachAndChooseBetweenNone is R6.3. The instruction is
+// unusually explicit — "choose between them for no purpose" — because picking a
+// winner is the natural next line of code and it would quietly create the
+// second-baseline concept the story rejects.
+//
+// _Requirements: R6, R6.1, R6.3_
+func TestOtherRepositoriesNameEachAndChooseBetweenNone(t *testing.T) {
+	guru := otherRepoTree(t, "0.150.0")
+	other := otherRepoTree(t, "0.151.0")
+
+	got := OtherRepositories(otherRepoAtom, []LocalRepo{
+		{Name: "guru", Path: guru, Available: true},
+		{Name: "steamos", Path: other, Available: true},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2 — both repositories carry it and both are named: %+v", len(got), got)
+	}
+	names := map[string]bool{}
+	for _, r := range got {
+		names[r.Name] = true
+		if !r.Checked {
+			t.Errorf("%s is reported as not checked although its contents were read", r.Name)
+		}
+	}
+	for _, want := range []string{"guru", "steamos"} {
+		if !names[want] {
+			t.Errorf("no row names %s; R6.3 names each and ranks none", want)
+		}
+	}
+
+	res := CompareResult{Category: "app-editors", Package: "zed", Baseline: Baseline{Found: false}, Others: got}
+	if needsRealignVerdict(res) {
+		t.Error("two informative rows produced a realignment candidate; more evidence from repositories that are not ::gentoo is still not a baseline (R6.2)")
+	}
+}
+
+// TestOtherRepositoriesReportNotCheckedRatherThanNotCarrying is the distinction
+// this sub-task exists for.
+//
+// "steamos does not carry it" and "steamos was never asked" are different
+// answers and only one of them is true. Collapsing them would let the report
+// claim, on the strength of ~428 repositories nobody queried, that a package is
+// ours alone.
+//
+// _Requirements: R6, R6.1_
+func TestOtherRepositoriesReportNotCheckedRatherThanNotCarrying(t *testing.T) {
+	guru := otherRepoTree(t, "0.150.0")
+	// Available locally, and genuinely does not carry the package.
+	empty := t.TempDir()
+
+	got := OtherRepositories(otherRepoAtom, []LocalRepo{
+		{Name: "guru", Path: guru, Available: true},
+		{Name: "empty-but-present", Path: empty, Available: true},
+		{Name: "registered-only", Path: filepath.Join(t.TempDir(), "not-on-disk"), Available: false},
+	})
+
+	byName := map[string]OtherRepo{}
+	for _, r := range got {
+		byName[r.Name] = r
+	}
+
+	carrying, ok := byName["guru"]
+	if !ok || carrying.Version == "" {
+		t.Errorf("guru is missing or carries no version: %+v", byName)
+	}
+
+	// Checked and empty-handed: a real negative.
+	checkedEmpty, ok := byName["empty-but-present"]
+	if !ok {
+		t.Fatalf("the repository that was checked and did not carry the package has no row at all: %+v", got)
+	}
+	if !checkedEmpty.Checked || checkedEmpty.Version != "" {
+		t.Errorf("empty-but-present is %+v, want Checked=true with no version — it was read and it does not carry it", checkedEmpty)
+	}
+
+	// Not consulted: no claim either way.
+	unchecked, ok := byName["registered-only"]
+	if !ok {
+		t.Fatalf("a registered repository whose contents are not on disk has no row; 'we did not look' is an answer the report owes (R6.1): %+v", got)
+	}
+	if unchecked.Checked {
+		t.Error("registered-only is reported as checked although nothing on disk holds its contents; 'reachable by name' is not 'queried'")
+	}
+	if unchecked.Version != "" {
+		t.Errorf("registered-only reports version %q without having been read", unchecked.Version)
+	}
+	if checkedEmpty.Checked == unchecked.Checked {
+		t.Error("a repository that was read and came up empty is indistinguishable from one that was never consulted; those are different answers and only one is true (R6.1)")
+	}
+}
+
+// TestOtherRepositoriesMakeNoNetworkCall holds the stage's offline promise
+// mechanically: PATH is emptied so no `git`, `wget` or `curl` is reachable, and
+// the repositories are directories.
+//
+// This is the assertion that stops the obvious "improvement" — consulting the
+// registry for the other ~428 — from arriving unnoticed as thousands of lookups.
+//
+// _Requirements: R6, R6.1_
+func TestOtherRepositoriesMakeNoNetworkCall(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	guru := otherRepoTree(t, "0.150.0")
+
+	got := OtherRepositories(otherRepoAtom, []LocalRepo{{Name: "guru", Path: guru, Available: true}})
+
+	if len(got) != 1 || got[0].Version != "0.150.0" {
+		t.Errorf("got %+v with PATH empty, want guru at 0.150.0 read straight off the disk", got)
+	}
+}
+
+// TestOtherRepositoriesDoNotReadWhatTheCallerDidNotOfferAsAvailable is ADDED BY
+// SUB-TASK 6.2, beside the fragment above rather than inside it, and it closes a
+// gap mutation testing found in the fragment's own not-checked case.
+//
+// There the unavailable repository's path does not exist either, so an
+// implementation that ignored Available and went to the disk anyway still
+// reports "not checked" — the stat simply fails. The guard that matters is
+// therefore proved by the fixture only by accident.
+//
+// Here the path is a real tree that really carries the package. Available is
+// false all the same, and the answer owed is still NOT CHECKED: this pass reads
+// what the caller says is here and never goes looking, which is the only reason
+// it can promise to be offline across ~428 registered repositories.
+//
+// _Requirements: R6, R6.1_
+func TestOtherRepositoriesDoNotReadWhatTheCallerDidNotOfferAsAvailable(t *testing.T) {
+	carried := otherRepoTree(t, "0.150.0")
+
+	got := OtherRepositories(otherRepoAtom, []LocalRepo{{Name: "guru", Path: carried, Available: false}})
+
+	if len(got) != 1 {
+		t.Fatalf("got %d rows, want 1 — a repository the caller named still owes an answer: %+v", len(got), got)
+	}
+	if got[0].Checked {
+		t.Error("a repository the caller did not offer as available was read anyway; Available is what makes this pass offline, and consulting a path it did not vouch for is the first step towards consulting all ~428")
+	}
+	if got[0].Version != "" {
+		t.Errorf("Version is %q for a repository that was not checked; the tree does carry that version, which is exactly why reporting it here would be reporting something nobody was asked to look at", got[0].Version)
+	}
+}
+
+// TestNoBaselineCountIsReportedWithItsDenominator is R6.4. The count on its own
+// answers "how many packages ::gentoo does not carry"; with its denominator it
+// answers "how much of the overlay this review could not measure", which is the
+// question the number is actually for.
+//
+// _Requirements: R6, R6.4_
+func TestNoBaselineCountIsReportedWithItsDenominator(t *testing.T) {
+	report := &CompareReport{
+		TotalPackages:    3,
+		ComparedPackages: 3,
+		NoBaselineCount:  1,
+		Results: []CompareResult{
+			{Category: baselineCategory, Package: baselinePkg, Baseline: Baseline{Repo: "gentoo", Version: "1.29.2", Found: true}},
+			{Category: "sys-devel", Package: "binutils", Baseline: Baseline{Repo: "gentoo", Version: "2.46", Found: true}},
+			{Category: "app-editors", Package: "zed", Baseline: Baseline{Found: false}},
+		},
+	}
+
+	rendered := FormatReport(report)
+
+	if !strings.Contains(rendered, "1") || !strings.Contains(rendered, "3") {
+		t.Errorf("the report does not state the no-baseline count with the number of packages examined:\n%s", rendered)
+	}
+	// The zero value stays silent, so a plain compare is untouched (R7.2). The
+	// shipped report has never used the word "baseline", so its absence is a
+	// usable proxy for "this story's lines did not render".
+	quiet := &CompareReport{TotalPackages: 3, ComparedPackages: 3}
+	quiet.Results = append([]CompareResult(nil), report.Results...)
+	for i := range quiet.Results {
+		quiet.Results[i].Baseline = Baseline{}
+		quiet.Results[i].Others = nil
+	}
+	if strings.Contains(strings.ToLower(FormatReport(quiet)), "baseline") {
+		t.Errorf("a report with no baseline data renders a baseline line; a run that requested no review must print what it printed yesterday (R7.2):\n%s", FormatReport(quiet))
+	}
+}
+
+// TestNoBaselineCountCountsTheAbsentBaselineAndNotTheStatus is ADDED BY SUB-TASK
+// 6.2, beside the fragment above rather than inside it, and it closes a gap
+// sub-task 6.3 measured and reported: countNoBaseline rewritten to count
+// `Status == StatusNotInRemote` instead of `!Baseline.Found` passes the entire
+// suite.
+//
+// The cause is that every fixture correlates the two. In annotateFixtureTrees
+// ONE map decides both — a package the map marks absent gets no provider version
+// (so the comparison calls it not-in-remote) AND no ::gentoo ebuild (so the
+// baseline is not found) — which makes the two predicates indistinguishable in
+// every tree the suite builds.
+//
+// They are not the same question. R6.4 asks how much of the overlay the review
+// could not measure, which is a fact about ::gentoo; the status is a fact about
+// what the comparison managed to do. The table below holds a row where they part
+// company, and it is a state production reaches: a ::gentoo package directory
+// that exists and will not list leaves Found false with Unexamined set
+// (ResolveBaseline), while the comparison that hit the same failure reports
+// StatusError rather than StatusNotInRemote.
+//
+// _Requirements: R6, R6.4, R1.3_
+func TestNoBaselineCountCountsTheAbsentBaselineAndNotTheStatus(t *testing.T) {
+	results := []CompareResult{
+		// Carried by ::gentoo and compared: neither definition counts it.
+		{
+			Category: baselineCategory, Package: baselinePkg, Status: StatusUpToDate,
+			Baseline: Baseline{Repo: baselineRepo, Version: "1.29.2", Found: true},
+		},
+		// One of the 84, and the correlated case both definitions agree on.
+		{
+			Category: "app-editors", Package: "zed", Status: StatusNotInRemote,
+			Baseline: Baseline{Found: false},
+		},
+		// The divergent row: no baseline was named, and the status is not
+		// not-in-remote. Counting by status misses it and reports 1.
+		{
+			Category: "sys-devel", Package: "binutils", Status: StatusError,
+			Baseline: Baseline{Found: false, Unexamined: "the ::gentoo package directory could not be listed"},
+		},
+	}
+
+	if got := countNoBaseline(results); got != 2 {
+		t.Errorf("countNoBaseline is %d, want 2 — rows 2 and 3 name no ::gentoo baseline, and a count that reads the comparison's status instead of Baseline.Found answers a different question and reports 1", got)
+	}
+}

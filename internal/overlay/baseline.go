@@ -191,6 +191,184 @@ type OtherRepo struct {
 	Checked bool
 }
 
+// LocalRepo is a repository the caller is prepared to have the report speak
+// about: what it is called, where its tree is, and whether its CONTENTS are on
+// this machine.
+//
+// AVAILABLE IS THE CALLER'S ANSWER, NOT A GUESS MADE HERE. The ~428
+// repositories of the Gentoo ecosystem are resolvable BY NAME through the
+// registry, and almost none of them are on disk; a list built from that registry
+// alone would describe 428 trees nobody has. So the caller passes the
+// repositories it means the report to speak about and says, for each, whether
+// its contents are here — and a repository marked unavailable is never touched.
+// That is what keeps this pass offline (R6.1): the alternative, resolving the
+// registry for 84 packages across every registered repository, is thousands of
+// network lookups in a stage the story promises makes none.
+//
+// _Requirements: R6, R6.1_
+type LocalRepo struct {
+	// Name is the repository as the registry names it — "guru", not "::guru";
+	// the report adds the "::" it prints.
+	Name string
+	// Path is the root of its tree, the directory <Path>/<category>/<package>
+	// would be found under. It is read only when Available is true.
+	Path string
+	// Available reports that the repository's CONTENTS are on disk at Path.
+	//
+	// "Registered", "resolvable by name" and "configured with a URL" are none of
+	// them available: nothing on this machine holds the tree, and the only true
+	// answer the report can give about such a repository is that it was not
+	// checked.
+	Available bool
+}
+
+// OtherRepositories reports which of the given repositories carry atom — one row
+// per repository, in the order they were given (R6.1).
+//
+// It is the answer for the 84 of the overlay's 321 packages ::gentoo carries no
+// version of. Knowing that GURU already packages something we package alone is
+// worth reporting; it is also the whole of what this function claims.
+//
+// # NOT CHECKED is an answer, and it is the common one
+//
+// A repository whose contents are not here is reported as NOT CHECKED and never
+// as one that does not carry the package. Those are different answers and only
+// one of them is true, and collapsing them would let the report assert, on the
+// strength of repositories nobody consulted, that a package is Bentoo's alone.
+// A repository marked unavailable is not stat'ed, not listed and not resolved:
+// the row is produced without touching the disk at all.
+//
+// # It names each and ranks none
+//
+// Where several carry the package, each gets a row and none of them is chosen
+// (R6.3). Choosing a winner is the natural next line of code and it would
+// quietly create the second-baseline concept this story rejects.
+//
+// # Nothing it finds is a baseline
+//
+// Every row is INFORMATIVE ONLY (R6.2): a repository outside ::gentoo has not
+// been through the same review and its quality varies from one to the next. No
+// realignment is ever proposed from one, and that is held structurally rather
+// than by wording — needsRealignVerdict reads Baseline.Found and never these
+// rows, so a package with no ::gentoo baseline cannot reach the model however
+// many repositories carry it.
+//
+// It reads no file, runs no command and resolves no host (R1.4): per available
+// repository it stats one directory and lists one more, and the ebuilds it finds
+// are recognised by NAME, exactly as a baseline candidate is. The versions'
+// TEXT is never read — the report prints who carries it and at what version, and
+// printing another repository's ebuild would be offering it as a replacement.
+//
+// _Requirements: R6, R6.1, R6.2, R6.3_
+func OtherRepositories(atom string, repos []LocalRepo) []OtherRepo {
+	category, pkg, err := splitBaselineAtom(atom)
+	if err != nil {
+		// The question cannot be asked of anyone, so nothing is reported about
+		// anyone. NOT CHECKED rows would be worse than silence here: that state
+		// is rendered with a reason — registered, contents not available locally
+		// — and it is not the reason this happened.
+		return nil
+	}
+
+	var others []OtherRepo
+	for _, repo := range repos {
+		if !reportableNeighbour(repo) {
+			continue
+		}
+		others = append(others, consultRepository(repo, category, pkg))
+	}
+	return others
+}
+
+// reportableNeighbour reports whether this repository is one the rows may speak
+// about at all. False says nothing about whether it carries the package: it
+// means no row is printed for it either way.
+//
+// Two repositories are dropped, for opposite reasons. An UNNAMED one cannot be
+// printed: the row is rendered by name and an empty one renders "::" followed by
+// nothing, which reads as a bug in the report rather than as the empty
+// configuration it is. ::gentoo itself is dropped because it is the BASELINE and
+// is reported as one by ResolveBaseline; repeated here it would arrive as an
+// informative row that "is never a baseline", contradicting the baseline line
+// printed directly above it on the same package.
+func reportableNeighbour(repo LocalRepo) bool {
+	return repo.Name != "" && !strings.EqualFold(repo.Name, baselineRepo)
+}
+
+// consultRepository answers for ONE repository: was it read, and what does it
+// carry.
+//
+// CONSULTED is the word the requirement uses and the one this function is named
+// for: the three outcomes are three different sentences, and each guard below
+// leaves the row in the one that is true. Every path that could not read
+// something leaves Checked false, because the only claim this type can make
+// about a repository is one backed by a directory listing.
+func consultRepository(repo LocalRepo, category, pkg string) OtherRepo {
+	row := OtherRepo{Name: repo.Name}
+
+	if !repo.Available || repo.Path == "" {
+		// NOT CHECKED, and nothing at all is touched — no stat, no listing, no
+		// registry lookup. This is the branch almost every registered repository
+		// takes, and it is the reason the pass costs nothing for them.
+		return row
+	}
+
+	// The ROOT is examined before the package directory, and that stat is the
+	// entire difference between the two negatives: <root>/<category>/<package> is
+	// missing both when the repository is here and does not carry the package and
+	// when the repository is not here at all. Only the first is "we looked and it
+	// has nothing".
+	//
+	// The Portage marker (portageRepoMarker) is deliberately NOT required, unlike
+	// LocateBaselineTree. That check exists because a directory mistaken for
+	// ::gentoo would report all 321 packages as absent from it; here the tree is
+	// one the caller named as available and the worst a bare directory can cost
+	// is one informative row nobody acts on.
+	info, err := os.Stat(repo.Path)
+	if err != nil || !info.IsDir() {
+		return row
+	}
+
+	entries, err := os.ReadDir(filepath.Join(repo.Path, category, pkg))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Read, and it has nothing: a real negative, which is what Checked with
+			// no version means.
+			row.Checked = true
+		}
+		// Anything else — a permission, an I/O error — is "we could not look", and
+		// stays NOT CHECKED for the same reason a registered repository does.
+		return row
+	}
+
+	row.Checked = true
+	row.Version = newestCarriedVersion(carriedVersions(entries, category, pkg))
+	return row
+}
+
+// newestCarriedVersion is the version a row reports for a repository carrying
+// several, and "" for one carrying none.
+//
+// The NEWEST is reported because of the question the row answers — does anyone
+// else package this — whose useful answer is the version a reader would go and
+// look at. It is chosen with the repository's own comparison rather than from
+// the directory listing's order, which is lexical: 0.9.0 sorts after 0.10.0 by
+// name and before it by version, and a row that depended on that would report a
+// different version on another filesystem.
+//
+// This is not the ranking R6.3 forbids. That one is between REPOSITORIES, and
+// every repository still gets its own row; this picks one version inside a row
+// that has room for exactly one.
+func newestCarriedVersion(carried []carriedEbuild) string {
+	newest := ""
+	for _, candidate := range carried {
+		if newest == "" || ebuild.CompareVersions(candidate.version, newest) > 0 {
+			newest = candidate.version
+		}
+	}
+	return newest
+}
+
 // ErrNoBaselineTree is the run-level outcome: there is no ::gentoo tree to read,
 // so NOTHING was examined and the review could not do its job.
 //
