@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
 // baselineRepo is the repository every baseline comes from.
@@ -154,6 +155,142 @@ func ResolveBaseline(gentooTree, atom, version string) (Baseline, error) {
 	}
 
 	return baseline, nil
+}
+
+// ErrNoBaselineTree is the run-level outcome: there is no ::gentoo tree to read,
+// so NOTHING was examined and the review could not do its job.
+//
+// It is a SENTINEL because the caller branches on it. This is the one condition
+// the command exits non-zero for (D9), and an exit code cannot be derived by
+// matching on a message. Everything else this package knows about a baseline is
+// a per-package VALUE and never an error — Baseline.Found is false for the 84
+// packages ::gentoo does not carry, Baseline.Unexamined says why a baseline that
+// exists would not read — so no per-package non-answer can reach the exit code
+// through here. The two states are returned through different channels on
+// purpose; collapsing them would make one unreadable ebuild fail the whole run.
+//
+// _Requirements: R1, R1.5_
+var ErrNoBaselineTree = errors.New("no ::gentoo tree to compare against")
+
+// portageRepoMarker is the file that makes a directory a Portage repository
+// rather than a directory with the right name.
+//
+// It is what LocateBaselineTree looks for, and therefore what R1.5's "name what
+// it looked for" names. Existence of the directory is not enough to go on:
+// /var/db/repos/gentoo is there on a machine that has never synced it, and taken
+// for a tree it would report every one of the overlay's 321 packages as absent
+// from ::gentoo — 321 packages presented as Bentoo's own work, by a run that
+// exited 0 and said nothing.
+//
+// It is spelled with a forward slash, as Portage's own documentation does, and
+// joined onto a root through filepath.FromSlash so the path itself stays
+// platform-correct.
+const portageRepoMarker = "profiles/repo_name"
+
+// LocateBaselineTree resolves candidate to the local ::gentoo repository, or
+// reports that there is none to compare against.
+//
+// A tree is RECOGNISED and never assumed (R1): the directory has to carry
+// Portage's own repository marker, which is what tells a synced repository from
+// an empty directory standing where one is meant to be. What it accepts it
+// returns AS GIVEN — cleaned, never replaced — because the report names the tree
+// the review actually read, and a default quietly fallen back to would be a
+// baseline nobody asked for.
+//
+// The refusal wraps ErrNoBaselineTree and NAMES the path and the marker (R1.5).
+// "No baseline tree" on its own is unactionable: a mistyped path and a
+// repository that was never synced need opposite fixes, and the message says
+// which one it found — nothing at all there, or a directory that is not a
+// repository.
+//
+// It stats two paths and reads nothing at all: no command, no host, no git,
+// exactly as ResolveBaseline does and for the same reason (R1.4).
+//
+// _Requirements: R1, R1.4, R1.5_
+func LocateBaselineTree(candidate string) (string, error) {
+	if candidate == "" {
+		// Nothing was configured, so there is no path to name and only the marker
+		// can be reported. Reachable: a `gentoo` entry with an empty path.
+		return "", fmt.Errorf("%w: no path was given to look for %s in", ErrNoBaselineTree, portageRepoMarker)
+	}
+
+	root := filepath.Clean(candidate)
+	marker := filepath.Join(root, filepath.FromSlash(portageRepoMarker))
+
+	info, err := os.Stat(root)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("%w: nothing at %s, where %s was looked for", ErrNoBaselineTree, root, marker)
+	case err != nil:
+		// There and unexaminable. Still "we could not look", which is what this
+		// error means — the stat's own text is carried with %v rather than %w
+		// because the sentinel is the only thing a caller is meant to match on.
+		return "", fmt.Errorf("%w: %s could not be examined: %v", ErrNoBaselineTree, root, err)
+	case !info.IsDir():
+		return "", fmt.Errorf("%w: %s is not a directory, so it carries no %s", ErrNoBaselineTree, root, portageRepoMarker)
+	}
+
+	markerInfo, err := os.Stat(marker)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("%w: %s carries no %s, so it is a directory rather than a synced repository", ErrNoBaselineTree, root, portageRepoMarker)
+	case err != nil:
+		return "", fmt.Errorf("%w: %s could not be examined: %v", ErrNoBaselineTree, marker, err)
+	case markerInfo.IsDir():
+		return "", fmt.Errorf("%w: %s is a directory rather than Portage's marker file, so %s is not a repository", ErrNoBaselineTree, marker, root)
+	}
+
+	// The marker's CONTENT is not read. Which repository a realignment run may
+	// name is settled on the configuration side, before any of this is reached;
+	// what this function answers is whether a repository is there to be read at
+	// all.
+	return root, nil
+}
+
+// MarkBaselineSkipped records on the report that the review was SKIPPED because
+// no ::gentoo tree could be located, naming what was looked for (R1.5).
+//
+// It exists as a function rather than as a field the caller assigns so the
+// wording is written once, beside the marker it names. What it must never
+// record is a per-package state: an unreadable baseline ebuild is
+// Baseline.Unexamined on that one package (D2) and leaves this untouched, or
+// else a run that examined 320 packages would report itself as having examined
+// none.
+//
+// _Requirements: R1, R1.5_
+func MarkBaselineSkipped(report *CompareReport, lookedFor string) {
+	if lookedFor == "" {
+		// Nothing was configured, so there is no path to name. Naming an empty one
+		// would print a sentence with a hole in it, which reads as a bug in the
+		// report rather than as the missing configuration it is.
+		report.BaselineSkipped = "no ::gentoo tree was configured, so nothing was compared against ::gentoo"
+		return
+	}
+	report.BaselineSkipped = fmt.Sprintf(
+		"no ::gentoo tree at %s — looked for its %s marker, so nothing was compared against ::gentoo",
+		lookedFor, portageRepoMarker)
+}
+
+// baselineSkippedLead opens the run-level SKIPPED line. It is a constant so a
+// test can name the word without copying the sentence, on the same argument that
+// made undeclaredDivergenceCaveat one.
+const baselineSkippedLead = "Baseline review SKIPPED: "
+
+// formatBaselineSkipped renders the run-level SKIPPED line, or "" when there is
+// none.
+//
+// "" is the answer for every run that requested no review, which is what keeps
+// `overlay compare` printing exactly what it printed yesterday (R7.2): the field
+// is additive and its zero value renders nothing at all.
+//
+// The text names an operator-configured path, so it is passed as an ARGUMENT and
+// never as a format string, exactly like every other piece of text this report
+// prints.
+func formatBaselineSkipped(report *CompareReport) string {
+	if report.BaselineSkipped == "" {
+		return ""
+	}
+	return output.Sprintf(output.Warning, "\n%s%s\n", baselineSkippedLead, report.BaselineSkipped)
 }
 
 // splitBaselineAtom splits "category/package" and refuses anything else.

@@ -343,6 +343,22 @@ type CompareReport struct {
 	VerdictRedundantCount   int
 	VerdictNeedsRebaseCount int
 	VerdictUnknownCount     int
+
+	// BaselineSkipped is non-empty when the review could not run at all: no
+	// ::gentoo tree could be located, so NOTHING was examined. The text names
+	// what was looked for (R1.5), and MarkBaselineSkipped is what writes it.
+	//
+	// It is the report's only RUN-level state, and it is deliberately not the
+	// per-package one. A baseline that exists but will not read is
+	// Baseline.Unexamined on that package alone (D2) and never reaches here:
+	// collapsing the two would have one unreadable ebuild declare that a run
+	// which examined 320 packages examined none.
+	//
+	// Its ZERO VALUE renders nothing (formatBaselineSkipped), which is what keeps
+	// a run that requested no review printing exactly what it printed yesterday
+	// (R7.2). Without it the same run prints "All packages are up-to-date!" over
+	// a comparison that never happened.
+	BaselineSkipped string
 }
 
 // githubProviderAdapter adapts a *github.Client to the provider.Provider interface,
@@ -1080,6 +1096,14 @@ func splitRedundantSection(results []CompareResult) (identical, differing []Comp
 // documented precondition rather than a branch here.
 func FormatReport(report *CompareReport) string {
 	var sb strings.Builder
+
+	// The run-level outcome opens the report, and it is written BEFORE the early
+	// return below because that return is the sentence it exists to correct: a
+	// review with no ::gentoo tree to read examined nothing, and "All packages
+	// are up-to-date!" is exactly how "we could not look" must never render
+	// (R1.5). It prints nothing at the zero value, which is every run that
+	// requested no review (R7.2).
+	sb.WriteString(formatBaselineSkipped(report))
 
 	if len(report.Results) == 0 {
 		sb.WriteString(output.Sprintf(output.Success, "All packages are up-to-date!"))
