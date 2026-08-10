@@ -424,6 +424,25 @@ type CompareReport struct {
 	// baseline" over every row of a plain `overlay compare`. Counted here it is
 	// reported once, with its denominator, and renders nothing at 0 (R7.2).
 	NoBaselineCount int
+
+	// RealignAsked and RealignNoVerdict are the realignment review's own
+	// arithmetic: how many divergences were put to the model, and how many of
+	// those came back with no verdict (R4.4). Both are written by
+	// AnnotateRealignVerdicts and by nothing else.
+	//
+	// The second exists because an unreachable model is EXIT 0 (D9) and leaves an
+	// EMPTY RealignVerdict on every package it could not judge — which renders as
+	// silence, and silence reads as "every divergence was judged and none
+	// objected". This is the number that says otherwise, and the first is the
+	// denominator without which it cannot be read: 12 unjudged out of 12 and 12
+	// out of 237 are different reports.
+	//
+	// They are RUN-level for the reason NoBaselineCount is: the per-package fact
+	// is an absent field, indistinguishable from the same absent field on every
+	// row of a plain `overlay compare`. Counted here they are stated once and
+	// render nothing at 0 (R7.2).
+	RealignAsked     int
+	RealignNoVerdict int
 }
 
 // githubProviderAdapter adapts a *github.Client to the provider.Provider interface,
@@ -1219,6 +1238,13 @@ func FormatReport(report *CompareReport) string {
 	// which is every run that requested no review, so the summary line below
 	// keeps following the last table exactly as it does today (R7.2).
 	sb.WriteString(formatBaselineSummary(report))
+
+	// How many divergences the model was asked about and did not judge (R4.4),
+	// stated once with its denominator. It prints NOTHING when every question was
+	// answered and nothing at all when none was asked — which is every run that
+	// requested no review — so the summary line below keeps following the last
+	// table exactly as it does today (R7.2).
+	sb.WriteString(formatRealignSummary(report))
 
 	sb.WriteString(formatStatusSummary(report.Results))
 

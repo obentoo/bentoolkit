@@ -72,6 +72,20 @@ type reviewCache struct {
 	mu sync.Mutex
 	// notes is the whole cache in memory, indexed by contentFingerprint.
 	notes map[string]ReviewNote
+	// realign holds the realignment verdicts (RealignNote), indexed by the same
+	// fingerprint over the same kind of pair.
+	//
+	// It is a SECOND MAP rather than a second cache file, because the two are one
+	// optimisation with one place to fail: one directory to resolve, one file to
+	// replace atomically, one "warn once" for a run. D7 says the verdict reuses
+	// this cache, and this is what reusing it means.
+	//
+	// It is a second map rather than the same one because the fingerprints
+	// COLLIDE by construction: for a package at ::gentoo's own version the two
+	// passes hash the identical pair of files, and they asked it two different
+	// questions. Sharing one map would serve a commentary note where a verdict
+	// was wanted.
+	realign map[string]RealignNote
 
 	// storeWarnOnce makes the store-side warning literally once per run. It is
 	// the side that needs a guard: put is called per finding, so a directory that
@@ -90,6 +104,12 @@ type reviewCache struct {
 // that will never be retired.
 type reviewCacheFile struct {
 	Notes map[string]ReviewNote `json:"notes"`
+	// Realign is the realignment verdicts (R4.1), added to the SAME file rather
+	// than to a second one — which is the growth this object shape was wrapped
+	// for. A file written before this field existed decodes with it absent, which
+	// reads as an empty verdict cache and costs one recomputation; a file written
+	// with it stays readable by a build that ignores it.
+	Realign map[string]RealignNote `json:"realign"`
 }
 
 // newReviewCache opens the note cache stored in dir, reading whatever a previous
@@ -100,7 +120,10 @@ type reviewCacheFile struct {
 // warning and an empty cache, and dir == "" is a cache that answers from memory
 // and persists nothing.
 func newReviewCache(dir string) *reviewCache {
-	c := &reviewCache{notes: make(map[string]ReviewNote)}
+	c := &reviewCache{
+		notes:   make(map[string]ReviewNote),
+		realign: make(map[string]RealignNote),
+	}
 	if dir == "" {
 		return c
 	}
@@ -154,6 +177,20 @@ func (c *reviewCache) put(req ReviewRequest, note ReviewNote) {
 	// Recorded in memory FIRST, and unconditionally, so a cache that cannot
 	// persist still answers within the run it was built for.
 	c.notes[contentFingerprint(req.Ours, req.Theirs)] = note
+	c.persist()
+}
+
+// persist writes the whole cache out, warning at most once per run when it
+// cannot. The caller holds c.mu.
+//
+// It is shared by both stores rather than written twice, which is what makes
+// "once per run" true across BOTH of them: two copies would each hold their own
+// half of storeWarnOnce's promise and print the same sentence twice for one
+// unwritable directory.
+//
+// An empty path is the deliberately silent in-memory-only cache, and it returns
+// before save so that shape stores nothing and says nothing.
+func (c *reviewCache) persist() {
 	if c.path == "" {
 		return
 	}
@@ -164,6 +201,39 @@ func (c *reviewCache) put(req ReviewRequest, note ReviewNote) {
 				filepath.Dir(c.path), err)
 		})
 	}
+}
+
+// getRealign returns the realignment verdict stored for the two ebuilds in req,
+// if there is one.
+//
+// The lookup reads req.Ours and req.Baseline and nothing else, exactly as get
+// reads the commentary pair: the judgement is a reading of the two files, so the
+// same pair under a different atom is the same question and hits. That is what
+// makes the SECOND run cheap, and the second run being cheap is the only reason
+// the first run's 237 calls are payable (D7).
+func (c *reviewCache) getRealign(req RealignRequest) (RealignNote, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	note, ok := c.realign[contentFingerprint(req.Ours, req.Baseline)]
+	return note, ok
+}
+
+// putRealign records a realignment verdict for the two ebuilds in req and
+// persists the cache.
+//
+// A failure to persist is a warning and nothing more, and it goes through the
+// SAME persist as put above rather than through a copy of it: a directory that
+// cannot be written fails identically for both maps, and two guards would print
+// the same sentence twice for one broken directory.
+func (c *reviewCache) putRealign(req RealignRequest, note RealignNote) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Recorded in memory FIRST, and unconditionally, so a cache that cannot
+	// persist still answers within the run it was built for.
+	c.realign[contentFingerprint(req.Ours, req.Baseline)] = note
+	c.persist()
 }
 
 // contentFingerprint is the index R5.7 specifies: sha256(ours) + ":" +
@@ -213,6 +283,9 @@ func (c *reviewCache) load() {
 	if stored.Notes != nil {
 		c.notes = stored.Notes
 	}
+	if stored.Realign != nil {
+		c.realign = stored.Realign
+	}
 }
 
 // save writes the whole cache out and replaces the file atomically. The caller
@@ -230,7 +303,7 @@ func (c *reviewCache) save() error {
 		return fmt.Errorf("create the review cache directory %s: %w", dir, err)
 	}
 
-	data, err := json.MarshalIndent(reviewCacheFile{Notes: c.notes}, "", "  ")
+	data, err := json.MarshalIndent(reviewCacheFile{Notes: c.notes, Realign: c.realign}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode the review cache: %w", err)
 	}
