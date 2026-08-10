@@ -4,7 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
+
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
 // divergenceTag is the marker that turns an ordinary comment into a
@@ -411,4 +416,340 @@ func divergenceDelimiterStart(c byte) bool {
 	default:
 		return false
 	}
+}
+
+// The CLOSED vocabulary of exit conditions (D6): three predicates, each of them
+// answerable by reading the local ::gentoo tree and nothing else, and each of
+// them a question about ONE PACKAGE rather than about ::gentoo at large — which
+// is why the atom travels with the condition through everything below.
+//
+// Closed on purpose. A vocabulary that grew by working out what a sentence
+// probably meant would sooner or later decide, silently, that a divergence
+// nobody retired is over. Refusing is the whole value of this evaluator.
+//
+// They are named `vocab*` rather than `dropWhen*` like everything else in this
+// half of the file, and the reason is worth writing down because it is invisible
+// and it will happen again. gosec's G101 matches the IDENTIFIER against
+// `(?i)…|pw|…`, and `dropWhen` contains "pW" — the p of "drop" against the W of
+// "When". Any constant so named whose value is a string long enough to clear
+// G101's entropy threshold reads as a hardcoded credential and fails the CI
+// lint; `gentoo-has-package` is the one of the three that is long enough, which
+// is why only it was flagged and why renaming the SUFFIX changed nothing.
+//
+// Fixed by the name rather than by a //nolint, for the reason filesdirMarker
+// gives in authorship.go: a suppression is something every later reader has to
+// re-evaluate, and these are three public vocabulary keywords.
+const (
+	// vocabVersionWord asks whether ::gentoo now ships a release at least as
+	// new as the one named. It is D5's worked case: sys-devel/binutils-2.47 says
+	// in prose that our ebuild goes away as soon as ::gentoo ships 2.47.
+	vocabVersionWord = "gentoo-version"
+	// vocabHasPackageWord asks whether ::gentoo carries the package at all. It
+	// takes no argument — the package is the one the declaration was read out of.
+	vocabHasPackageWord = "gentoo-has-package"
+	// vocabInheritsWord asks whether ::gentoo's own ebuild inherits an eclass.
+	// It is issue #33 read backwards: the divergence exists because the eclass
+	// did not carry the option list, and it ends when ::gentoo's ebuild inherits
+	// one that does.
+	vocabInheritsWord = "gentoo-inherits"
+)
+
+// dropWhenAtLeast is the only comparison `gentoo-version` admits.
+//
+// Only `>=`, because it is the only one the vocabulary defines and the only one
+// the end of a divergence is ever stated with — "drop this when ::gentoo reaches
+// X". A `>` or a `==` would each need a decision about what it means against a
+// tree carrying a dozen versions, and inventing that decision here is precisely
+// the guess this file refuses: anything else is reported unevaluated instead.
+const dropWhenAtLeast = ">="
+
+// EvaluateDropWhen answers a declaration's exit condition against the local
+// ::gentoo tree — and says whether it answered it at all (R3.2).
+//
+// # `checkable` is an answer, not an error
+//
+// met=false says the condition WAS evaluated and is not met: the divergence
+// still earns its place. checkable=false says it was NOT EVALUATED — the
+// condition is outside the vocabulary above, or the tree could not answer it.
+// Both come back with met=false and only `checkable` tells them apart, which is
+// why it is a return value rather than an error: a caller that dropped it would
+// collapse "a human must check this" into "we checked, and no".
+//
+// Both collapses are silent and both are expensive (D6). Read as unmet, a prose
+// condition keeps its divergence alive forever, because nothing will ever retire
+// it. Read as met, it retires the divergence with no cause at all, and work
+// somebody did deliberately rejoins the realignment queue.
+//
+// It reads one directory listing and at most one ebuild, both inside gentooTree.
+// It starts no process, resolves no host and never consults git: the local
+// /var/db/repos/gentoo is a shallow clone whose history is absent by
+// construction, so an evaluator reaching for `git log` would be answering from a
+// source that is not there (R1.4). The answer is in the tree's content.
+//
+// _Requirements: R3, R3.2_
+func EvaluateDropWhen(condition, gentooTree, atom string) (met, checkable bool) {
+	keyword, argument, stated := dropWhenPredicate(condition)
+	if !stated {
+		// No condition at all — the ordinary case, since most divergences state
+		// no end. There is nothing here to evaluate, and a divergence that stated
+		// no end has certainly not ended.
+		return false, false
+	}
+
+	switch {
+	case strings.EqualFold(keyword, vocabVersionWord):
+		return dropWhenVersionMet(argument, gentooTree, atom)
+	case strings.EqualFold(keyword, vocabHasPackageWord):
+		return dropWhenHasPackageMet(argument, gentooTree, atom)
+	case strings.EqualFold(keyword, vocabInheritsWord):
+		return dropWhenInheritsMet(argument, gentooTree, atom)
+	default:
+		// Free prose. Reported verbatim by whoever prints the declaration, and
+		// evaluated by nobody.
+		return false, false
+	}
+}
+
+// EvaluateDeclarations returns the declarations with Expired decided against the
+// local ::gentoo tree.
+//
+// A declaration is EXPIRED when its condition was evaluated and is met, and in
+// no other case (R3.3). An unmet condition leaves the divergence declared,
+// because it still earns its place; a condition the vocabulary does not cover
+// leaves it declared too, because nothing was evaluated that could retire it.
+//
+// Expiry is what puts a divergence back in front of the model — an expired
+// declaration is treated as UNDECLARED from then on, where a declared and
+// unexpired one is never sent (D7) — so the field is written here, in
+// production. Left to each reader to derive from `met && checkable`, the one
+// reader that got it wrong would silence a divergence or resurrect one, and the
+// struct would carry a field nothing ever set.
+//
+// Everything else comes back VERBATIM: the axis, the reason and the condition
+// are the maintainer's words, and this pass reads the tree and reports rather
+// than editing anybody's ebuild (R3.6). The input slice is not modified.
+//
+// _Requirements: R3, R3.2, R3.3_
+func EvaluateDeclarations(declared []DeclaredDivergence, gentooTree, atom string) []DeclaredDivergence {
+	evaluated := slices.Clone(declared)
+	for i := range evaluated {
+		met, checkable := EvaluateDropWhen(evaluated[i].DropWhen, gentooTree, atom)
+		// Written unconditionally, including back to false. Expiry is a question
+		// about the tree, and whatever the field arrived carrying was not an
+		// answer to it.
+		evaluated[i].Expired = met && checkable
+	}
+	return evaluated
+}
+
+// dropWhenPredicate splits a condition into its leading keyword and whatever
+// follows it, and reports whether there was anything at all to split.
+//
+// The keyword is the first WORD, so the vocabulary is spelled with blanks
+// between its parts exactly as D6 writes it. `gentoo-version>=2.47` is therefore
+// prose and is reported as prose rather than repaired — a reader that repaired
+// one spelling would have to decide how far to go, and every step past the first
+// is a guess about what somebody meant.
+func dropWhenPredicate(condition string) (keyword, argument string, stated bool) {
+	trimmed := strings.TrimSpace(condition)
+	if trimmed == "" {
+		return "", "", false
+	}
+	end := strings.IndexFunc(trimmed, unicode.IsSpace)
+	if end < 0 {
+		return trimmed, "", true
+	}
+	return trimmed[:end], strings.TrimSpace(trimmed[end:]), true
+}
+
+// dropWhenVersionMet answers `gentoo-version >= X`: does ::gentoo ship a release
+// of this package at least as new as X?
+//
+// The argument has to be a version this repository's own comparison can order.
+// "two-point-forty-seven" is not one, and it comes back UNEVALUATED rather than
+// as a quiet false: a vocabulary keyword carrying an argument nobody can read is
+// exactly the line a human must look at, and working out what it meant is the
+// guess this function exists to refuse.
+//
+// # A live ebuild ships nothing
+//
+// Live ebuilds are excluded, and that is the difference between this predicate
+// working and being meaningless. ::gentoo's sys-devel/binutils — D5's own worked
+// case — carries binutils-9999.ebuild, which builds from git master and orders
+// ABOVE every release there is. Counted, it would satisfy `gentoo-version >= X`
+// for every X anybody could write, retiring each such divergence on the day it
+// was declared. The question is what ::gentoo SHIPS.
+func dropWhenVersionMet(argument, gentooTree, atom string) (met, checkable bool) {
+	wanted, isAtLeast := strings.CutPrefix(argument, dropWhenAtLeast)
+	wanted = strings.TrimSpace(wanted)
+	if !isAtLeast || !ebuild.IsValidVersion(wanted) {
+		return false, false
+	}
+
+	_, carried, examined := dropWhenCarried(gentooTree, atom)
+	if !examined {
+		return false, false
+	}
+	for _, release := range dropWhenReleases(carried) {
+		if ebuild.CompareVersions(release.version, wanted) >= 0 {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// dropWhenHasPackageMet answers `gentoo-has-package`: does ::gentoo carry this
+// package at all?
+//
+// It takes NO argument, the package being the one the declaration was read out
+// of. A trailing word is therefore not a second package to ask about but a
+// spelling nobody defined, and it is reported unevaluated rather than answered
+// about the wrong package.
+//
+// Live ebuilds DO count here, where dropWhenVersionMet excludes them: a package
+// ::gentoo carries only as a live ebuild is still a package ::gentoo carries.
+// The two predicates ask different questions, and they differ here on purpose.
+func dropWhenHasPackageMet(argument, gentooTree, atom string) (met, checkable bool) {
+	if argument != "" {
+		return false, false
+	}
+
+	_, carried, examined := dropWhenCarried(gentooTree, atom)
+	if !examined {
+		return false, false
+	}
+	return len(carried) > 0, true
+}
+
+// dropWhenInheritsMet answers `gentoo-inherits <eclass>`: does ::gentoo's own
+// ebuild for this package inherit that eclass?
+//
+// It reads ONE ebuild — the baseline dropWhenBaselineEbuild picks — through the
+// very reader the inherit axis uses, so what an ebuild inherits has one answer
+// in this package rather than two that can drift apart.
+//
+// The eclass must be exactly one word. `gentoo-inherits meson python-any-r1`
+// names two, and whether the maintainer meant both of them or either of them is
+// written down nowhere; it is reported unevaluated instead of decided here. A
+// `gentoo-inherits` naming none is the same refusal for the same reason.
+func dropWhenInheritsMet(eclass, gentooTree, atom string) (met, checkable bool) {
+	if len(strings.Fields(eclass)) != 1 {
+		return false, false
+	}
+
+	dir, carried, examined := dropWhenCarried(gentooTree, atom)
+	if !examined {
+		return false, false
+	}
+	if len(carried) == 0 {
+		// ::gentoo carries no ebuild for this package, so there is none that
+		// inherits anything. The tree was read and the answer is no — which is
+		// not the same as not having been able to look.
+		return false, true
+	}
+
+	read, err := readAxisEbuild(filepath.Join(dir, dropWhenBaselineEbuild(carried).filename))
+	if err != nil {
+		// The ebuild is there and will not read. "We could not look" is not "it
+		// does not inherit that", so nothing is evaluated — the same line
+		// Baseline.Unexamined draws for the same reason (D2).
+		return false, false
+	}
+	// Exact match: an eclass name is a filename in ::gentoo's eclass/ directory,
+	// so its case is part of it — unlike the tag and the axis word, which two
+	// documents spell two ways and which are therefore folded.
+	return slices.Contains(read.inherit, eclass), true
+}
+
+// dropWhenCarried lists what ::gentoo carries for atom, and reports whether the
+// tree was READ at all.
+//
+// examined=false is "we could not look": no tree was given, the atom names no
+// package, or a directory that is there would not list. It is kept apart from
+// "::gentoo does not carry this package", which lists nothing and is a perfectly
+// good answer — 84 of the overlay's 321 packages are in that state, and
+// reporting them as unexaminable would hand a human 84 conditions the tool had
+// just evaluated. ResolveBaseline draws the same line for the same reason.
+func dropWhenCarried(gentooTree, atom string) (dir string, carried []carriedEbuild, examined bool) {
+	if gentooTree == "" {
+		return "", nil, false
+	}
+	category, pkg, err := splitBaselineAtom(atom)
+	if err != nil {
+		// Not one package, so there is no directory to look in. The error text is
+		// not carried: this returns a state and not a diagnosis, and the caller's
+		// answer is the same either way — unevaluated.
+		return "", nil, false
+	}
+
+	dir = filepath.Join(gentooTree, category, pkg)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return dir, nil, true
+		}
+		return dir, nil, false
+	}
+	return dir, carriedVersions(entries, category, pkg), true
+}
+
+// dropWhenReleases keeps the versions that are RELEASES, dropping the live
+// ebuilds — see dropWhenVersionMet for what counting them would cost.
+func dropWhenReleases(carried []carriedEbuild) []carriedEbuild {
+	var releases []carriedEbuild
+	for _, candidate := range carried {
+		if !dropWhenLiveVersion(candidate.version) {
+			releases = append(releases, candidate)
+		}
+	}
+	return releases
+}
+
+// dropWhenLiveVersion reports whether a version is a live ebuild's: one that
+// builds from the VCS rather than from a release, conventionally numbered 9999.
+//
+// ANY component counts, because ::gentoo writes both forms — binutils-9999
+// follows git master and binutils-2.47.9999 follows the 2.47 branch, and neither
+// is a release anyone can install a known version of. The convention is
+// Portage's, and internal/autoupdate already reads it the same way; it is
+// re-stated here rather than imported because internal/overlay imports nothing
+// from that package and keeps it that way on purpose (D8b).
+//
+// It reads the components through versionComponents, so "9999-r1" and "9999_p1"
+// are live too: that reader takes the numeric head and stops at the revision.
+func dropWhenLiveVersion(version string) bool {
+	for _, component := range versionComponents(version) {
+		if component == 9999 || component == 99999999 {
+			return true
+		}
+	}
+	return false
+}
+
+// dropWhenBaselineEbuild picks the ebuild to read for a question about
+// ::gentoo's own version of a package: the newest RELEASE it carries, or the
+// newest of what it carries when every one of them is live. It is only ever
+// called with at least one candidate.
+//
+// The newest is the right one to ask, because it is what ::gentoo maintains now
+// and what a realignment would move toward. An older version that happened to
+// inherit the eclass would retire a divergence on evidence ::gentoo itself has
+// moved past.
+//
+// The fallback matters for a package ::gentoo only ever ships live. Reading
+// nothing there would report "we could not look" at a tree that plainly carries
+// the package, when the live ebuild is the only evidence there is.
+func dropWhenBaselineEbuild(carried []carriedEbuild) carriedEbuild {
+	candidates := dropWhenReleases(carried)
+	if len(candidates) == 0 {
+		candidates = carried
+	}
+
+	newest := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if ebuild.CompareVersions(candidate.version, newest.version) > 0 {
+			newest = candidate
+		}
+	}
+	return newest
 }
