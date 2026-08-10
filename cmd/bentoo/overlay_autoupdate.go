@@ -712,6 +712,13 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		reportRevivableOrphans(checker, cfg)
 	}
 
+	// S033-R9.1: put every pending update through the gates at its resolved
+	// depth, and publish none of it. It runs BEFORE the reconciliation below for
+	// the same reason that one runs last: the reconciliation is the only prompt in
+	// this command that can write to the overlay, and it must be the last thing on
+	// screen rather than scrolled off by a validation report.
+	runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
+
 	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the
 	// batch path, for three reasons:

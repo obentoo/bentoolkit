@@ -20,12 +20,15 @@ package main
 // so that a test can watch a seam that is never used (R9.2).
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -376,6 +379,102 @@ func confirmValidationRun(plan validationPlan) bool {
 	output.Info.Println("  Nothing is published either way — a check writes no ebuild and no version pin.")
 	return confirmSweepFn(fmt.Sprintf(
 		"Evaluate %d package(s), %d of them up to depth %s?", len(plan.Entries), builds, deepest))
+}
+
+// runPendingValidation is R9.1 reaching the CLI: after a check has recorded what
+// is pending, every one of those bumps is put through the gates at its resolved
+// depth — priced first (R9.3), asked about once (R9.4), tallied at the end
+// (R9.5), and published never (R9.2).
+//
+// # Why it is gated on --llm
+//
+// R9's command is `--check --llm`, and the gate is not a technicality. A gate
+// above `options` unpacks and builds, and even `options` fetches a distfile, so
+// running this on every `--check` would turn a network read that takes seconds
+// into one that takes hours the first time somebody typed the command they have
+// always typed. `--llm` is the flag that already means "spend real resources on
+// validating this run", so it is the flag that turns the gates on here too; the
+// confirmation below still asks before anything builds.
+//
+// # It publishes nothing, and the guarantee is structural
+//
+// The one function in this file that could write to the overlay,
+// setVersionsForCheck, is never called — from here or from anywhere. The applier
+// built below runs Validate and never Apply: promotion, the version pin and the
+// `--clean` sweep all live in Apply, which this path does not reach.
+func runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) {
+	if !autoupdateLLM {
+		return
+	}
+
+	pending, err := autoupdate.NewPendingList(configDir)
+	if err != nil {
+		logger.Warn("could not read the pending list, so nothing was validated: %v", err)
+		return
+	}
+	updates := pending.List()
+	if len(updates) == 0 {
+		// Silence is right for an empty plan: printing "0 packages to evaluate"
+		// after a check that found nothing is a line about nothing.
+		return
+	}
+
+	// The RESOLVED tier from the check that just ran, not a guess from the
+	// package's name: CheckResult.Type is read from the current ebuild
+	// (RESTRICT=bindist, a binary SRC_URI, the name), and a resolver without it
+	// schedules a compile for a prebuilt blob.
+	tier := make(map[string]string, len(checked))
+	for _, item := range checked {
+		if item.Type != "" {
+			tier[item.Package] = item.Type
+		}
+	}
+
+	plan := planValidation(updates, autoupdateValidate.Policy, autoupdateValidate.Depth,
+		func(update autoupdate.PendingUpdate) string { return tier[update.Package] })
+
+	// Printed here rather than left to runValidationCheck, because the
+	// confirmation below is about this plan: a question about a cost nobody has
+	// seen is not a confirmation. Printed records that it has been shown, so it is
+	// not repeated.
+	printValidationPlan(plan)
+	plan.Printed = true
+	if !confirmValidationRun(plan) {
+		return
+	}
+
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		applierFixerOption(llmCfg),
+	}
+	opts = append(opts, applierDistfileOptions()...)
+	opts = append(opts, applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
+
+	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
+	// a read-only check has no business owning that switch even by accident.
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	if err != nil {
+		logger.Warn("could not initialize the validator, so nothing was validated: %v", err)
+		return
+	}
+
+	//nolint:contextcheck // ctx is propagated into every spawned child through
+	// WithApplierContext (a.ctx); Validate takes no ctx parameter, by the same
+	// single-source wiring Apply uses.
+	runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
+		// The ceiling one confirmation covered. It travels per entry so a
+		// reviewer's raise is held against what the operator approved rather than
+		// against this bump's own depth (R9.6). A depth the plan could not spell
+		// is no ceiling at all, which is the honest reading — nothing was
+		// confirmed about a number nobody printed.
+		ceiling, err := validate.ParseDepth(entry.ConfirmedDepth)
+		if err != nil {
+			ceiling = validate.DepthNone
+		}
+		return applier.Validate(entry.Package, ceiling)
+	})
 }
 
 // runValidationCheck evaluates every planned package through `run` and reports

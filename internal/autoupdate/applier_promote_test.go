@@ -34,6 +34,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
 // hashOverlayTree returns one digest over every path and file body under root,
@@ -115,12 +118,7 @@ func promoteFixture(t *testing.T, opts ...ApplierOption) (a *Applier, overlayDir
 	// Every child fails, and every child is observed. `false` is used rather
 	// than a scripted seam because WHAT the gate printed does not matter here —
 	// only that the published tree was untouched while it ran.
-	failingAndWatching := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
-		watch.spawns++
-		watch.hashesAtSpawn = append(watch.hashesAtSpawn, hashOverlayTree(t, overlayDir))
-		if _, err := os.Stat(candidate); err == nil {
-			watch.candidateSeenAt = append(watch.candidateSeenAt, name+" "+strings.Join(arg, " "))
-		}
+	failingAndWatching := func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "false")
 	}
 
@@ -140,6 +138,23 @@ func promoteFixture(t *testing.T, opts ...ApplierOption) (a *Applier, overlayDir
 	a, err = NewApplier(overlayDir, configDir, append(base, opts...)...)
 	if err != nil {
 		t.Fatalf("creating applier: %v", err)
+	}
+
+	// The watcher is installed LAST, wrapping whatever exec command finally
+	// won. base sets one, but a caller passing WithExecCommand(...) REPLACES
+	// it — options are applied in order and the caller's come after base's —
+	// so a watcher installed only in base would never fire for any case that
+	// supplies its own command, and watch.spawns would read 0 while the gates
+	// really ran. Wrapping preserves both: the caller's command decides the
+	// outcome, the watcher still observes every spawn.
+	inner := a.execCommand
+	a.execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		watch.spawns++
+		watch.hashesAtSpawn = append(watch.hashesAtSpawn, hashOverlayTree(t, overlayDir))
+		if _, err := os.Stat(candidate); err == nil {
+			watch.candidateSeenAt = append(watch.candidateSeenAt, name+" "+strings.Join(arg, " "))
+		}
+		return inner(ctx, name, arg...)
 	}
 	return a, overlayDir, pkg, watch, pins
 }
@@ -483,5 +498,525 @@ func TestApplierRetain_TwoFailuresStillLeaveTheOverlayUntouched(t *testing.T) {
 	}
 	if len(pins) != 0 {
 		t.Errorf("a pin was written for a bump that failed twice: %v", pins)
+	}
+}
+
+// The digest the fixture's published Manifest names for the new version's
+// distfile. Promotion re-checks it, because a tarball re-rolled under the same
+// name between staging and promotion is a different input.
+const (
+	stagedDistfileDigest   = "ab"
+	rerolledDistfileDigest = "ff"
+)
+
+// candidateBody returns the bytes the applier itself would write for the
+// candidate: a copy of the current version's ebuild. Matching means matching
+// THIS, so the fixture derives it rather than restating it.
+func candidateBody(t *testing.T, overlayDir string) string {
+	t.Helper()
+	path := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.28.6.ebuild")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the source ebuild: %v", err)
+	}
+	return string(data)
+}
+
+func digestOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+// stageCandidateFor materialises a staged tree holding exactly `body` as the
+// candidate, WITHOUT a record. It goes through validate.Stage rather than
+// writing the layout by hand, so these tests cannot pass against a tree the real
+// code would not recognise.
+func stageCandidateFor(t *testing.T, stagingRoot, overlayDir, body string) string {
+	t.Helper()
+	staged, err := validate.Stage(validate.StageRequest{
+		Overlay:     overlayDir,
+		StagingRoot: stagingRoot,
+		Atom:        "media-plugins/gst-plugins-qt6",
+		Version:     "1.29.2",
+		EbuildBytes: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("staging the candidate: %v", err)
+	}
+	return staged
+}
+
+// provedRecord is the record a successful validation leaves beside its tree:
+// every gate clean, at the given depth, over the given inputs.
+func provedRecord(depth validate.Depth, ebuildDigest, distfileDigest string) validate.StageRecord {
+	return validate.StageRecord{
+		Depth: depth,
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass,
+				Reason: "a configure pass does not cover compilation"},
+		},
+		EbuildDigest:   ebuildDigest,
+		DistfileDigest: distfileDigest,
+	}
+}
+
+// stageProvedCandidate stages the tree AND writes a clean record beside it —
+// the state a proving `--check --llm` run leaves behind.
+func stageProvedCandidate(t *testing.T, stagingRoot, overlayDir, body string, depth validate.Depth) string {
+	t.Helper()
+	staged := stageCandidateFor(t, stagingRoot, overlayDir, body)
+	if err := validate.WriteStageRecord(staged, provedRecord(depth, digestOf(body), stagedDistfileDigest)); err != nil {
+		t.Fatalf("writing the stage record: %v", err)
+	}
+	return staged
+}
+
+// TestApplierPromote_AMatchingProvedTreeIsPromotedWithoutRunningAGate is R10.1,
+// and the "no gate ran" half is the whole economic argument: the hours were
+// already spent, and spending them again is what makes an operator stop using
+// `--check --llm` first.
+func TestApplierPromote_AMatchingProvedTreeIsPromotedWithoutRunningAGate(t *testing.T) {
+	applier, overlayDir, pkg, watch, pins := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if !result.Success {
+		t.Fatalf("promoting a validated tree failed: %v", result.Error)
+	}
+	if result.ValidationSource != "staged" {
+		t.Errorf("ValidationSource = %q, want %q — this bump was proved before the run started (R10.3)", result.ValidationSource, "staged")
+	}
+	if watch.spawns != spawnsBefore {
+		t.Errorf("%d child process(es) ran while promoting an already-validated tree; the gates were paid for once already (R10.1)",
+			watch.spawns-spawnsBefore)
+	}
+
+	// R3.4: the bytes published are the bytes that were validated.
+	published := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+	got, err := os.ReadFile(published)
+	if err != nil {
+		t.Fatalf("the promoted ebuild is not in the overlay: %v", err)
+	}
+	if string(got) != candidateBody(t, overlayDir) {
+		t.Error("the published bytes differ from the staged ones; promotion publishes exactly what was validated (R3.4)")
+	}
+	if pins[pkg] != "1.29.2" {
+		t.Errorf("the pin after promotion is %q, want %q", pins[pkg], "1.29.2")
+	}
+}
+
+// TestApplierPromote_ARecordShowingAFailedGateIsRevalidated is THE blocker case.
+// R3.6 retains the tree of every bump that was not promoted — every failure — so
+// without this condition the retention rule feeds R10.1 directly and yesterday's
+// rejected bump is published today.
+//
+// The tree here is a perfect match on package, version, bytes and digest. The
+// only thing wrong with it is that it FAILED, and that has to be enough.
+func TestApplierPromote_ARecordShowingAFailedGateIsRevalidated(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	body := candidateBody(t, overlayDir)
+
+	staged := stageCandidateFor(t, applier.StagingRoot(), overlayDir, body)
+	failed := provedRecord(validate.DepthConfigure, digestOf(body), stagedDistfileDigest)
+	failed.Gates = append(failed.Gates, validate.GateResult{
+		Gate:    validate.GateConfigure,
+		Outcome: validate.OutcomeFailed,
+		Findings: []validate.Finding{{
+			Gate: validate.GateConfigure, Severity: validate.SeverityError,
+			Detail: `meson.build:1:0: ERROR: Unknown option: "aalib".`,
+		}},
+	})
+	if err := validate.WriteStageRecord(staged, failed); err != nil {
+		t.Fatalf("writing the failed record: %v", err)
+	}
+
+	spawnsBefore := watch.spawns
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "this-run" {
+		t.Fatalf("ValidationSource = %q for a tree whose own record shows a FAILED gate; R3.6 retains the tree of every "+
+			"failure, so promoting on a match alone republishes yesterday's rejected bump (R10.1)", result.ValidationSource)
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no gate ran for a tree recorded as failing; the bump was published on the strength of a record that says it did not pass")
+	}
+}
+
+// TestApplierPromote_ATreeWithNoRecordIsRevalidated is R10.5. An unrecorded tree
+// is not evidence of anything: it could be a half-written staging, a tree from a
+// version of bentoo that predates the record, or one an operator copied in by
+// hand. "No claim" is not "a passing claim".
+func TestApplierPromote_ATreeWithNoRecordIsRevalidated(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	stageCandidateFor(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir))
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "this-run" {
+		t.Errorf("ValidationSource = %q for a staged tree carrying no record; absence of a claim is not a passing claim (R10.5)",
+			result.ValidationSource)
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no gate ran for a tree with no record at all")
+	}
+}
+
+// TestApplierPromote_ATreeRecordedShallowerThanThisRunNeedsIsRevalidated is the
+// depth half of R10.1. A tree proved at `options` says nothing about whether the
+// package configures, so a run that selected `configure` cannot borrow it — and
+// the depth can legitimately rise between two runs, through a policy change, a
+// `--depth` flag or a reviewer escalation.
+func TestApplierPromote_ATreeRecordedShallowerThanThisRunNeedsIsRevalidated(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierDepth(validate.DepthConfigure),
+	)
+
+	// Proved, matching, clean — but only to the static gate.
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthOptions)
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "this-run" {
+		t.Errorf("ValidationSource = %q for a tree recorded at depth options while this run selected configure; "+
+			"a shallower proof does not cover a deeper question (R10.1)", result.ValidationSource)
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no gate ran although the retained proof stopped short of the depth this run needs")
+	}
+}
+
+// TestApplierPromote_ATreeRecordedDeeperThanNeededIsStillPromoted is the same
+// rule read the other way: "not below" means a compile-depth proof satisfies a
+// configure-depth run. Requiring equality would throw away the most expensive
+// evidence there is whenever policy relaxed by one rung.
+func TestApplierPromote_ATreeRecordedDeeperThanNeededIsStillPromoted(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierDepth(validate.DepthConfigure),
+	)
+
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthCompile)
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "staged" {
+		t.Errorf("ValidationSource = %q for a tree proved at compile depth while this run needed configure; "+
+			"the condition is \"not below\", and a deeper proof covers a shallower question", result.ValidationSource)
+	}
+	if watch.spawns != spawnsBefore {
+		t.Errorf("%d gate(s) ran although the retained proof went deeper than this run required", watch.spawns-spawnsBefore)
+	}
+}
+
+// TestApplierPromote_ARecordOfSkippedGatesIsStillPromotable keeps R10.1 aligned
+// with R3.3 and R3.12: SKIPPED is a reported outcome, not a failure, and a host
+// that could not build for want of an installed dependency still produced a
+// promotable result. Reading "PASS or SKIPPED" as "PASS only" would quietly
+// revalidate — and then re-skip — every such bump on every run.
+func TestApplierPromote_ARecordOfSkippedGatesIsStillPromotable(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	body := candidateBody(t, overlayDir)
+
+	staged := stageCandidateFor(t, applier.StagingRoot(), overlayDir, body)
+	skipped := validate.StageRecord{
+		Depth: validate.DepthConfigure,
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomeSkipped, Reason: "dev-qt/qtbase-6.9.1 is not installed"},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomeSkipped, Reason: "dev-qt/qtbase-6.9.1 is not installed"},
+		},
+		EbuildDigest:   digestOf(body),
+		DistfileDigest: stagedDistfileDigest,
+	}
+	if err := validate.WriteStageRecord(staged, skipped); err != nil {
+		t.Fatalf("writing the record: %v", err)
+	}
+
+	spawnsBefore := watch.spawns
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "staged" {
+		t.Errorf("ValidationSource = %q for a record of PASS and SKIPPED outcomes; SKIPPED is a reported outcome and R3.3 "+
+			"promotes on \"PASS or SKIPPED\"", result.ValidationSource)
+	}
+	if watch.spawns != spawnsBefore {
+		t.Errorf("%d gate(s) re-ran a question this host had already answered with a named skip", watch.spawns-spawnsBefore)
+	}
+}
+
+// TestApplierPromote_AnOlderStagedTreeThatStillMatchesIsPromoted is the case
+// that stops ModTime. The staged tree here is a full day older than the overlay
+// and identical in content; git, rsync, a container build and a restored backup
+// all produce exactly this.
+func TestApplierPromote_AnOlderStagedTreeThatStillMatchesIsPromoted(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	staged := stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
+
+	// Age the whole staged tree by a day, and touch the overlay's own ebuild so
+	// the ordering is unambiguous: staged is OLDER, content is IDENTICAL.
+	yesterday := time.Now().Add(-24 * time.Hour)
+	if err := filepath.Walk(staged, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, yesterday, yesterday)
+	}); err != nil {
+		t.Fatalf("ageing the staged tree: %v", err)
+	}
+	source := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.28.6.ebuild")
+	now := time.Now()
+	if err := os.Chtimes(source, now, now); err != nil {
+		t.Fatalf("touching the source ebuild: %v", err)
+	}
+
+	spawnsBefore := watch.spawns
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "staged" {
+		t.Errorf("ValidationSource = %q for a staged tree that is older but byte-identical; "+
+			"a mtime moves on checkout, rsync, a container build and a restored backup without a byte changing (R10.1)",
+			result.ValidationSource)
+	}
+	if watch.spawns != spawnsBefore {
+		t.Errorf("%d gate(s) ran because the staged tree was older, not because anything differed", watch.spawns-spawnsBefore)
+	}
+}
+
+// TestApplierPromote_ATreeTheFixerModifiedIsStillPromotable is the pre-fixer
+// rule, and it is worth its own case because getting it wrong is invisible: the
+// bump still publishes, it just pays for a second configure — on exactly the
+// packages that needed a repair, which are the slowest ones.
+//
+// The tree here has been edited on disk, as R8.1 has the fixer edit it. The
+// record still carries the digest of the candidate AS STAGED, and that is what
+// promotion compares against.
+func TestApplierPromote_ATreeTheFixerModifiedIsStillPromotable(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	asStaged := candidateBody(t, overlayDir)
+
+	staged := stageProvedCandidate(t, applier.StagingRoot(), overlayDir, asStaged, validate.DepthConfigure)
+
+	// The fixer's edit: the staged ebuild on disk no longer matches the bytes
+	// that were staged, and the record deliberately still names the original.
+	repaired := asStaged + "\n# the build fixer dropped -Daalib= and -Dlibcaca=\n"
+	candidate := filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+	if err := os.WriteFile(candidate, []byte(repaired), 0o644); err != nil {
+		t.Fatalf("simulating the fixer's edit: %v", err)
+	}
+
+	spawnsBefore := watch.spawns
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "staged" {
+		t.Errorf("ValidationSource = %q for a tree the fixer edited; the comparison is against the candidate's bytes "+
+			"AS STAGED, or every repaired bump revalidates — and those are the expensive ones (R10.1)", result.ValidationSource)
+	}
+	if watch.spawns != spawnsBefore {
+		t.Errorf("%d gate(s) re-ran because the fixer had edited the staged tree", watch.spawns-spawnsBefore)
+	}
+
+	// And what is published is the REPAIRED ebuild, since that is what the
+	// re-run validated.
+	published := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+	got, err := os.ReadFile(published)
+	if err != nil {
+		t.Fatalf("reading the promoted ebuild: %v", err)
+	}
+	if string(got) != repaired {
+		t.Error("the published bytes are not the repaired ones; promotion publishes the tree that was validated, fixes included (R3.4)")
+	}
+}
+
+// TestApplierPromote_AChangedDistfileDigestIsNotPromoted covers the input that
+// is not in the overlay at all. A tarball re-rolled upstream under the SAME name
+// between staging and promotion is a different source tree, and every gate's
+// answer was about the old one.
+func TestApplierPromote_AChangedDistfileDigestIsNotPromoted(t *testing.T) {
+	applier, overlayDir, pkg, _, pins := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	body := candidateBody(t, overlayDir)
+
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, body, validate.DepthConfigure)
+
+	// The published Manifest now names a different digest for the same file.
+	writePublishedManifest(t, overlayDir,
+		"DIST gst-plugins-good-1.29.2.tar.xz 100 BLAKE2B "+rerolledDistfileDigest+" SHA512 "+rerolledDistfileDigest+"\n")
+
+	result, _ := applier.Apply(pkg, false)
+
+	if result.Success && result.ValidationSource == "staged" {
+		t.Fatal("a retained tree was promoted although the distfile digest changed under it; every gate's answer was about " +
+			"a source tree that is no longer the one being published")
+	}
+	msg := ""
+	if result.Error != nil {
+		msg = result.Error.Error()
+	}
+	report := msg + " " + result.DepthReason + " " + applySummary(result)
+	if result.ValidationSource == "this-run" {
+		return // revalidating is an acceptable answer; naming the mismatch is not optional below
+	}
+	for _, want := range []string{stagedDistfileDigest, rerolledDistfileDigest} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the refusal does not name the digest %q; the operator cannot tell WHICH input moved: %q", want, report)
+		}
+	}
+	if len(pins) != 0 {
+		t.Errorf("a bump refused for a changed distfile wrote a pin: %v", pins)
+	}
+}
+
+// TestApplierPromote_DifferentEbuildBytesTriggerRevalidation is R10.2. A staged
+// tree whose candidate no longer matches what this apply would produce is
+// evidence about a different bump.
+func TestApplierPromote_DifferentEbuildBytesTriggerRevalidation(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir,
+		candidateBody(t, overlayDir)+"\n# an edit nobody validated\n", validate.DepthConfigure)
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "this-run" {
+		t.Errorf("ValidationSource = %q, want %q — the staged candidate differs from the one this apply produces, "+
+			"so the retained tree proves nothing about it (R10.2)", result.ValidationSource, "this-run")
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no gate ran although the staged tree did not match; the bump was published on the strength of a tree that describes a different candidate")
+	}
+}
+
+// TestApplierPromote_NoStagedTreeAtAllValidatesFirst is R10.2's ordinary case:
+// the operator ran `--apply` without a proving `--check` first, which is how
+// most applies happen.
+func TestApplierPromote_NoStagedTreeAtAllValidatesFirst(t *testing.T) {
+	applier, _, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource != "this-run" {
+		t.Errorf("ValidationSource = %q with no retained tree on disk, want %q", result.ValidationSource, "this-run")
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no gate ran and no staged tree existed; the bump was published without being validated at all")
+	}
+}
+
+// TestApplierPromote_ARecordIsWrittenBesideEveryStagedTree is R10.4 from the
+// producing side. Without it the whole condition above is unreachable: the first
+// run writes nothing, so the second run always revalidates and the feature is
+// dead code that still costs the hours.
+func TestApplierPromote_ARecordIsWrittenBesideEveryStagedTree(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	// Located through StagingRoot rather than result.StagedPath: 4.2 CLEARS
+	// StagedPath on a success on purpose — "the retained tree is a failure's
+	// evidence, not a success's" — and this case runs a successful apply, so
+	// reading the path off the result would contradict a rule the story
+	// deliberately made. The tree is where Stage always puts it, which is what
+	// the sibling cases below already rely on. Surface only; every assertion
+	// below is the one that was authored.
+	staged, err := validate.StagedTreePath(applier.StagingRoot(), pkg, "1.29.2")
+	if err != nil {
+		t.Fatalf("deriving the staged tree path: %v", err)
+	}
+
+	record, err := validate.ReadStageRecord(staged)
+	if err != nil {
+		t.Fatalf("no stage record beside %q: %v — R10.4 writes one for every staged tree, and R10.1 cannot promote without it",
+			staged, err)
+	}
+	if len(record.Gates) == 0 {
+		t.Error("the record names no gates; it has to say what was checked, not merely that something was")
+	}
+	if record.Depth == validate.DepthNone && result.DepthReached != "none" {
+		t.Errorf("the record's depth is none although the run reached %q", result.DepthReached)
+	}
+	if record.EbuildDigest == "" {
+		t.Error("the record carries no candidate digest, so a later run cannot tell whether the inputs moved")
+	}
+}
+
+// TestApplierPromote_TheReportStatesWhichPathWasTaken is R10.3 at the surface
+// the operator reads. A field nothing renders is a field the next refactor
+// deletes — the same argument 4.2 makes for the staged path.
+func TestApplierPromote_TheReportStatesWhichPathWasTaken(t *testing.T) {
+	applier, overlayDir, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	summary := applySummary(result)
+	if !strings.Contains(strings.ToLower(summary), "validated") && !strings.Contains(strings.ToLower(summary), "staged") {
+		t.Errorf("the success summary %q does not say whether the gates ran now or were paid for earlier; "+
+			"a fast green and a proved green look identical without it (R10.3)", summary)
+	}
+}
+
+// TestApplierPromote_ValidationSourceIsOneOfTwoKnownValues keeps the field from
+// becoming free text. Two callers render it and a third will eventually branch
+// on it.
+func TestApplierPromote_ValidationSourceIsOneOfTwoKnownValues(t *testing.T) {
+	applier, overlayDir, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	switch result.ValidationSource {
+	case "staged", "this-run":
+	default:
+		t.Errorf("ValidationSource = %q; the two values are \"staged\" and \"this-run\"", result.ValidationSource)
 	}
 }

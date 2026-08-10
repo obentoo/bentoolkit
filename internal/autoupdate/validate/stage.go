@@ -207,7 +207,13 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", fmt.Errorf("the published overlay %s is not a directory", overlayRoot)
 	}
 
-	stagedRoot = filepath.Join(stagingRoot, category, pkg, version)
+	// Through StagedTreePath rather than joined here, so that the layout a
+	// promoting run looks a retained tree up by (R10.1) and the layout this
+	// function creates are the same line of code.
+	stagedRoot, err = StagedTreePath(stagingRoot, req.Atom, version)
+	if err != nil {
+		return "", err
+	}
 	if err := ensureOutsideOverlay(overlayRoot, stagedRoot); err != nil {
 		return "", err
 	}

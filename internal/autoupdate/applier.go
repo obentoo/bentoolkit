@@ -203,6 +203,16 @@ type ApplyResult struct {
 	// depths differ — why validation stopped short, naming the atoms or the host
 	// condition that stopped it. It is never empty on a staged apply.
 	DepthReason string
+	// ValidationSource says which of R10's two paths this bump took: "staged"
+	// when a retained tree that had already been proved was promoted as it stood
+	// (R10.1), "this-run" when the gates ran here (R10.2). It is R10.3 — state
+	// per package which of the two happened — carried on the result so the
+	// reports and the summary line can both say it.
+	//
+	// Empty on an apply that ran with no staging root at all, because on that
+	// path no gate runs and neither answer would be true. The two constants are
+	// ValidationSourceStaged and ValidationSourceThisRun.
+	ValidationSource string
 }
 
 // Applier handles update application for packages.
@@ -680,6 +690,16 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		applier.pendingDeleteFn = applier.pending.Delete
 	}
 
+	// A caller that configured no depth table gets the SHIPPED one, not an empty
+	// map. The difference is not cosmetic: with an empty table every bump falls
+	// through classDepth's last fail-safe to `compile`, so an Applier built
+	// without the option would build every revision bump — which is neither the
+	// documented default nor a cost anybody agreed to. Overrides are left alone;
+	// a caller that supplied only overrides meant exactly that.
+	if applier.validatePolicy.ByClass == nil {
+		applier.validatePolicy.ByClass = validate.DefaultDepthPolicy().ByClass
+	}
+
 	// Same shape for the registry writer: a nil field means "production path",
 	// so a caller that never passes WithApplierSetVersionsFunc gets the real
 	// raw-text write into <overlay>/.autoupdate/packages.toml (S021-R2.1).
@@ -832,6 +852,71 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		rollbackPublished(result.Error)
 	}()
 
+	// gates accumulates every outcome this run produces, and it is declared here
+	// rather than where the first one is assigned so that the record written
+	// beside the staged tree (R10.4, below) sees the WHOLE list however this
+	// function returns — including the failing exits, whose record is the one that
+	// stops the next run promoting a rejected bump.
+	var gates []validate.GateResult
+
+	// R10: what an earlier run already proved about this exact bump.
+	//
+	// Taken BEFORE anything is staged, for the reason staging itself makes
+	// unavoidable: validate.Stage replaces the retained tree (R3.7), so a question
+	// asked after it is a question about a tree this run just rebuilt.
+	var inputs stagedInputs
+	if a.stagingRoot != "" {
+		captured, err := a.stagedInputsFor(pkg, currentVersion, update)
+		if err != nil {
+			return a.failApply(pkg, result, err)
+		}
+		inputs = captured
+
+		// R10.3: one of the two answers is recorded on every staged apply, and
+		// the default is the honest one — the gates below run in this run unless
+		// the retained tree takes their place.
+		result.ValidationSource = ValidationSourceThisRun
+
+		reuse := a.reusableStagedTree(pkg, newVersion, inputs, depth.Depth)
+		if reuse.root != "" {
+			// Only when a tree was actually there. R10.3's "which of the two
+			// happened" is already on the result and in the summary line; what
+			// this adds is the WHY, and "there was no retained tree" explains
+			// nothing an operator did not know from the absence of one.
+			result.DepthReason = appendDepthReason(result.DepthReason, reuse.reason)
+		}
+		if reuse.err != nil {
+			// The retained tree matched this bump exactly and its distfile moved
+			// underneath it. Reported against the staged proof, because that is
+			// what the decision was taken on — nothing was validated here.
+			result.ValidationSource = ValidationSourceStaged
+			result.StagedPath = reuse.root
+			return a.failApply(pkg, result, reuse.err)
+		}
+		if reuse.promote {
+			// R10.1: the hours were already spent. Nothing between here and the
+			// published write runs a gate, which is the entire economic argument
+			// — an operator who pays for `--check --llm` and then pays again for
+			// `--apply` stops running the check first.
+			result.ValidationSource = ValidationSourceStaged
+			result.StagedPath = reuse.root
+			result.DepthReached = reuse.reached
+
+			promoted, err := a.promote(reuse.cand, pkg, newVersion)
+			if err != nil {
+				return a.failApply(pkg, result, err)
+			}
+			rollbackPublished = promoted
+
+			result.Success = true
+			// R3.6's other direction, exactly as on the validating path: the
+			// retained tree is a failure's evidence, and there is no failure here.
+			result.StagedPath = ""
+			a.completeApply(pkg, newVersion, result)
+			return result, nil
+		}
+	}
+
 	// Materialise the candidate where the gates will read it: in a staged tree
 	// outside the overlay when a staging root was configured, in the published
 	// overlay otherwise.
@@ -851,6 +936,18 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		return a.failApply(pkg, result, prepErr)
 	}
 
+	// R10.4: a record of what the gates said, beside the tree they said it about,
+	// written however this apply ends.
+	//
+	// A defer rather than a call at each exit, and that is not brevity: there are
+	// six ways out from here down, and the ONE that must never be forgotten is the
+	// failing one — an unrecorded failed tree is promoted by the next run's R10.1
+	// on a match alone. The closure reads `gates` and `depth` at return time, so it
+	// records the final list and the depth a reviewer's escalation may have raised.
+	if stagedRoot := result.StagedPath; stagedRoot != "" {
+		defer func() { a.recordStagedProof(stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
+	}
+
 	// Run manifest command. When a fixer is wired, a failure here triggers a
 	// single agentic repair-and-retry before the apply is declared failed; the
 	// outcome (including whether a fix was applied) is recorded on result. On the
@@ -867,7 +964,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// the whole point of the slot: a gate added ABOVE that line instead of below
 	// it would silently undo sub-task 4.1's move, and the state's meaning —
 	// "passed the static gates" — would quietly go back to "the manifest ran".
-	gates := a.runStaticGates(cand, pkg, newVersion)
+	gates = a.runStaticGates(cand, pkg, newVersion)
 
 	// Update status to validated.
 	//
@@ -973,6 +1070,25 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// what is left is one directory per version, not a growing pile per run.
 	result.StagedPath = ""
 
+	a.completeApply(pkg, newVersion, result)
+	return result, nil
+}
+
+// completeApply is the bookkeeping every promoted bump gets once the published
+// overlay holds it: the pending entry is dropped, the registry pin is written and
+// `--clean` sweeps.
+//
+// It is a function rather than the tail of Apply because story 033 gave promotion
+// TWO routes to this point — the gates ran here, or a retained tree that had
+// already been proved was promoted as it stood (R10.1) — and a bump that reached
+// the overlay by the second route needs exactly the same three steps. Two copies
+// would diverge in the direction that hurts: a promotion with no pin leaves
+// `--clean` aiming at the only ebuild present.
+//
+// NOTHING HERE MAY FAIL THE APPLY. Every miss is a warning on the result with
+// Success left true and Error left nil — setting Error would fire the deferred
+// rollback and delete the ebuild this apply just published (S021-UB5).
+func (a *Applier) completeApply(pkg, newVersion string, result *ApplyResult) {
 	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
 	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (via the package warnLogf sink so tests
@@ -1030,8 +1146,24 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			result.CleanWarning = err.Error()
 		}
 	}
+}
 
-	return result, nil
+// appendDepthReason adds one more sentence to the reason a result carries,
+// keeping the ones already there.
+//
+// The depth reason is the only free-text field an operator reads to understand
+// why a bump was treated the way it was, and R10.3's answer ("the gates ran here"
+// or "an earlier run had already proved this") has to sit BESIDE the depth
+// decision rather than replace it — the two answer different questions and both
+// are needed to make sense of a four-second apply.
+func appendDepthReason(existing, added string) string {
+	switch {
+	case strings.TrimSpace(added) == "":
+		return existing
+	case strings.TrimSpace(existing) == "":
+		return added
+	}
+	return existing + "; " + added
 }
 
 // failApply records err as this apply's outcome and mirrors it into
@@ -1194,10 +1326,25 @@ func applySummary(result *ApplyResult) string {
 
 	switch {
 	case result.Success:
+		summary := result.NewVersion
 		if result.Fixed {
-			return result.NewVersion + " (fixed)"
+			summary += " (fixed)"
 		}
-		return result.NewVersion
+		// R10.3 at the surface the operator actually reads. Without it a fast
+		// green and a proved green are the same line: an apply that took four
+		// seconds because an earlier run paid for the gates looks exactly like one
+		// that took four seconds because nothing was checked.
+		//
+		// Empty on the pre-staging path, where no gate runs and neither answer
+		// would be true — which also keeps that path's summary byte-identical to
+		// every release before this one.
+		switch result.ValidationSource {
+		case ValidationSourceStaged:
+			summary += " (promoted from the tree an earlier run staged and validated)"
+		case ValidationSourceThisRun:
+			summary += " (validated in this run)"
+		}
+		return summary
 	case result.Obsolete:
 		return result.ObsoleteReason
 	case result.Held:
@@ -2167,6 +2314,20 @@ func defaultConfirmFunc(prompt string) bool {
 
 	response = strings.TrimSpace(strings.ToLower(response))
 	return response == "y" || response == "yes"
+}
+
+// StagingRoot returns the directory this applier stages candidates under, empty
+// when it was constructed without one (in which case no gate runs and the
+// candidate is written straight into the published overlay).
+//
+// It is exported because the staging root is where the EVIDENCE lives: the
+// retained tree of every bump that was not promoted (R3.6) and the record beside
+// it (R10.4). A caller that has to tell an operator where to look — or that wants
+// to prove that a promotion really came from a tree an earlier run left there —
+// cannot do either from the option it passed in, because the applier is the thing
+// that decides what to do with it.
+func (a *Applier) StagingRoot() string {
+	return a.stagingRoot
 }
 
 // Pending returns the pending list instance.

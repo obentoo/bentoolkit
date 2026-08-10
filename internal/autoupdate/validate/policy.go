@@ -78,6 +78,40 @@ type DepthPolicy struct {
 	Overrides map[string]DepthOverride
 }
 
+// DefaultDepthPolicy is the depth table this toolkit SHIPS: a revision or patch
+// bump is read but never built, and a series or major bump is taken as far as
+// configure.
+//
+// # Why an empty policy must not be the same thing as this one
+//
+// classDepth's last fallback is the deepest rung, and that is right for a table
+// somebody filled in and left a hole in: not knowing how far a bump moved is not
+// evidence that it moved a little. It is the WRONG answer for a table nobody
+// filled in at all, because then the fallback is not covering a hole, it IS the
+// policy — every revision bump compiles, which is neither what the documentation
+// promises nor a cost anyone agreed to. So a caller that supplies no table gets
+// the shipped one, and the fail-safe goes back to covering the case it was
+// written for.
+//
+// # It is duplicated in config, deliberately and visibly
+//
+// config.DefaultDepthRevision and its three siblings hold the same values as
+// strings, because the config layer has to answer GetDepthForClass for a key the
+// operator did not write. This package cannot read those constants — the import
+// runs the other way, and validate deliberately knows nothing about config — so
+// THE TWO MUST BE READ TOGETHER: a change to either is a change to both.
+func DefaultDepthPolicy() DepthPolicy {
+	return DepthPolicy{
+		ByClass: map[Class]Depth{
+			ClassRevision: DepthOptions,
+			ClassPatch:    DepthOptions,
+			ClassSeries:   DepthConfigure,
+			ClassMajor:    DepthConfigure,
+		},
+		Overrides: map[string]DepthOverride{},
+	}
+}
+
 // DepthRequest is everything ResolveDepth is allowed to look at. It performs no
 // I/O of its own, so a depth decision is reproducible from these fields alone
 // and can be replayed in a report.
