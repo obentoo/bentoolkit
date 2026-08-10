@@ -475,13 +475,12 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	overlayPath := appCtx.OverlayPath
 
 	// Determine config directory for autoupdate
-	home, err := os.UserHomeDir()
+	configDir, err := autoupdateConfigDir()
 	if err != nil {
-		logger.Error("failed to get home directory: %v", err)
+		logger.Error("%v", err)
 		osExit(1)
 		return
 	}
-	configDir := filepath.Join(home, ".config", "bentoo", "autoupdate")
 
 	// Wire SIGINT/SIGTERM into a context so an in-flight check cancels cleanly.
 	// The Checker threads this context through every outbound HTTP/LLM call, so
@@ -1400,7 +1399,7 @@ func resolveAutoupdateValidatePolicy(cfg *config.Config, cmd *cobra.Command) (au
 // published overlay and no gate runs, which is every release before this one.
 func applierValidateOptions(configDir string) []autoupdate.ApplierOption {
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, "staging")),
+		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, stagingDirName)),
 		autoupdate.WithApplierValidatePolicy(autoupdateValidate.Policy),
 		autoupdate.WithApplierRequireIsolation(autoupdateValidate.RequireIsolation),
 		autoupdate.WithApplierRequireProof(autoupdateValidate.RequireProof),
@@ -1409,6 +1408,44 @@ func applierValidateOptions(configDir string) []autoupdate.ApplierOption {
 		opts = append(opts, autoupdate.WithApplierDepth(*autoupdateValidate.Depth))
 	}
 	return opts
+}
+
+// stagingDirName is the ONE spelling of the staged-tree directory under the
+// autoupdate config dir (S033-D1).
+//
+// Both entry points join it — `--apply` through applierValidateOptions and
+// `overlay validate --depth` through autoupdateStagingRoot — because the path is
+// where the retention and reuse rules are recorded (R3.7, R10.1). Two spellings
+// would put the two commands' staged trees in different places, and a tree
+// proved by one would silently never be found by the other.
+const stagingDirName = "staging"
+
+// autoupdateConfigDir is where this command keeps its state: the pending list,
+// the retained logs and the staged trees.
+//
+// It is a function rather than four copies of the same filepath.Join so that
+// `overlay validate --depth` and `overlay autoupdate --apply` cannot come to
+// disagree about which directory that is.
+func autoupdateConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "bentoo", "autoupdate"), nil
+}
+
+// autoupdateStagingRoot is the directory staged trees are prepared under.
+//
+// It is deliberately NOT under the overlay and NOT under os.TempDir() (S033-D1):
+// a tree under the overlay is an unclaimed ebuild that `--clean` deletes and
+// `overlay validate` reports, and a tree under /tmp does not survive the run,
+// which R3.6 and R3.7 require so a failure can still be inspected afterwards.
+func autoupdateStagingRoot() (string, error) {
+	dir, err := autoupdateConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, stagingDirName), nil
 }
 
 // runApply handles the --apply flag. ctx is threaded into the Applier via

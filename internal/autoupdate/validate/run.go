@@ -28,6 +28,49 @@ type Options struct {
 	// Selector is "", "<category>" or "<category>/<package>". Empty validates
 	// every ebuild in the overlay.
 	Selector string
+	// Depth is how far up the ladder this run goes, spelled the way `--depth`
+	// and the config key spell it: none, options, patches, configure or
+	// compile, each including every rung before it (R2, R11.1).
+	//
+	// EMPTY MEANS "options", AND THAT IS THE WHOLE COMPATIBILITY PROMISE
+	// (R11.3). Every caller written before the ladder existed leaves this field
+	// zero, and each of them asked for exactly the static option gate. ParseDepth
+	// refuses "" rather than answering DepthNone, precisely so a mistyped key
+	// cannot switch validation off in silence — so the empty-to-options mapping
+	// is made HERE, once, instead of being left to each caller to remember.
+	//
+	// It is a string and not a Depth so the word the operator typed survives into
+	// the run and can be quoted back at them when it does not parse.
+	Depth string
+	// StagingRoot is the directory a run above DepthOptions prepares its staged
+	// trees under, <StagingRoot>/<category>/<package>/<version> (design D1).
+	//
+	// It is unused at or below DepthOptions, which is why a --depth-less run
+	// leaves it empty: the static gate reads files that are already on disk and
+	// writes nothing, and a scratch directory nothing uses is a directory that
+	// should not be created.
+	//
+	// IT MAY NOT RESOLVE INSIDE THE OVERLAY, and Stage refuses one that does
+	// rather than trusting its callers: ScanOverlay walks the overlay
+	// category/package deep and Reconcile turns every ebuild no registry pin
+	// claims into a deletion candidate, so a staged tree parked under the overlay
+	// root would be reported as a defect by this very command and deleted by
+	// `overlay autoupdate --clean`.
+	StagingRoot string
+}
+
+// depth resolves Options.Depth to a rung of the ladder, mapping the empty
+// string to DepthOptions — see the field's own note for why that mapping lives
+// here and not in ParseDepth.
+func (o Options) depth() (Depth, error) {
+	if o.Depth == "" {
+		return DepthOptions, nil
+	}
+	d, err := ParseDepth(o.Depth)
+	if err != nil {
+		return DepthNone, fmt.Errorf("reading the requested validation depth: %w", err)
+	}
+	return d, nil
 }
 
 // ebuildTarget is one ebuild the run has to answer for.
@@ -61,7 +104,23 @@ type qaResult struct {
 // Nothing here reaches the network (R4.4). That is asserted structurally, by a
 // test over this package's own imports, because behaviour cannot prove a
 // negative.
+//
+// # The depth is answered, never assumed
+//
+// Options.Depth selects a rung of the ladder and every rung gets an answer. At
+// or below DepthOptions that answer is this file's own static gate. Above it,
+// the build gates are reported as SKIPPED NAMING WHAT STOPPED THEM rather than
+// left out: the governing rule above applies to the ladder itself, and a report
+// that simply omitted the configure gate the operator asked for would be the
+// silence this whole package exists to remove.
 func Run(ctx context.Context, opts Options) (Report, error) {
+	// Before the tree is walked: a depth that does not parse makes the whole run
+	// meaningless, and answering it costs nothing.
+	depth, err := opts.depth()
+	if err != nil {
+		return Report{}, err
+	}
+
 	scan, err := overlay.ScanOverlay(opts.Overlay)
 	if err != nil {
 		return Report{}, fmt.Errorf("scanning overlay %q: %w", opts.Overlay, err)
@@ -72,6 +131,16 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	targets := selectTargets(scan, opts.Selector)
 	if len(targets) == 0 && opts.Selector != "" {
 		report.UnmatchedSelector = opts.Selector
+		return report, nil
+	}
+
+	// DepthNone runs no gate at all, so it does not get as far as locating a
+	// distdir — but it still reports one result per ebuild, saying that nothing
+	// was measured. An empty report would be indistinguishable from a clean one.
+	if depth == DepthNone {
+		for _, target := range targets {
+			report.Results = append(report.Results, unvalidatedResult(target))
+		}
 		return report, nil
 	}
 
@@ -90,10 +159,94 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	qa := map[string]qaResult{}
 	for _, target := range targets {
 		res := validateOptions(ctx, target, distdir, haveDistdir)
+		// Before attachQA, so the gates read in ladder order — options, then the
+		// build gates, then the advisory QA scan that decides nothing.
+		noteBuildDepth(&res, depth, opts.StagingRoot)
 		attachQA(ctx, &res, target, qa)
 		report.Results = append(report.Results, res)
 	}
 	return report, nil
+}
+
+// unvalidatedResult is what DepthNone reports for one ebuild: a SKIPPED option
+// gate saying that no validation was asked for.
+//
+// It states the depth on both fields because the request and the reach really
+// are the same here — nothing was asked for and nothing ran — which is the one
+// case where "as far as it got" needs no explanation.
+func unvalidatedResult(target ebuildTarget) EbuildResult {
+	res := skippedResult(target.atom, target.version,
+		"depth none was requested, so no gate ran and this report says nothing about this ebuild")
+	res.Depth = DepthNone.String()
+	res.DepthRequested = DepthNone.String()
+	return res
+}
+
+// noteBuildDepth records, on a result the static gate has just produced, that a
+// depth above `options` was asked for and how far this entry point got (R4.4,
+// R6.4, R11.2).
+//
+// # Why the build gates SKIP here instead of running
+//
+// RunBuildGates drives `ebuild <staged candidate> clean <phase>`, and Portage
+// refuses an ebuild whose Manifest does not describe its archive. Stage
+// deliberately does not carry the published Manifest across — it describes the
+// versions already published, not the candidate — so the staged tree needs a
+// manifest step, and that step (`pkgdev manifest`, with its fetch, its timeout
+// and its own repair path) lives on the apply side, in package autoupdate. It
+// cannot be reached from here: applier.go already imports this package, so the
+// import back would be a cycle.
+//
+// Running the gates anyway would produce a confident FAILED for an ebuild that
+// is fine — the false-FAILED failure mode findDistfile's own notes describe, and
+// the one that gets a gate switched off. So the depth is reported unreached,
+// with the reason and the command that does reach it.
+//
+// # Why the reach is PASS-only
+//
+// It mirrors the applier's recordDepthReached exactly: a rung is "reached" when
+// its own gate PASSED. Two entry points answering "how far did this get" by
+// different rules would make the same bump report two depths.
+//
+// Below DepthPatches this is a no-op, including for the default rung — a
+// --depth-less run must produce the bytes story 031 shipped, and populating a
+// field that report leaves empty would change the JSON document (R11.3).
+func noteBuildDepth(res *EbuildResult, depth Depth, stagingRoot string) {
+	if depth <= DepthOptions {
+		return
+	}
+
+	reached := DepthNone
+	for _, gate := range res.Gates {
+		if gate.Gate == GateOptions && gate.Outcome == OutcomePass {
+			reached = DepthOptions
+		}
+	}
+
+	reason := buildDepthNotRunReason(depth, stagingRoot)
+	res.Depth = reached.String()
+	res.DepthRequested = depth.String()
+	res.DepthReason = reason
+	res.Gates = append(res.Gates, SkippedGates(depth, reason)...)
+}
+
+// buildDepthNotRunReason is the sentence every skipped build gate of a
+// standalone run carries: what stopped it, where its tree would have gone, and
+// the command that does run it.
+//
+// The staging root is named because its absence and its presence are different
+// facts. A run given one has a scratch directory ready and is short only the
+// manifest step; a run given none was not even plumbed for the depth it was
+// asked for, and only the caller can fix that.
+func buildDepthNotRunReason(depth Depth, stagingRoot string) string {
+	where := "no staging root was given, so there is nowhere to prepare one either"
+	if root := strings.TrimSpace(stagingRoot); root != "" {
+		where = "its staged tree would be prepared under " + root + ", never in the published overlay"
+	}
+	return fmt.Sprintf("depth %s was requested and only the static gates ran: a build gate needs a staged tree whose "+
+		"Manifest describes the candidate archive, and the manifest step that writes one runs on the apply path (%s); "+
+		"run `bentoo overlay autoupdate --apply <package> --depth=%s` to drive the build gates",
+		depth, where, depth)
 }
 
 // selectTargets resolves the selector against the overlay, returning one target

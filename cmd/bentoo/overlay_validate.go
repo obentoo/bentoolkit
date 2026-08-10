@@ -67,9 +67,18 @@ pkgcheck is installed. They never affect the exit code: the overlay carries
 pre-existing QA findings unrelated to any bump, and letting them decide the
 status would fail the whole tree and reduce this command to noise.
 
+--depth selects how far up the ladder to go: none, options, patches, configure
+or compile, each rung including every rung before it. It defaults to options,
+which is this command as it has always been — read-only, unprivileged, building
+nothing. Above options the gates need a tree to build in, and that tree is a
+staged copy under ~/.config/bentoo/autoupdate/staging: the published overlay is
+never built in and never written to.
+
 Exit codes:
   0  every gate outcome was PASS or SKIPPED
-  1  at least one finding of severity error, from any gate but pkgcheck's
+  1  at least one finding of severity error, from any gate but pkgcheck's,
+     or an invocation that could not be honoured (a --depth that does not
+     name a rung of the ladder)
   2  the selector names something the overlay does not hold
 
 Examples:
@@ -77,12 +86,19 @@ Examples:
   bentoo overlay validate media-plugins                    # one category
   bentoo overlay validate media-plugins/gst-plugins-qt6    # every version of one package
   bentoo overlay validate --json | jq .                    # one JSON document
-  bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir`,
+  bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir
+  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6`,
 		Args: cobra.MaximumNArgs(1),
 		Run:  runValidate,
 	}
 	cmd.Flags().Bool("json", false, "Write the whole report to stdout as a single JSON document")
 	cmd.Flags().String("distdir", "", "Read distfiles from this directory (never created, never written to)")
+	// The default is the shipped behaviour, spelled out rather than left empty
+	// (R11.3): `--depth` absent and `--depth=options` are the same run, and the
+	// value is read off THIS command below, never from a package variable.
+	cmd.Flags().String("depth", validate.DepthOptions.String(),
+		"Validate to this rung of the ladder — none, options, patches, configure or compile, each including every rung before it. "+
+			"Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in")
 	return cmd
 }
 
@@ -131,6 +147,31 @@ func runValidate(cmd *cobra.Command, args []string) {
 		diag = os.Stderr
 	}
 
+	// The depth is settled before anything else, because a flag value that does
+	// not parse is a fault in the invocation itself: it depends on neither the
+	// selector nor the overlay, so answering it first costs nothing and reaches
+	// no work.
+	//
+	// IT EXITS 1, NOT 2, AND THE DISTINCTION IS THE CONTRACT DOCUMENTED ABOVE.
+	// Exit 2 means one specific thing — the selector names something the overlay
+	// does not hold — and a --depth that does not parse says nothing whatever
+	// about the overlay's contents, which was never consulted. A CI script that
+	// branches on 2 to mean "unknown package" would otherwise mis-handle a typo
+	// in a flag. ParseDepth's own error names the offender and lists every valid
+	// rung, so the operator is not sent to the source for five short words.
+	spelled, err := cmd.Flags().GetString("depth")
+	if err != nil {
+		_, _ = fmt.Fprintf(diag, "  reading --depth: %v\n", err)
+		osExit(1)
+		return
+	}
+	depth, err := validate.ParseDepth(spelled)
+	if err != nil {
+		_, _ = fmt.Fprintf(diag, "  --depth: %v\n", err)
+		osExit(1)
+		return
+	}
+
 	var selector string
 	if rest := cmd.Flags().Args(); len(rest) > 0 {
 		selector = rest[0]
@@ -146,10 +187,31 @@ func runValidate(cmd *cobra.Command, args []string) {
 		overlayPath = appCtx.OverlayPath
 	}
 
+	// Above `options` the gates need a tree to build in, and it is a STAGED COPY
+	// — the published overlay is read, never built in and never written to
+	// (R11.2). The root is resolved only for the depths that use one, so the
+	// shipped read-only run neither names nor creates a scratch directory
+	// (R11.3), and it is the same directory `overlay autoupdate --apply` stages
+	// under, so a tree one command proves is a tree the other can find.
+	var stagingRoot string
+	if depth > validate.DepthOptions {
+		stagingRoot, err = autoupdateStagingRoot()
+		if err != nil {
+			_, _ = fmt.Fprintf(diag, "  --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
+			osExit(1)
+			return
+		}
+	}
+
 	report, err := validateRunnerFn(ctx, validate.Options{
 		Overlay:  overlayPath,
 		Distdir:  distdir,
 		Selector: selector,
+		// depth.String() rather than the raw flag: the two are the same string
+		// for anything ParseDepth accepted, and going through the ladder means
+		// the runner is handed a name it can always parse back.
+		Depth:       depth.String(),
+		StagingRoot: stagingRoot,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(diag, "  validating %s: %v\n", overlayLabel(overlayPath), err)
