@@ -629,7 +629,11 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		// result the comparison produced, byte for byte.
 		after := report.Results[0]
 		after.Review = overlay.ReviewNote{}
-		if after != beforeResult {
+		// DeepEqual rather than ==: CompareResult stopped being comparable when
+		// the baseline review's slice fields (Axes, Declarations, Others) landed
+		// on it. The assertion is unchanged and now reaches further — it is still
+		// "every field the comparison produced is exactly as it was".
+		if !reflect.DeepEqual(after, beforeResult) {
 			t.Errorf("the review pass changed more than the commentary:\nbefore %+v\nafter  %+v", beforeResult, after)
 		}
 		if report.VerdictKeepCount != before.VerdictKeepCount ||

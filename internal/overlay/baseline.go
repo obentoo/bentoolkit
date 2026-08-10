@@ -157,6 +157,40 @@ func ResolveBaseline(gentooTree, atom, version string) (Baseline, error) {
 	return baseline, nil
 }
 
+// OtherRepo is a repository other than ::gentoo that carries a package ::gentoo
+// does not — one row of the answer for the 84 of 321 overlay packages that have
+// no ::gentoo counterpart at all (R6.1).
+//
+// CHECKED IS THE FIELD THE TYPE EXISTS FOR. The tempting shape is a two-way
+// answer — carries it, or does not — and under it a repository nobody consulted
+// reports exactly like one that was consulted and came back empty. Those are
+// different answers and only one of them is true. The ~428 registered
+// repositories are resolvable BY NAME, but nothing on disk holds the contents of
+// most of them, and asking about 84 packages across all of them would be
+// thousands of network lookups in a stage the story promises is offline.
+//
+// Whatever it reports is INFORMATIVE ONLY and never a baseline (R6.2): a
+// repository outside ::gentoo has not been through the same review, its quality
+// varies from one to the next, and where several carry a package the report
+// names each and chooses between them for no purpose (R6.3).
+//
+// Every field is comparable, so a nil slice of them is "nothing to say" and
+// renders nothing — the same terms every field of the baseline review rides on.
+//
+// _Requirements: R6, R6.1, R6.2, R6.3_
+type OtherRepo struct {
+	// Name is the repository as the registry names it — "guru", not "::guru";
+	// the report adds the "::" it prints.
+	Name string
+	// Version is the version that repository carries, empty when it carries
+	// none. It is meaningless unless Checked is true.
+	Version string
+	// Checked reports that the repository's contents were actually read. False
+	// means NOT CHECKED — the repository is registered but not available
+	// locally — and never "it does not carry the package".
+	Checked bool
+}
+
 // ErrNoBaselineTree is the run-level outcome: there is no ::gentoo tree to read,
 // so NOTHING was examined and the review could not do its job.
 //
