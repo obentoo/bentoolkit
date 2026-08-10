@@ -583,7 +583,7 @@ func TestBuildFixInstruction_BoundsArgvSize(t *testing.T) {
 	req := sampleFixRequest(t)
 	req.ManifestError = strings.Repeat("137750K .......... .......... 99% 58.7M 0s\n", 200000)
 
-	instruction := buildFixInstruction(req)
+	instruction := buildManifestFixInstruction(req)
 
 	// MAX_ARG_STRLEN on Linux is 128 KiB per single argv element; stay well under.
 	const maxArgStrlen = 128 * 1024

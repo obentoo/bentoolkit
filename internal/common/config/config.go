@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"gopkg.in/yaml.v3"
@@ -18,6 +20,10 @@ var (
 	ErrOverlayPathNotFound     = errors.New("overlay path does not exist")
 	ErrOverlayInvalidStructure = errors.New("overlay structure is invalid")
 	ErrGitUserNotConfigured    = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
+	// ErrOverrideMissingReason marks a per-package validation override that
+	// states a depth but not why (S033-R2.5). It is a sentinel so a caller can
+	// match the class of problem; the wrapped message always names the package.
+	ErrOverrideMissingReason = errors.New("per-package validate override has no reason")
 )
 
 // Config represents the application configuration
@@ -71,6 +77,119 @@ type AutoupdateConfig struct {
 	// The cache is only ever read from: files are symlinked into the working
 	// distdir, never written back.
 	DistfilesCache string `yaml:"distfiles_cache,omitempty"`
+	// Validate is the staged-bump validation policy (S033-R2). It is nested
+	// here rather than at the top level because everything it governs happens
+	// during an autoupdate.
+	Validate ValidateConfig `yaml:"validate,omitempty"`
+}
+
+// ValidateConfig is the staged-bump validation policy: how much of a bump gets
+// checked before it is published, and on whose stated authority a package gets
+// checked less (S033-R2).
+//
+// WHY IT LIVES HERE AND NOT IN THE OVERLAY'S packages.toml (S033-D10).
+// packages.toml sits inside the overlay, which auto-commits and publishes, and
+// a key there that runs ahead of the installed binary silently DISABLES the
+// record carrying it. A policy deciding how much a bump is validated would then
+// switch itself off without a word — the one failure mode it must not have. In
+// this file the same typo is a line on stderr from the strict re-decode in
+// LoadFrom and the run continues.
+//
+// Every default is answered by a getter and never by a struct literal, so an
+// absent block, a half-written block and a nil pointer all resolve to the same
+// documented table:
+//
+//	depths.revision    options     depths.series     configure
+//	depths.patch       options     depths.major      configure
+//	require_isolation  false       require_proof     false
+//	review             false       fix_on_failure    false
+//	timeout            3600 (seconds)
+//
+// `compile` is never a default. The ladder's expensive rung is reached through
+// --depth/--compile or a per-package override that states its reason, because
+// validating everything at compile depth does not become expensive, it becomes
+// ignored.
+type ValidateConfig struct {
+	// Depths is the per-class depth table, keyed by the bump classes
+	// internal/autoupdate/validate.Classify produces. A class left unset
+	// answers its documented default, never the empty string.
+	Depths ValidateDepths `yaml:"depths,omitempty"`
+	// RequireIsolation makes a compile gate SKIP rather than run unisolated,
+	// so a pass never claims a fidelity it did not have. It defaults to false
+	// because `unshare --net` is denied on ordinary hosts, and a default of
+	// true would turn every build gate into a SKIPPED (S033-R6.6, D11 — story
+	// 031's --require-isolation default, unchanged now that it has a key).
+	RequireIsolation bool `yaml:"require_isolation,omitempty"`
+	// RequireProof refuses to publish a bump whose validation could not reach
+	// the depth policy asked for. It defaults to false: an ordinary
+	// workstation rarely holds every build dependency, so a default of true
+	// would refuse most bumps for a reason that says nothing about them
+	// (S033-D6, R3.12). The unreached depth is reported either way.
+	RequireProof bool `yaml:"require_proof,omitempty"`
+	// Review and FixOnFailure are the two LLM capabilities, and they are
+	// TRI-STATE on purpose. The capabilities are enabled by --llm; this
+	// configuration can only SUBTRACT from that flag, never add to it
+	// (R7.1/R7.2). A plain bool cannot express "leave it to the flag" and
+	// "switch this one back off" as different things, so an unset key stays
+	// nil and only an explicit `review: false` disables. GetReview reports the
+	// configured value alone (false unless the file says true); the flag layer
+	// combines the two through ReviewDisabled.
+	Review *bool `yaml:"review,omitempty"`
+	// FixOnFailure is the build fixer, tri-state for the same reason as
+	// Review above.
+	FixOnFailure *bool `yaml:"fix_on_failure,omitempty"`
+	// Timeout bounds a single agent run, in SECONDS — the same unit and shape
+	// as cache_ttl and http_timeout above, because YAML has no duration
+	// literal and an int of seconds is what this file already speaks. It is
+	// read by the reviewer and by the build fixer: an agent with no deadline
+	// hangs an unattended sweep. Unset or non-positive means the default.
+	Timeout int `yaml:"timeout,omitempty"`
+	// Packages holds per-package overrides, keyed by category/name. An
+	// override supplies the depth to use and the reason it is used (R2.4); an
+	// override with no reason is reported invalid, naming the package (R2.5),
+	// because an override is the one input that can quietly reduce how much a
+	// bump is checked.
+	//
+	// The packages nobody wants to build from source ship AS ORDINARY ENTRIES
+	// in this map (see DefaultPackageOverrides), not as a hardcoded tier list,
+	// so R2.4 and R2.5 reach them exactly as they reach anything an operator
+	// writes — and so the report that says why a bump was not validated can
+	// quote their reason like any other.
+	Packages map[string]ValidatePackageOverride `yaml:"packages,omitempty"`
+}
+
+// ValidateDepths is the per-class depth table under `autoupdate.validate.depths`.
+//
+// It is a struct and not a map[string]string so that a mistyped CLASS name
+// ("revison:") is caught by the strict re-decode in LoadFrom and reported on
+// stderr. A map would accept the typo silently and the class it was meant for
+// would quietly keep its default — which is the packages.toml failure mode this
+// block exists to avoid.
+type ValidateDepths struct {
+	Revision string `yaml:"revision,omitempty"`
+	Patch    string `yaml:"patch,omitempty"`
+	Series   string `yaml:"series,omitempty"`
+	Major    string `yaml:"major,omitempty"`
+}
+
+// ValidatePackageOverride is one entry of autoupdate.validate.packages: the
+// depth to use for this package and the reason for using it.
+//
+// Both fields are reported beside the outcome, so a bump validated at a
+// shallower depth than its class calls for can always say on whose authority
+// (R2.4).
+type ValidatePackageOverride struct {
+	// Depth is a rung of the validation ladder, spelled exactly as
+	// internal/autoupdate/validate.ParseDepth accepts it: none, options,
+	// patches, configure, compile. It is stored and reported verbatim — this
+	// package deliberately neither trims nor case-folds it, because ParseDepth
+	// does not either, and a config layer that silently repaired " Compile "
+	// would make the name in the file and the name in the report two different
+	// strings.
+	Depth string `yaml:"depth"`
+	// Reason is why this package departs from its class depth. It is required:
+	// see OverrideErrors.
+	Reason string `yaml:"reason"`
 }
 
 // LLMConfig holds LLM provider configuration for autoupdate
@@ -229,6 +348,12 @@ func LoadFrom(path string) (*Config, error) {
 			if saveErr := cfg.SaveTo(path); saveErr != nil {
 				return nil, saveErr
 			}
+			// After the save, so the file this creates stays as small as it is
+			// today while the returned config still carries the shipped
+			// validation overrides: a host with no config.yaml must not be the
+			// one host where an unattended sweep picks a build depth for
+			// chromium.
+			cfg.Autoupdate.Validate.normalize()
 			return cfg, nil
 		}
 		return nil, err
@@ -274,6 +399,7 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	cfg.Autoupdate.LLM.normalize()
+	cfg.Autoupdate.Validate.normalize()
 
 	return &cfg, nil
 }
@@ -569,4 +695,218 @@ func (c *AutoupdateConfig) GetDistfilesCache() string {
 		return ""
 	}
 	return strings.TrimSpace(c.DistfilesCache)
+}
+
+// The default depth for each bump class (S033-R2). revision and patch are the
+// cheap, frequent bumps and stop at the static gate; series and major cross a
+// boundary upstream chose to mark, so they earn a configure. No class defaults
+// to compile — see ValidateConfig's doc comment.
+const (
+	DefaultDepthRevision = "options"
+	DefaultDepthPatch    = "options"
+	DefaultDepthSeries   = "configure"
+	DefaultDepthMajor    = "configure"
+)
+
+// DefaultValidateTimeout is the default per-agent budget in seconds (1 hour),
+// bounding the reviewer and the build fixer.
+const DefaultValidateTimeout = 3600
+
+// GetDepthForClass returns the configured depth for a bump class, falling back
+// to that class's documented default.
+//
+// It NEVER returns the empty string, for any input: the resolver downstream
+// always has a depth to work with, and an unrecognized class is answered as the
+// riskiest known one (major) rather than as "no validation", because failing to
+// classify a bump is not evidence that the bump is small.
+//
+// The class name is matched case-insensitively and trimmed — it is a lookup key
+// this package chooses, not a value it reports. The configured VALUE is
+// returned verbatim, so a typo in a depth name reaches validate.ParseDepth and
+// is rejected there by name instead of being silently repaired here.
+func (c *ValidateConfig) GetDepthForClass(class string) string {
+	depths := c.depths()
+
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "revision":
+		return depthOrDefault(depths.Revision, DefaultDepthRevision)
+	case "patch":
+		return depthOrDefault(depths.Patch, DefaultDepthPatch)
+	case "series":
+		return depthOrDefault(depths.Series, DefaultDepthSeries)
+	default:
+		// "major" and anything unrecognized.
+		return depthOrDefault(depths.Major, DefaultDepthMajor)
+	}
+}
+
+// depths reads the depth table through a possibly nil receiver.
+func (c *ValidateConfig) depths() ValidateDepths {
+	if c == nil {
+		return ValidateDepths{}
+	}
+	return c.Depths
+}
+
+// depthOrDefault treats an unset key and an empty value alike: both mean "not
+// configured". A depth of "none" — not "" — is how a class is switched off.
+func depthOrDefault(configured, fallback string) string {
+	if configured == "" {
+		return fallback
+	}
+	return configured
+}
+
+// GetRequireIsolation reports whether a compile gate must SKIP rather than run
+// unisolated. False by default, and false through a nil receiver: this is story
+// 031's --require-isolation default, unchanged now that it also has a key
+// (S033-R6.6).
+func (c *ValidateConfig) GetRequireIsolation() bool {
+	return c != nil && c.RequireIsolation
+}
+
+// GetRequireProof reports whether a bump whose validation could not reach the
+// policy depth must be refused rather than published with the unreached depth
+// named. False by default (S033-D6).
+func (c *ValidateConfig) GetRequireProof() bool {
+	return c != nil && c.RequireProof
+}
+
+// enabledExplicitly reports a tri-state key written as true. An unset key reads
+// as not enabled, which is what every default in this block is.
+func enabledExplicitly(v *bool) bool {
+	return v != nil && *v
+}
+
+// disabledExplicitly reports a tri-state key written as false — the only way a
+// config file can SUBTRACT a capability from a run started with --llm. An unset
+// key is not a disabled key, which is the whole reason these two are *bool.
+func disabledExplicitly(v *bool) bool {
+	return v != nil && !*v
+}
+
+// GetReview reports the CONFIGURED value of the reviewer capability, which is
+// false unless the file says otherwise. It is not the effective value: the
+// capabilities are switched on by --llm and configuration only subtracts, so
+// the flag layer combines this with ReviewDisabled.
+func (c *ValidateConfig) GetReview() bool {
+	return c != nil && enabledExplicitly(c.Review)
+}
+
+// ReviewDisabled reports an explicit `review: false`, which is the only way a
+// config file can switch the reviewer back off for a run started with --llm.
+func (c *ValidateConfig) ReviewDisabled() bool {
+	return c != nil && disabledExplicitly(c.Review)
+}
+
+// GetFixOnFailure reports the CONFIGURED value of the build-fixer capability.
+// See GetReview for why this is not the effective value.
+func (c *ValidateConfig) GetFixOnFailure() bool {
+	return c != nil && enabledExplicitly(c.FixOnFailure)
+}
+
+// FixOnFailureDisabled reports an explicit `fix_on_failure: false`. See
+// ReviewDisabled.
+func (c *ValidateConfig) FixOnFailureDisabled() bool {
+	return c != nil && disabledExplicitly(c.FixOnFailure)
+}
+
+// GetTimeout returns the per-agent budget as a duration, defaulting to
+// DefaultValidateTimeout when unset or non-positive. The stored key is an int
+// of seconds; the duration is what the callers (the reviewer and the build
+// fixer) actually need.
+func (c *ValidateConfig) GetTimeout() time.Duration {
+	if c == nil || c.Timeout <= 0 {
+		return DefaultValidateTimeout * time.Second
+	}
+	return time.Duration(c.Timeout) * time.Second
+}
+
+// OverrideErrors reports every per-package override that is invalid, one error
+// per package, in a stable (sorted) order so a diagnostic does not reshuffle
+// between runs.
+//
+// The rule enforced here is R2.5: an override must state its reason. It is
+// reported, never fatal — the same treatment an unknown key gets — so one bad
+// entry cannot cost the operator the rest of the file.
+//
+// The depth STRING is deliberately not validated here. validate.ParseDepth owns
+// that vocabulary and rejects an unknown rung by name; duplicating the ladder in
+// this package would put the same list in two places, and the copy would be the
+// one that goes stale.
+func (c *ValidateConfig) OverrideErrors() []error {
+	if c == nil || len(c.Packages) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(c.Packages))
+	for name := range c.Packages {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var errs []error
+	for _, name := range names {
+		if strings.TrimSpace(c.Packages[name].Reason) == "" {
+			errs = append(errs, fmt.Errorf(
+				"autoupdate.validate.packages.%s: %w; an override is the only input that can quietly reduce how much a bump is checked, so state why",
+				name, ErrOverrideMissingReason))
+		}
+	}
+	return errs
+}
+
+// DefaultPackageOverrides returns the per-package overrides bentoolkit ships
+// with, as a fresh map the caller may keep and edit.
+//
+// These are the packages whose from-source build costs hours that an unattended
+// sweep would otherwise spend without being asked. They are ORDINARY overrides
+// carrying ordinary reasons — not a hardcoded tier list — so R2.4 (report the
+// reason beside the outcome) and R2.5 (an override needs a reason) apply to them
+// exactly as to anything an operator writes, and so an operator overrides one by
+// writing the same package key with a depth and a reason of their own.
+func DefaultPackageOverrides() map[string]ValidatePackageOverride {
+	return map[string]ValidatePackageOverride{
+		"www-client/chromium": {
+			Depth:  "none",
+			Reason: "a from-source build costs hours of machine time; the overlay carries no patches for it, so a bump is a version and a hash",
+		},
+		"app-office/libreoffice": {
+			Depth:  "none",
+			Reason: "hours of machine time for a bump the overlay does not patch",
+		},
+		"net-libs/webkit-gtk": {
+			Depth:  "none",
+			Reason: "one of the longest builds in the tree, and every reverse dependency pays for it again",
+		},
+		"dev-lang/ghc": {
+			Depth:  "none",
+			Reason: "bootstraps its own compiler, so even a configure gate pulls in the full toolchain build",
+		},
+	}
+}
+
+// normalize materializes the shipped per-package overrides that the loaded file
+// does not already carry.
+//
+// Only Packages is materialized: every scalar default is answered by its getter,
+// so an absent block and a nil pointer stay indistinguishable from a written
+// one. A map cannot do that — Packages is read as a field by anything that
+// enumerates the policy — so the shipped entries are merged in here, per key, and
+// a key the operator wrote always wins whole (their entry replaces the shipped
+// one; it is never patched with the shipped reason, or a reasonless override
+// would inherit an excuse it never gave).
+func (c *ValidateConfig) normalize() {
+	if c == nil {
+		return
+	}
+	shipped := DefaultPackageOverrides()
+	if c.Packages == nil {
+		c.Packages = make(map[string]ValidatePackageOverride, len(shipped))
+	}
+	for name, override := range shipped {
+		if _, ok := c.Packages[name]; !ok {
+			c.Packages[name] = override
+		}
+	}
 }

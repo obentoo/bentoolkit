@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -40,10 +41,13 @@ var (
 	autoupdateForce bool
 	// autoupdateCompile runs compile test after apply
 	autoupdateCompile bool
-	// autoupdateRequireIsolation is --require-isolation. It reaches the Applier
-	// as a field and never as a config key: the configuration block that would
-	// own such a key is deferred to a later story, and a registry key is
-	// expensive to move once written (story 031 Constraints).
+	// autoupdateRequireIsolation is --require-isolation. Story 031 kept the
+	// setting out of the registry because a registry key is expensive to move
+	// once written (story 031 Constraints); story 033 added the block that owns
+	// it instead — autoupdate.validate.require_isolation in config.yaml, where
+	// an unknown key is a warning on stderr rather than a silently disabled
+	// record. That key defaults to false, so this flag stays the way the
+	// stricter behaviour is asked for on a run.
 	autoupdateRequireIsolation bool
 	// autoupdateClean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
@@ -108,6 +112,16 @@ var (
 	// suspicious version can be re-checked against an un-deduplicated run to tell
 	// a real upstream change from a sharing bug.
 	autoupdateNoFetchCache bool
+	// autoupdateLLM is --llm: the operator's consent to spend an agent on this
+	// run. ONE flag enables BOTH staged-bump capabilities — the bump reviewer and
+	// the build fixer (S033-R7.1) — because two names to turn one feature on is a
+	// tax on the operator, not a choice they wanted.
+	//
+	// Configuration only ever SUBTRACTS from it: `autoupdate.validate.review` or
+	// `fix_on_failure` set to false switches that one back off (S033-R7.2), while
+	// neither key can enable anything on a run where this flag is absent. The
+	// direction matters — the flag is where the cost is consented to.
+	autoupdateLLM bool
 )
 
 // autoupdateDistfileDirs is the answer to "which directories does the Manifest
@@ -139,6 +153,40 @@ type autoupdateDistfileDirs struct {
 }
 
 var autoupdateDirs autoupdateDistfileDirs
+
+// autoupdateValidate is the staged-bump validation policy this run applies:
+// the depth table translated out of config, plus the two switches that decide
+// what an unproved bump means (S033-R2, R3.13).
+//
+// It is resolved ONCE, in runAutoupdate, where both the config and the
+// *cobra.Command are in scope — exactly as autoupdateDirs is, and for the same
+// reason: three Applier construction sites need the same answer, and a mode that
+// silently missed it would validate nothing while looking like working software.
+type autoupdateValidatePolicy struct {
+	// Policy is the per-class depth table and the per-package overrides.
+	Policy validate.DepthPolicy
+	// Depth is --depth, nil when the operator did not type it. A POINTER because
+	// `none` is a depth an operator may legitimately ask for, and a zero value
+	// indistinguishable from "unset" is the one confusion that switches
+	// validation off in silence.
+	Depth *validate.Depth
+	// RequireIsolation and RequireProof are the config keys behind
+	// --require-isolation and R3.13's refusal.
+	RequireIsolation bool
+	RequireProof     bool
+}
+
+var autoupdateValidate autoupdateValidatePolicy
+
+// autoupdateValidateCfg is the `autoupdate.validate` block VERBATIM, kept beside
+// the resolved policy above and for the same reason: it is read where the config
+// is no longer in scope.
+//
+// It is the raw block and not a second resolved value because the two LLM keys are
+// tri-state (*bool) and the distinction survives all the way to the decision —
+// "unset" and "false" mean different things to --llm (see llmCapabilities), so
+// flattening them here would be flattening exactly what R7.2 needs.
+var autoupdateValidateCfg config.ValidateConfig
 
 var autoupdateCmd = &cobra.Command{
 	Use:   "autoupdate [package]",
@@ -199,6 +247,15 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateApply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	autoupdateCmd.Flags().BoolVar(&autoupdateForce, "force", false, "Ignore cache when checking")
 	autoupdateCmd.Flags().BoolVar(&autoupdateCompile, "compile", false, "Run compile test after apply")
+	// --depth is read OFF THE COMMAND rather than bound to a package variable
+	// (newValidateCmd's convention): the value is a rung of a ladder that has to
+	// be parsed and rejected by name, and a package variable would carry one
+	// invocation's depth into the next inside a single test binary.
+	//
+	// It is what gives S033-R2.7 a surface at all. Without it the resolver would
+	// be answering a question nobody could ask, and `--compile` would be the only
+	// way to reach a build gate.
+	autoupdateCmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure or compile, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRequireIsolation, "require-isolation", false, "With --compile: SKIP the compile test rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	autoupdateCmd.Flags().BoolVarP(&autoupdateClean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	autoupdateCmd.Flags().IntVar(&autoupdateConcurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
@@ -233,6 +290,7 @@ func init() {
 	autoupdateCmd.Flags().StringVar(&autoupdateDistdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
 	autoupdateCmd.Flags().StringVar(&autoupdateDistfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
 	autoupdateCmd.Flags().BoolVar(&autoupdateNoFetchCache, "no-fetch-cache", false, "Fetch each URL per record instead of sharing one response across records that declare it")
+	autoupdateCmd.Flags().BoolVar(&autoupdateLLM, "llm", false, "With --apply: let the configured claude-code agent take part in validation. It enables BOTH capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and proceeds exactly as it would have without the flag")
 
 	overlayCmd.AddCommand(autoupdateCmd)
 }
@@ -417,13 +475,12 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	overlayPath := appCtx.OverlayPath
 
 	// Determine config directory for autoupdate
-	home, err := os.UserHomeDir()
+	configDir, err := autoupdateConfigDir()
 	if err != nil {
-		logger.Error("failed to get home directory: %v", err)
+		logger.Error("%v", err)
 		osExit(1)
 		return
 	}
-	configDir := filepath.Join(home, ".config", "bentoo", "autoupdate")
 
 	// Wire SIGINT/SIGTERM into a context so an in-flight check cancels cleanly.
 	// The Checker threads this context through every outbound HTTP/LLM call, so
@@ -443,6 +500,21 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// Manifest reads the result; a mode that does not (--check, --list, --lint)
 	// simply never looks at it.
 	autoupdateDirs = resolveAutoupdateDistfileDirs(appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
+
+	// The staged-bump validation policy, resolved here for the same reason and in
+	// the same place as the distfile directories above (S033-R2). A --depth that
+	// does not name a rung is fatal BEFORE any package work: it is a typo the
+	// operator must fix, and silently validating at the class depth instead would
+	// be the run they did not ask for.
+	autoupdateValidate, err = resolveAutoupdateValidatePolicy(appCtx.Config, cmd)
+	if err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+		return
+	}
+	// The same block, unresolved, for the two --llm capabilities: their keys are
+	// tri-state and only mean something next to the flag (S033-R7.2).
+	autoupdateValidateCfg = appCtx.Config.Autoupdate.Validate
 
 	// Handle different modes
 	switch {
@@ -638,6 +710,13 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		//nolint:contextcheck // ctx is already injected into checker via autoupdate.WithContext above
 		reportRevivableOrphans(checker, cfg)
 	}
+
+	// S033-R9.1: put every pending update through the gates at its resolved
+	// depth, and publish none of it. It runs BEFORE the reconciliation below for
+	// the same reason that one runs last: the reconciliation is the only prompt in
+	// this command that can write to the overlay, and it must be the last thing on
+	// screen rather than scrolled off by a validation report.
+	runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
 
 	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the
@@ -1221,6 +1300,154 @@ func applierDistfileOptions() []autoupdate.ApplierOption {
 	}
 }
 
+// resolveAutoupdateValidatePolicy translates `autoupdate.validate` and the
+// --depth flag into what the Applier reads (S033-R2, R2.2, R2.4, R2.7, R6.6,
+// R3.13).
+//
+// # Why the translation lives here and not in validate
+//
+// internal/autoupdate/validate deliberately knows nothing about the config
+// package — the import already runs the other way — so the depth table crosses
+// as validate's own types and the STRINGS are turned into rungs here, by
+// validate.ParseDepth, which rejects a typo by name. Doing it anywhere else would
+// put the ladder's vocabulary in two places and the copy would be the stale one.
+//
+// # An unusable override is reported, never fatal
+//
+// A per-package override with no reason, or with a depth that names no rung, is
+// logged and DROPPED, which leaves that package at its class depth — the safe
+// direction, since an override is the one input that can quietly reduce how much
+// a bump is checked. One bad entry must not cost the operator the rest of the
+// file, which is the treatment an unknown config key already gets.
+//
+// Only --depth is fatal: it is this invocation's explicit instruction, and
+// running at some other depth than the one that was typed is a different run.
+func resolveAutoupdateValidatePolicy(cfg *config.Config, cmd *cobra.Command) (autoupdateValidatePolicy, error) {
+	validateCfg := &cfg.Autoupdate.Validate
+
+	policy := autoupdateValidatePolicy{
+		Policy: validate.DepthPolicy{
+			ByClass:   map[validate.Class]validate.Depth{},
+			Overrides: map[string]validate.DepthOverride{},
+		},
+		// --require-isolation stays a flag OR the key: story 031's flag was the
+		// only way in until story 033 gave the setting a home, and neither
+		// supersedes the other.
+		RequireIsolation: autoupdateRequireIsolation || validateCfg.GetRequireIsolation(),
+		RequireProof:     validateCfg.GetRequireProof(),
+	}
+
+	for class, name := range map[validate.Class]string{
+		validate.ClassRevision: "revision",
+		validate.ClassPatch:    "patch",
+		validate.ClassSeries:   "series",
+		validate.ClassMajor:    "major",
+	} {
+		// GetDepthForClass returns the configured value VERBATIM and never the
+		// empty string, so a typo reaches ParseDepth and is rejected by name here
+		// rather than silently repaired in the config layer.
+		spelled := validateCfg.GetDepthForClass(name)
+		depth, err := validate.ParseDepth(spelled)
+		if err != nil {
+			logger.Warn("autoupdate.validate.depths.%s: %v; that class keeps its shipped default instead", name, err)
+			continue
+		}
+		policy.Policy.ByClass[class] = depth
+	}
+
+	for _, err := range validateCfg.OverrideErrors() {
+		logger.Warn("%v", err)
+	}
+	for pkg, override := range validateCfg.Packages {
+		if strings.TrimSpace(override.Reason) == "" {
+			continue // already reported by OverrideErrors above
+		}
+		depth, err := validate.ParseDepth(override.Depth)
+		if err != nil {
+			logger.Warn("autoupdate.validate.packages.%s: %v; the override is ignored and %s keeps its class depth", pkg, err, pkg)
+			continue
+		}
+		policy.Policy.Overrides[pkg] = validate.DepthOverride{Depth: depth, Reason: override.Reason}
+	}
+
+	spelled, err := cmd.Flags().GetString("depth")
+	if err != nil {
+		return policy, fmt.Errorf("reading --depth: %w", err)
+	}
+	if spelled == "" {
+		return policy, nil
+	}
+	depth, err := validate.ParseDepth(spelled)
+	if err != nil {
+		return policy, fmt.Errorf("--depth: %w", err)
+	}
+	policy.Depth = &depth
+	return policy, nil
+}
+
+// applierValidateOptions carries the resolved validation policy into every
+// Applier this command builds, so --apply, --apply all and --revive all reach the
+// gates with the same depth table, the same staging root and the same two
+// switches (S033-12.1).
+//
+// One helper rather than three copies of the same six lines: a mode that silently
+// missed them would apply bumps with no gate at all, which — unlike a missing
+// distdir — looks exactly like success.
+//
+// The staging root is <configDir>/staging (S033-D1). It is what turns the whole
+// staged pipeline on: without it the candidate is written straight into the
+// published overlay and no gate runs, which is every release before this one.
+func applierValidateOptions(configDir string) []autoupdate.ApplierOption {
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, stagingDirName)),
+		autoupdate.WithApplierValidatePolicy(autoupdateValidate.Policy),
+		autoupdate.WithApplierRequireIsolation(autoupdateValidate.RequireIsolation),
+		autoupdate.WithApplierRequireProof(autoupdateValidate.RequireProof),
+	}
+	if autoupdateValidate.Depth != nil {
+		opts = append(opts, autoupdate.WithApplierDepth(*autoupdateValidate.Depth))
+	}
+	return opts
+}
+
+// stagingDirName is the ONE spelling of the staged-tree directory under the
+// autoupdate config dir (S033-D1).
+//
+// Both entry points join it — `--apply` through applierValidateOptions and
+// `overlay validate --depth` through autoupdateStagingRoot — because the path is
+// where the retention and reuse rules are recorded (R3.7, R10.1). Two spellings
+// would put the two commands' staged trees in different places, and a tree
+// proved by one would silently never be found by the other.
+const stagingDirName = "staging"
+
+// autoupdateConfigDir is where this command keeps its state: the pending list,
+// the retained logs and the staged trees.
+//
+// It is a function rather than four copies of the same filepath.Join so that
+// `overlay validate --depth` and `overlay autoupdate --apply` cannot come to
+// disagree about which directory that is.
+func autoupdateConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "bentoo", "autoupdate"), nil
+}
+
+// autoupdateStagingRoot is the directory staged trees are prepared under.
+//
+// It is deliberately NOT under the overlay and NOT under os.TempDir() (S033-D1):
+// a tree under the overlay is an unclaimed ebuild that `--clean` deletes and
+// `overlay validate` reports, and a tree under /tmp does not survive the run,
+// which R3.6 and R3.7 require so a failure can still be inspected afterwards.
+func autoupdateStagingRoot() (string, error) {
+	dir, err := autoupdateConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, stagingDirName), nil
+}
+
 // runApply handles the --apply flag. ctx is threaded into the Applier via
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
@@ -1239,11 +1466,12 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierDistfileOptions()...)
+	opts = append(opts, applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1321,7 +1549,6 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
 		// share one in-memory source of truth.
@@ -1329,6 +1556,11 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierDistfileOptions()...)
+	opts = append(opts, applierValidateOptions(configDir)...)
+	// One Applier serves the whole batch, so the two agents are constructed ONCE
+	// here — a per-package construction would warn once per package on a host with
+	// no claude CLI, and pay the PATH lookup as many times.
+	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1362,12 +1594,18 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // failures (an Apply returning a non-nil error). It is the concurrency seam of
 // runApplyAll.
 //
-// With compile == true the applies run serially: the compile step prompts for
-// confirmation and runs under sudo, and interleaving those across goroutines
-// would scramble the prompts. Otherwise the applies are dispatched across a
-// bounded worker pool (mirroring overlay.RegenerateManifests) so each Apply's
-// slow, network-bound `pkgdev manifest` step overlaps. concurrency caps the live
-// workers and is clamped to [1, len(updates)].
+// It runs serially for either of two reasons. With compile == true the compile
+// step prompts for confirmation and runs under sudo, and interleaving those
+// across goroutines would scramble the prompts. Since story 033 it is also
+// serial when any of these bumps resolves to a validation depth above `options`
+// (D14) — a rule about machine resources rather than about prompts, and the
+// reason it is asked of the Applier: the depth a bump gets is the applier's
+// decision, and a second copy of that logic here would be a copy that drifts.
+//
+// Otherwise the applies are dispatched across a bounded worker pool (mirroring
+// overlay.RegenerateManifests) so each Apply's slow, network-bound `pkgdev
+// manifest` step overlaps. concurrency caps the live workers and is clamped to
+// [1, len(updates)].
 //
 // Concurrency safety: the Applier's pending list and reporter are mutex-guarded,
 // each Apply's file work is scoped to its own package directory, and workers
@@ -1376,12 +1614,20 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
 	results := make([]*autoupdate.ApplyResult, len(updates))
 
-	// --compile path: serial, so the confirmation prompt and sudo invocation of
-	// each compile step are not interleaved across goroutines.
-	if compile {
+	// Serial when the compile step will prompt and escalate, and — since story
+	// 033 — when ANY of these bumps resolves to a depth that starts a build
+	// (D14). The second rule has nothing to do with prompts: concurrent builds
+	// contend for CPU and for space under PORTAGE_TMPDIR, measured at 60 MB for
+	// one gst configure, and a worker pool multiplies that on a machine that was
+	// never asked. Depths none and options keep the pool, which is every run whose
+	// bumps are revisions and patches.
+	if compile || applier.SerialApplyRequired(updates) {
 		failures := 0
 		for i, u := range updates {
-			result, err := applier.Apply(u.Package, true)
+			// `compile`, not a literal true: this branch is now reached for two
+			// different reasons, and a depth-driven serial run must not acquire the
+			// privileged compile step the operator never asked for.
+			result, err := applier.Apply(u.Package, compile)
 			if err != nil {
 				failures++
 			}
@@ -1390,7 +1636,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		return results, failures
 	}
 
-	// Non-compile path: a bounded worker pool over an index queue. Workers write
+	// Concurrent path: a bounded worker pool over an index queue. Workers write
 	// results[i] at distinct indices (no lock) and tally failures atomically.
 	jobs := concurrency
 	if jobs < 1 {
@@ -1467,7 +1713,8 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 // It is a no-op when result is nil. Otherwise it prints the package and
 // version transition, then reports status (obsolete, held, success, or failure)
 // plus any available details such as obsolete reason, LLM fix/QA summary,
-// cleaned old-version info/warnings, and failure log path.
+// cleaned old-version info/warnings, and — on a failure — the log path and the
+// staged tree the failed bump left behind.
 func displayApplyResult(result *autoupdate.ApplyResult) {
 	if result == nil {
 		return
@@ -1528,6 +1775,19 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		if result.LogPath != "" {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
+		}
+		if result.StagedPath != "" {
+			// S033-R3.6's second half, at the operator's end of it: the bump was
+			// validated in a tree of its own outside the overlay, that tree is kept
+			// when the bump is not promoted, and this line is what makes it findable.
+			// Without it the tree still survives, but the only way to see the ebuild
+			// the gates actually read is to run the whole bump again.
+			//
+			// Failure branch only, and that is not merely where it happens to sit: a
+			// promoted bump clears StagedPath precisely so no success ever points at
+			// a tree whose bytes are already in the overlay.
+			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+			output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
 		}
 	}
 }
@@ -1849,15 +2109,19 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		return
 	}
 
-	applier, err := autoupdate.NewApplier(overlayPath, configDir,
-		append([]autoupdate.ApplierOption{
-			autoupdate.WithApplierContext(ctx),
-			autoupdate.WithApplierClean(autoupdateClean),
-			autoupdate.WithApplierRequireIsolation(autoupdateRequireIsolation),
-			autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-			autoupdate.WithApplierPendingList(pending),
-		}, applierDistfileOptions()...)...,
-	)
+	reviveOpts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPendingList(pending),
+	}
+	reviveOpts = append(reviveOpts, applierDistfileOptions()...)
+	// R3 reaches the revive path through the same option block as the two apply
+	// paths, which is what keeps a second entry point from growing a second,
+	// gate-free way into the published overlay.
+	reviveOpts = append(reviveOpts, applierValidateOptions(configDir)...)
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
 		osExit(1)
@@ -1949,6 +2213,13 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 		detail := err.Error()
 		if applyResult != nil && applyResult.LogPath != "" {
 			detail = fmt.Sprintf("%v (log: %s)", err, applyResult.LogPath)
+		}
+		// S033-R3.6: a revive whose bump failed kept its staged tree exactly like any
+		// other failed apply, and this outcome line is the only report the operator
+		// gets for it — displayApplyResult never runs on this path. A tree named in no
+		// report is a tree found only by going looking for it.
+		if applyResult != nil && applyResult.StagedPath != "" {
+			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
 		}
 		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
 	}

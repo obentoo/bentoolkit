@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -103,10 +104,15 @@ func TestOverlayValidate_UnknownSelectorExitsTwo(t *testing.T) {
 func TestOverlayValidate_ErrorFindingExitsOne(t *testing.T) {
 	stubValidateRunner(t, validate.Report{
 		Results: []validate.EbuildResult{{
-			Package:  "media-plugins/gst-plugins-qt6",
-			Version:  "1.29.2",
-			Options:  "FAILED",
-			Findings: []validate.Finding{{Gate: "options", Severity: "error", Detail: "-Daalib= is undeclared upstream"}},
+			Package: "media-plugins/gst-plugins-qt6",
+			Version: "1.29.2",
+			Gates: []validate.GateResult{{
+				Gate:    validate.GateOptions,
+				Outcome: validate.OutcomeFailed,
+				Findings: []validate.Finding{
+					{Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is undeclared upstream"},
+				},
+			}},
 		}},
 	})
 
@@ -136,5 +142,202 @@ func TestOverlayValidate_UnknownSelectorNeverReachesTheRunner(t *testing.T) {
 
 	if reached {
 		t.Error("a malformed selector reached the runner; it should be rejected before any work")
+	}
+}
+
+// TestOverlayValidate_NoDepthKeepsTheShippedReadOnlyContract is R11.3. Depth
+// `options` is the default, no staged tree is prepared, and the command behaves
+// exactly as it does today.
+func TestOverlayValidate_NoDepthKeepsTheShippedReadOnlyContract(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	code, exited := captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
+	})
+
+	if exited && code != 0 {
+		t.Errorf("exit code: got %d, want 0", code)
+	}
+	if seen.Depth != "" && seen.Depth != "options" {
+		t.Errorf("Depth = %q for an invocation with no --depth; the default is the static gate and nothing else (R11.3)", seen.Depth)
+	}
+	if seen.StagingRoot != "" {
+		t.Errorf("StagingRoot = %q with no --depth; the shipped command stages nothing, builds nothing and needs no scratch directory",
+			seen.StagingRoot)
+	}
+}
+
+// TestOverlayValidate_DepthIsHandedToTheRunner is R11.1, across the whole
+// ladder. Each case builds its own command, which is also what proves the flag
+// is not bound to a package variable.
+func TestOverlayValidate_DepthIsHandedToTheRunner(t *testing.T) {
+	for _, depth := range []string{"none", "options", "patches", "configure", "compile"} {
+		t.Run(depth, func(t *testing.T) {
+			seen := stubValidateRunner(t, validate.Report{})
+
+			captureExit(t, func() {
+				runValidate(newValidateCmd(), []string{"--depth=" + depth, "media-plugins/gst-plugins-qt6"})
+			})
+
+			if seen.Depth != depth {
+				t.Errorf("Depth = %q, want %q", seen.Depth, depth)
+			}
+			if seen.Selector != "media-plugins/gst-plugins-qt6" {
+				t.Errorf("Selector = %q; the positional argument must survive alongside the flag", seen.Selector)
+			}
+		})
+	}
+}
+
+// TestOverlayValidate_DepthDoesNotLeakBetweenCommands is the convention at
+// overlay_validate.go:43-47, asserted rather than trusted. A package-level flag
+// var would make the second invocation inherit the first's compile depth.
+func TestOverlayValidate_DepthDoesNotLeakBetweenCommands(t *testing.T) {
+	first := stubValidateRunner(t, validate.Report{})
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
+	})
+	if first.Depth != "compile" {
+		t.Fatalf("Depth = %q on the first invocation, want compile", first.Depth)
+	}
+
+	second := stubValidateRunner(t, validate.Report{})
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
+	})
+
+	if second.Depth == "compile" {
+		t.Error("the second invocation inherited --depth=compile from the first; the flag is read off the command, " +
+			"never bound to a package var (overlay_validate.go:43-47)")
+	}
+}
+
+// TestOverlayValidate_BuildDepthStagesAndNamesWhere is R11.2's first half: above
+// `options` the gates need a tree, and it is not the published one.
+func TestOverlayValidate_BuildDepthStagesAndNamesWhere(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if seen.StagingRoot == "" {
+		t.Fatal("--depth=configure passed no StagingRoot; the build gates would then run against the published overlay, " +
+			"which is the one thing this story exists to prevent (R11.2)")
+	}
+	if seen.Overlay != "" && strings.HasPrefix(seen.StagingRoot, seen.Overlay) {
+		t.Errorf("StagingRoot %q is inside the overlay %q; ScanOverlay would see an unclaimed ebuild and --clean would delete it",
+			seen.StagingRoot, seen.Overlay)
+	}
+}
+
+// TestOverlayValidate_BuildDepthLeavesTheOverlayByteIdentical is R11.2's second
+// half, asserted where the command can see it: the runner is stubbed, so what is
+// pinned here is that the COMMAND writes nothing of its own around the call —
+// the runner's own byte-identity is asserted in the validate package
+// (golden_test.go), where the tree really exists.
+func TestOverlayValidate_BuildDepthLeavesTheOverlayByteIdentical(t *testing.T) {
+	var reached bool
+	orig := validateRunnerFn
+	validateRunnerFn = func(_ context.Context, opts validate.Options) (validate.Report, error) {
+		reached = true
+		if opts.Overlay == "" {
+			return validate.Report{}, nil
+		}
+		return validate.Report{Overlay: opts.Overlay}, nil
+	}
+	t.Cleanup(func() { validateRunnerFn = orig })
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if !reached {
+		t.Fatal("the runner was never reached for a build-depth invocation")
+	}
+}
+
+// TestOverlayValidate_UnknownDepthExitsOneNamingTheValidSet keeps a typo cheap.
+//
+// EXIT 1, NOT 2, AND THE DISTINCTION IS THE SHIPPED CONTRACT. Exit 2 is reserved
+// for "the selector names something the overlay does not hold"
+// (overlay_validate.go:70-73). A --depth value that does not parse is not a
+// selector miss: the overlay was never consulted, and a CI script that branches
+// on 2 to mean "unknown package" would silently mis-handle a typo in a flag.
+// The message lists the five valid names so the operator does not have to go and
+// read the source.
+//
+// An earlier draft of this file asserted 2 on the mistaken premise that 2 is a
+// general usage code. It is not; it names one specific condition.
+func TestOverlayValidate_UnknownDepthExitsOneNamingTheValidSet(t *testing.T) {
+	var reached bool
+	orig := validateRunnerFn
+	validateRunnerFn = func(_ context.Context, _ validate.Options) (validate.Report, error) {
+		reached = true
+		return validate.Report{}, nil
+	}
+	t.Cleanup(func() { validateRunnerFn = orig })
+
+	// captureStdout OUTSIDE captureExit, the order captureStdoutExit
+	// (snapshot_apply_test.go:110) already uses for a verb that prints and then
+	// exits. Nested the other way, osExit's stub panics, the panic unwinds
+	// through captureStdout before captureExit recovers it, and the assignment
+	// never runs — out would be "" whatever was printed. Surface only; every
+	// assertion below is the one that was authored.
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() {
+			runValidate(newValidateCmd(), []string{"--depth=shallow", "media-plugins/gst-plugins-qt6"})
+		})
+	})
+
+	if !exited {
+		t.Fatal("an unknown depth did not exit")
+	}
+	if code == 2 {
+		t.Fatalf("exit code 2 for an unparseable --depth; 2 is reserved for a selector the overlay does not hold, " +
+			"and nothing about a bad flag value says anything about the overlay's contents")
+	}
+	if code != 1 {
+		t.Errorf("exit code: got %d, want 1 for a --depth value that does not parse", code)
+	}
+	if reached {
+		t.Error("an unknown depth reached the runner; a usage error is answered before any work is done")
+	}
+	for _, name := range []string{"none", "options", "patches", "configure", "compile"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("the diagnostic does not list the valid depth %q:\n%s", name, out)
+		}
+	}
+}
+
+// TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding pins that the
+// three exit codes survive the new flag. A build-depth run that found a real
+// problem must fail the same way a static one does, or a CI script that already
+// keys on the exit status quietly stops noticing.
+func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T) {
+	stubValidateRunner(t, validate.Report{
+		Results: []validate.EbuildResult{{
+			Package: "media-plugins/gst-plugins-qt6",
+			Version: "1.29.2",
+			Depth:   "configure",
+			Gates: []validate.GateResult{{
+				Gate:    validate.GateConfigure,
+				Outcome: validate.OutcomeFailed,
+				Findings: []validate.Finding{{
+					Gate: validate.GateConfigure, Severity: validate.SeverityError,
+					Detail: `meson.build:1:0: ERROR: Unknown option: "aalib".`,
+				}},
+			}},
+		}},
+	})
+
+	code, exited := captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if !exited || code != 1 {
+		t.Errorf("exit code: got %d (exited=%v), want 1 for an error finding from the configure gate", code, exited)
 	}
 }

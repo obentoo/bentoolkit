@@ -96,8 +96,16 @@ type PackageConfig struct {
 	// Type classifies the package as binary ("bin") or source-built
 	// ("source"). Empty means auto-detect from the ebuild (RESTRICT=bindist,
 	// a -bin suffix, or a binary SRC_URI). Set it only to override/correct the
-	// heuristic. Used for reporting and the --only filter; it does not change
-	// apply/compile behavior.
+	// heuristic. Used for reporting and the --only filter.
+	//
+	// It ALSO decides how deeply a bump is validated (story 033, R2.3): a record
+	// resolved as "bin" is validated at depth none, because there is no source to
+	// unpack, patch, configure or compile and therefore no build gate that could
+	// run against it. What decides is the RESOLVED type — Checker.resolveType's
+	// answer, carried on CheckResult.Type — and NOT this field, which is empty
+	// for most records; a resolver reading the raw field would see "" for almost
+	// every auto-detected binary package in the registry and schedule a compile
+	// for a prebuilt blob.
 	Type string `toml:"type,omitempty"`
 	// Patched documents that this entry's ebuild deliberately diverges from
 	// ::gentoo's — a patch, an extra USE flag, a changed dependency — and therefore

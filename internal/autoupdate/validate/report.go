@@ -18,12 +18,59 @@ const (
 	OutcomeSkipped Outcome = "SKIPPED"
 )
 
+// GateResult is what ONE gate has to say about one ebuild.
+//
+// # Why the reason lives here and not on the result
+//
+// EbuildResult shipped with a single Reason shared by every gate, and attachQA
+// overwrote it: an option gate that skipped for a missing distfile and a QA gate
+// that skipped for a missing pkgcheck came out of the run as one cause, and
+// whichever wrote last won. A reason is a property of the gate that could not
+// run. With five gates that is no longer a nicety — four of them would be
+// explaining themselves through one field.
+//
+// # The invariant
+//
+// Outcome SKIPPED ALWAYS carries a non-empty Reason. That is the whole story in
+// one sentence — a skip nobody can read is a pass — and putting Reason on the
+// gate is what makes it statable once per gate instead of once per ebuild. The
+// converse does NOT hold: a PASS may carry a reason too, because an outcome
+// names its own reach and "a configure pass does not cover compilation" is
+// exactly the kind of qualification R4 asks for.
+//
+// Findings are the ones THIS gate produced. Each also carries its own Gate
+// field, which looks redundant here and is not: a renderer flattening every
+// gate's findings into one list must still be able to say which check spoke.
+type GateResult struct {
+	Gate     string    `json:"gate"`
+	Outcome  Outcome   `json:"outcome"`
+	Reason   string    `json:"reason,omitempty"`
+	Findings []Finding `json:"findings,omitempty"`
+}
+
 // EbuildResult is everything the run has to say about one ebuild version.
 //
-// Reason is non-empty whenever either Outcome is SKIPPED. That is the invariant
-// the whole story rests on — a skip nobody can read is a pass — so it is
-// asserted in tests and enforced by the constructors below rather than left to
-// whoever writes the next call site.
+// # A list of gates, not one field per gate
+//
+// This shipped with two hardcoded outcome fields, Options and QA, and one Reason
+// for both. Five gates do not fit that shape, and the failure is not cosmetic:
+// ExitCode filtered its findings on GateOptions, so an error from the gate that
+// actually runs the build was invisible to it and the command exited 0 while the
+// report printed a failure. Gates is a list so that a sixth gate costs a
+// constant and no surgery (D12).
+//
+// # Depth beside DepthRequested
+//
+// Depth is how far validation actually got; DepthRequested is how far it was
+// asked to go. Both are needed to say "compile was asked for and configure is as
+// far as it got, because …", which is the R4 rule — an outcome names its own
+// reach — applied to the ladder itself. DepthReason is that "because", and it is
+// the one of the three that is genuinely absent when the two agree.
+//
+// All three are strings rather than the Depth type on purpose: Depth is an int
+// whose ORDERING is its contract, so it would reach the wire as a number and
+// force every consumer to carry the ladder's ordering to read it. The string is
+// the same spelling `--depth` accepts and Depth.String prints.
 //
 // # The json tags are the contract
 //
@@ -34,16 +81,52 @@ const (
 // who has already shipped a jq expression against it.
 //
 // Only the fields that are genuinely absent carry omitempty. Package, Version,
-// Options, QA and Findings are always present, so a consumer never has to tell
-// "missing" from "empty" for them.
+// Depth, DepthRequested, Gates and Sources are always present, so a consumer
+// never has to tell "missing" from "empty" for them.
 type EbuildResult struct {
-	Package  string    `json:"package"`
-	Version  string    `json:"version"`
-	Options  Outcome   `json:"options"`
-	QA       Outcome   `json:"qa"`
-	Reason   string    `json:"reason,omitempty"`
-	Sources  []string  `json:"sources"`
-	Findings []Finding `json:"findings"`
+	Package        string       `json:"package"`
+	Version        string       `json:"version"`
+	Depth          string       `json:"depth"`
+	DepthRequested string       `json:"depth_requested"`
+	DepthReason    string       `json:"depth_reason,omitempty"`
+	Gates          []GateResult `json:"gates"`
+	Sources        []string     `json:"sources"`
+}
+
+// WorstOutcome is the one outcome that stands for the whole ebuild, for a
+// renderer that has one column and five gates to fit in it.
+//
+// FAILED beats SKIPPED beats PASS, and PASS is only reached when EVERY deciding
+// gate passed. A result carrying no deciding gate at all answers SKIPPED: it has
+// said nothing about this ebuild, and "nothing" read as a pass is the defect
+// this whole story exists to remove.
+//
+// # pkgcheck is excluded, exactly as it is from ExitCode
+//
+// The QA gate skips whenever pkgcheck is not installed, which on such a host is
+// every ebuild in the tree. Folding that into the headline would turn a clean
+// whole-overlay run into "0 passed, 500 skipped" and put the summary line at
+// odds with the exit code beside it — the same D8 argument that keeps QA
+// findings out of ExitCode, applied to the outcome instead of the finding. The
+// QA gate is still rendered, still named, and still carries its own reason.
+func (r EbuildResult) WorstOutcome() Outcome {
+	deciding, passes := 0, 0
+	for _, gate := range r.Gates {
+		if gate.Gate == GateQA {
+			continue
+		}
+		deciding++
+		switch gate.Outcome {
+		case OutcomeFailed:
+			return OutcomeFailed
+		case OutcomePass:
+			passes++
+		}
+	}
+	if deciding > 0 && passes == deciding {
+		return OutcomePass
+	}
+	return OutcomeSkipped
 }
 
 // Report is one whole run.
@@ -60,8 +143,12 @@ type Report struct {
 
 // Normalized returns a copy whose nil slices are empty ones, so the JSON
 // document carries `[]` rather than `null`. A consumer piping this into
-// `jq '.results[].findings[]'` should not have to special-case the difference
-// between "no findings" and "the key was nil in Go".
+// `jq '.results[].gates[]'` should not have to special-case the difference
+// between "no gates" and "the key was nil in Go".
+//
+// A gate's own Findings are left alone, because they carry omitempty: nil and
+// empty are both written as an absent key there, so neither can surface as a
+// `null` for jq to trip over.
 func (r Report) Normalized() Report {
 	out := r
 	out.Results = make([]EbuildResult, len(r.Results))
@@ -69,8 +156,8 @@ func (r Report) Normalized() Report {
 		if res.Sources == nil {
 			res.Sources = []string{}
 		}
-		if res.Findings == nil {
-			res.Findings = []Finding{}
+		if res.Gates == nil {
+			res.Gates = []GateResult{}
 		}
 		out.Results[i] = res
 	}
@@ -79,8 +166,8 @@ func (r Report) Normalized() Report {
 
 // ExitCode returns the process exit code for the run.
 //
-//	0 — every option-gate outcome was PASS or SKIPPED
-//	1 — at least one option-gate finding of severity error
+//	0 — every gate outcome was PASS or SKIPPED
+//	1 — at least one finding of severity error, from any gate but pkgcheck's
 //	2 — the selector named something the overlay does not hold
 //
 // # This is NOT BatchResult.ExitCode, and the two must not be unified
@@ -99,28 +186,46 @@ func (r Report) Normalized() Report {
 // Unify them and `2` acquires two meanings inside one binary, which is a bug
 // that surfaces in someone's CI script and nowhere else.
 //
-// # Only option-gate findings count
+// # Every gate counts, except the two that never decide
 //
-// pkgcheck findings ride in the same report and are excluded here (D8). The
-// overlay carries pre-existing QA findings that have nothing to do with a bump;
-// letting them set the exit status would make `overlay validate` fail across
-// the whole tree and reduce it to noise — a metadata.xml DOCTYPE typo
-// outranking the real signal.
+// This filtered on GateOptions, which is why it existed to be rewritten: the
+// configure gate is the one that actually runs the build, and an error from it
+// answered 0. The rule is now uniform — an error finding fails the run whatever
+// produced it — and the two exceptions are structural rather than listed:
+//
+//   - pkgcheck findings ride in the same report and are excluded here (D8). The
+//     overlay carries pre-existing QA findings that have nothing to do with a
+//     bump; letting them set the exit status would make `overlay validate` fail
+//     across the whole tree and reduce it to noise — a metadata.xml DOCTYPE typo
+//     outranking the real signal.
+//   - The reviewer is not excluded and does not need to be: it emits at info or
+//     warning and never at error (R7.6), so a model's opinion cannot fail a bump
+//     even when the rule counting it is uniform. That is a severity discipline
+//     enforced where the findings are produced, not a special case here.
+//
+// The exclusion selects on the GATE THAT RAN, not on the finding's own Gate
+// label. The gate that produced a finding owns whether it decides; the label is
+// for a renderer flattening several gates into one list.
 func (r Report) ExitCode() int {
 	if r.UnmatchedSelector != "" {
 		return 2
 	}
 	for _, res := range r.Results {
-		for _, f := range res.Findings {
-			if f.Gate == GateOptions && f.Severity == SeverityError {
-				return 1
+		for _, gate := range res.Gates {
+			if gate.Gate == GateQA {
+				continue
+			}
+			for _, f := range gate.Findings {
+				if f.Severity == SeverityError {
+					return 1
+				}
 			}
 		}
 	}
 	return 0
 }
 
-// HasErrors reports whether any option-gate error finding was recorded. It is
+// HasErrors reports whether any deciding gate recorded an error finding. It is
 // what the text renderer keys its summary line on, so the summary and the exit
 // code cannot disagree.
 func (r Report) HasErrors() bool { return r.ExitCode() == 1 }
@@ -129,12 +234,19 @@ func (r Report) HasErrors() bool { return r.ExitCode() == 1 }
 // run. The reason is a required argument rather than a settable field, which is
 // how the "SKIPPED always carries a reason" invariant is enforced instead of
 // merely documented.
+//
+// It produces the option gate alone. Every later gate is appended by whoever
+// runs it, and one that never ran contributes no GateResult rather than a
+// hollow one — an absent gate is honest, and a PASS nobody measured is not.
 func skippedResult(pkg, version, reason string) EbuildResult {
 	return EbuildResult{
 		Package: pkg,
 		Version: version,
-		Options: OutcomeSkipped,
-		Reason:  reason,
+		Gates: []GateResult{{
+			Gate:    GateOptions,
+			Outcome: OutcomeSkipped,
+			Reason:  reason,
+		}},
 	}
 }
 
@@ -154,10 +266,13 @@ func comparedResult(pkg, version string, d Declared, p Passed) EbuildResult {
 	}
 
 	return EbuildResult{
-		Package:  pkg,
-		Version:  version,
-		Options:  outcome,
-		Sources:  d.Sources,
-		Findings: findings,
+		Package: pkg,
+		Version: version,
+		Sources: d.Sources,
+		Gates: []GateResult{{
+			Gate:     GateOptions,
+			Outcome:  outcome,
+			Findings: findings,
+		}},
 	}
 }

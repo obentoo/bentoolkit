@@ -24,34 +24,48 @@ import (
 
 // mixedReport carries one of every outcome, so a renderer that handles only the
 // happy path cannot pass.
+//
+// The last entry is the case story 033 added and the shipped shape could not
+// express: TWO gates skipping for DIFFERENT causes. It used to be one Reason
+// field that whichever gate wrote last won.
 func mixedReport() validate.Report {
 	return validate.Report{
 		Overlay: "/var/db/repos/bentoo",
 		Results: []validate.EbuildResult{
 			{
-				Package: "media-plugins/gst-plugins-qt6",
-				Version: "1.29.2",
-				Options: "FAILED",
-				QA:      "PASS",
-				Sources: []string{"gst-plugins-good-1.29.2/meson.options"},
-				Findings: []validate.Finding{
-					{Gate: "options", Severity: "error", Detail: "-Daalib= is passed but upstream 1.29.2 declares no such option"},
+				Package:        "media-plugins/gst-plugins-qt6",
+				Version:        "1.29.2",
+				Depth:          "options",
+				DepthRequested: "options",
+				Sources:        []string{"gst-plugins-good-1.29.2/meson.options"},
+				Gates: []validate.GateResult{
+					{Gate: validate.GateOptions, Outcome: validate.OutcomeFailed, Findings: []validate.Finding{
+						{Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is passed but upstream 1.29.2 declares no such option"},
+					}},
+					{Gate: validate.GateQA, Outcome: validate.OutcomePass},
 				},
 			},
 			{
-				Package: "media-plugins/gst-plugins-qt6",
-				Version: "1.28.6",
-				Options: "PASS",
-				QA:      "SKIPPED",
-				Reason:  "pkgcheck was not found on PATH",
-				Sources: []string{"gst-plugins-good-1.28.6/meson.options"},
+				Package:        "media-plugins/gst-plugins-qt6",
+				Version:        "1.28.6",
+				Depth:          "options",
+				DepthRequested: "options",
+				Sources:        []string{"gst-plugins-good-1.28.6/meson.options"},
+				Gates: []validate.GateResult{
+					{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+					{Gate: validate.GateQA, Outcome: validate.OutcomeSkipped, Reason: "pkgcheck was not found on PATH"},
+				},
 			},
 			{
-				Package: "dev-libs/cmakeproj",
-				Version: "1.0",
-				Options: "SKIPPED",
-				QA:      "PASS",
-				Reason:  "build system is not Meson: cmake",
+				Package:        "dev-libs/cmakeproj",
+				Version:        "1.0",
+				Depth:          "options",
+				DepthRequested: "configure",
+				DepthReason:    "the option gate could not read the archive, so nothing deeper could run",
+				Gates: []validate.GateResult{
+					{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped, Reason: "build system is not Meson: cmake"},
+					{Gate: validate.GateConfigure, Outcome: validate.OutcomeSkipped, Reason: "the staged tree could not be prepared: permission denied"},
+				},
 			},
 		},
 	}
@@ -69,6 +83,10 @@ func TestRender_TextNamesEverySkipReason(t *testing.T) {
 	for _, want := range []string{
 		"pkgcheck was not found on PATH",
 		"build system is not Meson: cmake",
+		// Both reasons of the two-gates-skipping entry, which is the assertion
+		// the shipped renderer could not satisfy: one shared Reason field meant
+		// one of these two was always lost.
+		"the staged tree could not be prepared: permission denied",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the text report does not carry the skip reason %q\n--- got ---\n%s", want, out)
@@ -76,6 +94,64 @@ func TestRender_TextNamesEverySkipReason(t *testing.T) {
 	}
 	if !strings.Contains(out, "aalib") {
 		t.Errorf("the text report does not name the failing option\n--- got ---\n%s", out)
+	}
+}
+
+// TestRender_TextNamesTheGateBesideItsReason is R4.4 on the human surface. Two
+// skips with two causes are only actionable if the operator can tell WHICH gate
+// each one stopped: "permission denied" against the configure gate and "not
+// Meson" against the option gate call for different work.
+func TestRender_TextNamesTheGateBesideItsReason(t *testing.T) {
+	stubValidateRunner(t, mixedReport())
+
+	out := captureStdout(t, func() {
+		captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+	})
+
+	for _, want := range []string{
+		"options: build system is not Meson: cmake",
+		"configure: the staged tree could not be prepared: permission denied",
+		"qa: pkgcheck was not found on PATH",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the text report does not name the gate beside its reason: want %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRender_TextTallyIsTheWorstGatePerEbuild pins that the headline cannot be
+// taken from one favoured gate. The shipped renderer tallied res.Options alone,
+// which is how a configure failure would have printed as a pass.
+func TestRender_TextTallyIsTheWorstGatePerEbuild(t *testing.T) {
+	stubValidateRunner(t, validate.Report{
+		Overlay: "/var/db/repos/bentoo",
+		Results: []validate.EbuildResult{{
+			Package: "media-plugins/gst-plugins-qt6",
+			Version: "1.29.2",
+			Gates: []validate.GateResult{
+				{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+				{Gate: validate.GateConfigure, Outcome: validate.OutcomeFailed, Findings: []validate.Finding{
+					{Gate: validate.GateConfigure, Severity: validate.SeverityError, Detail: `meson.build:1:0: ERROR: Unknown option: "aalib".`},
+				}},
+			},
+		}},
+	})
+
+	// captureStdout goes OUTSIDE captureExit. osExit panics with a sentinel that
+	// captureExit recovers, so with the nesting the other way the assignment of
+	// the captured text never runs and every assertion about it passes on an
+	// empty string.
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+	})
+
+	if !strings.Contains(out, "1 ebuilds: 1 failed, 0 passed, 0 skipped") {
+		t.Errorf("the summary does not count the ebuild as failed\n--- got ---\n%s", out)
+	}
+	if !exited || code != 1 {
+		t.Errorf("exit code: got %d (exited=%v), want 1 for a configure-gate error", code, exited)
 	}
 }
 
@@ -120,10 +196,74 @@ func TestRender_JsonKeysAreTheContract(t *testing.T) {
 	if !ok {
 		t.Fatal("results[0] is not an object")
 	}
-	for _, key := range []string{"package", "version", "options", "qa", "findings"} {
+	for _, key := range []string{"package", "version", "depth", "depth_requested", "gates", "sources"} {
 		if _, present := first[key]; !present {
 			t.Errorf("result object is missing key %q; got %v", key, jsonKeysOf(first))
 		}
+	}
+	// The keys story 033 replaced. They are asserted ABSENT rather than left
+	// unmentioned, so a half-done revert that reintroduced one of them beside
+	// `gates` would fail here instead of shipping two disagreeing shapes.
+	for _, gone := range []string{"options", "qa", "reason", "findings"} {
+		if _, present := first[gone]; present {
+			t.Errorf("result object still carries the replaced key %q; findings and outcomes moved onto gates", gone)
+		}
+	}
+
+	gates, ok := first["gates"].([]any)
+	if !ok || len(gates) == 0 {
+		t.Fatalf("results[0].gates is missing or empty; got %v", first["gates"])
+	}
+	gate, ok := gates[0].(map[string]any)
+	if !ok {
+		t.Fatal("results[0].gates[0] is not an object")
+	}
+	for _, key := range []string{"gate", "outcome", "findings"} {
+		if _, present := gate[key]; !present {
+			t.Errorf("gate object is missing key %q; got %v", key, jsonKeysOf(gate))
+		}
+	}
+}
+
+// TestRender_JsonCarriesEveryGatesOwnReason is R4.4 on the machine surface. The
+// third entry of mixedReport has two gates skipping for two causes, and a
+// document that carried one of them would be the shipped defect with a new key
+// name.
+func TestRender_JsonCarriesEveryGatesOwnReason(t *testing.T) {
+	stubValidateRunner(t, mixedReport())
+
+	out := captureStdout(t, func() {
+		captureExit(t, func() { runValidate(newValidateCmd(), []string{"--json"}) })
+	})
+
+	var doc struct {
+		Results []struct {
+			Gates []struct {
+				Gate    string `json:"gate"`
+				Outcome string `json:"outcome"`
+				Reason  string `json:"reason"`
+			} `json:"gates"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshalling: %v\n--- got ---\n%s", err, out)
+	}
+	if len(doc.Results) != 3 {
+		t.Fatalf("results: got %d, want 3", len(doc.Results))
+	}
+
+	reasons := map[string]string{}
+	for _, gate := range doc.Results[2].Gates {
+		if gate.Outcome != "SKIPPED" {
+			t.Errorf("gate %q: got outcome %q, want SKIPPED", gate.Gate, gate.Outcome)
+		}
+		if gate.Reason == "" {
+			t.Errorf("gate %q reports SKIPPED with no reason on the wire", gate.Gate)
+		}
+		reasons[gate.Gate] = gate.Reason
+	}
+	if reasons["options"] == reasons["configure"] {
+		t.Errorf("both gates report the same reason (%q); one skip overwrote the other's explanation", reasons["options"])
 	}
 }
 
@@ -147,9 +287,15 @@ func TestRender_JsonCarriesTheEvidence(t *testing.T) {
 func TestRender_ExitCodeMatchesTheRenderedOutcomes(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
-	var out string
-	code, exited := captureExit(t, func() {
-		out = captureStdout(t, func() { runValidate(newValidateCmd(), []string{}) })
+	// The two captures nest this way round and not the other. osExit panics with
+	// a sentinel captureExit recovers, so with captureExit on the outside the
+	// `out = captureStdout(…)` assignment never runs and the FAILED assertion
+	// below silently tests an empty string — a vacuous green in the very test
+	// that exists to stop the report and the exit code drifting apart.
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
 	})
 
 	if !exited {
