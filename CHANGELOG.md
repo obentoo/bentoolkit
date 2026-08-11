@@ -112,6 +112,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `internal/overlay`, so the reverse edge would be a cycle, not merely a
   boundary violation.
 
+- **Publishing a realignment needs the maintainer AND the gates, and a passing
+  gate is not consent.** The shortcut is the reasonable-sounding one — "every
+  gate passed, so what is the maintainer adding?" What the maintainer adds is
+  the judgement no gate can make: the overlay's `nodejs` carries a 492-line
+  divergence that would pass every rung of the ladder, and reverting it would
+  still be wrong. The gates answer "does it build"; only a human answers "should
+  we". So approval is a parameter rather than a question the promoting code asks
+  itself — a function that asked it could not be tested for refusing.
+
+  A refusal names **which** authority said no, because "not promoted" is one
+  outcome for several reasons and an operator who cannot tell them apart does
+  not know whether to fix the ebuild, re-run the gates, or say yes. Every
+  refusal returns before the first byte of the overlay is touched, and the tests
+  assert that over the **whole tree** rather than the one file — a refusal that
+  wrote the right nothing but dropped a Manifest passes any per-file check.
+
+  What gets published is the proposal's own bytes, the same slice the gates ran
+  against, so "the exact bytes that were proved" holds by identity rather than
+  by resemblance; anything re-rendered at promotion time would be a file no gate
+  ever read. A proof carrying **no gate at all** is refused: `--depth options`
+  and below run no build gate, so "every gate reported PASS or SKIPPED" would be
+  true of nothing, leaving approval as the only authority that ever spoke.
+
 ### Changed
 - **`overlay compare` without `--realign` is unchanged** — the same output, the
   same exit code, the same package set, the same summary arithmetic. This is a

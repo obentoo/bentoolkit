@@ -217,15 +217,26 @@ func realignPassingGates() []validate.GateResult {
 // TestRealignConsumesStory033Unchanged is the "add no gate, invent no wrapper"
 // assertion, held at compile time.
 //
+// # Why every declaration below is //nolint:staticcheck
+//
+// staticcheck's QF1011 reads `var _ T = expr` as a redundant annotation and
+// offers to drop the T, because the right-hand side already has that type. Here
+// the T IS the assertion and the right-hand side is the thing under test: drop
+// it and `var _ = validate.Stage` states nothing at all, so the suggested
+// simplification would delete the only check in this function while leaving it
+// compiling and green. The signature drift these four lines exist to catch — a
+// parameter added to Stage, a return value moved on RunBuildGates — would then
+// reach a reader as nothing.
+//
 // _Requirements: R5, R5.1, R5.2_
 func TestRealignConsumesStory033Unchanged(t *testing.T) {
-	var _ func(validate.StageRequest) (string, error) = validate.Stage
-	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = validate.RunBuildGates
+	var _ func(validate.StageRequest) (string, error) = validate.Stage                                                             //nolint:staticcheck // QF1011: the explicit type is the assertion
+	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = validate.RunBuildGates //nolint:staticcheck // QF1011: the explicit type is the assertion
 
 	// The seams are the SAME functions, not adapters around them. An adapter is
 	// where a second copy of the ladder starts.
-	var _ func(validate.StageRequest) (string, error) = stageRealignment
-	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = runRealignGates
+	var _ func(validate.StageRequest) (string, error) = stageRealignment                                                    //nolint:staticcheck // QF1011: the explicit type is the assertion
+	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = runRealignGates //nolint:staticcheck // QF1011: the explicit type is the assertion
 }
 
 // TestProveStagesAndGatesAtTheRequestedDepth is R5.1 and R5.2: the
@@ -400,5 +411,384 @@ func TestProveStagingFailureIsAnError(t *testing.T) {
 	}
 	if got := realignTreeHash(t, overlayRoot); got != before {
 		t.Errorf("a failed staging attempt changed the published overlay (hash %s -> %s)", before, got)
+	}
+}
+
+// Pinned contract:
+//
+//	func Promote(p Proposal, proof Proof, approved bool, overlayRoot string) error
+//
+// `approved` is a bare bool parameter rather than a prompt this function runs,
+// and that is the design decision D8 asks for held at the signature: the model
+// proposes, the gates prove, the maintainer approves, and no two of those are
+// collapsed. The prompt itself is a TTY concern and lives in task 7.3, where
+// cobra and the terminal are. A function that asked the question itself could
+// not be tested for refusing.
+//
+// Every case below hashes the WHOLE published overlay before and after. R5.4
+// says the published overlay is left byte-identical, which is a claim about the
+// tree: a refusal that wrote the right nothing and also dropped a Manifest, or
+// removed a sibling version, passes any per-file check and fails this one.
+
+// realignPublishedPath is where the fixture's ebuild lives in the overlay.
+func realignPublishedPath(overlayRoot string) string {
+	return filepath.Join(overlayRoot, "media-libs", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+}
+
+// realignProvenProof is what Prove returns for a realignment that
+// cleared the ladder: PASS and SKIPPED only, which R5.3 accepts as passing.
+func realignProvenProof(t *testing.T, stagingRoot string) Proof {
+	t.Helper()
+	staged := filepath.Join(stagingRoot, "staged")
+	if err := os.MkdirAll(staged, 0o750); err != nil {
+		t.Fatalf("creating the staged root: %v", err)
+	}
+	return Proof{StagedRoot: staged, Gates: realignPassingGates(), Passed: true}
+}
+
+// TestPromotePublishesExactlyWhatWasProved is R5.3 and R5.5. The
+// bytes that reach the overlay are the bytes the gates ran against — not a
+// re-render, not a re-application of the diff, not the proposal regenerated from
+// the baseline. Anything regenerated at promotion time is unproved by
+// construction, however similar it looks.
+//
+// _Requirements: R5, R5.3, R5.5_
+func TestPromotePublishesExactlyWhatWasProved(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+
+	if err := Promote(proposal, proof, true, overlayRoot); err != nil {
+		t.Fatalf("Promote returned %v, want nil for an approved and passing realignment", err)
+	}
+
+	got, err := os.ReadFile(realignPublishedPath(overlayRoot))
+	if err != nil {
+		t.Fatalf("reading the published ebuild: %v", err)
+	}
+	if string(got) != realignProposedEbuild {
+		t.Errorf("the published ebuild is:\n%s\nwant the exact bytes that were proved:\n%s\nanything regenerated at promotion time is unproved however similar it looks (R5.5)", got, realignProposedEbuild)
+	}
+}
+
+// TestPromoteRefusesAFailingGate is R5.3's first half. The maintainer
+// said yes; the gates said no. Approval is permission to publish something that
+// works, never an override of the finding that it does not.
+//
+// _Requirements: R5, R5.3, R5.4_
+func TestPromoteRefusesAFailingGate(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Gates = append(proof.Gates, validate.GateResult{
+		Gate: "compile", Outcome: validate.OutcomeFailed, Reason: "meson: unknown option -Dqml",
+	})
+	proof.Passed = false
+
+	before := realignTreeHash(t, overlayRoot)
+
+	err := Promote(proposal, proof, true, overlayRoot)
+
+	if err == nil {
+		t.Error("Promote returned nil for an approved but FAILING realignment; approval is permission to publish something that works, not an override of the gate that says it does not (R5.3)")
+	}
+	if got := realignTreeHash(t, overlayRoot); got != before {
+		t.Errorf("the published overlay changed (hash %s -> %s); R5.4 leaves it byte-identical when a realignment does not pass", before, got)
+	}
+	if data, readErr := os.ReadFile(realignPublishedPath(overlayRoot)); readErr != nil || string(data) != realignPublishedEbuild {
+		t.Errorf("the published ebuild is now %q (err %v), want the original bytes untouched", data, readErr)
+	}
+}
+
+// TestPromoteRefusesWithoutApproval is R5.3's second half and the
+// shortcut this whole sub-task exists to block: treating a passing gate as
+// implicit approval.
+//
+// It is the likely shortcut because it is the reasonable-sounding one — "every
+// gate passed, so what is the maintainer adding?" What the maintainer is adding
+// is the judgement the gates cannot make: nodejs's 492-line divergence would
+// pass every gate in the ladder and reverting it would still be wrong. The gates
+// answer "does it build"; only a human answers "should we".
+//
+// _Requirements: R5, R5.3, R5.4_
+func TestPromoteRefusesWithoutApproval(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+
+	if !proof.Passed {
+		t.Fatal("the fixture proof does not pass, so this test would refuse for the wrong reason")
+	}
+	before := realignTreeHash(t, overlayRoot)
+
+	err := Promote(proposal, proof, false, overlayRoot)
+
+	if err == nil {
+		t.Error("Promote returned nil for an UNAPPROVED realignment whose gates all passed; a passing gate is not consent, and the overlay auto-commits, so a promotion is a publish (R5.3, R5.4)")
+	}
+	if got := realignTreeHash(t, overlayRoot); got != before {
+		t.Errorf("the published overlay changed (hash %s -> %s) without approval", before, got)
+	}
+	if data, readErr := os.ReadFile(realignPublishedPath(overlayRoot)); readErr != nil || string(data) != realignPublishedEbuild {
+		t.Errorf("the published ebuild is now %q (err %v), want the original bytes untouched", data, readErr)
+	}
+}
+
+// TestPromoteRefusalsNameWhichAuthoritySaidNo keeps the three
+// authorities legible after the fact. "Not promoted" is the same outcome for
+// three different reasons, and an operator who cannot tell which one applies
+// does not know whether to fix the ebuild, re-run the gates, or say yes.
+//
+// _Requirements: R5, R5.3_
+func TestPromoteRefusalsNameWhichAuthoritySaidNo(t *testing.T) {
+	cases := []struct {
+		name     string
+		approved bool
+		passed   bool
+		gate     *validate.GateResult
+		mustName string
+	}{
+		{
+			name:     "the gates said no",
+			approved: true,
+			passed:   false,
+			gate:     &validate.GateResult{Gate: "compile", Outcome: validate.OutcomeFailed, Reason: "meson: unknown option -Dqml"},
+			mustName: "compile",
+		},
+		{
+			name:     "the maintainer said no",
+			approved: false,
+			passed:   true,
+			mustName: "approv",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+			proof := realignProvenProof(t, stagingRoot)
+			proof.Passed = tc.passed
+			if tc.gate != nil {
+				proof.Gates = append(proof.Gates, *tc.gate)
+			}
+
+			err := Promote(proposal, proof, tc.approved, overlayRoot)
+			if err == nil {
+				t.Fatalf("Promote returned nil, want a refusal")
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), tc.mustName) {
+				t.Errorf("the refusal is %q, want it to name %q — three authorities can refuse and the operator must know which one did", err.Error(), tc.mustName)
+			}
+		})
+	}
+}
+
+// TestPromoteAcceptsSkippedGates: R5.3 says PASS **or** SKIPPED. A
+// SKIPPED gate is a gate that could not run — no portage on the host, no
+// distfile — and story 031's rule applies unchanged: absence of evidence is not
+// evidence of failure. Treating SKIPPED as failure would make the whole ladder
+// unusable on any machine without a full build environment, which is most of
+// them.
+//
+// _Requirements: R5, R5.3, R5.5_
+func TestPromoteAcceptsSkippedGates(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Gates = []validate.GateResult{
+		{Gate: "options", Outcome: validate.OutcomePass},
+		{Gate: "compile", Outcome: validate.OutcomeSkipped, Reason: "portage is not available on this host"},
+	}
+
+	if err := Promote(proposal, proof, true, overlayRoot); err != nil {
+		t.Fatalf("Promote returned %v; R5.3 accepts PASS or SKIPPED, and a SKIPPED gate is one that could not run rather than one that failed", err)
+	}
+	got, err := os.ReadFile(realignPublishedPath(overlayRoot))
+	if err != nil || string(got) != realignProposedEbuild {
+		t.Errorf("the published ebuild is %q (err %v), want the proved bytes", got, err)
+	}
+}
+
+// The tests below are not part of story 034's authored fragment. They cover the
+// refusals sub-task 7.2's implementation added beyond the two the fragment
+// names, so that no guard standing between a proposal and a tree that commits
+// and pushes itself ships without an executed proof that it holds.
+//
+// Every one of them re-asserts the whole-tree hash for the same reason the
+// fragment does: R5.4 is a claim about the tree, not about one file.
+
+// TestPromoteRefusesAProofOfNothing is the vacuity R5.3 would otherwise be
+// satisfied by. "Every gate reported PASS or SKIPPED" is trivially true of an
+// empty list, and validate.RunBuildGates returns exactly that for every depth
+// below DepthPatches — so a realignment proved at DepthNone or DepthOptions was
+// read by nothing, and publishing it would leave approval as the only authority
+// that ever spoke.
+//
+// _Requirements: R5, R5.3, R5.4_
+func TestPromoteRefusesAProofOfNothing(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Gates = nil
+
+	before := realignTreeHash(t, overlayRoot)
+
+	err := Promote(proposal, proof, true, overlayRoot)
+	if err == nil {
+		t.Fatal("Promote returned nil for a proof carrying no gate at all; an empty gate list satisfies R5.3 only vacuously")
+	}
+	if !errors.Is(err, ErrNotPromoted) {
+		t.Errorf("the refusal %v is not an ErrNotPromoted; a caller has to be able to tell a decision from a broken write", err)
+	}
+	if got := realignTreeHash(t, overlayRoot); got != before {
+		t.Errorf("the published overlay changed (hash %s -> %s) (R5.4)", before, got)
+	}
+}
+
+// TestPromoteRefusesAProofThatContradictsItsOwnGates: Proof carries the verdict
+// twice — as the Passed bit and as the gate list it was computed from. When the
+// two disagree, nothing here can tell which one is stale, and in a tree that
+// publishes itself only the refusal is safe.
+//
+// _Requirements: R5, R5.3, R5.4_
+func TestPromoteRefusesAProofThatContradictsItsOwnGates(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Passed = false // every gate in it still reads PASS or SKIPPED
+
+	before := realignTreeHash(t, overlayRoot)
+
+	err := Promote(proposal, proof, true, overlayRoot)
+	if err == nil {
+		t.Fatal("Promote returned nil for a proof whose recorded verdict contradicts its own gates")
+	}
+	if !errors.Is(err, ErrNotPromoted) {
+		t.Errorf("the refusal %v is not an ErrNotPromoted", err)
+	}
+	if got := realignTreeHash(t, overlayRoot); got != before {
+		t.Errorf("the published overlay changed (hash %s -> %s) (R5.4)", before, got)
+	}
+}
+
+// TestPromoteRefusesToPublishAnEbuildTheOverlayNeverHad: a realignment rewrites
+// how an ALREADY PUBLISHED version is built. If that version is not there, the
+// overlay moved on since the comparison — dropped, or revised to a -r1 this
+// proposal does not name — and writing anyway would ADD an ebuild nobody
+// approved, unclaimed by any registry pin, which is what `--clean` deletes.
+//
+// _Requirements: R5, R5.4, R5.5_
+func TestPromoteRefusesToPublishAnEbuildTheOverlayNeverHad(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+	proposal.Version = "1.30.0" // never published here
+
+	before := realignTreeHash(t, overlayRoot)
+
+	err := Promote(proposal, proof, true, overlayRoot)
+	if err == nil {
+		t.Fatal("Promote returned nil for a version the overlay does not carry; that is a bump wearing a realignment's clothes")
+	}
+	if !errors.Is(err, ErrNotPromoted) {
+		t.Errorf("the refusal %v is not an ErrNotPromoted", err)
+	}
+	if got := realignTreeHash(t, overlayRoot); got != before {
+		t.Errorf("the published overlay changed (hash %s -> %s) (R5.4)", before, got)
+	}
+}
+
+// TestPromoteRefusesBeforeTouchingTheOverlay covers the refusals that are about
+// the proposal rather than about an authority: a name that cannot address one
+// file inside the overlay, and a body that would empty the ebuild it claims to
+// realign.
+//
+// The traversal cases are the reason this guard exists here at all. Stage's own
+// splitStagedAtom protects the STAGED tree and nothing in validate ever joins a
+// path inside the published overlay, so this is not a second copy of that rule
+// — it is the only guard on the path that leads into a git repository which
+// commits and pushes on a timer.
+//
+// _Requirements: R5, R5.4, R5.5_
+func TestPromoteRefusesBeforeTouchingTheOverlay(t *testing.T) {
+	cases := []struct {
+		name      string
+		mutate    func(*Proposal)
+		noOverlay bool
+	}{
+		{name: "the category climbs out of the overlay", mutate: func(p *Proposal) { p.Category = ".." }},
+		{name: "the category carries a separator", mutate: func(p *Proposal) { p.Category = "../../etc" }},
+		{name: "the package is empty", mutate: func(p *Proposal) { p.Package = "" }},
+		{name: "the version carries a separator", mutate: func(p *Proposal) { p.Version = "1.29.2/../.." }},
+		{name: "the body is empty", mutate: func(p *Proposal) { p.Ebuild = nil }},
+		{name: "no overlay was named", mutate: func(*Proposal) {}, noOverlay: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+			proof := realignProvenProof(t, stagingRoot)
+			tc.mutate(&proposal)
+
+			target := overlayRoot
+			if tc.noOverlay {
+				target = ""
+			}
+
+			before := realignTreeHash(t, overlayRoot)
+
+			err := Promote(proposal, proof, true, target)
+			if err == nil {
+				t.Fatal("Promote returned nil, want a refusal taken before anything was written")
+			}
+			if !errors.Is(err, ErrNotPromoted) {
+				t.Errorf("the refusal %v is not an ErrNotPromoted", err)
+			}
+			if got := realignTreeHash(t, overlayRoot); got != before {
+				t.Errorf("the published overlay changed (hash %s -> %s) (R5.4)", before, got)
+			}
+		})
+	}
+}
+
+// TestPromoteChangesTheBytesAndNothingElse holds the two side effects a
+// promotion must not have.
+//
+// The mode is the one the overlay already carried: a realignment changes how a
+// version is built, and changing who may READ the file as a side effect of that
+// would be a second change nobody approved — on a tree Portage reads as an
+// unprivileged user.
+//
+// The package directory holding exactly one entry afterwards is the temporary
+// file's receipt. Publishing goes through a temp-and-rename so that no reader
+// ever sees a half-written ebuild under the published name, and the price is a
+// file the overlay never had existing inside it for the width of one write. This
+// overlay auto-commits, so a temporary left behind is a temporary published.
+//
+// _Requirements: R5, R5.4, R5.5_
+func TestPromoteChangesTheBytesAndNothingElse(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	proof := realignProvenProof(t, stagingRoot)
+
+	published := realignPublishedPath(overlayRoot)
+	if err := os.Chmod(published, 0o640); err != nil {
+		t.Fatalf("chmod %s: %v", published, err)
+	}
+
+	if err := Promote(proposal, proof, true, overlayRoot); err != nil {
+		t.Fatalf("Promote returned %v, want nil", err)
+	}
+
+	info, err := os.Stat(published)
+	if err != nil {
+		t.Fatalf("stat %s: %v", published, err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Errorf("the published ebuild is now mode %04o, want the 0640 the overlay already carried; a promotion changes bytes, not who may read them", info.Mode().Perm())
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(published))
+	if err != nil {
+		t.Fatalf("reading the package directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(published) {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("the package directory holds %v, want only the published ebuild; the overlay auto-commits, so a temporary file left inside it is a temporary file published", names)
 	}
 }
