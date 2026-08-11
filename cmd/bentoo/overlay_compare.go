@@ -37,6 +37,19 @@ var (
 	// suppresses work rather than narrowing a view, and it suppresses the only
 	// work that leaves this machine to something other than a package registry.
 	compareNoReview bool
+	// compareRealign turns the description into a JUDGEMENT: every package is
+	// measured against the ::gentoo ebuild it should be compared with, and what
+	// the two carry differently is reported by axis, by declaration and by class
+	// (R7.1).
+	//
+	// It DEFAULTS TO FALSE and everything it adds is gated on it, because
+	// `overlay compare` is shipped and in daily use: without this flag the
+	// rendered output and the exit code are the ones the command produced
+	// yesterday (R7.2). The gate is mechanical rather than careful — the renderer
+	// never learns which flags were passed, so every field the review writes
+	// renders nothing at its zero value and the passes that fill them are called
+	// only from behind this flag (overlay_compare_realign.go).
+	compareRealign bool
 )
 
 var compareCmd = &cobra.Command{
@@ -67,6 +80,13 @@ difference does and which side it came from. It is commentary: the verdicts and
 the removal recommendations are the same with or without it, nothing it says is
 written to a file, and --no-review contacts no model at all.
 
+Use --realign to measure every package against the ::gentoo ebuild it should be
+compared with: which baseline was used and how far it is, which structural axes
+differ, what the ebuild declares about them, and what a model makes of what is
+left. It needs ::gentoo's tree on this machine, so it is refused against any
+other repository and against an API-only provider. Without it the command behaves
+exactly as it always has.
+
 Examples:
   bentoo overlay compare                    # Compare with gentoo (API)
   bentoo overlay compare guru               # Compare with GURU (API)
@@ -76,7 +96,8 @@ Examples:
   bentoo overlay compare --only-outdated    # Show only outdated packages
   bentoo overlay compare --only-redundant   # Show only removal candidates
   bentoo overlay compare --only-patched     # Show only declared divergences
-  bentoo overlay compare --no-review        # Contact no model`,
+  bentoo overlay compare --no-review        # Contact no model
+  bentoo overlay compare --realign          # Review against the ::gentoo baseline`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runCompare,
 }
@@ -93,6 +114,7 @@ func init() {
 	compareCmd.Flags().BoolVar(&compareSync, "sync", false, "Force refresh of repository list")
 	compareCmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
 	compareCmd.Flags().BoolVar(&compareNoReview, "no-review", false, "Contact no model; print the report without commentary")
+	compareCmd.Flags().BoolVar(&compareRealign, "realign", false, "Review each package against its ::gentoo baseline (needs a local gentoo tree)")
 	overlayCmd.AddCommand(compareCmd)
 }
 
@@ -178,6 +200,26 @@ func runCompare(cmd *cobra.Command, args []string) {
 	}
 	defer prov.Close() //nolint:errcheck
 
+	// Refuse what THIS INVOCATION cannot do, before it costs anything (R7.4).
+	//
+	// It sits here, immediately after the provider exists and before the rate
+	// limit is consulted, because that is the first moment both halves of the
+	// question can be answered and the last one before the run starts spending:
+	// the check below issues an API call, and the scan beneath it walks the whole
+	// overlay. A refusal that arrived after either would have spent the run before
+	// saying the request was impossible.
+	//
+	// The reason comes back as a VALUE and is printed here, where this command
+	// knows its output goes to a terminal — logger binds its writer at first use
+	// and a refusal written inside the check could not be read by anything else.
+	if compareRealign {
+		if err := realignPreflight(repoName, prov); err != nil {
+			logger.Error("%v", err)
+			osExit(1)
+			return
+		}
+	}
+
 	// Set timeout for API providers
 	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
 		ghProv.HTTPClient.Timeout = time.Duration(compareTimeout) * time.Second
@@ -258,10 +300,20 @@ func runCompare(cmd *cobra.Command, args []string) {
 	opts := overlay.CompareOptions{
 		OnlyOutdated:  compareOnlyOutdated,
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
-		Concurrency:   compareConcurrency,
-		Ctx:           runCtx,
-		Divergence:    divergence,
-		OverlayPath:   overlayPath,
+		// A REVIEW RUN AND ONLY A REVIEW RUN sees the packages ::gentoo does not
+		// carry. They are the review's own subject — 84 of the overlay's 321
+		// packages have no ::gentoo counterpart, which is a fact about the overlay
+		// that only the baseline review can report (R6.1, R6.4).
+		//
+		// Switched on unconditionally it would be a regression rather than a
+		// feature: those packages would gain rows they do not have today, and
+		// verdictScopeLines' `counted - len(report.Results)` would change under
+		// every operator who never asked for a review (D1).
+		IncludeNotInRemote: compareRealign,
+		Concurrency:        compareConcurrency,
+		Ctx:                runCtx,
+		Divergence:         divergence,
+		OverlayPath:        overlayPath,
 		ProgressCallback: func(done, total uint64) {
 			percent := uint64(0)
 			if total > 0 {
@@ -304,6 +356,30 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// nothing and says nothing when the compared repository is not on disk.
 	overlay.AnnotateAuthorship(report, prov, opts)
 
+	// What our ebuild was MEASURED AGAINST, and what that measurement found: the
+	// ::gentoo baseline and how far it is (R1.1, R1.2), the structural axes that
+	// differ (R2.4), what the ebuild declares about them (R3.1), how much of the
+	// diff the three-way reduction could attribute (R2.5), and — for a package
+	// ::gentoo carries no version of — which other repository does (R6.1).
+	//
+	// IT RUNS ONLY FOR A REVIEW RUN, and that single condition is the whole of
+	// R7.2's byte-identical promise. Every field it writes renders nothing at its
+	// zero value, so a run that never reaches this line prints exactly what
+	// `overlay compare` printed yesterday — the tables, the summary lines and
+	// verdictScopeLines' arithmetic all untouched.
+	//
+	// Locating the tree comes FIRST because it is the one condition the command
+	// exits non-zero for (D9): a review with no ::gentoo repository to read
+	// examined nothing, which is a different sentence from having looked and found
+	// nothing, and the report has to say so instead of printing a coverage line
+	// over a comparison that never happened.
+	realignRan := compareRealign &&
+		realignBaselineIsLocatable(report, realignBaselineTreeCandidate(repoInfo, prov))
+	if realignRan {
+		overlay.AnnotateBaseline(report, prov, opts)
+		annotateOtherRepositories(report, realignLocalRepos(cfg))
+	}
+
 	// What a MODEL makes of the differences the report cannot settle: where each
 	// one came from, what it does, and — where it is ours — the `patched` text
 	// that would declare it (R5.2-R5.4). It is commentary and nothing else: the
@@ -326,6 +402,28 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// printed unchanged.
 	overlay.AnnotateReviews(report, compareDivergenceReviewer(runCtx, compareNoReview), prov, opts)
 
+	// A model's JUDGEMENT of what the baseline review found: is each undeclared
+	// divergence still justified, and what would replace it if not (R4.1, R4.2).
+	//
+	// It runs after the two passes above and on the same opts for their reasons,
+	// and it can no more fail the run than they can: a nil reviewer — `--no-review`
+	// (R5.6), or a machine with no `claude` on PATH (R5.5) — makes it a no-op, and
+	// every other way of not getting an answer leaves an EMPTY verdict and is
+	// counted, never invented. It returns nothing precisely so there is nothing to
+	// exit on: an unreachable model is exit 0, because the deterministic half of
+	// the report above is complete and useful without one (R4.4, D9).
+	//
+	// realignJudged records whether a model was reachable at all, which is the one
+	// thing the report itself cannot say: with no reviewer nothing is asked, both
+	// of its counters stay zero, and the silence would read as "every divergence
+	// was judged and none objected".
+	realignJudged := false
+	if realignRan {
+		reviewer := compareRealignReviewer(runCtx, compareNoReview)
+		realignJudged = reviewer != nil
+		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
+	}
+
 	// Narrow the VIEW, never the computation (D7). The comparison above already
 	// produced the whole picture; only report.Results — the rows the table
 	// prints — is narrowed here, and every counter on report keeps the value the
@@ -342,16 +440,35 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// Display results. Nothing left to show is reported BEFORE FormatReport, so
 	// the report never has to explain an emptiness it cannot see the cause of.
 	if len(report.Results) == 0 {
+		// The run-level SKIPPED line, said here because this path returns before
+		// FormatReport — which opens with it precisely to correct the "All packages
+		// are up-to-date" claim reportEmptyCompare is about to make.
+		reportSkippedBaseline(report)
 		reportEmptyCompare(repoInfo.Name, compareOnlyRedundant, compareOnlyPatched)
 		printComparisonSummary(report, repoInfo.Name)
+		exitOnSkippedBaseline(report)
 		return
 	}
 
 	// Print the formatted report
 	fmt.Print(overlay.FormatReport(report))
 
+	// What a review run adds beside the report: that no verdict was produced when
+	// no model was reachable (R4.4), and the candidate declarations a maintainer is
+	// invited to paste (R3.5). Both are printed HERE rather than by the renderer,
+	// which takes a *CompareReport and never learns which flags were passed, and
+	// both render nothing when there is nothing to say.
+	if realignRan {
+		fmt.Print(realignAddendum(report, realignJudged, compareNoReview))
+	}
+
 	// Print summary
 	printComparisonSummary(report, repoInfo.Name)
+
+	// The ONE non-zero condition (R7.5, D9): the review could not locate a
+	// ::gentoo tree, so nothing was examined. It is last because the report is
+	// still worth printing — `compare` did its job — and osExit does not return.
+	exitOnSkippedBaseline(report)
 }
 
 // filterCompareResults narrows a report to the rows the operator asked for.
