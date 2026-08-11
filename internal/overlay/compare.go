@@ -1239,6 +1239,15 @@ func FormatReport(report *CompareReport) string {
 	// keeps following the last table exactly as it does today (R7.2).
 	sb.WriteString(formatBaselineSummary(report))
 
+	// How much of the run's whole diff was actually explained (R2.3, R2.5),
+	// stated once with the number the three counts are a share of. It prints
+	// NOTHING when no package carries a classification, which is every run that
+	// requested no review, so the summary line below keeps following the last
+	// table exactly as it does today (R7.2).
+	if block := joinReportLines(runClassificationLines(report)); block != "" {
+		sb.WriteString("\n" + block)
+	}
+
 	// How many divergences the model was asked about and did not judge (R4.4),
 	// stated once with its denominator. It prints NOTHING when every question was
 	// answered and nothing at all when none was asked — which is every run that

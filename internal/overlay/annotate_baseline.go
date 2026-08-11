@@ -268,6 +268,16 @@ const (
 // baselineSummaryLead opens the run-level coverage line.
 const baselineSummaryLead = "Baseline coverage: "
 
+// classificationSummaryLead opens the run-level classification block: how much
+// of the whole run's diff the reduction and the model actually explained.
+//
+// It is a constant for the reason baselineSummaryLead is one — a test can name
+// the line without copying its wording — and it is a SEPARATE line from
+// realignSummaryLead on purpose. "How many divergences went unjudged" and "how
+// many differences nobody attributed" are different numbers over different
+// denominators, and one line carrying both would be read as one claim.
+const classificationSummaryLead = "Difference classification: "
+
 // formatBaselineFindings renders the baseline review for a section's results,
 // beneath its table and beneath the verification findings.
 //
@@ -314,7 +324,7 @@ func baselineResultLines(r CompareResult) string {
 		sb.WriteString(baselineDeclarationLine(atom, declared))
 	}
 
-	sb.WriteString(baselineClassificationLines(atom, r.Classified))
+	sb.WriteString(joinReportLines(classificationLines(r)))
 
 	// The model's verdict, and it SAYS WHOSE WORDS FOLLOW, on the same argument
 	// reviewReadingLead makes: everything else on these lines is something the
@@ -414,32 +424,146 @@ func baselineDeclarationLine(atom string, declared DeclaredDivergence) string {
 	return output.Sprintf(output.Info, "%s%s: declared divergence %s\n", baselineFindingLead, atom, detail)
 }
 
-// baselineClassificationLines render the per-class counts with the total they
-// add up to (R2.4, R2.5), or "" for a package nothing was classified for.
+// classificationLines renders one package's per-class counts WITH the total they
+// are a share of (R2.4, R2.5), or nothing for a package nothing was classified
+// for.
 //
 // The three classes get a line each rather than one line with three numbers on
 // it, so that "how many differences are unclassified" can be read without
 // arithmetic — and so that the unclassified count cannot be mistaken for either
-// of the other two, which is what R2.3 is about.
+// of the other two, which is what R2.3 is about. An unclassified difference is
+// counted in the third line and in NEITHER of the first two: pushing it into
+// "ours" would invite a realignment of something nobody read, and pushing it
+// into "version move" would subtract deliberate work as noise.
 //
-// The REACH of the classification is stated beside it, because a share whose
+// The DENOMINATOR is on the line that introduces them, once, and it is the
+// arithmetic classifiedTotal states rather than a fourth number typed out here —
+// three counts whose total is invisible let a reader infer the missing one
+// wrongly, and a total computed twice eventually disagrees with itself.
+//
+// The REACH of the classification is stated beside it too, because a share whose
 // reach is invisible is indistinguishable from a guess (R2.5). Reduced and Span
 // are read as a pair and never separately: false with Span 0 means no third
 // point existed, while false with a large Span means one existed and was refused
 // for being too wide, and those are different facts about the same package.
-func baselineClassificationLines(atom string, classified Classified) string {
-	if classified == (Classified{}) {
-		return ""
+//
+// It takes the whole result rather than the atom and the Classified so a
+// renderer holding one result cannot pair one package's counts with another's
+// name, and it returns LINES rather than a block so the run-level builder below
+// can be assembled and asserted the same way (D-8.1).
+//
+// _Requirements: R2, R2.3, R2.4, R2.5, R7.2_
+func classificationLines(r CompareResult) []string {
+	if r.Classified == (Classified{}) {
+		// Every result of every run that requested no review is in exactly this
+		// state, which is the whole of what keeps R7.2's byte-identical promise
+		// mechanical here: no classification, no lines, nothing to join.
+		return nil
 	}
 
-	total := classified.VersionMove + classified.Ours + classified.Unclassified
+	atom := r.Category + "/" + r.Package
+	classified := r.Classified
 
+	lead := output.Sprintf(output.Info, "%s%s: %d differences against the baseline, %s",
+		baselineFindingLead, atom, classifiedTotal(classified), baselineReachProse(classified))
+	return append([]string{lead}, classificationClassLines(classified)...)
+}
+
+// runClassificationLines renders the run-level classification block: how many of
+// all the differences this run examined were attributed to the version move, how
+// many to us, and how many to neither — with the number they are a share of
+// (R2.3, R2.5).
+//
+// The denominator is the point, and it is the same point formatBaselineSummary's
+// is. "122 differences were attributed to nobody" is unreadable alone, and "63%
+// unclassified" is worse: 63% of twelve differences in one package and 63% of
+// forty thousand across the overlay are different claims, and a classification
+// whose reach is invisible is indistinguishable from a guess.
+//
+// It is derived ENTIRELY from the per-result Classified fields — no counter on
+// the report, nothing accumulated during the pass. That is not tidiness: it is
+// what makes the block and the per-package lines above it incapable of
+// disagreeing, on the same argument countNoBaseline is a separate walk rather
+// than a counter incremented as the results are annotated.
+//
+// It renders NOTHING when no result carries a classification, which is every run
+// that requested no review (R7.2) — the same predicate, `== (Classified{})`, that
+// silences the per-package lines, so the two cannot fall out of step.
+//
+// _Requirements: R2, R2.3, R2.5, R7.2_
+func runClassificationLines(report *CompareReport) []string {
+	if report == nil {
+		return nil
+	}
+
+	var run Classified
+	packages := 0
+	for _, r := range report.Results {
+		if r.Classified == (Classified{}) {
+			// Never classified — a package with no readable baseline, or any
+			// package at all on a run that asked for no review. Counting it as a
+			// package with zero differences would inflate the reach of the
+			// classification with rows nobody looked at.
+			continue
+		}
+		packages++
+		run.VersionMove += r.Classified.VersionMove
+		run.Ours += r.Classified.Ours
+		run.Unclassified += r.Classified.Unclassified
+	}
+	if packages == 0 {
+		return nil
+	}
+
+	lead := output.Sprintf(output.Info, "%s%d differences examined across %d of the packages reviewed — %d of them were attributed to neither the version move nor to us",
+		classificationSummaryLead, classifiedTotal(run), packages, run.Unclassified)
+	return append([]string{lead}, classificationClassLines(run)...)
+}
+
+// classificationClassLines renders the three per-class counts, and is shared by
+// the per-package block and the run-level one so that the second reads as the
+// sum of the firsts rather than as a second way of saying the same thing.
+//
+// Sharing it is not only de-duplication. The two blocks sit in one report, and
+// an operator reads the run-level one as the total of the rows above it — which
+// they can only do if the labels, their order and their indent are the same
+// three, decided once. A class renamed on one of them and not the other would
+// read as two different classifications of the same diff.
+//
+// _Requirements: R2.3, R2.4_
+func classificationClassLines(classified Classified) []string {
+	return []string{
+		output.Sprintf(output.Info, "%sversion move: %d", baselineClassLead, classified.VersionMove),
+		output.Sprintf(output.Info, "%sours: %d", baselineClassLead, classified.Ours),
+		// Third and separate, always. An unclassified difference is one the
+		// reduction and the model both declined to attribute, and it is counted
+		// here and in neither line above (R2.3).
+		output.Sprintf(output.Info, "%sunclassified: %d", baselineClassLead, classified.Unclassified),
+	}
+}
+
+// classifiedTotal is the denominator every one of the three counts is a share
+// of: the number of differences the reduction actually looked at.
+//
+// It is one function rather than an expression written out at each site so the
+// per-package block and the run-level one can never disagree about what the
+// total is — and so that a class added to Classified later is added to the total
+// in the one place that decides it.
+//
+// _Requirements: R2.4, R2.5_
+func classifiedTotal(classified Classified) int {
+	return classified.VersionMove + classified.Ours + classified.Unclassified
+}
+
+// joinReportLines turns a line builder's output into the block the report
+// appends, one line each. It returns "" for no lines, which is what carries a
+// builder's silence through to the rendering unchanged (R7.2).
+func joinReportLines(lines []string) string {
 	var sb strings.Builder
-	sb.WriteString(output.Sprintf(output.Info, "%s%s: %d differences against the baseline, %s\n",
-		baselineFindingLead, atom, total, baselineReachProse(classified)))
-	sb.WriteString(output.Sprintf(output.Info, "%sversion move: %d\n", baselineClassLead, classified.VersionMove))
-	sb.WriteString(output.Sprintf(output.Info, "%sours: %d\n", baselineClassLead, classified.Ours))
-	sb.WriteString(output.Sprintf(output.Info, "%sunclassified: %d\n", baselineClassLead, classified.Unclassified))
+	for _, line := range lines {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
 	return sb.String()
 }
 
