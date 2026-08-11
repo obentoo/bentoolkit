@@ -42,13 +42,17 @@ import (
 //
 // # It returns nothing, deliberately
 //
-// Every way this can fail is a way of NOT KNOWING — no local tree behind the
-// provider, an ebuild that will not read, an atom that names no package — and
-// the zero value already says that, in the one way the report can print: by
-// saying nothing. The run-level failure, "there is no ::gentoo tree at all", is
-// not this function's to report either: it is ErrNoBaselineTree from
-// LocateBaselineTree, decided by the caller before any comparison is run,
-// because it is the one condition the command exits non-zero for (D9).
+// Every PER-PACKAGE way this can fail is a way of NOT KNOWING — an ebuild that
+// will not read, an atom that names no package — and the zero value already says
+// that, in the one way the report can print: by saying nothing.
+//
+// The RUN-LEVEL failure, "there is no ::gentoo tree at all", is the one thing
+// that may not render as silence, so it is recorded rather than returned:
+// MarkBaselineSkipped writes it onto the report, and the caller derives the exit
+// code from that field (D9). The command still asks LocateBaselineTree for itself
+// before any comparison is run — this pass does not replace that check, it stops
+// the same state from being unreported when the pass is reached without one,
+// which AnnotateRealignVerdicts does whenever a caller has not annotated yet.
 //
 // It reads only files, inside the two trees it was given. It runs no command,
 // resolves no host and consults no git — the local ::gentoo is a shallow clone
@@ -66,10 +70,18 @@ func AnnotateBaseline(report *CompareReport, prov provider.Provider, opts Compar
 	// second way to name it would be a second thing to disagree with the first.
 	tree, ok := baselineTreeOf(prov, report.Results)
 	if !ok {
-		// No local tree behind this provider, so nothing was examined. Every
-		// field stays zero — including NoBaselineCount, which must not be set
-		// here: "we could not look" is not "::gentoo carries none of them", and
-		// the second is what a count of len(Results) would assert.
+		// No ::gentoo tree behind this provider at all, so NOTHING was examined —
+		// and that is the one outcome this review may not render as silence
+		// (R1.5). Omitting every baseline field would leave the run
+		// indistinguishable from one whose packages all matched ::gentoo exactly,
+		// which is "we could not look" reported as "nothing differs".
+		//
+		// NoBaselineCount deliberately stays 0 beside it. "We could not look" is
+		// not "::gentoo carries none of them", and the second is precisely what a
+		// count of len(Results) would assert. The two states travel in different
+		// channels: this one is the run's, and Baseline.Unexamined is the
+		// package's.
+		MarkBaselineSkipped(report, baselineTreeCandidateOf(prov))
 		return
 	}
 
@@ -187,6 +199,26 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 // 84 packages that have no counterpart, and taking that for "no tree" would
 // disable the review on an overlay whose first category happens to be
 // Bentoo's own.
+//
+// # A result set that answers for NONE of them is still a tree
+//
+// The walk needs one package ::gentoo carries to be IN VIEW, and a run can
+// legitimately have none: `--realign --only-outdated` where nothing outdated has
+// a counterpart, or any selection that lands entirely on the overlay's own work.
+// Read as "no tree", that made the whole review a silent no-op at exit 0 over a
+// repository that was synced and perfectly readable — the same failure R1.5
+// exists to prevent, arriving through which packages the operator asked to see.
+//
+// So when the walk answers for nobody, the provider is asked where its own tree
+// is, and the answer is RECOGNISED rather than trusted: LocateBaselineTree wants
+// Portage's own marker, so a directory standing where a repository should be is
+// refused here exactly as it is refused to the command. That check stats two
+// paths and reads nothing.
+//
+// The walk comes FIRST and keeps every answer it used to give, which is not only
+// conservatism: for a `--clone` provider the walk's own LocalPackagePath calls are
+// what bring the tree onto disk, and a marker looked for before that would be
+// looked for in a directory nothing had cloned into yet.
 func baselineTreeOf(prov provider.Provider, results []CompareResult) (string, bool) {
 	dirProv, ok := prov.(provider.PackageDirProvider)
 	if !ok {
@@ -210,7 +242,38 @@ func baselineTreeOf(prov provider.Provider, results []CompareResult) (string, bo
 		}
 		return root, true
 	}
+
+	// Nothing in view could answer. That is a fact about the SELECTION, not about
+	// the repository, so the repository is asked directly before the review gives
+	// up on it.
+	if root, err := LocateBaselineTree(baselineTreeCandidateOf(prov)); err == nil {
+		return root, true
+	}
 	return "", false
+}
+
+// baselineTreeCandidateOf names the directory a provider reads its repository
+// from, or "" when it has none to name.
+//
+// It asks the ONE concrete type that carries a tree. *provider.GitCloneProvider
+// is what both `provider: local` and `--clone` build, and it is the only
+// production implementation of PackageDirProvider there is — the capability
+// interface names a package DIRECTORY and has no member for the root the
+// directory sits in. The command already resolves the same path the same way
+// (realignBaselineTreeCandidate), so this is the existing answer asked from the
+// other side rather than a second notion of where a tree lives.
+//
+// NOTHING IS TRUSTED ABOUT WHAT COMES BACK. Every caller puts it through
+// LocateBaselineTree, which is what turns a path into a recognised repository —
+// and which is why returning "" for a provider that has no tree costs nothing:
+// LocateBaselineTree refuses an empty candidate by naming the marker it could not
+// look for.
+func baselineTreeCandidateOf(prov provider.Provider) string {
+	clone, ok := prov.(*provider.GitCloneProvider)
+	if !ok {
+		return ""
+	}
+	return clone.LocalPath
 }
 
 // ourBaselineEbuild names the overlay-side ebuild at the compared version, or ""
