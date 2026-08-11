@@ -90,6 +90,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most of their contents and asking about all of them would be thousands of
   network lookups in a stage that is otherwise entirely offline.
 
+- **A proposed realignment is proved the same way a bump is.** "It matches
+  `::gentoo` now" is a statement about text, and text is not evidence that the
+  package still builds. So the realigned ebuild is materialised in a staged tree
+  outside the published overlay and handed to story 033's ladder — `Stage` and
+  `RunBuildGates`, unchanged and unwrapped — up to the depth the operator asked
+  for. Staging outside the overlay is a security property rather than a tidiness
+  one: the overlay auto-commits and pushes, so anything written inside it is
+  published before any gate has spoken.
+
+  The realignment path adds **no gate of its own**. The temptation is specific —
+  a "matches `::gentoo` now" check would be cheap to append and would look like
+  a gate — and it is exactly how this path would acquire an authority the design
+  gave to three separate parties. The ladder's results are reported back as they
+  came, in order and in number.
+
+  A gate that fails is an answer and is carried in the report; a staging step
+  that could not run is an error, because "we could not look" must never be
+  readable as "it does not build". The new `internal/realign` package exists for
+  an import edge: `internal/autoupdate/validate` already imports
+  `internal/overlay`, so the reverse edge would be a cycle, not merely a
+  boundary violation.
+
 ### Changed
 - **`overlay compare` without `--realign` is unchanged** — the same output, the
   same exit code, the same package set, the same summary arithmetic. This is a
