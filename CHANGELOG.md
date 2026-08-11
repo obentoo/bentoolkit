@@ -8,6 +8,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The `::gentoo` ebuild is now the stated baseline for every `::bentoo`
+  ebuild, and `overlay compare --realign` says how far each one has drifted
+  from it.** The policy was never written down anywhere. Divergence is allowed —
+  it is often the whole point of the overlay — but it is a decision, and a
+  decision has a reason and usually a condition under which it stops applying.
+  What we had was divergence with neither.
+
+  Measured on the overlay before writing any of this: 321 packages scanned, 237
+  also carried by `::gentoo`, 80 of those at the very same version, 84 with no
+  `::gentoo` counterpart at all — and **zero** registry entries declaring a
+  divergence. So on the first run every difference in the overlay is undeclared
+  by definition, and the first useful output is not a realignment but a set of
+  candidate declarations a maintainer can paste or edit.
+
+  `ResolveBaseline` names the ebuild each comparison is measured against: the
+  same version when `::gentoo` carries it, the nearest one otherwise with the
+  distance stated, and nothing at all for a package it does not carry. The
+  distance is reported because it bounds how much the comparison is worth — a
+  baseline one patch away and one three series away are not the same kind of
+  evidence, and the report must not let them look alike.
+
+- **The finding that produced obentoo/bentoo#33 costs a `grep`, not a prompt.**
+  `::gentoo`'s `gst-plugins-qt6-1.26.11` is `inherit gstreamer-meson` and passes
+  **2** `-D` options; ours is `inherit meson python-any-r1 xdg-utils` and passes
+  **85**, two of which stopped existing at 1.29. The whole of that issue sits in
+  that pair of lines, and detecting it is a text comparison and a count rather
+  than a judgement.
+
+  Four axes are therefore compared directly — `inherit` and `IUSE` as set
+  differences, the build options as counts and names, the dependency atoms as
+  full specs grouped by atom. `CompareAxes` takes no provider and holds no way
+  to reach one, so the axes keep answering under `--no-review`: a signal this
+  cheap has no business depending on a provider being configured. The golden
+  test empties `PATH` to prove it.
+
+- **A divergence can now declare itself, in the ebuild rather than the
+  registry.** `# BENTOO-DIVERGENCE: <axis>: <reason>` with an optional
+  `#   drop-when: <condition>` continuation. The convention is not invented
+  here: `sys-devel/binutils-2.47` already writes exactly this reason in prose,
+  in a comment, and nothing reads it. The declaration lives beside the code it
+  describes so it travels when the ebuild is copied to a new version — which is
+  exactly when a divergence is silently inherited today.
+
+  `drop-when` accepts a closed vocabulary answerable from the local tree:
+  `gentoo-version >= X`, `gentoo-has-package`, `gentoo-inherits <eclass>`.
+  Anything outside it is reported verbatim and **unevaluated** — never met,
+  never unmet. Read as unmet it would keep a divergence alive forever; read as
+  met it would retire one with no cause. A live `9999` ebuild is excluded from
+  the version predicate, since it orders above every release and would otherwise
+  satisfy every condition ever written.
+
+- **A judgement on what is left, from a model that holds nothing that writes.**
+  Only undeclared and expired divergences are sent; a decision with a reason is
+  not re-litigated every run. The verdict is written onto the result and read by
+  no code that decides an exit code or a `Verdict`, and the test derives the
+  deciders from the source rather than from a list, so there is no allow-list
+  anyone can widen later. An unreachable model leaves every divergence without a
+  verdict, says so, and exits 0 — the deterministic half of the report is
+  complete and useful without it. Cost is bounded rather than doubled: one call
+  per package, keyed on the two files' bytes in the same cache the existing
+  commentary uses, and the number of packages is printed before the pass opens a
+  single file.
+
+- **Every count is reported with its denominator, including the share nobody
+  could attribute.** Per package and for the run: how many differences went to
+  the version move, how many to us, how many to neither, beside the total. A
+  classification whose reach is invisible is indistinguishable from a guess.
+  `net-libs/nodejs-26.7.0` is the cautionary anchor — 492 lines differing from
+  `::gentoo`'s *same* version, 32 mentioning `eselect` and 100 mentioning
+  slotting. It is reported by class and never proposed for wholesale
+  realignment; reverting deliberate slotting work is the failure mode this must
+  not have.
+
+- **Packages `::gentoo` does not carry are reported without granting anyone
+  authority.** For the 84, another repository already available locally may be
+  named — informative only, never a baseline, and where several carry the
+  package each is named and none preferred. A repository that was not consulted
+  is reported as **not checked**, never as one that does not carry the package;
+  the ~428 registered repositories resolve by name, but nothing on disk holds
+  most of their contents and asking about all of them would be thousands of
+  network lookups in a stage that is otherwise entirely offline.
+
+### Changed
+- **`overlay compare` without `--realign` is unchanged** — the same output, the
+  same exit code, the same package set, the same summary arithmetic. This is a
+  shipped command and the regression was the risk, so the promise is mechanical
+  rather than careful: the renderer never learns which flags were passed, every
+  field this work adds renders nothing at its zero value, and the passes that
+  fill them run only for a review run. `IncludeNotInRemote` is switched on only
+  there — unconditionally it would give the 84 Bentoo-only packages rows they do
+  not have today. A test rebuilds the expected report independently and compares
+  whole renderings.
+
+  `--realign` refuses what it cannot do rather than degrading: comparing against
+  another repository while reading the baseline from `::gentoo`, or asking for
+  the review where no local tree exists, are usage errors naming the reason —
+  nothing was examined and the request itself was impossible. The exit code comes
+  from the review's own outcome and never from the count of divergences, because
+  an overlay of a derived distribution has divergences by definition and a code
+  that counted them would be non-zero forever and ignored within a week. No
+  baseline tree at all is the one non-zero condition.
+
+### Fixed
+- **A baseline review could be a silent no-op.** The `::gentoo` tree was located
+  only by walking the packages in view, so a run whose packages `::gentoo` does
+  not carry — `--realign --only-outdated`, say — found no tree, wrote nothing
+  and exited 0 over a repository that was synced and perfectly readable. Which
+  packages the operator asked to *see* decided whether the repository got
+  *read*. It now falls back to the provider's own tree, recognised by Portage's
+  `profiles/repo_name` rather than trusted, and reports SKIPPED when there is
+  genuinely none.
+
 - **A bump is now proved before it is published.** Story 031 shipped a gate that
   reads what upstream declares and what the ebuild passes, and reports the
   difference — but it could not stop the bump. Pointed at obentoo/bentoo#33 it
