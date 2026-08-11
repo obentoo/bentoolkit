@@ -135,6 +135,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and below run no build gate, so "every gate reported PASS or SKIPPED" would be
   true of nothing, leaving approval as the only authority that ever spoke.
 
+- **`overlay compare --realign --depth=<rung>` builds each proposal before
+  believing it, behind one plan and one confirmation for the whole run.**
+  `--depth` is the switch that turns proving on: `--realign` on its own is still
+  report-only, so every invocation shipped before this one behaves exactly as it
+  did. Given without `--realign` it is a usage error rather than a silent no-op —
+  a command that quietly did nothing with `--depth=compile` would be
+  indistinguishable from one that built everything and found no problem, which is
+  the worse silence, since it reads as evidence.
+
+  The plan names **every package and the depth**, and it is printed before the
+  first build starts. "Three packages will be built" is not a plan anyone can
+  decline in part, and the depth is the cost. One confirmation covers the run,
+  not one per package: a prompt per package trains the operator to answer without
+  reading. `--yes` buys past the prompt and never past the plan. The three gates
+  are the sweep's — `--yes` proceeds unattended, an interactive terminal is
+  asked, anything else builds nothing and **says `--yes` is the way through**,
+  because a gate that cannot be passed is a dead end in exactly the CI and cron
+  runs where it is reached. Interactivity requires **both** stdin and stdout to be
+  a terminal, so `yes | bentoo overlay compare --realign --depth=compile` cannot
+  answer for a human.
+
+  What gets proposed is `::gentoo`'s own ebuild, verbatim, and only where the
+  baseline is at **our own version** and the divergence is undeclared. A baseline
+  at a different version is deliberately never proposed: adopting another
+  version's file changes which version we ship, which is a bump and not a
+  realignment. The rule reads the baseline and the byte comparison and nothing a
+  model said, so `--no-review` and a machine with no model prove the same set.
+  `--depth=none` and `--depth=options` are refused, because below `patches` the
+  ladder runs no build gate and the resulting proof could never publish anything.
+
+  Nothing is published. The staged tree goes where `overlay autoupdate --apply`
+  and `overlay validate --depth` already stage — never inside the overlay, which
+  auto-commits and pushes and whose `--clean` deletes any ebuild no registry pin
+  claims. Declining is **exit 0**: nothing failed, a decision was taken.
+
 ### Changed
 - **`overlay compare` without `--realign` is unchanged** — the same output, the
   same exit code, the same package set, the same summary arithmetic. This is a

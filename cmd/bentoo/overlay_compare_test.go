@@ -10,6 +10,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
+	"github.com/obentoo/bentoolkit/internal/realign"
 )
 
 // TestCompareCmd_HasCloneFlag verifies that the compare command registers a --clone flag.
@@ -601,5 +602,294 @@ func TestCompareRealignAgainstAnotherRepositoryRefusesBeforeLooking(t *testing.T
 	}
 	if strings.TrimSpace(got) != "" {
 		t.Errorf("the refused run printed a report; it must refuse before comparing anything.\nstdout:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 034, sub-task 7.3. SURFACE ADJUSTMENT ON MATERIALISATION: this fragment
+// was authored against the pre-D8b placement, where the prover was to live in
+// internal/overlay as ProveRealignment, taking RealignProposal and
+// RealignOptions and returning RealignProof. Design decision D8b moved Stage 2
+// into the new internal/realign package — internal/autoupdate/validate already
+// imports internal/overlay, so the edge the old placement needed is a cycle —
+// and sub-tasks 7.1 and 7.2 implemented it there as realign.Prove,
+// realign.Proposal, realign.Options and realign.Proof.
+//
+// Only the import and the four call-surface names were rewritten. Not one
+// assertion was touched, and no assertion could have been: the seam's shape is
+// what changed, never what any test expects of it.
+// ---------------------------------------------------------------------------
+// Pinned contract:
+//
+//	var compareDepth string  // --depth
+//	var compareYes    bool   // --yes
+//	func compareDepthPreflight(depthFlag string, realign bool) error
+//	type realignPlan struct{ Atoms []string; Depth string }
+//	func realignPlanLines(plan realignPlan) []string
+//	func confirmRealignPlan(plan realignPlan) bool
+//	var realignProve = realign.Prove   // seam: no build runs in a test
+//
+// `realignPlanLines` is a pure line builder and `confirmRealignPlan` is the
+// three-gate decision, split exactly as overlay_compare_summary_test.go explains
+// for the summary: logger binds its writer at first use and exposes no setter,
+// so splitting the decision from the emission is cheaper than capturing a stream
+// and leaves the emission trivial enough to read.
+//
+// `realignProve` is a package-level seam over the prover, restored with
+// t.Cleanup. Driving the real one would mean a real `ebuild … clean compile` —
+// a network fetch, a writable DISTDIR and portage on the host — which this
+// story's constraints forbid a test to need. What the seam makes assertable is
+// the thing 7.3 actually owns: WHEN the first build starts relative to the plan,
+// and whether it starts at all.
+
+// realignBuildMarker is printed by the stubbed prover the instant it is called.
+// Ordering is then a question about two indexes in one captured stream, which is
+// what "the plan is printed BEFORE the first build starts" means operationally —
+// a test that only asserted "a plan appeared" would pass on an implementation
+// that printed it afterwards.
+const realignBuildMarker = "BUILD-STARTED"
+
+// realignDepthFlags saves and restores the two flags this sub-task adds.
+func realignDepthFlags(t *testing.T, depth string, yes bool) {
+	t.Helper()
+	origDepth, origYes := compareDepth, compareYes
+	t.Cleanup(func() { compareDepth, compareYes = origDepth, origYes })
+	compareDepth, compareYes = depth, yes
+}
+
+// realignStubProver replaces the prover with one that announces itself and
+// reports a clean proof, and returns a pointer to the call count.
+func realignStubProver(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	orig := realignProve
+	t.Cleanup(func() { realignProve = orig })
+	realignProve = func(ctx context.Context, p realign.Proposal, opts realign.Options) (realign.Proof, error) {
+		calls++
+		// Written to stdout so it lands in the same captured stream as the
+		// plan; the assertion is about their order in that one stream.
+		os.Stdout.WriteString(realignBuildMarker + "\n")
+		return realign.Proof{Passed: true}, nil
+	}
+	return &calls
+}
+
+// realignPipeStdin points os.Stdin at a pipe holding `input`, the shape
+// `yes | bentoo overlay compare --realign --depth=…` produces.
+func realignPipeStdin(t *testing.T, input string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the stdin pipe: %v", err)
+	}
+	if _, err := w.WriteString(input); err != nil {
+		t.Fatalf("writing to the stdin pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing the stdin pipe: %v", err)
+	}
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = orig
+		_ = r.Close()
+	})
+}
+
+// TestCompareCmdHasDepthFlag pins the surface.
+//
+// _Requirements: R7, R7.3_
+func TestCompareCmdHasDepthFlag(t *testing.T) {
+	if compareCmd.Flags().Lookup("depth") == nil {
+		t.Fatal("compare has no --depth flag; R7.3 puts the build depth where cobra and the terminal are")
+	}
+	if compareCmd.Flags().Lookup("yes") == nil {
+		t.Fatal("compare has no --yes flag; without it a non-interactive run has no way to proceed, and 'says how to proceed' would name nothing")
+	}
+}
+
+// TestCompareDepthPreflight is the usage error: there is nothing to prove.
+//
+// It is a refusal rather than a silent no-op because `--depth=compile` alone
+// reads as "build everything", and a command that quietly did nothing with it
+// would be indistinguishable from one that built and found no problem.
+//
+// _Requirements: R7, R7.3_
+func TestCompareDepthPreflight(t *testing.T) {
+	cases := []struct {
+		name     string
+		depth    string
+		realign  bool
+		wantErr  bool
+		mustName []string
+	}{
+		{
+			name:     "--depth without --realign is refused",
+			depth:    "configure",
+			realign:  false,
+			wantErr:  true,
+			mustName: []string{"depth", "realign"},
+		},
+		{
+			name:    "--depth with --realign is accepted",
+			depth:   "configure",
+			realign: true,
+			wantErr: false,
+		},
+		{
+			name:    "no --depth at all is accepted with or without --realign",
+			depth:   "",
+			realign: false,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := compareDepthPreflight(tc.depth, tc.realign)
+			if tc.wantErr && err == nil {
+				t.Fatalf("compareDepthPreflight(%q, realign=%v) = nil, want a usage error naming why", tc.depth, tc.realign)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("compareDepthPreflight(%q, realign=%v) = %v, want nil", tc.depth, tc.realign, err)
+			}
+			for _, want := range tc.mustName {
+				if !strings.Contains(strings.ToLower(err.Error()), want) {
+					t.Errorf("the refusal is %q, want it to name %q — the operator has to know which of the two flags to add or drop", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestRealignPlanIsPrintedBeforeTheFirstBuild is R7.3's ordering, asserted as an
+// ordering.
+//
+// A plan printed after the builds is not a plan, it is a receipt. The whole
+// point of R7.3 is that the operator sees the cost — how many packages, to what
+// depth — while declining is still possible.
+//
+// --yes is given so the run proceeds without a terminal, and that is the second
+// half of the assertion: --yes buys past the PROMPT, never past the PLAN.
+//
+// _Requirements: R7, R7.3_
+func TestRealignPlanIsPrintedBeforeTheFirstBuild(t *testing.T) {
+	realignSetup(t, true, true)
+	realignFlags(t, true, false)
+	realignDepthFlags(t, "configure", true)
+	calls := realignStubProver(t)
+
+	out, code := realignRun(t, nil)
+
+	if code != 0 {
+		t.Fatalf("exit code is %d, want 0", code)
+	}
+	if *calls == 0 {
+		t.Fatal("no realignment was proved although --yes was given; the ordering assertion below would pass vacuously")
+	}
+
+	planAt := strings.Index(out, "configure")
+	buildAt := strings.Index(out, realignBuildMarker)
+	if planAt < 0 {
+		t.Fatalf("the plan never names the depth it will build to; R7.3 asks for the plan, and a plan that omits the cost is not one:\n%s", out)
+	}
+	if buildAt < 0 {
+		t.Fatalf("the build marker is missing from the captured output; the stub was called %d times but wrote nothing, so the ordering cannot be read:\n%s", *calls, out)
+	}
+	if planAt > buildAt {
+		t.Errorf("the plan is printed at %d and the first build starts at %d; a plan that arrives after the build is a receipt, and R7.3 exists so the operator can decline:\n%s", planAt, buildAt, out)
+	}
+}
+
+// TestRealignPlanTakesOneConfirmationForTheWholeRun: "ask once for the whole
+// run" is the difference between one decision and 237 of them, and a prompt per
+// package trains the operator to answer without reading.
+//
+// _Requirements: R7, R7.3_
+func TestRealignPlanTakesOneConfirmationForTheWholeRun(t *testing.T) {
+	plan := realignPlan{
+		Atoms: []string{"media-libs/gst-plugins-qt6", "sys-devel/binutils", "net-libs/nodejs"},
+		Depth: "configure",
+	}
+	lines := realignPlanLines(plan)
+	if len(lines) == 0 {
+		t.Fatal("realignPlanLines produced nothing; there is no plan to show and nothing to confirm")
+	}
+
+	joined := strings.Join(lines, "\n")
+	for _, atom := range plan.Atoms {
+		if !strings.Contains(joined, atom) {
+			t.Errorf("the plan does not name %s; 'three packages' without their names is not a plan anyone can decline in part", atom)
+		}
+	}
+	if !strings.Contains(joined, "configure") {
+		t.Errorf("the plan does not name the depth; the depth IS the cost:\n%s", joined)
+	}
+}
+
+// TestRealignConfirmationRefusesWithoutATerminal is confirmSweep's third gate,
+// reached here through the same registryPromptIsInteractive: under `go test`
+// neither stream is a terminal, so this is the ordinary non-interactive case —
+// CI, a pipeline, a cron job.
+//
+// _Requirements: R7, R7.3_
+func TestRealignConfirmationRefusesWithoutATerminal(t *testing.T) {
+	realignDepthFlags(t, "configure", false)
+
+	if registryPromptIsInteractive() {
+		t.Skip("this test process has a TTY on both streams, so the non-interactive path cannot be reached here")
+	}
+	if confirmRealignPlan(realignPlan{Atoms: []string{"media-libs/gst-plugins-qt6"}, Depth: "configure"}) {
+		t.Error("confirmRealignPlan approved a run with no terminal and no --yes; the builds would start with nobody having agreed to them")
+	}
+}
+
+// TestRealignNonInteractiveRunBuildsNothingAndSaysHow is the same gate end to
+// end, plus the half that makes it usable: refusing without saying how to
+// proceed turns a safety gate into a dead end.
+//
+// _Requirements: R7, R7.3_
+func TestRealignNonInteractiveRunBuildsNothingAndSaysHow(t *testing.T) {
+	realignSetup(t, true, true)
+	realignFlags(t, true, false)
+	realignDepthFlags(t, "configure", false) // no --yes
+	calls := realignStubProver(t)
+
+	out, code := realignRun(t, nil)
+
+	if *calls != 0 {
+		t.Errorf("%d realignment(s) were proved without a terminal and without --yes; nothing may be built until somebody has agreed to it (R7.3)", *calls)
+	}
+	if code != 0 {
+		t.Errorf("exit code is %d, want 0 — declining to build is not a failure, and D9 keeps the exit code for the review's own outcome", code)
+	}
+	if !strings.Contains(out, "--yes") {
+		t.Errorf("the refusal does not say how to proceed; confirmSweep names --yes in exactly this position, and a gate that cannot be passed is a dead end:\n%s", out)
+	}
+}
+
+// TestRealignPipedYesCannotAnswer is the reason the interactivity test reads
+// BOTH streams. `yes | bentoo overlay compare --realign --depth=compile` presents
+// a readable stdin full of consent that no human typed; a check on stdin alone
+// accepts it.
+//
+// _Requirements: R7, R7.3_
+func TestRealignPipedYesCannotAnswer(t *testing.T) {
+	realignSetup(t, true, true)
+	realignFlags(t, true, false)
+	realignDepthFlags(t, "compile", false)
+	realignPipeStdin(t, "y\ny\ny\n")
+	calls := realignStubProver(t)
+
+	out, code := realignRun(t, nil)
+
+	if *calls != 0 {
+		t.Errorf("%d realignment(s) were proved after a piped `yes`; the confirmation must require BOTH stdin and stdout to be a terminal, exactly as confirmSweep does (overlay_autoupdate_sweep.go:241)", *calls)
+	}
+	if code != 0 {
+		t.Errorf("exit code is %d, want 0", code)
+	}
+	if !strings.Contains(out, "--yes") {
+		t.Errorf("the refusal does not name the flag that would let the run proceed unattended:\n%s", out)
 	}
 }

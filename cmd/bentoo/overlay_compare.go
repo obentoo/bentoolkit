@@ -50,6 +50,24 @@ var (
 	// renders nothing at its zero value and the passes that fill them are called
 	// only from behind this flag (overlay_compare_realign.go).
 	compareRealign bool
+	// compareDepth is the rung of story 033's build ladder each proposed
+	// realignment is PROVED at, and it is the switch that turns proving on at all
+	// (R7.3). Empty — the default, and every invocation that does not name it — is
+	// report-only: `--realign` alone stays exactly what Stage 1 shipped, with no
+	// staging, no plan, no prompt and no build.
+	//
+	// It is registered on THIS command rather than in group 6 because registering
+	// it means importing validate.ParseDepth, and Stage 1 of this story claims to
+	// be free of story 033 — a claim that is otherwise true of every task in
+	// groups 1-6.
+	compareDepth string
+	// compareYes proves the plan unattended, and it exists here for the reason it
+	// exists on the sweep: the refusal on a non-interactive terminal has to be able
+	// to NAME the way forward, and "pass --yes" is not a thing it can say about a
+	// flag the command does not have. It buys past the PROMPT and never past the
+	// PLAN — the plan is printed either way, because R7.3's whole point is that the
+	// operator sees the cost.
+	compareYes bool
 )
 
 var compareCmd = &cobra.Command{
@@ -115,6 +133,15 @@ func init() {
 	compareCmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
 	compareCmd.Flags().BoolVar(&compareNoReview, "no-review", false, "Contact no model; print the report without commentary")
 	compareCmd.Flags().BoolVar(&compareRealign, "realign", false, "Review each package against its ::gentoo baseline (needs a local gentoo tree)")
+	// The default is the EMPTY string and not a rung's name, unlike `overlay
+	// validate --depth`, because the two defaults mean opposite things: there the
+	// shallowest useful rung IS the shipped behaviour, here any rung at all is a
+	// build nobody asked for. Absent means report-only, which is what `--realign`
+	// shipped as.
+	compareCmd.Flags().StringVar(&compareDepth, "depth", "",
+		"Prove each proposed realignment by building it to this rung of the ladder — patches, configure or compile, each including every rung before it. "+
+			"Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built")
+	compareCmd.Flags().BoolVar(&compareYes, "yes", false, "Prove the whole plan without the prompt. Only --depth builds anything, and nothing is published either way")
 	overlayCmd.AddCommand(compareCmd)
 }
 
@@ -123,6 +150,21 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// with a clear message and a non-zero exit (R4.2).
 	if compareConcurrency < 1 || compareConcurrency > 100 {
 		logger.Error("--concurrency must be in range [1, 100], got %d", compareConcurrency)
+		osExit(1)
+		return
+	}
+
+	// Refuse a --depth this invocation has nothing to prove with, in the same
+	// position and for the same reason as the check above: it depends on neither
+	// the config, the repository nor the overlay, so answering it first costs
+	// nothing and reaches no work (R7.3).
+	//
+	// It exits 1 like every other usage error here. That is NOT the review's own
+	// non-zero condition — D9 keeps that for "no baseline tree at all" — and the
+	// two cannot be confused, because this one returns before a single package has
+	// been looked at and prints no report to attach a verdict to.
+	if err := compareDepthPreflight(compareDepth, compareRealign); err != nil {
+		logger.Error("%v", err)
 		osExit(1)
 		return
 	}
@@ -422,6 +464,31 @@ func runCompare(cmd *cobra.Command, args []string) {
 		reviewer := compareRealignReviewer(runCtx, compareNoReview)
 		realignJudged = reviewer != nil
 		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
+	}
+
+	// Whether each proposed realignment still BUILDS, proved the way a bump is
+	// proved: staged outside the published overlay and put up story 033's ladder to
+	// the depth the operator named, behind one plan and one confirmation covering
+	// the whole run (R7.3).
+	//
+	// IT RUNS ONLY WHEN --depth WAS GIVEN, and that is the second gate on top of
+	// --realign rather than a redundant one: R7.3 speaks of "a depth above
+	// report-only", and `--realign` alone is report-only by definition — it is what
+	// Stage 1 shipped, and every group-6 test asserts exactly that run.
+	//
+	// It sits HERE, after the three annotation passes and before the view is
+	// narrowed, for two reasons that pull the same way. After the passes, because
+	// the candidate rule reads the baseline they filled in and a proposal is only
+	// as good as the review behind it. Before the narrowing, because the plan is
+	// about the OVERLAY and not about the rows the operator asked to see (D7): a
+	// --only-redundant run and a full one must not prove different sets, and the
+	// plan names every atom, so nothing is proved that was not first shown.
+	//
+	// It cannot change the exit code (D9). Declining is not a failure, a gate that
+	// says no is an answer, and the one non-zero condition is decided below by
+	// exitOnSkippedBaseline over a field nothing here writes.
+	if realignRan && compareDepth != "" {
+		proveRealignments(runCtx, report, overlayPath)
 	}
 
 	// Narrow the VIEW, never the computation (D7). The comparison above already
