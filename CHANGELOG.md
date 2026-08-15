@@ -101,6 +101,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and never been promoted, and the column has to be read that way.
 
 ### Fixed
+- **A commit-tracked bump no longer fails on `COMMIT="<sha>"`, and a failed
+  substitution no longer leaves an ebuild behind.** Two defects, one incident.
+  The commit-hash rewrite matched four variable names across two patterns, and
+  `COMMIT` appeared only in the unquoted one — written from the single package
+  that omits the quotes. `sys-apps/asus-ec-sensors`, which pins
+  `COMMIT="<sha>"`, therefore fell between the patterns and was told its commit
+  variable did not exist.
+
+  That failure lands *after* the new ebuild has been copied into the published
+  package directory, and the orphan rollback was returned to the caller rather
+  than run — so a substitution failure returned an error with no rollback to
+  arm, and the copy stayed. Since this overlay auto-commits and pushes, the
+  leftover was published: `asus-ec-sensors-0_p20260809` carrying the July
+  commit, with no `Manifest` entry and no `md5-cache`, so any `emerge` of it
+  fails on the digest. The rollback now runs where the failure happens.
+
 - **A gate no longer reads an archive belonging to another version.** Observed,
   not hypothetical: with only `gst-plugins-good-1.29.2.tar.xz` on disk, the
   1.28.6 ebuild was validated against the 1.29.2 archive and reported FAILED,
