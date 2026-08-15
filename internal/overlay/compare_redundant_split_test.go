@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -248,13 +249,18 @@ func TestSplitRedundantSection(t *testing.T) {
 //
 // Whole results, not just their names: every field is part of what the report
 // prints, and a grouping has no business editing any of them.
+//
+// DeepEqual rather than ==: CompareResult stopped being comparable when the
+// baseline review's slice fields (Axes, Declarations, Others) landed on it. The
+// assertion is unchanged and now reaches further — those slices are part of what
+// the report prints too, and a grouping must not edit them either.
 func assertSectionUnchanged(t *testing.T, got, want []CompareResult, why string) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("%s: the section holds %d results, want %d", why, len(got), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("%s: results[%d] is now %s/%s (verified %d), was %s/%s (verified %d)",
 				why, i, got[i].Category, got[i].Package, got[i].Verified,
 				want[i].Category, want[i].Package, want[i].Verified)

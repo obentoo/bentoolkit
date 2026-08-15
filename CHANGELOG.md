@@ -8,6 +8,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The `::gentoo` ebuild is now the stated baseline for every `::bentoo`
+  ebuild, and `overlay compare --realign` says how far each one has drifted
+  from it.** The policy was never written down anywhere. Divergence is allowed —
+  it is often the whole point of the overlay — but it is a decision, and a
+  decision has a reason and usually a condition under which it stops applying.
+  What we had was divergence with neither.
+
+  Measured on the overlay before writing any of this: 321 packages scanned, 237
+  also carried by `::gentoo`, 80 of those at the very same version, 84 with no
+  `::gentoo` counterpart at all — and **zero** registry entries declaring a
+  divergence. So on the first run every difference in the overlay is undeclared
+  by definition, and the first useful output is not a realignment but a set of
+  candidate declarations a maintainer can paste or edit.
+
+  `ResolveBaseline` names the ebuild each comparison is measured against: the
+  same version when `::gentoo` carries it, the nearest one otherwise with the
+  distance stated, and nothing at all for a package it does not carry. The
+  distance is reported because it bounds how much the comparison is worth — a
+  baseline one patch away and one three series away are not the same kind of
+  evidence, and the report must not let them look alike.
+
+- **The finding that produced obentoo/bentoo#33 costs a `grep`, not a prompt.**
+  `::gentoo`'s `gst-plugins-qt6-1.26.11` is `inherit gstreamer-meson` and passes
+  **2** `-D` options; ours is `inherit meson python-any-r1 xdg-utils` and passes
+  **85**, two of which stopped existing at 1.29. The whole of that issue sits in
+  that pair of lines, and detecting it is a text comparison and a count rather
+  than a judgement.
+
+  Four axes are therefore compared directly — `inherit` and `IUSE` as set
+  differences, the build options as counts and names, the dependency atoms as
+  full specs grouped by atom. `CompareAxes` takes no provider and holds no way
+  to reach one, so the axes keep answering under `--no-review`: a signal this
+  cheap has no business depending on a provider being configured. The golden
+  test empties `PATH` to prove it.
+
+- **A divergence can now declare itself, in the ebuild rather than the
+  registry.** `# BENTOO-DIVERGENCE: <axis>: <reason>` with an optional
+  `#   drop-when: <condition>` continuation. The convention is not invented
+  here: `sys-devel/binutils-2.47` already writes exactly this reason in prose,
+  in a comment, and nothing reads it. The declaration lives beside the code it
+  describes so it travels when the ebuild is copied to a new version — which is
+  exactly when a divergence is silently inherited today.
+
+  `drop-when` accepts a closed vocabulary answerable from the local tree:
+  `gentoo-version >= X`, `gentoo-has-package`, `gentoo-inherits <eclass>`.
+  Anything outside it is reported verbatim and **unevaluated** — never met,
+  never unmet. Read as unmet it would keep a divergence alive forever; read as
+  met it would retire one with no cause. A live `9999` ebuild is excluded from
+  the version predicate, since it orders above every release and would otherwise
+  satisfy every condition ever written.
+
+- **A judgement on what is left, from a model that holds nothing that writes.**
+  Only undeclared and expired divergences are sent; a decision with a reason is
+  not re-litigated every run. The verdict is written onto the result and read by
+  no code that decides an exit code or a `Verdict`, and the test derives the
+  deciders from the source rather than from a list, so there is no allow-list
+  anyone can widen later. An unreachable model leaves every divergence without a
+  verdict, says so, and exits 0 — the deterministic half of the report is
+  complete and useful without it. Cost is bounded rather than doubled: one call
+  per package, keyed on the two files' bytes in the same cache the existing
+  commentary uses, and the number of packages is printed before the pass opens a
+  single file.
+
+- **Every count is reported with its denominator, including the share nobody
+  could attribute.** Per package and for the run: how many differences went to
+  the version move, how many to us, how many to neither, beside the total. A
+  classification whose reach is invisible is indistinguishable from a guess.
+  `net-libs/nodejs-26.7.0` is the cautionary anchor — 492 lines differing from
+  `::gentoo`'s *same* version, 32 mentioning `eselect` and 100 mentioning
+  slotting. It is reported by class and never proposed for wholesale
+  realignment; reverting deliberate slotting work is the failure mode this must
+  not have.
+
+- **Packages `::gentoo` does not carry are reported without granting anyone
+  authority.** For the 84, another repository already available locally may be
+  named — informative only, never a baseline, and where several carry the
+  package each is named and none preferred. A repository that was not consulted
+  is reported as **not checked**, never as one that does not carry the package;
+  the ~428 registered repositories resolve by name, but nothing on disk holds
+  most of their contents and asking about all of them would be thousands of
+  network lookups in a stage that is otherwise entirely offline.
+
+- **A proposed realignment is proved the same way a bump is.** "It matches
+  `::gentoo` now" is a statement about text, and text is not evidence that the
+  package still builds. So the realigned ebuild is materialised in a staged tree
+  outside the published overlay and handed to story 033's ladder — `Stage` and
+  `RunBuildGates`, unchanged and unwrapped — up to the depth the operator asked
+  for. Staging outside the overlay is a security property rather than a tidiness
+  one: the overlay auto-commits and pushes, so anything written inside it is
+  published before any gate has spoken.
+
+  The realignment path adds **no gate of its own**. The temptation is specific —
+  a "matches `::gentoo` now" check would be cheap to append and would look like
+  a gate — and it is exactly how this path would acquire an authority the design
+  gave to three separate parties. The ladder's results are reported back as they
+  came, in order and in number.
+
+  A gate that fails is an answer and is carried in the report; a staging step
+  that could not run is an error, because "we could not look" must never be
+  readable as "it does not build". The new `internal/realign` package exists for
+  an import edge: `internal/autoupdate/validate` already imports
+  `internal/overlay`, so the reverse edge would be a cycle, not merely a
+  boundary violation.
+
+- **Publishing a realignment needs the maintainer AND the gates, and a passing
+  gate is not consent.** The shortcut is the reasonable-sounding one — "every
+  gate passed, so what is the maintainer adding?" What the maintainer adds is
+  the judgement no gate can make: the overlay's `nodejs` carries a 492-line
+  divergence that would pass every rung of the ladder, and reverting it would
+  still be wrong. The gates answer "does it build"; only a human answers "should
+  we". So approval is a parameter rather than a question the promoting code asks
+  itself — a function that asked it could not be tested for refusing.
+
+  A refusal names **which** authority said no, because "not promoted" is one
+  outcome for several reasons and an operator who cannot tell them apart does
+  not know whether to fix the ebuild, re-run the gates, or say yes. Every
+  refusal returns before the first byte of the overlay is touched, and the tests
+  assert that over the **whole tree** rather than the one file — a refusal that
+  wrote the right nothing but dropped a Manifest passes any per-file check.
+
+  What gets published is the proposal's own bytes, the same slice the gates ran
+  against, so "the exact bytes that were proved" holds by identity rather than
+  by resemblance; anything re-rendered at promotion time would be a file no gate
+  ever read. A proof carrying **no gate at all** is refused: `--depth options`
+  and below run no build gate, so "every gate reported PASS or SKIPPED" would be
+  true of nothing, leaving approval as the only authority that ever spoke.
+
+- **`overlay compare --realign --depth=<rung>` builds each proposal before
+  believing it, behind one plan and one confirmation for the whole run.**
+  `--depth` is the switch that turns proving on: `--realign` on its own is still
+  report-only, so every invocation shipped before this one behaves exactly as it
+  did. Given without `--realign` it is a usage error rather than a silent no-op —
+  a command that quietly did nothing with `--depth=compile` would be
+  indistinguishable from one that built everything and found no problem, which is
+  the worse silence, since it reads as evidence.
+
+  The plan names **every package and the depth**, and it is printed before the
+  first build starts. "Three packages will be built" is not a plan anyone can
+  decline in part, and the depth is the cost. One confirmation covers the run,
+  not one per package: a prompt per package trains the operator to answer without
+  reading. `--yes` buys past the prompt and never past the plan. The three gates
+  are the sweep's — `--yes` proceeds unattended, an interactive terminal is
+  asked, anything else builds nothing and **says `--yes` is the way through**,
+  because a gate that cannot be passed is a dead end in exactly the CI and cron
+  runs where it is reached. Interactivity requires **both** stdin and stdout to be
+  a terminal, so `yes | bentoo overlay compare --realign --depth=compile` cannot
+  answer for a human.
+
+  What gets proposed is `::gentoo`'s own ebuild, verbatim, and only where the
+  baseline is at **our own version** and the divergence is undeclared. A baseline
+  at a different version is deliberately never proposed: adopting another
+  version's file changes which version we ship, which is a bump and not a
+  realignment. The rule reads the baseline and the byte comparison and nothing a
+  model said, so `--no-review` and a machine with no model prove the same set.
+  `--depth=none` and `--depth=options` are refused, because below `patches` the
+  ladder runs no build gate and the resulting proof could never publish anything.
+
+  Nothing is published. The staged tree goes where `overlay autoupdate --apply`
+  and `overlay validate --depth` already stage — never inside the overlay, which
+  auto-commits and pushes and whose `--clean` deletes any ebuild no registry pin
+  claims. Declining is **exit 0**: nothing failed, a decision was taken.
+
+### Changed
+- **`overlay compare` without `--realign` is unchanged** — the same output, the
+  same exit code, the same package set, the same summary arithmetic. This is a
+  shipped command and the regression was the risk, so the promise is mechanical
+  rather than careful: the renderer never learns which flags were passed, every
+  field this work adds renders nothing at its zero value, and the passes that
+  fill them run only for a review run. `IncludeNotInRemote` is switched on only
+  there — unconditionally it would give the 84 Bentoo-only packages rows they do
+  not have today. A test rebuilds the expected report independently and compares
+  whole renderings.
+
+  `--realign` refuses what it cannot do rather than degrading: comparing against
+  another repository while reading the baseline from `::gentoo`, or asking for
+  the review where no local tree exists, are usage errors naming the reason —
+  nothing was examined and the request itself was impossible. The exit code comes
+  from the review's own outcome and never from the count of divergences, because
+  an overlay of a derived distribution has divergences by definition and a code
+  that counted them would be non-zero forever and ignored within a week. No
+  baseline tree at all is the one non-zero condition.
+
+### Fixed
+- **A baseline review could be a silent no-op.** The `::gentoo` tree was located
+  only by walking the packages in view, so a run whose packages `::gentoo` does
+  not carry — `--realign --only-outdated`, say — found no tree, wrote nothing
+  and exited 0 over a repository that was synced and perfectly readable. Which
+  packages the operator asked to *see* decided whether the repository got
+  *read*. It now falls back to the provider's own tree, recognised by Portage's
+  `profiles/repo_name` rather than trusted, and reports SKIPPED when there is
+  genuinely none.
+
 - **A bump is now proved before it is published.** Story 031 shipped a gate that
   reads what upstream declares and what the ebuild passes, and reports the
   difference — but it could not stop the bump. Pointed at obentoo/bentoo#33 it

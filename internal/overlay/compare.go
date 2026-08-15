@@ -95,6 +95,58 @@ type CompareResult struct {
 	// finding that is not an undeclared divergence — carries it, and the renderer
 	// prints nothing for it.
 	Review ReviewNote
+
+	// The fields below carry the BASELINE REVIEW: what our ebuild was measured
+	// against, and what that measurement found. They are filled by one pass,
+	// AnnotateBaseline (annotate_baseline.go), which runs after the comparison
+	// and ONLY when the review was requested — exactly as AnnotateAuthorship and
+	// AnnotateReviews already do for the two fields above.
+	//
+	// EVERY ONE OF THEM RENDERS NOTHING AT ITS ZERO VALUE, and that is not a
+	// nicety: FormatReport takes a *CompareReport and never learns which flags
+	// were passed, so a zero value is the only mechanism by which `overlay
+	// compare` without a review can keep printing exactly what it printed
+	// yesterday (R7.2). A field read by no renderer would satisfy that promise
+	// and empty it of meaning, so each of these is rendered — see
+	// formatBaselineFindings.
+
+	// Baseline is the ::gentoo ebuild this package was measured against (R1.1).
+	// Its zero value is "no review ran, or ::gentoo does not carry this
+	// package"; the run-level NoBaselineCount below is what turns the second of
+	// those into a number, because the two are indistinguishable per package by
+	// construction.
+	Baseline Baseline
+	// Axes are the structural differences between our ebuild and that baseline
+	// — inherit, options, IUSE, dependencies (R2.4). A nil slice means nothing
+	// was compared or nothing differs, which is the same thing to a report that
+	// prints only what it found.
+	Axes []AxisFinding
+	// Classified is what the three-way reduction concluded about the
+	// differences: how many fell into each class and how much evidence it had
+	// (R2.4, R2.5).
+	Classified Classified
+	// Declarations are the `# BENTOO-DIVERGENCE:` tags our ebuild carries, with
+	// Expired decided against the ::gentoo tree (R3.1, R3.3). They are the
+	// EBUILD axis and never CompareOptions.Divergence, which is the registry
+	// one.
+	Declarations []DeclaredDivergence
+	// RealignVerdict is a MODEL's opinion on whether an undeclared divergence is
+	// still justified, and why (R4.1). It is written by the realignment reviewer
+	// (task 5.1) and never by AnnotateBaseline: a verdict nobody produced is
+	// worse than none, so an unreachable model leaves it empty (R4.4).
+	//
+	// It is COMMENTARY. Nothing that decides a Verdict or an exit code may read
+	// it (R4.3), on the same fence DiffAdded/DiffRemoved already sit behind.
+	RealignVerdict string
+	// Others are the repositories other than ::gentoo that carry this package,
+	// for the 84 of 321 packages ::gentoo does not (R6.1). They are INFORMATIVE
+	// ONLY and no realignment is ever proposed from one (R6.2): a repository
+	// outside ::gentoo has not been through the same review.
+	//
+	// They are filled by task 6.2's OtherRepositories, which needs the list of
+	// locally available repositories — something AnnotateBaseline is not given
+	// and deliberately does not go looking for.
+	Others []OtherRepo
 }
 
 // CompareStatus indicates the comparison result
@@ -343,6 +395,54 @@ type CompareReport struct {
 	VerdictRedundantCount   int
 	VerdictNeedsRebaseCount int
 	VerdictUnknownCount     int
+
+	// BaselineSkipped is non-empty when the review could not run at all: no
+	// ::gentoo tree could be located, so NOTHING was examined. The text names
+	// what was looked for (R1.5), and MarkBaselineSkipped is what writes it.
+	//
+	// It is the report's only RUN-level state, and it is deliberately not the
+	// per-package one. A baseline that exists but will not read is
+	// Baseline.Unexamined on that package alone (D2) and never reaches here:
+	// collapsing the two would have one unreadable ebuild declare that a run
+	// which examined 320 packages examined none.
+	//
+	// Its ZERO VALUE renders nothing (formatBaselineSkipped), which is what keeps
+	// a run that requested no review printing exactly what it printed yesterday
+	// (R7.2). Without it the same run prints "All packages are up-to-date!" over
+	// a comparison that never happened.
+	BaselineSkipped string
+
+	// NoBaselineCount is how many results ::gentoo carries no version of at all
+	// (R6.4) — 84 of 321 packages on the measured overlay. It is written by
+	// AnnotateBaseline and is, by construction, the number of Results whose
+	// Baseline.Found is false: any second definition would be a second answer to
+	// one question.
+	//
+	// It is a RUN-level count because the per-package fact cannot be printed. A
+	// package ::gentoo does not carry has the ZERO Baseline, which is also what
+	// a package no review examined has, so a per-package line would say "no
+	// baseline" over every row of a plain `overlay compare`. Counted here it is
+	// reported once, with its denominator, and renders nothing at 0 (R7.2).
+	NoBaselineCount int
+
+	// RealignAsked and RealignNoVerdict are the realignment review's own
+	// arithmetic: how many divergences were put to the model, and how many of
+	// those came back with no verdict (R4.4). Both are written by
+	// AnnotateRealignVerdicts and by nothing else.
+	//
+	// The second exists because an unreachable model is EXIT 0 (D9) and leaves an
+	// EMPTY RealignVerdict on every package it could not judge — which renders as
+	// silence, and silence reads as "every divergence was judged and none
+	// objected". This is the number that says otherwise, and the first is the
+	// denominator without which it cannot be read: 12 unjudged out of 12 and 12
+	// out of 237 are different reports.
+	//
+	// They are RUN-level for the reason NoBaselineCount is: the per-package fact
+	// is an absent field, indistinguishable from the same absent field on every
+	// row of a plain `overlay compare`. Counted here they are stated once and
+	// render nothing at 0 (R7.2).
+	RealignAsked     int
+	RealignNoVerdict int
 }
 
 // githubProviderAdapter adapts a *github.Client to the provider.Provider interface,
@@ -1081,6 +1181,14 @@ func splitRedundantSection(results []CompareResult) (identical, differing []Comp
 func FormatReport(report *CompareReport) string {
 	var sb strings.Builder
 
+	// The run-level outcome opens the report, and it is written BEFORE the early
+	// return below because that return is the sentence it exists to correct: a
+	// review with no ::gentoo tree to read examined nothing, and "All packages
+	// are up-to-date!" is exactly how "we could not look" must never render
+	// (R1.5). It prints nothing at the zero value, which is every run that
+	// requested no review (R7.2).
+	sb.WriteString(formatBaselineSkipped(report))
+
 	if len(report.Results) == 0 {
 		sb.WriteString(output.Sprintf(output.Success, "All packages are up-to-date!"))
 		return sb.String()
@@ -1124,6 +1232,28 @@ func FormatReport(report *CompareReport) string {
 	if len(unlisted) > 0 {
 		sb.WriteString(formatResultSection(unlisted, "Other Packages", "", output.Info))
 	}
+
+	// How much of the overlay the baseline review could not measure (R6.4),
+	// stated once with its denominator. It prints NOTHING at the zero count,
+	// which is every run that requested no review, so the summary line below
+	// keeps following the last table exactly as it does today (R7.2).
+	sb.WriteString(formatBaselineSummary(report))
+
+	// How much of the run's whole diff was actually explained (R2.3, R2.5),
+	// stated once with the number the three counts are a share of. It prints
+	// NOTHING when no package carries a classification, which is every run that
+	// requested no review, so the summary line below keeps following the last
+	// table exactly as it does today (R7.2).
+	if block := joinReportLines(runClassificationLines(report)); block != "" {
+		sb.WriteString("\n" + block)
+	}
+
+	// How many divergences the model was asked about and did not judge (R4.4),
+	// stated once with its denominator. It prints NOTHING when every question was
+	// answered and nothing at all when none was asked — which is every run that
+	// requested no review — so the summary line below keeps following the last
+	// table exactly as it does today (R7.2).
+	sb.WriteString(formatRealignSummary(report))
 
 	sb.WriteString(formatStatusSummary(report.Results))
 
@@ -1254,6 +1384,13 @@ func formatResultSection(results []CompareResult, title, note string, headerColo
 	// column would truncate exactly the identifier the operator needs in order
 	// to find that entry.
 	sb.WriteString(formatVerificationFindings(results))
+
+	// The baseline review, beneath those, for the same reason and on the same
+	// terms: it names an ebuild path and quotes an ebuild's own text, neither of
+	// which survives a column. It prints NOTHING unless a review filled the
+	// fields it reads, so a run that requested none appends the empty string
+	// here and the section ends exactly where it ends today (R7.2).
+	sb.WriteString(formatBaselineFindings(results))
 
 	return sb.String()
 }
