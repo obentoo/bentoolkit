@@ -231,7 +231,7 @@ func pkgdevCall(t *testing.T, calls []stagedManifestCall) stagedManifestCall {
 func TestRunStagedManifest_RunsInsideTheStagedTree(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 
-	if err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestRunStagedManifest_RunsInsideTheStagedTree(t *testing.T) {
 func TestRunStagedManifest_UsesAPrivateDistdir(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 
-	if err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -277,7 +277,7 @@ func TestRunStagedManifest_LeavesTheHostDistdirByteIdentical(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	if err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -296,13 +296,84 @@ func TestRunStagedManifest_LeavesTheHostDistdirByteIdentical(t *testing.T) {
 	}
 }
 
+// TestRunStagedManifest_HostDistdirSurvivesAFETCHINGRun is story 035's R1.3, and
+// it is the assertion the fix moves code closest to.
+//
+// The existing cases above run a manifest step that downloads NOTHING — the seam
+// spawns `true` — so they prove the host distdir survives a run that never
+// wrote anywhere. Story 035 makes the fetched directory outlive the step and
+// travel to the gates, which puts a directory full of freshly downloaded
+// archives one hand-off away from the boundary D3 defends. So the invariant is
+// asserted against a run that ACTUALLY FETCHED: the host distdir is populated
+// before, the child writes into whatever --distdir it was handed, and the host
+// distdir must be byte-identical afterwards.
+//
+// D3's invariant was never "the gate reads the shared distdir". It is "the host
+// DISTDIR is read through the cache and never written", and threading a private
+// directory to the gate does not touch it — but the story asserts that rather
+// than arguing it.
+func TestRunStagedManifest_HostDistdirSurvivesAFETCHINGRun(t *testing.T) {
+	env := stagedManifestFixture(t, false)
+
+	// Re-point the seam: this child behaves like the real pkgdev and puts the
+	// archive in the directory it was given.
+	var fetchedInto []string
+	env.sweeper.execCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		for i, a := range arg {
+			if a == "--distdir" && i+1 < len(arg) {
+				fetchedInto = append(fetchedInto, arg[i+1])
+				return exec.CommandContext(ctx, "sh", "-c",
+					"set -e; printf downloaded > \""+arg[i+1]+"/gst-plugins-good-1.29.2.tar.xz\"")
+			}
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+
+	before := hashDistdirTree(t, env.hostDistdir)
+
+	distdir, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	if err != nil {
+		t.Fatalf("runStagedManifest: %v", err)
+	}
+	t.Cleanup(func() { removeStagedDistdir(distdir) })
+
+	// Anti-vacuity: a run that fetched nothing cannot disturb anything, and this
+	// case would then assert only that `true` is harmless.
+	if len(fetchedInto) == 0 {
+		t.Fatal("the child was never given a --distdir, so nothing was fetched and this case proved nothing")
+	}
+	if _, statErr := os.Stat(filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.xz")); statErr != nil {
+		t.Fatalf("the fetched archive is not in the returned distdir %q: %v", distdir, statErr)
+	}
+
+	if after := hashDistdirTree(t, env.hostDistdir); after != before {
+		t.Errorf("a FETCHING staged manifest changed the host distdir: %s -> %s\n"+
+			"D3 is that the host DISTDIR is read through the cache and never written; a run that downloads must "+
+			"download into its own directory", before, after)
+	}
+
+	// Named explicitly, because a digest alone would not say WHICH file went, and
+	// the new version's tarball is the one at risk on this path: it is the name
+	// the run just fetched under.
+	for _, name := range []string{"gst-plugins-good-1.28.6.tar.xz", "gst-plugins-good-1.29.2.tar.xz", "unrelated-3.2.1.tar.gz"} {
+		body, readErr := os.ReadFile(filepath.Join(env.hostDistdir, name))
+		if readErr != nil {
+			t.Errorf("the host distfile %s is gone after a fetching run: %v", name, readErr)
+			continue
+		}
+		if string(body) != "pretend tarball "+name {
+			t.Errorf("the host distfile %s was OVERWRITTEN by the run's own download: %q", name, body)
+		}
+	}
+}
+
 // TestRunStagedManifest_HostDistdirSurvivesAFailedRun repeats the promise on the
 // path where cleanup is easiest to forget.
 func TestRunStagedManifest_HostDistdirSurvivesAFailedRun(t *testing.T) {
 	env := stagedManifestFixture(t, true)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	if err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err == nil {
+	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err == nil {
 		t.Fatal("runStagedManifest reported success although pkgdev exited non-zero")
 	}
 
@@ -311,11 +382,28 @@ func TestRunStagedManifest_HostDistdirSurvivesAFailedRun(t *testing.T) {
 	}
 }
 
-// TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure pins the deferred
-// cleanup. The private directory is per-invocation, and a sweep over the whole
-// registry that leaks one per failed package fills the scratch filesystem it was
-// created to protect.
-func TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure(t *testing.T) {
+// TestRunStagedManifest_HandsTheDistdirToTheCaller replaces this file's
+// TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure (story 033,
+// sub-task 3.1), which pinned a `defer os.RemoveAll` this function no longer
+// has.
+//
+// # This is a scope correction, not a weakening
+//
+// The guarantee that case protected — a sweep over forty packages does not leak
+// one private distdir per package into the scratch filesystem — is UNCHANGED and
+// still mandatory (R2.1, R2.2). What moved is who discharges it. The defer here
+// deleted the run's own fetched archive before the run's own static gates could
+// read it, which is the whole of story 035: the gate then read the shared
+// distdir, found only the previous release's tarball, declined it as belonging
+// to another version, reported SKIPPED, and R3.3 promoted the unread bump.
+//
+// So this level now asserts what this level owns: the directory is created, it
+// is REACHABLE by the caller on every path including failure, and it still lives
+// under the sandbox root. That the caller then removes it is asserted where the
+// removal happens — over a whole apply, in applier_gates_test.go (sub-task 4.2).
+// Splitting it that way is deliberate: a test that asserts a removal at a level
+// which no longer performs one can only be satisfied by putting the defect back.
+func TestRunStagedManifest_HandsTheDistdirToTheCaller(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		fail bool
@@ -326,7 +414,7 @@ func TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := stagedManifestFixture(t, tc.fail)
 
-			err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+			distdir, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 			if tc.fail && err == nil {
 				t.Fatal("a failing pkgdev reported success")
 			}
@@ -334,6 +422,36 @@ func TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure(t *testing.T) {
 				t.Fatalf("runStagedManifest: %v", err)
 			}
 
+			// The failing path matters more than the successful one here. A
+			// function that returned "" once something went wrong would leak the
+			// directory it had already created, and the caller could not remove
+			// what it was never told about.
+			if distdir == "" {
+				t.Fatalf("no distdir was returned (err=%v) — the caller owns the removal now, "+
+					"and cannot remove a path it was not given", err)
+			}
+			if _, statErr := os.Stat(distdir); statErr != nil {
+				t.Fatalf("the returned distdir %q does not exist: %v — the static gates of this run are its "+
+					"consumer, and a directory removed before they read is the defect story 035 fixes", distdir, statErr)
+			}
+			if !strings.HasPrefix(filepath.Clean(distdir), filepath.Clean(env.sandboxRoot)+string(os.PathSeparator)) {
+				t.Errorf("the returned distdir %q is not under the sandbox root %q; os.TempDir() is a tmpfs on the "+
+					"host this was measured on", distdir, env.sandboxRoot)
+			}
+
+			// And it is exactly the directory pkgdev was pointed at — otherwise the
+			// caller would hand the gates a directory nothing ever fetched into.
+			if !tc.fail {
+				if call := pkgdevCall(t, *env.calls); call.distdir != distdir {
+					t.Errorf("pkgdev fetched into %q but %q was returned; the gate would read the wrong directory",
+						call.distdir, distdir)
+				}
+			}
+
+			// The caller's discharge, demonstrated at this level rather than
+			// assumed: what is returned is removable, and removing it leaves the
+			// sandbox root as it was found.
+			removeStagedDistdir(distdir)
 			entries, readErr := os.ReadDir(env.sandboxRoot)
 			if readErr != nil {
 				t.Fatalf("reading the sandbox root: %v", readErr)
@@ -343,7 +461,7 @@ func TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure(t *testing.T) {
 				for _, e := range entries {
 					names = append(names, e.Name())
 				}
-				t.Errorf("the private distdir was left behind: %v — it is removed on the way out, on every path", names)
+				t.Errorf("the sandbox root still holds %v after the caller removed the returned distdir", names)
 			}
 		})
 	}
@@ -356,7 +474,7 @@ func TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure(t *testing.T) {
 func TestRunStagedManifest_ErrorNamesThePackage(t *testing.T) {
 	env := stagedManifestFixture(t, true)
 
-	err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	_, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 
 	if err == nil {
 		t.Fatal("a failing pkgdev produced no error")

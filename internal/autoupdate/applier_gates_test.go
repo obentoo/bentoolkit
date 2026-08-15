@@ -168,6 +168,199 @@ func patchBump(opts ...ApplierOption) gatesSetup {
 	return gatesSetup{from: "1.28.5", to: "1.28.6", opts: opts}
 }
 
+// =============================================================================
+// Story 035, sub-task 2.2 — the gate reads the directory the run filled
+// =============================================================================
+
+// TestStaticGateDistdir_PrefersWhatTheRunFetched pins the precedence R1.1 and
+// R1.2 turn on, and the empty-directory case that is easy to get wrong.
+//
+// The private distdir is created BEFORE the manifest step runs, so it exists
+// even on paths that fetched nothing. Preferring it while empty would hand the
+// gate the same empty room the story exists to stop handing it, with the shared
+// distdir — which does hold an archive — sitting right there unread.
+func TestStaticGateDistdir_PrefersWhatTheRunFetched(t *testing.T) {
+	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "shared.tar.gz"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seeding the shared distdir: %v", err)
+	}
+
+	fetchedWithArchive := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fetchedWithArchive, "fetched.tar.gz"), []byte("y"), 0o644); err != nil {
+		t.Fatalf("seeding the fetched distdir: %v", err)
+	}
+	fetchedEmpty := t.TempDir()
+
+	a := &Applier{distdir: shared}
+
+	for _, tc := range []struct {
+		name string
+		cand candidatePaths
+		want string
+		why  string
+	}{
+		{
+			name: "the run fetched an archive",
+			cand: candidatePaths{fetchedDistdir: fetchedWithArchive},
+			want: fetchedWithArchive,
+			why: "on a host that has never fetched this release, what the manifest step downloaded is the ONLY " +
+				"copy of the candidate's archive; reading the shared distdir instead is the defect",
+		},
+		{
+			name: "the manifest step fetched nothing",
+			cand: candidatePaths{fetchedDistdir: fetchedEmpty},
+			want: shared,
+			why: "an empty private directory means nothing was fetched, and an empty room is what the gate must " +
+				"NOT be handed while the shared distdir holds the archive",
+		},
+		{
+			name: "no manifest step ran at all",
+			cand: candidatePaths{},
+			want: shared,
+			why:  "the unstaged path never had a private directory: it wrote into the shared one all along",
+		},
+		{
+			name: "the private directory is gone",
+			cand: candidatePaths{fetchedDistdir: filepath.Join(t.TempDir(), "removed")},
+			want: shared,
+			why:  "\"I could not look\" and \"there was nothing to see\" lead to the same choice: read the other one",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.staticGateDistdir(tc.cand); got != tc.want {
+				t.Errorf("staticGateDistdir = %q, want %q\n%s", got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// TestApplyGates_NoFetchedDistfilesSurviveAnApply is story 033 sub-task 3.1's
+// guarantee, re-authored at the level that now discharges it (story 035, R2.1,
+// R2.2, sub-task 4.2).
+//
+// # A scope correction, not a weakening
+//
+// 3.1 asserted `TestRunStagedManifest_PrivateDistdirIsRemovedEvenOnFailure` — a
+// `defer os.RemoveAll` inside the manifest step. That defer deleted the run's own
+// fetched archive before the run's own static gates could read it, which is the
+// defect this story exists to remove, so the removal moved one level up. The
+// GUARANTEE is unchanged and still mandatory: a sweep over forty packages must
+// not leak one 6 MB archive per package into the scratch filesystem the private
+// directory was created to protect. Only the level that discharges it moved,
+// and this is where it is now asserted.
+//
+// Both paths, because they fail differently. The failing one is where a cleanup
+// is forgotten; the successful one is where a `defer` placed after an early
+// `return` would never be reached.
+func TestApplyGates_NoFetchedDistfilesSurviveAnApply(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		from, to    string
+		failBuild   bool
+		wantSuccess bool
+	}{
+		// A series crossing earns the configure gate, and every build child
+		// fails, so the apply fails after the fetch.
+		{name: "a failed apply", from: "1.28.6", to: "1.29.2", failBuild: true, wantSuccess: false},
+		// A patch bump stops at the static gate and every child succeeds, so the
+		// bump is promoted — and the removal still has to fire.
+		{name: "a successful apply", from: "1.28.5", to: "1.28.6", failBuild: false, wantSuccess: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sandbox := t.TempDir()
+			prev := fixSandboxRoot
+			fixSandboxRoot = func() string { return sandbox }
+			t.Cleanup(func() { fixSandboxRoot = prev })
+
+			tmp := t.TempDir()
+			overlayDir := filepath.Join(tmp, "overlay")
+			configDir := filepath.Join(tmp, "config")
+			const pkg = "media-plugins/gst-plugins-qt6"
+
+			createTestEbuildFile(t, overlayDir, pkg, tc.from)
+
+			pending, err := NewPendingList(configDir)
+			if err != nil {
+				t.Fatalf("creating pending list: %v", err)
+			}
+			pending.Add(PendingUpdate{Package: pkg, CurrentVersion: tc.from, NewVersion: tc.to, Status: StatusPending})
+
+			// pkgdev puts a file in whatever --distdir it is handed. An empty
+			// directory would be taken by an implementation that only ever calls
+			// os.Remove, so the case would not distinguish the two.
+			//
+			// fetchedInto is captured so the assertions below can prove the
+			// directory EXISTED. Without it, an apply that died before the
+			// manifest step passes for the trivial reason that it fetched
+			// nothing — the vacuous green it would be easiest to ship.
+			var fetchedInto []string
+			seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+				if name == "pkgdev" {
+					for i, s := range arg {
+						if s == "--distdir" && i+1 < len(arg) {
+							fetchedInto = append(fetchedInto, arg[i+1])
+							return exec.CommandContext(ctx, "sh", "-c",
+								"set -e; : > \""+arg[i+1]+"/gst-plugins-good-"+tc.to+".tar.gz\"")
+						}
+					}
+					return exec.CommandContext(ctx, "true")
+				}
+				if name == "emerge" {
+					return exec.CommandContext(ctx, "printf", "%s",
+						"[ebuild  N    ] media-plugins/gst-plugins-qt6-"+tc.to+"\n")
+				}
+				if tc.failBuild && name == "ebuild" {
+					return exec.CommandContext(ctx, "false")
+				}
+				return exec.CommandContext(ctx, "true")
+			}
+
+			applier, err := NewApplier(overlayDir, configDir,
+				WithApplierPendingList(pending),
+				WithExecCommand(seam),
+				WithConfirmFunc(func(string) bool { return true }),
+				WithApplierStagingRoot(filepath.Join(tmp, "staging")),
+				WithApplierValidatePolicy(gatesPolicy()),
+				WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
+			)
+			if err != nil {
+				t.Fatalf("creating applier: %v", err)
+			}
+
+			result, _ := applier.Apply(pkg, false)
+			if result.Success != tc.wantSuccess {
+				t.Fatalf("the apply returned success=%v, want %v (err=%v) — this case is about the removal on "+
+					"THAT path, so it must actually take it", result.Success, tc.wantSuccess, result.Error)
+			}
+
+			if len(fetchedInto) == 0 {
+				t.Fatal("pkgdev was never given a --distdir, so the apply never reached the manifest step and " +
+					"this case proved nothing about the removal")
+			}
+			for _, dir := range fetchedInto {
+				if _, statErr := os.Stat(dir); statErr == nil {
+					t.Errorf("the fetched distdir %q still exists after the apply", dir)
+				}
+			}
+
+			entries, err := os.ReadDir(sandbox)
+			if err != nil {
+				t.Fatalf("reading the sandbox root: %v", err)
+			}
+			var leaked []string
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), "bentoo-staged-distfiles-") {
+					leaked = append(leaked, e.Name())
+				}
+			}
+			if len(leaked) != 0 {
+				t.Errorf("the apply left %v under the sandbox root — the removal fires on every path, and a "+
+					"sweep over forty packages that leaks one per bump fills the filesystem it protects", leaked)
+			}
+		})
+	}
+}
+
 // TestApplyGates_SeriesCrossingRunsTheConfigureGate is R2.2 reaching all the way
 // into the command. 1.28.6 → 1.29.2 is the bump this whole story exists for.
 func TestApplyGates_SeriesCrossingRunsTheConfigureGate(t *testing.T) {

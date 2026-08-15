@@ -184,7 +184,7 @@ func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []val
 
 	report, err := validate.Run(a.ctx, validate.Options{
 		Overlay:  cand.repoRoot,
-		Distdir:  a.staticGateDistdir(),
+		Distdir:  a.staticGateDistdir(cand),
 		Selector: pkg,
 	})
 	if err != nil {
@@ -209,19 +209,63 @@ func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []val
 	}}
 }
 
-// staticGateDistdir names the directory the option gate reads archives from,
-// with the precedence the rest of this command already uses: the --distdir flag,
-// then autoupdate.distdir, then — left to validate.Run's own distfiles.Locate —
-// the host's DISTDIR.
+// staticGateDistdir names the directory the option gate reads archives from.
 //
-// Nothing is created and nothing is written: the gate opens archives that the
-// manifest step already put on disk, which is why Locate and not Resolve is the
-// accessor on the last rung (distfiles D2).
-func (a *Applier) staticGateDistdir() string {
+// The run's OWN fetch comes first (S035-R1.1, R1.2). The manifest step of this
+// same apply downloaded the candidate's archive into a private directory, and on
+// any host that had not already fetched this release that copy is the ONLY one
+// on disk. Reading the shared distdir instead is how the gate came to be handed
+// an empty room: the sole archive present was the PREVIOUS release's, sub-task
+// 8.1 declined it — correctly, because answering about the wrong tarball is
+// worse than not answering — the gate reported SKIPPED, and R3.3's "PASS or
+// SKIPPED" promoted a bump nothing had read.
+//
+// The fall-back keeps the precedence the rest of this command already uses: the
+// --distdir flag, then autoupdate.distdir, then — left to validate.Run's own
+// distfiles.Locate — the host's DISTDIR. It is what answers for a candidate with
+// no manifest step of its own, and for the unstaged path, which never had a
+// private directory because it wrote into the shared one all along.
+//
+// Nothing is created and nothing is written on either branch: the gate opens
+// archives that the manifest step already put on disk, which is why Locate and
+// not Resolve is the accessor on the last rung (distfiles D2). D3 is untouched —
+// the host DISTDIR is still only ever read, and reading a private directory
+// instead reads it even less.
+//
+// # An EMPTY private directory is "nothing was fetched", not "nothing is there"
+//
+// The preference is conditional on the directory holding something, and that is
+// not defensive coding. The private distdir is created before the manifest step
+// runs, so it exists on paths where the step brought nothing back: a manifest
+// child that had nothing to download, or one stubbed out entirely. Preferring an
+// empty directory would hand the gate the same empty room this story exists to
+// stop handing it — with the shared distdir, which does hold the archive, right
+// there unread. So the fall-back triggers on the directory being empty, which is
+// exactly the ToDo's "falling back to the shared one when nothing was fetched".
+func (a *Applier) staticGateDistdir(cand candidatePaths) string {
+	if holdsAnyFile(cand.fetchedDistdir) {
+		return cand.fetchedDistdir
+	}
 	if a.distdir != "" {
 		return a.distdir
 	}
 	return a.configuredDistdir
+}
+
+// holdsAnyFile answers whether a directory has anything in it at all.
+//
+// An unreadable or absent directory answers false rather than propagating an
+// error: the caller is choosing between two directories, and "I could not look"
+// and "there was nothing to see" lead to the same choice — read the other one.
+func holdsAnyFile(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 // lendPublishedDistNames makes the staged package directory name the archives

@@ -365,7 +365,12 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 func findDistfile(pkgDir, distdir, version string) (string, error) {
 	names := distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 	if len(names) == 0 {
-		return "", errors.New("the package's Manifest names no distfile, so there is no archive to read")
+		// The directory is named even though nothing was looked for in it (R4.1).
+		// Reading this line, an operator has to be able to tell "the Manifest is
+		// empty" from "I searched the wrong place", and a message that mentions no
+		// directory at all leaves the second possibility invisible.
+		return "", fmt.Errorf("the package's Manifest (%s) names no distfile, so there was no archive to look for in %s",
+			filepath.Join(pkgDir, "Manifest"), distdir)
 	}
 
 	var present []string
@@ -378,7 +383,11 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 
 	switch len(present) {
 	case 0:
-		return "", fmt.Errorf("no distfile named by the Manifest is present in %s: %s",
+		// R4.1. Naming the directory is what separates "this host has never
+		// fetched this release" from "the fetch went somewhere else" — and story
+		// 035 is the second one, which read as the first for as long as it did
+		// precisely because no message said where the search happened.
+		return "", fmt.Errorf("no distfile named by the Manifest is present in the directory searched, %s: %s",
 			distdir, strings.Join(names, ", "))
 	case 1:
 		// Safe when this file is this ebuild's (R12.1), or when no name in the

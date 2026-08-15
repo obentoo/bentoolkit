@@ -356,6 +356,68 @@ func TestFindDistfile_SinglePresentOfAnotherVersionIsDeclined(t *testing.T) {
 	}
 }
 
+// TestFindDistfile_ASkipNamesTheDirectoryItSearched is story 035's R4.1.
+//
+// # Why this is worth a requirement of its own
+//
+// Story 035's defect read as a wrong-version refusal for as long as it did
+// because no message said WHERE the search happened. "No archive here" and "I
+// looked in the wrong place" produce the same SKIP, and only the directory name
+// separates them. Naming it is what makes the next occurrence diagnosable from
+// the log alone, without reproducing the run.
+func TestFindDistfile_ASkipNamesTheDirectoryItSearched(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild, "gst-plugins-good-1.28.6.tar.gz")
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+
+	t.Run("nothing the Manifest names is present", func(t *testing.T) {
+		manifestNaming(t, pkgDir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz")
+		distdir := t.TempDir()
+
+		_, err := findDistfile(pkgDir, distdir, "1.28.6")
+		if err == nil {
+			t.Fatal("an empty distdir produced no error")
+		}
+		if !strings.Contains(err.Error(), distdir) {
+			t.Errorf("the skip %q does not name the directory it searched (%s); the operator cannot tell a host "+
+				"that never fetched the release from a fetch that went somewhere else", err, distdir)
+		}
+	})
+
+	t.Run("the Manifest names nothing at all", func(t *testing.T) {
+		manifestNaming(t, pkgDir)
+		distdir := t.TempDir()
+
+		_, err := findDistfile(pkgDir, distdir, "1.28.6")
+		if err == nil {
+			t.Fatal("a Manifest naming no distfile produced no error")
+		}
+		if !strings.Contains(err.Error(), distdir) {
+			t.Errorf("the skip %q does not name the directory (%s); with no directory in the message, "+
+				"\"the Manifest is empty\" and \"I searched the wrong place\" are indistinguishable", err, distdir)
+		}
+	})
+
+	// The wrong-version message already named the directory and must keep doing
+	// so: it is the reason string story 035's reproduction was read FROM, and a
+	// change to it would invalidate that transcript.
+	t.Run("the wrong-version refusal keeps naming both", func(t *testing.T) {
+		manifestNaming(t, pkgDir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz")
+		distdir := t.TempDir()
+		archive := buildTarGz(t, map[string]string{"gst-plugins-good-1.29.2/meson.build": "project('x')\n"})
+		linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.gz"))
+
+		_, err := findDistfile(pkgDir, distdir, "1.28.6")
+		if err == nil {
+			t.Fatal("the wrong-version archive was accepted")
+		}
+		for _, want := range []string{distdir, "gst-plugins-good-1.29.2.tar.gz", "does not belong to version 1.28.6"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal %q no longer contains %q", err, want)
+			}
+		}
+	})
+}
+
 // TestFindDistfile_UnversionedManifestNamesKeepTheShortcut is R12.2, and it is
 // the case that stops the fix from breaking snapshot packages: when NO distfile
 // the Manifest names carries any version, there is nothing to compare against
