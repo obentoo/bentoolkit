@@ -309,6 +309,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit, with no `Manifest` entry and no `md5-cache`, so any `emerge` of it
   fails on the digest. The rollback now runs where the failure happens.
 
+- **The static gate now reads the archive the run just fetched, instead of a
+  directory that may never have held it.** A bump could be published *unread* on
+  any host that had not already downloaded the release — a fresh CI runner, a new
+  machine, or simply the first time a package was bumped. Reproduced through the
+  real `Apply` pipeline with one variable changed: whether the shared `DISTDIR`
+  already held `gst-plugins-good-1.29.2.tar.gz`. With it, the gate names `aalib`
+  and `libcaca` and the bump is refused. Without it, `RESULT success=true
+  promoted=true` — obentoo/bentoo#33 goes out to an overlay that auto-commits and
+  pushes.
+
+  Two correct behaviours composed into a wrong one, which is why it survived
+  review. The manifest step fetched into a private distdir and removed it on the
+  way out — the cleanup of the very directory that stops a staged Manifest from
+  making quarantine move the host's real distfiles aside. The static gates then
+  read the *shared* distdir, where the only archive present was the previous
+  release's; the gate declined it as belonging to another version, which is the
+  right answer to the question it was asked, and reported SKIPPED. Promotion
+  requires every gate to report "PASS **or** SKIPPED" — the rule that lets a host
+  unable to run a build gate still publish a bump whose static gates passed.
+  Neither rule is wrong alone.
+
+  The fetched directory now travels with the bump it belongs to, on
+  `candidatePaths` rather than on the applier, because applies run concurrently
+  and a shared field would hand one package's gate another package's archive. It
+  is removed when the whole staged sequence ends, on every path including
+  failure, so a sweep over forty packages leaks nothing. An *empty* private
+  directory falls back to the shared one: it is created before the manifest step
+  runs, so preferring it while empty would hand the gate the same empty room.
+  `--check` gets the identical lifetime — it publishes nothing, which makes its
+  failure mode quieter rather than smaller: a plan that reports "proved" for a
+  bump nothing read.
+
+  The host `DISTDIR` invariant is unchanged and is now asserted against a run
+  that actually downloaded, rather than only against runs that fetched nothing.
+
+- **A skipped gate now names the directory it searched.** "No archive here" and
+  "I looked in the wrong place" produced the same message, which is why the
+  defect above read as a wrong-version refusal for as long as it did. The
+  wrong-version wording itself is unchanged.
+
 - **A gate no longer reads an archive belonging to another version.** Observed,
   not hypothetical: with only `gst-plugins-good-1.29.2.tar.xz` on disk, the
   1.28.6 ebuild was validated against the 1.29.2 archive and reported FAILED,
