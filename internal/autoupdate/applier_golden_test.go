@@ -97,11 +97,40 @@ func writeGoldenArchive(t *testing.T, distdir, name, prefix string, options []st
 	}
 }
 
+// goldenFixtureOpts parameterises the fixture WITHOUT changing what the three
+// original cases get. Its zero value reproduces the fixture exactly as story 033
+// wrote it, which is why the cases below it were left untouched.
+type goldenFixtureOpts struct {
+	// omitCandidateArchive leaves the CANDIDATE's archive out of the shared
+	// distdir — the state of any host that has never fetched this release: a
+	// fresh CI runner, a new machine, or simply the first bump of this package.
+	//
+	// It is the whole of story 035's R5.1. A fixture that pre-places the archive
+	// cannot fail for this reason, so the absence is part of the acceptance
+	// criteria rather than an incidental property: with the archive present the
+	// gate reads the shared distdir and answers correctly BY ACCIDENT, and the
+	// lifetime defect is invisible.
+	omitCandidateArchive bool
+
+	// fetchingPkgdev makes the exec seam behave the way the real `pkgdev
+	// manifest` does: it writes the distfile into whatever `--distdir` it is
+	// handed. mockExecCommandSuccess runs `true` and writes nothing, so with it
+	// no run ever fetches anything and omitCandidateArchive would only prove
+	// that a missing archive stays missing.
+	fetchingPkgdev bool
+}
+
 // goldenApplyFixture lays out the real shape: an overlay holding 1.28.6, a
 // pending bump to 1.29.2, a distdir holding both upstream archives — 1.28.6
 // still declares aalib and libcaca, 1.29.2 no longer does — and an applier whose
 // staging root sits outside the overlay.
 func goldenApplyFixture(t *testing.T) (*Applier, *PendingList, string, string) {
+	t.Helper()
+	return goldenApplyFixtureWith(t, goldenFixtureOpts{})
+}
+
+// goldenApplyFixtureWith is goldenApplyFixture with the knobs story 035 needs.
+func goldenApplyFixtureWith(t *testing.T, opts goldenFixtureOpts) (*Applier, *PendingList, string, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	overlayDir := filepath.Join(tmp, "overlay")
@@ -123,9 +152,30 @@ func goldenApplyFixture(t *testing.T) (*Applier, *PendingList, string, string) {
 	}
 	writeGoldenArchive(t, distdir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.28.6",
 		[]string{"qt6", "aalib", "libcaca"})
+
 	// 1.29.2: aalib and libcaca are gone from upstream. Nothing else changed.
-	writeGoldenArchive(t, distdir, "gst-plugins-good-1.29.2.tar.gz", "gst-plugins-good-1.29.2",
-		[]string{"qt6"})
+	//
+	// Where it is written is the variable this story turns on. In the shared
+	// distdir it is what a host that already fetched the release looks like; in
+	// the upstream directory it is what EVERY other host looks like, and the run
+	// has to fetch it.
+	const candidateArchive = "gst-plugins-good-1.29.2.tar.gz"
+	execCommand := mockExecCommandSuccess
+	if opts.omitCandidateArchive {
+		upstream := filepath.Join(tmp, "upstream")
+		if err := os.MkdirAll(upstream, 0o755); err != nil {
+			t.Fatalf("creating the upstream directory: %v", err)
+		}
+		writeGoldenArchive(t, upstream, candidateArchive, "gst-plugins-good-1.29.2", []string{"qt6"})
+		if opts.fetchingPkgdev {
+			execCommand = mockPkgdevFetchesInto(filepath.Join(upstream, candidateArchive))
+		}
+	} else {
+		writeGoldenArchive(t, distdir, candidateArchive, "gst-plugins-good-1.29.2", []string{"qt6"})
+		if opts.fetchingPkgdev {
+			execCommand = mockPkgdevFetchesInto(filepath.Join(distdir, candidateArchive))
+		}
+	}
 
 	pending, err := NewPendingList(configDir)
 	if err != nil {
@@ -140,7 +190,7 @@ func goldenApplyFixture(t *testing.T) (*Applier, *PendingList, string, string) {
 
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
-		WithExecCommand(mockExecCommandSuccess),
+		WithExecCommand(execCommand),
 		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(distdir, ""),
@@ -150,6 +200,35 @@ func goldenApplyFixture(t *testing.T) (*Applier, *PendingList, string, string) {
 		t.Fatalf("creating applier: %v", err)
 	}
 	return applier, pending, overlayDir, distdir
+}
+
+// mockPkgdevFetchesInto is the exec seam behaving like the real `pkgdev
+// manifest`: it puts the distfile in whatever `--distdir` it was handed, and
+// leaves every other child untouched.
+//
+// The distinction matters for the same reason the bug survived review. Every
+// other mock in this suite writes NOTHING, so the archive a gate reads is always
+// one the fixture pre-placed, and where the run would have put its own download
+// is a question no test ever asked.
+func mockPkgdevFetchesInto(archive string) func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		distdir := ""
+		for i, a := range arg {
+			if a == "--distdir" && i+1 < len(arg) {
+				distdir = arg[i+1]
+				break
+			}
+		}
+		if distdir == "" {
+			return exec.CommandContext(ctx, "true")
+		}
+		// `cp` and not a Go copy: the seam hands back an *exec.Cmd, and the point
+		// is that a CHILD PROCESS puts the file there — exactly as pkgdev does.
+		return exec.CommandContext(ctx, "cp", archive, distdir+string(os.PathSeparator))
+	}
 }
 
 // TestGoldenApply_TheBumpThatBrokeIsNotPublished is the acceptance criterion of
@@ -292,5 +371,78 @@ func TestGoldenApply_EveryBumpFailedAndTheOverlayIsByteIdentical(t *testing.T) {
 	if len(pins) != 0 {
 		t.Errorf("pins were written for bumps that all failed: %v — --clean sweeps by pin, and a pin for an absent ebuild "+
 			"aims the deletion rule at the only one present", pins)
+	}
+}
+
+// TestGoldenApply_TheGateReadsWhatTheRunFetched is story 035's whole point —
+// R1.2 and R5.1 — and it is the golden pair run TWICE with exactly one thing
+// different: whether the shared distdir already held the candidate's archive.
+//
+// # Why the difference must not matter, and today does
+//
+// The manifest step fetches into a PRIVATE distdir under fixSandboxRoot()
+// (sweep_staged.go), removes it on the way out, and the static gates afterwards
+// read the SHARED one (applier_gates.go, staticGateDistdir). On the maintainer's
+// host both archives were already in the shared distdir, so the gate answered
+// correctly without ever depending on the fetch. On a host that has never
+// fetched this release, the only archive present is the PREVIOUS version's —
+// story 033's sub-task 8.1 declines to read it, correctly, because answering
+// about the wrong tarball is worse than not answering — the option gate reports
+// SKIPPED, and R3.3's "PASS or SKIPPED" promotes the bump.
+//
+// Two correct behaviours composing into a wrong one: the bump that broke
+// obentoo/bentoo#33 is PUBLISHED, unread, to a tree that auto-commits and
+// pushes.
+//
+// The two sub-tests are deliberately in one function rather than inferred from
+// the contrast with the cases above: the control proves the fixture can pass, so
+// a red in the bug case is the lifetime and not the harness.
+func TestGoldenApply_TheGateReadsWhatTheRunFetched(t *testing.T) {
+	const pkg = "media-plugins/gst-plugins-qt6"
+
+	for _, tc := range []struct {
+		name string
+		omit bool
+	}{
+		// Control. The host already fetched this release at some earlier point,
+		// which is the only state every existing fixture has ever described.
+		{name: "the shared distdir already holds the archive", omit: false},
+		// The bug. Every other host, and every first bump of a package.
+		{name: "the host has never fetched this release", omit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			applier, _, overlayDir, _ := goldenApplyFixtureWith(t, goldenFixtureOpts{
+				omitCandidateArchive: tc.omit,
+				fetchingPkgdev:       true,
+			})
+
+			before := hashOverlayTree(t, overlayDir)
+			result, _ := applier.Apply(pkg, false)
+
+			if result.Success {
+				t.Fatalf("1.29.2 was PUBLISHED. The run fetched the archive; the gate did not read it, so nothing " +
+					"ever compared the ebuild's options against upstream's. This is obentoo/bentoo#33 going out " +
+					"to an overlay that auto-commits and pushes.")
+			}
+
+			msg := ""
+			if result.Error != nil {
+				msg = result.Error.Error()
+			}
+			for _, want := range []string{"aalib", "libcaca"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("the failure does not name %q — a bump can fail for many reasons, and only the option "+
+						"gate having READ the candidate's archive produces this one: %q", want, msg)
+				}
+			}
+
+			if after := hashOverlayTree(t, overlayDir); after != before {
+				t.Errorf("the published overlay changed for a bump that failed its gate: %s -> %s", before, after)
+			}
+			candidate := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
+			if _, err := os.Stat(candidate); err == nil {
+				t.Errorf("the rejected candidate is sitting in the published overlay at %q", candidate)
+			}
+		})
 	}
 }
