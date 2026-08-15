@@ -54,6 +54,21 @@ type candidatePaths struct {
 	pkgDir string
 	// ebuildPath is the candidate ebuild itself, inside pkgDir.
 	ebuildPath string
+	// fetchedDistdir is the private directory this run's manifest step fetched
+	// the candidate's archive into, and "" when no manifest step ran or the
+	// candidate is not staged.
+	//
+	// # Why it rides here and not on Applier (S035-D2)
+	//
+	// A field on Applier is the obvious shortcut and it is wrong for the reason
+	// story 033 kept staging keyed by path rather than by an index:
+	// applyAllPackages runs its workers CONCURRENTLY, so a per-Applier field
+	// would be shared mutable state across packages being staged at the same
+	// time, and package A's gate could be handed package B's distdir.
+	// candidatePaths is already the per-bump carrier that reaches both
+	// runStaticGates call sites, so the directory rides with the bump it belongs
+	// to and the concurrency justification stays intact.
+	fetchedDistdir string
 }
 
 // candidateIn names the candidate's paths inside one repository root. It is the

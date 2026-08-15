@@ -956,10 +956,13 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	a.reporter.TaskStage(pkg, "manifest")
 	fetchedDistdir, manifestErr := a.runManifestWithFix(cand, pkg, newVersion, result)
 	// Armed the instant the directory can exist, so every exit below — the six
-	// failing ones included — takes it back (R2.1, R2.2). Sub-task 2.2 moves what
-	// READS it; what removes it is here from the start, because a removal added
-	// after the fact is a removal one path will not have.
+	// failing ones included — takes it back (R2.1, R2.2). A removal added after
+	// the fact is a removal one path will not have.
 	defer removeStagedDistdir(fetchedDistdir)
+	// And handed to the gates, which are its consumer (R1.1, R1.2). On a host
+	// that has never fetched this release, what this step just downloaded is the
+	// only copy of the candidate's archive in existence locally.
+	cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
 		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, manifestErr))
 	}
