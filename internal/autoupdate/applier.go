@@ -954,8 +954,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// staged path this is `pkgdev manifest` inside the staged tree against a
 	// private distdir, so no directory the host shares changes while it runs.
 	a.reporter.TaskStage(pkg, "manifest")
-	if err := a.runManifestWithFix(cand, pkg, newVersion, result); err != nil {
-		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, err))
+	fetchedDistdir, manifestErr := a.runManifestWithFix(cand, pkg, newVersion, result)
+	// Armed the instant the directory can exist, so every exit below — the six
+	// failing ones included — takes it back (R2.1, R2.2). Sub-task 2.2 moves what
+	// READS it; what removes it is here from the start, because a removal added
+	// after the fact is a removal one path will not have.
+	defer removeStagedDistdir(fetchedDistdir)
+	if manifestErr != nil {
+		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, manifestErr))
 	}
 
 	// The static gates — the Meson option gate and the advisory QA scan (story
@@ -1713,27 +1719,33 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 // manifest runs in the staged tree and the fixer edits the staged ebuild, so a fix
 // attempt is itself covered by R3.2 — an agent rewriting SRC_URI must not be doing
 // it inside a repository that commits and pushes itself.
-func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, result *ApplyResult) error {
-	firstErr := a.runManifestFor(cand, pkg, version)
+// The returned path is the staged distdir whose contents the caller's gates must
+// read, and which the caller then removes (S035-D1). When the fixer runs, the
+// authoritative re-check below fetches into a SECOND private directory and the
+// first one's contents are superseded — so the first is removed here, at the
+// moment it stops being the answer, and the path returned is always the one the
+// surviving Manifest was computed against.
+func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
+	distdir, firstErr := a.runManifestFor(cand, pkg, version)
 	if firstErr == nil {
-		return nil
+		return distdir, nil
 	}
 
 	// The gate (S030-D6). It sits between the failed manifest and everything
 	// that would set a fix attempt up, because the cheapest fixer invocation is
 	// the one that never happens.
 	if envErr := a.refuseFixOnEnvironmentFailure(pkg, version, firstErr); envErr != nil {
-		return envErr
+		return distdir, envErr
 	}
 
 	if a.fixer == nil {
-		return firstErr
+		return distdir, firstErr
 	}
 
 	pkgDir := cand.pkgDir
 	if pkgDir == "" {
 		// Malformed name: nothing the fixer can scope to; surface the original error.
-		return firstErr
+		return distdir, firstErr
 	}
 
 	// Writable distdir the agent can pass to `pkgdev manifest --distdir` while it
@@ -1747,12 +1759,12 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	// asks the host for PORTAGE_TMPDIR and answers "" when it cannot, which is
 	// what os.MkdirTemp already means by "use the default": a host without
 	// portageq keeps exactly today's behaviour.
-	distdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
+	fixDistdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
 	if err != nil {
 		// Can't give the agent a private distdir; don't attempt the fix.
-		return fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
+		return distdir, fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
 	}
-	defer func() { _ = os.RemoveAll(distdir) }()
+	defer func() { _ = os.RemoveAll(fixDistdir) }()
 
 	logger.Info("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version)
 	a.reporter.TaskStage(pkg, "llm-fix")
@@ -1764,17 +1776,26 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		PkgDir:        pkgDir,
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
-		DistDir:       distdir,
+		DistDir:       fixDistdir,
 	})
 	if fixErr != nil {
-		return fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
+		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
 	}
 
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
 	// self-report.
+	//
+	// It fetches into a SECOND private distdir, and from here on that one is the
+	// answer: it is the directory the surviving Manifest was computed against, so
+	// it is the one the gates must read. The first is removed the moment it stops
+	// being that — not deferred, because a defer would keep a superseded copy of
+	// a 6 MB archive alive for the whole of the QA scan below.
 	a.reporter.TaskStage(pkg, "re-check")
-	if secondErr := a.runManifestFor(cand, pkg, version); secondErr != nil {
-		return fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
+	recheckDistdir, secondErr := a.runManifestFor(cand, pkg, version)
+	removeStagedDistdir(distdir)
+	distdir = recheckDistdir
+	if secondErr != nil {
+		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
 	}
 
 	result.Fixed = true
@@ -1799,7 +1820,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		result.QASummary = qa
 		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
 	}
-	return nil
+	return distdir, nil
 }
 
 // refuseFixOnEnvironmentFailure decides whether a failed manifest step is one
@@ -1994,11 +2015,35 @@ func (a *Applier) runManifest(pkg, version string) error {
 // because those three defend a directory the whole machine shares and pointing
 // them at a staged tree would have a validation run rearrange the host's DISTDIR.
 // sweep_staged.go carries the full argument.
-func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) error {
+//
+// The returned path is the private distdir the STAGED step fetched into, and is
+// "" on the published path — which has no private directory, having written into
+// the shared one all along. A caller that receives a non-empty path owns it and
+// must remove it (S035-D1); removeStagedDistdir is that removal.
+func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) (string, error) {
 	if cand.staged {
 		return a.sweeper().runStagedManifest(cand.pkgDir, pkg, version)
 	}
-	return a.runManifest(pkg, version)
+	return "", a.runManifest(pkg, version)
+}
+
+// removeStagedDistdir takes back what runManifestFor's staged branch created.
+//
+// It is a function rather than an inline os.RemoveAll so that every site which
+// must not forget it is greppable, and so the empty case — the published path,
+// which never had one — is answered in one place instead of at each call.
+//
+// The error is deliberately swallowed and logged rather than returned. A distdir
+// that could not be removed is a leaked temporary directory; it is not a reason
+// to fail a bump that passed its gates, and turning it into one would make a
+// full disk reject work that was already proved.
+func removeStagedDistdir(distdir string) {
+	if distdir == "" {
+		return
+	}
+	if err := os.RemoveAll(distdir); err != nil {
+		logger.Debug("could not remove the staged distdir %q: %v", distdir, err)
+	}
 }
 
 // runCompile runs a compile test with elevated privileges.

@@ -45,7 +45,8 @@ import (
 //     the host it is the hazard above.
 //   - RecordFetchScope + cleanupFailedFetch take away what a failed fetch left in
 //     a directory that outlives the run. This one does not outlive the run: the
-//     deferred RemoveAll below takes the whole thing, on every path.
+//     CALLER takes the whole thing, on every path — see "who owns the distdir"
+//     below.
 //
 // PrepopulateFromCache is the one that stays, RE-POINTED so the private distdir
 // is its destination and the shared directories are only ever its source. Both
@@ -60,13 +61,39 @@ import (
 // for the reason runManifestWithFix already does it (applier.go:1112) — on the
 // host S030 was measured on /tmp is a 31 GB tmpfs, so a distfile downloaded into
 // a default temporary directory lands in RAM.
-func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) error {
+//
+// # Who owns the distdir (S035-D1)
+//
+// This function CREATES the private distdir — it is the only one that knows what
+// seeding and prefetching the manifest step needs — and it no longer OWNS it.
+// The path is returned and the caller removes it once the whole staged sequence
+// for that bump is done.
+//
+// That split is the fix for a defect this function's own cleanup caused. The
+// distfile this step fetches is the ONLY copy of the candidate's archive on a
+// host that has never fetched the release, and the static gates of the same run
+// are its consumer. A `defer os.RemoveAll(distdir)` here deleted it before the
+// gate looked, the gate then read the SHARED distdir, found only the previous
+// version's tarball, declined it as belonging to another version — correctly —
+// and reported SKIPPED. R3.3 promotes on "PASS or SKIPPED", so the bump was
+// published unread.
+//
+// The removal is not optional and did not become the caller's choice: R2 keeps
+// it mandatory on every path including failure, because a sweep over forty
+// packages retaining every fetched tarball would fill the very scratch
+// filesystem the private directory was created to protect. What changed is only
+// WHERE it happens — one level up, after the consumer has read.
+//
+// A distdir is returned on the error paths too, and that is deliberate: once the
+// directory exists, the caller must be able to remove it whatever went wrong
+// next. Only the failures ABOVE its creation return "".
+func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) (string, error) {
 	_, pkgName, ok := splitPkgAtom(pkg)
 	if !ok {
-		return fmt.Errorf("%w: invalid package name format: %s", ErrManifestFailed, pkg)
+		return "", fmt.Errorf("%w: invalid package name format: %s", ErrManifestFailed, pkg)
 	}
 	if stagedPkgDir == "" {
-		return fmt.Errorf("%w: no staged package directory for %s-%s", ErrManifestFailed, pkg, version)
+		return "", fmt.Errorf("%w: no staged package directory for %s-%s", ErrManifestFailed, pkg, version)
 	}
 
 	// The private distdir. Read through the fixSandboxRoot var, never through
@@ -77,14 +104,13 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) error {
 	sandboxRoot := fixSandboxRoot()
 	distdir, err := os.MkdirTemp(sandboxRoot, "bentoo-staged-distfiles-")
 	if err != nil {
-		return fmt.Errorf("%w: creating a private distdir for %s-%s under %q: %w",
+		return "", fmt.Errorf("%w: creating a private distdir for %s-%s under %q: %w",
 			ErrManifestFailed, pkg, version, sandboxRoot, err)
 	}
-	// Registered before anything can fail below, so every exit path — the auth
-	// prefetch, the pkgdev failure, the success — leaves the sandbox root as it
-	// was found. A sweep over a whole registry that leaked one of these per failed
-	// package would fill the scratch filesystem it was created to protect.
-	defer func() { _ = os.RemoveAll(distdir) }()
+	// From here down every return carries `distdir`, including the failing ones:
+	// the directory now exists, and the caller cannot remove what it was not told
+	// about. The sweep-fills-the-scratch-filesystem argument that used to justify
+	// a defer here is unchanged — it just names the caller now (S035-D1, R2.2).
 
 	// The names this version is expected to need, derived from the STAGED
 	// Manifest and the STAGED directory's ebuilds — the same derivation the apply
@@ -104,9 +130,10 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) error {
 	// where pkgdev will digest it. A package without a [meta] fetch block, and a
 	// sweeper built without configs at all, are both no-ops. It writes into the
 	// PRIVATE distdir, and it needs no cleanup branch of its own for the same
-	// reason nothing else here does: the deferred RemoveAll already has it.
+	// reason nothing else here does: the returned path carries it to the caller,
+	// whose removal covers every path.
 	if err := s.prefetchAuthDistfile(pkg, version, distdir); err != nil {
-		return fmt.Errorf("%w: staged manifest for %s-%s: %w", ErrManifestFailed, pkg, version, err)
+		return distdir, fmt.Errorf("%w: staged manifest for %s-%s: %w", ErrManifestFailed, pkg, version, err)
 	}
 
 	// Bound the invocation exactly as the apply path does: a stalled distfile
@@ -134,10 +161,10 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) error {
 		// ErrManifestFailed first, because the promotion decision classifies on
 		// that sentinel; the package and version next, because inside a sweep one
 		// line of output has to say which of forty packages it belongs to.
-		return fmt.Errorf("%w: staged manifest for %s-%s in %s: %w\nOutput: %s",
+		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w\nOutput: %s",
 			ErrManifestFailed, pkg, version, stagedPkgDir, runErr, sc.Captured())
 	}
-	return nil
+	return distdir, nil
 }
 
 // stagedDistfileSources lists the directories a staged manifest may READ already

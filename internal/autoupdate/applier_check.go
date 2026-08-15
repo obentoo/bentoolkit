@@ -120,7 +120,12 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 	defer func() { a.recordStagedProof(stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
 
 	a.reporter.TaskStage(pkg, "manifest")
-	if err := a.runManifestWithFix(cand, pkg, newVersion, local); err != nil {
+	fetchedDistdir, err := a.runManifestWithFix(cand, pkg, newVersion, local)
+	// The same lifetime the apply path gets, on the runner that publishes nothing
+	// (R3.1). --check's failure mode is quieter, not smaller: a plan that reports
+	// "proved" for a bump nothing read.
+	defer removeStagedDistdir(fetchedDistdir)
+	if err != nil {
 		gates = append(gates, validate.GateResult{
 			Gate:    validate.GateOptions,
 			Outcome: validate.OutcomeSkipped,
