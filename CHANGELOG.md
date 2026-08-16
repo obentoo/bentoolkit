@@ -295,20 +295,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command asked. Both now call `DependenciesSatisfied` and say the same
   sentences.
 
-- **An interrupted `overlay validate` stops building, and does not blame the
-  ebuild.** Two halves. The per-package loop never checked for cancellation, so
-  a Ctrl-C during a whole-overlay `--depth=compile` kept staging trees and
-  spawning `ebuild` for every remaining package, reporting each as SKIPPED — a
-  word that reads as "considered and found not to apply" rather than "you
-  stopped me". And the package that was *already building* fared worse: the
-  child is spawned through `CommandContext`, so the interrupt killed it, the
-  phase counted as started-and-failed, and the gate reported **FAILED with
-  error findings and exit 1** — telling the operator their ebuild is broken
-  because they pressed Ctrl-C. Both are now reported as interrupted. The second
-  guard sits in `RunBuildGates`, on the path all three drivers share
-  (`overlay validate`, the applier, and realign's `Prove`), so none of them can
-  keep blaming a candidate for a signal. The partial transcript is still
-  retained — it is evidence someone may want.
+- **An interrupted run is an error, not a verdict and not a skip.** The
+  per-package loop never checked for cancellation, so a Ctrl-C during a
+  whole-overlay `--depth=compile` kept staging trees and spawning `ebuild` for
+  every remaining package. The package *already building* fared worse: the child
+  is spawned through `CommandContext`, so the interrupt killed it, the phase
+  counted as started-and-failed, and the gate reported FAILED with error
+  findings — telling the operator their ebuild is broken because they pressed
+  Ctrl-C.
+
+  Reporting those gates as SKIPPED instead would have been **worse than the bug**:
+  `PromotionDecision` promotes on a list of PASS-or-SKIPPED, so an interrupted
+  `overlay autoupdate --apply --depth=compile` would have *published* the bump —
+  into an overlay that auto-commits and pushes — on gates that were killed
+  mid-build. A gate list cannot express "nothing was measured", because every
+  value it can hold is a statement about the candidate.
+
+  So `RunBuildGates` returns an error, wrapping the context cause. All three
+  drivers already treat that as "could not be attempted": the applier fails the
+  apply rather than promoting, realign's `Prove` returns without a verdict, and
+  `Run` aborts the sweep. `Run` returns an error too, because `ExitCode` reads
+  error-severity findings and an interrupted gate has none — a SIGTERM'd sweep
+  would otherwise render as SKIPPED lines and exit 0, indistinguishable at the
+  shell from a clean pass. Remaining packages are still listed, so the partial
+  report names what went unexamined, and the partial transcript is still
+  retained.
+
+- **A staged tree is now thin, so Portage will build in it.** Staging carried
+  `thin-manifests` from the published overlay, absence included — and Portage's
+  default is `thin=false`. On a non-thin repository `digestcheck` goes past its
+  early return and requires every `.ebuild` in the package directory to carry an
+  `EBUILD` record, returning failure under `strict`, which is in the default
+  `FEATURES`. A staged tree's Manifest describes distfiles and nothing else by
+  construction, so the candidate had no `EBUILD` record and the tree was refused
+  before the first phase marker: every build gate SKIPPED, for a package that
+  would have built. `Stage` now imposes `thin-manifests = true`. It is the one
+  place the "validate under the published tree's own rules" principle is
+  deliberately broken, and the justification is that a staged tree holds one
+  ebuild and no repository files — the non-thin checks exist to catch an
+  undigested file added to a real package directory, and nothing can be added to
+  this one. DIST digests are still verified against the archive on disk.
 
 - **A staged Manifest no longer describes files that are not there.**
   `publishedManifestBytes` copied the published Manifest verbatim. A Manifest is
