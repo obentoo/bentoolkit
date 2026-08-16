@@ -240,8 +240,13 @@ func liveStagedGate(t *testing.T, version string) []GateResult {
 		DistNames: func(string) ([]string, error) {
 			return distfiles.ParseManifestDistFilenames(manifestPath), nil
 		},
+		// The DIST-only value PRODUCTION supplies, not the raw file. Feeding the
+		// published bytes verbatim here meant this acceptance measurement never
+		// exercised what `overlay validate` actually hands the runner, so a
+		// regression in the filter would have stayed green through the one test
+		// that builds for real.
 		StagedManifest: func(string) ([]byte, error) {
-			return append([]byte(nil), published...), nil
+			return distfiles.ManifestDistLines(published), nil
 		},
 	})
 	if err != nil {

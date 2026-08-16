@@ -275,26 +275,28 @@ func runValidate(cmd *cobra.Command, args []string) {
 // half, a bump, must feed the GENERATED Manifest instead: the published digests
 // there belong to the release being replaced.)
 //
-// # DIST lines only, and why "verbatim" was the wrong instinct
+// # DIST lines only — and what that does and does not buy
 //
 // Each DIST line travels UNTOUCHED — never re-encoded, re-ordered or
 // re-hashed — because Portage verifies those digests against the archive it
 // finds, and a digest that survived a round-trip through some intermediate form
-// is a digest the build gates fail on.
+// is a digest the build gates fail on. The records around them are dropped:
+// EBUILD, AUX and MISC name files in the package directory, and the staged tree
+// holds one ebuild, no metadata.xml and none of the siblings, so those records
+// describe a repository that is not there.
 //
-// But the lines around them must NOT travel. A Manifest is DIST-only just when
-// the repository sets `thin-manifests = true`; Portage's default is thin=false,
-// and then the file also carries EBUILD, AUX and MISC records for files that
-// live in the package directory. Stage copies the candidate ebuild and the
-// package's files/ — not metadata.xml, and not the sibling ebuilds. Handing the
-// full Manifest over therefore describes files the staged tree does not have,
-// digestcheck raises FileNotFound, and `ebuild` dies before the first phase
-// marker: every build gate SKIPPED, for a package that would have built. It is
-// invisible on `::bentoo`, which sets thin-manifests, and breaks on any overlay
-// that does not — and `--overlay` accepts any path.
+// AN EARLIER VERSION OF THIS COMMENT CLAIMED THIS FIXED THE NON-THIN OVERLAY
+// CASE. IT DOES NOT, and the claim was made without checking Portage's source.
+// On a non-thin repository digestcheck goes past its early return and requires
+// every .ebuild in the directory to carry an EBUILD record, failing under
+// `strict` — so a DIST-only Manifest trips that check exactly as an unfiltered
+// one trips FileNotFound. Filtering cannot fix it from this side at all. What
+// fixes it is Stage imposing `thin-manifests = true` on the staged tree; see
+// stagedThinManifests in validate/stage.go.
 //
-// The retired manifestDistLines filtered for exactly this reason. Dropping the
-// filter along with the helper was the regression; this is it restored.
+// So this is hygiene rather than the fix: it keeps records describing absent
+// files out of a synthetic tree, and it is what the retired manifestDistLines
+// did before the seam replaced it.
 //
 // # A Manifest that cannot be read is an ERROR, never empty bytes
 //
@@ -310,32 +312,7 @@ func publishedManifestBytes(pkgDir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the published Manifest of %s, to give its staged copy the digests Portage verifies: %w", pkgDir, err)
 	}
-	return manifestDistLines(body), nil
-}
-
-// manifestDistLines keeps the DIST records of a Manifest and drops everything
-// else, each surviving line byte-for-byte.
-//
-// A Manifest is line-oriented and its record type is the first field, so this
-// needs no parser and deliberately does not have one: a line is kept or it is
-// not, and a kept line is the bytes that were read. The trailing newline is
-// re-established rather than preserved per line, which is the one normalisation
-// here and the one Portage does not read a digest through.
-func manifestDistLines(body []byte) []byte {
-	var kept []string
-	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "DIST ") {
-			kept = append(kept, line)
-		}
-	}
-	if len(kept) == 0 {
-		// Not an error and not a fallback to the unfiltered file: a package whose
-		// Manifest names no archive has ANSWERED, and validate reads empty bytes as
-		// "this tree cannot be built in" (S037-D2). Returning the full file here
-		// would smuggle back exactly the records this function exists to drop.
-		return nil
-	}
-	return []byte(strings.Join(kept, "\n") + "\n")
+	return distfiles.ManifestDistLines(body), nil
 }
 
 // publishedManifestDistNames is Options.DistNames for this command: the upstream

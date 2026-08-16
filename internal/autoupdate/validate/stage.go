@@ -49,12 +49,51 @@ var carriedRepoDirs = []string{"eclass", "profiles"}
 // It is a whitelist, not a filter, and that is the point: copying the source
 // layout wholesale would carry `masters` (which D2 replaces) and could carry a
 // `repo-name` (which would reinstate the duplicate name the staged tree exists
-// to avoid). These three change how Portage digests and reads a repository, so a
+// to avoid). These change how Portage digests and reads a repository, so a
 // staged tree that dropped them would validate a bump under rules the published
 // overlay does not use. A key the source does not set is not invented here: its
 // absence is carried too, so the staged repository falls back to exactly the
 // Portage default the published one falls back to.
-var carriedLayoutKeys = []string{"thin-manifests", "sign-manifests", "profile-formats"}
+//
+// THIN-MANIFESTS IS NOT ON THIS LIST, and it used to be — see stagedThinManifests.
+var carriedLayoutKeys = []string{"sign-manifests", "profile-formats"}
+
+// stagedThinManifests is imposed on every staged tree rather than carried from
+// the overlay, and it is the one place this repository's rule of "validate under
+// the published tree's own rules" is deliberately broken.
+//
+// # What the carried absence did (measured against Portage 3.14's source)
+//
+// Portage's default is thin-manifests=false. Carrying that absence meant the
+// staged tree was a NON-THIN repository, and digestcheck.py then does more than
+// verify distfile digests: past line 88 it walks the package directory and
+// requires every .ebuild it finds to carry an EBUILD record in the Manifest,
+// returning 0 under `strict` — which is in Portage's default FEATURES and which
+// doebuild.py passes. The staged tree's Manifest describes distfiles and nothing
+// else, by construction, so the candidate ebuild has no EBUILD record and the
+// tree is refused before any phase marker. Every build gate then reports SKIPPED
+// for a package that would have built.
+//
+// Filtering the Manifest down to DIST lines does not fix this and neither does
+// leaving it unfiltered: the first trips the missing-EBUILD check, the second
+// trips FileNotFound on records naming files Stage never copies. The property
+// being carried IS the defect.
+//
+// # Why imposing it is right rather than merely convenient
+//
+// A staged tree is a synthetic single-use repository whose entire purpose is to
+// run build phases against one candidate. It holds exactly one ebuild, no
+// metadata.xml and none of the package's siblings — a shape no published
+// repository has, and a shape the non-thin checks are meaningless against: they
+// exist to catch a file added to a real package directory without being
+// digested, and nothing can be added to this one.
+//
+// What thin does NOT relax is the part that matters here: the DIST digests are
+// still verified against the archive on disk, above the early return. So the
+// guarantee this whole story rests on — the build reads the archive the Manifest
+// names — is untouched. What is dropped is bookkeeping about repository files,
+// which this tree has no meaningful version of.
+const stagedThinManifests = "thin-manifests = true"
 
 // ErrStageUnpreparable reports that a staged tree could not be built, whatever
 // the cause: a missing overlay, a malformed atom, a staging root nothing may
@@ -449,6 +488,11 @@ func writeStagedLayout(overlayRoot, stagedRoot string) error {
 	var body strings.Builder
 	body.WriteString("# Generated for validating one candidate ebuild. Not a published repository.\n")
 	body.WriteString(stagedMasters + "\n")
+	// Imposed, not carried — see stagedThinManifests for what the carried
+	// absence did to digestcheck, and why this tree is the one place that rule
+	// is deliberately broken.
+	body.WriteString("# Imposed: this tree holds one ebuild and no repository files to digest.\n")
+	body.WriteString(stagedThinManifests + "\n")
 	for _, line := range carried {
 		body.WriteString(line + "\n")
 	}

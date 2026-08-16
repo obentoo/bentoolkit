@@ -176,11 +176,63 @@ func TestStage_MastersOntoGentooAndNotTheDeployedCopy(t *testing.T) {
 			masters, sourceRepoName)
 	}
 	// The overlay's own layout properties travel with it, or the staged build
-	// digests differently from the published one.
-	for _, want := range []string{"thin-manifests", "sign-manifests", "profile-formats"} {
+	// digests differently from the published one. thin-manifests is NOT among
+	// them any more — see the dedicated test below.
+	for _, want := range []string{"sign-manifests", "profile-formats"} {
 		if !strings.Contains(layout, want) {
 			t.Errorf("the staged layout.conf does not carry %s from the source overlay", want)
 		}
+	}
+}
+
+// TestStage_ThinManifestsIsImposedNotCarried is the one place the "validate
+// under the published tree's own rules" principle is deliberately broken, and
+// the reason is measurable in Portage's own source.
+//
+// Portage defaults thin-manifests to false. On a non-thin repository,
+// digestcheck.py does more than verify distfile digests: past its thin/
+// allow_missing early return it walks the package directory and requires every
+// .ebuild to carry an EBUILD record in the Manifest, returning 0 under `strict`
+// — which is in the default FEATURES and which doebuild.py passes. A staged
+// tree's Manifest describes distfiles and nothing else by construction, so the
+// candidate has no EBUILD record and the tree is refused before the first phase
+// marker: every build gate SKIPPED, for a package that would have built.
+//
+// The three cases below are the three things an overlay can say, and all three
+// must produce a thin staged tree — including the overlay that says false out
+// loud, because the staged tree's shape, not the overlay's policy, is what makes
+// the non-thin checks meaningless here.
+func TestStage_ThinManifestsIsImposedNotCarried(t *testing.T) {
+	for _, tc := range []struct{ name, sourceLayout string }{
+		{"source says true", "masters = gentoo\nthin-manifests = true\n"},
+		{"source says false", "masters = gentoo\nthin-manifests = false\n"},
+		{"source says nothing", "masters = gentoo\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overlay := sourceOverlay(t)
+			if err := os.WriteFile(filepath.Join(overlay, "metadata", "layout.conf"), []byte(tc.sourceLayout), 0o644); err != nil {
+				t.Fatalf("rewriting the source layout: %v", err)
+			}
+
+			staged, err := Stage(stagedFor(t, overlay, filepath.Join(t.TempDir(), "staging"), "EAPI=8\n"))
+			if err != nil {
+				t.Fatalf("Stage: %v", err)
+			}
+			raw, err := os.ReadFile(filepath.Join(staged, "metadata", "layout.conf"))
+			if err != nil {
+				t.Fatalf("reading the staged layout.conf: %v", err)
+			}
+			layout := string(raw)
+
+			if !strings.Contains(layout, "thin-manifests = true") {
+				t.Errorf("the staged layout.conf is not thin:\n%s\n\nOn a non-thin repo digestcheck refuses the "+
+					"candidate for having no EBUILD record, and every build gate reports SKIPPED for an ebuild "+
+					"that would have built", layout)
+			}
+			if strings.Contains(layout, "thin-manifests = false") {
+				t.Errorf("the staged layout.conf carries thin-manifests = false:\n%s", layout)
+			}
+		})
 	}
 }
 
