@@ -161,32 +161,46 @@ func (a *Applier) resolvedPackageType(pkg, currentVersion string) string {
 // than as an error: a gate that cannot run is an outcome with a reason, and
 // aborting the apply for it would fail a bump for something that is not about the
 // bump.
+//
+// # The one input validate.Run cannot derive for itself: WHOSE archive this is
+//
+// The staged tree is a fresh single-package repository, and validate answers
+// "which tarball is this ebuild's" out of the package directory's Manifest. Until
+// the manifest step has written one there, the directory names no archive, the
+// option gate reports SKIPPED, and R3.3 promotes on SKIPPED — a bump published on
+// the strength of a gate that read nothing, which is how obentoo/bentoo#33 reached
+// the tree.
+//
+// So the names are decided HERE, per bump, from cand (S037-R3.1, S037-R3.2):
+//
+//   - the staged tree already carries a Manifest — the manifest child really ran —
+//     so the seam stays nil and the gate parses that file directly. It describes
+//     THIS candidate; the published one describes the release being replaced, and
+//     answering a bump with it is the defect R12 already had to fix once.
+//   - it carries none, so the PUBLISHED names travel through the seam as values.
+//     Nothing is written into the staged tree to say them, which is the whole of
+//     S037-R3.2 and the reason the lend that used to write a temporary Manifest
+//     here no longer exists (design D4).
+//
+// The value rides the per-CALL Options built from cand and is never a field on
+// Applier (S037-D7): applyAllPackages runs applies concurrently, and a seam stored
+// once would hand package A's archive names to package B — story 035's D2, with
+// names in place of a directory.
 func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []validate.GateResult {
 	if !cand.staged {
 		return nil
 	}
 
-	// The one input validate.Run cannot derive for itself on this path: WHICH
-	// upstream archive belongs to the candidate. See lendPublishedDistNames — the
-	// staged tree is a fresh single-package repository, and without a Manifest
-	// naming an archive the option gate reports SKIPPED and R3.3 publishes the
-	// bump on the strength of a gate that read nothing.
-	restore, err := a.lendPublishedDistNames(cand, pkg, version)
-	if err != nil {
-		return []validate.GateResult{{
-			Gate:    validate.GateOptions,
-			Outcome: validate.OutcomeSkipped,
-			Reason: fmt.Sprintf("the staged tree of %s-%s names no upstream archive and none could be named for it, "+
-				"so the option gate had nothing to read: %v", pkg, version, err),
-		}}
-	}
-	defer restore()
-
-	report, err := validate.Run(a.ctx, validate.Options{
+	opts := validate.Options{
 		Overlay:  cand.repoRoot,
 		Distdir:  a.staticGateDistdir(cand),
 		Selector: pkg,
-	})
+	}
+	if !stagedTreeNamesArchive(cand) {
+		opts.DistNames = publishedDistNames(a.overlayPath, pkg, version)
+	}
+
+	report, err := validate.Run(a.ctx, opts)
 	if err != nil {
 		return []validate.GateResult{{
 			Gate:    validate.GateOptions,
@@ -268,113 +282,87 @@ func holdsAnyFile(dir string) bool {
 	return len(entries) > 0
 }
 
-// lendPublishedDistNames makes the staged package directory name the archives
-// this package's releases are published under, for the length of the static
-// gates and no longer. It returns the undo, which is always safe to call.
+// stagedTreeNamesArchive answers whether the staged package directory already
+// names an upstream archive of its own — which is to say whether the manifest
+// step really wrote a Manifest there (S037-R3.1).
 //
-// # Without it the gate cannot run at all, and a skip here PUBLISHES
-//
-// validate's findDistfile answers "which tarball is this ebuild's" out of the
-// package directory's Manifest, and validate.Stage deliberately does not carry
-// the published one across (stage.go: it describes the versions already
-// published, not the candidate). The staged tree's own Manifest is written by
-// the manifest step — `pkgdev manifest`, a CHILD PROCESS behind the execCommand
-// seam. Whenever that child returns success without writing one, the staged
-// directory holds no Manifest, the option gate reports SKIPPED ("the package's
-// Manifest names no distfile"), and R3.3 promotes on SKIPPED.
-//
-// That is the worst shape this story has to remove: not a gate that failed to
-// decide, a gate that never read anything, one step in front of the overlay that
-// auto-commits and pushes. It is exactly how obentoo/bentoo#33 reached the tree —
-// every check green, nothing measured.
+// It is the ONE place that rule is written, and it is deliberately "names an
+// archive" rather than "a file called Manifest exists": a Manifest holding only
+// AUX or EBUILD records names no tarball, so treating its presence as an answer
+// would leave the gate with nothing to look for and no seam to ask instead.
+func stagedTreeNamesArchive(cand candidatePaths) bool {
+	return len(distfiles.ParseManifestDistFilenames(filepath.Join(cand.pkgDir, "Manifest"))) > 0
+}
+
+// publishedDistNames is the per-bump seam value the option gate reads its
+// candidate archive names from when the staged tree names none of its own
+// (S037-R3.2, design D4). It answers with BASENAMES — never Manifest lines.
 //
 // # Why the published Manifest is a legitimate source of the NAMES
 //
 // It is a name lookup and never a hash check. The gate opens the archive and
 // reads meson.options out of it, so the answer is decided by the archive's
 // CONTENTS; a wrong name yields a wrong answer, which is precisely why
-// findDistfile still has to find exactly one present name carrying THIS version
+// selectDistfile still has to find exactly one present name carrying THIS version
 // before it reads a byte, and reports what it declined otherwise (R12). The
 // published Manifest is the same record presentArchive already consults for the
 // reviewer and the same one the manifest step derives its prefetch names from, so
 // this adds no new notion of which file belongs to a package.
 //
-// # Why it is LENT and not given
+// # Names, not the Manifest's own lines
 //
-// The bytes go away again the moment the static gates are done, because the build
-// gates run next and Portage VERIFIES a Manifest: a file describing other
-// releases' tarballs would turn a fine ebuild into a digest mismatch — a
-// confident FAILED about a bump that is correct, which is how a gate gets
-// switched off. Nothing is lent when the staged tree already names a distfile,
-// which is every run whose manifest step really ran.
-func (a *Applier) lendPublishedDistNames(cand candidatePaths, pkg, version string) (func(), error) {
-	noop := func() {}
-	if !cand.staged {
-		return noop, nil
-	}
-
-	stagedManifest := filepath.Join(cand.pkgDir, "Manifest")
-	if len(distfiles.ParseManifestDistFilenames(stagedManifest)) > 0 {
-		return noop, nil
-	}
-
-	published, err := publishedCandidate(a.overlayPath, pkg, version)
-	if err != nil {
-		return noop, fmt.Errorf("naming the published package directory of %s: %w", pkg, err)
-	}
-	dist := manifestDistLines(filepath.Join(published.pkgDir, "Manifest"))
-	if dist == "" {
-		// Nothing to lend, and that is not a failure to report here: the option
-		// gate below says exactly what it could not find, which is the sentence
-		// the operator needs.
-		return noop, nil
-	}
-
-	// 0o600, matching validate's own stagedFileMode rather than a published
-	// Manifest's 0o644: this file lives in the staged tree, whose whole stance is
-	// that nothing outside this apply reads it (stage.go's stagedDirMode/
-	// stagedFileMode), and a published Manifest is not what it is.
-	if err := os.WriteFile(stagedManifest, []byte(dist), 0o600); err != nil {
-		return noop, fmt.Errorf("naming %s-%s's upstream archives in its staged tree: %w", pkg, version, err)
-	}
-	return func() {
-		if err := os.Remove(stagedManifest); err != nil {
-			// Not fatal to this apply — the gates already have their answer — but
-			// it must not be silent: the build gates run next against a Manifest
-			// bentoo wrote, and Portage would report a digest mismatch for a bump
-			// that may be perfectly fine.
-			warnLogf("the Manifest lent to the option gate of %s-%s could not be removed from %s: %v "+
-				"(a build gate reading it would report a digest mismatch for a bump that may be fine)",
-				pkg, version, stagedManifest, err)
+// A DIST record is "<name> <size> BLAKE2B … SHA512 …", and the gate looks each
+// name it is given up with os.Stat in the directory searched. Handing the lines
+// over verbatim would miss on every one of them and report SKIPPED — the silent
+// non-answer this story exists to remove, reintroduced through the seam meant to
+// remove it. So the shared parser answers, and the applier holds no second copy
+// of the DIST-line grammar.
+//
+// # An unreadable Manifest is an ERROR here, and that is the point
+//
+// A non-nil seam returning no names is AUTHORITATIVE — "I looked, this package
+// publishes no archive" — and the gate answers on it without falling back
+// (S037-D2). A package whose published Manifest could not be read has said no
+// such thing, so swallowing the read error to an empty slice would put a claim
+// in the operator's report that nothing ever measured. The error travels instead,
+// and validate turns it into a SKIPPED carrying these words verbatim (S037-R3.5)
+// — the same sentence the retired lend produced for the same condition, kept to
+// the byte so the outcome an operator has already learned to read did not change
+// along with the mechanism underneath it.
+func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string, error) {
+	// The pkgDir the gate asks about is ignored: this value is built for ONE bump
+	// and rides the Options of the one Selector-scoped run that validates it, so
+	// the only directory it can ever be asked about is that candidate's
+	// (S037-D7). Answering some other directory out of this package's Manifest is
+	// exactly what the per-package func signature exists to prevent.
+	return func(string) ([]string, error) {
+		published, err := publishedCandidate(overlayPath, pkg, version)
+		if err != nil {
+			return nil, namingFailure(pkg, version,
+				fmt.Errorf("naming the published package directory of %s: %w", pkg, err))
 		}
-	}, nil
+		manifestPath := filepath.Join(published.pkgDir, "Manifest")
+		// Read once to prove the file is READABLE, because the parser below cannot
+		// say so: ParseManifestDistFilenames answers a missing or unreadable
+		// Manifest with an empty slice, which through this seam would be read as an
+		// answer rather than as the failure to produce one it is.
+		if _, err := os.ReadFile(manifestPath); err != nil { //nolint:gosec // the path is derived from the overlay this applier was constructed for
+			return nil, namingFailure(pkg, version,
+				fmt.Errorf("reading the published Manifest of %s: %w", pkg, err))
+		}
+		return distfiles.ParseManifestDistFilenames(manifestPath), nil
+	}
 }
 
-// manifestDistLines returns a Manifest's DIST records and nothing else, or ""
-// when there are none or the file cannot be read.
+// namingFailure is the sentence a producer failure reaches the operator in.
 //
-// Only DIST travels. An AUX, EBUILD or MISC record describes a file that is not
-// in the staged tree at all — Stage copies the candidate ebuild and files/ and
-// nothing else — so carrying one across would describe something absent.
-//
-// An unreadable Manifest answers "" rather than an error for the same reason
-// lendPublishedDistNames' caller does not abort on it: a package whose published
-// Manifest cannot be read is a package the option gate reports on in its own
-// words, and two error paths for one condition would give the operator two
-// different sentences about it.
-func manifestDistLines(manifestPath string) string {
-	body, err := os.ReadFile(manifestPath) //nolint:gosec // the path is derived from the overlay this applier was constructed for
-	if err != nil {
-		return ""
-	}
-	var out strings.Builder
-	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "DIST ") {
-			out.WriteString(line)
-			out.WriteString("\n")
-		}
-	}
-	return out.String()
+// It is preserved to the byte from the retired lend's own SKIPPED reason
+// (S037-R3.5, design D4): the mechanism changed, the condition did not, and a
+// report whose wording moves with a refactor costs a reader the ability to
+// recognise a case they have seen before.
+func namingFailure(pkg, version string, cause error) error {
+	return fmt.Errorf("the staged tree of %s-%s names no upstream archive and none could be named for it, "+
+		"so the option gate had nothing to read: %w", pkg, version, cause)
 }
 
 // refusalWithFindings turns PromotionDecision's verdict into the sentence the
@@ -810,6 +798,30 @@ func (a *Applier) refuseUnproved(gates []validate.GateResult, pkg, version strin
 	}
 	return fmt.Errorf("not promoted: proof at depth %s is required and the build gates of %s-%s did not run: %s",
 		depth, pkg, version, strings.Join(reasons, "; "))
+}
+
+// refuseOnInterrupt is the one invariant that dominates every published write:
+// nothing derived from a cancelled context may be promoted.
+//
+// It exists because guarding the VERDICTS is what kept failing. Twice now an
+// interrupt has reached promotion by a route the previous fix did not cover:
+// through runStaticGates, which turns any validate.Run error — ctx.Err()
+// included — into one SKIPPED option gate, and through DependenciesSatisfied,
+// which turns a cancelled probe into SkippedGates with a nil error.
+// PromotionDecision promotes on PASS-or-SKIPPED and cannot tell either list
+// from a real one, because a gate list is the wrong shape for "you stopped me"
+// — build.go states exactly that at its own guard.
+//
+// So the rule is enforced where the overlay is WRITTEN rather than where the
+// verdict is reached. A future route that manufactures a promotable gate list
+// out of a cancellation is then merely wrong, not publishing.
+func (a *Applier) refuseOnInterrupt(pkg, version string) error {
+	ctxErr := a.ctx.Err()
+	if ctxErr == nil {
+		return nil
+	}
+	return fmt.Errorf("not promoted: the run was interrupted before %s-%s reached the published overlay, "+
+		"so nothing recorded here is a verdict on this candidate: %w", pkg, version, ctxErr)
 }
 
 // skippedBuildReasons collects the reason of every SKIPPED BUILD gate, in gate

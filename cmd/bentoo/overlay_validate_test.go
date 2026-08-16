@@ -16,6 +16,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -339,5 +342,304 @@ func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T)
 
 	if !exited || code != 1 {
 		t.Errorf("exit code: got %d (exited=%v), want 1 for an error finding from the configure gate", code, exited)
+	}
+}
+
+// MERGE FRAGMENT — story 037, sub-task 4.1 (overlay_validate.go populates the
+// seams).
+//
+// Target file: cmd/bentoo/overlay_validate_test.go (APPEND at the end).
+// Do NOT repeat the `package main` clause.
+//
+// IMPORTS MERGE, necessary and sufficient: "os" and "path/filepath" join the
+// target's existing block (context, strings, testing, and the validate
+// import). One block, not two.
+//
+// # Symbols
+//
+// Added: the two tests. Borrowed, never re-declared: stubValidateRunner and
+// captureExit (this file / snapshot_test.go).
+//
+// # PINNED CONTRACT (design D1, D3 — S037-R4, R4.1, R4.2, R4.3)
+//
+//	Options.DistNames      func(pkgDir string) ([]string, error)
+//	Options.StagedManifest func(pkgDir string) ([]byte, error)
+//
+// Above depth `options` the command populates BOTH seams from the published
+// `pkgDir/Manifest` — the same-version case, where the published digests are
+// the right ones (Clarify decision). Without `--depth` the Options are
+// constructed exactly as today: both seams nil, so
+// TestOverlayValidate_DepthIsHandedToTheRunner's field-by-field capture stays
+// honest and the shipped read-only contract survives (R4.3, R11.3).
+//
+// The producers are asserted BEHAVIOURALLY, by calling the captured funcs
+// against a package directory this test lays out: they are keyed by the pkgDir
+// they are handed (design D2 — Run walks many packages), and what must travel
+// is the published Manifest's DIST record, digests included, because Portage
+// verifies them (R4.2). Whether the command sends the file verbatim or its
+// DIST lines only is deliberately NOT pinned — both satisfy R4.2, and the
+// staged tree holds none of the files an AUX/EBUILD record would describe.
+
+// TestOverlayValidate_BuildDepthPopulatesTheManifestSeams is R4.1/R4.2: the
+// runner is handed producers that answer from the published Manifest.
+func TestOverlayValidate_BuildDepthPopulatesTheManifestSeams(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if seen.DistNames == nil {
+		t.Fatal("--depth=configure handed the runner no DistNames producer; the option gate over a staged " +
+			"tree then has no source of names and reports SKIPPED — the exact skip R11.2's execution half removes (R4.1)")
+	}
+	if seen.StagedManifest == nil {
+		t.Fatal("--depth=configure handed the runner no StagedManifest producer; the build gates then run " +
+			"against a staged tree Portage refuses, and the depth is a deeper class of skip (R4.1)")
+	}
+
+	// The producers' behaviour, against a package directory of this test's own.
+	pkgDir := t.TempDir()
+	const distLine = "DIST gst-plugins-good-1.29.2.tar.gz 5872164 BLAKE2B feedface SHA512 cafebabe"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(distLine+"\n"), 0o644); err != nil {
+		t.Fatalf("writing the published Manifest: %v", err)
+	}
+
+	body, err := seen.StagedManifest(pkgDir)
+	if err != nil {
+		t.Fatalf("StagedManifest(%s): %v — the directory holds a readable Manifest", pkgDir, err)
+	}
+	if !strings.Contains(string(body), distLine) {
+		t.Errorf("the supplied Manifest content does not carry the published DIST record with its digests:\n"+
+			"got  %q\nwant it to contain %q\nPortage VERIFIES these digests, so anything less leaves the build "+
+			"gates a Manifest they fail on (R4.2)", body, distLine)
+	}
+
+	names, err := seen.DistNames(pkgDir)
+	if err != nil {
+		t.Fatalf("DistNames(%s): %v", pkgDir, err)
+	}
+	found := false
+	for _, name := range names {
+		if name == "gst-plugins-good-1.29.2.tar.gz" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DistNames = %v; the published Manifest's distfile name did not travel, so the option gate "+
+			"has nothing to select from (R4.1)", names)
+	}
+}
+
+// TestOverlayValidate_NoDepthLeavesTheSeamsNil is R4.3: a depth-less run
+// constructs Options exactly as today. nil and populated are different
+// contracts inside the runner — nil parses the package's own Manifest, and a
+// depth-less run must keep doing exactly that, byte for byte.
+func TestOverlayValidate_NoDepthLeavesTheSeamsNil(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
+	})
+
+	if seen.DistNames != nil {
+		t.Error("a depth-less run populated DistNames; the shipped read-only contract is Options exactly as " +
+			"today, and a seam nobody asked for is a behaviour change waiting to be noticed (R4.3)")
+	}
+	if seen.StagedManifest != nil {
+		t.Error("a depth-less run populated StagedManifest; nothing travels on the shipped path (R4.3)")
+	}
+}
+
+// TestPublishedManifestBytes_KeepsDistRecordsAndDropsTheRest is the regression
+// the seam introduced by retiring manifestDistLines along with its caller.
+//
+// A Manifest is DIST-only just when the repository sets `thin-manifests = true`.
+// Portage's default is thin=false, and then the file also names EBUILD, AUX and
+// MISC records for files in the package directory. Stage copies the candidate
+// ebuild and files/ — not metadata.xml and not the sibling ebuilds — so handing
+// the full Manifest to the staged tree describes files that are not there,
+// digestcheck raises FileNotFound, and `ebuild` dies before the first phase
+// marker. Every build gate then reports SKIPPED for a package that would have
+// built, which is the exact silence this story exists to remove.
+func TestPublishedManifestBytes_KeepsDistRecordsAndDropsTheRest(t *testing.T) {
+	pkgDir := t.TempDir()
+	full := "AUX gst-plugins-qt6-1.29.2-qt6-detection.patch 512 BLAKE2B aa SHA512 bb\n" +
+		"DIST gst-plugins-good-1.29.2.tar.xz 2048 BLAKE2B cc SHA512 dd\n" +
+		"EBUILD gst-plugins-qt6-1.28.6.ebuild 900 BLAKE2B ee SHA512 ff\n" +
+		"EBUILD gst-plugins-qt6-1.29.2.ebuild 910 BLAKE2B 11 SHA512 22\n" +
+		"MISC metadata.xml 400 BLAKE2B 33 SHA512 44\n"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(full), 0o644); err != nil {
+		t.Fatalf("writing Manifest: %v", err)
+	}
+
+	got, err := publishedManifestBytes(pkgDir)
+	if err != nil {
+		t.Fatalf("publishedManifestBytes: %v", err)
+	}
+
+	want := "DIST gst-plugins-good-1.29.2.tar.xz 2048 BLAKE2B cc SHA512 dd\n"
+	if string(got) != want {
+		t.Errorf("the staged Manifest is not DIST-only:\n  got:  %q\n  want: %q", got, want)
+	}
+	for _, dropped := range []string{"EBUILD ", "AUX ", "MISC ", "metadata.xml", "1.28.6"} {
+		if strings.Contains(string(got), dropped) {
+			t.Errorf("%q survived into the staged Manifest; it names a file Stage never copies, so digestcheck "+
+				"fails and the gate reports SKIPPED for an ebuild that is fine", dropped)
+		}
+	}
+}
+
+// TestPublishedManifestBytes_ADistLineTravelsByteForByte is the other half, and
+// the reason this filters lines instead of parsing records: Portage verifies
+// these digests against the archive on disk, so a line that survived a
+// round-trip through some intermediate form is a line the build gates fail on.
+func TestPublishedManifestBytes_ADistLineTravelsByteForByte(t *testing.T) {
+	pkgDir := t.TempDir()
+	dist := "DIST some-1.0.tar.gz 12345 BLAKE2B 0f1e2d SHA512 9a8b7c"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(dist+"\n"), 0o644); err != nil {
+		t.Fatalf("writing Manifest: %v", err)
+	}
+
+	got, err := publishedManifestBytes(pkgDir)
+	if err != nil {
+		t.Fatalf("publishedManifestBytes: %v", err)
+	}
+	if string(got) != dist+"\n" {
+		t.Errorf("a DIST line did not survive unchanged:\n  got:  %q\n  want: %q", got, dist+"\n")
+	}
+}
+
+// Authored for the S037 review, round 6 — the interrupted run's report.
+//
+// Run does not merely return an error when a sweep is stopped: it fills the
+// report with one interruptedResult per package it never reached, because its
+// governing rule is that a package in view is never left unmentioned. The
+// command discarded that report and answered 2, which is Report.ExitCode's
+// "the selector matched nothing" — so a stopped run and a mistyped selector
+// were the same event at the shell, and `--json` emitted no document at all.
+
+// interruptedValidateRunner answers with a partial report AND a cancellation,
+// which is exactly the pair validate.Run returns when a sweep is stopped.
+func interruptedValidateRunner(t *testing.T) {
+	t.Helper()
+	orig := validateRunnerFn
+	validateRunnerFn = func(context.Context, validate.Options) (validate.Report, error) {
+		return validate.Report{
+			Results: []validate.EbuildResult{{
+				Package: "media-plugins/gst-plugins-qt6",
+				Version: "1.28.6",
+				Gates: []validate.GateResult{{
+					Gate:    validate.GateOptions,
+					Outcome: validate.OutcomeSkipped,
+					Reason:  "the run was interrupted before this ebuild was validated",
+				}},
+			}},
+		}, fmt.Errorf("the validation run was interrupted: %w", context.Canceled)
+	}
+	t.Cleanup(func() { validateRunnerFn = orig })
+}
+
+func TestOverlayValidate_AnInterruptedRunRendersItsPartialReport(t *testing.T) {
+	interruptedValidateRunner(t)
+
+	cmd := newValidateCmd()
+	if err := cmd.Flags().Set("json", "true"); err != nil {
+		t.Fatalf("setting --json: %v", err)
+	}
+
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(cmd, []string{}) })
+	})
+
+	if !exited {
+		t.Fatal("an interrupted run did not exit at all")
+	}
+	if code == 2 {
+		t.Errorf("an interrupted run exits 2, the code Report.ExitCode documents for a selector that matched " +
+			"nothing; a script cannot tell a stopped run from a mistyped package name")
+	}
+	if code != 130 {
+		t.Errorf("exit code %d, want 130 (128 + SIGINT)", code)
+	}
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("--json emitted no document for an interrupted run; the partial report Run assembles " +
+			"names the packages that went unexamined and it was thrown away")
+	}
+	if !strings.Contains(out, "gst-plugins-qt6") {
+		t.Errorf("the emitted document does not name the package the run was stopped over: %s", out)
+	}
+}
+
+func TestOverlayValidate_AnInterruptedTextRunAlsoExits130(t *testing.T) {
+	interruptedValidateRunner(t)
+
+	var code int
+	var exited bool
+	_ = captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+	})
+
+	if !exited {
+		t.Fatal("an interrupted run did not exit at all")
+	}
+	if code != 130 {
+		t.Errorf("exit code %d, want 130; the text and --json paths must agree on what an interruption is", code)
+	}
+}
+
+// TestOverlayValidate_HelpNoLongerPromisesAReadOnlyRunAtEveryDepth pins the
+// help text against the change this story made to the command's behaviour.
+//
+// "Nothing is built, downloaded or changed" was ACCURATE on main: every build
+// gate reachable from this entry point reported SKIPPED, so whatever --depth
+// said, nothing was ever built. Wiring the seams made the gates real, and the
+// promise became a command that compiles upstream code and fetches distfiles
+// across every package the selector matches while its own help says it does
+// neither. That is how someone starts a whole-overlay build by accident.
+func TestOverlayValidate_HelpNoLongerPromisesAReadOnlyRunAtEveryDepth(t *testing.T) {
+	long := newValidateCmd().Long
+
+	if strings.Contains(long, "Nothing is built, downloaded or") {
+		t.Error("the help still promises unconditionally that nothing is built or downloaded; " +
+			"--depth above `options` does both")
+	}
+	if !strings.Contains(strings.ToLower(long), "at the default depth nothing is built") {
+		t.Error("the help does not qualify the read-only promise by depth")
+	}
+	if !strings.Contains(long, "--depth") {
+		t.Error("the help never names --depth, the flag that turns this into a command that builds")
+	}
+}
+
+// TestOverlayValidate_RequireIsolationReachesTheRunner is the command half of
+// the same policy bypass: the runner honours Options.RequireIsolation, but only
+// if this command reads the key and hands it over.
+//
+// The config is written under a private XDG_CONFIG_HOME rather than read from
+// the host, keeping the environment coupling this file's header calls out.
+func TestOverlayValidate_RequireIsolationReachesTheRunner(t *testing.T) {
+	xdg := t.TempDir()
+	dir := filepath.Join(xdg, "bentoo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("laying out the config dir: %v", err)
+	}
+	body := "overlay:\n  path: " + t.TempDir() + "\nautoupdate:\n  validate:\n    require_isolation: true\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the config: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	seen := stubValidateRunner(t, validate.Report{})
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if !seen.RequireIsolation {
+		t.Error("autoupdate.validate.require_isolation is set and the runner was handed RequireIsolation=false; " +
+			"the identical gates honour that key under `overlay autoupdate`, so a build path that drops it " +
+			"is the operator's policy silently not applying to one of the two commands that build")
 	}
 }

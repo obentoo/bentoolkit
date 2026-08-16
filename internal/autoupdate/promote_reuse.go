@@ -322,6 +322,29 @@ func (a *Applier) recordStagedProof(root, pkg, version string, inputs stagedInpu
 	if root == "" {
 		return
 	}
+
+	// THE INTERRUPT INVARIANT, EXTENDED ACROSS RUNS — and it has to be, because
+	// this record is the one thing here that OUTLIVES the run.
+	//
+	// refuseOnInterrupt stops a cancelled run from publishing. It cannot stop the
+	// NEXT one: gates that were never asked report SKIPPED, Proves() accepts any
+	// list of PASS-or-SKIPPED at the requested depth, and the following --apply
+	// then takes the R10.1 reuse path — which consults neither refuseUnproved nor
+	// PromotionDecision — under a context that is not cancelled. Writing this
+	// record would turn "Ctrl-C does not publish" into "Ctrl-C publishes one run
+	// later", which is the same bump reaching the overlay by a slower route.
+	//
+	// Nothing else has to change, and nothing is lost: R10.5 already revalidates
+	// a retained tree carrying no readable record, because absence of a claim is
+	// not a passing claim. The tree itself still stays on disk as the failure's
+	// evidence (R3.6).
+	if ctxErr := a.ctx.Err(); ctxErr != nil {
+		logger.Warn("the run was interrupted, so what the gates of %s-%s reported is NOT recorded beside %s: "+
+			"they were stopped rather than answered, and the next run validates this bump again instead of "+
+			"promoting it on their silence (%v)", pkg, version, root, ctxErr)
+		return
+	}
+
 	err := validate.WriteStageRecord(root, validate.StageRecord{
 		Package:            pkg,
 		Version:            version,

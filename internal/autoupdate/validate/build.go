@@ -306,6 +306,40 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 
 	output, runErr := deps.attachedRunner()(cmd)
 
+	// An interrupted run is not a verdict on the ebuild — and it is not a SKIP
+	// either. IT IS AN ERROR, and the distinction is the whole of this comment.
+	//
+	// The child is spawned through CommandContext, so a cancelled context KILLS
+	// it: runErr becomes `signal: killed`, and derive's attribution rule — the
+	// phase started and the run failed, therefore this is where the bump died —
+	// reports FAILED with error-severity findings. The operator pressed Ctrl-C
+	// and was told their ebuild is broken.
+	//
+	// THE FIRST ATTEMPT AT THIS RETURNED SkippedGates, AND THAT WAS WORSE THAN
+	// THE BUG IT FIXED. PromotionDecision (stage.go) promotes on a list of
+	// PASS-or-SKIPPED: an interrupted `overlay autoupdate --apply --depth=compile`
+	// would then PUBLISH the bump — into an overlay that auto-commits and pushes
+	// — on the strength of gates that were killed mid-build. Reporting FAILED at
+	// least refused it. A gate list is the wrong shape for this answer entirely,
+	// because every shape it can take is a statement about the candidate, and
+	// there is nothing to state.
+	//
+	// So the error travels. Each of the three drivers already treats a non-nil
+	// error here as "this could not be attempted": the applier fails the apply
+	// rather than promoting, realign's Prove returns without a verdict, and
+	// validate's Run aborts the sweep. None of them can publish on it. The
+	// context error is wrapped so a caller can still recognise the cause with
+	// errors.Is rather than by matching this sentence.
+	//
+	// The retained log is deliberately still written: a partial transcript of an
+	// interrupted compile is evidence someone may want, and refusing to keep it
+	// would make the interruption cost more than it has to.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		note := retainedLogNote(req.LogDir, atom, version, output)
+		return nil, fmt.Errorf("the run was interrupted while %s was building, so no phase reached a verdict "+
+			"and nothing here says anything about this ebuild%s: %w", label.pv, note, ctxErr)
+	}
+
 	// The transcript is read with ANSI escapes removed and the LOG is not.
 	// Portage colours einfo through a TTY, and an attached run therefore carries
 	// escapes around the very bullets and markers every gate below greps for; a
@@ -803,12 +837,43 @@ func (r buildRun) unmeasuredReason(phase buildPhase) string {
 		doneMarker(phase), phase)
 }
 
-// failureExcerpt is the tail of the transcript after the last phase marker: the
-// lines the failing phase itself produced, which is where the option upstream
-// removed or the header that went missing is actually named.
+// failureExcerpt is the part of the transcript after the last phase marker that
+// carries the CAUSE: the lines the failing phase itself produced, where the
+// option upstream removed or the header that went missing is actually named.
 //
 // It is a SUMMARY. The full log is retained and named by the reason beside it,
-// so this quotes the end — where the error is — and stops.
+// so this quotes what explains the failure and stops.
+//
+// # Why the tail is the wrong thing to quote (S037-R5.1, measured 2026-08-16)
+//
+// The obvious reading of "quote the end, that is where the error is" does not
+// survive contact with Portage. On a real `ebuild … configure` failure the
+// output ends with `die`'s own epilogue — the call stack, the code snippet, the
+// support boilerplate, four `located at '…'` lines — and THAT epilogue comes
+// AFTER the error it is reporting. Measured on this host: the transcript of the
+// gst-plugins-qt6-1.29.2 configure failure carries
+// `meson.build:1:0: ERROR: Unknown option: "aalib".` as the 7th of 24 non-empty
+// lines, and die's epilogue is the last 16. Quoting the last 12 therefore
+// quoted 12 lines of boilerplate and none of the cause, for every FAILED build
+// gate this package has ever reported.
+//
+// So the window ENDS at die's banner instead of at the transcript's end, and the
+// banner itself is appended: it is the line that names the atom and the phase,
+// and it is the line the staging-repository name has to be scrubbed out of
+// (`clean`), so dropping it would quietly retire that guarantee's only witness.
+//
+// A transcript with no banner — a phase that failed without `die`, or a
+// synthetic one — keeps exactly the old behaviour: the last excerptLines lines.
+//
+// # The banner is not the last thing worth quoting (measured 2026-08-16)
+//
+// Ending AT the banner was still one line short. `die` prints the message it was
+// CALLED with immediately after its banner, and for a failure that produced no
+// diagnostic of its own — `emake || die "emake failed"`, the common shape — that
+// message is the entire cause. Ending at the banner made the excerpt collapse to
+// the banner alone, which only repeats what failReason already says. So
+// dieMessage is appended too: the banner names WHAT failed, and the message
+// after it names WHY.
 func (r buildRun) failureExcerpt() []string {
 	lines := strings.Split(r.transcript, "\n")
 
@@ -825,10 +890,80 @@ func (r buildRun) failureExcerpt() []string {
 			excerpt = append(excerpt, trimmed)
 		}
 	}
+
+	// The cause lives before die's banner; the banner names what failed; and
+	// die's own message is the line AFTER it (S037-R5.1, second measurement).
+	if at := dieBannerIndex(excerpt); at >= 0 {
+		cause := excerpt[:at]
+		if len(cause) > excerptLines {
+			cause = cause[len(cause)-excerptLines:]
+		}
+		quoted := append(append([]string(nil), cause...), excerpt[at])
+		return append(quoted, dieMessage(excerpt[at+1:])...)
+	}
+
 	if len(excerpt) > excerptLines {
 		excerpt = excerpt[len(excerpt)-excerptLines:]
 	}
 	return excerpt
+}
+
+// dieBannerIndex is where Portage's failure epilogue begins, or -1.
+//
+// The banner is the `ERROR: <atom>::<repo> failed (<phase> phase):` line `die`
+// prints before its call stack. It is matched on shape rather than on the atom,
+// because the atom in it carries the staging repository's name — the very thing
+// `clean` rewrites downstream — so matching the atom here would mean matching a
+// string this package deliberately does not let escape.
+//
+// The FIRST match wins: everything after it is epilogue by construction, and a
+// second banner would only appear in a transcript that already failed twice.
+func dieBannerIndex(lines []string) int {
+	for i, line := range lines {
+		if isDieBanner(line) {
+			return i
+		}
+	}
+	return -1
+}
+
+// isDieBanner is dieBannerIndex's predicate, named so that dieMessage can stop
+// at a banner without re-stating the shape it matches on.
+func isDieBanner(line string) bool {
+	return strings.Contains(line, "ERROR: ") && strings.Contains(line, " failed (") && strings.Contains(line, "phase)")
+}
+
+// dieMessageLines bounds how much of die's own message is quoted. One line is
+// the overwhelmingly common shape; the cap exists so that a `die` called with an
+// unbounded string cannot push the cause out of a summary that is meant to stay
+// readable.
+const dieMessageLines = 4
+
+// dieMessage is the message `die` was CALLED with: the lines Portage prints
+// between its banner and the rest of the epilogue.
+//
+// # Where it stops, and why each boundary is there
+//
+// Portage prints the message, then a bare `*` separator, then `Call stack:` and
+// the boilerplate this excerpt exists to exclude. Any of the three ends the
+// message. A second banner ends it too, because Portage emits the whole banner
+// and message twice — once unprefixed and once with the ` * ` prefix — and the
+// first copy's message must not swallow the second copy's banner.
+//
+// Empty is a legitimate answer: a `die` with no message prints none, and the
+// banner alone is then genuinely all there is.
+func dieMessage(after []string) []string {
+	var msg []string
+	for _, line := range after {
+		if line == "*" || strings.Contains(line, "Call stack:") || isDieBanner(line) {
+			break
+		}
+		msg = append(msg, line)
+		if len(msg) == dieMessageLines {
+			break
+		}
+	}
+	return msg
 }
 
 // patchCount renders the exact number of patches applied, singular or plural.

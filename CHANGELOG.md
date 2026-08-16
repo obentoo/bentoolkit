@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`overlay validate --depth` now runs the build gates it names, instead of
+  reporting a deeper class of skip.** A staged tree deliberately leaves without
+  a Manifest — it describes the versions already published, not the candidate —
+  and Portage refuses an ebuild whose Manifest does not describe its archive. So
+  every build gate over a staged tree died in the setup phase and came back
+  SKIPPED, which promotion read as acceptable.
+
+  **What this entry covers, and what it does not.** The cause above was first
+  measured on the *realign* path — a proof of 13 packages "passed" with 26/26
+  gates SKIPPED and zero builds executed. That measurement is why the seams
+  exist, but the realign path is **not** fixed here. `realign.Prove` calls
+  `Stage` and `RunBuildGates` directly rather than going through `validate.Run`,
+  so it supplies no Manifest, its gates still report SKIPPED, and
+  `PromotionDecision` still returns passed for an all-SKIPPED list. What is
+  fixed is `overlay validate --depth` and the autoupdate applier, which do go
+  through `Run`. Closing the realign path needs the same seam wired into a
+  second caller and is tracked separately.
+
+  `validate.Options` gains two optional seams, `DistNames` and `StagedManifest`
+  (`internal/autoupdate/validate/run.go`). The caller supplies the distfile
+  names and the Manifest content; `Run` materialises the bytes inside the staged
+  tree at mode 0600 and then runs the gates. Manifest *generation* stays in
+  `internal/autoupdate` — `cmd/bentoo` composes the two, which is the only place
+  that already imports both. The zero value of every new field reproduces the
+  previous behaviour byte-for-byte, and that was proved by execution rather than
+  by reading the diff: all four nil-seam refusals rendered from the new code
+  diff empty against the same four rendered from the previous release's format
+  strings.
+
+  The applier feeds the same seams, and `lendPublishedDistNames` — which wrote a
+  temporary Manifest into the staged tree so the gate could read names out of
+  it, then defer-removed it — is deleted. That coupling had a failure mode worth
+  naming: on a staged tree the gate could not write to, the lend died, the gate
+  reported SKIPPED, and the bump was published on the strength of a gate that
+  read nothing. `--check` and `--apply` reach the seam through the shared path,
+  so the two drivers cannot drift apart in silence.
+
+  Also added: `Options.LogDir`, so a standalone run retains the full build
+  transcript in the same directory the apply path uses.
+
+  Proved on the real golden pair under `-tags live`: `gst-plugins-qt6-1.29.2`
+  fails the configure gate naming `aalib`, `1.28.6` configures cleanly, and the
+  published overlay is byte-identical after a real build — 6 PASS / 0 FAIL,
+  where the same suite measured 4 PASS / 2 FAIL before.
+
 - **A proved realignment can now actually be published — per package, on
   evidence, and only on the maintainer's yes.** `realign.Promote` shipped with
   story 034's Stage 2 carrying every guard R5.3–R5.5 ask for, and nothing ever
@@ -213,6 +258,229 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **`overlay validate --depth` now honours `require_isolation`.** This closes a
+  policy bypass rather than adding an option.
+  `autoupdate.validate.require_isolation` is read by the *same* build gates
+  under `overlay autoupdate`, and until this story those gates were unreachable
+  from `overlay validate` — every one of them SKIPPED, so nothing this command
+  did could ever be unisolated. Wiring the seams made them run while the
+  `BuildRequest` kept leaving the field at its zero value, so an operator's
+  decision that builds must be isolated silently stopped applying to one of the
+  two commands that build. `validate.Options` carries the setting now, and the
+  command reads the same key from the same config.
+
+- **`overlay validate --help` no longer promises a read-only run at every
+  depth.** "Nothing is built, downloaded or changed" was *accurate* on `main`:
+  every build gate reachable from this entry point reported SKIPPED, so whatever
+  `--depth` said, nothing was ever built. Wiring the seams made those gates real
+  — `--depth=configure` now stages each candidate and runs upstream's own build
+  phases against it, compiling code and fetching any distfile this host does not
+  hold, across every package the selector matches. The published overlay is
+  still never written to, but "read-only" stopped being true of the *host*, and
+  a command whose own help denies that is how someone starts a whole-overlay
+  build by accident. Both the help and the file header now qualify the promise
+  by depth.
+
+- **An interrupted build is no longer reported as one that could not be
+  started.** `buildDepthGates` funnelled every `RunBuildGates` error into "the
+  build gates for X could not be started" — accurate when that function errored
+  about the *request* and never about the build, and false since the interrupt
+  guard began returning the cancellation the same way. The package the Ctrl-C
+  actually landed on was described as never having begun, while every *later*
+  package in the same sweep got the correct wording from `interruptedResult`:
+  one report, two accounts of one event.
+
+- **The two DIST-record parsers now agree on what a DIST line is.**
+  `ManifestDistLines` matched `HasPrefix("DIST ")` and
+  `ParseManifestDistFilenames` splits fields, so a tab-separated or indented
+  record was a distfile to one and invisible to the other. They read the same
+  file for the same run — one decides which archives the option gate looks for,
+  the other which records the staged Manifest carries — so the disagreement
+  produced a report that proved and denied the same file at once. Both use the
+  field split now; the record's bytes still travel untouched.
+
+- **An interrupted run no longer publishes the bump one run later.** Blocking
+  the publish inside the interrupted run was not enough, because one thing it
+  produces outlives it: the `StageRecord` written beside the retained tree. Its
+  gates were never asked and therefore report SKIPPED, `Proves()` accepts any
+  PASS-or-SKIPPED list at the requested depth, and the next `--apply` takes the
+  R10.1 reuse path — which consults neither `refuseUnproved` nor
+  `PromotionDecision` — under a context that is not cancelled. Ctrl-C published,
+  just a run later and by a quieter route.
+
+  A cancelled context now writes no record at all. Nothing else changes and
+  nothing is lost: R10.5 already revalidates a retained tree carrying no
+  readable record, because absence of a claim is not a passing claim, and the
+  tree itself still stays on disk as the failure's evidence.
+
+- **A mid-sweep interrupt no longer drops the packages it never reached.**
+  `Run` has two cancellation checks, and only the one *before* a package listed
+  the remaining targets as interrupted. The one *after* a package returns first
+  on every real Ctrl-C, so the rule the first states — a package in view is
+  never left unmentioned — held only for a run cancelled before its very first
+  package. Every unexamined package silently vanished from the report. Both
+  branches now list them.
+
+- **An interrupted `overlay validate` now prints the partial report it already
+  assembled, and exits 130 instead of 2.** `Run` does not merely fail when a
+  sweep is stopped: it appends one `interruptedResult` per package it never
+  reached, because its governing rule is that a package in view is never left
+  unmentioned. The command took the plain `err != nil` branch and threw all of
+  that away — under `--json` it emitted **no document at all**, so a stopped run
+  and a run that produced nothing looked identical to the `| jq` the flag exists
+  for.
+
+  The exit code was the second half. `2` is what `Report.ExitCode` documents for
+  "the selector matched nothing", so an operator's Ctrl-C and a mistyped package
+  name were the same event at the shell unless someone parsed the diagnostic
+  text. An interruption now answers 130 — 128 + SIGINT, the shell's own
+  convention — on both the text and the `--json` path.
+
+- **The test pinning "`--depth` executes the build gates" no longer passes
+  without executing them.** It stripped `PATH` to stay hermetic, but the
+  dependency pre-check runs in *front* of `RunBuildGates` and needs `emerge`, so
+  every gate came back SKIPPED carrying the pre-check's "could not be
+  determined" — and the assertion, which only checked that the *old deferral
+  sentence* was absent, was satisfied by that list. The execution half of R2.2
+  was unpinned for the whole story.
+
+  The fixture now puts a stub `emerge` on `PATH` and leaves `ebuild` off it, so
+  the run gets past the pre-check and `ebuild`'s absence becomes
+  `RunBuildGates`' own answer — a sentence produced at exactly one place in the
+  package, which is what makes it usable as proof of arrival. Both directions
+  are asserted, since the negative alone is what let this pass before.
+
+- **An interrupt can no longer publish a bump, by any route.** This guard has
+  now been written three times, and the first two guarded a *verdict*: one
+  inside `RunBuildGates`, one around `validate.Run`'s return. Each time, the
+  next review found a route into promotion that did not pass through the one
+  that had been guarded.
+
+  Three were open. `runStaticGates` turns any `validate.Run` error — `ctx.Err()`
+  included — into a single SKIPPED option gate, and `PromotionDecision` promotes
+  on SKIPPED. `DependenciesSatisfied` runs *in front of* `RunBuildGates` and
+  turns a cancelled probe into `SkippedGates` with a **nil** error, so the apply
+  never sees a failure at all. And R10.1's reuse path calls `promote()` without
+  consulting `PromotionDecision` in the first place.
+
+  The invariant now sits at the WRITE rather than at the verdict.
+  `refuseOnInterrupt` is the first statement of `promote()` — the one function
+  that writes into the published overlay — and both call sites pass through it,
+  so a future route that manufactures a promotable gate list out of a
+  cancellation is merely wrong rather than publishing. A second check in `Apply`
+  keeps the refusal honest: without it `refuseUnproved` answers first, and
+  "proof at depth configure is required" sends the operator to change a policy
+  that had nothing to do with their Ctrl-C.
+
+  Proved by mutation rather than by a green run. With the guard neutralised all
+  four new tests fail; with only the `promote()` check removed the reuse test
+  fails alone; with only the early check removed the message test fails alone.
+  That battery was worth running: the first draft of the static-gate test passed
+  with the guard dead, because at compile depth it was reaching the older
+  `RunBuildGates` guard instead. It is now pinned to depth `options`, where no
+  build gate runs at all.
+
+- **A failed build gate now quotes the cause instead of Portage's epilogue.**
+  `failureExcerpt` quoted the last 12 non-empty lines of a failing phase, on the
+  reasoning that the error is at the end. It is not. Portage's `die` prints its
+  call stack, the offending snippet, the support boilerplate and four `located
+  at '…'` lines *after* the error — measured here, 16 lines of epilogue
+  following the one line that mattered. So every FAILED build gate this project
+  ever reported quoted 12 lines of boilerplate and none of the cause.
+
+  The window now ends at `die`'s banner and appends that banner, which is also
+  the line the staging-repository name is scrubbed out of, **plus the message
+  `die` was called with**, which Portage prints immediately after the banner.
+  That last part was a second measurement: ending at the banner was still one
+  line short, and for the common `emake || die "emake failed"` shape — a phase
+  that produces no diagnostic of its own — die's message is the entire cause. An
+  excerpt ending at the banner collapsed to a line that only repeats what the
+  gate's reason already says. A transcript with no banner keeps exactly the old
+  behaviour.
+
+  The hermetic test that should have caught the first half was passing
+  vacuously: its fixture carried three non-empty lines after the last phase
+  marker where a real failure carries twenty-four, so the truncation never
+  engaged. The fixture now carries `die`'s real epilogue, and with the old
+  tail-quoting restored it fails with precisely the production symptom. A second
+  fixture covers the bare-`die` shape, which the first cannot: there, `meson`
+  happens to print a diagnostic before dying, so the loss was survivable.
+
+- **A missing build dependency no longer reports as a broken ebuild.**
+  `overlay validate --depth` drove `ebuild … clean <phase>` with no dependency
+  pre-check. `ebuild` does no dependency resolution, so on a host lacking a
+  `DEPEND` atom the phase started, died on the missing header, and the gate
+  reported FAILED with error findings and exit 1 — blaming the candidate for
+  something only that machine was missing. The autoupdate applier has answered
+  this since story 031 and reports SKIPPED naming the atoms to install, so the
+  same host gave opposite verdicts for the same package depending on which
+  command asked. Both now call `DependenciesSatisfied` and say the same
+  sentences.
+
+- **An interrupted run is an error, not a verdict and not a skip.** The
+  per-package loop never checked for cancellation, so a Ctrl-C during a
+  whole-overlay `--depth=compile` kept staging trees and spawning `ebuild` for
+  every remaining package. The package *already building* fared worse: the child
+  is spawned through `CommandContext`, so the interrupt killed it, the phase
+  counted as started-and-failed, and the gate reported FAILED with error
+  findings — telling the operator their ebuild is broken because they pressed
+  Ctrl-C.
+
+  Reporting those gates as SKIPPED instead would have been **worse than the bug**:
+  `PromotionDecision` promotes on a list of PASS-or-SKIPPED, so an interrupted
+  `overlay autoupdate --apply --depth=compile` would have *published* the bump —
+  into an overlay that auto-commits and pushes — on gates that were killed
+  mid-build. A gate list cannot express "nothing was measured", because every
+  value it can hold is a statement about the candidate.
+
+  So `RunBuildGates` returns an error, wrapping the context cause. All three
+  drivers already treat that as "could not be attempted": the applier fails the
+  apply rather than promoting, realign's `Prove` returns without a verdict, and
+  `Run` aborts the sweep. `Run` returns an error too, because `ExitCode` reads
+  error-severity findings and an interrupted gate has none — a SIGTERM'd sweep
+  would otherwise render as SKIPPED lines and exit 0, indistinguishable at the
+  shell from a clean pass. Remaining packages are still listed, so the partial
+  report names what went unexamined, and the partial transcript is still
+  retained.
+
+- **A staged tree is now thin, so Portage will build in it.** Staging carried
+  `thin-manifests` from the published overlay, absence included — and Portage's
+  default is `thin=false`. On a non-thin repository `digestcheck` goes past its
+  early return and requires every `.ebuild` in the package directory to carry an
+  `EBUILD` record, returning failure under `strict`, which is in the default
+  `FEATURES`. A staged tree's Manifest describes distfiles and nothing else by
+  construction, so the candidate had no `EBUILD` record and the tree was refused
+  before the first phase marker: every build gate SKIPPED, for a package that
+  would have built. `Stage` now imposes `thin-manifests = true`. It is the one
+  place the "validate under the published tree's own rules" principle is
+  deliberately broken, and the justification is that a staged tree holds one
+  ebuild and no repository files — the non-thin checks exist to catch an
+  undigested file added to a real package directory, and nothing can be added to
+  this one. DIST digests are still verified against the archive on disk.
+
+- **A staged Manifest no longer describes files that are not there.**
+  `publishedManifestBytes` copied the published Manifest verbatim. A Manifest is
+  DIST-only just when the repository sets `thin-manifests = true`; Portage's
+  default is `thin=false`, and the file then also carries `EBUILD`, `AUX` and
+  `MISC` records. `Stage` copies the candidate ebuild and the package's
+  `files/` — not `metadata.xml`, not the sibling ebuilds — so those records name
+  files the staged tree does not have, `digestcheck` raises `FileNotFound`, and
+  `ebuild` dies before the first phase marker: every build gate SKIPPED for a
+  package that would have built. Invisible on `::bentoo`, which sets
+  thin-manifests, and broken on any overlay that does not — and `--overlay`
+  accepts any path. The retired `manifestDistLines` filtered for exactly this
+  reason; dropping the filter along with the helper was the regression. Each
+  surviving DIST line still travels byte-for-byte, because Portage verifies
+  those digests against the archive on disk.
+
+- **A SKIP no longer denies the file it was read from.** When distfile names
+  came through the caller seam, every refusal appended "the names searched for
+  were supplied by the caller, not read from a Manifest". True of the `validate`
+  package, false of the operator's world: `overlay validate` supplies names it
+  read out of the published Manifest, so the sentence denied the existence of
+  the file that had just been read. It now says the list arrived from outside
+  and stops there.
+
 - **A baseline review could be a silent no-op.** The `::gentoo` tree was located
   only by walking the packages in view, so a run whose packages `::gentoo` does
   not carry — `--realign --only-outdated`, say — found no tree, wrote nothing

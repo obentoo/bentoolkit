@@ -568,3 +568,60 @@ func PrepopulateFromCache(distdir, cacheDir string, names []string) int {
 	}
 	return reused
 }
+
+// ManifestDistLines keeps the DIST records of a Manifest and drops everything
+// else, each surviving line byte-for-byte.
+//
+// # Why a caller wants this
+//
+// A staged validation tree holds one candidate ebuild, no metadata.xml and none
+// of the package's siblings. The published Manifest's EBUILD, AUX and MISC
+// records all name files that tree does not have, so handing it over whole
+// describes a repository that does not exist. Only the DIST records describe
+// something the staged tree genuinely shares with the published one: the
+// upstream archive on disk.
+//
+// This is NOT what makes such a tree buildable on its own — a non-thin
+// repository refuses a candidate carrying no EBUILD record of its own, whatever
+// the Manifest says. Staging imposes thin-manifests for that. This is the other
+// half: not handing over records that describe absent files.
+//
+// # Why lines and not a parser
+//
+// A Manifest is line-oriented and its record type is the first field, so a line
+// is kept or it is not — and a kept line is the bytes that were read. Portage
+// verifies these digests against the archive it finds, so a DIST line that
+// survived a round-trip through some intermediate form is a line the build
+// fails on. The trailing newline is re-established rather than preserved per
+// line, which is the one normalisation here and the one no digest is read
+// through.
+//
+// Empty in, or no DIST record found, yields nil: a Manifest naming no archive
+// has answered, and its caller reads nil as "this describes nothing".
+func ManifestDistLines(body []byte) []byte {
+	var kept []string
+	for _, line := range strings.Split(string(body), "\n") {
+		// The SAME test ParseManifestDistFilenames applies, and that is the whole
+		// point of spelling it this way rather than as HasPrefix("DIST ").
+		//
+		// The two functions read the same file for the same run: one decides
+		// which archives the option gate looks for, the other decides which
+		// records the staged Manifest carries. A line that is a DIST record to
+		// one and not to the other — an indented one, or one separated by a tab —
+		// produces a report that proves and denies the same file at once. The
+		// field split is the more permissive of the two, so it is the one both
+		// converge on.
+		//
+		// The line is appended UNTOUCHED whatever its shape: Portage verifies
+		// these digests against the archive on disk, and a record that survived a
+		// round-trip through some normalised form is a record the build gates
+		// fail on.
+		if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "DIST" {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return []byte(strings.Join(kept, "\n") + "\n")
+}

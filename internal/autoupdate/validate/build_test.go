@@ -77,6 +77,16 @@ const configureOKNoPatchLog = markerUnpacked +
 // configureFailLog is the measurement this whole story exists for, verbatim
 // (design M-A). Note `::bentoo-staging`: Portage names the STAGING repo, and the
 // report has to translate that back before an operator ever reads it (D13).
+// EXTENDED IN STORY 037 (2026-08-16) WITH `die`'s REAL EPILOGUE, and the
+// extension is the whole point of it. As authored this constant carried three
+// non-empty lines after the last phase marker, where a real Portage failure
+// carries 24 — so failureExcerpt's excerptLines window never engaged, and the
+// test below passed without ever exercising the selection it is supposed to
+// pin. Measured on this host, the epilogue is 16 lines and comes AFTER the
+// error, which is precisely how the shipped tail-quoting reported 12 lines of
+// boilerplate and none of the cause. The lines below are the ones `ebuild`
+// actually printed, with the staging repo name kept so `clean` still has
+// something to scrub.
 const configureFailLog = markerUnpacked +
 	markerPreparing +
 	" * Applying gst-plugins-qt6-1.29.2-qt6-detection.patch ...\n" +
@@ -84,7 +94,45 @@ const configureFailLog = markerUnpacked +
 	markerConfiguring +
 	"meson.build:1:0: ERROR: Unknown option: \"aalib\".\n" +
 	"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
-	"  meson setup failed\n"
+	"  meson setup failed\n" +
+	" * ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	" *   meson setup failed\n" +
+	" * \n" +
+	" * Call stack:\n" +
+	" *     ebuild.sh, line  143:  Called src_configure\n" +
+	" *   environment, line 2603:  Called meson_src_configure\n" +
+	" *   environment, line 1769:  Called die\n" +
+	" * The specific snippet of code:\n" +
+	" *       [[ ${rv} -eq 0 ]] || die -n \"configure failed\";\n" +
+	" * \n" +
+	" * If you need support, post the output of `emerge --info '=media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging'`,\n" +
+	" * the complete build log and the output of `emerge -pqv '=media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging'`.\n" +
+	" * The complete build log is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/build.log.gz'.\n" +
+	" * The ebuild environment file is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/environment'.\n" +
+	" * Working directory: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n" +
+	" * S: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n"
+
+// configureBareDieFailLog is the shape the banner-ending window got wrong: a
+// phase that produced NO diagnostic of its own before dying. `econf || die
+// "econf failed"` and `emake || die "emake failed"` are the common case in the
+// tree, and for them die's message — printed AFTER the banner — is the entire
+// cause. An excerpt that ends at the banner therefore quotes a line that only
+// repeats failReason, and the operator learns nothing they did not already have.
+const configureBareDieFailLog = markerUnpacked +
+	markerPreparing +
+	markerPrepared +
+	markerConfiguring +
+	"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	"  econf failed\n" +
+	" * ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	" *   econf failed\n" +
+	" * \n" +
+	" * Call stack:\n" +
+	" *     ebuild.sh, line  143:  Called src_configure\n" +
+	" *   environment, line 1769:  Called die\n" +
+	" * The specific snippet of code:\n" +
+	" *       econf || die \"econf failed\";\n" +
+	" * The complete build log is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/build.log.gz'.\n"
 
 // unpackFailLog stops before `>>> Source prepared.`, which per design D6 makes
 // it a host or distfile fault rather than a statement about the ebuild.
@@ -266,6 +314,61 @@ func TestRunBuildGates_ConfigureFailureNamesTheOptionAndRetainsTheLog(t *testing
 	joined := strings.Join(details, " | ")
 	if !strings.Contains(joined, "aalib") {
 		t.Errorf("the configure failure does not name the option upstream removed; findings: %q", joined)
+	}
+	// die's OWN message, which Portage prints AFTER the banner. Quoting up to the
+	// banner and stopping dropped it, and here that loss is survivable only
+	// because meson happened to print a diagnostic first — see
+	// TestRunBuildGates_ABareDieStillReportsItsMessage for the shape where it is
+	// the only thing there is.
+	if !strings.Contains(joined, "meson setup failed") {
+		t.Errorf("the excerpt drops the message die was called with; findings: %q", joined)
+	}
+	// The epilogue is still excluded. This is the half the story fixed first, and
+	// appending die's message must not have re-admitted the boilerplate behind it.
+	for _, boilerplate := range []string{"Call stack:", "located at", "If you need support"} {
+		if strings.Contains(joined, boilerplate) {
+			t.Errorf("die's epilogue is back in the excerpt (%q); findings: %q", boilerplate, joined)
+		}
+	}
+}
+
+// TestRunBuildGates_ABareDieStillReportsItsMessage pins the case that ending the
+// excerpt at die's banner got wrong.
+//
+// The phase printed no diagnostic before dying, so everything before the banner
+// is empty and the banner is the first line after the phase marker. Quoting
+// `cause + banner` therefore yielded the banner alone — a line that names the
+// atom and the phase, both of which failReason already says. The message die was
+// called with is the only statement of WHY, and it is printed after the banner.
+func TestRunBuildGates_ABareDieStillReportsItsMessage(t *testing.T) {
+	spy := &buildSpy{}
+	req := buildRequestFor(t, DepthConfigure)
+
+	gates, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureBareDieFailLog, errors.New("exit status 1")))
+	if err != nil {
+		t.Fatalf("RunBuildGates returned an error (%v); a failing build is a REPORTED OUTCOME", err)
+	}
+
+	cfg := gateNamed(t, gates, GateConfigure)
+	if cfg.Outcome != OutcomeFailed {
+		t.Fatalf("configure gate: got %q, want FAILED", cfg.Outcome)
+	}
+
+	var details []string
+	for _, f := range cfg.Findings {
+		if f.Severity == SeverityError {
+			details = append(details, f.Detail)
+		}
+	}
+	joined := strings.Join(details, " | ")
+
+	if !strings.Contains(joined, "econf failed") {
+		t.Errorf("the only statement of why this build died is absent from the findings: %q", joined)
+	}
+	for _, boilerplate := range []string{"Call stack:", "located at", "specific snippet"} {
+		if strings.Contains(joined, boilerplate) {
+			t.Errorf("die's epilogue leaked into the excerpt (%q); findings: %q", boilerplate, joined)
+		}
 	}
 
 	// R5.1/R6.5: the log is retained and its path is named. Exactly one log for
@@ -648,4 +751,69 @@ func TestRunBuildGates_PrivilegeUnobtainableIsSkippedNotFailed(t *testing.T) {
 	if got.Outcome != OutcomeSkipped || got.Reason == "" {
 		t.Errorf("configure gate: got %q with reason %q, want SKIPPED naming why", got.Outcome, got.Reason)
 	}
+}
+
+// TestRunBuildGates_AnInterruptedBuildIsAnErrorNotAGateList pins the shape of
+// the answer, and the shape is the whole point.
+//
+// Two wrong answers were tried before this one. Deriving normally reports
+// FAILED: the child is spawned through CommandContext, so Ctrl-C kills it, the
+// phase counts as started-and-failed, and the operator is told their ebuild is
+// broken. Returning SkippedGates instead was WORSE — PromotionDecision promotes
+// on a list of PASS-or-SKIPPED, so an interrupted `--apply --depth=compile`
+// would publish the bump into an overlay that auto-commits and pushes.
+//
+// A gate list cannot express "nothing was measured", because every value it can
+// hold is a statement about the candidate. So the error travels, and each
+// driver already refuses to promote on one.
+func TestRunBuildGates_AnInterruptedBuildIsAnErrorNotAGateList(t *testing.T) {
+	spy := &buildSpy{}
+	req := buildRequestFor(t, DepthConfigure)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	gates, err := RunBuildGates(ctx, req, buildSeam(spy, configureFailLog, errors.New("signal: killed")))
+
+	if err == nil {
+		t.Fatalf("an interrupted build returned no error; gates=%+v — a gate list is a statement about the "+
+			"candidate, and PromotionDecision publishes on one that is all PASS or SKIPPED", gates)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the error does not wrap the context cause (%v); a caller cannot tell an interrupt from a "+
+			"malformed request without matching this sentence", err)
+	}
+	// The critical assertion: NOTHING promotable comes back. A single SKIPPED
+	// gate here is enough for PromotionDecision to return promoted=true.
+	if len(gates) != 0 {
+		t.Errorf("an interrupted build produced %d gate(s): %+v — every one of them is promotable", len(gates), gates)
+	}
+	// The partial transcript is still evidence, and the error names where it is.
+	entries, rerr := os.ReadDir(req.LogDir)
+	if rerr != nil {
+		t.Fatalf("reading the log dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Errorf("the log dir holds %d files; the partial transcript of an interrupted build is evidence "+
+			"someone may want", len(entries))
+	}
+}
+
+// TestPromotionDecision_RefusesNothingRatherThanPromotingIt is the invariant the
+// interrupt fix exists to protect, asserted directly so a future change to
+// RunBuildGates' return shape cannot quietly re-open it.
+//
+// An all-SKIPPED list promotes BY DESIGN — a gate that could not run is not a
+// gate that objected. That design is only safe while "could not run" never
+// covers "was killed halfway through". This pins the consequence: if an
+// interrupt ever produces skipped gates again, this test still passes, and the
+// one above is what fails. Both are needed; neither is redundant.
+func TestPromotionDecision_RefusesNothingRatherThanPromotingIt(t *testing.T) {
+	skipped := SkippedGates(DepthConfigure, "killed mid-build")
+
+	promoted, reason := PromotionDecision(skipped, nil)
+	if !promoted {
+		t.Skip("PromotionDecision no longer promotes on all-SKIPPED; the interrupt hazard this guards is gone")
+	}
+	t.Logf("confirmed: an all-SKIPPED list promotes (%q) — which is why an interrupt must not produce one", reason)
 }
