@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -250,6 +252,29 @@ func runValidate(cmd *cobra.Command, args []string) {
 		StagedManifest: stagedManifest,
 	})
 	if err != nil {
+		// AN INTERRUPTION IS NOT A FAILURE TO VALIDATE, and it was being reported
+		// as one. Run fills the report with interruptedResult entries precisely so
+		// that a stopped sweep still says WHICH packages went unexamined — its
+		// governing rule is that a package in view is never left unmentioned — and
+		// discarding the report here threw all of that away. Under --json it threw
+		// away the entire document: the flag emitted nothing at all, so a stopped
+		// run and a run that produced no output were indistinguishable to the `|
+		// jq` the flag exists for.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if asJSON {
+				renderValidateJSON(report, diag)
+			} else {
+				renderValidateText(report)
+			}
+			_, _ = fmt.Fprintf(diag, "  %v\n", err)
+			// 128 + SIGINT, the shell's own convention — and deliberately NOT 2.
+			// Report.ExitCode documents 2 as "the selector matched nothing", and
+			// answering an interrupt with it left a script no way to tell a run
+			// that was stopped from a selector that was wrong, short of parsing
+			// the diagnostic text.
+			osExit(130)
+			return
+		}
 		_, _ = fmt.Fprintf(diag, "  validating %s: %v\n", overlayLabel(overlayPath), err)
 		osExit(2)
 		return

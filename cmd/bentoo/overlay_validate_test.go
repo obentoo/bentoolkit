@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,5 +507,85 @@ func TestPublishedManifestBytes_ADistLineTravelsByteForByte(t *testing.T) {
 	}
 	if string(got) != dist+"\n" {
 		t.Errorf("a DIST line did not survive unchanged:\n  got:  %q\n  want: %q", got, dist+"\n")
+	}
+}
+
+// Authored for the S037 review, round 6 — the interrupted run's report.
+//
+// Run does not merely return an error when a sweep is stopped: it fills the
+// report with one interruptedResult per package it never reached, because its
+// governing rule is that a package in view is never left unmentioned. The
+// command discarded that report and answered 2, which is Report.ExitCode's
+// "the selector matched nothing" — so a stopped run and a mistyped selector
+// were the same event at the shell, and `--json` emitted no document at all.
+
+// interruptedValidateRunner answers with a partial report AND a cancellation,
+// which is exactly the pair validate.Run returns when a sweep is stopped.
+func interruptedValidateRunner(t *testing.T) {
+	t.Helper()
+	orig := validateRunnerFn
+	validateRunnerFn = func(context.Context, validate.Options) (validate.Report, error) {
+		return validate.Report{
+			Results: []validate.EbuildResult{{
+				Package: "media-plugins/gst-plugins-qt6",
+				Version: "1.28.6",
+				Gates: []validate.GateResult{{
+					Gate:    validate.GateOptions,
+					Outcome: validate.OutcomeSkipped,
+					Reason:  "the run was interrupted before this ebuild was validated",
+				}},
+			}},
+		}, fmt.Errorf("the validation run was interrupted: %w", context.Canceled)
+	}
+	t.Cleanup(func() { validateRunnerFn = orig })
+}
+
+func TestOverlayValidate_AnInterruptedRunRendersItsPartialReport(t *testing.T) {
+	interruptedValidateRunner(t)
+
+	cmd := newValidateCmd()
+	if err := cmd.Flags().Set("json", "true"); err != nil {
+		t.Fatalf("setting --json: %v", err)
+	}
+
+	var code int
+	var exited bool
+	out := captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(cmd, []string{}) })
+	})
+
+	if !exited {
+		t.Fatal("an interrupted run did not exit at all")
+	}
+	if code == 2 {
+		t.Errorf("an interrupted run exits 2, the code Report.ExitCode documents for a selector that matched " +
+			"nothing; a script cannot tell a stopped run from a mistyped package name")
+	}
+	if code != 130 {
+		t.Errorf("exit code %d, want 130 (128 + SIGINT)", code)
+	}
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("--json emitted no document for an interrupted run; the partial report Run assembles " +
+			"names the packages that went unexamined and it was thrown away")
+	}
+	if !strings.Contains(out, "gst-plugins-qt6") {
+		t.Errorf("the emitted document does not name the package the run was stopped over: %s", out)
+	}
+}
+
+func TestOverlayValidate_AnInterruptedTextRunAlsoExits130(t *testing.T) {
+	interruptedValidateRunner(t)
+
+	var code int
+	var exited bool
+	_ = captureStdout(t, func() {
+		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+	})
+
+	if !exited {
+		t.Fatal("an interrupted run did not exit at all")
+	}
+	if code != 130 {
+		t.Errorf("exit code %d, want 130; the text and --json paths must agree on what an interruption is", code)
 	}
 }

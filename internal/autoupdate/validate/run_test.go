@@ -1036,7 +1036,23 @@ func TestRun_AManifestProducerFailureIsAReportedSkipNamingTheAttempt(t *testing.
 // was really staged, which is exactly what today's run never does.
 func TestRun_DepthAboveOptionsExecutesTheBuildGates(t *testing.T) {
 	overlay, distdir := seamDepthFixture(t)
-	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	// A PATH holding `emerge` AND NOT `ebuild`, and the pair is the whole point
+	// of this fixture.
+	//
+	// STRIPPING PATH ENTIRELY — what this test did first — does not reach the
+	// build gates at all. unbuildableHereReason runs the dependency pre-check in
+	// FRONT of RunBuildGates, that pre-check needs `emerge`, and without it every
+	// gate comes back SKIPPED carrying "could not be determined". The old
+	// assertions passed on that list: it does not contain the deferral sentence
+	// either, so the test went green over a run that never executed a build gate
+	// — the exact half of R2.2 it was written to pin.
+	//
+	// So `emerge` answers (exit 0, nothing listed, therefore nothing
+	// unsatisfied), the run gets past the pre-check, and `ebuild`'s absence is
+	// then RunBuildGates' OWN answer. That sentence is produced at exactly one
+	// place in this package, which is what makes it usable as proof of arrival.
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
 
 	staging := t.TempDir()
 	got, err := Run(context.Background(), Options{
@@ -1068,7 +1084,34 @@ func TestRun_DepthAboveOptionsExecutesTheBuildGates(t *testing.T) {
 				"supplied, the depth path executes the gates instead of sending the operator to the apply "+
 				"command (R2.2)", gate, g.Reason)
 		}
+		// The negative and the positive are BOTH asserted, because the negative
+		// alone is what let this test pass without executing anything.
+		if strings.Contains(g.Reason, "could not be determined") {
+			t.Errorf("the %s gate carries the dependency PRE-CHECK's answer (%q); that check runs in front of "+
+				"RunBuildGates, so a run stopping there executed no build gate at all (R2.2)", gate, g.Reason)
+		}
+		if !strings.Contains(g.Reason, "ebuild was not found on PATH") {
+			t.Errorf("the %s gate does not carry RunBuildGates' own answer (%q); this fixture puts `emerge` on "+
+				"PATH and leaves `ebuild` off it precisely so that arriving inside RunBuildGates is the only "+
+				"way to produce that sentence (R2.2)", gate, g.Reason)
+		}
 	}
+}
+
+// fakeBinDir writes one executable per entry into a fresh directory and returns
+// it, to be used as the WHOLE of PATH. It is how a hermetic test decides which
+// external binaries a run can find — the lookups themselves are seams inside the
+// package, but a test driving Run only reaches them through the environment.
+func fakeBinDir(t *testing.T, scripts map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range scripts {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil { //nolint:gosec // a stub that must be executable is the point
+			t.Fatalf("writing the fake %s: %v", name, err)
+		}
+	}
+	return dir
 }
 
 // TestRun_NoManifestSourceIsAReportedSkipNamingTheCondition is R2.3/R4.4, the

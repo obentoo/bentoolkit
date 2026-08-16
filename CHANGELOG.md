@@ -258,6 +258,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **An interrupted `overlay validate` now prints the partial report it already
+  assembled, and exits 130 instead of 2.** `Run` does not merely fail when a
+  sweep is stopped: it appends one `interruptedResult` per package it never
+  reached, because its governing rule is that a package in view is never left
+  unmentioned. The command took the plain `err != nil` branch and threw all of
+  that away — under `--json` it emitted **no document at all**, so a stopped run
+  and a run that produced nothing looked identical to the `| jq` the flag exists
+  for.
+
+  The exit code was the second half. `2` is what `Report.ExitCode` documents for
+  "the selector matched nothing", so an operator's Ctrl-C and a mistyped package
+  name were the same event at the shell unless someone parsed the diagnostic
+  text. An interruption now answers 130 — 128 + SIGINT, the shell's own
+  convention — on both the text and the `--json` path.
+
+- **The test pinning "`--depth` executes the build gates" no longer passes
+  without executing them.** It stripped `PATH` to stay hermetic, but the
+  dependency pre-check runs in *front* of `RunBuildGates` and needs `emerge`, so
+  every gate came back SKIPPED carrying the pre-check's "could not be
+  determined" — and the assertion, which only checked that the *old deferral
+  sentence* was absent, was satisfied by that list. The execution half of R2.2
+  was unpinned for the whole story.
+
+  The fixture now puts a stub `emerge` on `PATH` and leaves `ebuild` off it, so
+  the run gets past the pre-check and `ebuild`'s absence becomes
+  `RunBuildGates`' own answer — a sentence produced at exactly one place in the
+  package, which is what makes it usable as proof of arrival. Both directions
+  are asserted, since the negative alone is what let this pass before.
+
 - **An interrupt can no longer publish a bump, by any route.** This guard has
   now been written three times, and the first two guarded a *verdict*: one
   inside `RunBuildGates`, one around `validate.Run`'s return. Each time, the
