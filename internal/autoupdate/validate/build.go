@@ -306,6 +306,30 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 
 	output, runErr := deps.attachedRunner()(cmd)
 
+	// An interrupted run is not a verdict on the ebuild.
+	//
+	// The child is spawned through CommandContext, so a cancelled context KILLS
+	// it: runErr becomes `signal: killed`, and derive's attribution rule — the
+	// phase started and the run failed, therefore this is where the bump died —
+	// then reports FAILED with error-severity findings, and the command exits 1.
+	// The operator pressed Ctrl-C and was told their ebuild is broken.
+	//
+	// This is checked HERE, on the shared path, rather than at the caller that
+	// noticed it first: all three drivers — `overlay validate --depth`, the
+	// autoupdate applier and realign's Prove — reach the child through this
+	// function, and a per-caller guard would leave the other two blaming the
+	// candidate for a signal.
+	//
+	// The retained log is deliberately still written: a partial transcript of an
+	// interrupted compile is evidence someone may want, and refusing to keep it
+	// would make the interruption cost more than it has to.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		note := retainedLogNote(req.LogDir, atom, version, output)
+		return SkippedGates(req.Depth, fmt.Sprintf(
+			"the run was interrupted while %s was building, so no phase reached a verdict and this says "+
+				"nothing about this ebuild: %v%s", label.pv, ctxErr, note)), nil
+	}
+
 	// The transcript is read with ANSI escapes removed and the LOG is not.
 	// Portage colours einfo through a TTY, and an attached run therefore carries
 	// escapes around the very bullets and markers every gate below greps for; a

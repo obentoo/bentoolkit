@@ -752,3 +752,58 @@ func TestRunBuildGates_PrivilegeUnobtainableIsSkippedNotFailed(t *testing.T) {
 		t.Errorf("configure gate: got %q with reason %q, want SKIPPED naming why", got.Outcome, got.Reason)
 	}
 }
+
+// TestRunBuildGates_AnInterruptedBuildIsNotAVerdict is the half of the
+// cancellation story that the per-package loop check could not reach.
+//
+// Run's loop stops packages that have not STARTED. This one has: the child is
+// spawned through CommandContext, so Ctrl-C kills it, `runErr` becomes a signal
+// error, and derive's attribution rule — the phase started and the run failed,
+// so this is where the bump died — reported FAILED with error-severity findings
+// and exited 1. The operator interrupted their own run and was told their ebuild
+// is broken.
+//
+// The transcript deliberately carries a real phase marker AND a real failure
+// tail: without the marker the gate would skip anyway and the test would pass
+// for the wrong reason.
+func TestRunBuildGates_AnInterruptedBuildIsNotAVerdict(t *testing.T) {
+	spy := &buildSpy{}
+	req := buildRequestFor(t, DepthConfigure)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	gates, err := RunBuildGates(ctx, req, buildSeam(spy, configureFailLog, errors.New("signal: killed")))
+	if err != nil {
+		t.Fatalf("RunBuildGates returned an error (%v); an interrupted run is a REPORTED OUTCOME", err)
+	}
+
+	cfg := gateNamed(t, gates, GateConfigure)
+	if cfg.Outcome == OutcomeFailed {
+		t.Fatalf("the configure gate reports FAILED after an interrupt, blaming the ebuild for the operator's "+
+			"own Ctrl-C; reason: %q", cfg.Reason)
+	}
+	if cfg.Outcome != OutcomeSkipped {
+		t.Fatalf("configure gate: got %q, want SKIPPED", cfg.Outcome)
+	}
+	if !strings.Contains(cfg.Reason, "interrupted") {
+		t.Errorf("the skip %q does not say the run was interrupted", cfg.Reason)
+	}
+	// No error-severity finding may survive: ExitCode reads those, so a leftover
+	// one would still exit 1 on an interrupt.
+	for _, f := range cfg.Findings {
+		if f.Severity == SeverityError {
+			t.Errorf("an interrupted gate still carries an error finding (%q), which exits 1", f.Detail)
+		}
+	}
+	// The partial transcript is still evidence, and keeping it is what makes the
+	// interruption cost no more than it has to.
+	entries, rerr := os.ReadDir(req.LogDir)
+	if rerr != nil {
+		t.Fatalf("reading the log dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Errorf("the log dir holds %d files; the partial transcript of an interrupted build is evidence "+
+			"someone may want", len(entries))
+	}
+}
