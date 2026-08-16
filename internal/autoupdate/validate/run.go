@@ -13,8 +13,15 @@ import (
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
-// Options is what a run needs. All three come from the command line or the
-// config; none is discovered, so a run is fully described by this struct.
+// Options is what a run needs, and a run is fully described by it: nothing here
+// is discovered.
+//
+// The plain values come from the command line or the config. DistNames does not
+// — it is a SEAM, a function the caller supplies so that a package directory
+// which cannot name its own upstream archives can still be validated. Its zero
+// value is nil, and nil is exactly the behaviour every field of this struct had
+// before it existed (S037-R1.2), which is why it is listed last: a caller
+// written against the older struct is still describing the same run.
 type Options struct {
 	// Overlay is the tree to validate.
 	Overlay string
@@ -57,6 +64,40 @@ type Options struct {
 	// root would be reported as a defect by this very command and deleted by
 	// `overlay autoupdate --clean`.
 	StagingRoot string
+
+	// DistNames answers, for ONE package directory, which upstream archives the
+	// option gate may look for. It is the seam a caller uses when the directory
+	// on disk cannot name them itself — a staged tree is exactly that shape: a
+	// fresh single-package repository with no Manifest in it until a manifest
+	// step has run, which is a gate reading nothing and reporting SKIPPED
+	// (S037-R1.1).
+	//
+	// # NIL IS NOT AN EMPTY SLICE
+	//
+	// Nil means NOBODY SUPPLIED ANYTHING: the gate parses pkgDir/Manifest exactly
+	// as it did before this field existed, and the report it produces is
+	// byte-identical to that one (S037-R1.2). A non-nil function returning no
+	// names is an ANSWER — the caller looked, and there is nothing to read — and
+	// it is answered on its own authority, never by quietly falling back to a
+	// Manifest the caller has already spoken for. Two different facts, so two
+	// different values.
+	//
+	// # Why a func of pkgDir, and never a bare []string
+	//
+	// One Run walks MANY packages. A flat list would apply one package's archives
+	// to the whole overlay, and each ebuild would be answered with whichever name
+	// happened to match — a confident verdict about the wrong tarball, which is
+	// the failure findDistfile's own notes exist to prevent (S037-D2).
+	//
+	// # Why the value is per-CALL, and never a field on an applier
+	//
+	// It is set on the Options of the one run that needs it and goes away with
+	// it. An applier that stored the seam once would hand package A's archive
+	// names to package B — the shared-mutable-state failure story 035 kept the
+	// distdir off the Applier to avoid (S035-D2), reproduced here with names
+	// instead of a directory. Concurrent applies make that a race; a sequential
+	// one merely makes it wrong later.
+	DistNames func(pkgDir string) ([]string, error)
 }
 
 // depth resolves Options.Depth to a rung of the ladder, mapping the empty
@@ -71,6 +112,49 @@ func (o Options) depth() (Depth, error) {
 		return DepthNone, fmt.Errorf("reading the requested validation depth: %w", err)
 	}
 	return d, nil
+}
+
+// distNameLookup answers, for one package directory, which upstream archives may
+// be looked for and in whose words a refusal about them is written.
+//
+// The source travels WITH the names rather than beside them because the two
+// cannot come apart without producing a wrong diagnostic: "the package's
+// Manifest names no distfile", said about a directory that has no Manifest,
+// sends an operator to fix a file that was never part of the question
+// (S037-R1.6).
+type distNameLookup func(pkgDir string) ([]string, distNameSource, error)
+
+// distNames is the name source a call must use: the caller's seam when there is
+// one, otherwise this package's own Manifest parse.
+//
+// It is BuildDeps.commandFactory's idiom (deps.go:109) applied to a field on
+// Options — normalised at ONE place, so a nil seam can never reach a call site
+// and the two sources cannot drift into two selection rules (S037-D2).
+func (o Options) distNames() distNameLookup {
+	if o.DistNames != nil {
+		return func(pkgDir string) ([]string, distNameSource, error) {
+			names, err := o.DistNames(pkgDir)
+			return names, suppliedSource, err
+		}
+	}
+	return func(pkgDir string) ([]string, distNameSource, error) {
+		return manifestDistNames(pkgDir), manifestSource(pkgDir), nil
+	}
+}
+
+// manifestDistNames is the nil seam's answer: the archives the package
+// directory's own Manifest names, parsed exactly as they were parsed before
+// Options.DistNames existed.
+//
+// IT REPORTS NO ERROR, and that is the byte-for-byte promise rather than an
+// omission (S037-R1.2). ParseManifestDistFilenames answers a missing or
+// unreadable Manifest with an empty slice, and an empty slice is already an
+// answer here — selectDistfile's named refusal, in the words story 031 shipped.
+// Inventing an error return would replace that reported outcome with a different
+// sentence for every package directory that has no Manifest, which is every
+// staged tree and precisely the case this story is about.
+func manifestDistNames(pkgDir string) []string {
+	return distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 }
 
 // ebuildTarget is one ebuild the run has to answer for.
@@ -156,9 +240,13 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	// it is reached at most once per run.
 	distdir, haveDistdir := distfiles.Locate(opts.Distdir, "")
 
+	// Resolved once, for the whole run, so that every package is answered by the
+	// same source and no branch below has to remember that the seam may be nil.
+	distNames := opts.distNames()
+
 	qa := map[string]qaResult{}
 	for _, target := range targets {
-		res := validateOptions(ctx, target, distdir, haveDistdir)
+		res := validateOptions(ctx, target, distdir, haveDistdir, distNames)
 		// Before attachQA, so the gates read in ladder order — options, then the
 		// build gates, then the advisory QA scan that decides nothing.
 		noteBuildDepth(&res, depth, opts.StagingRoot)
@@ -292,11 +380,16 @@ func matchesSelector(atom, category, selector string) bool {
 // validateOptions runs the option gate over one ebuild.
 //
 // Every branch that cannot continue returns a SKIPPED naming what stopped it.
-// The order — ebuild, then distfile, then archive — is cheapest-first, and it
-// also produces the most specific diagnostic: an ebuild that cannot be read is
-// reported as exactly that, rather than as whichever later step happened to
-// fail second.
-func validateOptions(ctx context.Context, target ebuildTarget, distdir string, haveDistdir bool) EbuildResult {
+// The order — ebuild, then the candidate names, then the distfile, then the
+// archive — is cheapest-first, and it also produces the most specific
+// diagnostic: an ebuild that cannot be read is reported as exactly that, rather
+// than as whichever later step happened to fail second.
+//
+// distNames arrives already normalised (Options.distNames), so this function has
+// no nil seam to defend against and no notion of WHERE the names came from
+// beyond the words it is handed to refuse in.
+func validateOptions(ctx context.Context, target ebuildTarget, distdir string, haveDistdir bool,
+	distNames distNameLookup) EbuildResult {
 	passed, err := OptionsFromEbuild(target.path)
 	if err != nil {
 		return skippedResult(target.atom, target.version, fmt.Sprintf("the ebuild could not be read: %v", err))
@@ -307,7 +400,18 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 			"no distdir could be located, so there is no archive to read the upstream options from")
 	}
 
-	archive, err := findDistfile(target.dir, distdir, target.version)
+	names, source, err := distNames(target.dir)
+	if err != nil {
+		// A producer that failed has NOT told us there are no archives — it has
+		// told us it could not say. Both stop the gate, and the difference is the
+		// sentence the operator reads, so the producer's own words are carried
+		// through verbatim (S037-R1.5) and the directory is still named (R1.6).
+		return skippedResult(target.atom, target.version,
+			fmt.Sprintf("the distfile names for %s-%s could not be produced, so there was no archive to look for in %s: %v%s",
+				target.atom, target.version, distdir, err, source.attributed))
+	}
+
+	archive, err := selectDistfile(names, source, distdir, target.version)
 	if err != nil {
 		return skippedResult(target.atom, target.version, err.Error())
 	}
@@ -324,18 +428,104 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 	return comparedResult(target.atom, target.version, declared, passed)
 }
 
+// distNameSource says where one package's candidate distfile names came from,
+// and carries the words every refusal about them is written in (S037-R1.6,
+// design D6).
+//
+// # Why the wording is a value and not a constant
+//
+// The two sources have nothing in common to say. One can point at a FILE and
+// quote its path; the other has no file at all, and "the package's Manifest
+// names no distfile" said about a staged tree is a wrong answer dressed as a
+// diagnostic — it names a fix that does not exist. Passing the words in, instead
+// of deciding them at each refusal, is what lets ONE set of selection rules
+// serve both sources (S037-R1.1) while each still explains itself.
+type distNameSource struct {
+	// origin names the source as the SUBJECT of "<origin> names no distfile".
+	origin string
+
+	// listed attributes a list of names inside "no distfile <listed> is present
+	// in the directory searched". It is its own phrase rather than something
+	// derived from origin because the Manifest wording predates this story and is
+	// reproduced to the byte (S037-R1.2).
+	listed string
+
+	// attributed is the clause appended to the two refusals story 031 wrote with
+	// no source in them at all.
+	//
+	// IT IS EMPTY FOR THE MANIFEST, and that is the byte-for-byte promise rather
+	// than an oversight: those two sentences are in reports that have already
+	// shipped, and a run that supplies no names must produce today's bytes
+	// (S037-R1.2). A run that DOES supply names is new, so its wording is free to
+	// say so — which is where R1.6's "source its names came from" is met on the
+	// only path that could ever be confused about it.
+	attributed string
+}
+
+// manifestSource is the nil seam's source: the package directory's own Manifest,
+// in the words story 031 wrote and story 035 pinned.
+func manifestSource(pkgDir string) distNameSource {
+	return distNameSource{
+		origin: "the package's Manifest (" + filepath.Join(pkgDir, "Manifest") + ")",
+		listed: "named by the Manifest",
+	}
+}
+
+// suppliedSource is the seam's source. Every sentence it produces carries the
+// word "supplied", which is what tells an operator reading a SKIP that no
+// Manifest decided this — so going to look for one would be looking in the wrong
+// place, and the caller that handed the names over is what has to be fixed
+// (S037-R1.6).
+var suppliedSource = distNameSource{
+	origin:     "the distfile list the caller supplied",
+	listed:     "the caller supplied",
+	attributed: "; the names searched for were supplied by the caller, not read from a Manifest",
+}
+
 // findDistfile returns the path of the distfile belonging to THIS ebuild
 // version, among those the package's Manifest names and distdir actually holds.
 //
+// It is the nil-seam half of the answer, and one line of it: the Manifest is
+// parsed here, and selectDistfile — which serves caller-supplied names under
+// exactly the same rules (S037-R1.1) — does the choosing. The signature is
+// unchanged because four TestFindDistfile_* cases call it directly, and they are
+// the measurement that the Manifest path still behaves as it did.
+func findDistfile(pkgDir, distdir, version string) (string, error) {
+	return selectDistfile(manifestDistNames(pkgDir), manifestSource(pkgDir), distdir, version)
+}
+
+// selectDistfile is the frozen selection core: given the candidate names, where
+// they came from, the directory to search and the version to answer for, it
+// returns the one archive belonging to this ebuild version — or a refusal naming
+// what it declined, where it looked, and whose names those were.
+//
+// Story 037 changed none of the rules below. What it changed is that they now
+// serve caller-supplied names as well as Manifest-parsed ones, from ONE body of
+// code rather than two copies that could drift into two answers.
+//
+// # Why the names are re-validated here
+//
+// ParseManifestDistFilenames drops any name carrying a path separator
+// (distfiles.go:537-541), so on the Manifest path the first loop can never fire.
+// Names arriving through Options.DistNames never passed that filter, and
+// filepath.Join(distdir, "../elsewhere.tar.gz") resolves happily OUTSIDE the
+// directory searched — an archive nobody chose, read as though the gate had
+// chosen it (S037-R1.4, design D5).
+//
+// ONE BAD NAME DECLINES THE WHOLE LIST. Selecting from the rest would answer a
+// compromised supplier with a PASS built out of its other names; refusing
+// everything costs a gate that could have run, and this package has preferred
+// that trade since R12 — a false SKIP is investigated, a false PASS is not.
+//
 // # Why the version has to be part of the question
 //
-// One Manifest serves the whole package directory, so a directory holding
-// 1.28.6 and 1.29.2 names both tarballs. Taking the first present one — which
-// this did until the golden test caught it — validated the 1.29.2 ebuild
-// against the 1.28.6 archive, where aalib and libcaca are still declared, and
-// reported a PASS for exactly the bump this gate exists to reject. A wrong
-// archive is worse than no archive: it produces a confident answer to a
-// question nobody asked.
+// One name list serves the whole package directory — one Manifest, or one
+// caller's answer for that directory — so a directory holding 1.28.6 and 1.29.2
+// names both tarballs. Taking the first present one, which this did until the
+// golden test caught it, validated the 1.29.2 ebuild against the 1.28.6
+// archive, where aalib and libcaca are still declared, and reported a PASS for
+// exactly the bump this gate exists to reject. A wrong archive is worse than no
+// archive: it produces a confident answer to a question nobody asked.
 //
 // # The single-present shortcut had the same defect, in reverse
 //
@@ -350,27 +540,36 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 //
 //   - One present, its name carrying this ebuild's version: it is the one
 //     (R12.1).
-//   - One present and no name in the Manifest carrying any version at all: it
-//     is the one (R12.2). This is the snapshot and commit-hash naming scheme —
-//     with no version anywhere in the names there is no other release for the
-//     file to belong to, and this is the case the shortcut exists to serve.
-//   - One present, but the Manifest does distinguish versions and this name is
-//     not this ebuild's: SKIPPED naming the file declined (R12.3).
+//   - One present and no candidate name carrying any version at all: it is the
+//     one (R12.2). This is the snapshot and commit-hash naming scheme — with no
+//     version anywhere in the names there is no other release for the file to
+//     belong to, and this is the case the shortcut exists to serve.
+//   - One present, but the candidate names DO distinguish versions and this one
+//     is not this ebuild's: SKIPPED naming the file declined (R12.3).
 //   - Several present and exactly one carrying the version string: it is the
 //     one, and this is the ordinary multi-version package directory.
 //   - Anything else — several carrying the version, or none — is reported as
 //     SKIPPED naming the candidates. Picking the shortest, or the first, would
 //     be a guess, and a guess here is indistinguishable from a measurement in
 //     the report it produces.
-func findDistfile(pkgDir, distdir, version string) (string, error) {
-	names := distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
+func selectDistfile(names []string, source distNameSource, distdir, version string) (string, error) {
+	// Before anything is joined to distdir, and over the WHOLE list before any of
+	// it is used: the same test ParseManifestDistFilenames applies, applied again
+	// because these names may never have been through it (S037-R1.4).
+	for _, name := range names {
+		if name == "" || strings.ContainsAny(name, "/\\") {
+			return "", fmt.Errorf("the distfile name %q is not a plain file name, so it names nothing in the "+
+				"directory searched, %s; the whole list was declined rather than the remaining names read%s",
+				name, distdir, source.attributed)
+		}
+	}
+
 	if len(names) == 0 {
 		// The directory is named even though nothing was looked for in it (R4.1).
 		// Reading this line, an operator has to be able to tell "the Manifest is
 		// empty" from "I searched the wrong place", and a message that mentions no
 		// directory at all leaves the second possibility invisible.
-		return "", fmt.Errorf("the package's Manifest (%s) names no distfile, so there was no archive to look for in %s",
-			filepath.Join(pkgDir, "Manifest"), distdir)
+		return "", fmt.Errorf("%s names no distfile, so there was no archive to look for in %s", source.origin, distdir)
 	}
 
 	var present []string
@@ -387,18 +586,18 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 		// fetched this release" from "the fetch went somewhere else" — and story
 		// 035 is the second one, which read as the first for as long as it did
 		// precisely because no message said where the search happened.
-		return "", fmt.Errorf("no distfile named by the Manifest is present in the directory searched, %s: %s",
-			distdir, strings.Join(names, ", "))
+		return "", fmt.Errorf("no distfile %s is present in the directory searched, %s: %s",
+			source.listed, distdir, strings.Join(names, ", "))
 	case 1:
-		// Safe when this file is this ebuild's (R12.1), or when no name in the
-		// Manifest tells releases apart at all (R12.2). Otherwise the shortcut is
-		// a guess, and it declines by name (R12.3).
+		// Safe when this file is this ebuild's (R12.1), or when no candidate name
+		// tells releases apart at all (R12.2). Otherwise the shortcut is a guess,
+		// and it declines by name (R12.3).
 		only := present[0]
 		if carriesVersion(only, version) || !anyNameCarriesAVersion(names) {
 			return filepath.Join(distdir, only), nil
 		}
 		return "", fmt.Errorf("the only distfile present in %s is %s, which does not belong to version %s; "+
-			"reading it would answer about a different release", distdir, only, version)
+			"reading it would answer about a different release%s", distdir, only, version, source.attributed)
 	}
 
 	// Exact rather than carriesVersion: with several archives present a revision
@@ -413,8 +612,8 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 	if len(matching) == 1 {
 		return filepath.Join(distdir, matching[0]), nil
 	}
-	return "", fmt.Errorf("cannot tell which of %d distfiles in %s belongs to version %s: %s",
-		len(present), distdir, version, strings.Join(present, ", "))
+	return "", fmt.Errorf("cannot tell which of %d distfiles in %s belongs to version %s: %s%s",
+		len(present), distdir, version, strings.Join(present, ", "), source.attributed)
 }
 
 var (
@@ -444,10 +643,10 @@ func carriesVersion(name, version string) bool {
 	return strings.Contains(name, revisionSuffix.ReplaceAllString(version, ""))
 }
 
-// anyNameCarriesAVersion reports whether the Manifest distinguishes releases by
-// name at all (R12.2). When it does not, one present distfile is the only
-// candidate there could be and the shortcut is safe; when it does, taking a name
-// that is not this ebuild's is a guess.
+// anyNameCarriesAVersion reports whether the candidate names distinguish
+// releases at all (R12.2) — whoever supplied them. When they do not, one present
+// distfile is the only candidate there could be and the shortcut is safe; when
+// they do, taking a name that is not this ebuild's is a guess.
 func anyNameCarriesAVersion(names []string) bool {
 	for _, name := range names {
 		if versionInDistfileName.MatchString(name) {

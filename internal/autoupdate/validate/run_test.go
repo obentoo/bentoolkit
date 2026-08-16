@@ -17,6 +17,7 @@ package validate
 
 import (
 	"context"
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -465,5 +466,290 @@ func TestFindDistfile_SeveralPresentKeepTheirBehaviour(t *testing.T) {
 	empty := t.TempDir()
 	if _, err := findDistfile(pkgDir, empty, "1.29.2"); err == nil {
 		t.Error("findDistfile answered from an empty distdir")
+	}
+}
+
+// MERGE FRAGMENT — story 037, sub-task 1.1 (Options.DistNames + selection core).
+//
+// Target file: internal/autoupdate/validate/run_test.go (APPEND at the end).
+// Do NOT repeat the `package validate` clause.
+//
+// IMPORTS: none added — context, os, path/filepath, strings and testing are
+// already in the target's block.
+//
+// # Symbols
+//
+// Added: TestRun_CallerSuppliedNamesSelectTheArchiveUnderTheSameRules,
+// TestRun_ASuppliedNameRefusalNamesTheDirectoryAndTheSource, and the helper
+// seamOverlayWithoutManifest — prefixed so nothing collides with run_test.go's
+// own helpers.
+//
+// Borrowed, never re-declared: overlayWith and gateOf (run_test.go),
+// buildTarGz (archive_test.go), linkInto (run_test.go), goldenEbuild and
+// resultFor (golden_test.go), onlyResult (run_test.go).
+//
+// # PINNED CONTRACT (design D2, D5, D6 — S037-R1.1, R1.4, R1.6)
+//
+//	Options.DistNames func(pkgDir string) ([]string, error)
+//
+// nil parses pkgDir/Manifest exactly as today — that half is already pinned by
+// the TestFindDistfile_* suite and golden_test.go and is NOT re-asserted here.
+// What is asserted is only the NEW behaviour: names supplied through the seam
+// are selected under the SAME R12 rules the Manifest-parsed names get, a name
+// carrying a path separator is refused by name without escaping the distdir,
+// and every refusal names the directory searched AND the source the names came
+// from ("supplied", D6's wording for the caller-side source).
+//
+// These tests go through Run, not through the extracted selection core: the
+// core's name is not part of the contract, and pinning it would turn a
+// refactoring seam into a public surface.
+
+// seamOverlayWithoutManifest is overlayWith with the Manifest removed — the
+// shape of a staged tree, which is the whole reason the seam exists: a package
+// directory that has archives to answer for and no Manifest file to name them.
+func seamOverlayWithoutManifest(t *testing.T, atom, version, ebuild string) string {
+	t.Helper()
+	root := overlayWith(t, atom, version, ebuild, "placeholder-0.tar.gz")
+	parts := strings.SplitN(atom, "/", 2)
+	if err := os.Remove(filepath.Join(root, parts[0], parts[1], "Manifest")); err != nil {
+		t.Fatalf("removing the Manifest to shape the tree like a staged one: %v", err)
+	}
+	return root
+}
+
+// TestRun_CallerSuppliedNamesSelectTheArchiveUnderTheSameRules is R1.1: with
+// no Manifest file anywhere, the seam's names feed the option gate, and the
+// R12 selection rules still decide WHICH archive is read.
+//
+// The proof that selection happened is in the archives' contents: the 1.28.6
+// archive declares everything the ebuild passes and the 1.29.2 one does not,
+// so a PASS is only reachable by reading exactly the 1.28.6 archive. An
+// implementation that took the first present name, or any present name, fails
+// this with a confident FAILED — the false-FAILED findDistfile's own notes
+// call the way a gate gets switched off.
+func TestRun_CallerSuppliedNamesSelectTheArchiveUnderTheSameRules(t *testing.T) {
+	overlay := seamOverlayWithoutManifest(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild)
+
+	distdir := t.TempDir()
+	older := buildTarGz(t, map[string]string{
+		"gst-plugins-good-1.28.6/meson.build":   "project('x')\n",
+		"gst-plugins-good-1.28.6/meson.options": "option('qt6')\noption('aalib')\noption('libcaca')\n",
+	})
+	linkInto(t, older, filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz"))
+	newer := buildTarGz(t, map[string]string{
+		"gst-plugins-good-1.29.2/meson.build":   "project('x')\n",
+		"gst-plugins-good-1.29.2/meson.options": "option('qt6')\n",
+	})
+	linkInto(t, newer, filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.gz"))
+
+	supplied := []string{"gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz"}
+	got, err := Run(context.Background(), Options{
+		Overlay: overlay,
+		Distdir: distdir,
+		DistNames: func(string) ([]string, error) {
+			return supplied, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	options := gateOf(t, onlyResult(t, got), GateOptions)
+	if options.Outcome == OutcomeSkipped {
+		t.Fatalf("the option gate SKIPPED (reason %q) although the caller supplied the names; "+
+			"a staged tree without a Manifest is exactly what the seam exists to validate (R1.1)", options.Reason)
+	}
+	if options.Outcome != OutcomePass {
+		t.Errorf("options gate: got %q (reason %q), want PASS — only the 1.28.6 archive declares what this "+
+			"ebuild passes, so any other outcome means the selection rules were not applied to the supplied names",
+			options.Outcome, options.Reason)
+	}
+}
+
+// TestRun_ASuppliedNameRefusalNamesTheDirectoryAndTheSource is R1.4 and R1.6
+// together, because they are one sentence in the report: a refusal that names
+// what was declined, where the search happened, and whose names these were.
+func TestRun_ASuppliedNameRefusalNamesTheDirectoryAndTheSource(t *testing.T) {
+	overlay := seamOverlayWithoutManifest(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild)
+
+	t.Run("only another version's archive is present", func(t *testing.T) {
+		distdir := t.TempDir()
+		newer := buildTarGz(t, map[string]string{"gst-plugins-good-1.29.2/meson.build": "project('x')\n"})
+		linkInto(t, newer, filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.gz"))
+
+		got, err := Run(context.Background(), Options{
+			Overlay: overlay,
+			Distdir: distdir,
+			DistNames: func(string) ([]string, error) {
+				return []string{"gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.29.2.tar.gz"}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		options := gateOf(t, onlyResult(t, got), GateOptions)
+		if options.Outcome != OutcomeSkipped {
+			t.Fatalf("options gate: got %q, want SKIPPED — the only present archive belongs to another release, "+
+				"and R12.3 applies to supplied names exactly as it applies to parsed ones", options.Outcome)
+		}
+		for _, want := range []string{distdir, "gst-plugins-good-1.29.2.tar.gz", "supplied"} {
+			if !strings.Contains(options.Reason, want) {
+				t.Errorf("the refusal %q does not contain %q; R1.6 requires the directory searched, the file "+
+					"declined and the source of the names, all in the sentence the operator reads", options.Reason, want)
+			}
+		}
+	})
+
+	t.Run("a name carrying a path separator is refused without leaving the distdir", func(t *testing.T) {
+		parent := t.TempDir()
+		distdir := filepath.Join(parent, "dist")
+		if err := os.Mkdir(distdir, 0o755); err != nil {
+			t.Fatalf("creating the distdir: %v", err)
+		}
+		// A perfectly readable archive OUTSIDE the distdir, declaring everything
+		// the ebuild passes. If the gate follows the traversal it reaches a PASS
+		// — which is precisely how this assertion detects the escape (D5).
+		escape := buildTarGz(t, map[string]string{
+			"gst-plugins-good-1.28.6/meson.build":   "project('x')\n",
+			"gst-plugins-good-1.28.6/meson.options": "option('qt6')\noption('aalib')\noption('libcaca')\n",
+		})
+		linkInto(t, escape, filepath.Join(parent, "evil-1.28.6.tar.gz"))
+
+		const hostile = "../evil-1.28.6.tar.gz"
+		got, err := Run(context.Background(), Options{
+			Overlay: overlay,
+			Distdir: distdir,
+			DistNames: func(string) ([]string, error) {
+				return []string{hostile}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		options := gateOf(t, onlyResult(t, got), GateOptions)
+		if options.Outcome != OutcomeSkipped {
+			t.Fatalf("options gate: got %q (reason %q), want SKIPPED — a name carrying a path separator was "+
+				"followed outside the distdir, which is the escape D5 exists to close (R1.4)", options.Outcome, options.Reason)
+		}
+		if !strings.Contains(options.Reason, hostile) {
+			t.Errorf("the refusal %q does not name the hostile name %q it declined (R1.4)", options.Reason, hostile)
+		}
+		if !strings.Contains(options.Reason, distdir) {
+			t.Errorf("the refusal %q does not name the directory searched, %s (R1.6)", options.Reason, distdir)
+		}
+	})
+}
+
+// MERGE FRAGMENT — story 037, sub-task 1.2 (empty-authoritative and
+// producer-failure outcomes).
+//
+// Target file: internal/autoupdate/validate/run_test.go (APPEND immediately
+// AFTER sub-task 1.1's fragment). Do NOT repeat the `package validate` clause.
+//
+// IMPORTS: "errors" joins the target's existing block (context, go/parser,
+// go/token, os, path/filepath, strings, testing). One block, not two, and not
+// left unused — the producer-failure case below is its only user.
+//
+// # Symbols
+//
+// Added: TestRun_EmptySuppliedNamesAreAuthoritativeOverTheManifest,
+// TestRun_ANamesProducerFailureIsAReportedSkip. Borrowed: overlayWith, gateOf,
+// onlyResult (run_test.go), buildTarGz (archive_test.go), linkInto
+// (run_test.go), goldenEbuild (golden_test.go).
+//
+// # PINNED CONTRACT (design D6 — S037-R1.3, R1.5, R1.6)
+//
+// An empty-but-present seam result is AUTHORITATIVE: the option gate reports
+// SKIPPED naming the source and does NOT fall back to parsing the package's
+// Manifest file. A producer error becomes a SKIPPED naming what was attempted.
+// Both refusals keep naming the directory searched (035's discipline).
+//
+// The fixture deliberately makes the silent-fallback failure mode VISIBLE: the
+// Manifest file is present, names an archive that is on disk, and that archive
+// declares everything the ebuild passes. Any fallback therefore produces a
+// PASS — so a PASS here is the defect, not a near-miss.
+
+// TestRun_EmptySuppliedNamesAreAuthoritativeOverTheManifest is R1.3. nil seam
+// and empty result are different facts: nil means "parse the Manifest as
+// today", empty means "the caller answered, and the answer is nothing".
+func TestRun_EmptySuppliedNamesAreAuthoritativeOverTheManifest(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild,
+		"gst-plugins-good-1.28.6.tar.gz")
+
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{
+		"gst-plugins-good-1.28.6/meson.build":   "project('x')\n",
+		"gst-plugins-good-1.28.6/meson.options": "option('qt6')\noption('aalib')\noption('libcaca')\n",
+	})
+	linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz"))
+
+	got, err := Run(context.Background(), Options{
+		Overlay: overlay,
+		Distdir: distdir,
+		DistNames: func(string) ([]string, error) {
+			return []string{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	options := gateOf(t, onlyResult(t, got), GateOptions)
+	if options.Outcome == OutcomePass || options.Outcome == OutcomeFailed {
+		t.Fatalf("the option gate answered %q although the caller supplied an EMPTY names list; the only way "+
+			"to that answer is a silent fallback to the Manifest file, and D6 says empty is authoritative (R1.3)",
+			options.Outcome)
+	}
+	if options.Outcome != OutcomeSkipped {
+		t.Fatalf("options gate: got %q, want SKIPPED", options.Outcome)
+	}
+	for _, want := range []string{distdir, "supplied"} {
+		if !strings.Contains(options.Reason, want) {
+			t.Errorf("the skip %q does not contain %q; the operator has to be able to tell WHOSE empty answer "+
+				"this was and where nothing was looked for (R1.3, R1.6)", options.Reason, want)
+		}
+	}
+}
+
+// TestRun_ANamesProducerFailureIsAReportedSkip is R1.5: the producer failing is
+// a stopping condition like any other, and the governing rule applies — a
+// reported outcome with a reason naming what was attempted, never a silent
+// pass and never an aborted run.
+func TestRun_ANamesProducerFailureIsAReportedSkip(t *testing.T) {
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild,
+		"gst-plugins-good-1.28.6.tar.gz")
+
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{
+		"gst-plugins-good-1.28.6/meson.build":   "project('x')\n",
+		"gst-plugins-good-1.28.6/meson.options": "option('qt6')\noption('aalib')\noption('libcaca')\n",
+	})
+	linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz"))
+
+	got, err := Run(context.Background(), Options{
+		Overlay: overlay,
+		Distdir: distdir,
+		DistNames: func(string) ([]string, error) {
+			return nil, errors.New("deriving the bump's archive names: the registry entry is unreadable")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v — a failing producer is one ebuild's reported outcome, not a failed run", err)
+	}
+
+	options := gateOf(t, onlyResult(t, got), GateOptions)
+	if options.Outcome != OutcomeSkipped {
+		t.Fatalf("options gate: got %q (reason %q), want SKIPPED — the producer failed, so nothing was read, "+
+			"and anything but a skip claims a measurement that never happened (R1.5)", options.Outcome, options.Reason)
+	}
+	if !strings.Contains(options.Reason, "the registry entry is unreadable") {
+		t.Errorf("the skip %q does not carry the producer's own error; without it the operator cannot tell "+
+			"WHAT was attempted (R1.5)", options.Reason)
+	}
+	if !strings.Contains(options.Reason, distdir) {
+		t.Errorf("the skip %q does not name the directory, %s; R1.6 covers every option-gate refusal, "+
+			"this one included", options.Reason, distdir)
 	}
 }
