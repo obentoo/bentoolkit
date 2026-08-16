@@ -1031,6 +1031,13 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// It is deliberately NOT folded into PromotionDecision: that function's rule
 	// is R3.3's ("PASS or SKIPPED promotes"), and this is the operator subtracting
 	// from it, which is a different authority and belongs where it can be seen.
+	// The same invariant, said early so the operator reads the interruption
+	// instead of refuseUnproved's "proof at depth X is required" — true, but it
+	// blames configuration for a Ctrl-C. promote() enforces it regardless.
+	if err := a.refuseOnInterrupt(pkg, newVersion); err != nil {
+		return a.failApply(pkg, result, err)
+	}
+
 	if err := a.refuseUnproved(gates, pkg, newVersion, depth.Depth); err != nil {
 		return a.failApply(pkg, result, err)
 	}

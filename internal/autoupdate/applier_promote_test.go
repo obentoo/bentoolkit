@@ -1020,3 +1020,201 @@ func TestApplierPromote_ValidationSourceIsOneOfTwoKnownValues(t *testing.T) {
 		t.Errorf("ValidationSource = %q; the two values are \"staged\" and \"this-run\"", result.ValidationSource)
 	}
 }
+
+// Authored for the S037 review, round 6 — the interrupt invariant.
+//
+// AN INTERRUPT MUST NOT PUBLISH A BUMP, AND THIS IS THE THIRD ATTEMPT AT SAYING
+// SO. The first put the guard in RunBuildGates; the second wrapped
+// validate.Run's return. Both guarded a VERDICT, and each time the next review
+// found a route that reached promotion without passing through the guarded one:
+//
+//   - runStaticGates turns any validate.Run error — ctx.Err() included — into a
+//     single SKIPPED option gate, and PromotionDecision promotes on SKIPPED.
+//   - DependenciesSatisfied turns a cancelled probe into SkippedGates with a NIL
+//     error, so runBuildGates reports a promotable list and no failure at all.
+//   - the reuse path (R10.1) calls promote() without consulting
+//     PromotionDecision in the first place.
+//
+// So the invariant now sits at the WRITE (promote), and these two tests are one
+// per route into it. They assert the overlay's bytes and the pin rather than the
+// error text: a guard that returns the right sentence and publishes anyway is
+// the bug, not the fix.
+
+// TestApplierPromote_AnInterruptedRunPublishesNothingOnTheReusePath drives the
+// route no verdict-side guard can cover — nothing is validated in this run, so
+// there is no gate list to inspect and nothing for PromotionDecision to refuse.
+func TestApplierPromote_AnInterruptedRunPublishesNothingOnTheReusePath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	applier, overlayDir, pkg, _, pins := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess), WithApplierContext(ctx))
+
+	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
+	before := hashOverlayTree(t, overlayDir)
+
+	// The operator's Ctrl-C, landing before Apply reaches the reuse branch. The
+	// tree really is proved and really does match: everything about this bump is
+	// publishable EXCEPT that the run was stopped.
+	cancel()
+
+	result, err := applier.Apply(pkg, false)
+
+	if err == nil || result.Success {
+		t.Fatal("an interrupted run promoted a bump from a retained tree; a cancelled context must never reach the published overlay")
+	}
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the published overlay changed during an interrupted run: %s -> %s", before, after)
+	}
+	if pins[pkg] != "" {
+		t.Errorf("an interrupted run wrote the pin %q; `--clean` sweeps by pin, so a pin for a bump that is not on disk "+
+			"aims the deletion rule at the only ebuild present", pins[pkg])
+	}
+}
+
+// TestApplierPromote_AnInterruptedStaticGatePublishesNothing drives the FIRST
+// open door on its own.
+//
+// Depth `options` is chosen so that runBuildGates returns before it builds
+// anything, which takes the guard d784377 put inside RunBuildGates out of the
+// picture entirely — a run at compile depth reaches that guard first and would
+// pass this assertion without the new one, which is how the first draft of this
+// test came to prove nothing. What is left is the option gate alone: cancelled,
+// it becomes one SKIPPED gate, and PromotionDecision promotes on SKIPPED.
+func TestApplierPromote_AnInterruptedStaticGatePublishesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	applier, overlayDir, pkg, _, pins := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierContext(ctx),
+		WithApplierDepth(validate.DepthOptions))
+	before := hashOverlayTree(t, overlayDir)
+
+	// The child is built on a context of its OWN and the applier's is cancelled
+	// once it has been. That is the scenario deliberately: a Ctrl-C that KILLS
+	// the manifest child fails the apply long before promotion and proves
+	// nothing, whereas an interrupt arriving after the child returned leaves the
+	// gates below to answer under a dead context.
+	var spawned int
+	inner := applier.execCommand
+	applier.execCommand = func(_ context.Context, name string, arg ...string) *exec.Cmd {
+		spawned++
+		// NOT the applier's context, deliberately: the child has to COMPLETE and
+		// the applier's context has to be dead afterwards. Inheriting it would
+		// kill the child instead, which fails the apply at the manifest step and
+		// never reaches the gate this test is about.
+		cmd := inner(context.Background(), name, arg...) //nolint:contextcheck // see above: the detached child IS the scenario
+		cancel()
+		return cmd
+	}
+
+	result, err := applier.Apply(pkg, false)
+
+	if spawned == 0 {
+		t.Fatal("no child was spawned, so the cancellation never fired and this test asserted nothing")
+	}
+	if err == nil || result.Success {
+		t.Fatal("an interrupted run promoted a bump whose option gate was asked under a cancelled context")
+	}
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the published overlay changed during an interrupted run: %s -> %s", before, after)
+	}
+	if pins[pkg] != "" {
+		t.Errorf("an interrupted run wrote the pin %q", pins[pkg])
+	}
+}
+
+// TestApplierPromote_AnInterruptedDependencyProbePublishesNothing drives the
+// SECOND open door, which sits in front of the guard that was supposed to cover
+// it: DependenciesSatisfied runs before RunBuildGates and turns a cancelled
+// probe into SkippedGates with a NIL error, so the apply never sees a failure at
+// all.
+//
+// Only the manifest child is spared the cancellation. Sparing every child — the
+// obvious way to write this — lets the probe succeed and hands the run to
+// RunBuildGates, whose own guard then answers, and the door under test is never
+// opened.
+func TestApplierPromote_AnInterruptedDependencyProbePublishesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	applier, overlayDir, pkg, _, pins := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierContext(ctx),
+		WithApplierDepth(validate.DepthConfigure))
+	before := hashOverlayTree(t, overlayDir)
+
+	var probed bool
+	inner := applier.execCommand
+	applier.execCommand = func(c context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" {
+			// Detached on purpose — see the sibling test above. Only the manifest
+			// child is spared, so the cancellation is observed by the step after it.
+			cmd := inner(context.Background(), name, arg...) //nolint:contextcheck // the detached manifest child IS the scenario
+			cancel()
+			return cmd
+		}
+		if name == "emerge" {
+			probed = true
+		}
+		return inner(c, name, arg...)
+	}
+
+	result, err := applier.Apply(pkg, false)
+
+	if !probed {
+		t.Fatal("the dependency pre-check never spawned `emerge`, so the door under test was never reached")
+	}
+	if err == nil || result.Success {
+		t.Fatal("an interrupted run promoted a bump whose dependency probe was cancelled; " +
+			"DependenciesSatisfied reports that as SKIPPED gates and a nil error, which PromotionDecision promotes on")
+	}
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the published overlay changed during an interrupted run: %s -> %s", before, after)
+	}
+	if pins[pkg] != "" {
+		t.Errorf("an interrupted run wrote the pin %q", pins[pkg])
+	}
+}
+
+// TestApplierPromote_AnInterruptedRunBlamesTheInterruptNotTheProofPolicy pins
+// the SECOND placement of the invariant, the one in Apply.
+//
+// promote() alone already makes an interrupted run unpublishable — the mutation
+// matrix for this round says so: removing the early check leaves every
+// assertion above green. What it does NOT preserve is WHICH refusal the
+// operator reads. With `require_proof` set, refuseUnproved runs first and
+// answers "proof at depth configure is required and the build gates did not
+// run", which is true and useless: it sends the operator to change a policy
+// that had nothing to do with it. The early check exists to say "you stopped
+// me" instead, and without an assertion on the message it is a line nothing
+// defends.
+func TestApplierPromote_AnInterruptedRunBlamesTheInterruptNotTheProofPolicy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	applier, _, pkg, _, _ := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierContext(ctx),
+		WithApplierDepth(validate.DepthConfigure),
+		WithApplierRequireProof(true))
+
+	inner := applier.execCommand
+	applier.execCommand = func(c context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" {
+			// Detached on purpose — see the sibling test above. Only the manifest
+			// child is spared, so the cancellation is observed by the step after it.
+			cmd := inner(context.Background(), name, arg...) //nolint:contextcheck // the detached manifest child IS the scenario
+			cancel()
+			return cmd
+		}
+		return inner(c, name, arg...)
+	}
+
+	_, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("an interrupted run under require_proof reported no error at all")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "interrupted") {
+		t.Errorf("the refusal does not mention the interruption: %s", msg)
+	}
+	if strings.Contains(msg, "proof at depth") {
+		t.Errorf("the refusal blames `require_proof` for a Ctrl-C, sending the operator to change a policy "+
+			"that had nothing to do with it: %s", msg)
+	}
+}

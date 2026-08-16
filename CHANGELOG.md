@@ -258,6 +258,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **An interrupt can no longer publish a bump, by any route.** This guard has
+  now been written three times, and the first two guarded a *verdict*: one
+  inside `RunBuildGates`, one around `validate.Run`'s return. Each time, the
+  next review found a route into promotion that did not pass through the one
+  that had been guarded.
+
+  Three were open. `runStaticGates` turns any `validate.Run` error — `ctx.Err()`
+  included — into a single SKIPPED option gate, and `PromotionDecision` promotes
+  on SKIPPED. `DependenciesSatisfied` runs *in front of* `RunBuildGates` and
+  turns a cancelled probe into `SkippedGates` with a **nil** error, so the apply
+  never sees a failure at all. And R10.1's reuse path calls `promote()` without
+  consulting `PromotionDecision` in the first place.
+
+  The invariant now sits at the WRITE rather than at the verdict.
+  `refuseOnInterrupt` is the first statement of `promote()` — the one function
+  that writes into the published overlay — and both call sites pass through it,
+  so a future route that manufactures a promotable gate list out of a
+  cancellation is merely wrong rather than publishing. A second check in `Apply`
+  keeps the refusal honest: without it `refuseUnproved` answers first, and
+  "proof at depth configure is required" sends the operator to change a policy
+  that had nothing to do with their Ctrl-C.
+
+  Proved by mutation rather than by a green run. With the guard neutralised all
+  four new tests fail; with only the `promote()` check removed the reuse test
+  fails alone; with only the early check removed the message test fails alone.
+  That battery was worth running: the first draft of the static-gate test passed
+  with the guard dead, because at compile depth it was reaching the older
+  `RunBuildGates` guard instead. It is now pinned to depth `options`, where no
+  build gate runs at all.
+
 - **A failed build gate now quotes the cause instead of Portage's epilogue.**
   `failureExcerpt` quoted the last 12 non-empty lines of a failing phase, on the
   reasoning that the error is at the end. It is not. Portage's `die` prints its

@@ -800,6 +800,30 @@ func (a *Applier) refuseUnproved(gates []validate.GateResult, pkg, version strin
 		depth, pkg, version, strings.Join(reasons, "; "))
 }
 
+// refuseOnInterrupt is the one invariant that dominates every published write:
+// nothing derived from a cancelled context may be promoted.
+//
+// It exists because guarding the VERDICTS is what kept failing. Twice now an
+// interrupt has reached promotion by a route the previous fix did not cover:
+// through runStaticGates, which turns any validate.Run error — ctx.Err()
+// included — into one SKIPPED option gate, and through DependenciesSatisfied,
+// which turns a cancelled probe into SkippedGates with a nil error.
+// PromotionDecision promotes on PASS-or-SKIPPED and cannot tell either list
+// from a real one, because a gate list is the wrong shape for "you stopped me"
+// — build.go states exactly that at its own guard.
+//
+// So the rule is enforced where the overlay is WRITTEN rather than where the
+// verdict is reached. A future route that manufactures a promotable gate list
+// out of a cancellation is then merely wrong, not publishing.
+func (a *Applier) refuseOnInterrupt(pkg, version string) error {
+	ctxErr := a.ctx.Err()
+	if ctxErr == nil {
+		return nil
+	}
+	return fmt.Errorf("not promoted: the run was interrupted before %s-%s reached the published overlay, "+
+		"so nothing recorded here is a verdict on this candidate: %w", pkg, version, ctxErr)
+}
+
 // skippedBuildReasons collects the reason of every SKIPPED BUILD gate, in gate
 // order and without repeats.
 //
