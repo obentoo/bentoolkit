@@ -295,12 +295,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command asked. Both now call `DependenciesSatisfied` and say the same
   sentences.
 
-- **An interrupted `overlay validate` stops building.** The per-package loop
-  never checked for cancellation. While the build gates could not run this cost
-  nothing; now a Ctrl-C during a whole-overlay `--depth=compile` kept staging
-  trees and spawning `ebuild` for every remaining package, and reported each as
-  SKIPPED — a word that reads as "considered and found not to apply" rather than
-  "you stopped me". Remaining packages are still reported, now as interrupted.
+- **An interrupted `overlay validate` stops building, and does not blame the
+  ebuild.** Two halves. The per-package loop never checked for cancellation, so
+  a Ctrl-C during a whole-overlay `--depth=compile` kept staging trees and
+  spawning `ebuild` for every remaining package, reporting each as SKIPPED — a
+  word that reads as "considered and found not to apply" rather than "you
+  stopped me". And the package that was *already building* fared worse: the
+  child is spawned through `CommandContext`, so the interrupt killed it, the
+  phase counted as started-and-failed, and the gate reported **FAILED with
+  error findings and exit 1** — telling the operator their ebuild is broken
+  because they pressed Ctrl-C. Both are now reported as interrupted. The second
+  guard sits in `RunBuildGates`, on the path all three drivers share
+  (`overlay validate`, the applier, and realign's `Prove`), so none of them can
+  keep blaming a candidate for a signal. The partial transcript is still
+  retained — it is evidence someone may want.
+
+- **A staged Manifest no longer describes files that are not there.**
+  `publishedManifestBytes` copied the published Manifest verbatim. A Manifest is
+  DIST-only just when the repository sets `thin-manifests = true`; Portage's
+  default is `thin=false`, and the file then also carries `EBUILD`, `AUX` and
+  `MISC` records. `Stage` copies the candidate ebuild and the package's
+  `files/` — not `metadata.xml`, not the sibling ebuilds — so those records name
+  files the staged tree does not have, `digestcheck` raises `FileNotFound`, and
+  `ebuild` dies before the first phase marker: every build gate SKIPPED for a
+  package that would have built. Invisible on `::bentoo`, which sets
+  thin-manifests, and broken on any overlay that does not — and `--overlay`
+  accepts any path. The retired `manifestDistLines` filtered for exactly this
+  reason; dropping the filter along with the helper was the regression. Each
+  surviving DIST line still travels byte-for-byte, because Portage verifies
+  those digests against the archive on disk.
 
 - **A SKIP no longer denies the file it was read from.** When distfile names
   came through the caller seam, every refusal appended "the names searched for
