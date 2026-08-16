@@ -601,7 +601,22 @@ func PrepopulateFromCache(distdir, cacheDir string, names []string) int {
 func ManifestDistLines(body []byte) []byte {
 	var kept []string
 	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "DIST ") {
+		// The SAME test ParseManifestDistFilenames applies, and that is the whole
+		// point of spelling it this way rather than as HasPrefix("DIST ").
+		//
+		// The two functions read the same file for the same run: one decides
+		// which archives the option gate looks for, the other decides which
+		// records the staged Manifest carries. A line that is a DIST record to
+		// one and not to the other — an indented one, or one separated by a tab —
+		// produces a report that proves and denies the same file at once. The
+		// field split is the more permissive of the two, so it is the one both
+		// converge on.
+		//
+		// The line is appended UNTOUCHED whatever its shape: Portage verifies
+		// these digests against the archive on disk, and a record that survived a
+		// round-trip through some normalised form is a record the build gates
+		// fail on.
+		if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "DIST" {
 			kept = append(kept, line)
 		}
 	}

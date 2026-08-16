@@ -258,6 +258,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **`overlay validate --help` no longer promises a read-only run at every
+  depth.** "Nothing is built, downloaded or changed" was *accurate* on `main`:
+  every build gate reachable from this entry point reported SKIPPED, so whatever
+  `--depth` said, nothing was ever built. Wiring the seams made those gates real
+  — `--depth=configure` now stages each candidate and runs upstream's own build
+  phases against it, compiling code and fetching any distfile this host does not
+  hold, across every package the selector matches. The published overlay is
+  still never written to, but "read-only" stopped being true of the *host*, and
+  a command whose own help denies that is how someone starts a whole-overlay
+  build by accident. Both the help and the file header now qualify the promise
+  by depth.
+
+- **An interrupted build is no longer reported as one that could not be
+  started.** `buildDepthGates` funnelled every `RunBuildGates` error into "the
+  build gates for X could not be started" — accurate when that function errored
+  about the *request* and never about the build, and false since the interrupt
+  guard began returning the cancellation the same way. The package the Ctrl-C
+  actually landed on was described as never having begun, while every *later*
+  package in the same sweep got the correct wording from `interruptedResult`:
+  one report, two accounts of one event.
+
+- **The two DIST-record parsers now agree on what a DIST line is.**
+  `ManifestDistLines` matched `HasPrefix("DIST ")` and
+  `ParseManifestDistFilenames` splits fields, so a tab-separated or indented
+  record was a distfile to one and invisible to the other. They read the same
+  file for the same run — one decides which archives the option gate looks for,
+  the other which records the staged Manifest carries — so the disagreement
+  produced a report that proved and denied the same file at once. Both use the
+  field split now; the record's bytes still travel untouched.
+
 - **An interrupted run no longer publishes the bump one run later.** Blocking
   the publish inside the interrupted run was not enough, because one thing it
   produces outlives it: the `StageRecord` written beside the retained tree. Its

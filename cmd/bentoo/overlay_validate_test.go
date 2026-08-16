@@ -589,3 +589,27 @@ func TestOverlayValidate_AnInterruptedTextRunAlsoExits130(t *testing.T) {
 		t.Errorf("exit code %d, want 130; the text and --json paths must agree on what an interruption is", code)
 	}
 }
+
+// TestOverlayValidate_HelpNoLongerPromisesAReadOnlyRunAtEveryDepth pins the
+// help text against the change this story made to the command's behaviour.
+//
+// "Nothing is built, downloaded or changed" was ACCURATE on main: every build
+// gate reachable from this entry point reported SKIPPED, so whatever --depth
+// said, nothing was ever built. Wiring the seams made the gates real, and the
+// promise became a command that compiles upstream code and fetches distfiles
+// across every package the selector matches while its own help says it does
+// neither. That is how someone starts a whole-overlay build by accident.
+func TestOverlayValidate_HelpNoLongerPromisesAReadOnlyRunAtEveryDepth(t *testing.T) {
+	long := newValidateCmd().Long
+
+	if strings.Contains(long, "Nothing is built, downloaded or") {
+		t.Error("the help still promises unconditionally that nothing is built or downloaded; " +
+			"--depth above `options` does both")
+	}
+	if !strings.Contains(strings.ToLower(long), "at the default depth nothing is built") {
+		t.Error("the help does not qualify the read-only promise by depth")
+	}
+	if !strings.Contains(long, "--depth") {
+		t.Error("the help never names --depth, the flag that turns this into a command that builds")
+	}
+}

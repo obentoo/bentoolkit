@@ -17,11 +17,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// This file is `bentoo overlay validate`: the read-only gate that asks whether
-// an ebuild still matches the source it points at, by reading the build options
-// the upstream archive declares, reading the ones the ebuild passes, and
-// subtracting. It builds nothing, needs no privilege, makes no network call and
-// asks no model.
+// This file is `bentoo overlay validate`: the gate that asks whether an ebuild
+// still matches the source it points at, by reading the build options the
+// upstream archive declares, reading the ones the ebuild passes, and
+// subtracting. At the DEFAULT depth it builds nothing, needs no privilege,
+// makes no network call and asks no model.
+//
+// THAT SENTENCE USED TO HAVE NO QUALIFIER, and it was true until this story
+// wired the build seams: every build gate reached from here SKIPPED, so the
+// command really was read-only whatever `--depth` said. It now stages each
+// candidate outside the overlay and runs upstream's own build phases against
+// it, which compiles code and fetches any distfile this host does not already
+// hold. The published overlay is still never written to — but "read-only" has
+// stopped being true of the HOST, and a command that says otherwise in its own
+// help is how an operator runs a whole-overlay compile by accident.
 //
 // # Where the operator-facing text goes
 //
@@ -54,8 +63,15 @@ func newValidateCmd() *cobra.Command {
 		Use:   "validate [category[/package]]",
 		Short: "Check that each ebuild still matches the source it points at",
 		Long: `Read the build options the upstream archive declares, read the ones the
-ebuild passes, and report the difference. Nothing is built, downloaded or
-changed: the archive is the one already on disk, put there by the manifest step.
+ebuild passes, and report the difference. At the default depth nothing is built,
+downloaded or changed: the archive is the one already on disk, put there by the
+manifest step.
+
+--depth above "options" is different. Each candidate is staged outside the
+overlay and upstream's own build phases are run against it, so that depth
+compiles code and downloads any distfile this host does not already hold — over
+every package the selector matches. The published overlay is still never written
+to.
 
 This catches the failure class where a version bump moves the version and the
 ebuild stays put. In media-plugins/gst-plugins-qt6 upstream removed the aalib

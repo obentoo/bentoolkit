@@ -575,9 +575,25 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		LogDir: opts.LogDir,
 	}, BuildDeps{})
 	if err != nil {
-		// RunBuildGates errors about the REQUEST and never about the build, so
-		// this is a caller's bug rather than a verdict on the ebuild — and it is
-		// still one ebuild reporting why while the run carries on.
+		// AN INTERRUPTION IS NOT A REQUEST THAT COULD NOT BE STARTED, and this
+		// branch used to say it was. The sentence below was written when
+		// RunBuildGates errored about the REQUEST and never about the build, so
+		// every error here really was a caller's bug. The interrupt guard inside
+		// RunBuildGates now returns the cancellation as an error too, and
+		// answering a build that ran for minutes and was KILLED with "could not
+		// be started" is simply false — worse, it disagreed with the wording
+		// every LATER package in the same sweep got from interruptedResult.
+		//
+		// The reason stays a SKIP because the run-level ctx.Err() check below
+		// turns the sweep itself into an error; these gates only have to describe
+		// the package honestly in the report that check hands back.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return skippedBuildGates(depth, fmt.Sprintf(
+				"the run was interrupted while %s-%s was building, so no phase reached a verdict and this "+
+					"report says nothing about this ebuild: %v", target.atom, target.version, err))
+		}
+		// A caller's bug rather than a verdict on the ebuild — and still one
+		// ebuild reporting why while the run carries on.
 		return skippedBuildGates(depth, fmt.Sprintf("the build gates for %s-%s could not be started: %v",
 			target.atom, target.version, err))
 	}

@@ -3,6 +3,7 @@ package distfiles
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -295,5 +296,45 @@ func TestPrepopulateFromCacheSkipsAnExistingDestination(t *testing.T) {
 	}
 	if string(data) != "local" {
 		t.Errorf("existing distdir file overwritten: %q", data)
+	}
+}
+
+// TestManifestDistLinesAgreesWithParseManifestDistFilenames pins the two DIST
+// parsers to one notion of what a DIST record looks like.
+//
+// They read the same file for the same run — one decides which archives the
+// option gate looks for, the other decides which records the staged Manifest
+// carries — so a line that is a record to one and not to the other produces a
+// report that proves and denies the same file at once. ManifestDistLines used
+// HasPrefix("DIST "), which a tab or a leading space defeats;
+// ParseManifestDistFilenames splits fields, which neither defeats.
+func TestManifestDistLinesAgreesWithParseManifestDistFilenames(t *testing.T) {
+	body := "DIST plain-1.tar.gz 1 BLAKE2B aa SHA512 bb\n" +
+		"DIST\ttabbed-2.tar.gz 2 BLAKE2B aa SHA512 bb\n" +
+		"  DIST indented-3.tar.gz 3 BLAKE2B aa SHA512 bb\n" +
+		"EBUILD pkg-1.ebuild 4 BLAKE2B aa SHA512 bb\n" +
+		"DISTANT not-a-record.tar.gz 5 BLAKE2B aa SHA512 bb\n"
+
+	path := filepath.Join(t.TempDir(), "Manifest")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the Manifest: %v", err)
+	}
+
+	kept := string(ManifestDistLines([]byte(body)))
+	for _, name := range ParseManifestDistFilenames(path) {
+		if !strings.Contains(kept, name) {
+			t.Errorf("ParseManifestDistFilenames finds %q but ManifestDistLines drops its record; the option "+
+				"gate would look for an archive the staged Manifest never names", name)
+		}
+	}
+
+	// The converse, so the agreement is not bought by keeping everything: a
+	// record type that is not DIST, and a word that merely starts with it, stay
+	// out.
+	if strings.Contains(kept, "pkg-1.ebuild") {
+		t.Error("an EBUILD record survived into the staged Manifest")
+	}
+	if strings.Contains(kept, "not-a-record.tar.gz") {
+		t.Error("a DISTANT line was read as a DIST record")
 	}
 }

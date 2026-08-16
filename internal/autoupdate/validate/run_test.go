@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // overlayWith lays out a minimal overlay holding one ebuild and returns its
@@ -1314,5 +1315,54 @@ func TestRun_AMidSweepInterruptStillListsTheUnexaminedPackages(t *testing.T) {
 	if len(got.Results) != 2 {
 		t.Errorf("the report names %d of the 2 packages in view; the one the sweep never reached was dropped "+
 			"rather than reported as interrupted", len(got.Results))
+	}
+}
+
+// TestRun_AnInterruptedBuildIsNotReportedAsUnstartable pins the wording of the
+// one package a Ctrl-C actually lands on.
+//
+// buildDepthGates funnelled every RunBuildGates error into "the build gates for
+// X could not be started". That sentence was written when RunBuildGates errored
+// about the REQUEST and never about the build, so it was accurate. The
+// interrupt guard inside RunBuildGates now returns the cancellation as an error
+// too, and a build that ran and was killed was being described as one that
+// never began — while every LATER package in the same sweep got
+// interruptedResult's correct wording. One report, two accounts of one event.
+//
+// `ebuild` is a stub that outlives the deadline, so the child really is killed
+// by the context rather than failing on its own.
+func TestRun_AnInterruptedBuildIsNotReportedAsUnstartable(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{
+		"emerge": "#!/bin/sh\nexit 0\n",
+		"ebuild": "#!/bin/sh\nexec /bin/sleep 30\n",
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	got, err := Run(ctx, Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: t.TempDir(),
+		StagedManifest: func(string) ([]byte, error) {
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		},
+	})
+	if err == nil {
+		t.Fatal("the run outlived its deadline without reporting an error")
+	}
+
+	res := onlyResult(t, got)
+	for _, gate := range []string{GatePatches, GateConfigure} {
+		g := gateOf(t, res, gate)
+		if strings.Contains(g.Reason, "could not be started") {
+			t.Errorf("the %s gate says the build could not be started (%q); it ran and was killed, and the "+
+				"later packages of the same sweep are told so in different words", gate, g.Reason)
+		}
+		if !strings.Contains(g.Reason, "interrupted") {
+			t.Errorf("the %s gate does not say the run was interrupted (%q)", gate, g.Reason)
+		}
 	}
 }
