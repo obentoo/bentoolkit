@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A proved realignment can now actually be published — per package, on
+  evidence, and only on the maintainer's yes.** `realign.Promote` shipped with
+  story 034's Stage 2 carrying every guard R5.3–R5.5 ask for, and nothing ever
+  called it: a realignment could be proposed, staged, built and approved of in
+  principle, and the answer still went nowhere. `overlay compare --realign
+  --depth=<rung>` now asks, after each proof that PASSED, one question per
+  package naming its atom, and a yes replaces the published ebuild with the
+  exact bytes the gates read (`cmd/bentoo/overlay_compare_promote.go`, wired in
+  `cmd/bentoo/overlay_compare_depth.go`).
+
+  Three properties hold by construction, and each carries a test: the question
+  is only put when at least one gate reported PASS — measured on this host
+  (2026-08-10, re-confirmed 2026-08-16), a staged tree carries no Manifest, so
+  `ebuild` dies in setup and every gate SKIPs, and an all-SKIPPED proof
+  satisfies `PromotionDecision` while proving nothing, so it is refused as "a
+  proof of nothing" instead of asked about; `--yes` keeps buying the build
+  prompt only and never answers publication (its help text now says so —
+  `cmd/bentoo/overlay_compare.go`); and a refusal from `Promote`
+  (`ErrNotPromoted`) renders apart from a write error, because "an authority
+  said no, nothing was written" and "the write broke after every authority said
+  yes" must never be readable as one another.
+
 - **The `::gentoo` ebuild is now the stated baseline for every `::bentoo`
   ebuild, and `overlay compare --realign` says how far each one has drifted
   from it.** The policy was never written down anywhere. Divergence is allowed —

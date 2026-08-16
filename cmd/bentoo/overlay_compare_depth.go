@@ -26,11 +26,13 @@ import (
 // into that file would have left its first sentence false for whoever read it
 // next, which is the sort of drift a promise like that does not survive.
 //
-// Nothing here writes into the PUBLISHED overlay. Publishing is realign.Promote,
-// it takes a maintainer's approval as a parameter, and this pass does not call
-// it: the confirmation below buys a BUILD, and "yes, spend the machine time" is
-// not "yes, publish it" (design D8 — the model proposes, the gates prove, the
-// maintainer approves, and no two of the three are collapsed).
+// Writing into the PUBLISHED overlay is realign.Promote's alone, and it happens
+// only through offerRealignPublish (overlay_compare_promote.go): per package,
+// only on a proof at least one gate actually read, and only on a maintainer's
+// yes given in a terminal. The confirmation below buys a BUILD, and "yes, spend
+// the machine time" is not "yes, publish it" (design D8 — the model proposes,
+// the gates prove, the maintainer approves, and no two of the three are
+// collapsed; D8c is the shape of the third question).
 //
 // # Where the text goes, and why not through logger
 //
@@ -176,7 +178,7 @@ func realignPlanLines(plan realignPlan) []string {
 		lines = append(lines, "  "+atom)
 	}
 	lines = append(lines,
-		"  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing it is a separate decision, and this run takes none.")
+		"  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing.")
 	return lines
 }
 
@@ -407,6 +409,15 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			// test never reaches this line, because realignProve is the seam.
 		})
 		printRealignProof(c.name, proof, err)
+
+		// The publish question is put only for a proof that PASSED and that at
+		// least one gate actually read: an errored prove was never examined, an
+		// empty gate list is a proof of nothing (printRealignProof has already
+		// said so), and a failed proof was refused by the gates themselves.
+		if err != nil || len(proof.Gates) == 0 || !proof.Passed {
+			continue
+		}
+		offerRealignPublish(c, proof, overlayPath)
 	}
 }
 
