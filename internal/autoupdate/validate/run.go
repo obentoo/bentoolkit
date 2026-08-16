@@ -388,8 +388,20 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		// that found nothing wrong. An operator scripting this would read a
 		// killed run as a pass.
 		if err := ctx.Err(); err != nil {
+			examined := len(report.Results)
+			// The packages BELOW this one are listed here too, exactly as the
+			// pre-package branch lists them — and without this they were not.
+			// That branch only ever fires for a run cancelled before its FIRST
+			// package, because this check returns first on every real mid-sweep
+			// Ctrl-C. So the rule it states in its own comment ("every remaining
+			// package is still REPORTED") held for a case that barely happens,
+			// while the case that does happen silently dropped every unexamined
+			// package from the report the caller goes on to print.
+			for _, remaining := range targets[i+1:] {
+				report.Results = append(report.Results, interruptedResult(remaining, depth, err))
+			}
 			return report, fmt.Errorf("the validation run was interrupted after %d of %d ebuilds, so this "+
-				"report is partial and says nothing about the rest: %w", len(report.Results), len(targets), err)
+				"report is partial and says nothing about the rest: %w", examined, len(targets), err)
 		}
 	}
 	return report, nil

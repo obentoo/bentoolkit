@@ -1218,3 +1218,50 @@ func TestApplierPromote_AnInterruptedRunBlamesTheInterruptNotTheProofPolicy(t *t
 			"that had nothing to do with it: %s", msg)
 	}
 }
+
+// TestApplierPromote_AnInterruptedRunRecordsNoProofForTheNextRun closes the
+// interrupt invariant's remaining leak, which is the only one that crosses a
+// process boundary.
+//
+// refuseOnInterrupt keeps the interrupted run from publishing. The record
+// written beside the retained tree OUTLIVES that run: its gates were never
+// asked and therefore report SKIPPED, Proves() accepts any PASS-or-SKIPPED list
+// at the requested depth, and the next --apply takes the R10.1 reuse path --
+// which consults neither refuseUnproved nor PromotionDecision -- under a
+// context that is not cancelled. So Ctrl-C published one run later instead of
+// not at all.
+func TestApplierPromote_AnInterruptedRunRecordsNoProofForTheNextRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	applier, _, pkg, _, _ := promoteFixture(t,
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierContext(ctx),
+		WithApplierDepth(validate.DepthOptions))
+
+	inner := applier.execCommand
+	applier.execCommand = func(_ context.Context, name string, arg ...string) *exec.Cmd {
+		// Detached on purpose -- see the sibling tests above.
+		cmd := inner(context.Background(), name, arg...) //nolint:contextcheck // the detached child IS the scenario
+		cancel()
+		return cmd
+	}
+
+	result, err := applier.Apply(pkg, false)
+	if err == nil {
+		t.Fatal("the interrupted apply reported no error")
+	}
+
+	root := result.StagedPath
+	if root == "" {
+		t.Fatal("the interrupted apply retained no staged tree, so there is nothing to ask what was recorded beside it")
+	}
+
+	record, rerr := validate.ReadStageRecord(root)
+	if rerr != nil {
+		return // No record at all is the strongest form of the guarantee.
+	}
+	if proved, why := record.Proves(validate.DepthOptions); proved {
+		t.Errorf("the interrupted run left a record the next --apply promotes on without running a gate (%s); "+
+			"the reuse path consults neither refuseUnproved nor PromotionDecision, so the bump reaches the "+
+			"overlay one run later instead of not at all", why)
+	}
+}

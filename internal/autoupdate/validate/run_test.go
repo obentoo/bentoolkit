@@ -1253,3 +1253,66 @@ func TestRun_ACancelledRunIsAnErrorAndNotAQuietPass(t *testing.T) {
 			"gate list cannot tell an interruption from a package that was examined")
 	}
 }
+
+// addPackageTo lays a second package into an overlay that already exists, so a
+// sweep has more than one target and "the packages after the one being
+// validated" becomes a set a test can observe. overlayWith cannot do this: it
+// creates its own t.TempDir() root per call.
+func addPackageTo(t *testing.T, root, atom, version, ebuild, distfile string) {
+	t.Helper()
+	parts := strings.SplitN(atom, "/", 2)
+	if len(parts) != 2 {
+		t.Fatalf("atom %q is not category/package", atom)
+	}
+	dir := filepath.Join(root, parts[0], parts[1])
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("laying out %s: %v", atom, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, parts[1]+"-"+version+".ebuild"), []byte(ebuild), 0o644); err != nil {
+		t.Fatalf("writing the ebuild of %s: %v", atom, err)
+	}
+	manifest := "DIST " + distfile + " 100 BLAKE2B deadbeef SHA512 deadbeef\n"
+	if err := os.WriteFile(filepath.Join(dir, "Manifest"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("writing the Manifest of %s: %v", atom, err)
+	}
+}
+
+// TestRun_AMidSweepInterruptStillListsTheUnexaminedPackages pins the rule the
+// pre-package branch states and the post-package branch did not keep: a package
+// in view is never left unmentioned.
+//
+// The cancellation is fired from inside the Manifest seam, which is to say
+// DURING the first package. That is what a real Ctrl-C hits: the post-package
+// check returns first, so the branch that lists the remaining packages was only
+// ever reachable for a run cancelled before it had started its first one. Every
+// unexamined package silently vanished from the report the caller then prints.
+func TestRun_AMidSweepInterruptStillListsTheUnexaminedPackages(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	addPackageTo(t, overlay, "dev-libs/zzsecond", "2.0", "emesonargs=()\n", "zzsecond-2.0.tar.gz")
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var seamCalls int
+	got, err := Run(ctx, Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: t.TempDir(),
+		StagedManifest: func(string) ([]byte, error) {
+			seamCalls++
+			cancel()
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		},
+	})
+
+	if seamCalls == 0 {
+		t.Fatal("the Manifest seam never ran, so the cancellation never fired and this test asserted nothing")
+	}
+	if err == nil {
+		t.Fatal("a cancelled run reported no error")
+	}
+	if len(got.Results) != 2 {
+		t.Errorf("the report names %d of the 2 packages in view; the one the sweep never reached was dropped "+
+			"rather than reported as interrupted", len(got.Results))
+	}
+}

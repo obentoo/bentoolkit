@@ -258,6 +258,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **An interrupted run no longer publishes the bump one run later.** Blocking
+  the publish inside the interrupted run was not enough, because one thing it
+  produces outlives it: the `StageRecord` written beside the retained tree. Its
+  gates were never asked and therefore report SKIPPED, `Proves()` accepts any
+  PASS-or-SKIPPED list at the requested depth, and the next `--apply` takes the
+  R10.1 reuse path — which consults neither `refuseUnproved` nor
+  `PromotionDecision` — under a context that is not cancelled. Ctrl-C published,
+  just a run later and by a quieter route.
+
+  A cancelled context now writes no record at all. Nothing else changes and
+  nothing is lost: R10.5 already revalidates a retained tree carrying no
+  readable record, because absence of a claim is not a passing claim, and the
+  tree itself still stays on disk as the failure's evidence.
+
+- **A mid-sweep interrupt no longer drops the packages it never reached.**
+  `Run` has two cancellation checks, and only the one *before* a package listed
+  the remaining targets as interrupted. The one *after* a package returns first
+  on every real Ctrl-C, so the rule the first states — a package in view is
+  never left unmentioned — held only for a run cancelled before its very first
+  package. Every unexamined package silently vanished from the report. Both
+  branches now list them.
+
 - **An interrupted `overlay validate` now prints the partial report it already
   assembled, and exits 130 instead of 2.** `Run` does not merely fail when a
   sweep is stopped: it appends one `interruptedResult` per package it never
