@@ -13,9 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a Manifest — it describes the versions already published, not the candidate —
   and Portage refuses an ebuild whose Manifest does not describe its archive. So
   every build gate over a staged tree died in the setup phase and came back
-  SKIPPED, which promotion read as acceptable. Measured before this change on
-  the realign path: a proof of 13 packages "passed" with 26/26 gates SKIPPED and
-  zero builds executed.
+  SKIPPED, which promotion read as acceptable.
+
+  **What this entry covers, and what it does not.** The cause above was first
+  measured on the *realign* path — a proof of 13 packages "passed" with 26/26
+  gates SKIPPED and zero builds executed. That measurement is why the seams
+  exist, but the realign path is **not** fixed here. `realign.Prove` calls
+  `Stage` and `RunBuildGates` directly rather than going through `validate.Run`,
+  so it supplies no Manifest, its gates still report SKIPPED, and
+  `PromotionDecision` still returns passed for an all-SKIPPED list. What is
+  fixed is `overlay validate --depth` and the autoupdate applier, which do go
+  through `Run`. Closing the realign path needs the same seam wired into a
+  second caller and is tracked separately.
 
   `validate.Options` gains two optional seams, `DistNames` and `StagedManifest`
   (`internal/autoupdate/validate/run.go`). The caller supplies the distfile
@@ -258,14 +267,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ever reported quoted 12 lines of boilerplate and none of the cause.
 
   The window now ends at `die`'s banner and appends that banner, which is also
-  the line the staging-repository name is scrubbed out of. A transcript with no
-  banner keeps exactly the old behaviour.
+  the line the staging-repository name is scrubbed out of, **plus the message
+  `die` was called with**, which Portage prints immediately after the banner.
+  That last part was a second measurement: ending at the banner was still one
+  line short, and for the common `emake || die "emake failed"` shape — a phase
+  that produces no diagnostic of its own — die's message is the entire cause. An
+  excerpt ending at the banner collapsed to a line that only repeats what the
+  gate's reason already says. A transcript with no banner keeps exactly the old
+  behaviour.
 
-  The hermetic test that should have caught this was passing vacuously: its
-  fixture carried three non-empty lines after the last phase marker where a real
-  failure carries twenty-four, so the truncation never engaged. The fixture now
-  carries `die`'s real epilogue, and with the old tail-quoting restored it fails
-  with precisely the production symptom.
+  The hermetic test that should have caught the first half was passing
+  vacuously: its fixture carried three non-empty lines after the last phase
+  marker where a real failure carries twenty-four, so the truncation never
+  engaged. The fixture now carries `die`'s real epilogue, and with the old
+  tail-quoting restored it fails with precisely the production symptom. A second
+  fixture covers the bare-`die` shape, which the first cannot: there, `meson`
+  happens to print a diagnostic before dying, so the loss was survivable.
+
+- **A missing build dependency no longer reports as a broken ebuild.**
+  `overlay validate --depth` drove `ebuild … clean <phase>` with no dependency
+  pre-check. `ebuild` does no dependency resolution, so on a host lacking a
+  `DEPEND` atom the phase started, died on the missing header, and the gate
+  reported FAILED with error findings and exit 1 — blaming the candidate for
+  something only that machine was missing. The autoupdate applier has answered
+  this since story 031 and reports SKIPPED naming the atoms to install, so the
+  same host gave opposite verdicts for the same package depending on which
+  command asked. Both now call `DependenciesSatisfied` and say the same
+  sentences.
+
+- **An interrupted `overlay validate` stops building.** The per-package loop
+  never checked for cancellation. While the build gates could not run this cost
+  nothing; now a Ctrl-C during a whole-overlay `--depth=compile` kept staging
+  trees and spawning `ebuild` for every remaining package, and reported each as
+  SKIPPED — a word that reads as "considered and found not to apply" rather than
+  "you stopped me". Remaining packages are still reported, now as interrupted.
+
+- **A SKIP no longer denies the file it was read from.** When distfile names
+  came through the caller seam, every refusal appended "the names searched for
+  were supplied by the caller, not read from a Manifest". True of the `validate`
+  package, false of the operator's world: `overlay validate` supplies names it
+  read out of the published Manifest, so the sentence denied the existence of
+  the file that had just been read. It now says the list arrived from outside
+  and stops there.
 
 - **A baseline review could be a silent no-op.** The `::gentoo` tree was located
   only by walking the packages in view, so a run whose packages `::gentoo` does
