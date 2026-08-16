@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -339,5 +341,111 @@ func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T)
 
 	if !exited || code != 1 {
 		t.Errorf("exit code: got %d (exited=%v), want 1 for an error finding from the configure gate", code, exited)
+	}
+}
+
+// MERGE FRAGMENT — story 037, sub-task 4.1 (overlay_validate.go populates the
+// seams).
+//
+// Target file: cmd/bentoo/overlay_validate_test.go (APPEND at the end).
+// Do NOT repeat the `package main` clause.
+//
+// IMPORTS MERGE, necessary and sufficient: "os" and "path/filepath" join the
+// target's existing block (context, strings, testing, and the validate
+// import). One block, not two.
+//
+// # Symbols
+//
+// Added: the two tests. Borrowed, never re-declared: stubValidateRunner and
+// captureExit (this file / snapshot_test.go).
+//
+// # PINNED CONTRACT (design D1, D3 — S037-R4, R4.1, R4.2, R4.3)
+//
+//	Options.DistNames      func(pkgDir string) ([]string, error)
+//	Options.StagedManifest func(pkgDir string) ([]byte, error)
+//
+// Above depth `options` the command populates BOTH seams from the published
+// `pkgDir/Manifest` — the same-version case, where the published digests are
+// the right ones (Clarify decision). Without `--depth` the Options are
+// constructed exactly as today: both seams nil, so
+// TestOverlayValidate_DepthIsHandedToTheRunner's field-by-field capture stays
+// honest and the shipped read-only contract survives (R4.3, R11.3).
+//
+// The producers are asserted BEHAVIOURALLY, by calling the captured funcs
+// against a package directory this test lays out: they are keyed by the pkgDir
+// they are handed (design D2 — Run walks many packages), and what must travel
+// is the published Manifest's DIST record, digests included, because Portage
+// verifies them (R4.2). Whether the command sends the file verbatim or its
+// DIST lines only is deliberately NOT pinned — both satisfy R4.2, and the
+// staged tree holds none of the files an AUX/EBUILD record would describe.
+
+// TestOverlayValidate_BuildDepthPopulatesTheManifestSeams is R4.1/R4.2: the
+// runner is handed producers that answer from the published Manifest.
+func TestOverlayValidate_BuildDepthPopulatesTheManifestSeams(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if seen.DistNames == nil {
+		t.Fatal("--depth=configure handed the runner no DistNames producer; the option gate over a staged " +
+			"tree then has no source of names and reports SKIPPED — the exact skip R11.2's execution half removes (R4.1)")
+	}
+	if seen.StagedManifest == nil {
+		t.Fatal("--depth=configure handed the runner no StagedManifest producer; the build gates then run " +
+			"against a staged tree Portage refuses, and the depth is a deeper class of skip (R4.1)")
+	}
+
+	// The producers' behaviour, against a package directory of this test's own.
+	pkgDir := t.TempDir()
+	const distLine = "DIST gst-plugins-good-1.29.2.tar.gz 5872164 BLAKE2B feedface SHA512 cafebabe"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(distLine+"\n"), 0o644); err != nil {
+		t.Fatalf("writing the published Manifest: %v", err)
+	}
+
+	body, err := seen.StagedManifest(pkgDir)
+	if err != nil {
+		t.Fatalf("StagedManifest(%s): %v — the directory holds a readable Manifest", pkgDir, err)
+	}
+	if !strings.Contains(string(body), distLine) {
+		t.Errorf("the supplied Manifest content does not carry the published DIST record with its digests:\n"+
+			"got  %q\nwant it to contain %q\nPortage VERIFIES these digests, so anything less leaves the build "+
+			"gates a Manifest they fail on (R4.2)", body, distLine)
+	}
+
+	names, err := seen.DistNames(pkgDir)
+	if err != nil {
+		t.Fatalf("DistNames(%s): %v", pkgDir, err)
+	}
+	found := false
+	for _, name := range names {
+		if name == "gst-plugins-good-1.29.2.tar.gz" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DistNames = %v; the published Manifest's distfile name did not travel, so the option gate "+
+			"has nothing to select from (R4.1)", names)
+	}
+}
+
+// TestOverlayValidate_NoDepthLeavesTheSeamsNil is R4.3: a depth-less run
+// constructs Options exactly as today. nil and populated are different
+// contracts inside the runner — nil parses the package's own Manifest, and a
+// depth-less run must keep doing exactly that, byte for byte.
+func TestOverlayValidate_NoDepthLeavesTheSeamsNil(t *testing.T) {
+	seen := stubValidateRunner(t, validate.Report{})
+
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
+	})
+
+	if seen.DistNames != nil {
+		t.Error("a depth-less run populated DistNames; the shipped read-only contract is Options exactly as " +
+			"today, and a seam nobody asked for is a behaviour change waiting to be noticed (R4.3)")
+	}
+	if seen.StagedManifest != nil {
+		t.Error("a depth-less run populated StagedManifest; nothing travels on the shipped path (R4.3)")
 	}
 }

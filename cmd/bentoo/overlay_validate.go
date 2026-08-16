@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -193,7 +195,16 @@ func runValidate(cmd *cobra.Command, args []string) {
 	// shipped read-only run neither names nor creates a scratch directory
 	// (R11.3), and it is the same directory `overlay autoupdate --apply` stages
 	// under, so a tree one command proves is a tree the other can find.
+	// The three values below are set together or not at all, and the ONE branch
+	// that decides them is this depth comparison. A depth-less run leaves all
+	// three at their zero value, so the Options it builds are the Options this
+	// command has always built — nil seams included (S037-R4.3, R11.3). nil and
+	// populated are different contracts inside the runner, not a shortcut for the
+	// same one: a nil DistNames parses the package's own Manifest, and a nil
+	// StagedManifest means nothing travels at all.
 	var stagingRoot string
+	var distNames func(pkgDir string) ([]string, error)
+	var stagedManifest func(pkgDir string) ([]byte, error)
 	if depth > validate.DepthOptions {
 		stagingRoot, err = autoupdateStagingRoot()
 		if err != nil {
@@ -201,6 +212,15 @@ func runValidate(cmd *cobra.Command, args []string) {
 			osExit(1)
 			return
 		}
+		// This is the composition design D1 puts here and nowhere else: validate
+		// only accepts what a caller supplies, autoupdate owns Manifest
+		// GENERATION, and cmd/bentoo is the one place that already imports both.
+		// This command validates each package AT ITS PUBLISHED VERSION — it bumps
+		// nothing — so the published Manifest is the record that describes the
+		// archive actually on disk, and both seams read it (S037-R4.1, S037-R4.2,
+		// design D3).
+		distNames = publishedManifestDistNames
+		stagedManifest = publishedManifestBytes
 	}
 
 	report, err := validateRunnerFn(ctx, validate.Options{
@@ -210,8 +230,10 @@ func runValidate(cmd *cobra.Command, args []string) {
 		// depth.String() rather than the raw flag: the two are the same string
 		// for anything ParseDepth accepted, and going through the ladder means
 		// the runner is handed a name it can always parse back.
-		Depth:       depth.String(),
-		StagingRoot: stagingRoot,
+		Depth:          depth.String(),
+		StagingRoot:    stagingRoot,
+		DistNames:      distNames,
+		StagedManifest: stagedManifest,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(diag, "  validating %s: %v\n", overlayLabel(overlayPath), err)
@@ -225,6 +247,68 @@ func runValidate(cmd *cobra.Command, args []string) {
 		renderValidateText(report)
 	}
 	osExit(report.ExitCode())
+}
+
+// publishedManifestBytes is Options.StagedManifest for this command: the bytes
+// the staged copy of pkgDir must carry before Portage will build in it
+// (S037-R4.2, design D3).
+//
+// # Why the PUBLISHED Manifest, and why byte-for-byte
+//
+// This command bumps nothing. Every ebuild it validates is the one already in
+// the overlay, so the digests the published Manifest records are the digests of
+// the archive on disk — the same-version half of D3's two callers. (The other
+// half, a bump, must feed the GENERATED Manifest instead: the published digests
+// there belong to the release being replaced.)
+//
+// The file travels VERBATIM — read and handed over, never parsed, filtered,
+// re-encoded or line-normalised. Portage VERIFIES the digests on the DIST lines
+// against the archive it finds, so a Manifest that survived a round-trip through
+// some intermediate form is a Manifest the build gates fail on. os.ReadFile is
+// the whole of the transformation, and that is deliberate.
+//
+// # A Manifest that cannot be read is an ERROR, never empty bytes
+//
+// A non-nil seam is a caller taking responsibility for the answer, so an empty
+// result is AUTHORITATIVE — "I looked, and this package publishes nothing"
+// (S037-D2). A package whose Manifest could not be opened has said no such
+// thing. The error travels instead, and validate renders it as a build gate
+// reported SKIPPED carrying these words verbatim (S037-R4.4) — which is why the
+// sentence names what was attempted and the directory needed to reproduce it,
+// rather than only what the operating system said.
+func publishedManifestBytes(pkgDir string) ([]byte, error) {
+	body, err := os.ReadFile(publishedManifestPath(pkgDir)) //nolint:gosec // the path is the package directory the runner is walking, joined with a fixed filename
+	if err != nil {
+		return nil, fmt.Errorf("reading the published Manifest of %s, to give its staged copy the digests Portage verifies: %w", pkgDir, err)
+	}
+	return body, nil
+}
+
+// publishedManifestDistNames is Options.DistNames for this command: the upstream
+// archives the option gate may look for when it reads a STAGED tree, which
+// carries no Manifest of its own (S037-R4.1).
+//
+// It answers BASENAMES and never Manifest lines — the gate looks each name up
+// with os.Stat in the distdir — so the shared parser in internal/common/distfiles
+// answers, and this command holds no second copy of the DIST-line grammar.
+//
+// The read below is not redundant with that parser: ParseManifestDistFilenames
+// answers a missing or unreadable Manifest with an empty slice, and through a
+// non-nil seam an empty slice is an ANSWER (S037-D2). Reading first is what keeps
+// "I could not look" from being reported as "this package publishes no archive".
+func publishedManifestDistNames(pkgDir string) ([]string, error) {
+	path := publishedManifestPath(pkgDir)
+	if _, err := os.ReadFile(path); err != nil { //nolint:gosec // the path is the package directory the runner is walking, joined with a fixed filename
+		return nil, fmt.Errorf("reading the published Manifest of %s, to name the archives the option gate looks for: %w", pkgDir, err)
+	}
+	return distfiles.ParseManifestDistFilenames(path), nil
+}
+
+// publishedManifestPath is the one place this command spells out where a package
+// directory keeps its Manifest, so the two producers above cannot drift into
+// disagreeing about which file they are talking about.
+func publishedManifestPath(pkgDir string) string {
+	return filepath.Join(pkgDir, "Manifest")
 }
 
 // validSelector reports whether a selector can name anything at all. An overlay
