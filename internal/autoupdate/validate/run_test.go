@@ -1105,3 +1105,101 @@ func TestRun_NoManifestSourceIsAReportedSkipNamingTheCondition(t *testing.T) {
 			"the silence this package exists to remove (R2.3, R4.4)", configure.Reason)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Story 037, review round 2 (2026-08-16). Both tests below pin a behaviour the
+// seams CREATED rather than one they were designed to change: before the build
+// gates could run at all, neither condition was reachable.
+// ---------------------------------------------------------------------------
+
+// TestUnbuildableHereReason_SeparatesTheHostFromTheEbuild is the divergence the
+// review found: `ebuild` does no dependency resolution, so a host missing a
+// DEPEND atom makes the phase start and die, and derive reads that as FAILED —
+// a confident verdict about a candidate that may be perfectly fine, with exit 1
+// behind it. The applier has asked this question since story 031; this entry
+// point did not, so the same host answered differently depending on which
+// command was run.
+//
+// The three cases are the three answers, and the difference between the last
+// two is the operator's next action: unsatisfied names atoms to install,
+// undetermined names no atom because none is known.
+func TestUnbuildableHereReason_SeparatesTheHostFromTheEbuild(t *testing.T) {
+	target := ebuildTarget{atom: "media-plugins/gst-plugins-qt6", version: "1.29.2"}
+
+	t.Run("satisfied lets the gates run", func(t *testing.T) {
+		reason := unbuildableHereReason(context.Background(), t.TempDir(), target,
+			newDepsSeam(&depsSeam{}, emergeOnlyTheBump, false))
+		if reason != "" {
+			t.Errorf("a host that holds every dependency stopped the build gates: %q", reason)
+		}
+	})
+
+	t.Run("unsatisfied names the atoms to install", func(t *testing.T) {
+		reason := unbuildableHereReason(context.Background(), t.TempDir(), target,
+			newDepsSeam(&depsSeam{}, emergeWithMissingDeps, false))
+		if reason == "" {
+			t.Fatal("a host missing two dependencies let the build gates run; the phase would die and the " +
+				"ebuild would be reported FAILED for something only this machine is missing")
+		}
+		for _, want := range []string{"media-libs/gst-plugins-base", "dev-qt/qtbase", "install "} {
+			if !strings.Contains(reason, want) {
+				t.Errorf("the skip %q does not carry %q; without the atoms it is not an instruction", reason, want)
+			}
+		}
+	})
+
+	t.Run("undetermined names no atom", func(t *testing.T) {
+		reason := unbuildableHereReason(context.Background(), t.TempDir(), target,
+			newDepsSeam(&depsSeam{}, "", true))
+		if reason == "" {
+			t.Fatal("a probe that could not answer let the build gates run")
+		}
+		if !strings.Contains(reason, "could not be determined") {
+			t.Errorf("the skip %q does not say the question went unanswered", reason)
+		}
+		if strings.Contains(reason, "install ") {
+			t.Errorf("the skip %q instructs the operator to install something, but nothing is known to be "+
+				"missing — the probe failed (mirrors R6.2)", reason)
+		}
+	})
+}
+
+// TestRun_ACancelledRunStopsBuildingAndSaysSo is the cost the seams added to a
+// loop that used to be cheap. Each iteration can now stage a tree and spawn
+// `ebuild`, so a whole-overlay `--depth=compile` that the operator stopped would
+// otherwise keep building — and report every remaining package as SKIPPED, a
+// word that reads as "considered and found not to apply".
+//
+// The package is still REPORTED, because a package in view never goes
+// unmentioned. What is asserted is that it is reported as interrupted.
+func TestRun_ACancelledRunStopsBuildingAndSaysSo(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // before Run, so no iteration can have started
+
+	got, err := Run(ctx, Options{
+		Overlay:        overlay,
+		Distdir:        distdir,
+		Depth:          "configure",
+		StagingRoot:    t.TempDir(),
+		StagedManifest: func(string) ([]byte, error) { return []byte("DIST x 1 BLAKE2B ab SHA512 cd\n"), nil },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	res := onlyResult(t, got)
+	configure := gateOf(t, res, GateConfigure)
+	if configure.Outcome != OutcomeSkipped {
+		t.Fatalf("configure gate: got %q, want SKIPPED", configure.Outcome)
+	}
+	if !strings.Contains(configure.Reason, "interrupted") {
+		t.Errorf("the gate reason %q does not say the run was stopped; \"skipped\" alone reads as a verdict "+
+			"about this ebuild rather than about the run", configure.Reason)
+	}
+	if res.DepthReason == "" {
+		t.Error("an interrupted package reports no depth_reason, so a reader of the JSON who never opens the " +
+			"gate list cannot tell an interruption from a package that was examined")
+	}
+}

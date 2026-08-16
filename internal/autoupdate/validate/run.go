@@ -344,7 +344,26 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	distNames := opts.distNames()
 
 	qa := map[string]qaResult{}
-	for _, target := range targets {
+	for i, target := range targets {
+		// Interruption is checked HERE, before anything is staged or spawned.
+		//
+		// While the build gates could not run this loop was cheap and a late
+		// cancellation cost nothing. Now each iteration can stage a tree and spawn
+		// `ebuild`, so a whole-overlay `--depth=compile` that the operator stopped
+		// would otherwise keep building the rest of the overlay — and, worse,
+		// report every remaining package as SKIPPED, a word that reads as "this
+		// was considered and found not to apply" rather than "you stopped me".
+		//
+		// Every remaining package is still REPORTED, because Run's governing rule
+		// is that a package in view never goes unmentioned. What changes is that
+		// it is mentioned as interrupted.
+		if err := ctx.Err(); err != nil {
+			for _, remaining := range targets[i:] {
+				report.Results = append(report.Results, interruptedResult(remaining, depth, err))
+			}
+			break
+		}
+
 		res := validateOptions(ctx, target, distdir, haveDistdir, distNames)
 		// Before attachQA, so the gates read in ladder order — options, then the
 		// build gates, then the advisory QA scan that decides nothing.
@@ -366,6 +385,32 @@ func unvalidatedResult(target ebuildTarget) EbuildResult {
 		"depth none was requested, so no gate ran and this report says nothing about this ebuild")
 	res.Depth = DepthNone.String()
 	res.DepthRequested = DepthNone.String()
+	return res
+}
+
+// interruptedResult is what a package still in the queue reports when the run
+// was cancelled before it was reached: nothing ran, and the reason says the run
+// was stopped rather than that this package was found wanting.
+//
+// The depth fields follow noteBuildDepth's own rule rather than a second one:
+// they are populated only above DepthOptions, because a --depth-less run must
+// still produce the bytes story 031 shipped (R11.3), and an interrupted run is
+// not a licence to add keys to that document.
+func interruptedResult(target ebuildTarget, depth Depth, err error) EbuildResult {
+	reason := fmt.Sprintf(
+		"the run was interrupted before %s-%s was validated, so no gate ran and this report says nothing about this ebuild: %v",
+		target.atom, target.version, err)
+
+	res := skippedResult(target.atom, target.version, reason)
+	if depth > DepthOptions {
+		// Every gate the requested depth covers is still listed, for the same
+		// reason skippedBuildGates lists them: an unreported gate is
+		// indistinguishable from one that passed.
+		res.Gates = append(res.Gates, SkippedGates(depth, reason)...)
+		res.Depth = DepthNone.String()
+		res.DepthRequested = depth.String()
+		res.DepthReason = reason
+	}
 	return res
 }
 
@@ -467,6 +512,26 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		return skippedBuildGates(depth, err.Error())
 	}
 
+	// A host that lacks a build dependency is not an ebuild that fails to build,
+	// and the two must not arrive at the same verdict. `ebuild` does no
+	// dependency resolution at all: it starts the phase, the phase dies on the
+	// missing header, and derive reads that as FAILED — blaming the candidate for
+	// something only this machine is missing, and exiting 1 on it.
+	//
+	// The applier has answered this since story 031 (runBuildGates, package
+	// autoupdate) and this entry point did not, so the same host could get
+	// opposite verdicts for the same package depending on which command asked.
+	// The sentences below are the applier's, deliberately word-for-word: two
+	// entry points explaining the same condition differently is the divergence
+	// one shared helper exists to prevent (S037-R2.1).
+	//
+	// It runs AFTER the Manifest is in place: the probe resolves the candidate
+	// through Portage, which refuses an ebuild whose Manifest does not describe
+	// its archive — the very condition this story exists to remove.
+	if reason := unbuildableHereReason(ctx, stagedRoot, target, BuildDeps{}); reason != "" {
+		return skippedBuildGates(depth, reason)
+	}
+
 	gates, err := RunBuildGates(ctx, BuildRequest{
 		StagedRoot: stagedRoot,
 		Atom:       target.atom,
@@ -484,6 +549,40 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 			target.atom, target.version, err))
 	}
 	return gates, ""
+}
+
+// unbuildableHereReason answers whether THIS HOST can build the candidate at
+// all, and says why not — or "" when the build gates may proceed.
+//
+// It is the same question, asked with the same helper and answered in the same
+// words, as the applier's runBuildGates (package autoupdate). The two callers
+// stay word-for-word aligned on purpose: the answer is about the machine, not
+// about the bump, so an operator who sees it from `overlay validate` and from
+// `overlay autoupdate` must not have to work out whether they are being told the
+// same thing.
+//
+// Both non-nil answers are a SKIP rather than a FAILED, and the difference
+// between them is the operator's next action: unsatisfied names the atoms to
+// install, undetermined names the probe that could not answer and names no atom,
+// because none is known (mirrors R6.2).
+//
+// deps is a parameter rather than the BuildDeps{} literal the only production
+// caller passes, so that both branches below stay reachable from a hermetic
+// test on a host that does have Portage — the same reasoning BuildDeps.LookPath
+// is separate from ExecCommand for.
+func unbuildableHereReason(ctx context.Context, stagedRoot string, target ebuildTarget, deps BuildDeps) string {
+	satisfied, missing, err := DependenciesSatisfied(ctx, stagedRoot, target.atom, target.version, deps)
+	switch {
+	case err != nil:
+		return fmt.Sprintf(
+			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
+			target.atom, target.version, err)
+	case !satisfied:
+		return fmt.Sprintf(
+			"this host does not hold the build dependencies of %s-%s, so no build phase was run; install %s to validate it here",
+			target.atom, target.version, strings.Join(missing, ", "))
+	}
+	return ""
 }
 
 // skippedBuildGates renders one stopping condition as buildDepthGates' two
@@ -775,14 +874,22 @@ func manifestSource(pkgDir string) distNameSource {
 }
 
 // suppliedSource is the seam's source. Every sentence it produces carries the
-// word "supplied", which is what tells an operator reading a SKIP that no
-// Manifest decided this — so going to look for one would be looking in the wrong
-// place, and the caller that handed the names over is what has to be fixed
-// (S037-R1.6).
+// word "supplied", which is what tells an operator reading a SKIP that this
+// package did not choose the names — the caller did, and the caller is where a
+// wrong list has to be fixed (S037-R1.6).
+//
+// # It says where THIS package got them, and stops there
+//
+// It deliberately does not say what the names are NOT. An earlier wording
+// asserted "not read from a Manifest", which was true of this package and false
+// of the operator's world: `overlay validate` supplies names it read out of the
+// published Manifest, so the sentence denied the existence of the very file that
+// had just been read and sent whoever read it somewhere else. What validate can
+// honestly say is that the list arrived from outside, and that is all this says.
 var suppliedSource = distNameSource{
 	origin:     "the distfile list the caller supplied",
 	listed:     "the caller supplied",
-	attributed: "; the names searched for were supplied by the caller, not read from a Manifest",
+	attributed: "; the names searched for were supplied by the caller rather than read here",
 }
 
 // findDistfile returns the path of the distfile belonging to THIS ebuild
