@@ -33,6 +33,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
 const baselineEbuildBody = "EAPI=8\ninherit gstreamer-meson\nDESCRIPTION=\"Qt6 plugin for GStreamer\"\n"
@@ -670,5 +672,333 @@ func TestNoBaselineCountCountsTheAbsentBaselineAndNotTheStatus(t *testing.T) {
 
 	if got := countNoBaseline(results); got != 2 {
 		t.Errorf("countNoBaseline is %d, want 2 — rows 2 and 3 name no ::gentoo baseline, and a count that reads the comparison's status instead of Baseline.Found answers a different question and reports 1", got)
+	}
+}
+
+// MERGE FRAGMENT — story 036, sub-task 1.1 (`versionValue`, `versionDistance`).
+//
+// Target file: internal/overlay/baseline_test.go  (APPEND, at the very end of
+// the file — after story 034's three fragments, the last of which ends with
+// TestNoBaselineCountCountsTheAbsentBaselineAndNotTheStatus). Do NOT repeat the
+// `package overlay` clause: it is already at the top of the target.
+//
+// # IMPORT MERGE — the one mechanical thing to get right
+//
+// This fragment needs "github.com/obentoo/bentoolkit/internal/common/ebuild"
+// added to baseline_test.go's EXISTING import block (today: errors, os,
+// path/filepath, strings, testing). Merge it into that block; do not open a
+// second one, and do not leave it unused. Story 034 lost a Run-mode cycle to a
+// dead import in a merged fragment, which is why this is stated first.
+//
+// # Symbols
+//
+// Added, all prefixed `versionMetric` so nothing can collide with the three
+// story-034 fragments already in this file: `versionMetricLadders`,
+// `versionMetricPool`, and the five Test functions below — named so that the
+// sub-task's own validation command, `-run 'TestVersionDistance|TestVersionValue'`,
+// selects every one of them.
+//
+// Borrowed, never re-declared: `ebuild.CompareVersions` — the repository's own
+// version ordering, used ONLY to prove the fixtures' ladders really are
+// ascending. The metric under test never decides which of two versions is
+// greater; ordering stays with CompareVersions, and this fragment keeps that
+// separation on both sides.
+//
+// # PINNED CONTRACT (design.md "Components & Interfaces", D1)
+//
+//	func versionValue(version string) int   // NEW — the version's position on the
+//	                                        // existing significance ladder,
+//	                                        // clamped per level
+//	func versionDistance(a, b string) int   // CHANGED — |value(a) - value(b)|,
+//	                                        // same name, signature and unit
+//
+// Both are UNEXPORTED, so this is an in-package test by necessity, not by
+// choice.
+//
+// # What this fragment exists to close
+//
+// MONOTONICITY ALONG THE VERSION ORDER. Story 034 recorded, in its own deviation
+// register, that the ladder's direction rested on documentation rather than on
+// an assertion: inverting the weights left its suite green. So the defect this
+// story fixes was never pinned by anything, and the eleven wrong baselines are
+// its visible half. The triple loop below is the whole point of the file — for
+// any three versions in release order, stepping further away must never report a
+// smaller number.
+//
+// # A deliberate boundary on that claim, argued rather than hidden
+//
+// Monotonicity is asserted over ladders whose components all sit INSIDE the
+// ladder's radix (minor, patch and finer each below 100, which is 1_000_000 /
+// 10_000 and 10_000 / 100). That is not a convenience: a mixed-radix positional
+// value is monotone exactly while no component carries into the level above it,
+// so `1.2.150` would out-value `1.3.0` and no implementation of D1 could pass a
+// ladder containing it. D1 says as much when it notes that `1.32.2` has minor 32
+// and is "still well inside the radix", and the per-level clamp exists for the
+// malformed rest. Every version in M-2 is inside it. Asserting more than that
+// would be authoring a test the design cannot satisfy, so the ladders are chosen
+// where the property genuinely holds and this comment says where that ends.
+
+// versionMetricLadders are ascending version ladders, one per package the
+// measurement (story.md M-2) names, plus runc — whose 1.4.2 / 1.4.3 / 1.5.1 is
+// the shape design D1 works through line by line.
+//
+// They are FIXTURES and never a live query, for the reason the whole testing
+// strategy gives: what ::gentoo carries tomorrow must not change what this suite
+// means.
+//
+// Each ladder is asserted to be ascending before it is used, by the repository's
+// own comparison, so a typo in a version string fails as a broken fixture rather
+// than as a broken metric.
+func versionMetricLadders() map[string][]string {
+	return map[string][]string{
+		// D1's worked example, and the plainest reading of the defect: 1.4.2 is
+		// reported nearer to 1.5.1 than 1.4.3 is, although 1.4.3 is strictly
+		// greater and therefore fewer releases away.
+		"runc": {"1.3.6", "1.4.2", "1.4.3", "1.5.1"},
+		// The mechanism at its worst: 12.3 wins on a minor digit that MATCHES
+		// ours across two different major lines.
+		"nvidia-cuda-toolkit": {"12.3.2", "12.9.2", "13.3.1"},
+		// A minor component well above 9, which is where a digit-by-digit
+		// comparison stops meaning anything at all.
+		"fakeroot": {"1.32.2", "1.33", "2.1.4"},
+		// A zero major line, where every difference lives in the minor and patch
+		// components.
+		"sentry-native": {"0.7.2", "0.7.6", "0.16.2"},
+		// mesa's real trio. Ours is 26.3.0_pre20260810 in the overlay; the
+		// suffix is invisible to the ladder by design, so it lands exactly where
+		// 26.3.0 does and is written that way here.
+		"mesa": {"26.1.4", "26.1.6", "26.3.0"},
+	}
+}
+
+// versionMetricPool is a flat set of versions for the properties that are about
+// PAIRS rather than about order: symmetry, non-negativity, and zero-iff-identical.
+//
+// It deliberately mixes the shapes the ladder truncates — a revision, a
+// pre-release suffix, a version that stops short — with ordinary ones, because
+// those are the pairs where a metric quietly returns 0 for two different
+// ebuilds.
+func versionMetricPool() []string {
+	return []string{
+		"1.0", "1.0.0", "1.29", "1.29.1", "1.29.2",
+		"2.52.5", "2.52.5-r410", "2.52.5-r601",
+		"4.7", "4.7.1", "4.8", "4.8_alpha3",
+		"12.9.2", "13.3.1", "26.1.6", "26.3.0",
+	}
+}
+
+// TestVersionValuePositionsAVersionOnTheLadder pins D1's arithmetic directly:
+// a version read as a number in the mixed-radix positional system the existing
+// significance ladder already defines — major 1_000_000, minor 10_000, patch
+// 100, finer 1.
+//
+// The numbers are pinned rather than described because R1.5 requires the UNIT to
+// survive: `versionDistance` feeds both the baseline distance and the
+// reduction's span, and the width bound compares the two against each other. Two
+// numbers in different units are not comparable at all, so a rescaled ladder is
+// a silent regression in `ReduceDiff` that nothing in reduce_test.go would
+// catch.
+//
+// _Requirements: R1, R1.3, R1.5_
+func TestVersionValuePositionsAVersionOnTheLadder(t *testing.T) {
+	cases := []struct {
+		version string
+		want    int
+		why     string
+	}{
+		{"1.5.1", 1_050_100, "D1's worked example: 1*1e6 + 5*1e4 + 1*100"},
+		{"1.4.2", 1_040_200, "D1's worked example"},
+		{"1.4.3", 1_040_300, "D1's worked example, and the version the old metric ranked further away"},
+		{"1.29.2", 1_290_200, "the version the shipped suite measures its distances from"},
+		{"1.29", 1_290_000, "a version that stops short is the same point as 1.29.0 — componentAt already says so"},
+		{"2.52.5-r601", 2_520_500, "a revision is invisible to the ladder by design; the caller's tie-break is what orders two of them"},
+		{"4.8_alpha3", 4_080_000, "and so is a pre-release suffix — versionComponents truncates at the first non-digit-non-separator"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := versionValue(tc.version); got != tc.want {
+				t.Errorf("versionValue(%q) is %d, want %d — %s. The ladder is major 1_000_000, minor 10_000, patch 100, finer 1, and R1.5 requires it to stay in that unit because the reduction's width bound compares a span against the baseline distance",
+					tc.version, got, tc.want, tc.why)
+			}
+		})
+	}
+
+	// The two distances D1 derives from those values, in the same breath. They
+	// are the whole defect in two numbers: 1.4.3 must come out NEARER to 1.5.1
+	// than 1.4.2 is, and the shipped metric reports the opposite.
+	nearer, farther := versionDistance("1.5.1", "1.4.3"), versionDistance("1.5.1", "1.4.2")
+	if nearer != 9_800 {
+		t.Errorf("versionDistance(1.5.1, 1.4.3) is %d, want 9_800 — |1_050_100 - 1_040_300| (D1)", nearer)
+	}
+	if farther != 9_900 {
+		t.Errorf("versionDistance(1.5.1, 1.4.2) is %d, want 9_900 — |1_050_100 - 1_040_200| (D1)", farther)
+	}
+	if nearer >= farther {
+		t.Errorf("1.4.3 is %d release steps from 1.5.1 and 1.4.2 is %d; the greater version is fewer releases away and the metric must say so, or the baseline lands further back than necessary and every difference those releases introduced is reported as ours (R1.2)", nearer, farther)
+	}
+
+	// The two distances the sub-task's own plan predicts for the shipped suite,
+	// pinned here so a rescaled ladder is caught in one place rather than in
+	// whichever test happens to break first: `the distance grows with the gap`
+	// (baseline_test.go) becomes 100 against 90_200, and the reduction's width
+	// bound keeps refusing a third point at 190_000 against 200.
+	if got := versionDistance("1.29.2", "1.29.1"); got != 100 {
+		t.Errorf("versionDistance(1.29.2, 1.29.1) is %d, want 100 — one patch release, the unit the report prints as `release steps`", got)
+	}
+	if got := versionDistance("1.29.2", "1.20.0"); got != 90_200 {
+		t.Errorf("versionDistance(1.29.2, 1.20.0) is %d, want 90_200 — nine minor series and two patch releases", got)
+	}
+}
+
+// TestVersionDistanceIsMonotoneAlongTheVersionOrder is the property the shipped
+// metric FAILS and which no test in story 034 pins. It is the reason eleven
+// baselines are not the nearest version.
+//
+// The claim, stated so a reader can check it against the code: for any three
+// versions in release order, stepping further away along the order must report a
+// strictly larger distance — measured from below AND from above, because the
+// defect is directional and a one-sided assertion would miss half of it.
+//
+// It asserts the ORDERING of two measurements rather than either measurement's
+// value, so a change to the ladder's scale cannot fail it and an inversion of
+// the ladder's direction cannot pass it. That is exactly the mutation story
+// 034's suite survived.
+//
+// _Requirements: R1, R1.2, R1.3_
+func TestVersionDistanceIsMonotoneAlongTheVersionOrder(t *testing.T) {
+	for name, ladder := range versionMetricLadders() {
+		t.Run(name, func(t *testing.T) {
+			// The fixture's own premise first: if the ladder is not ascending by
+			// the repository's own comparison, everything below is measuring a
+			// typo.
+			for i := 1; i < len(ladder); i++ {
+				if ebuild.CompareVersions(ladder[i], ladder[i-1]) <= 0 {
+					t.Fatalf("the ladder is not ascending: %q does not order above %q by ebuild.CompareVersions — the fixture is wrong, not the metric", ladder[i], ladder[i-1])
+				}
+			}
+
+			for i := range ladder {
+				for j := i + 1; j < len(ladder); j++ {
+					for k := j + 1; k < len(ladder); k++ {
+						low, mid, high := ladder[i], ladder[j], ladder[k]
+
+						// From below: the middle version is nearer to the lowest
+						// than the highest is.
+						if near, far := versionDistance(low, mid), versionDistance(low, high); near >= far {
+							t.Errorf("from %s: %s is %d release steps away and %s is %d, but %s comes first in release order — a version further along the line must never be reported as nearer, which is precisely how a baseline six minor releases too far back gets chosen (R1.2)",
+								low, mid, near, high, far, mid)
+						}
+
+						// From above, which is the direction the baseline is
+						// actually chosen in: ours is the top of the ladder and
+						// the candidates are below it.
+						if near, far := versionDistance(high, mid), versionDistance(high, low); near >= far {
+							t.Errorf("from %s: %s is %d release steps away and %s is %d, but %s is the greater of the two and therefore fewer releases back — this is the nvidia-cuda-toolkit case, where a lower-significance digit that matches ours decides across a higher-significance difference (R1.2)",
+								high, mid, near, low, far, mid)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestVersionDistanceIsZeroOnlyForTheSameVersionString is the identity property,
+// and it is load-bearing rather than tidy: 0 is what the report renders as "the
+// same version", and `ReduceDiff` reads 0 as "no version move can explain
+// anything here".
+//
+// Identity is STRING equality and not `ebuild.CompareVersions`, on the
+// constraint story.md states: that comparison pads missing components with
+// zeros, so `1.0` and `1.0.0` order equal while being two different ebuilds.
+// The `distance == 0 -> 1` floor is what keeps them apart, and it must survive
+// D1 unchanged.
+//
+// _Requirements: R1, R1.3, R1.5_
+func TestVersionDistanceIsZeroOnlyForTheSameVersionString(t *testing.T) {
+	pool := versionMetricPool()
+
+	for _, version := range pool {
+		if got := versionDistance(version, version); got != 0 {
+			t.Errorf("versionDistance(%q, %q) is %d, want 0 — a version is zero release steps from itself, and the report prints 0 as `the same version`", version, version, got)
+		}
+	}
+
+	for i := range pool {
+		for j := i + 1; j < len(pool); j++ {
+			if got := versionDistance(pool[i], pool[j]); got == 0 {
+				t.Errorf("versionDistance(%q, %q) is 0 for two DIFFERENT version strings; 0 means `the baseline is our own ebuild`, and a report that cannot tell those apart cannot tell a real divergence from an artefact of comparing against the wrong file",
+					pool[i], pool[j])
+			}
+		}
+	}
+}
+
+// TestVersionDistanceIsSymmetricAndNeverNegative pins the two properties the
+// callers take for granted without ever stating them.
+//
+// Negative is the dangerous one. `pickBaseline` takes the MINIMUM, so a distance
+// that went negative — through an overflow the per-level clamp exists to
+// prevent — would read as the nearest baseline of all and win silently, and
+// `reduceSpan`'s width bound would then compare against it.
+//
+// _Requirements: R1, R1.3, R1.5_
+func TestVersionDistanceIsSymmetricAndNeverNegative(t *testing.T) {
+	pool := versionMetricPool()
+
+	for i := range pool {
+		for j := range pool {
+			forward, backward := versionDistance(pool[i], pool[j]), versionDistance(pool[j], pool[i])
+			if forward != backward {
+				t.Errorf("versionDistance(%q, %q) is %d but versionDistance(%q, %q) is %d; the gap between two versions cannot depend on which of them is named first",
+					pool[i], pool[j], forward, pool[j], pool[i], backward)
+			}
+			if forward < 0 {
+				t.Errorf("versionDistance(%q, %q) is %d — a negative distance reads as the nearest baseline of all and wins pickBaseline's minimum silently, which is what the per-level clamp exists to prevent",
+					pool[i], pool[j], forward)
+			}
+		}
+	}
+}
+
+// TestVersionDistanceLeavesRevisionsAndSuffixesEquidistant states, as an
+// assertion, the design decision D1 makes in prose: the ladder truncates at the
+// first character that is neither a digit nor a separator, so two versions
+// differing only by a revision or a `_suffix` land at the SAME point and are
+// equidistant from any third version. The caller's tie-break is what orders
+// them, and `pickBaseline` still takes the newer (R1.4).
+//
+// This is why `2.52.5-r601` and `2.52.5-r410` are NOT among the eleven, and
+// pinning it stops the obvious "improvement" — teaching the ladder about
+// revisions — from arriving as an unnoticed change to the unit the width bound
+// is measured in.
+//
+// _Requirements: R1, R1.3, R1.4_
+func TestVersionDistanceLeavesRevisionsAndSuffixesEquidistant(t *testing.T) {
+	cases := []struct {
+		name string
+		// same and other are two version strings the ladder cannot separate:
+		// they differ only below the numeric components.
+		same, other string
+		// third is the version both are measured against.
+		third string
+	}{
+		{"two revisions of one version", "2.52.5-r410", "2.52.5-r601", "3.0"},
+		{"a revision and the unrevised version", "2.52.5", "2.52.5-r601", "3.0"},
+		{"a pre-release suffix and the release", "4.8_alpha3", "4.8", "4.7.1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fromSame, fromOther := versionDistance(tc.same, tc.third), versionDistance(tc.other, tc.third)
+			if fromSame != fromOther {
+				t.Errorf("%q is %d release steps from %q and %q is %d; the ladder is truncated at the first non-digit-non-separator BY DESIGN, so these two land at the same point and the tie-break — not the measurement — is what orders them (D1, R1.4)",
+					tc.same, fromSame, tc.third, tc.other, fromOther)
+			}
+			if got := versionDistance(tc.same, tc.other); got != 1 {
+				t.Errorf("versionDistance(%q, %q) is %d, want 1 — two different ebuilds whose components agree are one step apart and never zero, because zero means `the same version`", tc.same, tc.other, got)
+			}
+		})
 	}
 }

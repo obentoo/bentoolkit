@@ -628,50 +628,110 @@ var versionStepWeights = [...]int{1_000_000, 10_000, 100}
 // nearest baseline of all and quietly win.
 const maxVersionSteps = 1_000_000_000
 
+// versionValue is where one version sits on the ladder above, read as a number
+// in the mixed-radix positional system that ladder already defines: 1.5.1 is
+// 1*1_000_000 + 5*10_000 + 1*100 = 1_050_100, and 1.29 is 1_290_000 because a
+// version that stopped short is the same point as 1.29.0 (componentAt).
+//
+// It is a POSITION and never an ordering. ebuild.CompareVersions stays the only
+// thing that decides which of two versions is greater; this feeds a magnitude,
+// and everything versionComponents drops — a revision, a pre-release suffix, a
+// trailing letter — puts two such versions on the SAME point on purpose. See
+// versionDistance, which says what that costs and why it is wanted.
+//
+// The clamp is maxVersionSteps applied per level, which is where the old
+// per-step clamp went. A component big enough to carry into the level above it
+// is a real edge — fakeroot's 1.32.2 has minor 32, still well inside a radix of
+// 100 — and the clamp is not for those: it is for a component no repository
+// really publishes, which would multiply out far enough to overflow the sum and
+// hand back a NEGATIVE distance. That reads as the nearest baseline of all and
+// wins pickBaseline's minimum silently. A component is never negative to begin
+// with, because versionComponents' head stops at the first character that is
+// neither a digit nor a separator, and a '-' is one of those.
+func versionValue(version string) int {
+	components := versionComponents(version)
+	// Every level the ladder names is read, plus any finer component the version
+	// carries. componentAt is what answers for a level the version stopped short
+	// of, and reading the value through it is what keeps 1.29 and 1.29.0 on one
+	// point without this function holding a second opinion about what a missing
+	// component means.
+	levels := max(len(components), len(versionStepWeights))
+
+	value := 0
+	for level := 0; level < levels; level++ {
+		component := componentAt(components, level)
+		if component > maxVersionSteps {
+			component = maxVersionSteps
+		}
+		value += component * versionStepWeight(level)
+	}
+	return value
+}
+
 // versionDistance reports how far apart two versions are, in RELEASE STEPS.
 //
-// The unit: one major release counts 1_000_000, one minor series 10_000, one
-// patch release 100, and anything finer — a fourth component, a revision, a
-// pre-release suffix — counts 1. So a distance below 100 is our own release
-// differently revised, below 10_000 the same series, and below 1_000_000 the
-// same major line. 1.29.2 to 1.29.1 is 100; 1.29.2 to 1.20.0 is 90_200.
+// It is the gap between the two versions' POSITIONS on the ladder —
+// |versionValue(a) - versionValue(b)| — and deliberately not a sum of
+// per-component differences. That distinction is the whole of what this
+// function has to get right. Summing each component's absolute difference
+// measures two component VECTORS apart, and the moment a higher-significance
+// component differs it compares the lower digits across a boundary those digits
+// do not span: from 1.5.1 it reads 1.4.2 as nearer than 1.4.3, although 1.4.3
+// is the later release and therefore fewer releases back. Replayed over the
+// overlay's 158 packages whose version differs from ::gentoo's, that metric
+// chose a baseline which was not the nearest version eleven times.
+//
+// The unit is unchanged, and changing it is not a local decision: one major
+// release counts 1_000_000, one minor series 10_000, one patch release 100, and
+// anything finer — a fourth component, a revision, a pre-release suffix —
+// counts 1. So a distance below 100 is our own release differently revised,
+// below 10_000 the same series, and below 1_000_000 the same major line. 1.29.2
+// to 1.29.1 is 100; 1.29.2 to 1.20.0 is 90_200. reduceSpan's width bound
+// compares a version move's span against a baseline distance (R1.5), and two
+// numbers on different ladders are not comparable at all.
 //
 // THE UNIT IS THIS STORY'S OWN. Portage orders versions and never measures the
 // gap between two of them, and the design fixes no unit either. Only two
 // properties are relied on anywhere, and both hold here: the distance is zero
-// exactly when the two versions are the same one, and it is monotone, so a
-// nearer version never reports a larger number than a farther one. Ordering
-// itself stays with ebuild.CompareVersions — this function never decides which
-// of two versions is greater, only how far apart they are.
+// exactly when the two versions are the same one, and it is monotone ALONG THE
+// VERSION ORDER, so a version further along the release order never reports a
+// smaller number than a nearer one. That last property holds while every
+// component stays inside the ladder's radix — a minor or a patch below 100,
+// which is where every version in the overlay and in ::gentoo sits. A component
+// that carried into the level above it (1.2.150 against 1.3.0) is outside what
+// any positional value can order, and outside what a repository publishes.
+// Ordering itself stays with ebuild.CompareVersions — this function never
+// decides which of two versions is greater, only how far apart they are.
 //
 // Two versions that differ only below the numeric components — 2.47 and
 // 2.47-r1, or 1.0 and 1.0.0 — are one step apart and never zero. Zero means
 // "the same version", and a report that cannot tell those two apart cannot tell
 // a real divergence from an artefact of comparing against the wrong ebuild.
+//
+// A REVISION AND A _suffix ARE INVISIBLE TO THE LADDER, BY DESIGN. Both are
+// truncated away before the value is read, so 2.52.5-r601 and 2.52.5-r410 sit
+// on one point and come out EQUIDISTANT from any third version. That is wanted:
+// the measurement genuinely has nothing left to say between them, and
+// pickBaseline's tie-break — the repository's own comparison, taking the newer —
+// is what orders them. Teaching the ladder about revisions would change the
+// unit reduceSpan's bound is measured in, which is why it is stated here as a
+// decision rather than left to look like an omission.
 func versionDistance(a, b string) int {
 	if a == b {
 		return 0
 	}
 
-	first, second := versionComponents(a), versionComponents(b)
-	levels := max(len(first), len(second))
-
-	distance := 0
-	for level := 0; level < levels; level++ {
-		steps := componentAt(first, level) - componentAt(second, level)
-		if steps < 0 {
-			steps = -steps
-		}
-		if steps == 0 {
-			continue
-		}
-		if steps > maxVersionSteps {
-			steps = maxVersionSteps
-		}
-		distance += steps * versionStepWeight(level)
+	distance := versionValue(a) - versionValue(b)
+	if distance < 0 {
+		distance = -distance
 	}
 
 	if distance == 0 {
+		// Two DIFFERENT strings on the same point: a revision, a suffix, a
+		// trailing letter, or 1.0 against 1.0.0. One step apart and never zero,
+		// because zero is what the report prints as "the same version". This
+		// floor is not a rounding convenience — deleting it would make a
+		// baseline read as our own ebuild.
 		return 1
 	}
 	return distance
