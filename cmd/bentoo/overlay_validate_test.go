@@ -449,3 +449,62 @@ func TestOverlayValidate_NoDepthLeavesTheSeamsNil(t *testing.T) {
 		t.Error("a depth-less run populated StagedManifest; nothing travels on the shipped path (R4.3)")
 	}
 }
+
+// TestPublishedManifestBytes_KeepsDistRecordsAndDropsTheRest is the regression
+// the seam introduced by retiring manifestDistLines along with its caller.
+//
+// A Manifest is DIST-only just when the repository sets `thin-manifests = true`.
+// Portage's default is thin=false, and then the file also names EBUILD, AUX and
+// MISC records for files in the package directory. Stage copies the candidate
+// ebuild and files/ — not metadata.xml and not the sibling ebuilds — so handing
+// the full Manifest to the staged tree describes files that are not there,
+// digestcheck raises FileNotFound, and `ebuild` dies before the first phase
+// marker. Every build gate then reports SKIPPED for a package that would have
+// built, which is the exact silence this story exists to remove.
+func TestPublishedManifestBytes_KeepsDistRecordsAndDropsTheRest(t *testing.T) {
+	pkgDir := t.TempDir()
+	full := "AUX gst-plugins-qt6-1.29.2-qt6-detection.patch 512 BLAKE2B aa SHA512 bb\n" +
+		"DIST gst-plugins-good-1.29.2.tar.xz 2048 BLAKE2B cc SHA512 dd\n" +
+		"EBUILD gst-plugins-qt6-1.28.6.ebuild 900 BLAKE2B ee SHA512 ff\n" +
+		"EBUILD gst-plugins-qt6-1.29.2.ebuild 910 BLAKE2B 11 SHA512 22\n" +
+		"MISC metadata.xml 400 BLAKE2B 33 SHA512 44\n"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(full), 0o644); err != nil {
+		t.Fatalf("writing Manifest: %v", err)
+	}
+
+	got, err := publishedManifestBytes(pkgDir)
+	if err != nil {
+		t.Fatalf("publishedManifestBytes: %v", err)
+	}
+
+	want := "DIST gst-plugins-good-1.29.2.tar.xz 2048 BLAKE2B cc SHA512 dd\n"
+	if string(got) != want {
+		t.Errorf("the staged Manifest is not DIST-only:\n  got:  %q\n  want: %q", got, want)
+	}
+	for _, dropped := range []string{"EBUILD ", "AUX ", "MISC ", "metadata.xml", "1.28.6"} {
+		if strings.Contains(string(got), dropped) {
+			t.Errorf("%q survived into the staged Manifest; it names a file Stage never copies, so digestcheck "+
+				"fails and the gate reports SKIPPED for an ebuild that is fine", dropped)
+		}
+	}
+}
+
+// TestPublishedManifestBytes_ADistLineTravelsByteForByte is the other half, and
+// the reason this filters lines instead of parsing records: Portage verifies
+// these digests against the archive on disk, so a line that survived a
+// round-trip through some intermediate form is a line the build gates fail on.
+func TestPublishedManifestBytes_ADistLineTravelsByteForByte(t *testing.T) {
+	pkgDir := t.TempDir()
+	dist := "DIST some-1.0.tar.gz 12345 BLAKE2B 0f1e2d SHA512 9a8b7c"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(dist+"\n"), 0o644); err != nil {
+		t.Fatalf("writing Manifest: %v", err)
+	}
+
+	got, err := publishedManifestBytes(pkgDir)
+	if err != nil {
+		t.Fatalf("publishedManifestBytes: %v", err)
+	}
+	if string(got) != dist+"\n" {
+		t.Errorf("a DIST line did not survive unchanged:\n  got:  %q\n  want: %q", got, dist+"\n")
+	}
+}

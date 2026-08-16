@@ -267,7 +267,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 // the staged copy of pkgDir must carry before Portage will build in it
 // (S037-R4.2, design D3).
 //
-// # Why the PUBLISHED Manifest, and why byte-for-byte
+// # Why the PUBLISHED Manifest
 //
 // This command bumps nothing. Every ebuild it validates is the one already in
 // the overlay, so the digests the published Manifest records are the digests of
@@ -275,11 +275,26 @@ func runValidate(cmd *cobra.Command, args []string) {
 // half, a bump, must feed the GENERATED Manifest instead: the published digests
 // there belong to the release being replaced.)
 //
-// The file travels VERBATIM — read and handed over, never parsed, filtered,
-// re-encoded or line-normalised. Portage VERIFIES the digests on the DIST lines
-// against the archive it finds, so a Manifest that survived a round-trip through
-// some intermediate form is a Manifest the build gates fail on. os.ReadFile is
-// the whole of the transformation, and that is deliberate.
+// # DIST lines only, and why "verbatim" was the wrong instinct
+//
+// Each DIST line travels UNTOUCHED — never re-encoded, re-ordered or
+// re-hashed — because Portage verifies those digests against the archive it
+// finds, and a digest that survived a round-trip through some intermediate form
+// is a digest the build gates fail on.
+//
+// But the lines around them must NOT travel. A Manifest is DIST-only just when
+// the repository sets `thin-manifests = true`; Portage's default is thin=false,
+// and then the file also carries EBUILD, AUX and MISC records for files that
+// live in the package directory. Stage copies the candidate ebuild and the
+// package's files/ — not metadata.xml, and not the sibling ebuilds. Handing the
+// full Manifest over therefore describes files the staged tree does not have,
+// digestcheck raises FileNotFound, and `ebuild` dies before the first phase
+// marker: every build gate SKIPPED, for a package that would have built. It is
+// invisible on `::bentoo`, which sets thin-manifests, and breaks on any overlay
+// that does not — and `--overlay` accepts any path.
+//
+// The retired manifestDistLines filtered for exactly this reason. Dropping the
+// filter along with the helper was the regression; this is it restored.
 //
 // # A Manifest that cannot be read is an ERROR, never empty bytes
 //
@@ -295,7 +310,32 @@ func publishedManifestBytes(pkgDir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the published Manifest of %s, to give its staged copy the digests Portage verifies: %w", pkgDir, err)
 	}
-	return body, nil
+	return manifestDistLines(body), nil
+}
+
+// manifestDistLines keeps the DIST records of a Manifest and drops everything
+// else, each surviving line byte-for-byte.
+//
+// A Manifest is line-oriented and its record type is the first field, so this
+// needs no parser and deliberately does not have one: a line is kept or it is
+// not, and a kept line is the bytes that were read. The trailing newline is
+// re-established rather than preserved per line, which is the one normalisation
+// here and the one Portage does not read a digest through.
+func manifestDistLines(body []byte) []byte {
+	var kept []string
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(line, "DIST ") {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == 0 {
+		// Not an error and not a fallback to the unfiltered file: a package whose
+		// Manifest names no archive has ANSWERED, and validate reads empty bytes as
+		// "this tree cannot be built in" (S037-D2). Returning the full file here
+		// would smuggle back exactly the records this function exists to drop.
+		return nil
+	}
+	return []byte(strings.Join(kept, "\n") + "\n")
 }
 
 // publishedManifestDistNames is Options.DistNames for this command: the upstream
