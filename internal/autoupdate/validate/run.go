@@ -16,12 +16,15 @@ import (
 // Options is what a run needs, and a run is fully described by it: nothing here
 // is discovered.
 //
-// The plain values come from the command line or the config. DistNames does not
-// — it is a SEAM, a function the caller supplies so that a package directory
-// which cannot name its own upstream archives can still be validated. Its zero
-// value is nil, and nil is exactly the behaviour every field of this struct had
-// before it existed (S037-R1.2), which is why it is listed last: a caller
-// written against the older struct is still describing the same run.
+// The plain values come from the command line or the config. The last two do
+// not — they are SEAMS, functions the caller supplies so that a package
+// directory which cannot answer for itself can still be validated: DistNames
+// names the upstream archives the option gate may look for, StagedManifest
+// supplies the Manifest a staged tree must carry before Portage will build in
+// it. Their zero value is nil, and nil is exactly the behaviour every field of
+// this struct had before they existed (S037-R1.2, S037-R2), which is why they
+// are listed last: a caller written against the older struct is still
+// describing the same run.
 type Options struct {
 	// Overlay is the tree to validate.
 	Overlay string
@@ -98,6 +101,46 @@ type Options struct {
 	// instead of a directory. Concurrent applies make that a race; a sequential
 	// one merely makes it wrong later.
 	DistNames func(pkgDir string) ([]string, error)
+
+	// StagedManifest answers, for ONE package directory, the Manifest content
+	// that package's STAGED tree must carry before a build gate can run in it
+	// (S037-R2.1, design D3).
+	//
+	// # Why the caller owns this and this package cannot
+	//
+	// RunBuildGates drives `ebuild <staged candidate> clean <phase>`, and Portage
+	// refuses an ebuild whose Manifest does not describe its archive. Stage
+	// deliberately does not carry the published Manifest across — it describes
+	// the versions already published, not the candidate — and the step that
+	// GENERATES one, `pkgdev manifest` with its fetch, its timeout and its own
+	// repair path, lives on the apply side in package autoupdate. That side
+	// cannot be reached from here: applier.go already imports this package, so
+	// the import back would be a cycle. The content therefore arrives as a value,
+	// from whoever already has it.
+	//
+	// # NIL MEANS NOTHING TRAVELS
+	//
+	// Nil is not "supply an empty Manifest": it is the whole build-depth path
+	// behaving exactly as it did before this field existed — nothing staged,
+	// nothing written, every build gate reported SKIPPED naming what stopped it
+	// (S037-R2). A non-nil function is a caller taking responsibility for the
+	// bytes, and what it returns is written into the staged tree verbatim,
+	// because Portage VERIFIES the digests in them: re-encoding or filtering
+	// them here would hand the gates a Manifest they fail on.
+	//
+	// # Two callers, two different right answers
+	//
+	// A same-version caller — the standalone `overlay validate --depth` — feeds
+	// the PUBLISHED Manifest's bytes, which describe exactly the archive on
+	// disk. A bump caller feeds the GENERATED one, because the published digests
+	// belong to the release being replaced; feeding them for a bump would answer
+	// about a different release, the defect R12 already had to fix once for
+	// distfile names.
+	//
+	// It is a func of pkgDir, and per-CALL rather than a field on an applier, for
+	// the two reasons DistNames states above: one Run walks many packages, and a
+	// seam stored once hands package A's Manifest to package B (S035-D2).
+	StagedManifest func(pkgDir string) ([]byte, error)
 }
 
 // depth resolves Options.Depth to a rung of the ladder, mapping the empty
@@ -157,6 +200,31 @@ func manifestDistNames(pkgDir string) []string {
 	return distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 }
 
+// stagedManifestLookup answers, for one package directory, the Manifest content
+// its staged tree must carry before a build gate can run in it.
+type stagedManifestLookup func(pkgDir string) ([]byte, error)
+
+// stagedManifest is the Manifest source a run must use, AND whether it has one
+// at all.
+//
+// It is distNames' normalising idiom (BuildDeps.commandFactory, deps.go:109)
+// with one addition, and the addition is the whole difference between the two
+// seams. A nil DistNames has an answer of its own — parse the Manifest on disk —
+// so normalising it produces a function and the call site never learns there was
+// a nil. A nil StagedManifest has NO answer: nothing travels, so nothing is
+// staged and nothing is built, and the build-depth path has to be able to take
+// that branch WITHOUT calling anything (S037-R2).
+//
+// The bool carries that fact, and the returned function stays callable on both
+// paths so no branch can reach a nil and panic. Asking it on the nil path is
+// answered rather than forbidden: no content, no error.
+func (o Options) stagedManifest() (stagedManifestLookup, bool) {
+	if o.StagedManifest != nil {
+		return o.StagedManifest, true
+	}
+	return func(string) ([]byte, error) { return nil, nil }, false
+}
+
 // ebuildTarget is one ebuild the run has to answer for.
 type ebuildTarget struct {
 	atom    string // category/package
@@ -193,10 +261,12 @@ type qaResult struct {
 //
 // Options.Depth selects a rung of the ladder and every rung gets an answer. At
 // or below DepthOptions that answer is this file's own static gate. Above it,
-// the build gates are reported as SKIPPED NAMING WHAT STOPPED THEM rather than
-// left out: the governing rule above applies to the ladder itself, and a report
-// that simply omitted the configure gate the operator asked for would be the
-// silence this whole package exists to remove.
+// the build gates run against a staged tree when the caller supplied the
+// Manifest that tree needs (Options.StagedManifest), and are otherwise reported
+// as SKIPPED NAMING WHAT STOPPED THEM rather than left out: the governing rule
+// above applies to the ladder itself, and a report that simply omitted the
+// configure gate the operator asked for would be the silence this whole package
+// exists to remove.
 func Run(ctx context.Context, opts Options) (Report, error) {
 	// Before the tree is walked: a depth that does not parse makes the whole run
 	// meaningless, and answering it costs nothing.
@@ -249,7 +319,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		res := validateOptions(ctx, target, distdir, haveDistdir, distNames)
 		// Before attachQA, so the gates read in ladder order — options, then the
 		// build gates, then the advisory QA scan that decides nothing.
-		noteBuildDepth(&res, depth, opts.StagingRoot)
+		noteBuildDepth(ctx, &res, target, depth, opts)
 		attachQA(ctx, &res, target, qa)
 		report.Results = append(report.Results, res)
 	}
@@ -271,24 +341,35 @@ func unvalidatedResult(target ebuildTarget) EbuildResult {
 }
 
 // noteBuildDepth records, on a result the static gate has just produced, that a
-// depth above `options` was asked for and how far this entry point got (R4.4,
-// R6.4, R11.2).
+// depth above `options` was asked for — and either drives the build gates or
+// says why they did not run (R4.4, R6.4, R11.2, S037-R2.1).
 //
-// # Why the build gates SKIP here instead of running
+// # A staged tree needs a Manifest, and this package cannot make one
 //
 // RunBuildGates drives `ebuild <staged candidate> clean <phase>`, and Portage
 // refuses an ebuild whose Manifest does not describe its archive. Stage
 // deliberately does not carry the published Manifest across — it describes the
-// versions already published, not the candidate — so the staged tree needs a
-// manifest step, and that step (`pkgdev manifest`, with its fetch, its timeout
-// and its own repair path) lives on the apply side, in package autoupdate. It
-// cannot be reached from here: applier.go already imports this package, so the
-// import back would be a cycle.
+// versions already published, not the candidate — and the step that GENERATES
+// one (`pkgdev manifest`, with its fetch, its timeout and its own repair path)
+// lives on the apply side, in package autoupdate, which cannot be reached from
+// here: applier.go already imports this package, so the import back would be a
+// cycle.
 //
-// Running the gates anyway would produce a confident FAILED for an ebuild that
-// is fine — the false-FAILED failure mode findDistfile's own notes describe, and
-// the one that gets a gate switched off. So the depth is reported unreached,
-// with the reason and the command that does reach it.
+// So the content is the CALLER'S to supply, through Options.StagedManifest
+// (S037-D3). With that seam the tree is staged, the Manifest is materialised
+// inside it, and the gates run. Without it nothing travels: nothing is staged,
+// nothing is built, and the depth is reported unreached with the reason and the
+// command that does reach it — which is what every run did before the seam
+// existed.
+//
+// # Why the gates are never simply left out
+//
+// Building against a tree Portage refuses would produce a confident FAILED for
+// an ebuild that is fine — the false-FAILED failure mode findDistfile's own
+// notes describe, and the one that gets a gate switched off. Omitting the gates
+// instead would be worse still, because an unreported gate is indistinguishable
+// from one that passed. Every branch below therefore reports every gate the
+// requested depth covers.
 //
 // # Why the reach is PASS-only
 //
@@ -299,23 +380,213 @@ func unvalidatedResult(target ebuildTarget) EbuildResult {
 // Below DepthPatches this is a no-op, including for the default rung — a
 // --depth-less run must produce the bytes story 031 shipped, and populating a
 // field that report leaves empty would change the JSON document (R11.3).
-func noteBuildDepth(res *EbuildResult, depth Depth, stagingRoot string) {
+func noteBuildDepth(ctx context.Context, res *EbuildResult, target ebuildTarget, depth Depth, opts Options) {
 	if depth <= DepthOptions {
 		return
 	}
 
-	reached := DepthNone
-	for _, gate := range res.Gates {
-		if gate.Gate == GateOptions && gate.Outcome == OutcomePass {
-			reached = DepthOptions
-		}
-	}
+	gates, reason := buildDepthGates(ctx, target, depth, opts)
+	res.Gates = append(res.Gates, gates...)
 
-	reason := buildDepthNotRunReason(depth, stagingRoot)
-	res.Depth = reached.String()
+	// Read out of the gate list AFTER the build gates joined it: with the gates
+	// able to run, "how far did this get" is no longer a question the option gate
+	// alone can answer.
+	res.Depth = deepestPassedRung(res.Gates, depth).String()
 	res.DepthRequested = depth.String()
 	res.DepthReason = reason
-	res.Gates = append(res.Gates, SkippedGates(depth, reason)...)
+}
+
+// buildDepthGates prepares what the build gates need and reports them, plus the
+// run-level reason the depth went unreached — empty when the gates themselves
+// answered, because each then carries its own.
+//
+// # The order is the contract, not an accident
+//
+// Stage, then the Manifest, then the gates. The seam is asked about a staged
+// tree that LACKS a Manifest, so the tree has to exist before it is asked; and
+// the Manifest has to be in place before `ebuild` reads the tree, or Portage
+// refuses the candidate over a file this run was about to write. An
+// implementation that probed for `ebuild` first and skipped early would invert
+// both, and its skip would be an answer about a tree nobody prepared.
+//
+// # Every stopping condition is a reported SKIP
+//
+// Run's governing rule, applied to the four things that can stop a build gate
+// before it starts: the candidate could not be read, the tree could not be
+// staged, the Manifest could not be PRODUCED (S037-R2.6) or could not be WRITTEN
+// (S037-R2.5). None of them is an error out of Run and none of them is silence —
+// the rest of the overlay is still validated, and this ebuild says what stopped
+// it.
+func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts Options) ([]GateResult, string) {
+	manifest, supplied := opts.stagedManifest()
+	if !supplied {
+		// Nothing travels, so nothing is staged and nothing is built: exactly
+		// the bytes every run produced before the seam existed (S037-R2).
+		return skippedBuildGates(depth, buildDepthNotRunReason(depth, opts.StagingRoot))
+	}
+
+	stagedRoot, err := stageCandidate(target, opts)
+	if err != nil {
+		// Stage's own sentence already opens with "the staged tree could not be
+		// prepared", so this one says what that COST rather than repeating it.
+		return skippedBuildGates(depth, fmt.Sprintf(
+			"the build gates for %s-%s had no staged tree to run in, so none of them read this candidate: %v",
+			target.atom, target.version, err))
+	}
+
+	if err := materializeStagedManifest(stagedRoot, target, manifest); err != nil {
+		return skippedBuildGates(depth, err.Error())
+	}
+
+	gates, err := RunBuildGates(ctx, BuildRequest{
+		StagedRoot: stagedRoot,
+		Atom:       target.atom,
+		Version:    target.version,
+		Depth:      depth,
+	}, BuildDeps{})
+	if err != nil {
+		// RunBuildGates errors about the REQUEST and never about the build, so
+		// this is a caller's bug rather than a verdict on the ebuild — and it is
+		// still one ebuild reporting why while the run carries on.
+		return skippedBuildGates(depth, fmt.Sprintf("the build gates for %s-%s could not be started: %v",
+			target.atom, target.version, err))
+	}
+	return gates, ""
+}
+
+// skippedBuildGates renders one stopping condition as buildDepthGates' two
+// answers: every build gate the depth covers reporting SKIPPED with the reason,
+// and the same sentence on DepthReason so a reader who never opens the gate list
+// still learns why the depth went unreached.
+func skippedBuildGates(depth Depth, reason string) ([]GateResult, string) {
+	return SkippedGates(depth, reason), reason
+}
+
+// stageCandidate builds the single-package repository the build gates run in,
+// out of the ebuild the overlay actually holds.
+//
+// The bytes are READ FROM DISK rather than regenerated, for the reason
+// StageRequest.EbuildBytes gives: a gate result has to describe a file that
+// exists somewhere other than in this process.
+func stageCandidate(target ebuildTarget, opts Options) (string, error) {
+	body, err := os.ReadFile(target.path) //nolint:gosec // the path comes from scanning the overlay under validation, not from input
+	if err != nil {
+		return "", fmt.Errorf("reading the candidate ebuild %s: %w", target.path, err)
+	}
+
+	return Stage(StageRequest{
+		Overlay:     opts.Overlay,
+		StagingRoot: opts.StagingRoot,
+		Atom:        target.atom,
+		Version:     target.version,
+		EbuildBytes: body,
+	})
+}
+
+// materializeStagedManifest puts the Manifest the caller supplied where Portage
+// reads one from — the staged tree's own package directory (S037-R2.1, D3).
+//
+// # It writes inside the staged tree and nowhere else (S037-R2.4)
+//
+// The path is built from the root Stage returned, and Stage refuses a staging
+// root that resolves inside the published overlay (ensureOutsideOverlay). That
+// refusal is what makes "never the overlay" a property of the code rather than a
+// promise kept by hand: there is no path from here to a published package
+// directory to get wrong.
+//
+// # A staged tree that already carries one is left alone
+//
+// The caller's bytes answer for a tree that LACKS a Manifest. A tree that has one
+// has it because a manifest step wrote it — the apply path's `pkgdev manifest` —
+// and overwriting a generated Manifest with the published release's digests
+// would replace a measurement with a guess.
+//
+// The mode is stagedFileMode, 0600: the same stance every file staging writes
+// takes, because the tree holds a candidate nobody has reviewed yet.
+func materializeStagedManifest(stagedRoot string, target ebuildTarget, manifest stagedManifestLookup) error {
+	category, pkg, err := splitStagedAtom(target.atom)
+	if err != nil {
+		// Unreachable after a successful Stage, which split the same atom through
+		// this same function — checked anyway, because "unreachable" is a property
+		// of today's call order rather than of this function.
+		return fmt.Errorf("naming the staged Manifest of %s-%s: %v", target.atom, target.version, err)
+	}
+	path := filepath.Join(stagedRoot, category, pkg, "Manifest")
+
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
+	// Asked only now, with the tree on disk: the seam answers about a staged tree
+	// that lacks a Manifest, and there is no such thing to answer about until
+	// Stage has run.
+	body, err := manifest(target.dir)
+	if err != nil {
+		// S037-R2.6, and a DIFFERENT fault from the write failure below: the bytes
+		// were never made. The producer's own words travel verbatim because it is
+		// the only party that knows what it was attempting, and "could not be
+		// produced" on its own sends an operator nowhere.
+		return fmt.Errorf("the Manifest content for %s-%s could not be produced, so there was nothing to write "+
+			"into the staged tree at %s and no build phase could run against it: %v",
+			target.atom, target.version, path, err)
+	}
+	if len(body) == 0 {
+		// A producer that answered with no content has ANSWERED — the same
+		// nil-is-not-empty rule DistNames states — and the answer is that this
+		// tree cannot be built in. Writing an empty Manifest instead would send
+		// `ebuild` at a candidate Portage refuses, and the gate would report a
+		// confident FAILED about a bump that may be perfectly fine.
+		return fmt.Errorf("the Manifest content supplied for %s-%s is empty, so the staged tree at %s would "+
+			"describe no archive and Portage would refuse the candidate before any phase ran",
+			target.atom, target.version, path)
+	}
+
+	if err := os.WriteFile(path, body, stagedFileMode); err != nil {
+		// S037-R2.5. The staged path is named because it is the fact the operator
+		// acts on: a full disk, a sealed directory and a tree that was swept away
+		// under the run all read alike without it.
+		return fmt.Errorf("the Manifest supplied for %s-%s could not be written to %s, so the staged tree "+
+			"carries none and no build phase could run against it: %v",
+			target.atom, target.version, path, err)
+	}
+	return nil
+}
+
+// gateRungs maps a gate back to the rung of the ladder its PASS proves. It is
+// the inverse of buildGates plus the option rung, and it answers exactly one
+// question: how far did this run actually get.
+//
+// qa and review are absent, and their absence is the rule rather than an
+// oversight: neither decides anything (D8), so neither can be evidence that a
+// rung was reached.
+//
+// The applier keeps the same table for the same question (gateDepths,
+// applier_gates.go:46). Two entry points, one rule — see deepestPassedRung.
+var gateRungs = map[string]Depth{
+	GateOptions:   DepthOptions,
+	GatePatches:   DepthPatches,
+	GateConfigure: DepthConfigure,
+	GateCompile:   DepthCompile,
+}
+
+// deepestPassedRung answers "how far did this get": the deepest rung whose own
+// gate PASSED, never deeper than the rung that was asked for.
+//
+// PASS-ONLY, exactly as the applier's recordDepthReached answers it
+// (applier_gates.go:779). A SKIPPED gate measured nothing and a FAILED one
+// measured a failure; reading either as reach would let a report claim a depth
+// no gate ever proved.
+func deepestPassedRung(gates []GateResult, requested Depth) Depth {
+	reached := DepthNone
+	for _, gate := range gates {
+		if gate.Outcome != OutcomePass {
+			continue
+		}
+		if rung, isRung := gateRungs[gate.Gate]; isRung && rung > reached && rung <= requested {
+			reached = rung
+		}
+	}
+	return reached
 }
 
 // buildDepthNotRunReason is the sentence every skipped build gate of a

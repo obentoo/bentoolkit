@@ -145,10 +145,15 @@ type StageRequest struct {
 //
 // WHAT STAGING DELIBERATELY DOES NOT COPY. The published package directory's
 // Manifest does not travel: it describes the tarballs of the versions already
-// published and has no entry for the candidate's, so the gate that needs one
-// must generate it. Nor does anything else in the package directory, including
-// the previously published ebuilds — a single-package repository holding one
-// version is what makes a gate's answer unambiguous.
+// published and has no entry for the candidate's. The tree therefore leaves here
+// WITHOUT one, and the content is supplied through Options.StagedManifest — the
+// seam whose bytes Run materialises inside this tree, after Stage and before the
+// build gates run (S037-R2.1, design D3). Staging does not reach for it itself
+// because the two callers need different bytes: a same-version run wants the
+// published Manifest verbatim, a bump wants the generated one, and only the
+// caller knows which it is. Nothing else in the package directory travels
+// either, including the previously published ebuilds — a single-package
+// repository holding one version is what makes a gate's answer unambiguous.
 //
 // EVERY FAILURE IS ONE FAILURE (R3.9). Whatever goes wrong, Stage returns an
 // error wrapping ErrStageUnpreparable and an EMPTY path — never a half-made tree

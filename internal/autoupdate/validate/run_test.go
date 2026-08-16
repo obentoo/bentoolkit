@@ -753,3 +753,355 @@ func TestRun_ANamesProducerFailureIsAReportedSkip(t *testing.T) {
 			"this one included", options.Reason, distdir)
 	}
 }
+
+// MERGE FRAGMENT — story 037, sub-task 2.1 (Options.StagedManifest +
+// materialization).
+//
+// Target file: internal/autoupdate/validate/run_test.go (APPEND immediately
+// AFTER sub-task 1.2's fragment). Do NOT repeat the `package validate` clause.
+//
+// IMPORTS: none added beyond what 1.2 already merged — context, os,
+// path/filepath, strings, testing are in the target's block.
+//
+// # Symbols
+//
+// Added: seamStagedManifests, seamStagedCandidateDir (shared with sub-task
+// 2.2's fragment — materialise 2.1 BEFORE 2.2), and the two tests. Borrowed:
+// overlayWith, gateOf, onlyResult (run_test.go), buildTarGz (archive_test.go),
+// linkInto (run_test.go), goldenEbuild, hashTree (golden_test.go).
+//
+// # PINNED CONTRACT (design D3 — S037-R2.1, R2.4, R2.5, R2.6)
+//
+//	Options.StagedManifest func(pkgDir string) ([]byte, error)
+//
+// nil → nothing travels (today, already pinned elsewhere). Non-nil, staged
+// tree lacking a Manifest → the returned bytes are materialised at
+// <staged>/Manifest, mode 0o600, inside the staged tree ONLY, before the build
+// gates run; a write failure is a reported SKIP naming the staged path; a
+// PRODUCER failure — the content could not be made at all, distinct from a
+// write that failed (R2.6 vs R2.5) — is a reported SKIP carrying the
+// producer's own words; the published overlay stays byte-identical
+// throughout. The R2.6 case uses the "errors" import sub-task 1.2's fragment
+// merges into this file — materialise 1.2 before 2.1, which the ordering
+// above already requires.
+//
+// # Why PATH is stripped
+//
+// These cases assert the MATERIALISATION, not the build. With no `ebuild` on
+// PATH the build gates report their own skip and spawn nothing, so the case is
+// hermetic on every host — including a Gentoo host, where a real `ebuild`
+// against a synthetic tree would otherwise be invoked. The contract still
+// requires staging and materialisation to have happened by then: the gates'
+// skip must be the GATES' answer, produced after the tree they would have
+// built in was prepared.
+
+// seamStagedManifests walks a staging root and returns every file named
+// Manifest under it. A walk rather than a joined path, so the assertion cannot
+// silently miss a layout change and pass by looking in the wrong place.
+func seamStagedManifests(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.Name() == "Manifest" {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out
+}
+
+// seamStagedCandidateDir returns the directory under root holding the named
+// candidate ebuild, or "" when no tree was staged at all.
+func seamStagedCandidateDir(root, ebuildName string) string {
+	var found string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.Name() == ebuildName {
+			found = filepath.Dir(path)
+		}
+		return nil
+	})
+	return found
+}
+
+// seamDepthFixture lays out the one-package overlay whose option gate PASSES —
+// so the run genuinely reaches the build-depth path — and a distdir holding
+// the matching archive. Returned: overlay root, distdir.
+func seamDepthFixture(t *testing.T) (string, string) {
+	t.Helper()
+	overlay := overlayWith(t, "media-plugins/gst-plugins-qt6", "1.28.6", goldenEbuild,
+		"gst-plugins-good-1.28.6.tar.gz")
+	distdir := t.TempDir()
+	archive := buildTarGz(t, map[string]string{
+		"gst-plugins-good-1.28.6/meson.build":   "project('x')\n",
+		"gst-plugins-good-1.28.6/meson.options": "option('qt6')\noption('aalib')\noption('libcaca')\n",
+	})
+	linkInto(t, archive, filepath.Join(distdir, "gst-plugins-good-1.28.6.tar.gz"))
+	return overlay, distdir
+}
+
+// TestRun_SuppliedManifestIsMaterializedInsideTheStagedTree is R2.1 and R2.4:
+// the caller's bytes land at <staged>/Manifest, 0o600, and NOTHING lands in
+// the published overlay.
+func TestRun_SuppliedManifestIsMaterializedInsideTheStagedTree(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	staging := t.TempDir()
+	supplied := []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n")
+	before := hashTree(t, overlay)
+
+	_, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: staging,
+		StagedManifest: func(string) ([]byte, error) {
+			return append([]byte(nil), supplied...), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	manifests := seamStagedManifests(t, staging)
+	if len(manifests) != 1 {
+		t.Fatalf("found %d Manifest files under the staging root, want exactly 1 — the supplied bytes were "+
+			"not materialised into the staged tree (R2.1): %v", len(manifests), manifests)
+	}
+	body, err := os.ReadFile(manifests[0])
+	if err != nil {
+		t.Fatalf("reading the materialised Manifest: %v", err)
+	}
+	if string(body) != string(supplied) {
+		t.Errorf("the materialised Manifest is not the supplied bytes:\ngot  %q\nwant %q", body, supplied)
+	}
+	info, err := os.Stat(manifests[0])
+	if err != nil {
+		t.Fatalf("stat %s: %v", manifests[0], err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("materialised Manifest mode: got %04o, want 0600 — the staged tree's own stance is that "+
+			"nothing outside this run reads it (stagedFileMode)", info.Mode().Perm())
+	}
+
+	if after := hashTree(t, overlay); after != before {
+		t.Errorf("the run changed the published overlay: %s -> %s; materialisation writes only inside the "+
+			"staged tree (R2.4)", before, after)
+	}
+}
+
+// TestRun_AManifestWriteFailureIsAReportedSkipNamingTheStagedPath is R2.5.
+//
+// The failure is injected through the seam's own call: by the time the
+// producer is asked, the staged tree exists (the contract consults the seam
+// about "a staged tree lacking a Manifest", so staging comes first), and the
+// producer seals the staged package directory read-only before answering. The
+// write that follows must fail, and the build gates must say so — naming the
+// staged path — rather than run against a tree whose Manifest silently never
+// arrived.
+func TestRun_AManifestWriteFailureIsAReportedSkipNamingTheStagedPath(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	staging := t.TempDir()
+	var sealed []string
+	t.Cleanup(func() {
+		for _, dir := range sealed {
+			_ = os.Chmod(dir, 0o755)
+		}
+	})
+
+	got, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: staging,
+		StagedManifest: func(string) ([]byte, error) {
+			dir := seamStagedCandidateDir(staging, "gst-plugins-qt6-1.28.6.ebuild")
+			if dir == "" {
+				t.Error("the Manifest producer was asked before any tree was staged; the seam answers about " +
+					"a staged tree that lacks a Manifest, so staging must come first (D3)")
+				return []byte("DIST x 1 BLAKE2B ab SHA512 cd\n"), nil
+			}
+			if err := os.Chmod(dir, 0o555); err != nil {
+				t.Errorf("sealing the staged package directory: %v", err)
+			} else {
+				sealed = append(sealed, dir)
+			}
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v — a write failure is a reported outcome, not a failed run", err)
+	}
+	if len(sealed) == 0 {
+		t.Fatal("the staged package directory was never sealed: either nothing was staged or the Manifest " +
+			"producer was never consulted, and this case then proves nothing about a failing write (R2.5)")
+	}
+
+	configure := gateOf(t, onlyResult(t, got), GateConfigure)
+	if configure.Outcome != OutcomeSkipped {
+		t.Fatalf("configure gate: got %q (reason %q), want SKIPPED — the Manifest could not be written, so no "+
+			"build phase had anything trustworthy to verify against (R2.5)", configure.Outcome, configure.Reason)
+	}
+	if !strings.Contains(configure.Reason, staging) {
+		t.Errorf("the skip %q does not name the staged path it could not write (under %s); without it the "+
+			"operator cannot tell a full disk from a sealed directory (R2.5)", configure.Reason, staging)
+	}
+}
+
+// TestRun_AManifestProducerFailureIsAReportedSkipNamingTheAttempt is R2.6,
+// the producer-side twin of the write failure above: the content could not be
+// PRODUCED, so nothing may be materialised and the build gates must say what
+// was attempted — in the producer's own words, because those words carry the
+// identifiers the operator needs to reproduce the failure. Distinct from
+// R2.5 on purpose: "the bytes could not be made" and "the bytes could not be
+// written" are different next actions.
+func TestRun_AManifestProducerFailureIsAReportedSkipNamingTheAttempt(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	staging := t.TempDir()
+	before := hashTree(t, overlay)
+
+	got, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: staging,
+		StagedManifest: func(string) ([]byte, error) {
+			return nil, errors.New("generating the candidate's Manifest: pkgdev is not installed on this host")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v — a failing producer is a reported outcome, not a failed run", err)
+	}
+
+	configure := gateOf(t, onlyResult(t, got), GateConfigure)
+	if configure.Outcome != OutcomeSkipped {
+		t.Fatalf("configure gate: got %q (reason %q), want SKIPPED — no Manifest content exists, so a build "+
+			"phase could only die in setup and report a confident failure about nothing (R2.6)",
+			configure.Outcome, configure.Reason)
+	}
+	if !strings.Contains(configure.Reason, "pkgdev is not installed on this host") {
+		t.Errorf("the skip %q does not carry the producer's own error; without it the operator cannot tell "+
+			"WHAT was attempted (R2.6)", configure.Reason)
+	}
+
+	if manifests := seamStagedManifests(t, staging); len(manifests) != 0 {
+		t.Errorf("a Manifest was materialised although the producer failed: %v — there were no bytes to "+
+			"write, so whatever this file holds is invented (R2.6)", manifests)
+	}
+	if after := hashTree(t, overlay); after != before {
+		t.Errorf("the failing producer's run changed the published overlay: %s -> %s (R2.4)", before, after)
+	}
+}
+
+// MERGE FRAGMENT — story 037, sub-task 2.2 (Run's depth path executes instead
+// of skipping).
+//
+// Target file: internal/autoupdate/validate/run_test.go (APPEND immediately
+// AFTER sub-task 2.1's fragment — this fragment BORROWS 2.1's helpers
+// seamDepthFixture, seamStagedCandidateDir; materialise 2.1 first).
+// Do NOT repeat the `package validate` clause.
+//
+// IMPORTS: none added.
+//
+// # PINNED CONTRACT (S037-R2.2, R2.3, R4.4)
+//
+// With a Manifest source supplied, Run at a depth above `options` goes
+// Stage → materialise → RunBuildGates: the build gates' outcomes come from the
+// gates themselves, not from noteBuildDepth's unconditional deferral to the
+// apply path. With NO Manifest source (seam nil, staged tree without a file),
+// the residual skip survives and names the condition.
+//
+// # What separates the new path from the old one, observably
+//
+// Today every build gate of a standalone run carries buildDepthNotRunReason's
+// sentence, which ends by directing the operator to `bentoo overlay autoupdate
+// --apply`. After this sub-task that sentence is gone from the seam-fed path:
+// the gates RUN, and whatever stops them (here: no `ebuild` on a stripped
+// PATH) is the gates' own reported reason. The staged tree's existence is the
+// second observable: today the standalone runner stages nothing.
+
+// TestRun_DepthAboveOptionsExecutesTheBuildGates is R2.2. PATH is stripped so
+// the case is hermetic (see 2.1's fragment header): the gates stop at their
+// own "no ebuild on this host" answer — but they are REACHED, over a tree that
+// was really staged, which is exactly what today's run never does.
+func TestRun_DepthAboveOptionsExecutesTheBuildGates(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	staging := t.TempDir()
+	got, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: staging,
+		StagedManifest: func(string) ([]byte, error) {
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if dir := seamStagedCandidateDir(staging, "gst-plugins-qt6-1.28.6.ebuild"); dir == "" {
+		t.Error("no staged tree exists under the staging root after a configure-depth run with a Manifest " +
+			"source; the depth path must Stage before it can build (R2.2)")
+	}
+
+	res := onlyResult(t, got)
+	if res.DepthRequested != "configure" {
+		t.Errorf("DepthRequested = %q, want %q", res.DepthRequested, "configure")
+	}
+	for _, gate := range []string{GatePatches, GateConfigure} {
+		g := gateOf(t, res, gate)
+		if strings.Contains(g.Reason, "overlay autoupdate --apply") {
+			t.Errorf("the %s gate still carries the old deferral sentence (%q); with a Manifest source "+
+				"supplied, the depth path executes the gates instead of sending the operator to the apply "+
+				"command (R2.2)", gate, g.Reason)
+		}
+	}
+}
+
+// TestRun_NoManifestSourceIsAReportedSkipNamingTheCondition is R2.3/R4.4, the
+// residual skip: seam nil, staged tree without a Manifest — the build gates
+// are SKIPPED with a reason naming the missing source.
+//
+// EXPECT THIS GREEN ON ARRIVAL at the outcome level: today's run also reports
+// these gates SKIPPED with a Manifest-mentioning sentence, so this test is a
+// REGRESSION PIN on the residual branch surviving the rewrite, not a Red. In
+// Run mode, prove it by mutation: remove the residual branch (make the nil-seam
+// depth path stage and run the gates anyway) and confirm this fails.
+func TestRun_NoManifestSourceIsAReportedSkipNamingTheCondition(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	got, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	configure := gateOf(t, onlyResult(t, got), GateConfigure)
+	if configure.Outcome != OutcomeSkipped {
+		t.Fatalf("configure gate: got %q (reason %q), want SKIPPED — with no Manifest source anywhere, a build "+
+			"would die in Portage's setup phase and report a confident failure about a bump that may be fine (R2.3)",
+			configure.Outcome, configure.Reason)
+	}
+	if configure.Reason == "" || !strings.Contains(configure.Reason, "Manifest") {
+		t.Errorf("the skip %q does not name the missing Manifest source; \"skipped\" without the condition is "+
+			"the silence this package exists to remove (R2.3, R4.4)", configure.Reason)
+	}
+}
