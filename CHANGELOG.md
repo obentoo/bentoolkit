@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`overlay validate --depth` now runs the build gates it names, instead of
+  reporting a deeper class of skip.** A staged tree deliberately leaves without
+  a Manifest — it describes the versions already published, not the candidate —
+  and Portage refuses an ebuild whose Manifest does not describe its archive. So
+  every build gate over a staged tree died in the setup phase and came back
+  SKIPPED, which promotion read as acceptable. Measured before this change on
+  the realign path: a proof of 13 packages "passed" with 26/26 gates SKIPPED and
+  zero builds executed.
+
+  `validate.Options` gains two optional seams, `DistNames` and `StagedManifest`
+  (`internal/autoupdate/validate/run.go`). The caller supplies the distfile
+  names and the Manifest content; `Run` materialises the bytes inside the staged
+  tree at mode 0600 and then runs the gates. Manifest *generation* stays in
+  `internal/autoupdate` — `cmd/bentoo` composes the two, which is the only place
+  that already imports both. The zero value of every new field reproduces the
+  previous behaviour byte-for-byte, and that was proved by execution rather than
+  by reading the diff: all four nil-seam refusals rendered from the new code
+  diff empty against the same four rendered from the previous release's format
+  strings.
+
+  The applier feeds the same seams, and `lendPublishedDistNames` — which wrote a
+  temporary Manifest into the staged tree so the gate could read names out of
+  it, then defer-removed it — is deleted. That coupling had a failure mode worth
+  naming: on a staged tree the gate could not write to, the lend died, the gate
+  reported SKIPPED, and the bump was published on the strength of a gate that
+  read nothing. `--check` and `--apply` reach the seam through the shared path,
+  so the two drivers cannot drift apart in silence.
+
+  Also added: `Options.LogDir`, so a standalone run retains the full build
+  transcript in the same directory the apply path uses.
+
+  Proved on the real golden pair under `-tags live`: `gst-plugins-qt6-1.29.2`
+  fails the configure gate naming `aalib`, `1.28.6` configures cleanly, and the
+  published overlay is byte-identical after a real build — 6 PASS / 0 FAIL,
+  where the same suite measured 4 PASS / 2 FAIL before.
+
 - **A proved realignment can now actually be published — per package, on
   evidence, and only on the maintainer's yes.** `realign.Promote` shipped with
   story 034's Stage 2 carrying every guard R5.3–R5.5 ask for, and nothing ever
@@ -213,6 +249,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **A failed build gate now quotes the cause instead of Portage's epilogue.**
+  `failureExcerpt` quoted the last 12 non-empty lines of a failing phase, on the
+  reasoning that the error is at the end. It is not. Portage's `die` prints its
+  call stack, the offending snippet, the support boilerplate and four `located
+  at '…'` lines *after* the error — measured here, 16 lines of epilogue
+  following the one line that mattered. So every FAILED build gate this project
+  ever reported quoted 12 lines of boilerplate and none of the cause.
+
+  The window now ends at `die`'s banner and appends that banner, which is also
+  the line the staging-repository name is scrubbed out of. A transcript with no
+  banner keeps exactly the old behaviour.
+
+  The hermetic test that should have caught this was passing vacuously: its
+  fixture carried three non-empty lines after the last phase marker where a real
+  failure carries twenty-four, so the truncation never engaged. The fixture now
+  carries `die`'s real epilogue, and with the old tail-quoting restored it fails
+  with precisely the production symptom.
+
 - **A baseline review could be a silent no-op.** The `::gentoo` tree was located
   only by walking the packages in view, so a run whose packages `::gentoo` does
   not carry — `--realign --only-outdated`, say — found no tree, wrote nothing
