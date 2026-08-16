@@ -112,6 +112,28 @@ const configureFailLog = markerUnpacked +
 	" * Working directory: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n" +
 	" * S: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n"
 
+// configureBareDieFailLog is the shape the banner-ending window got wrong: a
+// phase that produced NO diagnostic of its own before dying. `econf || die
+// "econf failed"` and `emake || die "emake failed"` are the common case in the
+// tree, and for them die's message — printed AFTER the banner — is the entire
+// cause. An excerpt that ends at the banner therefore quotes a line that only
+// repeats failReason, and the operator learns nothing they did not already have.
+const configureBareDieFailLog = markerUnpacked +
+	markerPreparing +
+	markerPrepared +
+	markerConfiguring +
+	"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	"  econf failed\n" +
+	" * ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	" *   econf failed\n" +
+	" * \n" +
+	" * Call stack:\n" +
+	" *     ebuild.sh, line  143:  Called src_configure\n" +
+	" *   environment, line 1769:  Called die\n" +
+	" * The specific snippet of code:\n" +
+	" *       econf || die \"econf failed\";\n" +
+	" * The complete build log is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/build.log.gz'.\n"
+
 // unpackFailLog stops before `>>> Source prepared.`, which per design D6 makes
 // it a host or distfile fault rather than a statement about the ebuild.
 const unpackFailLog = ">>> Unpacking source...\n" +
@@ -292,6 +314,61 @@ func TestRunBuildGates_ConfigureFailureNamesTheOptionAndRetainsTheLog(t *testing
 	joined := strings.Join(details, " | ")
 	if !strings.Contains(joined, "aalib") {
 		t.Errorf("the configure failure does not name the option upstream removed; findings: %q", joined)
+	}
+	// die's OWN message, which Portage prints AFTER the banner. Quoting up to the
+	// banner and stopping dropped it, and here that loss is survivable only
+	// because meson happened to print a diagnostic first — see
+	// TestRunBuildGates_ABareDieStillReportsItsMessage for the shape where it is
+	// the only thing there is.
+	if !strings.Contains(joined, "meson setup failed") {
+		t.Errorf("the excerpt drops the message die was called with; findings: %q", joined)
+	}
+	// The epilogue is still excluded. This is the half the story fixed first, and
+	// appending die's message must not have re-admitted the boilerplate behind it.
+	for _, boilerplate := range []string{"Call stack:", "located at", "If you need support"} {
+		if strings.Contains(joined, boilerplate) {
+			t.Errorf("die's epilogue is back in the excerpt (%q); findings: %q", boilerplate, joined)
+		}
+	}
+}
+
+// TestRunBuildGates_ABareDieStillReportsItsMessage pins the case that ending the
+// excerpt at die's banner got wrong.
+//
+// The phase printed no diagnostic before dying, so everything before the banner
+// is empty and the banner is the first line after the phase marker. Quoting
+// `cause + banner` therefore yielded the banner alone — a line that names the
+// atom and the phase, both of which failReason already says. The message die was
+// called with is the only statement of WHY, and it is printed after the banner.
+func TestRunBuildGates_ABareDieStillReportsItsMessage(t *testing.T) {
+	spy := &buildSpy{}
+	req := buildRequestFor(t, DepthConfigure)
+
+	gates, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureBareDieFailLog, errors.New("exit status 1")))
+	if err != nil {
+		t.Fatalf("RunBuildGates returned an error (%v); a failing build is a REPORTED OUTCOME", err)
+	}
+
+	cfg := gateNamed(t, gates, GateConfigure)
+	if cfg.Outcome != OutcomeFailed {
+		t.Fatalf("configure gate: got %q, want FAILED", cfg.Outcome)
+	}
+
+	var details []string
+	for _, f := range cfg.Findings {
+		if f.Severity == SeverityError {
+			details = append(details, f.Detail)
+		}
+	}
+	joined := strings.Join(details, " | ")
+
+	if !strings.Contains(joined, "econf failed") {
+		t.Errorf("the only statement of why this build died is absent from the findings: %q", joined)
+	}
+	for _, boilerplate := range []string{"Call stack:", "located at", "specific snippet"} {
+		if strings.Contains(joined, boilerplate) {
+			t.Errorf("die's epilogue leaked into the excerpt (%q); findings: %q", boilerplate, joined)
+		}
 	}
 
 	// R5.1/R6.5: the log is retained and its path is named. Exactly one log for

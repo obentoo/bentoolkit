@@ -830,6 +830,16 @@ func (r buildRun) unmeasuredReason(phase buildPhase) string {
 //
 // A transcript with no banner — a phase that failed without `die`, or a
 // synthetic one — keeps exactly the old behaviour: the last excerptLines lines.
+//
+// # The banner is not the last thing worth quoting (measured 2026-08-16)
+//
+// Ending AT the banner was still one line short. `die` prints the message it was
+// CALLED with immediately after its banner, and for a failure that produced no
+// diagnostic of its own — `emake || die "emake failed"`, the common shape — that
+// message is the entire cause. Ending at the banner made the excerpt collapse to
+// the banner alone, which only repeats what failReason already says. So
+// dieMessage is appended too: the banner names WHAT failed, and the message
+// after it names WHY.
 func (r buildRun) failureExcerpt() []string {
 	lines := strings.Split(r.transcript, "\n")
 
@@ -847,13 +857,15 @@ func (r buildRun) failureExcerpt() []string {
 		}
 	}
 
-	// The cause lives before die's banner; the banner names what failed.
+	// The cause lives before die's banner; the banner names what failed; and
+	// die's own message is the line AFTER it (S037-R5.1, second measurement).
 	if at := dieBannerIndex(excerpt); at >= 0 {
 		cause := excerpt[:at]
 		if len(cause) > excerptLines {
 			cause = cause[len(cause)-excerptLines:]
 		}
-		return append(append([]string(nil), cause...), excerpt[at])
+		quoted := append(append([]string(nil), cause...), excerpt[at])
+		return append(quoted, dieMessage(excerpt[at+1:])...)
 	}
 
 	if len(excerpt) > excerptLines {
@@ -874,11 +886,50 @@ func (r buildRun) failureExcerpt() []string {
 // second banner would only appear in a transcript that already failed twice.
 func dieBannerIndex(lines []string) int {
 	for i, line := range lines {
-		if strings.Contains(line, "ERROR: ") && strings.Contains(line, " failed (") && strings.Contains(line, "phase)") {
+		if isDieBanner(line) {
 			return i
 		}
 	}
 	return -1
+}
+
+// isDieBanner is dieBannerIndex's predicate, named so that dieMessage can stop
+// at a banner without re-stating the shape it matches on.
+func isDieBanner(line string) bool {
+	return strings.Contains(line, "ERROR: ") && strings.Contains(line, " failed (") && strings.Contains(line, "phase)")
+}
+
+// dieMessageLines bounds how much of die's own message is quoted. One line is
+// the overwhelmingly common shape; the cap exists so that a `die` called with an
+// unbounded string cannot push the cause out of a summary that is meant to stay
+// readable.
+const dieMessageLines = 4
+
+// dieMessage is the message `die` was CALLED with: the lines Portage prints
+// between its banner and the rest of the epilogue.
+//
+// # Where it stops, and why each boundary is there
+//
+// Portage prints the message, then a bare `*` separator, then `Call stack:` and
+// the boilerplate this excerpt exists to exclude. Any of the three ends the
+// message. A second banner ends it too, because Portage emits the whole banner
+// and message twice — once unprefixed and once with the ` * ` prefix — and the
+// first copy's message must not swallow the second copy's banner.
+//
+// Empty is a legitimate answer: a `die` with no message prints none, and the
+// banner alone is then genuinely all there is.
+func dieMessage(after []string) []string {
+	var msg []string
+	for _, line := range after {
+		if line == "*" || strings.Contains(line, "Call stack:") || isDieBanner(line) {
+			break
+		}
+		msg = append(msg, line)
+		if len(msg) == dieMessageLines {
+			break
+		}
+	}
+	return msg
 }
 
 // patchCount renders the exact number of patches applied, singular or plural.
