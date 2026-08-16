@@ -613,3 +613,33 @@ func TestOverlayValidate_HelpNoLongerPromisesAReadOnlyRunAtEveryDepth(t *testing
 		t.Error("the help never names --depth, the flag that turns this into a command that builds")
 	}
 }
+
+// TestOverlayValidate_RequireIsolationReachesTheRunner is the command half of
+// the same policy bypass: the runner honours Options.RequireIsolation, but only
+// if this command reads the key and hands it over.
+//
+// The config is written under a private XDG_CONFIG_HOME rather than read from
+// the host, keeping the environment coupling this file's header calls out.
+func TestOverlayValidate_RequireIsolationReachesTheRunner(t *testing.T) {
+	xdg := t.TempDir()
+	dir := filepath.Join(xdg, "bentoo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("laying out the config dir: %v", err)
+	}
+	body := "overlay:\n  path: " + t.TempDir() + "\nautoupdate:\n  validate:\n    require_isolation: true\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the config: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	seen := stubValidateRunner(t, validate.Report{})
+	captureExit(t, func() {
+		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
+	})
+
+	if !seen.RequireIsolation {
+		t.Error("autoupdate.validate.require_isolation is set and the runner was handed RequireIsolation=false; " +
+			"the identical gates honour that key under `overlay autoupdate`, so a build path that drops it " +
+			"is the operator's policy silently not applying to one of the two commands that build")
+	}
+}

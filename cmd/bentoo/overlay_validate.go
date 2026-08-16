@@ -203,8 +203,15 @@ func runValidate(cmd *cobra.Command, args []string) {
 	}
 
 	var overlayPath string
+	// requireIsolation is read from the SAME key `overlay autoupdate` reads
+	// (autoupdate.validate.require_isolation), because the gates it governs are
+	// the same gates. A config that could not be loaded leaves it false, which is
+	// the shipped behaviour of both commands with the key unset — the run is not
+	// refused over a missing config file, it simply carries no policy to apply.
+	var requireIsolation bool
 	if appCtx, err := loadAppContextNoValidation(); err == nil {
 		overlayPath = appCtx.OverlayPath
+		requireIsolation = appCtx.Config.Autoupdate.Validate.GetRequireIsolation()
 	}
 
 	// Above `options` the gates need a tree to build in, and it is a STAGED COPY
@@ -261,11 +268,12 @@ func runValidate(cmd *cobra.Command, args []string) {
 		// depth.String() rather than the raw flag: the two are the same string
 		// for anything ParseDepth accepted, and going through the ladder means
 		// the runner is handed a name it can always parse back.
-		Depth:          depth.String(),
-		StagingRoot:    stagingRoot,
-		LogDir:         logDir,
-		DistNames:      distNames,
-		StagedManifest: stagedManifest,
+		Depth:            depth.String(),
+		StagingRoot:      stagingRoot,
+		LogDir:           logDir,
+		RequireIsolation: requireIsolation,
+		DistNames:        distNames,
+		StagedManifest:   stagedManifest,
 	})
 	if err != nil {
 		// AN INTERRUPTION IS NOT A FAILURE TO VALIDATE, and it was being reported

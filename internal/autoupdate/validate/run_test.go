@@ -1366,3 +1366,62 @@ func TestRun_AnInterruptedBuildIsNotReportedAsUnstartable(t *testing.T) {
 		}
 	}
 }
+
+// TestRun_RequireIsolationReachesTheBuildGates closes a POLICY BYPASS rather
+// than adding a feature.
+//
+// `autoupdate.validate.require_isolation` is honoured by these same gates under
+// `overlay autoupdate`. Until this story they were unreachable from `overlay
+// validate` — every one of them SKIPPED — so nothing that command did could be
+// unisolated. Wiring the seams made them run while the BuildRequest kept
+// leaving RequireIsolation at its zero value, so the operator's decision that
+// builds must be isolated silently stopped applying to one of the two commands
+// that build.
+//
+// The discriminator is ORDER: RunBuildGates tests isolation BEFORE it looks up
+// `ebuild`. So with `ebuild` off PATH, a run that did not carry the field stops
+// at "ebuild was not found" and a run that did carry it stops earlier, at the
+// isolation refusal. Same fixture, one field apart.
+func TestRun_RequireIsolationReachesTheBuildGates(t *testing.T) {
+	run := func(t *testing.T, require bool) GateResult {
+		t.Helper()
+		overlay, distdir := seamDepthFixture(t)
+		t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+		got, err := Run(context.Background(), Options{
+			Overlay:          overlay,
+			Distdir:          distdir,
+			Depth:            "configure",
+			StagingRoot:      t.TempDir(),
+			RequireIsolation: require,
+			StagedManifest: func(string) ([]byte, error) {
+				return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run(RequireIsolation=%v): %v", require, err)
+		}
+		return gateOf(t, onlyResult(t, got), GateConfigure)
+	}
+
+	off := run(t, false)
+	if !strings.Contains(off.Reason, "ebuild was not found on PATH") {
+		t.Fatalf("the control run did not stop where this test needs it to (%q); its assertion below "+
+			"would not be measuring the isolation policy", off.Reason)
+	}
+
+	on := run(t, true)
+	if strings.Contains(on.Reason, "ebuild was not found on PATH") {
+		// Either the field was dropped on the way to BuildRequest — the bypass —
+		// or this host really can isolate, in which case the two runs are
+		// genuinely indistinguishable and there is nothing here to measure.
+		if isolated, _ := (BuildDeps{}).isolationProbe()(); isolated {
+			t.Skip("this host reports build isolation, so the required and not-required runs stop at the " +
+				"same place and the policy cannot be observed from here")
+		}
+		t.Errorf("RequireIsolation did not reach the build gates: the run stopped at the `ebuild` lookup (%q), "+
+			"which RunBuildGates only reaches AFTER the isolation check it should have refused at", on.Reason)
+	}
+	if !strings.Contains(on.Reason, "isolation was required") {
+		t.Errorf("the gate does not name the isolation refusal (%q)", on.Reason)
+	}
+}

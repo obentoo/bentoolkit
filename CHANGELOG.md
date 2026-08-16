@@ -258,6 +258,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **`overlay validate --depth` now honours `require_isolation`.** This closes a
+  policy bypass rather than adding an option.
+  `autoupdate.validate.require_isolation` is read by the *same* build gates
+  under `overlay autoupdate`, and until this story those gates were unreachable
+  from `overlay validate` — every one of them SKIPPED, so nothing this command
+  did could ever be unisolated. Wiring the seams made them run while the
+  `BuildRequest` kept leaving the field at its zero value, so an operator's
+  decision that builds must be isolated silently stopped applying to one of the
+  two commands that build. `validate.Options` carries the setting now, and the
+  command reads the same key from the same config.
+
 - **`overlay validate --help` no longer promises a read-only run at every
   depth.** "Nothing is built, downloaded or changed" was *accurate* on `main`:
   every build gate reachable from this entry point reported SKIPPED, so whatever

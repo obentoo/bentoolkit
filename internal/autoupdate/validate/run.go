@@ -68,6 +68,25 @@ type Options struct {
 	// `overlay autoupdate --clean`.
 	StagingRoot string
 
+	// RequireIsolation refuses to run a build this host cannot isolate, exactly
+	// as BuildRequest.RequireIsolation does for the applier — it IS that field,
+	// carried to the one caller that had no way to set it.
+	//
+	// IT EXISTS BECAUSE ITS ABSENCE WAS A POLICY BYPASS, not a missing feature.
+	// `autoupdate.validate.require_isolation` is honoured by the identical gates
+	// under `overlay autoupdate`, and until this story those gates were
+	// unreachable from `overlay validate`: every one of them SKIPPED, so nothing
+	// this command did could be unisolated. Wiring the seams made them run, and
+	// a build path that ignores the setting is not a command missing an option —
+	// it is the operator's decision that builds must be isolated, silently not
+	// applying to one of the two commands that build.
+	//
+	// The zero value is false, which is the shipped behaviour of both commands
+	// when the key is unset (R11.3): an unisolated build still runs and its pass
+	// is labelled "unverified isolation" rather than refused, because creating
+	// the namespace needs privilege an ordinary user does not have.
+	RequireIsolation bool
+
 	// DistNames answers, for ONE package directory, which upstream archives the
 	// option gate may look for. It is the seam a caller uses when the directory
 	// on disk cannot name them itself — a staged tree is exactly that shape: a
@@ -570,6 +589,11 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		Atom:       target.atom,
 		Version:    target.version,
 		Depth:      depth,
+		// Carried, not defaulted. Leaving it zero here was the whole of the
+		// bypass: the same gates honour this under `overlay autoupdate`, and a
+		// policy that applies to one of the two commands that build is not a
+		// policy.
+		RequireIsolation: opts.RequireIsolation,
 		// The whole transcript, kept for whoever has to go past the summary.
 		// Empty is still accepted and the gate's reason still says so.
 		LogDir: opts.LogDir,
