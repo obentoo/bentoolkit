@@ -651,3 +651,315 @@ func TestRequiresSerialApply_AnyBuildDepthSerialises(t *testing.T) {
 		}
 	}
 }
+
+// MERGE FRAGMENT — story 037, sub-task 3.1 (per-bump seam values in
+// runStaticGates; the lend retires).
+//
+// Target file: internal/autoupdate/applier_gates_test.go (APPEND at the end).
+// Do NOT repeat the `package autoupdate` clause.
+//
+// IMPORTS: none added — context, os, os/exec, path/filepath, strings and
+// testing, plus the validate import, are already in the target's block.
+//
+// # Symbols
+//
+// Added: seamFindStagedPkgDir, seamGoldenBumpFixture, and the two tests.
+// Borrowed, never re-declared: createTestEbuildFileWithContent
+// (applier_test.go), goldenApplyEbuild and writeGoldenArchive
+// (applier_golden_test.go), hashOverlayTree (applier_promote_test.go).
+//
+// # PINNED CONTRACT (design D4, D7 — S037-R3, R3.1, R3.2)
+//
+// runStaticGates supplies the option gate's names per bump, from `cand`:
+// staged Manifest present (the manifest child wrote one) → the gate reads it
+// directly; absent → the PUBLISHED names travel through the seam, and NO file
+// is written into the staged tree while the gate answers. The write-free half
+// is asserted the only way it can be from outside: the staged package
+// directory is sealed read-only before the gates run, and the gate must still
+// reach a verdict — under the lend, the same fixture dies on the temporary
+// Manifest's own WriteFile and reports SKIPPED, which R3.3 then publishes.
+
+// seamFindStagedPkgDir walks a staging root for the directory holding the
+// named candidate ebuild, or "" when nothing is staged yet.
+func seamFindStagedPkgDir(stagingRoot, ebuildName string) string {
+	var found string
+	_ = filepath.Walk(stagingRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.Name() == ebuildName {
+			found = filepath.Dir(path)
+		}
+		return nil
+	})
+	return found
+}
+
+// seamGoldenBumpFixture lays out the golden bump — 1.28.6 published, 1.29.2
+// pending, the published Manifest naming both archives, the shared distdir
+// holding both (1.29.2's declares only qt6, so its option gate has a FAILED to
+// reach) — and an applier at depth options whose pkgdev seam runs `hook`
+// against the staged package directory the moment the manifest step is
+// spawned. The hook fires between staging and the static gates, which is the
+// only window the write-free assertion can be armed in.
+func seamGoldenBumpFixture(t *testing.T, hook func(stagedPkgDir, sharedDistdir string)) (*Applier, string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	overlayDir := filepath.Join(tmp, "overlay")
+	configDir := filepath.Join(tmp, "config")
+	distdir := filepath.Join(tmp, "distdir")
+	staging := filepath.Join(tmp, "staging")
+	const pkg = "media-plugins/gst-plugins-qt6"
+
+	createTestEbuildFileWithContent(t, overlayDir, pkg, "1.28.6", goldenApplyEbuild)
+	pkgDir := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6")
+	manifest := "DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n" +
+		"DIST gst-plugins-good-1.29.2.tar.gz 100 BLAKE2B ef SHA512 01\n"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("writing the published Manifest: %v", err)
+	}
+	if err := os.MkdirAll(distdir, 0o755); err != nil {
+		t.Fatalf("creating distdir: %v", err)
+	}
+	writeGoldenArchive(t, distdir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.28.6",
+		[]string{"qt6", "aalib", "libcaca"})
+	writeGoldenArchive(t, distdir, "gst-plugins-good-1.29.2.tar.gz", "gst-plugins-good-1.29.2",
+		[]string{"qt6"})
+
+	pending, err := NewPendingList(configDir)
+	if err != nil {
+		t.Fatalf("creating pending list: %v", err)
+	}
+	pending.Add(PendingUpdate{Package: pkg, CurrentVersion: "1.28.6", NewVersion: "1.29.2", Status: StatusPending})
+
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" && hook != nil {
+			if dir := seamFindStagedPkgDir(staging, "gst-plugins-qt6-1.29.2.ebuild"); dir != "" {
+				hook(dir, distdir)
+			}
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(seam),
+		WithConfirmFunc(func(string) bool { return true }),
+		WithApplierStagingRoot(staging),
+		WithApplierDistdir(distdir, ""),
+		WithApplierDepth(validate.DepthOptions),
+	)
+	if err != nil {
+		t.Fatalf("creating applier: %v", err)
+	}
+	return applier, overlayDir, pkg
+}
+
+// TestStaticGates_AnswerWriteFreeFromAReadOnlyStagedTree is R3.2's whole
+// claim in one fixture: the staged tree carries no Manifest, its package
+// directory cannot be written to at all, and the option gate must still
+// answer — FAILED, because upstream 1.29.2 declares neither aalib nor libcaca
+// and the ebuild passes both. A gate that needs to write a temporary file
+// into the tree (the lend) dies here with SKIPPED, and R3.3 publishes the
+// bump on the strength of a gate that read nothing.
+func TestStaticGates_AnswerWriteFreeFromAReadOnlyStagedTree(t *testing.T) {
+	var sealed []string
+	applier, overlayDir, pkg := seamGoldenBumpFixture(t, func(stagedPkgDir, _ string) {
+		if err := os.Chmod(stagedPkgDir, 0o555); err != nil {
+			t.Errorf("sealing the staged package directory: %v", err)
+			return
+		}
+		sealed = append(sealed, stagedPkgDir)
+	})
+	// Registered AFTER the fixture's own t.TempDir, so it runs BEFORE the
+	// directory's RemoveAll (cleanups are LIFO): the seal must be lifted or the
+	// retained staged tree cannot be deleted.
+	t.Cleanup(func() {
+		for _, dir := range sealed {
+			_ = os.Chmod(dir, 0o755)
+		}
+	})
+
+	before := hashOverlayTree(t, overlayDir)
+	result, _ := applier.Apply(pkg, false)
+
+	if len(sealed) == 0 {
+		t.Fatal("the staged package directory was never found and sealed, so this case proved nothing " +
+			"about a write-free gate")
+	}
+	if result.Success {
+		t.Fatal("the apply PUBLISHED the golden bump although its option gate had a FAILED to report; the " +
+			"gate could not answer from a read-only staged tree, which means it needed to write into the tree " +
+			"to read names — the exact coupling R3.2 removes")
+	}
+	msg := ""
+	if result.Error != nil {
+		msg = result.Error.Error()
+	}
+	for _, want := range []string{"aalib", "libcaca"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal %q does not name %q; the gate answered, so its findings must reach the "+
+				"operator", msg, want)
+		}
+	}
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the refused bump changed the published overlay: %s -> %s", before, after)
+	}
+	for _, dir := range sealed {
+		if _, err := os.Stat(filepath.Join(dir, "Manifest")); err == nil {
+			t.Errorf("a Manifest exists in the staged package directory %s after the gates; nothing may be "+
+				"written into the staged tree while the static gates answer (R3.2)", dir)
+		}
+	}
+}
+
+// TestStaticGates_AStagedManifestFromTheManifestStepIsReadDirectly is R3.1,
+// the other half of the per-bump supply rule: when the manifest child DID
+// write a staged Manifest, that file is the authority — the generated names,
+// never the published ones, because on a bump the published Manifest answers
+// about a different release (the defect R12 fixed once already).
+//
+// EXPECT THIS GREEN ON ARRIVAL: the lend already no-ops when a staged
+// Manifest exists, so this is a REGRESSION PIN carried across the lend's
+// deletion (design D4's "rewrite, not delete"). In Run mode, prove it by
+// mutation: make runStaticGates feed the published names unconditionally and
+// confirm this fails — the staged Manifest names an archive the published one
+// has never heard of.
+func TestStaticGates_AStagedManifestFromTheManifestStepIsReadDirectly(t *testing.T) {
+	// The generated archive, named like nothing the published Manifest knows,
+	// declaring only qt6 — so a FAILED naming aalib/libcaca is only reachable
+	// by reading the STAGED Manifest and the archive it names.
+	generated := t.TempDir()
+	writeGoldenArchive(t, generated, "seam-proof-1.29.2.tar.gz", "seam-proof-1.29.2", []string{"qt6"})
+
+	applier, overlayDir, pkg := seamGoldenBumpFixture(t, func(stagedPkgDir, sharedDistdir string) {
+		if err := os.WriteFile(filepath.Join(stagedPkgDir, "Manifest"),
+			[]byte("DIST seam-proof-1.29.2.tar.gz 100 BLAKE2B ab SHA512 cd\n"), 0o600); err != nil {
+			t.Errorf("writing the staged Manifest the manifest child would have written: %v", err)
+			return
+		}
+		body, err := os.ReadFile(filepath.Join(generated, "seam-proof-1.29.2.tar.gz"))
+		if err != nil {
+			t.Errorf("reading the generated archive: %v", err)
+			return
+		}
+		// Into the SHARED distdir: this run's private fetched directory holds
+		// nothing (the pkgdev stub downloads nothing), so 035's precedence —
+		// untouched by this story — sends the gate to the shared one, where the
+		// staged Manifest's own archive is waiting.
+		if err := os.WriteFile(filepath.Join(sharedDistdir, "seam-proof-1.29.2.tar.gz"), body, 0o644); err != nil {
+			t.Errorf("placing the generated archive in the shared distdir: %v", err)
+		}
+	})
+
+	before := hashOverlayTree(t, overlayDir)
+	result, _ := applier.Apply(pkg, false)
+
+	if result.Success {
+		t.Fatal("the apply published the bump although the staged Manifest's own archive declares neither " +
+			"aalib nor libcaca; the gate did not read the Manifest the manifest step wrote (R3.1)")
+	}
+	msg := ""
+	if result.Error != nil {
+		msg = result.Error.Error()
+	}
+	if !strings.Contains(msg, "aalib") {
+		t.Errorf("the refusal %q does not name aalib; the verdict must come from the generated archive the "+
+			"staged Manifest names", msg)
+	}
+	if after := hashOverlayTree(t, overlayDir); after != before {
+		t.Errorf("the refused bump changed the published overlay: %s -> %s — the published tree never "+
+			"carries a bentoo-written Manifest, and never changes on a refusal", before, after)
+	}
+}
+
+// TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead is the
+// DISCRIMINATING half of R3.1, added during Run mode because the pre-authored
+// pin above cannot carry the proof its own doc-comment claims.
+//
+// # Why the pin above is not enough (measured, 2026-08-16)
+//
+// TestStaticGates_AStagedManifestFromTheManifestStepIsReadDirectly says a
+// FAILED naming aalib is "only reachable by reading the STAGED Manifest". It is
+// not: seamGoldenBumpFixture's published 1.29.2 archive ALSO declares only
+// qt6, so both sources yield the same verdict. Feeding the published names
+// unconditionally — the mutation the story's red-evidence prescribes — leaves
+// that test green, and a probe confirmed the refusal names neither archive.
+// The pin is real but non-discriminating; it pins the outcome, not the source.
+//
+// # What this one changes
+//
+// The PUBLISHED 1.29.2 archive declares everything the ebuild passes, so
+// reading it reaches a PASS and the bump is published. The STAGED Manifest
+// names an archive declaring only qt6, so reading it reaches a FAILED. The two
+// sources now disagree, and the verdict says which one was read.
+func TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead(t *testing.T) {
+	tmp := t.TempDir()
+	overlayDir := filepath.Join(tmp, "overlay")
+	configDir := filepath.Join(tmp, "config")
+	distdir := filepath.Join(tmp, "distdir")
+	staging := filepath.Join(tmp, "staging")
+	const pkg = "media-plugins/gst-plugins-qt6"
+
+	createTestEbuildFileWithContent(t, overlayDir, pkg, "1.28.6", goldenApplyEbuild)
+	pkgDir := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6")
+	published := "DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n" +
+		"DIST gst-plugins-good-1.29.2.tar.gz 100 BLAKE2B ef SHA512 01\n"
+	if err := os.WriteFile(filepath.Join(pkgDir, "Manifest"), []byte(published), 0o644); err != nil {
+		t.Fatalf("writing the published Manifest: %v", err)
+	}
+	if err := os.MkdirAll(distdir, 0o755); err != nil {
+		t.Fatalf("creating distdir: %v", err)
+	}
+	writeGoldenArchive(t, distdir, "gst-plugins-good-1.28.6.tar.gz", "gst-plugins-good-1.28.6",
+		[]string{"qt6", "aalib", "libcaca"})
+	// THE DISCRIMINATOR: the published candidate archive declares everything the
+	// ebuild passes, so a gate reading the PUBLISHED names answers PASS.
+	writeGoldenArchive(t, distdir, "gst-plugins-good-1.29.2.tar.gz", "gst-plugins-good-1.29.2",
+		[]string{"qt6", "aalib", "libcaca"})
+	// ...while the archive the STAGED Manifest names declares only qt6.
+	writeGoldenArchive(t, distdir, "seam-proof-1.29.2.tar.gz", "seam-proof-1.29.2", []string{"qt6"})
+
+	pending, err := NewPendingList(configDir)
+	if err != nil {
+		t.Fatalf("creating pending list: %v", err)
+	}
+	pending.Add(PendingUpdate{Package: pkg, CurrentVersion: "1.28.6", NewVersion: "1.29.2", Status: StatusPending})
+
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name == "pkgdev" {
+			if dir := seamFindStagedPkgDir(staging, "gst-plugins-qt6-1.29.2.ebuild"); dir != "" {
+				_ = os.WriteFile(filepath.Join(dir, "Manifest"),
+					[]byte("DIST seam-proof-1.29.2.tar.gz 100 BLAKE2B ab SHA512 cd\n"), 0o600)
+			}
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+
+	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(seam),
+		WithConfirmFunc(func(string) bool { return true }),
+		WithApplierStagingRoot(staging),
+		WithApplierDistdir(distdir, ""),
+		WithApplierDepth(validate.DepthOptions),
+	)
+	if err != nil {
+		t.Fatalf("creating applier: %v", err)
+	}
+
+	result, _ := applier.Apply(pkg, false)
+	if result.Success {
+		t.Fatal("the apply PUBLISHED the bump: the gate answered from the PUBLISHED Manifest's archive, which " +
+			"declares everything the ebuild passes. On a bump the published Manifest describes a different " +
+			"release, and the staged Manifest the manifest step wrote is the authority (R3.1, design D4)")
+	}
+	msg := ""
+	if result.Error != nil {
+		msg = result.Error.Error()
+	}
+	if !strings.Contains(msg, "aalib") {
+		t.Errorf("the refusal %q does not name aalib; the verdict must come from the archive the STAGED "+
+			"Manifest names, which declares only qt6", msg)
+	}
+}
