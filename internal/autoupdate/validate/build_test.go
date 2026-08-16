@@ -77,6 +77,16 @@ const configureOKNoPatchLog = markerUnpacked +
 // configureFailLog is the measurement this whole story exists for, verbatim
 // (design M-A). Note `::bentoo-staging`: Portage names the STAGING repo, and the
 // report has to translate that back before an operator ever reads it (D13).
+// EXTENDED IN STORY 037 (2026-08-16) WITH `die`'s REAL EPILOGUE, and the
+// extension is the whole point of it. As authored this constant carried three
+// non-empty lines after the last phase marker, where a real Portage failure
+// carries 24 — so failureExcerpt's excerptLines window never engaged, and the
+// test below passed without ever exercising the selection it is supposed to
+// pin. Measured on this host, the epilogue is 16 lines and comes AFTER the
+// error, which is precisely how the shipped tail-quoting reported 12 lines of
+// boilerplate and none of the cause. The lines below are the ones `ebuild`
+// actually printed, with the staging repo name kept so `clean` still has
+// something to scrub.
 const configureFailLog = markerUnpacked +
 	markerPreparing +
 	" * Applying gst-plugins-qt6-1.29.2-qt6-detection.patch ...\n" +
@@ -84,7 +94,23 @@ const configureFailLog = markerUnpacked +
 	markerConfiguring +
 	"meson.build:1:0: ERROR: Unknown option: \"aalib\".\n" +
 	"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
-	"  meson setup failed\n"
+	"  meson setup failed\n" +
+	" * ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n" +
+	" *   meson setup failed\n" +
+	" * \n" +
+	" * Call stack:\n" +
+	" *     ebuild.sh, line  143:  Called src_configure\n" +
+	" *   environment, line 2603:  Called meson_src_configure\n" +
+	" *   environment, line 1769:  Called die\n" +
+	" * The specific snippet of code:\n" +
+	" *       [[ ${rv} -eq 0 ]] || die -n \"configure failed\";\n" +
+	" * \n" +
+	" * If you need support, post the output of `emerge --info '=media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging'`,\n" +
+	" * the complete build log and the output of `emerge -pqv '=media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging'`.\n" +
+	" * The complete build log is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/build.log.gz'.\n" +
+	" * The ebuild environment file is located at '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/temp/environment'.\n" +
+	" * Working directory: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n" +
+	" * S: '/var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/gst-plugins-good-1.29.2'\n"
 
 // unpackFailLog stops before `>>> Source prepared.`, which per design D6 makes
 // it a host or distfile fault rather than a statement about the ebuild.

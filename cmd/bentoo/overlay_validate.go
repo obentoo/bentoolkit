@@ -203,6 +203,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 	// same one: a nil DistNames parses the package's own Manifest, and a nil
 	// StagedManifest means nothing travels at all.
 	var stagingRoot string
+	var logDir string
 	var distNames func(pkgDir string) ([]string, error)
 	var stagedManifest func(pkgDir string) ([]byte, error)
 	if depth > validate.DepthOptions {
@@ -211,6 +212,18 @@ func runValidate(cmd *cobra.Command, args []string) {
 			_, _ = fmt.Fprintf(diag, "  --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
 			osExit(1)
 			return
+		}
+		// S037-R5.1. A build gate that FAILED says so on its own, but the reason
+		// upstream broke — the option `meson` refused — is only in `ebuild`'s log.
+		// The same directory the apply path retains its logs in, so an operator
+		// looking for "the log of the thing that just failed" has one place to
+		// look regardless of which command ran the gates. A failure to place it is
+		// NOT fatal: the gates still run and their reason says the log was not
+		// retained, which is worth more than refusing to validate at all.
+		if configDir, cerr := autoupdateConfigDir(); cerr == nil {
+			logDir = filepath.Join(configDir, "logs")
+		} else {
+			_, _ = fmt.Fprintf(diag, "  build logs will not be retained: %v\n", cerr)
 		}
 		// This is the composition design D1 puts here and nowhere else: validate
 		// only accepts what a caller supplies, autoupdate owns Manifest
@@ -232,6 +245,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 		// the runner is handed a name it can always parse back.
 		Depth:          depth.String(),
 		StagingRoot:    stagingRoot,
+		LogDir:         logDir,
 		DistNames:      distNames,
 		StagedManifest: stagedManifest,
 	})

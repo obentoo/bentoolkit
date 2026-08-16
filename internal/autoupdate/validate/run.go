@@ -141,6 +141,35 @@ type Options struct {
 	// the two reasons DistNames states above: one Run walks many packages, and a
 	// seam stored once hands package A's Manifest to package B (S035-D2).
 	StagedManifest func(pkgDir string) ([]byte, error)
+
+	// LogDir is where a FAILED build gate's whole transcript is retained.
+	//
+	// # What it buys, stated precisely
+	//
+	// The gate's findings quote only a SUMMARY of the failure. The transcript
+	// holds everything the phase printed, and it is often the difference between
+	// "configure failed" and a diagnosis — the compiler invocation, the preceding
+	// warnings, the exact line of a generated file. A Run caller with no LogDir
+	// gets the summary and nothing to fall back on.
+	//
+	// It does NOT decide whether the findings name the cause: that is
+	// failureExcerpt's selection, and it reads the captured transcript in memory,
+	// never a file on disk. A gate names the option upstream removed with or
+	// without a LogDir. (This field was first added on the opposite belief; the
+	// belief was measured and refuted — see failureExcerpt's own note.)
+	//
+	// # Empty is today's behaviour, and it is still honest
+	//
+	// Empty retains nothing and the gate's reason says so, so nothing silently
+	// degrades — the operator is told the log was not kept rather than left to
+	// wonder where it went. Every caller written before this field existed leaves
+	// it zero and keeps exactly the reports it had.
+	//
+	// It is a plain directory and not a func of pkgDir, unlike the two seams
+	// above: a log directory is one place for the whole run, not one answer per
+	// package, and RunBuildGates already names each log after the atom and
+	// version it belongs to.
+	LogDir string
 }
 
 // depth resolves Options.Depth to a rung of the ladder, mapping the empty
@@ -443,6 +472,9 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		Atom:       target.atom,
 		Version:    target.version,
 		Depth:      depth,
+		// The whole transcript, kept for whoever has to go past the summary.
+		// Empty is still accepted and the gate's reason still says so.
+		LogDir: opts.LogDir,
 	}, BuildDeps{})
 	if err != nil {
 		// RunBuildGates errors about the REQUEST and never about the build, so

@@ -155,8 +155,54 @@ func liveEbuildSource(t *testing.T, overlay, version string) []byte {
 	return body
 }
 
-// liveStagedGate stages one version and runs the build gates at configure depth
-// against the real host, returning the gates it reported.
+// MERGE FRAGMENT — story 037, sub-task 5.1 (the live golden pair through the
+// seams). E2E RUNG — tool: go-test-live. DO NOT run in Phase 3; Red is
+// confirmed in Run mode on kekkai, where the standing measurement (story 033,
+// 2026-08-10) is 4 PASS / 2 FAIL and this story's acceptance is 6/6.
+//
+// Target file: internal/autoupdate/validate/live_test.go (//go:build live).
+//
+// THIS FRAGMENT REPLACES A FUNCTION RATHER THAN ONLY APPENDING. The existing
+// helper `liveStagedGate` (the one that calls Stage and RunBuildGates
+// directly, currently between liveEbuildSource and
+// TestLiveStaged_TheBumpThatBrokeFailsTheConfigureGate) must be DELETED and
+// the version below put in its place — Go refuses two functions of one name,
+// and the whole point of 5.1 is that the harness stops hand-building what the
+// seams now carry. Every EXISTING test and its assertions stay untouched:
+// TestLiveStaged_TheBumpThatBrokeFailsTheConfigureGate still demands configure
+// FAILED naming `aalib` (`meson.build:1:0: ERROR: Unknown option: "aalib"`,
+// measured 2026-08-09), TestLiveStaged_ThePreviousVersionConfiguresCleanly
+// still demands PASS (`>>> Source configured.`), and
+// TestLiveStaged_ThePublishedOverlayIsUntouchedByARealBuild still hashes the
+// real overlay around the failing half.
+//
+// IMPORTS: none added — context, os, path/filepath, testing and the distfiles
+// import are already in the target's block.
+//
+// # Why the harness routes through Run and not through Stage+RunBuildGates
+//
+// R5.3's claim is "opposite verdicts through the REAL staged path". The old
+// harness staged a tree with no Manifest and drove RunBuildGates directly, so
+// both configure runs died in Portage's setup phase — the 2 FAIL half of
+// 033's measurement, and precisely the setup-failure-read-as-outcome this
+// story removes. Driving validate.Run with the seams populated the way the
+// standalone command populates them (published bytes — the same-version case,
+// where the published digests are the right ones) makes the live pair prove
+// the WHOLE path: Stage → materialise 0o600 → RunBuildGates, with nothing
+// hand-fed behind the seam's back.
+//
+// # Cost, stated honestly
+//
+// Run walks every version the selector matches, so each call configures BOTH
+// versions and the pair costs four configures instead of two. That is the
+// price of proving the real path end to end; if kekkai minutes matter, Run
+// mode may memoise ONE report across the two tests — but must then keep the
+// per-version skip behaviour of liveArchive intact.
+
+// liveStagedGate validates one version of the golden package at configure
+// depth THROUGH THE SEAMS — validate.Run's own depth path, fed the published
+// Manifest exactly as `overlay validate --depth=configure` feeds it — and
+// returns the gates it reported for that version.
 func liveStagedGate(t *testing.T, version string) []GateResult {
 	t.Helper()
 	liveEbuildTool(t)
@@ -167,28 +213,49 @@ func liveStagedGate(t *testing.T, version string) []GateResult {
 	// can go and get it.
 	_ = liveArchive(t, "gst-plugins-good-"+version+".tar.xz")
 
-	staged, err := Stage(StageRequest{
-		Overlay:     overlay,
-		StagingRoot: filepath.Join(t.TempDir(), "staging"),
-		Atom:        "media-plugins/gst-plugins-qt6",
-		Version:     version,
-		EbuildBytes: liveEbuildSource(t, overlay, version),
-	})
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	manifestPath := filepath.Join(pkgDir, "Manifest")
+	published, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("staging %s: %v", version, err)
+		t.Skipf("the published Manifest is not readable at %s: %v — the same-version seam feeds published "+
+			"bytes, and without them there is nothing to feed", manifestPath, err)
 	}
 
-	gates, err := RunBuildGates(context.Background(), BuildRequest{
-		StagedRoot: staged,
-		Atom:       "media-plugins/gst-plugins-qt6",
-		Version:    version,
-		Depth:      DepthConfigure,
-		LogDir:     t.TempDir(),
-	}, BuildDeps{})
+	report, err := Run(context.Background(), Options{
+		Overlay:     overlay,
+		Selector:    "media-plugins/gst-plugins-qt6",
+		Depth:       DepthConfigure.String(),
+		StagingRoot: filepath.Join(t.TempDir(), "staging"),
+		// The helper this fragment replaced passed a LogDir to its own
+		// RunBuildGates call, so the live run keeps retaining its transcript.
+		// It is NOT what makes the configure gate name `aalib` — that was a
+		// diagnosis made and refuted in Run mode; the cause was failureExcerpt
+		// quoting die's epilogue instead of the error before it. No assertion is
+		// touched either way.
+		LogDir: t.TempDir(),
+		// S037-R5: the seams, populated the way the standalone command populates
+		// them — a realignment-shaped, same-version consumer. The names come from
+		// the same published Manifest whose bytes travel, so the option gate and
+		// the build gates answer about the same archives.
+		DistNames: func(string) ([]string, error) {
+			return distfiles.ParseManifestDistFilenames(manifestPath), nil
+		},
+		StagedManifest: func(string) ([]byte, error) {
+			return append([]byte(nil), published...), nil
+		},
+	})
 	if err != nil {
-		t.Fatalf("RunBuildGates(%s): %v — a failing build is a reported outcome, not an aborted run", version, err)
+		t.Fatalf("Run at configure depth for %s: %v — a failing build is a reported outcome, not an aborted run",
+			version, err)
 	}
-	return gates
+
+	for _, res := range report.Results {
+		if res.Version == version {
+			return res.Gates
+		}
+	}
+	t.Fatalf("the run reported no result for version %s: %+v", version, report.Results)
+	return nil
 }
 
 // TestLiveStaged_TheBumpThatBrokeFailsTheConfigureGate is design M-A turned into

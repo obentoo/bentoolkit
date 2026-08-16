@@ -803,12 +803,33 @@ func (r buildRun) unmeasuredReason(phase buildPhase) string {
 		doneMarker(phase), phase)
 }
 
-// failureExcerpt is the tail of the transcript after the last phase marker: the
-// lines the failing phase itself produced, which is where the option upstream
-// removed or the header that went missing is actually named.
+// failureExcerpt is the part of the transcript after the last phase marker that
+// carries the CAUSE: the lines the failing phase itself produced, where the
+// option upstream removed or the header that went missing is actually named.
 //
 // It is a SUMMARY. The full log is retained and named by the reason beside it,
-// so this quotes the end — where the error is — and stops.
+// so this quotes what explains the failure and stops.
+//
+// # Why the tail is the wrong thing to quote (S037-R5.1, measured 2026-08-16)
+//
+// The obvious reading of "quote the end, that is where the error is" does not
+// survive contact with Portage. On a real `ebuild … configure` failure the
+// output ends with `die`'s own epilogue — the call stack, the code snippet, the
+// support boilerplate, four `located at '…'` lines — and THAT epilogue comes
+// AFTER the error it is reporting. Measured on this host: the transcript of the
+// gst-plugins-qt6-1.29.2 configure failure carries
+// `meson.build:1:0: ERROR: Unknown option: "aalib".` as the 7th of 24 non-empty
+// lines, and die's epilogue is the last 16. Quoting the last 12 therefore
+// quoted 12 lines of boilerplate and none of the cause, for every FAILED build
+// gate this package has ever reported.
+//
+// So the window ENDS at die's banner instead of at the transcript's end, and the
+// banner itself is appended: it is the line that names the atom and the phase,
+// and it is the line the staging-repository name has to be scrubbed out of
+// (`clean`), so dropping it would quietly retire that guarantee's only witness.
+//
+// A transcript with no banner — a phase that failed without `die`, or a
+// synthetic one — keeps exactly the old behaviour: the last excerptLines lines.
 func (r buildRun) failureExcerpt() []string {
 	lines := strings.Split(r.transcript, "\n")
 
@@ -825,10 +846,39 @@ func (r buildRun) failureExcerpt() []string {
 			excerpt = append(excerpt, trimmed)
 		}
 	}
+
+	// The cause lives before die's banner; the banner names what failed.
+	if at := dieBannerIndex(excerpt); at >= 0 {
+		cause := excerpt[:at]
+		if len(cause) > excerptLines {
+			cause = cause[len(cause)-excerptLines:]
+		}
+		return append(append([]string(nil), cause...), excerpt[at])
+	}
+
 	if len(excerpt) > excerptLines {
 		excerpt = excerpt[len(excerpt)-excerptLines:]
 	}
 	return excerpt
+}
+
+// dieBannerIndex is where Portage's failure epilogue begins, or -1.
+//
+// The banner is the `ERROR: <atom>::<repo> failed (<phase> phase):` line `die`
+// prints before its call stack. It is matched on shape rather than on the atom,
+// because the atom in it carries the staging repository's name — the very thing
+// `clean` rewrites downstream — so matching the atom here would mean matching a
+// string this package deliberately does not let escape.
+//
+// The FIRST match wins: everything after it is epilogue by construction, and a
+// second banner would only appear in a transcript that already failed twice.
+func dieBannerIndex(lines []string) int {
+	for i, line := range lines {
+		if strings.Contains(line, "ERROR: ") && strings.Contains(line, " failed (") && strings.Contains(line, "phase)") {
+			return i
+		}
+	}
+	return -1
 }
 
 // patchCount renders the exact number of patches applied, singular or plural.
