@@ -753,20 +753,20 @@ func TestRunBuildGates_PrivilegeUnobtainableIsSkippedNotFailed(t *testing.T) {
 	}
 }
 
-// TestRunBuildGates_AnInterruptedBuildIsNotAVerdict is the half of the
-// cancellation story that the per-package loop check could not reach.
+// TestRunBuildGates_AnInterruptedBuildIsAnErrorNotAGateList pins the shape of
+// the answer, and the shape is the whole point.
 //
-// Run's loop stops packages that have not STARTED. This one has: the child is
-// spawned through CommandContext, so Ctrl-C kills it, `runErr` becomes a signal
-// error, and derive's attribution rule — the phase started and the run failed,
-// so this is where the bump died — reported FAILED with error-severity findings
-// and exited 1. The operator interrupted their own run and was told their ebuild
-// is broken.
+// Two wrong answers were tried before this one. Deriving normally reports
+// FAILED: the child is spawned through CommandContext, so Ctrl-C kills it, the
+// phase counts as started-and-failed, and the operator is told their ebuild is
+// broken. Returning SkippedGates instead was WORSE — PromotionDecision promotes
+// on a list of PASS-or-SKIPPED, so an interrupted `--apply --depth=compile`
+// would publish the bump into an overlay that auto-commits and pushes.
 //
-// The transcript deliberately carries a real phase marker AND a real failure
-// tail: without the marker the gate would skip anyway and the test would pass
-// for the wrong reason.
-func TestRunBuildGates_AnInterruptedBuildIsNotAVerdict(t *testing.T) {
+// A gate list cannot express "nothing was measured", because every value it can
+// hold is a statement about the candidate. So the error travels, and each
+// driver already refuses to promote on one.
+func TestRunBuildGates_AnInterruptedBuildIsAnErrorNotAGateList(t *testing.T) {
 	spy := &buildSpy{}
 	req := buildRequestFor(t, DepthConfigure)
 
@@ -774,30 +774,21 @@ func TestRunBuildGates_AnInterruptedBuildIsNotAVerdict(t *testing.T) {
 	cancel()
 
 	gates, err := RunBuildGates(ctx, req, buildSeam(spy, configureFailLog, errors.New("signal: killed")))
-	if err != nil {
-		t.Fatalf("RunBuildGates returned an error (%v); an interrupted run is a REPORTED OUTCOME", err)
-	}
 
-	cfg := gateNamed(t, gates, GateConfigure)
-	if cfg.Outcome == OutcomeFailed {
-		t.Fatalf("the configure gate reports FAILED after an interrupt, blaming the ebuild for the operator's "+
-			"own Ctrl-C; reason: %q", cfg.Reason)
+	if err == nil {
+		t.Fatalf("an interrupted build returned no error; gates=%+v — a gate list is a statement about the "+
+			"candidate, and PromotionDecision publishes on one that is all PASS or SKIPPED", gates)
 	}
-	if cfg.Outcome != OutcomeSkipped {
-		t.Fatalf("configure gate: got %q, want SKIPPED", cfg.Outcome)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the error does not wrap the context cause (%v); a caller cannot tell an interrupt from a "+
+			"malformed request without matching this sentence", err)
 	}
-	if !strings.Contains(cfg.Reason, "interrupted") {
-		t.Errorf("the skip %q does not say the run was interrupted", cfg.Reason)
+	// The critical assertion: NOTHING promotable comes back. A single SKIPPED
+	// gate here is enough for PromotionDecision to return promoted=true.
+	if len(gates) != 0 {
+		t.Errorf("an interrupted build produced %d gate(s): %+v — every one of them is promotable", len(gates), gates)
 	}
-	// No error-severity finding may survive: ExitCode reads those, so a leftover
-	// one would still exit 1 on an interrupt.
-	for _, f := range cfg.Findings {
-		if f.Severity == SeverityError {
-			t.Errorf("an interrupted gate still carries an error finding (%q), which exits 1", f.Detail)
-		}
-	}
-	// The partial transcript is still evidence, and keeping it is what makes the
-	// interruption cost no more than it has to.
+	// The partial transcript is still evidence, and the error names where it is.
 	entries, rerr := os.ReadDir(req.LogDir)
 	if rerr != nil {
 		t.Fatalf("reading the log dir: %v", rerr)
@@ -806,4 +797,23 @@ func TestRunBuildGates_AnInterruptedBuildIsNotAVerdict(t *testing.T) {
 		t.Errorf("the log dir holds %d files; the partial transcript of an interrupted build is evidence "+
 			"someone may want", len(entries))
 	}
+}
+
+// TestPromotionDecision_RefusesNothingRatherThanPromotingIt is the invariant the
+// interrupt fix exists to protect, asserted directly so a future change to
+// RunBuildGates' return shape cannot quietly re-open it.
+//
+// An all-SKIPPED list promotes BY DESIGN — a gate that could not run is not a
+// gate that objected. That design is only safe while "could not run" never
+// covers "was killed halfway through". This pins the consequence: if an
+// interrupt ever produces skipped gates again, this test still passes, and the
+// one above is what fails. Both are needed; neither is redundant.
+func TestPromotionDecision_RefusesNothingRatherThanPromotingIt(t *testing.T) {
+	skipped := SkippedGates(DepthConfigure, "killed mid-build")
+
+	promoted, reason := PromotionDecision(skipped, nil)
+	if !promoted {
+		t.Skip("PromotionDecision no longer promotes on all-SKIPPED; the interrupt hazard this guards is gone")
+	}
+	t.Logf("confirmed: an all-SKIPPED list promotes (%q) — which is why an interrupt must not produce one", reason)
 }

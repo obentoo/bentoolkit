@@ -1164,19 +1164,20 @@ func TestUnbuildableHereReason_SeparatesTheHostFromTheEbuild(t *testing.T) {
 	})
 }
 
-// TestRun_ACancelledRunStopsBuildingAndSaysSo is the cost the seams added to a
-// loop that used to be cheap. Each iteration can now stage a tree and spawn
-// `ebuild`, so a whole-overlay `--depth=compile` that the operator stopped would
-// otherwise keep building — and report every remaining package as SKIPPED, a
-// word that reads as "considered and found not to apply".
+// TestRun_ACancelledRunIsAnErrorAndNotAQuietPass covers what the Report shape
+// cannot express on its own.
 //
-// The package is still REPORTED, because a package in view never goes
-// unmentioned. What is asserted is that it is reported as interrupted.
-func TestRun_ACancelledRunStopsBuildingAndSaysSo(t *testing.T) {
+// ExitCode reads error-severity findings, and an interrupted gate has none to
+// give. So a sweep reported purely as SKIPPED lines exits 0 — at the shell, a
+// SIGTERM'd `--depth=compile` is indistinguishable from a clean run that found
+// nothing wrong, and anything scripting this reads a killed run as a pass. The
+// remaining packages are still listed, so the partial report says WHICH ones
+// went unexamined; the error is what stops it being read as a verdict.
+func TestRun_ACancelledRunIsAnErrorAndNotAQuietPass(t *testing.T) {
 	overlay, distdir := seamDepthFixture(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // before Run, so no iteration can have started
+	cancel()
 
 	got, err := Run(ctx, Options{
 		Overlay:        overlay,
@@ -1185,18 +1186,24 @@ func TestRun_ACancelledRunStopsBuildingAndSaysSo(t *testing.T) {
 		StagingRoot:    t.TempDir(),
 		StagedManifest: func(string) ([]byte, error) { return []byte("DIST x 1 BLAKE2B ab SHA512 cd\n"), nil },
 	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+
+	if err == nil {
+		t.Fatalf("an interrupted run returned no error; ExitCode()=%d, and an interrupted gate carries no error "+
+			"finding, so this renders as a clean pass at the shell", got.ExitCode())
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the error does not wrap the context cause: %v", err)
 	}
 
+	// The package is still listed and still says why, so the partial report
+	// names what went unexamined instead of silently being short.
 	res := onlyResult(t, got)
 	configure := gateOf(t, res, GateConfigure)
 	if configure.Outcome != OutcomeSkipped {
 		t.Fatalf("configure gate: got %q, want SKIPPED", configure.Outcome)
 	}
 	if !strings.Contains(configure.Reason, "interrupted") {
-		t.Errorf("the gate reason %q does not say the run was stopped; \"skipped\" alone reads as a verdict "+
-			"about this ebuild rather than about the run", configure.Reason)
+		t.Errorf("the gate reason %q does not say the run was stopped", configure.Reason)
 	}
 	if res.DepthReason == "" {
 		t.Error("an interrupted package reports no depth_reason, so a reader of the JSON who never opens the " +

@@ -306,28 +306,38 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 
 	output, runErr := deps.attachedRunner()(cmd)
 
-	// An interrupted run is not a verdict on the ebuild.
+	// An interrupted run is not a verdict on the ebuild — and it is not a SKIP
+	// either. IT IS AN ERROR, and the distinction is the whole of this comment.
 	//
 	// The child is spawned through CommandContext, so a cancelled context KILLS
 	// it: runErr becomes `signal: killed`, and derive's attribution rule — the
 	// phase started and the run failed, therefore this is where the bump died —
-	// then reports FAILED with error-severity findings, and the command exits 1.
-	// The operator pressed Ctrl-C and was told their ebuild is broken.
+	// reports FAILED with error-severity findings. The operator pressed Ctrl-C
+	// and was told their ebuild is broken.
 	//
-	// This is checked HERE, on the shared path, rather than at the caller that
-	// noticed it first: all three drivers — `overlay validate --depth`, the
-	// autoupdate applier and realign's Prove — reach the child through this
-	// function, and a per-caller guard would leave the other two blaming the
-	// candidate for a signal.
+	// THE FIRST ATTEMPT AT THIS RETURNED SkippedGates, AND THAT WAS WORSE THAN
+	// THE BUG IT FIXED. PromotionDecision (stage.go) promotes on a list of
+	// PASS-or-SKIPPED: an interrupted `overlay autoupdate --apply --depth=compile`
+	// would then PUBLISH the bump — into an overlay that auto-commits and pushes
+	// — on the strength of gates that were killed mid-build. Reporting FAILED at
+	// least refused it. A gate list is the wrong shape for this answer entirely,
+	// because every shape it can take is a statement about the candidate, and
+	// there is nothing to state.
+	//
+	// So the error travels. Each of the three drivers already treats a non-nil
+	// error here as "this could not be attempted": the applier fails the apply
+	// rather than promoting, realign's Prove returns without a verdict, and
+	// validate's Run aborts the sweep. None of them can publish on it. The
+	// context error is wrapped so a caller can still recognise the cause with
+	// errors.Is rather than by matching this sentence.
 	//
 	// The retained log is deliberately still written: a partial transcript of an
 	// interrupted compile is evidence someone may want, and refusing to keep it
 	// would make the interruption cost more than it has to.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		note := retainedLogNote(req.LogDir, atom, version, output)
-		return SkippedGates(req.Depth, fmt.Sprintf(
-			"the run was interrupted while %s was building, so no phase reached a verdict and this says "+
-				"nothing about this ebuild: %v%s", label.pv, ctxErr, note)), nil
+		return nil, fmt.Errorf("the run was interrupted while %s was building, so no phase reached a verdict "+
+			"and nothing here says anything about this ebuild%s: %w", label.pv, note, ctxErr)
 	}
 
 	// The transcript is read with ANSI escapes removed and the LOG is not.

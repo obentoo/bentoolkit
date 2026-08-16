@@ -358,10 +358,16 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		// is that a package in view never goes unmentioned. What changes is that
 		// it is mentioned as interrupted.
 		if err := ctx.Err(); err != nil {
+			// The remaining packages are still LISTED, so a reader of the partial
+			// report sees which ones went unexamined rather than having to infer
+			// it from a short list. But the run still ends as an error: see the
+			// note at the bottom of this loop for why a Report cannot carry this.
 			for _, remaining := range targets[i:] {
 				report.Results = append(report.Results, interruptedResult(remaining, depth, err))
 			}
-			break
+			return report, fmt.Errorf("the validation run was interrupted before %s-%s, so %d of %d ebuilds "+
+				"went unexamined and this report says nothing about them: %w",
+				target.atom, target.version, len(targets)-i, len(targets), err)
 		}
 
 		res := validateOptions(ctx, target, distdir, haveDistdir, distNames)
@@ -370,6 +376,21 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		noteBuildDepth(ctx, &res, target, depth, opts)
 		attachQA(ctx, &res, target, qa)
 		report.Results = append(report.Results, res)
+
+		// Cancelled DURING this package, rather than before it. The check above
+		// catches packages the sweep never started; this one catches the package
+		// it was in the middle of, whose gates were killed rather than answered.
+		//
+		// It is an ERROR and not a report, because a Report cannot express this.
+		// ExitCode reads error-severity findings, and an interrupted gate has
+		// none to give — so a SIGTERM'd `--depth=compile` would render as SKIPPED
+		// lines and exit 0, indistinguishable at the shell from a clean sweep
+		// that found nothing wrong. An operator scripting this would read a
+		// killed run as a pass.
+		if err := ctx.Err(); err != nil {
+			return report, fmt.Errorf("the validation run was interrupted after %d of %d ebuilds, so this "+
+				"report is partial and says nothing about the rest: %w", len(report.Results), len(targets), err)
+		}
 	}
 	return report, nil
 }
