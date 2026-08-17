@@ -760,3 +760,72 @@ func TestBaselineVersionMoveRunsNoCommandAndReadsNoGitLog(t *testing.T) {
 		t.Errorf("the move starts at %q, want %q — the same answer the chooser gives with a full PATH", move.From, want)
 	}
 }
+
+// TestAnnotateBaselinePassesTheChosenMoveToTheReduction closes the one gap
+// `stories validate 036` found by mutation: every other test of the third point
+// calls baselineVersionMove DIRECTLY, and every pre-existing AnnotateBaseline
+// fixture writes a single version per side, so the chooser returns nil in all of
+// them. Restoring story 034's `ReduceDiff(ourEbuild, baseline.Path, nil)` — the
+// exact defect this story exists to fix — therefore left the WHOLE SUITE green.
+//
+// The assertion is on the OUTCOME of the wiring, never on the call: a version
+// move reaches Classified only if AnnotateBaseline chose one AND handed it to
+// ReduceDiff. A test that asserted the chooser had been called would be
+// satisfied by a caller that then discarded the answer, which is the shape the
+// mutation actually took.
+//
+// _Requirements: R2, R2.1, R3, R3.1_
+func TestAnnotateBaselinePassesTheChosenMoveToTheReduction(t *testing.T) {
+	// No model and no subprocess is reachable here, on the same terms as every
+	// other fixture in this file.
+	t.Setenv("PATH", t.TempDir())
+
+	const category, pkg = "media-libs", "gst-plugins-qt6"
+	atom := category + "/" + pkg
+
+	// The baseline and OUR PREVIOUS version agree on IUSE, and ours is the only
+	// one carrying `wayland`. So diff(baseline, ours) and diff(our_prev, ours)
+	// render the same hunk, the shipped matching rule pairs them, and what our own
+	// bump changed comes back version-move (D3). The span is 1.29.0 -> 1.29.2 and
+	// the baseline is two minor series back, so the width bound accepts it.
+	gentooRoot, overlayRoot := moveChooserTrees(t, category, pkg,
+		map[string]string{"1.28.0": moveChooserEbuildBody("qml", false)},
+		map[string]string{
+			"1.29.0": moveChooserEbuildBody("qml", false),
+			"1.29.2": moveChooserEbuildBody("qml wayland", false),
+		})
+
+	prov := &localRootedFakeProvider{
+		root:     gentooRoot,
+		versions: map[string][]string{atom: {"1.28.0"}},
+	}
+	pkgs := []PackageInfo{{
+		Category:      category,
+		Package:       pkg,
+		Versions:      []string{"1.29.0", "1.29.2"},
+		LatestVersion: "1.29.2",
+	}}
+	opts := annotateReviewOpts(overlayRoot)
+
+	report := annotateCompare(t, pkgs, prov, opts)
+	AnnotateBaseline(report, prov, opts)
+
+	if len(report.Results) != 1 {
+		t.Fatalf("report holds %d results, want 1", len(report.Results))
+	}
+	got := report.Results[0]
+
+	if !got.Baseline.Found || got.Baseline.Version != "1.28.0" {
+		t.Fatalf("baseline is %+v, want 1.28.0 found — nothing below measures a reduction without one", got.Baseline)
+	}
+
+	if got.Classified.VersionMove == 0 {
+		t.Errorf("Classified.VersionMove is 0 although the overlay carries 1.29.0 below ours and its IUSE agrees with the baseline: a third point was chosen and never reached ReduceDiff, which is story 034's nil third point exactly (R3.1)")
+	}
+	if got.Classified.Span == 0 {
+		t.Errorf("Classified.Span is 0 — a move from 1.29.0 to 1.29.2 spans real release steps, and a zero span is what a NIL third point reports (R2.2)")
+	}
+	if !got.Classified.Reduced {
+		t.Errorf("Classified.Reduced is false although the third point's span (%d) is inside the distance from the baseline to us (%d) — the bound refused a pair it should accept (R3.4)", got.Classified.Span, got.Baseline.Distance)
+	}
+}
