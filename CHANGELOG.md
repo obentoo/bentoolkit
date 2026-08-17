@@ -258,6 +258,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **The baseline is now the `::gentoo` version genuinely nearest ours, not the
+  one whose digits happen to match.** `versionDistance` summed each version
+  component's absolute difference, weighted by significance. That measures two
+  component *vectors* apart rather than two versions: as soon as a
+  higher-significance component differs, the lower digits get compared across a
+  boundary they do not span. From `1.5.1` it read `1.4.2` as nearer than
+  `1.4.3`, although `1.4.3` is the later release and therefore fewer releases
+  back. Replayed over the 158 packages this overlay carries at a version
+  differing from `::gentoo`'s, that metric picked a baseline which was **not the
+  nearest version in eleven cases**; the corrected one picks it in zero.
+  `dev-util/nvidia-cuda-toolkit` is where it was furthest wrong: for ours at
+  `13.3.1` it chose `12.3.2` over `12.9.2`, because the minor digit `3` matched
+  ours exactly across two different major lines — and a digit that matches
+  across major lines says nothing at all about proximity. A version is now read
+  as a number on the significance ladder that already existed, and the distance
+  is the difference of two such numbers. The ladder, the weights and the unit
+  are unchanged, because the reduction's width bound compares a span against a
+  baseline distance and two numbers on different ladders are not comparable.
+  Whichever baseline was too far back, every release between it and the real
+  one had its changes attributed to this overlay.
+
+- **A reduction now either subtracts something or says it did not.** The
+  three-way reduction was called with no third point at all, so it never
+  reduced: every difference from the baseline came back unclassified and the
+  whole of it was reported as ours. The third point it now uses is **our own
+  previous version**, which exists for **86 of those 158 packages** and passes
+  the width bound in all 86 — our own consecutive versions are close together by
+  construction, while the baseline is however far `::gentoo` has fallen behind.
+  Where our previous version still agreed with the baseline, what our bump
+  changed there is recognised as version noise; where it had already diverged,
+  the difference stays ours, which is the deliberate work the reduction exists
+  to leave behind. A `::gentoo` version above the baseline is preferred where
+  one exists, and is still refused when it spans further than the baseline is
+  from us. Separately, the report no longer prints `reduced against a third
+  point spanning N release steps` over a run in which nothing was attributed: a
+  third point that was accepted and explained nothing now says exactly that. A
+  confident sentence about work that did not happen is worse than no sentence.
+
+- **`overlay compare` without `--realign` is unchanged by both fixes** — same
+  output, byte for byte, and the same exit code. The pass these changes live in
+  runs only for a review run.
+
 - **`overlay validate --depth` now honours `require_isolation`.** This closes a
   policy bypass rather than adding an option.
   `autoupdate.validate.require_isolation` is read by the *same* build gates
