@@ -446,7 +446,7 @@ func carryRepoDir(src, dst string) error {
 // is created exclusively: the staged tree was removed and rebuilt, so a
 // destination that already exists means two sources claim one path, which is
 // worth an error rather than a silent last-writer-wins.
-func copyRegularFile(src, dst string) error {
+func copyRegularFile(src, dst string) (err error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", src, err)
@@ -462,13 +462,18 @@ func copyRegularFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", dst, err)
 	}
-	defer out.Close() //nolint:errcheck
+	// A write is not durable until the handle closes, so the close error is the
+	// last chance to notice a truncated copy. It only replaces the returned
+	// error when the copy itself succeeded — an earlier failure is the more
+	// informative one.
+	defer func() {
+		if cerr := out.Close(); err == nil && cerr != nil {
+			err = fmt.Errorf("closing %s: %w", dst, cerr)
+		}
+	}()
 
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("closing %s: %w", dst, err)
 	}
 	return nil
 }

@@ -258,6 +258,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **A staged file whose final flush fails is now reported instead of copied
+  half-way.** `copyRegularFile` closed the destination twice: once explicitly
+  with the error handled, once through a deferred `Close` that discarded it. The
+  handled close made the behaviour correct, but only on the path where `io.Copy`
+  had already succeeded — and the duplicate meant the deferred close could only
+  ever return `ErrClosed`, so it verified nothing. It now closes once, from the
+  defer, and promotes the close error to the function's result when the copy
+  itself succeeded. A write is not durable until the handle closes, so this is
+  the last point at which a truncated file in the staged tree can be noticed
+  rather than handed to a build gate as if it were complete. Earlier errors keep
+  priority, because they name the actual cause. Also clears the CodeQL
+  `go/unhandled-writable-file-close` alert, whose pattern the previous shape
+  tripped even though the explicit close made it safe.
+
 - **The baseline is now the `::gentoo` version genuinely nearest ours, not the
   one whose digits happen to match.** `versionDistance` summed each version
   component's absolute difference, weighted by significance. That measures two

@@ -634,3 +634,69 @@ func TestStage_AbsentFilesDirectoryIsNotAnError(t *testing.T) {
 		t.Error("staging invented a files/ directory the overlay does not have")
 	}
 }
+
+// TestCopyRegularFile_CarriesBytesAndPermissions pins the contract every staged
+// file depends on. It also anchors the close-error path: copyRegularFile reports
+// the close failure through its named return, so a copy that silently truncated
+// on flush stops being a success. That path is not injectable from a test
+// without a seam through os.File, so it is held by mutation instead — replacing
+// the deferred Close with a failing one must turn this case red.
+func TestCopyRegularFile_CarriesBytesAndPermissions(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.ebuild")
+	const body = "EAPI=8\ninherit gstreamer-meson\n"
+	if err := os.WriteFile(src, []byte(body), 0o640); err != nil {
+		t.Fatalf("writing the source: %v", err)
+	}
+
+	dst := filepath.Join(dir, "dst.ebuild")
+	if err := copyRegularFile(src, dst); err != nil {
+		t.Fatalf("copyRegularFile: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading the copy: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("the copy holds %q, want the source's bytes (%q)", got, body)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stating the copy: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o640 {
+		t.Errorf("the copy is mode %o, want the source's %o — Portage reads permissions off the staged tree", perm, 0o640)
+	}
+}
+
+// TestCopyRegularFile_ExistingDestinationIsRefused holds the O_EXCL the doc
+// comment promises: the staged tree is rebuilt from scratch, so two sources
+// claiming one path is a bug worth surfacing rather than a last-writer-wins.
+func TestCopyRegularFile_ExistingDestinationIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.ebuild")
+	if err := os.WriteFile(src, []byte("EAPI=8\n"), 0o644); err != nil {
+		t.Fatalf("writing the source: %v", err)
+	}
+	dst := filepath.Join(dir, "dst.ebuild")
+	const occupant = "written by whoever got here first\n"
+	if err := os.WriteFile(dst, []byte(occupant), 0o644); err != nil {
+		t.Fatalf("occupying the destination: %v", err)
+	}
+
+	err := copyRegularFile(src, dst)
+	if err == nil {
+		t.Fatal("copyRegularFile overwrote an existing destination; two sources claiming one staged path must be an error")
+	}
+	if !errors.Is(err, os.ErrExist) {
+		t.Errorf("copyRegularFile returned %v, want an error wrapping os.ErrExist", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading the destination: %v", err)
+	}
+	if string(got) != occupant {
+		t.Errorf("the refused copy still rewrote the destination to %q", got)
+	}
+}
