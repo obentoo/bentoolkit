@@ -1002,3 +1002,219 @@ func TestVersionDistanceLeavesRevisionsAndSuffixesEquidistant(t *testing.T) {
 		})
 	}
 }
+
+// MERGE FRAGMENT — story 036, sub-task 1.2 (the eleven measured baselines).
+//
+// Target file: internal/overlay/baseline_test.go  (APPEND, immediately AFTER
+// sub-task 1.1's fragment, which is itself appended after story 034's three).
+// Do NOT repeat the `package overlay` clause.
+//
+// IMPORTS: none added. This fragment uses `testing` only, which the target file
+// already imports. It does NOT need the `ebuild` import 1.1 merges in — if 1.2
+// is materialised first for any reason, that import must not be added here.
+//
+// # Symbols
+//
+// Added, all prefixed `pickBaseline` so they cannot collide with 1.1's
+// `versionMetric*` helpers or with story 034's `baseline*` ones:
+// `pickBaselineCase`, `pickBaselineCandidates`, `pickBaselineTable`, and
+// `TestPickBaselineChoosesTheNearestMeasuredVersion` — named so the sub-task's
+// validation command, `-run 'TestPickBaseline'`, selects it.
+//
+// Borrowed, never re-declared: the production types `carriedEbuild`
+// (baseline.go) and the function `pickBaseline` (baseline.go:582). Nothing here
+// touches the disk, so `writeVerifyEbuild` and `baselineTree` are deliberately
+// NOT used.
+//
+// # PINNED CONTRACT
+//
+//	type carriedEbuild struct{ version, filename string }   // UNCHANGED
+//	func pickBaseline(carried []carriedEbuild, ours string) carriedEbuild  // UNCHANGED
+//
+// D2 is explicit that `pickBaseline` is NOT rewritten: its inputs get better.
+// So this fragment adds no production code and asserts the selection through the
+// function exactly as it stands today. If making it pass requires editing
+// `pickBaseline`, the fix has been put in the wrong place — the arithmetic
+// belongs in `versionDistance` (sub-task 1.1), which is the one place all four
+// callers read.
+//
+// # Why a fixture and not the live tree
+//
+// The suite must not change meaning when ::gentoo syncs. The eleven rows are the
+// measurement (story.md M-2) reduced to `(ours, carried versions, expected
+// baseline)`, taken on 2026-08-11 against /var/db/repos/gentoo; they are frozen
+// here so that a package that gains a version tomorrow cannot silently rewrite
+// what this test claims. That is the testing strategy's own instruction, and it
+// is also the only way the table can be read as evidence of the FIX rather than
+// as a snapshot of the tree.
+//
+// # The control rows are not padding
+//
+// Four rows are cases the shipped metric ALREADY gets right: the exact-version
+// match, the equidistant revision pair, a nearest-below choice, and a candidate
+// on each side of ours. Without them a table of eleven failures is satisfied by
+// a metric that simply inverted the answer, and inverting the answer is a real
+// possibility here — the defect is directional.
+
+// pickBaselineCase is one measured selection: what we carry, what ::gentoo
+// carries, and which of those is the baseline.
+type pickBaselineCase struct {
+	// name is the atom the row was measured on, so a failure names the package
+	// a maintainer can go and look at.
+	name string
+	// pkg is the package directory name, used only to build the filenames the
+	// chosen candidate carries back.
+	pkg string
+	// ours is the version the overlay carries.
+	ours string
+	// carried are the versions ::gentoo carries, in the order a directory
+	// listing might hand them over — deliberately not sorted, because a
+	// selection that depended on listing order would report differently on
+	// another filesystem.
+	carried []string
+	// want is the version that must be chosen.
+	want string
+	// why says what the row is evidence of.
+	why string
+}
+
+// pickBaselineCandidates turns a row's versions into the candidates production
+// would have built from a directory listing.
+//
+// The FILENAME is carried as well as the version, and it is asserted on below:
+// `ResolveBaseline` builds `Baseline.Path` from the filename the listing
+// produced, so a chooser that returned the right version beside another
+// candidate's filename would name an ebuild nobody compared against.
+func pickBaselineCandidates(pkg string, versions []string) []carriedEbuild {
+	candidates := make([]carriedEbuild, 0, len(versions))
+	for _, version := range versions {
+		candidates = append(candidates, carriedEbuild{
+			version:  version,
+			filename: pkg + "-" + version + ".ebuild",
+		})
+	}
+	return candidates
+}
+
+// pickBaselineTable is story.md M-2 in full, plus the controls.
+func pickBaselineTable() []pickBaselineCase {
+	return []pickBaselineCase{
+		// ---- the eleven, measured 2026-08-11 (story.md M-2) ----
+		{
+			name: "dev-util/nvidia-cuda-toolkit", pkg: "nvidia-cuda-toolkit",
+			ours: "13.3.1", carried: []string{"12.3.2", "12.9.2"}, want: "12.9.2",
+			// LOAD-BEARING ROW. This is where the shipped metric is furthest
+			// wrong, and it is wrong for a reason no adjacent-patch repair
+			// touches: 12.3.2 wins because its minor digit 3 MATCHES ours
+			// exactly, across a major-line difference those digits do not span.
+			// A fix that only straightened out the 1.4.2 / 1.4.3 shape still
+			// fails here, which is precisely why this row is in the table.
+			// The baseline lands six minor releases further back than
+			// necessary, and every difference those six releases introduced is
+			// then reported as our divergence.
+			why: "the load-bearing row: a matching lower-significance digit deciding across a major-line difference (R1.2)",
+		},
+		{
+			name: "sys-apps/fakeroot", pkg: "fakeroot",
+			ours: "2.1.4", carried: []string{"1.32.2", "1.33"}, want: "1.33",
+			why: "a two-digit minor component, where a digit-by-digit comparison stops meaning anything",
+		},
+		{
+			name: "media-plugins/frei0r-plugins", pkg: "frei0r-plugins",
+			ours: "3.2.3", carried: []string{"2.3.3", "2.4.1-r1"}, want: "2.4.1-r1",
+			why: "the nearest version carries a revision, which the ladder ignores and the choice must not",
+		},
+		{
+			name: "sci-biology/foldingathome", pkg: "foldingathome",
+			ours: "8.5.6-r2", carried: []string{"7.6.13-r1", "7.6.21"}, want: "7.6.21",
+			why: "ours is revised too, and the revision must not enter the measurement on either side",
+		},
+		{
+			name: "media-libs/opencv", pkg: "opencv",
+			ours: "5.0.0", carried: []string{"4.11.0-r1", "4.12.0-r2"}, want: "4.12.0-r2",
+			why: "a zero patch on our side, where the absolute per-component difference is at its most misleading",
+		},
+		{
+			name: "dev-libs/sentry-native", pkg: "sentry-native",
+			ours: "0.16.2", carried: []string{"0.7.2", "0.7.6"}, want: "0.7.6",
+			why: "a zero major line: every difference lives in the minor and patch components",
+		},
+		{
+			name: "media-libs/mesa", pkg: "mesa",
+			ours: "26.3.0_pre20260810", carried: []string{"26.1.4", "26.1.6"}, want: "26.1.6",
+			why: "a pre-release suffix on our side, truncated by the ladder and irrelevant to the choice",
+		},
+		{
+			name: "dev-util/mesa_clc", pkg: "mesa_clc",
+			ours: "26.3.0_pre20260810", carried: []string{"26.1.4", "26.1.6"}, want: "26.1.6",
+			why: "mesa's companion package, measured separately because it is a separate row in the report",
+		},
+		{
+			name: "net-misc/networkmanager", pkg: "networkmanager",
+			ours: "1.58.0", carried: []string{"1.56.0", "1.56.1"}, want: "1.56.1",
+			why: "one patch release apart, the narrowest of the eleven",
+		},
+		{
+			name: "app-containers/runc", pkg: "runc",
+			ours: "1.5.1", carried: []string{"1.3.6", "1.4.2", "1.4.3"}, want: "1.4.3",
+			why: "design D1's worked example, and R1.1: with every candidate below ours, the GREATEST of them is the baseline",
+		},
+		{
+			name: "dev-games/godot", pkg: "godot",
+			ours: "4.8_alpha3", carried: []string{"4.7", "4.7.1"}, want: "4.7.1",
+			why: "a candidate that stops short (4.7) against one that does not; 4.7 and 4.7.0 are one point on the ladder",
+		},
+
+		// ---- controls: rows the shipped metric ALREADY gets right ----
+		{
+			name: "control: ::gentoo carries our exact version", pkg: "gst-plugins-qt6",
+			ours: "1.29.2", carried: []string{"1.29.1", "1.29.2", "1.29.3"}, want: "1.29.2",
+			why: "story 034's R1.1, unchanged by this story: the same version is the answer and not a candidate among others, checked before any proximity is computed",
+		},
+		{
+			name: "control: the nearest is plainly below ours", pkg: "gst-plugins-qt6",
+			ours: "1.29.2", carried: []string{"1.20.0", "1.29.1"}, want: "1.29.1",
+			why: "the shipped metric agrees here; the row is what proves the fix did not simply invert the answer",
+		},
+		{
+			name: "control: candidates on both sides of ours", pkg: "gst-plugins-qt6",
+			ours: "1.29.2", carried: []string{"1.28.0", "1.30.0"}, want: "1.30.0",
+			why: "R1.2's other shape — 1.30.0 is 9_800 steps away and 1.28.0 is 10_200, so the nearer one wins whichever side it sits on",
+		},
+		{
+			name: "control: equidistant candidates take the newer", pkg: "libxml2",
+			ours: "2.52.5", carried: []string{"2.52.5-r410", "2.52.5-r601"}, want: "2.52.5-r601",
+			why: "R1.4: the ladder cannot separate two revisions, so the tie-break decides — and it stays as it is today, taking the version ::gentoo still maintains",
+		},
+	}
+}
+
+// TestPickBaselineChoosesTheNearestMeasuredVersion pins the eleven packages
+// whose baseline is not the nearest version ::gentoo carries, plus four rows the
+// shipped metric already answers correctly.
+//
+// It asserts through `pickBaseline` rather than through `versionDistance`
+// because the requirement is about the CHOICE: R1.2 says the system shall choose
+// the version fewest releases away, and a metric that improved without changing
+// any answer would satisfy a distance-only assertion while leaving all eleven
+// baselines exactly where they are.
+//
+// _Requirements: R1, R1.1, R1.2, R1.4_
+func TestPickBaselineChoosesTheNearestMeasuredVersion(t *testing.T) {
+	for _, tc := range pickBaselineTable() {
+		t.Run(tc.name, func(t *testing.T) {
+			candidates := pickBaselineCandidates(tc.pkg, tc.carried)
+
+			got := pickBaseline(candidates, tc.ours)
+
+			if got.version != tc.want {
+				t.Errorf("with ours at %s and ::gentoo carrying %v, the baseline chosen is %s and the nearest version is %s — %s.\nMeasured on the real trees on 2026-08-11 (story.md M-2); the baseline is measured from a fixture precisely so this claim does not change when ::gentoo syncs",
+					tc.ours, tc.carried, got.version, tc.want, tc.why)
+			}
+			if want := tc.pkg + "-" + tc.want + ".ebuild"; got.version == tc.want && got.filename != want {
+				t.Errorf("the chosen candidate is %s but its filename is %q, want %q — Baseline.Path is built from this filename, so the report would name an ebuild nobody compared against",
+					got.version, got.filename, want)
+			}
+		})
+	}
+}
