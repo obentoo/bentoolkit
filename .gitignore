@@ -18,8 +18,10 @@ build/
 # Dependências vendorizadas
 vendor/
 
-# Epic — artefatos de planejamento (stories/design/tasks/drafts), não versionados
-.epic/
+# Epic planning artifacts (stories/design/tasks/drafts) — never versioned.
+# No trailing slash: a worktree links .epic to the main checkout, and git treats
+# that symlink as a file, which a directory-only pattern lets through.
+.epic
 
 # Arquivos de IDE/editor
 .idea/
@@ -49,5 +51,3 @@ vendor/
 .claude/
 # Playwright MCP local artifacts
 .playwright-mcp/
-# Epic local planning artifacts
-.epic/

@@ -2,9 +2,11 @@ package overlay
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
@@ -167,17 +169,241 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 	// offering them as a replacement — which is the wholesale-realignment
 	// proposal this story exists to prevent.
 	//
-	// The third point is nil, and D3's first preference CANNOT supply one under
-	// a nearest-version baseline. A hunk of ours matches a hunk of the move only
-	// when the two diffs share the same BEFORE-text, which is the baseline; so a
-	// usable move must end at the baseline, starting between it and us —
-	// and ResolveBaseline already took the nearest version, so nothing lies
-	// there. Every pair ::gentoo could offer subtracts exactly nothing, which
-	// makes Reduced=false with Span=0 — "no third point was offered" — the
-	// truthful answer rather than a gap. Proved by execution; the chooser is a
-	// named follow-up, not something to improvise here.
-	classified, _ := ReduceDiff(ourEbuild, baseline.Path, nil)
+	// The third point is CHOSEN here rather than left nil (R3). The chooser
+	// offers a ::gentoo version above the baseline where one exists, and our own
+	// previous version otherwise — the third point this overlay actually has, in
+	// 86 of the 158 packages whose version differs from ::gentoo's. Where it has
+	// neither, nil still travels, and the report says no third point was
+	// available rather than pretending one was subtracted (R3.3).
+	//
+	// What it costs is ONE MORE DIRECTORY LISTING per package, at most two: the
+	// ::gentoo package directory ResolveBaseline listed a moment ago is listed
+	// again for the versions above the baseline, and our own is listed only when
+	// that found nothing. No extra ebuild is read here — ReduceDiff reads the
+	// pair itself, and refuses it unread when the span is too wide — and no
+	// command is run, on the same terms as everything else on this path (R1.4).
+	//
+	// The WIDTH of what is offered is not checked here and must not be:
+	// reduceSpan owns that bound (R3.4), and a chooser that withheld a wide pair
+	// itself would report Span 0 — "no third point existed" — for a package where
+	// one existed and was refused for being too wide. Those are different facts
+	// about the same package, and the report distinguishes them (R2.5).
+	move := baselineVersionMove(gentooTree, opts.OverlayPath, atom, r.LocalVersion, baseline)
+	classified, _ := ReduceDiff(ourEbuild, baseline.Path, move)
 	r.Classified = classified
+}
+
+// baselineVersionMove chooses the third point the reduction subtracts for one
+// package — the pair of ebuilds whose difference IS a version move — or nil when
+// this overlay has none to offer (R3, R3.3).
+//
+// It answers from the CONTENT of the two trees and nothing else: one directory
+// listing each, read through the same carriedVersions the baseline itself is
+// chosen with, so nothing here is a second notion of what an ebuild filename is.
+// It runs no command and consults no git, for the reason ResolveBaseline does not
+// either — the local ::gentoo is a shallow clone whose history is absent by
+// construction, so a chooser that read a log would work on a fixture and answer
+// nothing on the host (R1.4).
+//
+// # It states D3's order and nothing else
+//
+// Preference 1 is a ::gentoo version above the baseline, preference 2 is our own
+// previous version, and where neither exists the answer is nil (R3.3). Each
+// preference decides for itself, below, what it will offer and why; this
+// function's whole content is which of them is asked first.
+//
+// # It does not judge the WIDTH of what it offers
+//
+// reduceSpan owns that bound (R3.4), and this story leaves reduce.go untouched. A
+// pair withheld here for being wide would reach the report as no pair at all —
+// Span 0 — while a pair offered and refused reports the width that refused it,
+// and those are different facts about the same package (R2.5). Under a corrected
+// nearest-version baseline preference 1 is refused by that bound every time
+// today (D4); it stays first and stays implemented because R3.2 makes it a
+// capability. Whether a REFUSED preference 1 should fall back to preference 2 is
+// deliberately not decided here: nothing in the overlay pins it, and a fallback
+// chosen quietly inside a chooser is a subtraction nobody agreed to.
+//
+// A directory that will not list yields NO THIRD POINT rather than an error, as
+// everything on this path already degrades: this is a report, and "we could not
+// look for a third point" renders as "there was none" — the same sentence, and
+// the same exit code.
+//
+// _Requirements: R2, R2.1, R3, R3.1, R3.2, R3.3, R3.4_
+func baselineVersionMove(gentooTree, overlayPath, atom, ourVersion string, baseline Baseline) *VersionMove {
+	if ourVersion == "" || !baseline.Found || baseline.Version == "" || baseline.Path == "" {
+		// No baseline to move away from, or no version of ours to move to. Both
+		// preferences are pairs anchored on one of those two, so there is nothing
+		// to choose between.
+		return nil
+	}
+	category, pkg, err := splitBaselineAtom(atom)
+	if err != nil {
+		// Not one package, so there is no directory to list. Unreachable from the
+		// annotation pass, which got this far only because ResolveBaseline accepted
+		// the same atom, and refused here anyway: both halves are joined onto a
+		// tree root below, and a ".." would read an ebuild from another package
+		// entirely.
+		return nil
+	}
+
+	if move := gentooVersionMoveAbove(gentooTree, category, pkg, baseline); move != nil {
+		return move
+	}
+	return ourPreviousVersionMove(overlayPath, category, pkg, ourVersion)
+}
+
+// gentooVersionMoveAbove is D3's first preference: the move from the baseline up
+// to the next version ::gentoo carries, or nil when it carries none above it
+// (R3.2).
+//
+// It is FIRST because the move is then written in ::gentoo's own hand — better
+// provenance for the same subtraction than a move written in ours, since nobody
+// here decided any of it.
+//
+// It must START at the baseline, and at baseline.Path itself rather than at a
+// path rebuilt from baseline.Version. A hunk of ours matches a hunk of the move
+// only when the two share their before-text, and ours is diffed from the
+// baseline; and the file the reduction subtracts from is then the very one the
+// report named as the baseline, rather than a second answer to where that ebuild
+// is.
+//
+// _Requirements: R3, R3.2_
+func gentooVersionMoveAbove(gentooTree, category, pkg string, baseline Baseline) *VersionMove {
+	dir := filepath.Join(gentooTree, category, pkg)
+	newer, ok := adjacentVersion(carriedIn(dir, category, pkg), baseline.Version, versionAbove)
+	if !ok {
+		return nil
+	}
+	return &VersionMove{From: baseline.Path, To: filepath.Join(dir, newer.filename)}
+}
+
+// ourPreviousVersionMove is D3's second preference: the move OUR OWN last bump
+// made, from the version we carried before this one to the one we carry now, or
+// nil when the overlay carries no previous version (R3.1, R3.3).
+//
+// This is the third point this overlay actually has — 86 of its 158
+// different-version packages carry one, against 1 that has a ::gentoo version
+// above the baseline — and D3 proved by execution that the shipped matching rule
+// reads it correctly. What our bump changed on text that still agreed with the
+// baseline renders as the same two-sided hunk in both diffs and is subtracted as
+// version noise; a divergence that predates the bump is absent from the move
+// entirely and stays ours, which is the deliberate work the reduction exists to
+// leave behind.
+//
+// _Requirements: R3, R3.1, R3.3_
+func ourPreviousVersionMove(overlayPath, category, pkg, ourVersion string) *VersionMove {
+	if overlayPath == "" {
+		return nil
+	}
+	dir := filepath.Join(overlayPath, category, pkg)
+	carried := carriedIn(dir, category, pkg)
+
+	// Our own ebuild is taken from the listing by STRING equality, exactly as
+	// pickBaseline takes a baseline at our version: the question is which file
+	// carries our version, not which versions order equally. ebuild.CompareVersions
+	// reads 1.0 and 1.0.0 as one version and those are two different ebuilds —
+	// ending the move at the wrong one would offer a diff nobody's report
+	// describes.
+	ours, ok := carriedAt(carried, ourVersion)
+	if !ok {
+		// Our version is not in the overlay's own listing for this package, though
+		// the scan found it a moment ago. That is the tree moving underneath the
+		// run, and no pair can be built without the end of it.
+		return nil
+	}
+	previous, ok := adjacentVersion(carried, ourVersion, versionBelow)
+	if !ok {
+		// Nothing of ours below our own version — the answer for the 72 of the 158
+		// this overlay carries no previous version of. D3's third preference is
+		// that there is then no third point, not a worse one.
+		return nil
+	}
+	return &VersionMove{
+		From: filepath.Join(dir, previous.filename),
+		To:   filepath.Join(dir, ours.filename),
+	}
+}
+
+// The two sides a neighbouring version can lie on, in ebuild.CompareVersions'
+// own answers so the direction and the comparison cannot drift apart.
+const (
+	versionAbove = 1
+	versionBelow = -1
+)
+
+// carriedIn lists the versions one repository carries of one package, and is the
+// ONE listing both preferences above are chosen from.
+//
+// It is carriedVersions with a directory in front of it rather than a second
+// walker: what an ebuild filename is, and which files belong to this package
+// rather than to a neighbour like gst-plugins-qt6-doc, stays decided in exactly
+// one place. dropWhenCarried opens the same two lines for the declaration
+// evaluator and is deliberately not reused — it answers a third question this has
+// no use for, and its tree parameter is named for ::gentoo while half the
+// listings here are of our own overlay.
+//
+// A directory that will not list — absent, unreadable, or not a directory at all
+// — carries no candidate as far as this is concerned. The distinction
+// ResolveBaseline draws between the two, "::gentoo does not carry it" and "we
+// could not look", is worth a field on the report; here both answers lead to the
+// same place, which is that no third point can be built out of it.
+func carriedIn(dir, category, pkg string) []carriedEbuild {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	return carriedVersions(entries, category, pkg)
+}
+
+// carriedAt finds the entry carrying exactly this version string.
+func carriedAt(carried []carriedEbuild, version string) (carriedEbuild, bool) {
+	for _, candidate := range carried {
+		if candidate.version == version {
+			return candidate, true
+		}
+	}
+	return carriedEbuild{}, false
+}
+
+// adjacentVersion is the carried version NEXT TO pivot on one side: the lowest
+// above it, or the highest below it.
+//
+// The NEIGHBOUR is what both preferences want, and that is the width bound's
+// doing rather than a preference for small numbers. reduceSpan refuses a third
+// point spanning further than the baseline is from us (R3.4), so the narrowest
+// pair is the one most likely to be accepted at all — offering ::gentoo's newest
+// version, or our oldest, offers a pair that is refused more often and subtracts
+// nothing when it is. A wider pair does carry more changes and could match more
+// of our differences; that is the argument AGAINST it, not for it, on the same
+// reasoning the bound itself rests on: more churn in the move is more room for a
+// deliberate divergence of ours to be subtracted as version noise.
+//
+// Both sides are answered by one function because they are one question asked in
+// two directions, and because the ordering behind them must be the same in both.
+// That ordering is ebuild.CompareVersions — the repository's own, never a second
+// opinion assembled here, and never versionDistance, which measures a magnitude
+// and cannot say which of two versions is later.
+//
+// A candidate that orders EQUAL to the pivot is on neither side and is skipped.
+// That is what keeps 1.0.0 from being offered as the version above 1.0: the two
+// are different ebuilds, but the difference between them is not a version move,
+// and a pair built from them would subtract one file's text from the other's
+// under a name nothing supports.
+func adjacentVersion(carried []carriedEbuild, pivot string, direction int) (carriedEbuild, bool) {
+	var nearest carriedEbuild
+	found := false
+	for _, candidate := range carried {
+		if ebuild.CompareVersions(candidate.version, pivot) != direction {
+			continue
+		}
+		// Nearer to the pivot means further from the direction of travel: going
+		// up, the smaller candidate wins; going down, the larger one does.
+		if !found || ebuild.CompareVersions(candidate.version, nearest.version) == -direction {
+			nearest, found = candidate, true
+		}
+	}
+	return nearest, found
 }
 
 // baselineTreeOf resolves the ::gentoo repository root behind a provider. ok is
@@ -505,10 +731,12 @@ func baselineDeclarationLine(atom string, declared DeclaredDivergence) string {
 // wrongly, and a total computed twice eventually disagrees with itself.
 //
 // The REACH of the classification is stated beside it too, because a share whose
-// reach is invisible is indistinguishable from a guess (R2.5). Reduced and Span
-// are read as a pair and never separately: false with Span 0 means no third
-// point existed, while false with a large Span means one existed and was refused
-// for being too wide, and those are different facts about the same package.
+// reach is invisible is indistinguishable from a guess (R2.5). Reduced, Span and
+// the version-move count are read together and never separately: false with Span
+// 0 means no third point existed, false with a large Span means one existed and
+// was refused for being too wide, and true with a span but nothing attributed
+// means one was accepted and explained nothing (D5). Those are different facts
+// about the same package, and baselineReachProse is where they are told apart.
 //
 // It takes the whole result rather than the atom and the Classified so a
 // renderer holding one result cannot pair one package's counts with another's
@@ -630,14 +858,50 @@ func joinReportLines(lines []string) string {
 	return sb.String()
 }
 
-// baselineReachProse says how far the classification reached, from the pair
-// Classified reports it in.
+// baselineReachProse says how far the classification reached, from the three
+// fields Classified reports it in: whether a third point was accepted, how wide
+// it was, and how much of the diff it actually explained.
+//
+// The COUNT is read as well as the pair, and that is the whole of D5. `Reduced`
+// says a third point was accepted, never that it attributed anything, and a third
+// point can be accepted and explain nothing — which is exactly what our own
+// previous version does for a package whose every difference predates its bump.
+// Written from the pair alone the sentence then reads `reduced against a third
+// point spanning N release steps` over a subtraction of zero: the claim R2.3
+// forbids, and a confident sentence about work that did not happen is worse than
+// the honest one it replaces.
+//
+// The count is read OFF THE VALUE rather than taken as a second parameter,
+// because it is already in there. A caller that had to pass the same number
+// alongside the struct carrying it would be a second way of saying what was
+// attributed, and eventually a second answer.
+//
+// `Reduced` itself is unchanged, and deliberately: what moves is what is SAID
+// about an accepted third point that attributed nothing, not whether one was
+// accepted. The field keeps its meaning and the three counts keep theirs.
+//
+// _Requirements: R2, R2.2, R2.3, R2.5_
 func baselineReachProse(classified Classified) string {
 	switch {
 	case classified.Reduced && classified.Span == 0:
 		// Our version and the baseline are the same one, so no version move
 		// existed for anything to be attributed to.
 		return "attributed without a third point: the baseline is our own version"
+	case classified.Reduced && classified.Span > 0 && classified.VersionMove == 0:
+		// A third point was accepted, and it explained none of the differences.
+		//
+		// The SPAN half is what the arm above already implies in this order, and
+		// it is written out anyway so the condition says what the row IS rather
+		// than what its neighbour happens to have taken first. On the count alone
+		// this arm swallows the same-version case the moment the two are
+		// reordered — and that row's version-move count is zero because no
+		// version move ever existed, not because a third point came up empty.
+		// Reporting it here would invent a third point that was never offered.
+		//
+		// The WIDTH is still stated. A third point existed, and the span is the
+		// only thing that tells this state apart from the one where none was
+		// available (R2.5).
+		return fmt.Sprintf("a third point spanning %d release steps explained nothing", classified.Span)
 	case classified.Reduced:
 		return fmt.Sprintf("reduced against a third point spanning %d release steps", classified.Span)
 	case classified.Span > 0:
