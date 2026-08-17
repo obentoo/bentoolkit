@@ -731,10 +731,12 @@ func baselineDeclarationLine(atom string, declared DeclaredDivergence) string {
 // wrongly, and a total computed twice eventually disagrees with itself.
 //
 // The REACH of the classification is stated beside it too, because a share whose
-// reach is invisible is indistinguishable from a guess (R2.5). Reduced and Span
-// are read as a pair and never separately: false with Span 0 means no third
-// point existed, while false with a large Span means one existed and was refused
-// for being too wide, and those are different facts about the same package.
+// reach is invisible is indistinguishable from a guess (R2.5). Reduced, Span and
+// the version-move count are read together and never separately: false with Span
+// 0 means no third point existed, false with a large Span means one existed and
+// was refused for being too wide, and true with a span but nothing attributed
+// means one was accepted and explained nothing (D5). Those are different facts
+// about the same package, and baselineReachProse is where they are told apart.
 //
 // It takes the whole result rather than the atom and the Classified so a
 // renderer holding one result cannot pair one package's counts with another's
@@ -856,14 +858,50 @@ func joinReportLines(lines []string) string {
 	return sb.String()
 }
 
-// baselineReachProse says how far the classification reached, from the pair
-// Classified reports it in.
+// baselineReachProse says how far the classification reached, from the three
+// fields Classified reports it in: whether a third point was accepted, how wide
+// it was, and how much of the diff it actually explained.
+//
+// The COUNT is read as well as the pair, and that is the whole of D5. `Reduced`
+// says a third point was accepted, never that it attributed anything, and a third
+// point can be accepted and explain nothing — which is exactly what our own
+// previous version does for a package whose every difference predates its bump.
+// Written from the pair alone the sentence then reads `reduced against a third
+// point spanning N release steps` over a subtraction of zero: the claim R2.3
+// forbids, and a confident sentence about work that did not happen is worse than
+// the honest one it replaces.
+//
+// The count is read OFF THE VALUE rather than taken as a second parameter,
+// because it is already in there. A caller that had to pass the same number
+// alongside the struct carrying it would be a second way of saying what was
+// attributed, and eventually a second answer.
+//
+// `Reduced` itself is unchanged, and deliberately: what moves is what is SAID
+// about an accepted third point that attributed nothing, not whether one was
+// accepted. The field keeps its meaning and the three counts keep theirs.
+//
+// _Requirements: R2, R2.2, R2.3, R2.5_
 func baselineReachProse(classified Classified) string {
 	switch {
 	case classified.Reduced && classified.Span == 0:
 		// Our version and the baseline are the same one, so no version move
 		// existed for anything to be attributed to.
 		return "attributed without a third point: the baseline is our own version"
+	case classified.Reduced && classified.Span > 0 && classified.VersionMove == 0:
+		// A third point was accepted, and it explained none of the differences.
+		//
+		// The SPAN half is what the arm above already implies in this order, and
+		// it is written out anyway so the condition says what the row IS rather
+		// than what its neighbour happens to have taken first. On the count alone
+		// this arm swallows the same-version case the moment the two are
+		// reordered — and that row's version-move count is zero because no
+		// version move ever existed, not because a third point came up empty.
+		// Reporting it here would invent a third point that was never offered.
+		//
+		// The WIDTH is still stated. A third point existed, and the span is the
+		// only thing that tells this state apart from the one where none was
+		// available (R2.5).
+		return fmt.Sprintf("a third point spanning %d release steps explained nothing", classified.Span)
 	case classified.Reduced:
 		return fmt.Sprintf("reduced against a third point spanning %d release steps", classified.Span)
 	case classified.Span > 0:
