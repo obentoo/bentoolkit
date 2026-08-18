@@ -651,3 +651,282 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 		t.Errorf("deletefile calls = %v, want none after lsjson failure", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 038 — the post-ship prune must be scoped to ONE subvolume (R1.1, R6.1, R6.2)
+// ---------------------------------------------------------------------------
+
+// mapParentStore is a SUBVOLUME-AWARE test parentStore: Record files the snapshot
+// under its (subvol, ship) pair and Last reads that same pair back. It exists
+// because fakeParentStore.Last discards both arguments and returns one scripted
+// head for every subvolume, which cannot model a fixture shipping TWO subvolumes
+// through one shipper (R6.1) — each needs its own lineage head. No error is ever
+// scripted here; the store-error paths stay covered by fakeParentStore's tests.
+type mapParentStore struct {
+	heads map[string]Snapshot
+}
+
+func newMapParentStore() *mapParentStore {
+	return &mapParentStore{heads: make(map[string]Snapshot)}
+}
+
+// parentKey joins a (subvol, ship) pair with a byte that occurs in neither, so
+// two distinct pairs can never collide onto one entry.
+func parentKey(subvol, ship string) string { return subvol + "\x00" + ship }
+
+func (m *mapParentStore) Last(subvol, ship string) (Snapshot, bool, error) {
+	snap, ok := m.heads[parentKey(subvol, ship)]
+	return snap, ok, nil
+}
+
+func (m *mapParentStore) Record(subvol, ship string, snap Snapshot) error {
+	m.heads[parentKey(subvol, ship)] = snap
+	return nil
+}
+
+var _ parentStore = (*mapParentStore)(nil)
+
+// growingArchiveRunner scripts a MockRunner over a remote whose CONTENT CHANGES
+// — the one thing archivePruneRunner cannot do, since it returns one fixed
+// listing to every lsjson call:
+//
+//   - `rclone rcat <remote>/<key>` stores <key>, stamped with .modTime (which the
+//     test sets before each ship — never time.Now(), so calendar bucketing is
+//     deterministic and cannot straddle UTC midnight);
+//   - `rclone lsjson <path>` serialises what is stored under <path>, with names
+//     relative to the LISTED path (the behaviour measured against rclone 1.75.0);
+//   - `rclone deletefile <remote>/<key>` removes <key>;
+//   - the pipe stages (btrfs, the compressor) succeed.
+//
+// Modelling growth is what makes a two-ship fixture mean anything: the SECOND
+// ship's prune has to see the FIRST ship's object, and that is the entire
+// mechanism of the bug. Object keys are derived from the argv rather than rebuilt
+// with archiveObjectName, so the helper keeps working when the remote key layout
+// changes. Access is single-goroutine — runPipe runs the stages sequentially
+// through this one Runner — so no locking is needed.
+type growingArchiveRunner struct {
+	*MockRunner
+	remote  string
+	modTime time.Time        // ModTime stamped on the next rcat upload
+	objects []rcloneObject   // remote content; Name is the key RELATIVE to the remote root
+	served  [][]rcloneObject // spy: the listing returned by each lsjson call
+}
+
+func newGrowingArchiveRunner(remote string) *growingArchiveRunner {
+	g := &growingArchiveRunner{MockRunner: &MockRunner{}, remote: remote}
+	g.RunFunc = func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
+		if name != "rclone" || len(args) == 0 {
+			return []byte("stream"), nil // btrfs / compressor stages succeed
+		}
+		target := args[len(args)-1] // rcat, lsjson and deletefile all take the path last
+		switch args[0] {
+		case "rcat":
+			g.objects = append(g.objects, rcloneObject{Name: g.key(target), ModTime: g.modTime})
+			return []byte("RCAT_DONE"), nil
+		case "lsjson":
+			listing := g.list(target)
+			g.served = append(g.served, listing)
+			return scriptedLsjson(listing), nil
+		case "deletefile":
+			g.remove(g.key(target))
+			return nil, nil
+		}
+		return []byte("stream"), nil
+	}
+	return g
+}
+
+// key maps an rclone path argument ("<remote>/<key>") to the object key relative
+// to the remote root. Reading it off the argv — instead of rebuilding it with
+// archiveObjectName — is what keeps this helper honest if the key layout gains a
+// per-subvolume prefix.
+func (g *growingArchiveRunner) key(target string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(target, g.remote), "/")
+}
+
+// list returns what the remote holds under target, with names relative to the
+// listed path (rclone's own convention). Listing the remote ROOT returns every
+// object under today's flat layout, which creates no directories.
+func (g *growingArchiveRunner) list(target string) []rcloneObject {
+	prefix := g.key(target) // "" when the remote root itself is listed
+	var out []rcloneObject
+	for _, o := range g.objects {
+		if prefix == "" {
+			out = append(out, o)
+			continue
+		}
+		leaf, under := strings.CutPrefix(o.Name, prefix+"/")
+		if !under {
+			continue
+		}
+		out = append(out, rcloneObject{Name: leaf, ModTime: o.ModTime})
+	}
+	return out
+}
+
+// remove drops key from the modelled remote, so a later listing reflects a
+// deletion that already happened.
+func (g *growingArchiveRunner) remove(key string) {
+	g.objects = slices.DeleteFunc(g.objects, func(o rcloneObject) bool { return o.Name == key })
+}
+
+// deleteTargets returns the RAW `rclone deletefile <target>` arguments a
+// MockRunner recorded. Unlike deletedNames it does not truncate to the last path
+// segment: the target is the whole remote key, and asserting on it in full keeps
+// the assertion meaning the same thing once the key layout carries a prefix.
+func deleteTargets(calls []RunnerCall) []string {
+	var out []string
+	for _, c := range calls {
+		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "deletefile" {
+			out = append(out, c.Args[1])
+		}
+	}
+	return out
+}
+
+// shippedHead reads back the lineage head Send recorded for subvol, failing if
+// none was recorded. Reading the STORE (rather than assuming the snapshot value)
+// is what ties the assertion to the object production would reference as the next
+// incremental `-p` base (R2.1).
+func shippedHead(t *testing.T, ps *mapParentStore, subvol, ship string) Snapshot {
+	t.Helper()
+	head, ok, err := ps.Last(subvol, ship)
+	if err != nil {
+		t.Fatalf("parent store Last(%q, %q): %v", subvol, ship, err)
+	}
+	if !ok {
+		t.Fatalf("parent store recorded no head for %q — a successful Send must record one", subvol)
+	}
+	return head
+}
+
+// assertHeadNotDeleted fails if any recorded deletefile names head's object —
+// either as the exact remote key, or by carrying head's snapshot ID, which
+// catches the deletion under any key layout. It asserts the head SURVIVES, never
+// the shape of the comparison that spares it (R6.2).
+func assertHeadNotDeleted(t *testing.T, calls []RunnerCall, remote string, head Snapshot, why string) {
+	t.Helper()
+	headObject := remote + "/" + ArchiveObjectName(head.Subvolume, head.ID)
+	for _, target := range deleteTargets(calls) {
+		if target == headObject || strings.Contains(target, head.ID) {
+			t.Errorf("rclone deletefile %q deleted %s's recorded head %q — %s", target, head.Subvolume, headObject, why)
+		}
+	}
+}
+
+// TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes is the 038 regression:
+// objects from different subvolumes share one flat remote namespace, so they land
+// in the same calendar bucket and compete for the single representative slot it
+// has. Shipping /root therefore deletes /home's lineage head — silently, because
+// the deletefile SUCCEEDS, the next /home send still works (btrfs `-p` takes the
+// on-disk parent PATH), and the damage only surfaces at restore. Pruning after a
+// ship must consider only that snapshot's subvolume (R1.1) and must leave every
+// other subvolume's recorded head alone (R2.1, asserted as "the head survives",
+// R6.2).
+//
+// The fixture must ship TWO subvolumes into ONE remote, because a
+// single-subvolume fixture cannot fail for this reason (R6.1) — which is exactly
+// what the control subtest demonstrates: same sequence, same policy, same growing
+// remote, only the subvolume COUNT differs, and it passes.
+func TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+
+	// Both instants fall in the SAME UTC calendar day, so Retention{Daily: 1}
+	// yields exactly ONE bucket holding ONE representative: the newest object.
+	// The second ship is the newer, so it wins the bucket and the first ship's
+	// object is what a whole-remote prune selects for deletion.
+	firstShipAt := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	secondShipAt := time.Date(2026, 8, 18, 11, 0, 0, 0, time.UTC)
+
+	// newShipper builds the shipper under test: one shipper, one remote, the
+	// production default mode ("incremental", newArchiveShipper) and a daily policy.
+	newShipper := func(run Runner, ps parentStore) *archiveShipper {
+		return &archiveShipper{
+			remote:    remote,
+			mode:      "incremental",
+			compress:  "zstd",
+			run:       run,
+			parents:   ps,
+			retention: Retention{Daily: 1},
+		}
+	}
+
+	t.Run("two subvolumes: shipping /root must not delete /home's head", func(t *testing.T) {
+		home := Snapshot{ID: "home.A", Subvolume: "/home", Path: "/snaps/home.A"}
+		root := Snapshot{ID: "root.B", Subvolume: "/root", Path: "/snaps/root.B"}
+
+		run := newGrowingArchiveRunner(remote)
+		ps := newMapParentStore()
+		a := newShipper(run, ps)
+
+		// Each subvolume's FIRST ship has no recorded parent, so Send warns and
+		// falls back to a full send — expected, and not what is under test.
+		_ = captureWarn(t)
+
+		run.modTime = firstShipAt
+		if _, err := a.Send(t.Context(), home); err != nil {
+			t.Fatalf("Send(%s): %v", home.Subvolume, err)
+		}
+
+		// Fixture integrity, half one: /home's object is REALLY on the remote by
+		// the time /root ships. A fixture whose remote does not grow would make
+		// this test pass for the wrong reason — hiding the bug instead of proving
+		// it. Asserted on the modelled remote, not on what lsjson returned, so
+		// scoping the listing later does not change what this means.
+		if len(run.objects) != 1 || !strings.Contains(run.objects[0].Name, home.ID) {
+			t.Fatalf("remote holds %v after shipping %s, want exactly its object", names(run.objects), home.Subvolume)
+		}
+
+		run.modTime = secondShipAt
+		if _, err := a.Send(t.Context(), root); err != nil {
+			t.Fatalf("Send(%s): %v", root.Subvolume, err)
+		}
+
+		// Fixture integrity, half two: /root's ship did prune, so it really did
+		// decide what to keep against that grown remote.
+		if len(run.served) < 2 {
+			t.Fatalf("rclone lsjson served %d listings, want one per ship — a ship did not prune at all", len(run.served))
+		}
+
+		assertHeadNotDeleted(t, run.Calls, remote, shippedHead(t, ps, home.Subvolume, a.Name()),
+			"pruning after /root's ship must consider only /root's own objects (R1.1, R2.1)")
+	})
+
+	t.Run("one subvolume control: its own recorded head survives", func(t *testing.T) {
+		// The SAME sequence — two ships, one remote, same calendar day,
+		// Retention{Daily: 1}, a remote that grows — with both ships in ONE
+		// subvolume. The older object is legitimately pruned (that IS the policy,
+		// applied within the subvolume); the recorded head must survive. Keeping
+		// the control here makes the contrast visible in one place: only the
+		// subvolume COUNT differs from the case above, so its failure cannot be
+		// blamed on the fixture's shape.
+		first := Snapshot{ID: "home.A", Subvolume: "/home", Path: "/snaps/home.A"}
+		second := Snapshot{ID: "home.C", Subvolume: "/home", Path: "/snaps/home.C"}
+
+		run := newGrowingArchiveRunner(remote)
+		ps := newMapParentStore()
+		a := newShipper(run, ps)
+
+		_ = captureWarn(t) // the first ship has no parent yet; the second does.
+
+		run.modTime = firstShipAt
+		if _, err := a.Send(t.Context(), first); err != nil {
+			t.Fatalf("Send(%s): %v", first.ID, err)
+		}
+		if len(run.objects) != 1 || !strings.Contains(run.objects[0].Name, first.ID) {
+			t.Fatalf("remote holds %v after the first ship, want exactly its object", names(run.objects))
+		}
+
+		run.modTime = secondShipAt
+		if _, err := a.Send(t.Context(), second); err != nil {
+			t.Fatalf("Send(%s): %v", second.ID, err)
+		}
+
+		if len(run.served) < 2 {
+			t.Fatalf("rclone lsjson served %d listings, want one per ship — a ship did not prune at all", len(run.served))
+		}
+
+		assertHeadNotDeleted(t, run.Calls, remote, shippedHead(t, ps, first.Subvolume, a.Name()),
+			"a subvolume's own prune must never delete its current lineage head (R2.1)")
+	})
+}
