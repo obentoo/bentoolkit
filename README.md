@@ -1504,7 +1504,9 @@ bentoo snapshot prune
 bentoo snapshot prune --ship gdrive       # scope to one destination only
 
 # Restore a snapshot from a cloud ship (destructive — requires confirmation)
+# --subvolume is required only when two or more subvolumes are configured
 bentoo snapshot restore <id> --target /mnt/restore --ship offsite --yes
+bentoo snapshot restore <id> --target /mnt/restore --ship offsite --subvolume /home --yes
 
 # Roll the system back to a snapshot (snapper engine only; destructive)
 bentoo snapshot rollback <id> --yes
@@ -1573,15 +1575,46 @@ local snapshots, plus a `restore` verb to bring either back.
     (never silent). The parent for a `(subvolume, ship)` is recorded **only after a
     successful ship** under `/var/lib/bentoo/snapshot/parents/`, so a failed ship
     never breaks the chain.
-  - **Archive retention (GFS):** rclone has no retention of its own, so after a
-    successful ship bentoolkit lists the remote (`rclone lsjson`), applies a
-    grandfather-father-son policy from `[engine.retention]`, and deletes out-of-policy
-    objects — but **never the active parent**.
+  - **Object layout:** each object is stored at `<remote>/<subvolume>/<id>.zst`, so
+    the subvolume is a **directory** under the remote, not part of the filename. The
+    directory name is the subvolume path with every byte outside `[A-Za-z0-9._-]`
+    replaced by `-`, with no special case: `/home` becomes `-home`, and the root
+    subvolume `/` becomes the directory `-`.
+  - **Archive retention (GFS), per subvolume:** rclone has no retention of its own,
+    so after a successful ship bentoolkit lists **that subvolume's directory**
+    (`rclone lsjson <remote>/<subvolume>`), applies a grandfather-father-son policy
+    from `[engine.retention]`, and deletes out-of-policy objects — but **never the
+    active parent**. Retention is decided **within one subvolume**: a subvolume's
+    snapshots compete only with each other, so adding a second subvolume never
+    shortens the first one's history. `bentoo snapshot prune` applies the same
+    policy independently to each configured subvolume, and a subvolume nothing has
+    been shipped for yet is simply skipped with a warning, not an error.
+  - **Nothing outside the layout is ever deleted.** A prune only ever lists a
+    configured subvolume's own directory, so any other object in the bucket — put
+    there by hand, by another tool, or by an older layout — is never a deletion
+    candidate. Directory entries are never passed to `rclone deletefile`.
 
 **Restore.** `bentoo snapshot restore <id> --target <path> --ship <name>` dispatches
 by the ship's driver. An `archive` restore **validates the full + delta chain before
 applying** and refuses a broken chain *before* any `btrfs receive`. Restore is
 destructive: it requires `--yes` or an interactive `[y/N]` confirmation.
+
+**`--subvolume` — which subvolume to read from.** Because each subvolume has its own
+directory on the remote, a restore has to know which one to read. With **exactly one**
+subvolume configured — the common case — it is inferred and the flag is not needed.
+With **two or more**, `--subvolume` becomes **required**: without it the command
+exits non-zero, naming the configured subvolumes, **before any subprocess runs**.
+Naming a subvolume that is not configured fails the same way. The check is applied
+whichever driver the named ship uses, including `restic`, which discards the value —
+a gate that depends on the driver is a gate someone has to remember to extend.
+
+```bash
+# One subvolume configured: unchanged, no new flag
+bentoo snapshot restore 42 --target /mnt/restore --ship offsite --yes
+
+# Two or more: name the one to read from
+bentoo snapshot restore 42 --target /mnt/restore --ship offsite --subvolume /home --yes
+```
 
 **Secrets.** Only secret **paths** (`password_file`) and rclone's own config/env are
 passed — never secret **values** in argv or TOML — and passwords/tokens are never
