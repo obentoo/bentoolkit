@@ -237,6 +237,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-commits and pushes and whose `--clean` deletes any ebuild no registry pin
   claims. Declining is **exit 0**: nothing failed, a decision was taken.
 
+- **A bump is now proved before it is published.** Story 031 shipped a gate that
+  reads what upstream declares and what the ebuild passes, and reports the
+  difference — but it could not stop the bump. Pointed at obentoo/bentoo#33 it
+  names `aalib` and `libcaca` in about five seconds, and then the bump publishes
+  anyway. The overlay this toolkit writes to auto-commits and pushes, so "we
+  report it afterwards" and "it never reached anyone" are different promises.
+
+  The candidate is now materialised in a staging tree of its own — a
+  self-consistent single-package repository under `<configDir>/staging`, holding
+  copies of the overlay's `eclass/`, `profiles/` and the package's `files/`, and
+  mastering onto `gentoo` alone. Not onto the overlay: that name resolves through
+  `repos.conf` to the *deployed* copy, which lags the working tree by however
+  long the commit/push/sync cycle takes, and validating a new ebuild against a
+  stale eclass is the same class of error as validating it against the wrong
+  tarball. Only a bump whose gates all reported PASS or SKIPPED is copied into
+  the published overlay, and only then is the registry pin written.
+
+  Measured: a staged skeleton plus one package is 24 KB; `eclass/` is 32 KB and
+  `profiles/` 56 KB. One tree per package and version, replaced on restaging, so
+  there is no index to keep consistent and no lock to take.
+
+- **Three build gates, from one `ebuild` invocation.** `ebuild <path> clean
+  <phase>` runs setup, unpack, prepare and configure in a single pass, so the
+  patches, configure and compile outcomes are derived from the phase markers in
+  one captured log rather than by unpacking the same 6 MB tarball three times.
+  A failure attributes itself to the last phase that started. This also settles
+  what the patches gate is: `src_prepare` applies the patches the way the build
+  will, in the ebuild's own order, through `eapply`/`eapply_user` — a strictly
+  better test than the `patch --dry-run` story 031 deferred.
+
+  Measured on the reference host: `1.29.2` exits 1 with
+  `meson.build:1:0: ERROR: Unknown option: "aalib".`, `1.28.6` exits 0 with
+  `>>> Source configured.`, and the whole unpack/prepare/configure cycle runs
+  unprivileged for a user in the `portage` group.
+
+- **A depth ladder, and a policy that picks a rung.** `none`, `options`,
+  `patches`, `configure`, `compile`, each including every rung before it.
+  Selected from how far the version moved — revision, patch, series, major —
+  then lowered to `none` for a binary record, overridden per package, and
+  replaced outright by `--depth` or `--compile`. `compile` is never a default:
+  a default that started building on every major bump would be switched off in a
+  week. An override that *lowers* the depth reports the bump as skipped by
+  policy, never as validated; only an explicit operator flag buys less scrutiny
+  quietly.
+
+- **`--depth` on `overlay autoupdate` and on `overlay validate`**, and a
+  `autoupdate.validate` block in `config.yaml` carrying the per-class depths,
+  `require_isolation`, `require_proof`, `review`, `fix_on_failure`, `timeout`
+  and per-package overrides. The policy lives in `config.yaml` rather than
+  `packages.toml` on purpose: that file sits inside the overlay, auto-commits
+  and publishes, and silently auto-disables a record whose syntax runs ahead of
+  the installed binary. Here an unknown key is a warning and the run continues.
+
+- **`--llm`, enabling a bump reviewer and a build fixer.** The reviewer reads
+  the locally computed difference between the two versions' build declarations
+  and reaches no network; it holds `Read` and nothing else, and emits at `info`
+  or `warning` and never at `error` — so a model's opinion can raise validation
+  depth but can never decide a gate. The build fixer holds exactly `Read` and
+  `Edit`: no `Write`, because it only ever edits an ebuild that already exists,
+  and no `Bash` in any form, because `--add-dir` bounds file writes but not a
+  shell. After a repair the same phase is re-run and *that* outcome is the
+  gate's — the agent's self-report is never the verdict.
+
+- **`--check --llm` prints its plan before it spends anything**: how many
+  packages, the depth for each and why, what is skipped and why, how many
+  distfiles will be fetched, and the distribution of depths across the run. It
+  then asks once for the whole run when any gate above `options` would run, and
+  reports the proved, errored and skipped tallies at the end.
+
 ### Changed
 - **Archive objects are stored at `<remote>/<subvolume>/<id>.zst`, and
   `snapshot restore` gained `--subvolume`.** The subvolume is now a directory
@@ -621,75 +690,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   *read*. It now falls back to the provider's own tree, recognised by Portage's
   `profiles/repo_name` rather than trusted, and reports SKIPPED when there is
   genuinely none.
-
-- **A bump is now proved before it is published.** Story 031 shipped a gate that
-  reads what upstream declares and what the ebuild passes, and reports the
-  difference — but it could not stop the bump. Pointed at obentoo/bentoo#33 it
-  names `aalib` and `libcaca` in about five seconds, and then the bump publishes
-  anyway. The overlay this toolkit writes to auto-commits and pushes, so "we
-  report it afterwards" and "it never reached anyone" are different promises.
-
-  The candidate is now materialised in a staging tree of its own — a
-  self-consistent single-package repository under `<configDir>/staging`, holding
-  copies of the overlay's `eclass/`, `profiles/` and the package's `files/`, and
-  mastering onto `gentoo` alone. Not onto the overlay: that name resolves through
-  `repos.conf` to the *deployed* copy, which lags the working tree by however
-  long the commit/push/sync cycle takes, and validating a new ebuild against a
-  stale eclass is the same class of error as validating it against the wrong
-  tarball. Only a bump whose gates all reported PASS or SKIPPED is copied into
-  the published overlay, and only then is the registry pin written.
-
-  Measured: a staged skeleton plus one package is 24 KB; `eclass/` is 32 KB and
-  `profiles/` 56 KB. One tree per package and version, replaced on restaging, so
-  there is no index to keep consistent and no lock to take.
-
-- **Three build gates, from one `ebuild` invocation.** `ebuild <path> clean
-  <phase>` runs setup, unpack, prepare and configure in a single pass, so the
-  patches, configure and compile outcomes are derived from the phase markers in
-  one captured log rather than by unpacking the same 6 MB tarball three times.
-  A failure attributes itself to the last phase that started. This also settles
-  what the patches gate is: `src_prepare` applies the patches the way the build
-  will, in the ebuild's own order, through `eapply`/`eapply_user` — a strictly
-  better test than the `patch --dry-run` story 031 deferred.
-
-  Measured on the reference host: `1.29.2` exits 1 with
-  `meson.build:1:0: ERROR: Unknown option: "aalib".`, `1.28.6` exits 0 with
-  `>>> Source configured.`, and the whole unpack/prepare/configure cycle runs
-  unprivileged for a user in the `portage` group.
-
-- **A depth ladder, and a policy that picks a rung.** `none`, `options`,
-  `patches`, `configure`, `compile`, each including every rung before it.
-  Selected from how far the version moved — revision, patch, series, major —
-  then lowered to `none` for a binary record, overridden per package, and
-  replaced outright by `--depth` or `--compile`. `compile` is never a default:
-  a default that started building on every major bump would be switched off in a
-  week. An override that *lowers* the depth reports the bump as skipped by
-  policy, never as validated; only an explicit operator flag buys less scrutiny
-  quietly.
-
-- **`--depth` on `overlay autoupdate` and on `overlay validate`**, and a
-  `autoupdate.validate` block in `config.yaml` carrying the per-class depths,
-  `require_isolation`, `require_proof`, `review`, `fix_on_failure`, `timeout`
-  and per-package overrides. The policy lives in `config.yaml` rather than
-  `packages.toml` on purpose: that file sits inside the overlay, auto-commits
-  and publishes, and silently auto-disables a record whose syntax runs ahead of
-  the installed binary. Here an unknown key is a warning and the run continues.
-
-- **`--llm`, enabling a bump reviewer and a build fixer.** The reviewer reads
-  the locally computed difference between the two versions' build declarations
-  and reaches no network; it holds `Read` and nothing else, and emits at `info`
-  or `warning` and never at `error` — so a model's opinion can raise validation
-  depth but can never decide a gate. The build fixer holds exactly `Read` and
-  `Edit`: no `Write`, because it only ever edits an ebuild that already exists,
-  and no `Bash` in any form, because `--add-dir` bounds file writes but not a
-  shell. After a repair the same phase is re-run and *that* outcome is the
-  gate's — the agent's self-report is never the verdict.
-
-- **`--check --llm` prints its plan before it spends anything**: how many
-  packages, the depth for each and why, what is skipped and why, how many
-  distfiles will be fetched, and the distribution of depths across the run. It
-  then asks once for the whole run when any gate above `options` would run, and
-  reports the proved, errored and skipped tallies at the end.
 
 - **A commit-tracked bump no longer fails on `COMMIT="<sha>"`, and a failed
   substitution no longer leaves an ebuild behind.** Two defects, one incident.
