@@ -607,7 +607,9 @@ func TestResolveRestoreSubvolume_MatchesExactSpelling(t *testing.T) {
 
 // TestResolveRestoreSubvolume_NoneConfigured covers a config that legitimately
 // reaches the resolver with an EMPTY subvolume list: Validate only WARNS about
-// it (config.go, R1.4), and the old `Subvolumes[0]` guess would have PANICKED.
+// it (config.go, R1.4). The old `Subvolumes[0]` guess was length-guarded, so it
+// did not panic — it silently produced the EMPTY subvolume, whose prefix is ""
+// and whose key is "/<id>.zst": a restore pointed at a path nothing ever wrote.
 // There is nothing to restore from and no list to suggest, so both the flagged
 // and unflagged forms must fail — naming the empty setting so the operator fixes
 // the config rather than the command.

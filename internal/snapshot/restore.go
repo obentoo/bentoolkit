@@ -140,28 +140,36 @@ func quotedSubvolumes(subvolumes []string) string {
 // CLI assigns the result straight into RestoreOptions.Chain (design §5 SCOPE
 // NOTE). A restic ship needs no chain and gets nil.
 //
+// subvolume is the ALREADY-RESOLVED subvolume the restore reads from: the caller
+// runs ResolveRestoreSubvolume first, so an ambiguous or unconfigured request has
+// already failed before this point (R5.2, R5.3). This function makes no choice of
+// its own. It used to derive the key from the engine's FIRST configured subvolume,
+// which on any config with more than one sent every restore to the wrong prefix —
+// the reason the value is passed in now.
+//
 // MVP: for an archive ship it returns a SINGLE full link — id treated as a FULL
 // base (ParentID "" → validateChain accepts a length-one full→target chain) whose
-// object key is ArchiveObjectName(<engine's first subvolume>, id), the same
-// sanitize+suffix key the archive shipper wrote (R5.2). The first configured
-// subvolume is taken as the snapshot's subvolume — the common single-subvolume
-// case.
+// object key is ArchiveObjectName(subvolume, id) — the "<prefix>/<leaf>" form
+// "<ArchivePrefix(subvolume)>/<id>.zst", which is exactly the key the archive
+// shipper wrote under that subvolume's own prefix directory (R3.2).
+//
+// cfg is unread today. It is kept because the chain this returns is still a
+// placeholder — see the TODO — and reconstructing a real chain needs the config
+// (the ship list and retention live there); the seam is exported, so churning its
+// signature twice costs more than one unread parameter.
 //
 // TODO(incremental-chain): full chain reconstruction — listing the remote and
-// re-deriving the full→…→target delta sequence for an incremental id, and
-// per-subvolume selection — is live-test/future work (T6.1 scoped it out). Until
-// then this replays only the requested object as a self-contained full; restoring
-// a delta-only id this way would (correctly) fail at `btrfs receive` because its
+// re-deriving the full→…→target delta sequence for an incremental id — is
+// live-test/future work (T6.1 scoped it out). Resolving the subvolume changed
+// WHICH prefix the chain reads from, NOT how many links it has: this still
+// replays only the requested object as a self-contained full, so restoring a
+// delta-only id this way would (correctly) fail at `btrfs receive` because its
 // base is absent (the chain validation still guards against a truly empty chain).
-func RestoreChainFor(cfg *Config, ship ShipConfig, id string) []chainLink {
+func RestoreChainFor(cfg *Config, ship ShipConfig, id, subvolume string) []chainLink {
 	if ship.Type != "archive" {
 		return nil
 	}
-	subvol := ""
-	if len(cfg.Engine.Subvolumes) > 0 {
-		subvol = cfg.Engine.Subvolumes[0]
-	}
-	return []chainLink{{ID: id, ParentID: "", Object: ArchiveObjectName(subvol, id)}}
+	return []chainLink{{ID: id, ParentID: "", Object: ArchiveObjectName(subvolume, id)}}
 }
 
 // ArchivePrefix is the remote sub-path that holds one subvolume's objects: the
