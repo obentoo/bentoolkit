@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -317,5 +318,142 @@ func TestRestore_InvalidDriver(t *testing.T) {
 	}
 	if len(mr.Calls) != 0 {
 		t.Errorf("invalid driver ran %d subprocess(es); want 0", len(mr.Calls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 038 T2.1 — the remote key carries the subvolume as a DIRECTORY (R3, R3.1,
+// R3.3).
+//
+// The property under test is NOT the two literal strings these functions
+// produce, it is that `sanitize` can never emit '/': every byte outside
+// [A-Za-z0-9._-] becomes '-', so the single '/' ArchiveObjectName inserts is the
+// ONLY separator in the key. That is what makes prefix and leaf unambiguous.
+// The old flat scheme joined them with '-', a byte sanitize CAN emit, so the
+// boundary was indistinguishable from sanitized content and nested subvolumes
+// could render to the same key.
+// ---------------------------------------------------------------------------
+
+// TestArchivePrefix_SanitizeAppliedWithNoSpecialCase pins R3.3: the prefix is
+// `sanitize(subvolume)` unchanged, with no special case whatsoever — the root
+// subvolume "/" is not exempted and its prefix is therefore the directory "-".
+// The final check is the load-bearing one: a prefix NEVER contains '/', which is
+// the invariant every other test here rests on.
+func TestArchivePrefix_SanitizeAppliedWithNoSpecialCase(t *testing.T) {
+	cases := []struct{ subvolume, want string }{
+		{"/", "-"},                     // R3.3: root gets no special case
+		{"/home", "-home"},             //
+		{"/home/otaku", "-home-otaku"}, // separators sanitize to '-' like any other byte
+		{"/var/lib/portage", "-var-lib-portage"},
+	}
+	for _, c := range cases {
+		got := ArchivePrefix(c.subvolume)
+		if got != c.want {
+			t.Errorf("ArchivePrefix(%q) = %q, want %q", c.subvolume, got, c.want)
+		}
+		if got != sanitize(c.subvolume) {
+			t.Errorf("ArchivePrefix(%q) = %q, want sanitize(%q) = %q — the prefix must be the sanitize rule unchanged",
+				c.subvolume, got, c.subvolume, sanitize(c.subvolume))
+		}
+		if strings.Contains(got, "/") {
+			t.Errorf("ArchivePrefix(%q) = %q contains '/' — sanitize must never emit one, or the key separator stops being unambiguous",
+				c.subvolume, got)
+		}
+	}
+}
+
+// TestArchiveObjectLeaf_IsRelativeToTheListedPath pins the distinction this
+// three-function split exists to make visible: the leaf is what
+// `rclone lsjson <remote>/<prefix>` reports in Name — relative to the LISTED
+// path, carrying no prefix — while ArchiveObjectName is the full key relative to
+// the remote ROOT. The two are NOT interchangeable, and a comparison between
+// them fails silently: never true, no error, no empty result.
+func TestArchiveObjectLeaf_IsRelativeToTheListedPath(t *testing.T) {
+	const id = "snap1"
+
+	if got, want := ArchiveObjectLeaf(id), "snap1.zst"; got != want {
+		t.Errorf("ArchiveObjectLeaf(%q) = %q, want %q", id, got, want)
+	}
+	if strings.Contains(ArchiveObjectLeaf(id), "/") {
+		t.Errorf("ArchiveObjectLeaf(%q) = %q carries a path separator; a scoped listing reports NO prefix",
+			id, ArchiveObjectLeaf(id))
+	}
+	// The silent-mismatch hazard, asserted rather than merely documented.
+	if leaf, key := ArchiveObjectLeaf(id), ArchiveObjectName("/home", id); leaf == key {
+		t.Fatalf("leaf %q equals full key %q — the test can no longer detect the confusion it guards", leaf, key)
+	}
+}
+
+// TestArchiveObjectName_KeyIsPrefixSlashLeaf pins R3.1: the full key is
+// "<sanitize(subvolume)>/<id>.zst", composed from the other two functions. The
+// root subvolume "/" is included deliberately — its prefix is the directory "-"
+// with no special case (R3.3), a layout verified to work end to end.
+func TestArchiveObjectName_KeyIsPrefixSlashLeaf(t *testing.T) {
+	cases := []struct{ subvolume, id, want string }{
+		{"/", "snap1", "-/snap1.zst"},
+		{"/home", "snap1", "-home/snap1.zst"},
+		{"/home/otaku", "snap1", "-home-otaku/snap1.zst"},
+	}
+	for _, c := range cases {
+		got := ArchiveObjectName(c.subvolume, c.id)
+		if got != c.want {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", c.subvolume, c.id, got, c.want)
+		}
+		if want := ArchivePrefix(c.subvolume) + "/" + ArchiveObjectLeaf(c.id); got != want {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q, want ArchivePrefix+\"/\"+ArchiveObjectLeaf = %q",
+				c.subvolume, c.id, got, want)
+		}
+		// Exactly ONE separator: the one this function inserts.
+		if n := strings.Count(got, "/"); n != 1 {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q has %d '/', want exactly 1 — the prefix/leaf boundary must be unique",
+				c.subvolume, c.id, got, n)
+		}
+	}
+}
+
+// TestArchiveObjectName_NestedSubvolumesCannotCollide is the regression proper.
+// Under the OLD flat scheme "<sanitize(subvolume)>-<id>.zst", subvolume "/home"
+// with id "otaku-42" and subvolume "/home/otaku" with id "42" both rendered as
+// "-home-otaku-42.zst" — one object key for two different snapshots, because the
+// '-' joining prefix to id is a byte sanitize itself emits, so the boundary was
+// unrecoverable. Separating them with '/', which sanitize can NEVER emit, makes
+// the boundary unambiguous for every input.
+func TestArchiveObjectName_NestedSubvolumesCannotCollide(t *testing.T) {
+	const (
+		parentSubvol, parentID = "/home", "otaku-42"
+		childSubvol, childID   = "/home/otaku", "42"
+	)
+
+	// The old scheme's collision, reconstructed to show the pair is genuinely
+	// adversarial and not just two arbitrary inputs.
+	oldParent := sanitize(parentSubvol) + "-" + parentID + ".zst"
+	oldChild := sanitize(childSubvol) + "-" + childID + ".zst"
+	if oldParent != oldChild {
+		t.Fatalf("fixture no longer collides under the old flat scheme (%q vs %q); it must, or this test proves nothing",
+			oldParent, oldChild)
+	}
+
+	gotParent := ArchiveObjectName(parentSubvol, parentID)
+	gotChild := ArchiveObjectName(childSubvol, childID)
+
+	if gotParent == gotChild {
+		t.Fatalf("ArchiveObjectName(%q, %q) and ArchiveObjectName(%q, %q) both = %q — two subvolumes still share one key",
+			parentSubvol, parentID, childSubvol, childID, gotParent)
+	}
+	if want := "-home/otaku-42.zst"; gotParent != want {
+		t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", parentSubvol, parentID, gotParent, want)
+	}
+	if want := "-home-otaku/42.zst"; gotChild != want {
+		t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", childSubvol, childID, gotChild, want)
+	}
+
+	// Neither prefix is a prefix of the other AS A DIRECTORY, so a scoped listing
+	// of one subvolume can never reach the other's objects.
+	pParent, pChild := ArchivePrefix(parentSubvol)+"/", ArchivePrefix(childSubvol)+"/"
+	if strings.HasPrefix(gotChild, pParent) {
+		t.Errorf("child key %q lives under the parent's prefix %q — a scoped listing would still mix the two", gotChild, pParent)
+	}
+	if strings.HasPrefix(gotParent, pChild) {
+		t.Errorf("parent key %q lives under the child's prefix %q — a scoped listing would still mix the two", gotParent, pChild)
 	}
 }

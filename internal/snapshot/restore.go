@@ -90,15 +90,49 @@ func RestoreChainFor(cfg *Config, ship ShipConfig, id string) []chainLink {
 	return []chainLink{{ID: id, ParentID: "", Object: ArchiveObjectName(subvol, id)}}
 }
 
-// ArchiveObjectName derives the deterministic remote object name for a snapshot
-// of subvolume with the given id: "<sanitized-subvolume>-<id>.zst". It is the
-// EXPORTED mirror of the unexported archiveObjectName(Snapshot) used on the ship
-// side, so the restore path can build the object key from a subvolume + id pair
-// without holding a full Snapshot value. Keeping both on the same sanitize+suffix
-// convention guarantees the restore reads back exactly the key the archive
-// shipper wrote (R5.2).
+// ArchivePrefix is the remote sub-path that holds one subvolume's objects: the
+// subvolume path put through the same sanitize rule the parent store already
+// uses for its filenames, with NO special case — including for the root
+// subvolume "/", whose prefix is therefore the single directory "-" (R3.3).
+//
+// The property that makes this prefix unambiguous is that sanitize maps every
+// byte outside [A-Za-z0-9._-] to '-' and so can NEVER emit '/'. The '/' that
+// ArchiveObjectName appends is therefore the only one in the key: a prefix can
+// never bleed into the leaf, and two nested subvolumes can never produce the
+// same key. The old flat scheme joined prefix and id with '-', a byte sanitize
+// CAN emit, so subvolume "/home" with id "otaku-42" and subvolume "/home/otaku"
+// with id "42" both rendered as "-home-otaku-42.zst" (R3.1).
+func ArchivePrefix(subvolume string) string {
+	return sanitize(subvolume)
+}
+
+// ArchiveObjectLeaf is the object name RELATIVE to its prefix directory:
+// "<id>.zst". This is exactly what `rclone lsjson <remote>/<prefix>` reports in
+// each entry's Name — relative to the LISTED path, carrying no prefix — so a
+// scoped listing of "-home" yields "snap1.zst", not "-home/snap1.zst".
+//
+// Comparing a listing entry against a FULL key (ArchiveObjectName) therefore
+// matches nothing, and it does so SILENTLY: no error, no empty result, just a
+// comparison that is never true. Where that comparison is a guard, "matches
+// nothing" means "the guard protects nothing". Compare listing entries with this
+// function; use ArchiveObjectName only for keys relative to the remote root.
+func ArchiveObjectLeaf(id string) string {
+	return id + ".zst"
+}
+
+// ArchiveObjectName derives the deterministic FULL remote object key — relative
+// to the remote ROOT — for a snapshot of subvolume with the given id:
+// "<ArchivePrefix(subvolume)>/<ArchiveObjectLeaf(id)>", e.g. subvolume "/home"
+// with id "snap1" → "-home/snap1.zst" (R3.1). It is the EXPORTED mirror of the
+// unexported archiveObjectName(Snapshot) used on the ship side, so the restore
+// path can build the object key from a subvolume + id pair without holding a
+// full Snapshot value. Keeping both on the same convention guarantees the
+// restore reads back exactly the key the archive shipper wrote (R5.2).
+//
+// This is a full key, NOT a listing entry: see ArchiveObjectLeaf for what
+// `rclone lsjson` reports under a scoped path.
 func ArchiveObjectName(subvolume, id string) string {
-	return sanitize(subvolume) + "-" + id + ".zst"
+	return ArchivePrefix(subvolume) + "/" + ArchiveObjectLeaf(id)
 }
 
 // RestoreOptions configures a Restore. Driver selects the path; Yes/Confirm gate
