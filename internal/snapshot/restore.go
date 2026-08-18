@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -58,6 +59,79 @@ func defaultConfirmFunc(prompt string) bool {
 // (under opts.Remote) holding this link's `btrfs send` stream.
 type chainLink struct {
 	ID, ParentID, Object string
+}
+
+// ResolveRestoreSubvolume picks the subvolume a restore reads from, given the
+// engine's configured list and the value of the --subvolume flag ("" when the
+// operator did not pass one). Its three branches ARE requirement R5:
+//
+//   - a non-empty flag must name a configured subvolume, else it fails naming
+//     the value passed and listing the configured spellings (R5.3);
+//   - an empty flag with exactly ONE configured subvolume yields that one, so
+//     the single-subvolume deployment keeps working with no new flag (R5.1);
+//   - an empty flag with TWO OR MORE is ambiguous and fails, naming every
+//     configured subvolume so the operator can retry without opening the config
+//     (R5.2).
+//
+// The rule lives HERE, in the package, rather than inside the cobra handler for
+// one reason: restore is DESTRUCTIVE, it writes a subvolume over a target, so
+// the rule that decides WHICH subvolume it reads has to be provable. Held in the
+// handler it could only be exercised by driving a command; held here it is a
+// pure function over (config, flag) that a unit test pins branch by branch —
+// which is why the guarantee can be trusted. Callers must resolve BEFORE calling
+// Restore, so an ambiguous request fails ahead of any subprocess, not midway.
+//
+// Matching is exact string equality against the configured entries: the
+// configured spelling is the key ArchivePrefix sanitizes, so normalising the
+// flag (trimming a trailing '/', say) would silently accept a spelling that does
+// not correspond to the stored prefix and send the restore to the wrong objects.
+func ResolveRestoreSubvolume(cfg *Config, flag string) (string, error) {
+	// A nil config is a programming error upstream, not operator input; it is
+	// rejected explicitly because the alternative in a destructive verb is a nil
+	// dereference panic.
+	if cfg == nil {
+		return "", errors.New("cannot resolve the restore subvolume: no snapshot configuration was loaded")
+	}
+
+	configured := cfg.Engine.Subvolumes
+
+	// Validate only WARNS about an empty subvolume list (config.go, R1.4), so a
+	// config with none legitimately reaches here. There is no subvolume to read
+	// from and no list to suggest: fail naming the empty setting. The flag is
+	// echoed when present, since the operator asked for something specific.
+	if len(configured) == 0 {
+		if flag != "" {
+			return "", fmt.Errorf("subvolume %q is not configured: engine.subvolumes is empty", flag)
+		}
+		return "", errors.New("cannot resolve the restore subvolume: engine.subvolumes is empty")
+	}
+
+	if flag != "" {
+		if slices.Contains(configured, flag) {
+			return flag, nil // R5.3, satisfied
+		}
+		return "", fmt.Errorf("subvolume %q is not configured; configured subvolumes are %s",
+			flag, quotedSubvolumes(configured))
+	}
+
+	if len(configured) == 1 {
+		return configured[0], nil // R5.1: no flag needed for the single-subvolume case
+	}
+
+	return "", fmt.Errorf("cannot tell which subvolume to restore from: %d are configured (%s); name one with --subvolume",
+		len(configured), quotedSubvolumes(configured))
+}
+
+// quotedSubvolumes renders a subvolume list for an operator-facing error as
+// `"/", "/home"`. The quoting is what makes an entry with a trailing space or an
+// empty string visible instead of invisible — this text is read while a restore
+// is being retried, so a spelling has to be copyable exactly as configured.
+func quotedSubvolumes(subvolumes []string) string {
+	quoted := make([]string, 0, len(subvolumes))
+	for _, sv := range subvolumes {
+		quoted = append(quoted, fmt.Sprintf("%q", sv))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // RestoreChainFor builds the archive object chain the restore CLI replays for id
