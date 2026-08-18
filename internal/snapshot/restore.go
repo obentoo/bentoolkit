@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -60,45 +61,160 @@ type chainLink struct {
 	ID, ParentID, Object string
 }
 
+// ResolveRestoreSubvolume picks the subvolume a restore reads from, given the
+// engine's configured list and the value of the --subvolume flag ("" when the
+// operator did not pass one). Its three branches ARE requirement R5:
+//
+//   - a non-empty flag must name a configured subvolume, else it fails naming
+//     the value passed and listing the configured spellings (R5.3);
+//   - an empty flag with exactly ONE configured subvolume yields that one, so
+//     the single-subvolume deployment keeps working with no new flag (R5.1);
+//   - an empty flag with TWO OR MORE is ambiguous and fails, naming every
+//     configured subvolume so the operator can retry without opening the config
+//     (R5.2).
+//
+// The rule lives HERE, in the package, rather than inside the cobra handler for
+// one reason: restore is DESTRUCTIVE, it writes a subvolume over a target, so
+// the rule that decides WHICH subvolume it reads has to be provable. Held in the
+// handler it could only be exercised by driving a command; held here it is a
+// pure function over (config, flag) that a unit test pins branch by branch —
+// which is why the guarantee can be trusted. Callers must resolve BEFORE calling
+// Restore, so an ambiguous request fails ahead of any subprocess, not midway.
+//
+// Matching is exact string equality against the configured entries: the
+// configured spelling is the key ArchivePrefix sanitizes, so normalising the
+// flag (trimming a trailing '/', say) would silently accept a spelling that does
+// not correspond to the stored prefix and send the restore to the wrong objects.
+func ResolveRestoreSubvolume(cfg *Config, flag string) (string, error) {
+	// A nil config is a programming error upstream, not operator input; it is
+	// rejected explicitly because the alternative in a destructive verb is a nil
+	// dereference panic.
+	if cfg == nil {
+		return "", errors.New("cannot resolve the restore subvolume: no snapshot configuration was loaded")
+	}
+
+	configured := cfg.Engine.Subvolumes
+
+	// Validate only WARNS about an empty subvolume list (config.go, R1.4), so a
+	// config with none legitimately reaches here. There is no subvolume to read
+	// from and no list to suggest: fail naming the empty setting. The flag is
+	// echoed when present, since the operator asked for something specific.
+	if len(configured) == 0 {
+		if flag != "" {
+			return "", fmt.Errorf("subvolume %q is not configured: engine.subvolumes is empty", flag)
+		}
+		return "", errors.New("cannot resolve the restore subvolume: engine.subvolumes is empty")
+	}
+
+	if flag != "" {
+		if slices.Contains(configured, flag) {
+			return flag, nil // R5.3, satisfied
+		}
+		return "", fmt.Errorf("subvolume %q is not configured; configured subvolumes are %s",
+			flag, quotedSubvolumes(configured))
+	}
+
+	if len(configured) == 1 {
+		return configured[0], nil // R5.1: no flag needed for the single-subvolume case
+	}
+
+	return "", fmt.Errorf("cannot tell which subvolume to restore from: %d are configured (%s); name one with --subvolume",
+		len(configured), quotedSubvolumes(configured))
+}
+
+// quotedSubvolumes renders a subvolume list for an operator-facing error as
+// `"/", "/home"`. The quoting is what makes an entry with a trailing space or an
+// empty string visible instead of invisible — this text is read while a restore
+// is being retried, so a spelling has to be copyable exactly as configured.
+func quotedSubvolumes(subvolumes []string) string {
+	quoted := make([]string, 0, len(subvolumes))
+	for _, sv := range subvolumes {
+		quoted = append(quoted, fmt.Sprintf("%q", sv))
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // RestoreChainFor builds the archive object chain the restore CLI replays for id
 // (T6.2). It is the EXPORTED seam that keeps chain construction INSIDE this
 // package: chainLink is unexported and cannot be built from package main, so the
 // CLI assigns the result straight into RestoreOptions.Chain (design §5 SCOPE
 // NOTE). A restic ship needs no chain and gets nil.
 //
+// subvolume is the ALREADY-RESOLVED subvolume the restore reads from: the caller
+// runs ResolveRestoreSubvolume first, so an ambiguous or unconfigured request has
+// already failed before this point (R5.2, R5.3). This function makes no choice of
+// its own. It used to derive the key from the engine's FIRST configured subvolume,
+// which on any config with more than one sent every restore to the wrong prefix —
+// the reason the value is passed in now.
+//
 // MVP: for an archive ship it returns a SINGLE full link — id treated as a FULL
 // base (ParentID "" → validateChain accepts a length-one full→target chain) whose
-// object key is ArchiveObjectName(<engine's first subvolume>, id), the same
-// sanitize+suffix key the archive shipper wrote (R5.2). The first configured
-// subvolume is taken as the snapshot's subvolume — the common single-subvolume
-// case.
+// object key is ArchiveObjectName(subvolume, id) — the "<prefix>/<leaf>" form
+// "<ArchivePrefix(subvolume)>/<id>.zst", which is exactly the key the archive
+// shipper wrote under that subvolume's own prefix directory (R3.2).
+//
+// cfg is unread today. It is kept because the chain this returns is still a
+// placeholder — see the TODO — and reconstructing a real chain needs the config
+// (the ship list and retention live there); the seam is exported, so churning its
+// signature twice costs more than one unread parameter.
 //
 // TODO(incremental-chain): full chain reconstruction — listing the remote and
-// re-deriving the full→…→target delta sequence for an incremental id, and
-// per-subvolume selection — is live-test/future work (T6.1 scoped it out). Until
-// then this replays only the requested object as a self-contained full; restoring
-// a delta-only id this way would (correctly) fail at `btrfs receive` because its
+// re-deriving the full→…→target delta sequence for an incremental id — is
+// live-test/future work (T6.1 scoped it out). Resolving the subvolume changed
+// WHICH prefix the chain reads from, NOT how many links it has: this still
+// replays only the requested object as a self-contained full, so restoring a
+// delta-only id this way would (correctly) fail at `btrfs receive` because its
 // base is absent (the chain validation still guards against a truly empty chain).
-func RestoreChainFor(cfg *Config, ship ShipConfig, id string) []chainLink {
+func RestoreChainFor(cfg *Config, ship ShipConfig, id, subvolume string) []chainLink {
 	if ship.Type != "archive" {
 		return nil
 	}
-	subvol := ""
-	if len(cfg.Engine.Subvolumes) > 0 {
-		subvol = cfg.Engine.Subvolumes[0]
-	}
-	return []chainLink{{ID: id, ParentID: "", Object: ArchiveObjectName(subvol, id)}}
+	return []chainLink{{ID: id, ParentID: "", Object: ArchiveObjectName(subvolume, id)}}
 }
 
-// ArchiveObjectName derives the deterministic remote object name for a snapshot
-// of subvolume with the given id: "<sanitized-subvolume>-<id>.zst". It is the
-// EXPORTED mirror of the unexported archiveObjectName(Snapshot) used on the ship
-// side, so the restore path can build the object key from a subvolume + id pair
-// without holding a full Snapshot value. Keeping both on the same sanitize+suffix
-// convention guarantees the restore reads back exactly the key the archive
-// shipper wrote (R5.2).
+// ArchivePrefix is the remote sub-path that holds one subvolume's objects: the
+// subvolume path put through the same sanitize rule the parent store already
+// uses for its filenames, with NO special case — including for the root
+// subvolume "/", whose prefix is therefore the single directory "-" (R3.3).
+//
+// The property that makes this prefix unambiguous is that sanitize maps every
+// byte outside [A-Za-z0-9._-] to '-' and so can NEVER emit '/'. The '/' that
+// ArchiveObjectName appends is therefore the only one in the key: a prefix can
+// never bleed into the leaf, and two nested subvolumes can never produce the
+// same key. The old flat scheme joined prefix and id with '-', a byte sanitize
+// CAN emit, so subvolume "/home" with id "otaku-42" and subvolume "/home/otaku"
+// with id "42" both rendered as "-home-otaku-42.zst" (R3.1).
+func ArchivePrefix(subvolume string) string {
+	return sanitize(subvolume)
+}
+
+// ArchiveObjectLeaf is the object name RELATIVE to its prefix directory:
+// "<id>.zst". This is exactly what `rclone lsjson <remote>/<prefix>` reports in
+// each entry's Name — relative to the LISTED path, carrying no prefix — so a
+// scoped listing of "-home" yields "snap1.zst", not "-home/snap1.zst".
+//
+// Comparing a listing entry against a FULL key (ArchiveObjectName) therefore
+// matches nothing, and it does so SILENTLY: no error, no empty result, just a
+// comparison that is never true. Where that comparison is a guard, "matches
+// nothing" means "the guard protects nothing". Compare listing entries with this
+// function; use ArchiveObjectName only for keys relative to the remote root.
+func ArchiveObjectLeaf(id string) string {
+	return id + ".zst"
+}
+
+// ArchiveObjectName derives the deterministic FULL remote object key — relative
+// to the remote ROOT — for a snapshot of subvolume with the given id:
+// "<ArchivePrefix(subvolume)>/<ArchiveObjectLeaf(id)>", e.g. subvolume "/home"
+// with id "snap1" → "-home/snap1.zst" (R3.1). It is the EXPORTED mirror of the
+// unexported archiveObjectName(Snapshot) used on the ship side, so the restore
+// path can build the object key from a subvolume + id pair without holding a
+// full Snapshot value. Keeping both on the same convention guarantees the
+// restore reads back exactly the key the archive shipper wrote (R5.2).
+//
+// This is a full key, NOT a listing entry: see ArchiveObjectLeaf for what
+// `rclone lsjson` reports under a scoped path.
 func ArchiveObjectName(subvolume, id string) string {
-	return sanitize(subvolume) + "-" + id + ".zst"
+	return ArchivePrefix(subvolume) + "/" + ArchiveObjectLeaf(id)
 }
 
 // RestoreOptions configures a Restore. Driver selects the path; Yes/Confirm gate

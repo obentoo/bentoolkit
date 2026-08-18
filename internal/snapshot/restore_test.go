@@ -3,7 +3,9 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -317,5 +319,336 @@ func TestRestore_InvalidDriver(t *testing.T) {
 	}
 	if len(mr.Calls) != 0 {
 		t.Errorf("invalid driver ran %d subprocess(es); want 0", len(mr.Calls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 038 T2.1 — the remote key carries the subvolume as a DIRECTORY (R3, R3.1,
+// R3.3).
+//
+// The property under test is NOT the two literal strings these functions
+// produce, it is that `sanitize` can never emit '/': every byte outside
+// [A-Za-z0-9._-] becomes '-', so the single '/' ArchiveObjectName inserts is the
+// ONLY separator in the key. That is what makes prefix and leaf unambiguous.
+// The old flat scheme joined them with '-', a byte sanitize CAN emit, so the
+// boundary was indistinguishable from sanitized content and nested subvolumes
+// could render to the same key.
+// ---------------------------------------------------------------------------
+
+// TestArchivePrefix_SanitizeAppliedWithNoSpecialCase pins R3.3: the prefix is
+// `sanitize(subvolume)` unchanged, with no special case whatsoever — the root
+// subvolume "/" is not exempted and its prefix is therefore the directory "-".
+// The final check is the load-bearing one: a prefix NEVER contains '/', which is
+// the invariant every other test here rests on.
+func TestArchivePrefix_SanitizeAppliedWithNoSpecialCase(t *testing.T) {
+	cases := []struct{ subvolume, want string }{
+		{"/", "-"},                     // R3.3: root gets no special case
+		{"/home", "-home"},             //
+		{"/home/otaku", "-home-otaku"}, // separators sanitize to '-' like any other byte
+		{"/var/lib/portage", "-var-lib-portage"},
+	}
+	for _, c := range cases {
+		got := ArchivePrefix(c.subvolume)
+		if got != c.want {
+			t.Errorf("ArchivePrefix(%q) = %q, want %q", c.subvolume, got, c.want)
+		}
+		if got != sanitize(c.subvolume) {
+			t.Errorf("ArchivePrefix(%q) = %q, want sanitize(%q) = %q — the prefix must be the sanitize rule unchanged",
+				c.subvolume, got, c.subvolume, sanitize(c.subvolume))
+		}
+		if strings.Contains(got, "/") {
+			t.Errorf("ArchivePrefix(%q) = %q contains '/' — sanitize must never emit one, or the key separator stops being unambiguous",
+				c.subvolume, got)
+		}
+	}
+}
+
+// TestArchiveObjectLeaf_IsRelativeToTheListedPath pins the distinction this
+// three-function split exists to make visible: the leaf is what
+// `rclone lsjson <remote>/<prefix>` reports in Name — relative to the LISTED
+// path, carrying no prefix — while ArchiveObjectName is the full key relative to
+// the remote ROOT. The two are NOT interchangeable, and a comparison between
+// them fails silently: never true, no error, no empty result.
+func TestArchiveObjectLeaf_IsRelativeToTheListedPath(t *testing.T) {
+	const id = "snap1"
+
+	if got, want := ArchiveObjectLeaf(id), "snap1.zst"; got != want {
+		t.Errorf("ArchiveObjectLeaf(%q) = %q, want %q", id, got, want)
+	}
+	if strings.Contains(ArchiveObjectLeaf(id), "/") {
+		t.Errorf("ArchiveObjectLeaf(%q) = %q carries a path separator; a scoped listing reports NO prefix",
+			id, ArchiveObjectLeaf(id))
+	}
+	// The silent-mismatch hazard, asserted rather than merely documented.
+	if leaf, key := ArchiveObjectLeaf(id), ArchiveObjectName("/home", id); leaf == key {
+		t.Fatalf("leaf %q equals full key %q — the test can no longer detect the confusion it guards", leaf, key)
+	}
+}
+
+// TestArchiveObjectName_KeyIsPrefixSlashLeaf pins R3.1: the full key is
+// "<sanitize(subvolume)>/<id>.zst", composed from the other two functions. The
+// root subvolume "/" is included deliberately — its prefix is the directory "-"
+// with no special case (R3.3), a layout verified to work end to end.
+func TestArchiveObjectName_KeyIsPrefixSlashLeaf(t *testing.T) {
+	cases := []struct{ subvolume, id, want string }{
+		{"/", "snap1", "-/snap1.zst"},
+		{"/home", "snap1", "-home/snap1.zst"},
+		{"/home/otaku", "snap1", "-home-otaku/snap1.zst"},
+	}
+	for _, c := range cases {
+		got := ArchiveObjectName(c.subvolume, c.id)
+		if got != c.want {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", c.subvolume, c.id, got, c.want)
+		}
+		if want := ArchivePrefix(c.subvolume) + "/" + ArchiveObjectLeaf(c.id); got != want {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q, want ArchivePrefix+\"/\"+ArchiveObjectLeaf = %q",
+				c.subvolume, c.id, got, want)
+		}
+		// Exactly ONE separator: the one this function inserts.
+		if n := strings.Count(got, "/"); n != 1 {
+			t.Errorf("ArchiveObjectName(%q, %q) = %q has %d '/', want exactly 1 — the prefix/leaf boundary must be unique",
+				c.subvolume, c.id, got, n)
+		}
+	}
+}
+
+// TestArchiveObjectName_NestedSubvolumesCannotCollide is the regression proper.
+// Under the OLD flat scheme "<sanitize(subvolume)>-<id>.zst", subvolume "/home"
+// with id "otaku-42" and subvolume "/home/otaku" with id "42" both rendered as
+// "-home-otaku-42.zst" — one object key for two different snapshots, because the
+// '-' joining prefix to id is a byte sanitize itself emits, so the boundary was
+// unrecoverable. Separating them with '/', which sanitize can NEVER emit, makes
+// the boundary unambiguous for every input.
+func TestArchiveObjectName_NestedSubvolumesCannotCollide(t *testing.T) {
+	const (
+		parentSubvol, parentID = "/home", "otaku-42"
+		childSubvol, childID   = "/home/otaku", "42"
+	)
+
+	// The old scheme's collision, reconstructed to show the pair is genuinely
+	// adversarial and not just two arbitrary inputs.
+	oldParent := sanitize(parentSubvol) + "-" + parentID + ".zst"
+	oldChild := sanitize(childSubvol) + "-" + childID + ".zst"
+	if oldParent != oldChild {
+		t.Fatalf("fixture no longer collides under the old flat scheme (%q vs %q); it must, or this test proves nothing",
+			oldParent, oldChild)
+	}
+
+	gotParent := ArchiveObjectName(parentSubvol, parentID)
+	gotChild := ArchiveObjectName(childSubvol, childID)
+
+	if gotParent == gotChild {
+		t.Fatalf("ArchiveObjectName(%q, %q) and ArchiveObjectName(%q, %q) both = %q — two subvolumes still share one key",
+			parentSubvol, parentID, childSubvol, childID, gotParent)
+	}
+	if want := "-home/otaku-42.zst"; gotParent != want {
+		t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", parentSubvol, parentID, gotParent, want)
+	}
+	if want := "-home-otaku/42.zst"; gotChild != want {
+		t.Errorf("ArchiveObjectName(%q, %q) = %q, want %q", childSubvol, childID, gotChild, want)
+	}
+
+	// Neither prefix is a prefix of the other AS A DIRECTORY, so a scoped listing
+	// of one subvolume can never reach the other's objects.
+	pParent, pChild := ArchivePrefix(parentSubvol)+"/", ArchivePrefix(childSubvol)+"/"
+	if strings.HasPrefix(gotChild, pParent) {
+		t.Errorf("child key %q lives under the parent's prefix %q — a scoped listing would still mix the two", gotChild, pParent)
+	}
+	if strings.HasPrefix(gotParent, pChild) {
+		t.Errorf("parent key %q lives under the child's prefix %q — a scoped listing would still mix the two", gotParent, pChild)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.1 — ResolveRestoreSubvolume: which subvolume a restore reads from (R5).
+//
+// Restore is destructive, so the rule that picks the subvolume must fail on an
+// ambiguous request BEFORE any subprocess rather than silently read the wrong
+// one. Holding the rule in the package (not in the cobra handler) is what makes
+// these branch-by-branch assertions possible without driving a command.
+//
+// The error MESSAGES are part of the deliverable, not decoration: they are read
+// by an operator mid-restore, so each test asserts the message CONTENT. An
+// `err != nil` assertion alone would pass for a message that helps nobody.
+// ---------------------------------------------------------------------------
+
+// engineWith builds a Config whose engine has exactly the given subvolumes.
+func engineWith(subvolumes ...string) *Config {
+	return &Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: subvolumes}}
+}
+
+// assertNamesSubvolumes fails unless msg names every want subvolume AS ITS OWN
+// entry. Plain substring containment is NOT enough: with "/home" and
+// "/home/otaku" configured, a message naming only the second would "contain"
+// the first and the assertion would pass while the operator is still missing an
+// option. The quoted rendering is the entry boundary, so it is what is checked.
+func assertNamesSubvolumes(t *testing.T, msg string, want []string) {
+	t.Helper()
+	for _, sv := range want {
+		if !strings.Contains(msg, fmt.Sprintf("%q", sv)) {
+			t.Errorf("error %q does not name configured subvolume %q — the operator cannot retry without opening the config",
+				msg, sv)
+		}
+	}
+}
+
+// TestResolveRestoreSubvolume_SingleConfiguredNeedsNoFlag pins R5.1 and
+// Unchanged Behavior #6: the ONLY deployed configuration is subvolumes = ["/"],
+// and it must keep restoring with no new flag. Breaking this branch breaks the
+// only real deployment, so the deployed spelling is a case in its own right.
+func TestResolveRestoreSubvolume_SingleConfiguredNeedsNoFlag(t *testing.T) {
+	for _, only := range []string{"/", "/home", "/var/lib/portage"} {
+		got, err := ResolveRestoreSubvolume(engineWith(only), "")
+		if err != nil {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=[%q], no flag) = error %v, want %q with no flag required (R5.1)",
+				only, err, only)
+			continue
+		}
+		if got != only {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=[%q], no flag) = %q, want %q", only, got, only)
+		}
+	}
+}
+
+// TestResolveRestoreSubvolume_AmbiguousNamesEveryConfigured pins R5.2: with two
+// or more configured and no flag, the request is ambiguous and must FAIL —
+// never guess — and the failure must name EVERY configured subvolume plus the
+// flag that resolves it. A message that states a problem without stating the fix
+// wastes the reader's time at the worst possible moment.
+func TestResolveRestoreSubvolume_AmbiguousNamesEveryConfigured(t *testing.T) {
+	cases := [][]string{
+		{"/", "/home"},
+		{"/", "/home", "/var/lib/portage"},
+		{"/home", "/home/otaku"}, // adversarial: one name contains the other
+	}
+	for _, configured := range cases {
+		got, err := ResolveRestoreSubvolume(engineWith(configured...), "")
+		if err == nil {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, no flag) = %q with no error; an ambiguous restore must fail, not guess (R5.2)",
+				configured, got)
+			continue
+		}
+		if got != "" {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, no flag) returned subvolume %q alongside an error; a failed resolution must yield nothing usable",
+				configured, got)
+		}
+		msg := err.Error()
+		assertNamesSubvolumes(t, msg, configured)
+		if !strings.Contains(msg, "--subvolume") {
+			t.Errorf("error %q does not name --subvolume — it states the problem without stating the fix", msg)
+		}
+	}
+}
+
+// TestResolveRestoreSubvolume_UnknownFlagNamesItAndTheAlternatives pins R5.3: a
+// --subvolume that is not configured fails naming THE VALUE PASSED, and listing
+// the configured ones is what turns "wrong" into "here is the right spelling".
+func TestResolveRestoreSubvolume_UnknownFlagNamesItAndTheAlternatives(t *testing.T) {
+	configured := []string{"/", "/home"}
+	for _, flag := range []string{"/hom", "/var", "home", "/HOME"} {
+		got, err := ResolveRestoreSubvolume(engineWith(configured...), flag)
+		if err == nil {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, flag=%q) = %q with no error; an unconfigured subvolume must fail (R5.3)",
+				configured, flag, got)
+			continue
+		}
+		if got != "" {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, flag=%q) returned %q alongside an error", configured, flag, got)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, fmt.Sprintf("%q", flag)) {
+			t.Errorf("error %q does not name the value passed (%q) — the operator cannot see what was rejected", msg, flag)
+		}
+		assertNamesSubvolumes(t, msg, configured)
+	}
+}
+
+// TestResolveRestoreSubvolume_ValidFlagSelectsIt is R5.3's inverse, the plain
+// success path: a flag naming a configured subvolume resolves to exactly that
+// subvolume — including when several are configured, which is the whole point of
+// the flag.
+func TestResolveRestoreSubvolume_ValidFlagSelectsIt(t *testing.T) {
+	configured := []string{"/", "/home", "/home/otaku"}
+	for _, flag := range configured {
+		got, err := ResolveRestoreSubvolume(engineWith(configured...), flag)
+		if err != nil {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, flag=%q) = error %v, want %q", configured, flag, err, flag)
+			continue
+		}
+		if got != flag {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, flag=%q) = %q, want %q", configured, flag, got, flag)
+		}
+	}
+	// A single configured subvolume named explicitly resolves the same way.
+	if got, err := ResolveRestoreSubvolume(engineWith("/"), "/"); err != nil || got != "/" {
+		t.Errorf(`ResolveRestoreSubvolume(subvolumes=["/"], flag="/") = (%q, %v), want ("/", nil)`, got, err)
+	}
+}
+
+// TestResolveRestoreSubvolume_MatchesExactSpelling pins the matching rule:
+// EXACT string equality against the configured entries, no normalisation. The
+// configured spelling is the key ArchivePrefix sanitizes into the remote prefix,
+// so accepting "/home/" for a configured "/home" would send the restore to the
+// prefix "-home-", which holds nothing — a silently wrong read on a destructive
+// verb. Rejecting it is the safe answer, and R5.3 already says how to report it.
+func TestResolveRestoreSubvolume_MatchesExactSpelling(t *testing.T) {
+	configured := []string{"/home"}
+	for _, flag := range []string{"/home/", "home", " /home", "/home "} {
+		if ArchivePrefix(flag) == ArchivePrefix(configured[0]) {
+			continue // not a distinguishable spelling; nothing to prove
+		}
+		got, err := ResolveRestoreSubvolume(engineWith(configured...), flag)
+		if err == nil {
+			t.Errorf("ResolveRestoreSubvolume(subvolumes=%q, flag=%q) = %q with no error; %q sanitizes to prefix %q, not %q, so accepting it would read the wrong objects",
+				configured, flag, got, flag, ArchivePrefix(flag), ArchivePrefix(configured[0]))
+		}
+	}
+}
+
+// TestResolveRestoreSubvolume_NoneConfigured covers a config that legitimately
+// reaches the resolver with an EMPTY subvolume list: Validate only WARNS about
+// it (config.go, R1.4). The old `Subvolumes[0]` guess was length-guarded, so it
+// did not panic — it silently produced the EMPTY subvolume, whose prefix is ""
+// and whose key is "/<id>.zst": a restore pointed at a path nothing ever wrote.
+// There is nothing to restore from and no list to suggest, so both the flagged
+// and unflagged forms must fail — naming the empty setting so the operator fixes
+// the config rather than the command.
+func TestResolveRestoreSubvolume_NoneConfigured(t *testing.T) {
+	for _, cfg := range []*Config{engineWith(), {Engine: EngineConfig{Driver: "btrbk"}}} {
+		for _, flag := range []string{"", "/home"} {
+			got, err := ResolveRestoreSubvolume(cfg, flag)
+			if err == nil {
+				t.Errorf("ResolveRestoreSubvolume(no subvolumes, flag=%q) = %q with no error; there is no subvolume to restore from", flag, got)
+				continue
+			}
+			if got != "" {
+				t.Errorf("ResolveRestoreSubvolume(no subvolumes, flag=%q) returned %q alongside an error", flag, got)
+			}
+			if msg := err.Error(); !strings.Contains(msg, "engine.subvolumes") {
+				t.Errorf("error %q does not name engine.subvolumes — the fix is in the config, and the message must say so", msg)
+			}
+			if flag != "" {
+				if msg := err.Error(); !strings.Contains(msg, fmt.Sprintf("%q", flag)) {
+					t.Errorf("error %q does not name the value passed (%q)", msg, flag)
+				}
+			}
+		}
+	}
+}
+
+// TestResolveRestoreSubvolume_NilConfig: a nil *Config is only reachable through
+// a programming error upstream, but in a DESTRUCTIVE verb a nil dereference is
+// worth one line to avoid. It must return an error, not panic (the panic is what
+// this test would report as a failure).
+func TestResolveRestoreSubvolume_NilConfig(t *testing.T) {
+	got, err := ResolveRestoreSubvolume(nil, "/home")
+	if err == nil {
+		t.Fatalf("ResolveRestoreSubvolume(nil, %q) = %q with no error; a nil config cannot resolve a subvolume", "/home", got)
+	}
+	if got != "" {
+		t.Errorf("ResolveRestoreSubvolume(nil, ...) returned %q alongside an error", got)
+	}
+	if got, err := ResolveRestoreSubvolume(nil, ""); err == nil {
+		t.Errorf("ResolveRestoreSubvolume(nil, \"\") = %q with no error", got)
 	}
 }

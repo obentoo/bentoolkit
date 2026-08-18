@@ -867,12 +867,12 @@ func TestSnapperListParse_EmptyPayloads(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			warned := captureWarn(t)
+			warnings := captureWarn(t)
 			if got := parseSnapperListJSON([]byte(c.payload), "/"); len(got) != 0 {
 				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
 			}
-			if warned() {
-				t.Error("an empty listing warned; only a malformed payload should (R3.4)")
+			if got := warnings(); len(got) != 0 {
+				t.Errorf("an empty listing warned %v; only a malformed payload should (R3.4)", got)
 			}
 		})
 	}
@@ -887,11 +887,11 @@ func TestSnapperListParse_EmptyPayloads(t *testing.T) {
 func TestSnapperListParse_MalformedPayloadWarns(t *testing.T) {
 	for _, payload := range []string{"not json at all", `{"root":`, `{"root":"unexpected"}`} {
 		t.Run(payload, func(t *testing.T) {
-			warned := captureWarn(t)
+			warnings := captureWarn(t)
 			if got := parseSnapperListJSON([]byte(payload), "/"); len(got) != 0 {
 				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
 			}
-			if !warned() {
+			if len(warnings()) == 0 {
 				t.Error("malformed payload parsed silently; it must warn rather than look like an empty listing")
 			}
 		})
