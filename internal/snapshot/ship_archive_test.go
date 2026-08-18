@@ -282,15 +282,22 @@ func (f *fakeParentStore) Record(_, _ string, snap Snapshot) error {
 var _ parentStore = (*fakeParentStore)(nil)
 
 // captureWarn redirects warnLogf to a recorder for the duration of the test and
-// returns a func reporting whether any warn was emitted. It restores warnLogf via
-// t.Cleanup (the package-var override pattern used by config.go's Validate seam).
-func captureWarn(t *testing.T) (warned func() bool) {
+// returns a func yielding every warning emitted so far, FORMATTED. It restores
+// warnLogf via t.Cleanup (the package-var override pattern used by config.go's
+// Validate seam).
+//
+// It returns the messages rather than a bare "did it warn" because some warnings
+// are required to say WHICH subject they are about: 038 R4.2 asks the on-demand
+// prune to name the subvolume whose prefix is missing, and a boolean cannot tell
+// a warning that names it from one that does not. Callers that only care whether
+// a warn happened test len(...) instead.
+func captureWarn(t *testing.T) (warnings func() []string) {
 	t.Helper()
 	orig := warnLogf
-	var got bool
-	warnLogf = func(string, ...any) { got = true }
+	var got []string
+	warnLogf = func(format string, args ...any) { got = append(got, fmt.Sprintf(format, args...)) }
 	t.Cleanup(func() { warnLogf = orig })
-	return func() bool { return got }
+	return func() []string { return slices.Clone(got) }
 }
 
 // TestArchiveShipper_Send_Incremental: with a recorded parent and mode
@@ -344,7 +351,7 @@ func TestArchiveShipper_Send_AbsentParentFallback(t *testing.T) {
 	mr := &MockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 
-	warned := captureWarn(t)
+	warnings := captureWarn(t)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -355,7 +362,7 @@ func TestArchiveShipper_Send_AbsentParentFallback(t *testing.T) {
 	if slices.Contains(mr.Calls[0].Args, "-p") {
 		t.Errorf("stage1 args %v must not contain -p when no parent is recorded", mr.Calls[0].Args)
 	}
-	if !warned() {
+	if len(warnings()) == 0 {
 		t.Errorf("absent-parent fallback must emit a warn (R3.3 — no silent fallback)")
 	}
 	if rep.Incremental {
@@ -377,7 +384,7 @@ func TestArchiveShipper_Send_FullModeAlwaysFull(t *testing.T) {
 	mr := &MockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "full", compress: "zstd", run: mr, parents: ps}
 
-	warned := captureWarn(t)
+	warnings := captureWarn(t)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -388,8 +395,8 @@ func TestArchiveShipper_Send_FullModeAlwaysFull(t *testing.T) {
 	if slices.Contains(mr.Calls[0].Args, "-p") {
 		t.Errorf("stage1 args %v must not contain -p in mode=full", mr.Calls[0].Args)
 	}
-	if warned() {
-		t.Errorf("mode=full is an explicit choice and must NOT warn")
+	if got := warnings(); len(got) != 0 {
+		t.Errorf("mode=full is an explicit choice and must NOT warn; got %v", got)
 	}
 	if rep.Incremental {
 		t.Errorf("report.Incremental = true, want false in mode=full")
@@ -695,7 +702,7 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 		retention: Retention{Hourly: 2, Daily: 3},
 	}
 
-	warned := captureWarn(t)
+	warnings := captureWarn(t)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -709,7 +716,7 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 	if len(ps.recorded) != 1 || ps.recorded[0].ID != snap.ID {
 		t.Fatalf("recorded = %+v, want the snap recorded despite prune failure", ps.recorded)
 	}
-	if !warned() {
+	if len(warnings()) == 0 {
 		t.Errorf("prune failure must emit a warn (surfaced, not swallowed)")
 	}
 	// No deletefile should have happened since listing failed.
@@ -726,10 +733,15 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 // under its (subvol, ship) pair and Last reads that same pair back. It exists
 // because fakeParentStore.Last discards both arguments and returns one scripted
 // head for every subvolume, which cannot model a fixture shipping TWO subvolumes
-// through one shipper (R6.1) — each needs its own lineage head. No error is ever
-// scripted here; the store-error paths stay covered by fakeParentStore's tests.
+// through one shipper (R6.1) — each needs its own lineage head.
+//
+// lastErr scripts a read failure for INDIVIDUAL subvolumes (see failLast).
+// fakeParentStore can fail a read too, but only for every subvolume at once,
+// which cannot express the case 038 D3 turns on: the error has to land on a
+// subvolume the loop reaches AFTER one it could already have pruned.
 type mapParentStore struct {
-	heads map[string]Snapshot
+	heads   map[string]Snapshot
+	lastErr map[string]error // subvolume → the error Last returns for it
 }
 
 func newMapParentStore() *mapParentStore {
@@ -740,7 +752,20 @@ func newMapParentStore() *mapParentStore {
 // two distinct pairs can never collide onto one entry.
 func parentKey(subvol, ship string) string { return subvol + "\x00" + ship }
 
+// failLast makes Last(subvol, …) return err while every OTHER subvolume stays
+// readable. That asymmetry is the whole point: it is what lets a test place the
+// store failure on the SECOND subvolume and ask what happened to the first.
+func (m *mapParentStore) failLast(subvol string, err error) {
+	if m.lastErr == nil {
+		m.lastErr = make(map[string]error)
+	}
+	m.lastErr[subvol] = err
+}
+
 func (m *mapParentStore) Last(subvol, ship string) (Snapshot, bool, error) {
+	if err, scripted := m.lastErr[subvol]; scripted {
+		return Snapshot{}, false, err
+	}
 	snap, ok := m.heads[parentKey(subvol, ship)]
 	return snap, ok, nil
 }
@@ -776,6 +801,12 @@ type growingArchiveRunner struct {
 	modTime time.Time        // ModTime stamped on the next rcat upload
 	objects []rcloneObject   // remote content; Name is the key RELATIVE to the remote root
 	served  [][]rcloneObject // spy: the listing returned by each lsjson call
+
+	// lsjsonErr fails `rclone lsjson` for SPECIFIC paths (see failLsjson).
+	// archivePruneRunner also takes an lsjson error, but applies it to every
+	// listing regardless of path, so it cannot model "one subvolume's prefix is
+	// missing while another's is present" (R4.2) — only this can.
+	lsjsonErr map[string]error // listed path → the error rclone returns for it
 }
 
 func newGrowingArchiveRunner(remote string) *growingArchiveRunner {
@@ -790,6 +821,9 @@ func newGrowingArchiveRunner(remote string) *growingArchiveRunner {
 			g.objects = append(g.objects, rcloneObject{Name: g.key(target), ModTime: g.modTime})
 			return []byte("RCAT_DONE"), nil
 		case "lsjson":
+			if err, scripted := g.lsjsonErr[target]; scripted {
+				return nil, err
+			}
 			listing := g.list(target)
 			g.served = append(g.served, listing)
 			return scriptedLsjson(listing), nil
@@ -828,6 +862,16 @@ func (g *growingArchiveRunner) list(target string) []rcloneObject {
 		out = append(out, rcloneObject{Name: leaf, ModTime: o.ModTime})
 	}
 	return out
+}
+
+// failLsjson makes `rclone lsjson <remote>/<ArchivePrefix(subvol)>` return err,
+// leaving every other path listable — the state of a remote where one configured
+// subvolume has been shipped and another never has (038 R4.2).
+func (g *growingArchiveRunner) failLsjson(subvol string, err error) {
+	if g.lsjsonErr == nil {
+		g.lsjsonErr = make(map[string]error)
+	}
+	g.lsjsonErr[g.remote+"/"+ArchivePrefix(subvol)] = err
 }
 
 // remove drops key from the modelled remote, so a later listing reflects a
@@ -882,6 +926,16 @@ func shippedHead(t *testing.T, ps *mapParentStore, subvol, ship string) Snapshot
 		t.Fatalf("parent store recorded no head for %q — a successful Send must record one", subvol)
 	}
 	return head
+}
+
+// recordHead files snap as subvol's lineage head through the store's own API,
+// leaving the state a previous successful ship would have left behind — the input
+// the on-demand prune reads in its first phase.
+func recordHead(t *testing.T, ps *mapParentStore, subvol, ship string, snap Snapshot) {
+	t.Helper()
+	if err := ps.Record(subvol, ship, snap); err != nil {
+		t.Fatalf("recording the lineage head of %q: %v", subvol, err)
+	}
 }
 
 // assertHeadNotDeleted fails if any recorded deletefile names head's object —
@@ -1059,12 +1113,13 @@ func isDirListing() []rcloneObject {
 // not take a bucket representative slot), and the policy still applied normally
 // to the real objects (exactly the oldest was pruned).
 //
-// deleteBase is the remote path the path under test joins its deletes under, and
-// the two paths genuinely differ: the post-ship prune is scoped to one subvolume
-// so it deletes "<remote>/<prefix>/<leaf>", while PruneRemoteOnDemand still lists
-// the root and deletes "<remote>/<name>". Taking it as a parameter keeps BOTH
-// assertions on the full deletefile argument; hiding the difference by truncating
-// to the basename would also hide a prefix re-joined wrong.
+// deleteBase is the remote path the path under test joins its deletes under.
+// Both prune paths are now scoped to one subvolume, so both pass
+// "<remote>/<prefix>" and delete "<remote>/<prefix>/<leaf>" — but it stays a
+// PARAMETER rather than being rebuilt in here, because that is what keeps the
+// assertions on the full deletefile argument. Truncating to the basename would
+// hide a prefix dropped, doubled or re-joined wrong, which is exactly the class
+// of defect the scoping introduced the risk of (R1.3).
 func assertIsDirEntriesFiltered(t *testing.T, calls []RunnerCall, deleteBase string) {
 	t.Helper()
 	targets := deleteTargets(calls)
@@ -1161,13 +1216,21 @@ func TestArchiveShipper_Prune_DropsIsDirEntries(t *testing.T) {
 			retention: isDirRetention,
 		}
 
-		if err := a.PruneRemoteOnDemand(t.Context(), []string{"/home", "/root"}); err != nil {
+		// ONE subvolume, because archivePruneRunner answers every lsjson with the
+		// same listing: with two, this path would list two prefixes, see the same
+		// five entries twice and delete the same leaf under each — a fixture
+		// artefact, not behaviour. Per-subvolume independence is measured against a
+		// path-aware remote in TestArchiveShipper_PruneOnDemand_PrunesEachSubvolume.
+		const subvol = "/home"
+		if err := a.PruneRemoteOnDemand(t.Context(), []string{subvol}); err != nil {
 			t.Fatalf("PruneRemoteOnDemand: %v", err)
 		}
 
-		// This path still lists the remote ROOT and joins its deletes there, so the
-		// fixture is exactly what it sees in production today.
-		assertIsDirEntriesFiltered(t, mr.Calls, remote)
+		// Since 3.4 this path is scoped like the post-ship one, so its deletes are
+		// joined under the subvolume prefix it listed. The listing itself stays
+		// counterfactual here for the same reason as above: a scoped listing holds
+		// no directories, and the filter must not depend on that.
+		assertIsDirEntriesFiltered(t, mr.Calls, remote+"/"+ArchivePrefix(subvol))
 	})
 }
 
@@ -1314,20 +1377,38 @@ func TestArchiveShipper_PruneOnDemand_MissingRemoteIsNotAFailure(t *testing.T) {
 				retention: Retention{Hourly: 2, Daily: 3},
 			}
 
-			if err := a.PruneRemoteOnDemand(t.Context(), []string{"/home", "/root"}); err != nil {
+			subvolumes := []string{"/home", "/root"}
+			warnings := captureWarn(t)
+
+			if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
 				t.Fatalf("PruneRemoteOnDemand returned %v, want nil — a path that was never shipped to is nothing to prune", err)
 			}
 			if got := deleteTargets(mr.Calls); len(got) != 0 {
 				t.Errorf("deletefile calls = %v, want none — the benign path must never delete", got)
 			}
-			var listed int
-			for _, c := range mr.Calls {
-				if c.Name == "rclone" && len(c.Args) > 0 && c.Args[0] == "lsjson" {
-					listed++
-				}
+
+			// The listings themselves are asserted, not just the nil return: with an
+			// all-zero retention this returns nil BEFORE listing, so "no error, no
+			// deletes" would otherwise pass without the benign path ever being taken.
+			// One listing per subvolume, each scoped to that subvolume's prefix.
+			var want []string
+			for _, sv := range subvolumes {
+				want = append(want, remote+"/"+ArchivePrefix(sv))
 			}
-			if listed != 1 {
-				t.Fatalf("rclone lsjson calls = %d, want 1 — without the listing this test proves nothing", listed)
+			if got := lsjsonTargets(mr.Calls); !slices.Equal(got, want) {
+				t.Fatalf("rclone lsjson targets = %v, want %v — one scoped listing per subvolume, and without them this test proves nothing", got, want)
+			}
+
+			// R4.2: a missing prefix is skipped out loud, naming the subvolume — the
+			// operator has to be able to tell WHICH one went unpruned.
+			got := warnings()
+			if len(got) != len(subvolumes) {
+				t.Fatalf("warnings = %v, want one per skipped subvolume (%d)", got, len(subvolumes))
+			}
+			for i, sv := range subvolumes {
+				if !strings.Contains(got[i], sv) {
+					t.Errorf("warning %q does not name subvolume %q (R4.2)", got[i], sv)
+				}
 			}
 		})
 	}
@@ -1361,5 +1442,331 @@ func TestArchiveShipper_PruneOnDemand_SurfacesRealLsjsonFailure(t *testing.T) {
 	}
 	if got := deleteTargets(mr.Calls); len(got) != 0 {
 		t.Errorf("deletefile calls = %v, want none after a failed listing", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 038 — the on-demand prune is per-subvolume, and two-phase (R1.2, R1.3, R2.1,
+// R2.2, R4.1, R4.2 — design D3)
+// ---------------------------------------------------------------------------
+
+// onDemandRetention is the policy every fixture below is hand-derived against:
+// the 2 newest DAY buckets survive, everything older is out of policy.
+var onDemandRetention = Retention{Daily: 2}
+
+// onDemandRemote is the modelled remote the on-demand prune tests run against:
+// four objects for /home, four for /root, and one under "-var" — a prefix no
+// configured subvolume names.
+//
+// The two configured subvolumes deliberately share the SAME four day buckets,
+// with /root's object an hour newer than /home's in each. That is what makes a
+// scoped prune measurably different from an unscoped one, which is the whole
+// mechanism of the bug this story fixes:
+//
+//   - listed per prefix, each subvolume keeps its own 2 newest days (Jun 8, Jun 7)
+//     and loses its own 2 older ones (Jun 1, May 15) — 2 deletes each, and neither
+//     subvolume can even name the other's objects;
+//   - listed at the remote ROOT, those four buckets have ONE representative each
+//     and /root wins all four on ModTime, so every /home object becomes a delete
+//     candidate, "-var"'s along with them.
+//
+// A fixture whose subvolumes fell in disjoint buckets would yield the same delete
+// set either way and would measure nothing.
+func onDemandRemote() []rcloneObject {
+	at := func(month time.Month, day, hour int) time.Time {
+		return time.Date(2026, month, day, hour, 0, 0, 0, time.UTC)
+	}
+	return []rcloneObject{
+		{Name: ArchiveObjectName("/home", "h-jun8"), ModTime: at(time.June, 8, 10)},
+		{Name: ArchiveObjectName("/home", "h-jun7"), ModTime: at(time.June, 7, 10)},
+		{Name: ArchiveObjectName("/home", "h-jun1"), ModTime: at(time.June, 1, 10)},
+		{Name: ArchiveObjectName("/home", "h-may15"), ModTime: at(time.May, 15, 10)},
+		{Name: ArchiveObjectName("/root", "r-jun8"), ModTime: at(time.June, 8, 11)},
+		{Name: ArchiveObjectName("/root", "r-jun7"), ModTime: at(time.June, 7, 11)},
+		{Name: ArchiveObjectName("/root", "r-jun1"), ModTime: at(time.June, 1, 11)},
+		{Name: ArchiveObjectName("/root", "r-may15"), ModTime: at(time.May, 15, 11)},
+		{Name: ArchiveObjectName("/var", "v-jun1"), ModTime: at(time.June, 1, 9)},
+	}
+}
+
+// onDemandRunner is the PATH-AWARE Runner these tests need: growingArchiveRunner
+// preloaded with onDemandRemote, so `rclone lsjson <remote>/<prefix>` answers with
+// that prefix's own objects as LEAVES and `rclone deletefile` removes what it is
+// handed. archivePruneRunner cannot serve here — it answers every listing with one
+// fixed slice regardless of path, so under it two subvolumes are indistinguishable.
+func onDemandRunner(remote string) *growingArchiveRunner {
+	g := newGrowingArchiveRunner(remote)
+	g.objects = onDemandRemote()
+	return g
+}
+
+// onDemandShipper wires an archiveShipper over the fixture Runner and store.
+func onDemandShipper(g *growingArchiveRunner, ps *mapParentStore) *archiveShipper {
+	return &archiveShipper{
+		remote:    g.remote,
+		mode:      "incremental",
+		compress:  "zstd",
+		run:       g,
+		parents:   ps,
+		retention: onDemandRetention,
+	}
+}
+
+// scopedDeletes runs the REAL selector over exactly what a scoped listing of
+// subvol returns, so a test can prove its fixture gives that subvolume something
+// to delete before asserting on what was or was not deleted.
+//
+// Every test below asserts an absence somewhere ("this object survived", "nothing
+// was deleted at all"), and an absence is also what a fixture with nothing out of
+// policy produces no matter how the code is shaped. This is what tells the two
+// apart — without it the mutations these tests exist to catch stay green.
+func scopedDeletes(t *testing.T, g *growingArchiveRunner, subvol string) []string {
+	t.Helper()
+	_, del := gfsSelect(g.list(g.remote+"/"+ArchivePrefix(subvol)), onDemandRetention)
+	return names(del)
+}
+
+// TestArchiveShipper_PruneOnDemand_PrunesEachSubvolume is R1.2/R1.3/R4.1: a manual
+// prune applies the retention policy to each configured subvolume INDEPENDENTLY,
+// inside that subvolume's own prefix directory. One subvolume's policy is decided
+// by its own listing alone, so it can neither evict another subvolume's object
+// from a shared calendar bucket nor name it in a deletefile — and an object under
+// no configured prefix at all is never even a candidate.
+func TestArchiveShipper_PruneOnDemand_PrunesEachSubvolume(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+	subvolumes := []string{"/home", "/root"}
+
+	g := onDemandRunner(remote)
+	// No recorded head for either subvolume: the ordinary first-run state, which
+	// must protect nothing WITHOUT being an error (R2.2). It also keeps the head
+	// guard out of the way of what this test measures.
+	a := onDemandShipper(g, newMapParentStore())
+
+	// Fixture integrity, both halves: each subvolume must have something out of
+	// policy, or "deleted exactly its own" would hold vacuously.
+	for _, sv := range subvolumes {
+		if got := scopedDeletes(t, g, sv); len(got) == 0 {
+			t.Fatalf("fixture gives %q nothing out of policy under %+v — an assertion over its deletes would measure nothing", sv, onDemandRetention)
+		}
+	}
+	// And the scope itself must be observable: the whole-remote selection has to
+	// DIFFER from the per-prefix one, or a prune that ignored the scoping entirely
+	// would produce the same deletes and this test could not tell the two apart.
+	var scopedKeys []string
+	for _, sv := range subvolumes {
+		for _, leaf := range scopedDeletes(t, g, sv) {
+			scopedKeys = append(scopedKeys, ArchivePrefix(sv)+"/"+leaf)
+		}
+	}
+	sort.Strings(scopedKeys)
+	_, unscoped := gfsSelect(g.list(remote), onDemandRetention)
+	if slices.Equal(scopedKeys, names(unscoped)) {
+		t.Fatalf("fixture cannot distinguish a scoped prune from an unscoped one: both select %v", scopedKeys)
+	}
+
+	if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
+		t.Fatalf("PruneRemoteOnDemand: %v", err)
+	}
+
+	// One scoped listing per subvolume, and never the remote root (R1.2). This is
+	// the mechanism, not a detail: objects outside the listed prefix are not spared
+	// by a check, they are never candidates.
+	var wantListed []string
+	for _, sv := range subvolumes {
+		wantListed = append(wantListed, remote+"/"+ArchivePrefix(sv))
+	}
+	if got := lsjsonTargets(g.Calls); !slices.Equal(got, wantListed) {
+		t.Errorf("rclone lsjson targets = %v, want %v — each subvolume's own prefix, never the remote root", got, wantListed)
+	}
+
+	// Exactly each subvolume's own out-of-policy objects, deleted back under its
+	// own prefix (R1.3). Asserted on the FULL argument: a dropped or a doubled
+	// prefix truncates to the same basename.
+	want := []string{
+		remote + "/" + ArchiveObjectName("/home", "h-jun1"),
+		remote + "/" + ArchiveObjectName("/home", "h-may15"),
+		remote + "/" + ArchiveObjectName("/root", "r-jun1"),
+		remote + "/" + ArchiveObjectName("/root", "r-may15"),
+	}
+	got := slices.Clone(deleteTargets(g.Calls))
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("deletefile targets = %v, want %v — each subvolume pruned against its OWN listing, under its OWN prefix", got, want)
+	}
+
+	// R4.1, stated separately from the set equality above so a regression says why
+	// it matters: "-var" is under no configured subvolume, so it is out of reach.
+	stray := remote + "/" + ArchiveObjectName("/var", "v-jun1")
+	if slices.Contains(deleteTargets(g.Calls), stray) {
+		t.Errorf("rclone deletefile %q — an object under no configured subvolume's prefix must be left untouched (R4.1)", stray)
+	}
+}
+
+// TestArchiveShipper_PruneOnDemand_StoreReadErrorDeletesNothing is design D3's
+// ordering requirement and the regression it exists to prevent: a parent-store
+// READ error must abort the prune BEFORE any deletion, whichever subvolume it
+// lands on.
+//
+// The error is scripted on the SECOND subvolume, which is the only placement that
+// can tell a two-phase loop from an interleaved one. Interleaved — read subvolume
+// N's head, prune subvolume N, move on — the first subvolume is fully pruned and
+// only then does the read fail: a READ failure that mutated the remote. Two-phase,
+// every head is read first, so the same failure deletes nothing.
+//
+// This is why the deletes are asserted rather than only the error: both shapes
+// return the error, and only the delete count separates them.
+func TestArchiveShipper_PruneOnDemand_StoreReadErrorDeletesNothing(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+	subvolumes := []string{"/home", "/root"} // the read error lands on the SECOND
+
+	g := onDemandRunner(remote)
+	ps := newMapParentStore()
+	storeErr := errors.New("parent store: reading lineage head: permission denied")
+	ps.failLast(subvolumes[1], storeErr)
+	a := onDemandShipper(g, ps)
+
+	// Fixture integrity: the FIRST subvolume must have something to delete. With
+	// nothing out of policy there, "zero deletes" would hold whatever the loop
+	// shape is and the interleaved mutation would stay green.
+	if got := scopedDeletes(t, g, subvolumes[0]); len(got) == 0 {
+		t.Fatalf("fixture gives %q nothing out of policy: pruning it would delete nothing anyway, so this test could not detect an interleaved loop", subvolumes[0])
+	}
+
+	err := a.PruneRemoteOnDemand(t.Context(), subvolumes)
+	if err == nil {
+		t.Fatal("PruneRemoteOnDemand returned nil, want the parent-store read error surfaced as a failed stage")
+	}
+	if !errors.Is(err, storeErr) {
+		t.Errorf("returned error %v does not wrap the store cause %v", err, storeErr)
+	}
+	if !strings.Contains(err.Error(), subvolumes[1]) {
+		t.Errorf("returned error %q does not name %q, the subvolume whose head could not be read", err, subvolumes[1])
+	}
+
+	// The assertion this test exists for (038 D3).
+	if got := deleteTargets(g.Calls); len(got) != 0 {
+		t.Errorf("a parent-store read error on %q had already deleted %d object(s): %v — D3: phase one must read EVERY head and abort before phase two deletes anything, or a READ failure leaves the remote half-pruned",
+			subvolumes[1], len(got), got)
+	}
+}
+
+// TestArchiveShipper_PruneOnDemand_MissingPrefixStillPrunesTheRest is R4.2: a
+// subvolume whose prefix does not exist yet — nothing has ever been shipped for
+// it — is nothing to prune, not a failure. It is skipped with a warning NAMING
+// it, and the remaining subvolumes are pruned normally.
+//
+// The missing subvolume is listed FIRST on purpose: last, a `return` where the
+// code must `continue` would leave every other subvolume already pruned and the
+// test would pass on the broken shape.
+func TestArchiveShipper_PruneOnDemand_MissingPrefixStillPrunesTheRest(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+	const missing = "/home"
+	subvolumes := []string{missing, "/root"}
+
+	g := onDemandRunner(remote)
+	// Model the remote honestly: a prefix that does not exist holds nothing.
+	g.objects = slices.DeleteFunc(g.objects, func(o rcloneObject) bool {
+		return strings.HasPrefix(o.Name, ArchivePrefix(missing)+"/")
+	})
+	g.failLsjson(missing, runnerShapedErr(t, rcloneExitDirNotFound,
+		"2026/08/18 12:00:00 ERROR : : error listing: directory not found"))
+	a := onDemandShipper(g, newMapParentStore())
+
+	// Fixture integrity: without something out of policy under /root, "the others
+	// were still pruned" would be unobservable.
+	if got := scopedDeletes(t, g, "/root"); len(got) == 0 {
+		t.Fatalf("fixture gives %q nothing out of policy — that the remaining subvolume was still pruned would be unobservable", "/root")
+	}
+
+	warnings := captureWarn(t)
+	if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
+		t.Fatalf("PruneRemoteOnDemand returned %v, want nil — a prefix that was never shipped to is nothing to prune (R4.2)", err)
+	}
+
+	// It CONTINUED: the second subvolume was listed at all, and pruned fully.
+	wantListed := []string{remote + "/" + ArchivePrefix(missing), remote + "/" + ArchivePrefix("/root")}
+	if got := lsjsonTargets(g.Calls); !slices.Equal(got, wantListed) {
+		t.Errorf("rclone lsjson targets = %v, want %v — a missing prefix must not stop the remaining subvolumes", got, wantListed)
+	}
+	want := []string{
+		remote + "/" + ArchiveObjectName("/root", "r-jun1"),
+		remote + "/" + ArchiveObjectName("/root", "r-may15"),
+	}
+	got := slices.Clone(deleteTargets(g.Calls))
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("deletefile targets = %v, want %v — the present subvolume is pruned, and fully", got, want)
+	}
+
+	// Skipped OUT LOUD, naming the subvolume: the operator has to be able to tell
+	// which one went unpruned (R4.2).
+	msgs := warnings()
+	if len(msgs) != 1 {
+		t.Fatalf("warnings = %v, want exactly one — the skipped subvolume, and only it", msgs)
+	}
+	if !strings.Contains(msgs[0], missing) {
+		t.Errorf("warning %q does not name the skipped subvolume %q (R4.2)", msgs[0], missing)
+	}
+}
+
+// TestArchiveShipper_PruneOnDemand_NeverDeletesRecordedHeads is R2.1: a manual
+// prune spans every configured subvolume, so it must spare EVERY subvolume's
+// recorded lineage head — the object each one's next incremental send will
+// reference with `-p` — not just one.
+//
+// Two things make this test able to fail. Each head is deliberately an
+// OUT-OF-POLICY object: a head the retention would keep anyway is spared by the
+// policy, not by the guard, and a test built on one passes with the guard
+// deleted. And the surviving heads are asserted alongside the objects that DID
+// go, so a prune that deleted nothing at all cannot pass either.
+//
+// The guard's comparable form is a LEAF (ArchiveObjectLeaf), because a scoped
+// listing reports names relative to the listed path. Compared as the full key
+// ArchiveObjectName it would match nothing and would do so silently — no error,
+// no empty result, just a guard that never fires — which is exactly what this
+// test turns into a red.
+func TestArchiveShipper_PruneOnDemand_NeverDeletesRecordedHeads(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+	subvolumes := []string{"/home", "/root"}
+
+	g := onDemandRunner(remote)
+	ps := newMapParentStore()
+	a := onDemandShipper(g, ps)
+
+	heads := map[string]Snapshot{
+		"/home": {ID: "h-jun1", Subvolume: "/home", Path: "/snaps/h-jun1"},
+		"/root": {ID: "r-jun1", Subvolume: "/root", Path: "/snaps/r-jun1"},
+	}
+	for _, sv := range subvolumes {
+		recordHead(t, ps, sv, a.Name(), heads[sv])
+	}
+
+	// Fixture integrity: unguarded, the selector picks each head for deletion.
+	for _, sv := range subvolumes {
+		if !slices.Contains(scopedDeletes(t, g, sv), ArchiveObjectLeaf(heads[sv].ID)) {
+			t.Fatalf("fixture: %q's recorded head %q is not out of policy under %+v, so the retention would spare it anyway and the guard would go unmeasured",
+				sv, heads[sv].ID, onDemandRetention)
+		}
+	}
+
+	if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
+		t.Fatalf("PruneRemoteOnDemand: %v", err)
+	}
+
+	for _, sv := range subvolumes {
+		assertHeadNotDeleted(t, g.Calls, remote, heads[sv],
+			"a manual prune spans every configured subvolume, so every recorded head is the base its next incremental send needs (R2.1)")
+	}
+
+	// The prune still did its job: each subvolume's other out-of-policy object
+	// went. Without this the test would pass on a prune that deleted nothing.
+	want := []string{
+		remote + "/" + ArchiveObjectName("/home", "h-may15"),
+		remote + "/" + ArchiveObjectName("/root", "r-may15"),
+	}
+	got := slices.Clone(deleteTargets(g.Calls))
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("deletefile targets = %v, want %v — the recorded heads spared, everything else out of policy pruned", got, want)
 	}
 }

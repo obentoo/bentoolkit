@@ -497,73 +497,122 @@ func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 }
 
 // PruneRemoteOnDemand applies the GFS retention policy to the rclone remote for
-// a user-invoked `snapshot prune` (008 R3.1). The mechanics mirror the post-ship
-// pruneRemote — the all-zero-retention short-circuit, `rclone lsjson`, the pure
-// gfsSelect, `rclone deletefile` per out-of-policy object — with two deliberate
-// differences:
+// a user-invoked `snapshot prune` (008 R3.1), ONE configured subvolume at a
+// time. Each subvolume is listed, selected and deleted entirely inside its own
+// prefix directory `<remote>/<ArchivePrefix(sv)>` (R1.2, R1.3), so one
+// subvolume's retention can never reach another's objects — they are not in its
+// listing to begin with — and an object under no configured prefix at all is
+// never a candidate (R4.1).
 //
-//   - The active-parent guard comes from the parent store, not a just-uploaded
-//     snapshot: every recorded lineage head for this ship across the configured
-//     subvolumes is protected (R4.2), because the remote holds objects from all
-//     subvolumes and deleting any recorded head would break that subvolume's
-//     next incremental `-p` reference. A subvolume with no recorded parent (the
-//     normal first-run state) simply contributes nothing to protect; a store
-//     READ error aborts before any deletion.
+// ORDERING REQUIREMENT — the loop is TWO-PHASE and must stay that way. Phase one
+// reads EVERY subvolume's recorded head and returns on the first parent-store
+// read error; only then may phase two delete anything. This is a requirement,
+// not an accident of arrangement. The obvious simplification — read subvolume
+// N's head, prune subvolume N, move on — introduces a regression this code does
+// not have: a store error on the third subvolume would surface AFTER the first
+// two had already been pruned, making a READ failure produce a partial mutation
+// of the remote. Nothing is deleted until every head that must be spared is
+// known (038 D3). Do NOT fold the two loops into one.
+//
+// Where it differs from the post-ship pruneRemote, and why:
+//
+//   - Protecting MANY heads is legitimate HERE. pruneRemote runs for the one
+//     subvolume just shipped, so its protection is structural — other subvolumes
+//     are simply not in its listing. A user-invoked prune deliberately spans every
+//     configured subvolume, so every recorded head is genuinely in scope. Each is
+//     still only ever compared inside its OWN subvolume's listing, where it is the
+//     only head that can appear (R2.1).
+//   - The comparable form of a head is a LEAF, never a full key. `rclone lsjson
+//     <prefix>` reports names relative to the LISTED path, so the head compares as
+//     ArchiveObjectLeaf(head.ID); the full key ArchiveObjectName would match
+//     nothing and would do so SILENTLY — a guard indistinguishable from a working
+//     one that protects nothing. scoped.protectedLeaf below holds a leaf and there
+//     is deliberately no key beside it, so the two can no longer meet in one
+//     comparison. (Before this story the guard was a map keyed by full names, which
+//     was correct only while the listing was the unscoped remote root.)
+//   - A subvolume with NO recorded head — the ordinary first-run state — protects
+//     nothing and is not an error (R2.2).
+//   - A prefix that does not exist is nothing to prune, not a failure: it is warned
+//     NAMING the subvolume and the remaining subvolumes are still pruned (R4.2).
+//     The warning lives here and not in pruneRemote's benign branch because after a
+//     ship the directory necessarily exists, so there it would be unreachable noise.
 //   - Failures are RETURNED, never swallowed: the post-ship prune is best-effort
 //     housekeeping after a successful backup, but a manual prune is the user's
-//     primary action, so a lsjson/parse/deletefile error must surface as a
-//     failed stage in the RunResult (Manager.Prune). deletefile errors are
-//     accumulated with errors.Join so one bad object does not block pruning the
-//     rest.
+//     primary action, so a lsjson/parse/deletefile failure must surface as a failed
+//     stage in the RunResult (Manager.Prune). Phase-two failures accumulate with
+//     errors.Join instead of returning on the spot — the subvolumes are independent
+//     (R1.2) and each one's protected head was already read in phase one, so one bad
+//     object, or one unreadable prefix, must not block pruning the rest.
 func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []string) error {
 	if a.retention.Hourly == 0 && a.retention.Daily == 0 &&
 		a.retention.Weekly == 0 && a.retention.Monthly == 0 {
 		return nil // no GFS policy configured → keep everything, skip listing entirely.
 	}
 
-	// Collect the objects to spare: each subvolume's recorded active parent for
-	// THIS ship is the base its next incremental send references with `-p` (R4.2).
-	protected := make(map[string]bool, len(subvolumes))
+	// scoped is one subvolume's prune plan: the single remote path it may touch
+	// and the single object it must spare there. protectedLeaf is a LEAF because
+	// that is the form a scoped listing reports; no full key is kept alongside it,
+	// so the silent key-vs-leaf mismatch cannot be written by accident.
+	type scoped struct {
+		subvolume     string // named in the R4.2 warning
+		prefixPath    string // "<remote>/<ArchivePrefix(subvolume)>"
+		protectedLeaf string // this subvolume's recorded head as a leaf; "" when none (R2.2)
+	}
+
+	// PHASE ONE — read every recorded head BEFORE deleting anything (see the
+	// ordering requirement above). A store-read error returns from here, with
+	// nothing deleted yet, whichever subvolume it came from.
+	plans := make([]scoped, 0, len(subvolumes))
 	for _, sv := range subvolumes {
 		parent, ok, err := a.parents.Last(sv, a.Name())
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the recorded lineage head of %s: %w", sv, err)
 		}
+		p := scoped{subvolume: sv, prefixPath: a.remote + "/" + ArchivePrefix(sv)}
 		if ok {
-			protected[archiveObjectName(parent)] = true
+			p.protectedLeaf = ArchiveObjectLeaf(parent.ID)
 		}
+		plans = append(plans, p)
 	}
 
-	out, err := a.run.Run(ctx, "rclone", []string{"lsjson", a.remote}, nil)
-	if err != nil {
-		// A path that is not there is NOT a failure: it is the ordinary state of
-		// a remote nothing has been shipped to yet, and failing here would make
-		// `snapshot prune` fail on a freshly installed, correctly configured
-		// system (038 R4.2). There is nothing to prune, so return success without
-		// deleting anything. This test comes BEFORE decodeLsjson deliberately:
-		// rclone prints a bare "[" on stdout in this case, which does not parse.
-		//
-		// Every OTHER failure is still returned, unchanged: a manual prune is the
-		// user's primary action and must surface as a failed stage.
-		if isRemoteDirNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("rclone lsjson %s: %w", a.remote, err)
-	}
-	objs, err := decodeLsjson(out)
-	if err != nil {
-		return fmt.Errorf("parse rclone lsjson output for %s: %w", a.remote, err)
-	}
-
-	_, del := gfsSelect(objs, a.retention)
-
+	// PHASE TWO — every head is known, so deleting is now safe to start.
 	var errs []error
-	for _, d := range del {
-		if protected[d.Name] {
-			continue // R4.2: an active parent is a future incremental base; spare it.
+	for _, p := range plans {
+		out, err := a.run.Run(ctx, "rclone", []string{"lsjson", p.prefixPath}, nil)
+		if err != nil {
+			// A path that is not there is NOT a failure: it is the ordinary state
+			// of a subvolume nothing has been shipped for yet, and failing here
+			// would make `snapshot prune` fail on a freshly installed, correctly
+			// configured system (038 R4.2). There is nothing to prune for this
+			// subvolume — name it and continue with the rest. This test comes
+			// BEFORE decodeLsjson deliberately: rclone prints a bare "[" on stdout
+			// in this case, which does not parse.
+			if isRemoteDirNotFound(err) {
+				warnLogf("snapshot: ship %q: subvolume %q has nothing at %q yet; skipping its prune", a.Name(), p.subvolume, p.prefixPath)
+				continue
+			}
+			// Every OTHER failure still surfaces as a failed stage.
+			errs = append(errs, fmt.Errorf("rclone lsjson %s: %w", p.prefixPath, err))
+			continue
 		}
-		if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", a.remote + "/" + d.Name}, nil); err != nil {
-			errs = append(errs, fmt.Errorf("rclone deletefile %s: %w", d.Name, err))
+		objs, err := decodeLsjson(out)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("parse rclone lsjson output for %s: %w", p.prefixPath, err))
+			continue
+		}
+
+		_, del := gfsSelect(objs, a.retention)
+		for _, d := range del {
+			// The listing is scoped, so its entries are LEAVES; the only head that
+			// can appear in it is this subvolume's own. An empty protectedLeaf means
+			// no recorded head, which protects nothing (R2.2).
+			if p.protectedLeaf != "" && d.Name == p.protectedLeaf {
+				continue // R2.1: a recorded head is the next incremental base; spare it.
+			}
+			target := p.prefixPath + "/" + d.Name // re-join the prefix the listing stripped.
+			if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", target}, nil); err != nil {
+				errs = append(errs, fmt.Errorf("rclone deletefile %s: %w", target, err))
+			}
 		}
 	}
 	return errors.Join(errs...)

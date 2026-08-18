@@ -114,11 +114,18 @@ func TestRunSnapshotPrune_InvokesEnginePruneAndArchiveGFS(t *testing.T) {
 	if !callsWith(mr.Calls, "btrbk", "clean", "/home") {
 		t.Errorf("engine prune (btrbk clean /home) not invoked (008 R3.1); calls: %+v", mr.Calls)
 	}
-	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:a") {
-		t.Errorf("archive GFS for cloud-a (rclone lsjson gdrive:a) not invoked (008 R3.1); calls: %+v", mr.Calls)
+	// The listed path is the SUBVOLUME PREFIX under each remote, not the remote
+	// itself: since 038 the on-demand prune walks the configured subvolumes and
+	// scopes every rclone call to one prefix directory, so a remote holding several
+	// subvolumes can never have one subvolume's retention reach another's objects
+	// (038 R1.2, R1.3). Built with ArchivePrefix rather than spelled out, so the
+	// sanitize rule stays in one place.
+	homePrefix := "/" + snapshot.ArchivePrefix("/home")
+	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:a"+homePrefix) {
+		t.Errorf("archive GFS for cloud-a (rclone lsjson gdrive:a%s) not invoked (008 R3.1); calls: %+v", homePrefix, mr.Calls)
 	}
-	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:b") {
-		t.Errorf("archive GFS for cloud-b (rclone lsjson gdrive:b) not invoked (008 R3.1); calls: %+v", mr.Calls)
+	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:b"+homePrefix) {
+		t.Errorf("archive GFS for cloud-b (rclone lsjson gdrive:b%s) not invoked (008 R3.1); calls: %+v", homePrefix, mr.Calls)
 	}
 }
 
@@ -176,10 +183,15 @@ func TestRunSnapshotPrune_ShipScopesToOneDestination(t *testing.T) {
 	if callsWith(mr.Calls, "btrbk", "clean") {
 		t.Errorf("--ship scoping must skip the engine-local prune (008 R3.2); calls: %+v", mr.Calls)
 	}
-	if callsWith(mr.Calls, "rclone", "lsjson", "gdrive:a") {
+	// Both assertions name the SCOPED path the prune actually lists since 038
+	// ("<remote>/<prefix>"). The negative one especially: left as the bare remote
+	// it could no longer match anything, so it would hold even if cloud-a HAD been
+	// pruned — a check that cannot fail is not a check.
+	homePrefix := "/" + snapshot.ArchivePrefix("/home")
+	if callsWith(mr.Calls, "rclone", "lsjson", "gdrive:a"+homePrefix) {
 		t.Errorf("--ship cloud-b must not touch cloud-a's remote (008 R3.2); calls: %+v", mr.Calls)
 	}
-	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:b") {
+	if !callsWith(mr.Calls, "rclone", "lsjson", "gdrive:b"+homePrefix) {
 		t.Errorf("--ship cloud-b did not prune its remote (008 R3.2); calls: %+v", mr.Calls)
 	}
 }
