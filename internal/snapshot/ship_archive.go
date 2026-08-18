@@ -402,14 +402,38 @@ func (k bucketKey) after(other bucketKey) bool {
 	}
 }
 
-// pruneRemote applies the GFS retention policy to the rclone remote after a
-// successful ship (R4.1). It lists the remote with `rclone lsjson`, runs the pure
-// gfsSelect, and deletefiles each out-of-policy object — EXCEPT the active parent
-// (R4.2): archiveObjectName(snap) is the object just uploaded and the base the
-// next incremental send will reference with `-p`, so it is never deleted even
-// when GFS would drop it. When retention is all-zero there is no policy, so it
-// returns immediately without listing (matches restic skipping forget when
+// pruneRemote applies the GFS retention policy after a successful ship (R4.1),
+// scoped to the shipped subvolume. It lists ONE prefix directory with `rclone
+// lsjson <remote>/<ArchivePrefix(snap.Subvolume)>`, runs the pure gfsSelect over
+// exactly what that listing returned, and deletefiles each out-of-policy object
+// back under the same prefix. When retention is all-zero there is no policy, so
+// it returns immediately without listing (matches restic skipping forget when
 // retention is unconfigured).
+//
+// R4.2 — protection here is STRUCTURAL, not a check, and that is the point.
+// Other subvolumes' recorded lineage heads are safe because they are not in the
+// listing at all (R1.1, R1.3, R2.1), not because anything spares them. The old
+// whole-remote listing is what let a /root ship delete /home's head: one flat
+// namespace put every subvolume's objects in the same calendar bucket, a bucket
+// keeps a single representative, and the losers were deletefiled — silently,
+// since the delete succeeded and the damage only surfaced at restore (038).
+//
+// Do NOT "restore" a multi-subvolume head guard on this path. It would have no
+// job — the objects it would spare are not candidates — and its presence would
+// re-assert that safety depends on someone remembering to keep a comparison
+// correct, which is the property this path was changed to stop depending on.
+// PruneRemoteOnDemand is the path that legitimately protects many heads, because
+// a user-invoked prune deliberately spans every configured subvolume.
+//
+// The one head IN scope is this subvolume's own, and its guard compares LEAVES:
+// a scoped `rclone lsjson` reports each entry's Name relative to the LISTED path,
+// so the comparable form of the object just uploaded is ArchiveObjectLeaf(snap.ID),
+// never the full key ArchiveObjectName. A full key compared against a scoped
+// listing matches nothing and does so silently — a guard indistinguishable from a
+// working one that protects nothing. By the time this runs, Send has already
+// recorded snap as the new head (and returns early if recording fails), so
+// sparing snap's object IS sparing the recorded head that the next incremental
+// send will reference with `-p`.
 //
 // Non-fatal by contract: every failure here is reported via warnLogf and
 // swallowed, never returned, because Send has already succeeded and recorded the
@@ -420,36 +444,54 @@ func (k bucketKey) after(other bucketKey) bool {
 // objects form a delta chain, and GFS deleting a MID-CHAIN delta would break
 // restorability of every later snapshot that depends on it. The active-parent
 // guard only protects the CURRENT head, not arbitrary interior deltas, so GFS is
-// NOT chain-aware here. This is a documented known risk for T5.1, not fixed in it:
-// restore-time chain validation (T6) is the backstop that detects a missing base.
-// GFS is fully safe for mode="full", where each object is self-contained.
+// NOT chain-aware here. Scoping the prune per subvolume does not change that: the
+// chain lives WITHIN one subvolume, so its interior deltas are exactly the
+// objects still in the listing. This remains a documented known risk for T5.1,
+// not fixed here: restore-time chain validation (T6) is the backstop that detects
+// a missing base. GFS is fully safe for mode="full", where each object is
+// self-contained.
 func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 	if a.retention.Hourly == 0 && a.retention.Daily == 0 &&
 		a.retention.Weekly == 0 && a.retention.Monthly == 0 {
 		return // no GFS policy configured → keep everything, skip listing entirely.
 	}
 
-	out, err := a.run.Run(ctx, "rclone", []string{"lsjson", a.remote}, nil)
+	// Every rclone call below is scoped to this snapshot's subvolume directory.
+	// Listing it is what makes the prune per-subvolume (R1.1); the delete re-joins
+	// the SAME string because a scoped listing yields bare leaves (R1.3).
+	prefixPath := a.remote + "/" + ArchivePrefix(snap.Subvolume)
+
+	out, err := a.run.Run(ctx, "rclone", []string{"lsjson", prefixPath}, nil)
 	if err != nil {
-		warnLogf("snapshot: ship %q: rclone lsjson %q failed; skipping prune: %v", a.Name(), a.remote, err)
+		// Defensive only: this runs after a successful upload, so the prefix
+		// directory necessarily exists. Should rclone still report the path as
+		// missing, there is genuinely nothing to prune — a silent no-op, not a
+		// warn, because no housekeeping was skipped (038 R4.2).
+		if isRemoteDirNotFound(err) {
+			return
+		}
+		warnLogf("snapshot: ship %q: rclone lsjson %q failed; skipping prune: %v", a.Name(), prefixPath, err)
 		return
 	}
 
 	objs, err := decodeLsjson(out)
 	if err != nil {
-		warnLogf("snapshot: ship %q: parsing rclone lsjson output failed; skipping prune: %v", a.Name(), err)
+		warnLogf("snapshot: ship %q: parsing rclone lsjson output for %q failed; skipping prune: %v", a.Name(), prefixPath, err)
 		return
 	}
 
 	_, del := gfsSelect(objs, a.retention)
 
-	active := archiveObjectName(snap) // the object just uploaded — never delete (R4.2).
+	// The listing is scoped, so its entries are LEAVES — compare the active parent
+	// as a leaf too (R4.2). See the doc comment: a full key would never match.
+	active := ArchiveObjectLeaf(snap.ID)
 	for _, d := range del {
 		if d.Name == active {
 			continue // R4.2: the active parent is the next incremental base; spare it.
 		}
-		if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", a.remote + "/" + d.Name}, nil); err != nil {
-			warnLogf("snapshot: ship %q: rclone deletefile %q failed: %v", a.Name(), d.Name, err)
+		target := prefixPath + "/" + d.Name // re-join the prefix the listing stripped.
+		if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", target}, nil); err != nil {
+			warnLogf("snapshot: ship %q: rclone deletefile %q failed: %v", a.Name(), target, err)
 		}
 	}
 }

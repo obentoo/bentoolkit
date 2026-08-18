@@ -538,26 +538,6 @@ func scriptedLsjson(objs []rcloneObject) []byte {
 	return []byte(b.String())
 }
 
-// deletedNames scans a MockRunner's calls for `rclone deletefile <remote>/<obj>`
-// and returns the object basenames, so a test can assert exactly which remote
-// objects were pruned. The pipe also calls rclone with rcat — args[0] disambiguates.
-func deletedNames(calls []RunnerCall) []string {
-	var out []string
-	for _, c := range calls {
-		if c.Name != "rclone" || len(c.Args) < 2 || c.Args[0] != "deletefile" {
-			continue
-		}
-		target := c.Args[1] // "<remote>/<obj>"
-		if i := strings.LastIndex(target, "/"); i >= 0 {
-			out = append(out, target[i+1:])
-		} else {
-			out = append(out, target)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // archivePruneRunner scripts a MockRunner for the prune integration tests: the
 // pipe stages (btrfs/zstd/rclone rcat) succeed; `rclone lsjson` returns the
 // scripted listing; `rclone deletefile` succeeds and is recorded via Calls. An
@@ -611,29 +591,59 @@ func TestArchiveShipper_Send_PrunesOutOfPolicy(t *testing.T) {
 		t.Errorf("report.Target = %q, want gdrive:bentoo-backups", rep.Target)
 	}
 
-	wantDel := []string{"B", "F", "G"}
-	if got := deletedNames(mr.Calls); !slices.Equal(got, wantDel) {
-		t.Errorf("deletefile objects = %v, want %v", got, wantDel)
+	// The prune listed ONE subvolume's prefix directory, not the remote root. This
+	// is the mechanism, asserted at the argv boundary: everything the selector can
+	// possibly delete came from under this path (R1.1).
+	prefixPath := a.remote + "/" + ArchivePrefix(snap.Subvolume)
+	if got := lsjsonTargets(mr.Calls); !slices.Equal(got, []string{prefixPath}) {
+		t.Errorf("rclone lsjson targets = %v, want exactly [%q] — a post-ship prune must list the shipped subvolume's prefix, not the whole remote (R1.1)", got, prefixPath)
+	}
+
+	// Assert the RAW deletefile arguments, prefix included. A scoped listing yields
+	// bare LEAVES, so the delete has to re-join the prefix (R1.3) — and every way of
+	// getting that join wrong ("<remote>/B" with the prefix dropped,
+	// "<remote>/-home/-home/B" with it applied twice) truncates to the same "B",
+	// which is why this no longer asserts on the basename.
+	wantDel := []string{prefixPath + "/B", prefixPath + "/F", prefixPath + "/G"}
+	got := deleteTargets(mr.Calls)
+	sort.Strings(got)
+	if !slices.Equal(got, wantDel) {
+		t.Errorf("deletefile targets = %v, want %v", got, wantDel)
 	}
 }
 
 // TestArchiveShipper_Send_NeverDeletesActiveParent is the R4.2 guard: even when
 // GFS would drop the just-uploaded object (it is old enough to be out of policy),
-// the active parent — archiveObjectName(snap) — must NEVER be deletefiled, because
-// the next incremental send uses it as the `-p` base.
+// the active parent must NEVER be deletefiled, because the next incremental send
+// uses it as the `-p` base — and by the time the prune runs it is also the head
+// the parent store has just recorded.
+//
+// The guard's comparable form is ArchiveObjectLeaf(snap.ID), not the full key
+// ArchiveObjectName: a scoped listing reports leaves. Get that wrong and nothing
+// errors — the comparison is simply never true and the guard protects nothing,
+// which is why the fixture below is deliberately built as a leaf.
 func TestArchiveShipper_Send_NeverDeletesActiveParent(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
-	active := archiveObjectName(snap)
+
+	// The fixture entry is a LEAF, and that is load-bearing. pruneRemote lists
+	// "<remote>/<prefix>", and rclone reports every entry's Name relative to the
+	// LISTED path, so a full key (ArchiveObjectName) is a string a real scoped
+	// listing can never contain. Putting one here would also make this test green
+	// against ANY guard: production would compare a full key too, both sides would
+	// move together, and the assertion would measure nothing.
+	activeLeaf := ArchiveObjectLeaf(snap.ID)
+	activeTarget := remote + "/" + ArchivePrefix(snap.Subvolume) + "/" + activeLeaf
 
 	// Build a listing where the active object is OLD (April) — GFS under
 	// Hourly:1,Daily:1 would otherwise delete it, proving the guard is what spares it.
 	listing := []rcloneObject{
 		{Name: "recent-head.zst", ModTime: time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)},
-		{Name: active, ModTime: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{Name: activeLeaf, ModTime: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
 	}
 	mr := archivePruneRunner(listing, nil)
 	a := &archiveShipper{
-		remote:    "gdrive:bentoo-backups",
+		remote:    remote,
 		mode:      "incremental",
 		compress:  "zstd",
 		run:       mr,
@@ -645,9 +655,13 @@ func TestArchiveShipper_Send_NeverDeletesActiveParent(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 
-	for _, n := range deletedNames(mr.Calls) {
-		if n == active {
-			t.Fatalf("active parent %q was deletefiled — R4.2 violated", active)
+	// Assert on the RAW deletefile arguments and match the snapshot ID as well as
+	// the exact target, so a guard that fails to spare the object is caught however
+	// the delete path happens to join it (R6.2: assert the object SURVIVES, not the
+	// shape of the comparison that spares it).
+	for _, target := range deleteTargets(mr.Calls) {
+		if target == activeTarget || strings.Contains(target, snap.ID) {
+			t.Fatalf("active parent %q was deletefiled as %q — R4.2 violated", activeLeaf, target)
 		}
 	}
 	// Sanity: gfsSelect alone WOULD have put the active object in del, so the guard
@@ -655,12 +669,12 @@ func TestArchiveShipper_Send_NeverDeletesActiveParent(t *testing.T) {
 	_, del := gfsSelect(listing, Retention{Hourly: 1, Daily: 1})
 	var gfsWouldDelete bool
 	for _, d := range del {
-		if d.Name == active {
+		if d.Name == activeLeaf {
 			gfsWouldDelete = true
 		}
 	}
 	if !gfsWouldDelete {
-		t.Fatalf("test is not exercising the guard: GFS already keeps %q", active)
+		t.Fatalf("test is not exercising the guard: GFS already keeps %q", activeLeaf)
 	}
 }
 
@@ -699,7 +713,7 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 		t.Errorf("prune failure must emit a warn (surfaced, not swallowed)")
 	}
 	// No deletefile should have happened since listing failed.
-	if got := deletedNames(mr.Calls); len(got) != 0 {
+	if got := deleteTargets(mr.Calls); len(got) != 0 {
 		t.Errorf("deletefile calls = %v, want none after lsjson failure", got)
 	}
 }
@@ -823,13 +837,31 @@ func (g *growingArchiveRunner) remove(key string) {
 }
 
 // deleteTargets returns the RAW `rclone deletefile <target>` arguments a
-// MockRunner recorded. Unlike deletedNames it does not truncate to the last path
-// segment: the target is the whole remote key, and asserting on it in full keeps
-// the assertion meaning the same thing once the key layout carries a prefix.
+// MockRunner recorded. It does NOT truncate to the last path segment, and that is
+// the entire point: once the key carries a per-subvolume prefix,
+// "<remote>/old.zst", "<remote>/-home/old.zst" and "<remote>/-home/-home/old.zst"
+// all truncate to "old.zst", so a basename assertion cannot tell a correct
+// re-join from a dropped or a doubled prefix. It REPLACED a truncating helper for
+// that reason; assert on the full argument (R1.3).
 func deleteTargets(calls []RunnerCall) []string {
 	var out []string
 	for _, c := range calls {
 		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "deletefile" {
+			out = append(out, c.Args[1])
+		}
+	}
+	return out
+}
+
+// lsjsonTargets returns the RAW `rclone lsjson <target>` path arguments a
+// MockRunner recorded, in call order. It is what pins WHICH slice of the remote a
+// prune considered: the post-ship prune must list one subvolume's prefix
+// directory, never the remote root, and that argument is the whole mechanism —
+// objects outside it are not spared by a check, they are never candidates (R1.1).
+func lsjsonTargets(calls []RunnerCall) []string {
+	var out []string
+	for _, c := range calls {
+		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "lsjson" {
 			out = append(out, c.Args[1])
 		}
 	}
@@ -1026,26 +1058,36 @@ func isDirListing() []rcloneObject {
 // object a directory would have evicted survived (never kept — the directory did
 // not take a bucket representative slot), and the policy still applied normally
 // to the real objects (exactly the oldest was pruned).
-func assertIsDirEntriesFiltered(t *testing.T, calls []RunnerCall, remote string) {
+//
+// deleteBase is the remote path the path under test joins its deletes under, and
+// the two paths genuinely differ: the post-ship prune is scoped to one subvolume
+// so it deletes "<remote>/<prefix>/<leaf>", while PruneRemoteOnDemand still lists
+// the root and deletes "<remote>/<name>". Taking it as a parameter keeps BOTH
+// assertions on the full deletefile argument; hiding the difference by truncating
+// to the basename would also hide a prefix re-joined wrong.
+func assertIsDirEntriesFiltered(t *testing.T, calls []RunnerCall, deleteBase string) {
 	t.Helper()
 	targets := deleteTargets(calls)
 
+	// Compare LEAVES for this one check: a directory entry that reached deletefile
+	// arrives joined under deleteBase, whichever path produced it.
 	for _, target := range targets {
+		leaf := target[strings.LastIndex(target, "/")+1:]
 		for _, subvol := range []string{"/home", "/root"} {
-			if dir := remote + "/" + ArchivePrefix(subvol); target == dir {
+			if leaf == ArchivePrefix(subvol) {
 				t.Errorf("rclone deletefile %q handed a DIRECTORY entry to deletefile — R4.3 violated", target)
 			}
 		}
 	}
 
-	evicted := remote + "/" + ArchiveObjectLeaf("recent")
+	evicted := deleteBase + "/" + ArchiveObjectLeaf("recent")
 	if slices.Contains(targets, evicted) {
 		t.Errorf("rclone deletefile %q deleted a real object — a directory took its bucket representative slot, so it was KEPT in its place (R4.3)", evicted)
 	}
 
 	got := slices.Clone(targets)
 	sort.Strings(got)
-	want := []string{remote + "/" + ArchiveObjectLeaf("old")}
+	want := []string{deleteBase + "/" + ArchiveObjectLeaf("old")}
 	if !slices.Equal(got, want) {
 		t.Errorf("deletefile targets = %v, want %v — with directories dropped the policy prunes only the out-of-policy object", got, want)
 	}
@@ -1099,7 +1141,13 @@ func TestArchiveShipper_Prune_DropsIsDirEntries(t *testing.T) {
 			t.Fatalf("Send: %v", err)
 		}
 
-		assertIsDirEntriesFiltered(t, mr.Calls, remote)
+		// Deliberately counterfactual for this path: the post-ship prune lists ONE
+		// prefix directory, which by construction holds no directories at all, so
+		// the scripted listing is one it cannot receive in production. That is the
+		// point — the filter must not depend on the caller's scope being tidy, and
+		// this is the only way to exercise it here. Deletes land under the scoped
+		// prefix, so that is what the targets are checked against.
+		assertIsDirEntriesFiltered(t, mr.Calls, remote+"/"+ArchivePrefix(snap.Subvolume))
 	})
 
 	t.Run("on-demand prune", func(t *testing.T) {
@@ -1117,6 +1165,8 @@ func TestArchiveShipper_Prune_DropsIsDirEntries(t *testing.T) {
 			t.Fatalf("PruneRemoteOnDemand: %v", err)
 		}
 
+		// This path still lists the remote ROOT and joins its deletes there, so the
+		// fixture is exactly what it sees in production today.
 		assertIsDirEntriesFiltered(t, mr.Calls, remote)
 	})
 }
