@@ -518,8 +518,11 @@ func TestGFSSelect_AllZeroPolicyKeepsAll(t *testing.T) {
 }
 
 // scriptedLsjson returns a JSON array as `rclone lsjson` would emit it (the real
-// command prints {Path,Name,Size,ModTime,IsDir,...}; gfsSelect only consumes
-// Name+ModTime). ModTimes use RFC3339 with the offset rclone uses.
+// command prints {Path,Name,Size,ModTime,IsDir,...}; the prune paths consume
+// Name+ModTime and reject IsDir). ModTimes use RFC3339 with the offset rclone
+// uses. IsDir is serialised from the ENTRY, not hardcoded false, so a fixture can
+// express a directory at all (R4.3); the zero value is false, so every fixture
+// that lists only objects is unaffected.
 func scriptedLsjson(objs []rcloneObject) []byte {
 	var b strings.Builder
 	b.WriteByte('[')
@@ -527,8 +530,8 @@ func scriptedLsjson(objs []rcloneObject) []byte {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		fmt.Fprintf(&b, `{"Path":%q,"Name":%q,"Size":123,"ModTime":%q,"IsDir":false}`,
-			o.Name, o.Name, o.ModTime.Format(time.RFC3339Nano))
+		fmt.Fprintf(&b, `{"Path":%q,"Name":%q,"Size":123,"ModTime":%q,"IsDir":%t}`,
+			o.Name, o.Name, o.ModTime.Format(time.RFC3339Nano), o.IsDir)
 	}
 	b.WriteByte(']')
 	return []byte(b.String())
@@ -977,4 +980,158 @@ func TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes(t *testing.T) {
 		assertHeadNotDeleted(t, run.Calls, remote, shippedHead(t, ps, first.Subvolume, a.Name()),
 			"a subvolume's own prune must never delete its current lineage head (R2.1)")
 	})
+}
+
+// ---------------------------------------------------------------------------
+// 038 — a directory entry is never a prune candidate (R4, R4.3)
+// ---------------------------------------------------------------------------
+
+// isDirRetention is the policy the R4.3 fixture is hand-derived against: two day
+// buckets kept, everything else deleted.
+var isDirRetention = Retention{Daily: 2}
+
+// isDirListing is what a caller listing the remote ROOT sees once this story
+// gives every subvolume its own directory: two DIRECTORY entries mixed in with
+// real objects. It is built so that letting the directories reach gfsSelect
+// breaks BOTH halves of R4.3 at once, each in a way a deletefile assertion can
+// observe. Under Retention{Daily: 2}:
+//
+//   - "-root" (a directory, Jun 1 12:00) LOSES: Jun 1 is the third-newest day
+//     bucket, so an unfiltered prune puts the directory in the delete set and
+//     runs `rclone deletefile` on it. That is the "never deleted" half.
+//   - "-home" (a directory, Jun 8 12:00) WINS: it is newer than the only real
+//     object in the newest day bucket, so an unfiltered prune keeps the
+//     DIRECTORY as that bucket's representative and deletes "recent.zst"
+//     instead. That is the "never kept" half — a directory must not occupy a
+//     retention slot that belongs to a real backup.
+//
+// Filtered, the listing is three objects across three day buckets and the policy
+// deletes exactly the oldest, "old.zst". Both halves therefore show up as a
+// difference in the deletefile calls, which is what makes the mutation (removing
+// the filter) turn this test red instead of passing vacuously.
+func isDirListing() []rcloneObject {
+	utc := time.UTC
+	return []rcloneObject{
+		{Name: ArchivePrefix("/home"), ModTime: time.Date(2026, 6, 8, 12, 0, 0, 0, utc), IsDir: true},
+		{Name: ArchiveObjectLeaf("recent"), ModTime: time.Date(2026, 6, 8, 9, 0, 0, 0, utc)},
+		{Name: ArchiveObjectLeaf("mid"), ModTime: time.Date(2026, 6, 7, 9, 0, 0, 0, utc)},
+		{Name: ArchivePrefix("/root"), ModTime: time.Date(2026, 6, 1, 12, 0, 0, 0, utc), IsDir: true},
+		{Name: ArchiveObjectLeaf("old"), ModTime: time.Date(2026, 6, 1, 9, 0, 0, 0, utc)},
+	}
+}
+
+// assertIsDirEntriesFiltered checks the three consequences of R4.3 on whichever
+// prune path produced calls: no directory was deletefiled (never deleted), the
+// object a directory would have evicted survived (never kept — the directory did
+// not take a bucket representative slot), and the policy still applied normally
+// to the real objects (exactly the oldest was pruned).
+func assertIsDirEntriesFiltered(t *testing.T, calls []RunnerCall, remote string) {
+	t.Helper()
+	targets := deleteTargets(calls)
+
+	for _, target := range targets {
+		for _, subvol := range []string{"/home", "/root"} {
+			if dir := remote + "/" + ArchivePrefix(subvol); target == dir {
+				t.Errorf("rclone deletefile %q handed a DIRECTORY entry to deletefile — R4.3 violated", target)
+			}
+		}
+	}
+
+	evicted := remote + "/" + ArchiveObjectLeaf("recent")
+	if slices.Contains(targets, evicted) {
+		t.Errorf("rclone deletefile %q deleted a real object — a directory took its bucket representative slot, so it was KEPT in its place (R4.3)", evicted)
+	}
+
+	got := slices.Clone(targets)
+	sort.Strings(got)
+	want := []string{remote + "/" + ArchiveObjectLeaf("old")}
+	if !slices.Equal(got, want) {
+		t.Errorf("deletefile targets = %v, want %v — with directories dropped the policy prunes only the out-of-policy object", got, want)
+	}
+}
+
+// TestArchiveShipper_Prune_DropsIsDirEntries asserts that a directory entry in an
+// `rclone lsjson` listing is neither kept nor deleted by either prune path: it is
+// dropped before gfsSelect, so it never occupies a retention bucket and is never
+// handed to `rclone deletefile`, which takes a file (R4.3).
+//
+// Both paths are covered on purpose. They decode the same listing shape and feed
+// the same selector, and a guard that exists on only one of them is the exact
+// defect this story is fixing elsewhere in this file.
+func TestArchiveShipper_Prune_DropsIsDirEntries(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+
+	// Fixture integrity: on the RAW listing — the input the paths would see with
+	// no filter — gfsSelect must BOTH select a directory for deletion AND delete
+	// the object a directory outranked. Without either property this test would
+	// still pass with the filter removed, and would measure nothing.
+	_, del := gfsSelect(isDirListing(), isDirRetention)
+	var dirSelected, objEvicted bool
+	for _, d := range del {
+		if d.Name == ArchivePrefix("/root") {
+			dirSelected = true
+		}
+		if d.Name == ArchiveObjectLeaf("recent") {
+			objEvicted = true
+		}
+	}
+	if !dirSelected || !objEvicted {
+		t.Fatalf("fixture does not exercise the guard: unfiltered gfsSelect deletes %v, want it to include both %q (directory) and %q (object outranked by a directory)",
+			names(del), ArchivePrefix("/root"), ArchiveObjectLeaf("recent"))
+	}
+
+	t.Run("post-ship prune", func(t *testing.T) {
+		mr := archivePruneRunner(isDirListing(), nil)
+		a := &archiveShipper{
+			remote:    remote,
+			mode:      "full",
+			compress:  "zstd",
+			run:       mr,
+			parents:   &fakeParentStore{},
+			retention: isDirRetention,
+		}
+
+		// The shipped object's own key is not in the listing, so the R4.2
+		// active-parent guard removes nothing here and cannot mask the filter.
+		snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
+		if _, err := a.Send(t.Context(), snap); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+
+		assertIsDirEntriesFiltered(t, mr.Calls, remote)
+	})
+
+	t.Run("on-demand prune", func(t *testing.T) {
+		mr := archivePruneRunner(isDirListing(), nil)
+		a := &archiveShipper{
+			remote:    remote,
+			mode:      "full",
+			compress:  "zstd",
+			run:       mr,
+			parents:   newMapParentStore(), // no recorded head → nothing protected
+			retention: isDirRetention,
+		}
+
+		if err := a.PruneRemoteOnDemand(t.Context(), []string{"/home", "/root"}); err != nil {
+			t.Fatalf("PruneRemoteOnDemand: %v", err)
+		}
+
+		assertIsDirEntriesFiltered(t, mr.Calls, remote)
+	})
+}
+
+// TestDecodeLsjson_DropsIsDirEntries pins the filter at its source: a listing
+// mixing directories with objects decodes to the objects ALONE, so a directory is
+// not merely spared at the delete site — it never enters the selector's input at
+// all. Decoding real `rclone lsjson` bytes (scriptedLsjson) keeps the assertion
+// on the JSON boundary, tag included, rather than on an in-memory struct.
+func TestDecodeLsjson_DropsIsDirEntries(t *testing.T) {
+	objs, err := decodeLsjson(scriptedLsjson(isDirListing()))
+	if err != nil {
+		t.Fatalf("decodeLsjson: %v", err)
+	}
+	want := []string{ArchiveObjectLeaf("mid"), ArchiveObjectLeaf("old"), ArchiveObjectLeaf("recent")}
+	if got := names(objs); !slices.Equal(got, want) {
+		t.Errorf("decodeLsjson names = %v, want %v (directory entries dropped)", got, want)
+	}
 }

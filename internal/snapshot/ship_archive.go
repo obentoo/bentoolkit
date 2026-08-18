@@ -198,10 +198,55 @@ func archiveObjectName(snap Snapshot) string {
 // rcloneObject is the subset of an `rclone lsjson` array element bentoolkit needs.
 // lsjson emits a JSON array of {"Path","Name","Size","ModTime","IsDir",...}; the
 // GFS selector only consumes the leaf Name (the remote object key) and ModTime
-// (the calendar instant it is bucketed by). Other fields are ignored on decode.
+// (the calendar instant it is bucketed by), and IsDir is decoded purely to REJECT
+// the entry (see below). Every other field is ignored on decode.
 type rcloneObject struct {
 	Name    string    `json:"Name"`
 	ModTime time.Time `json:"ModTime"`
+
+	// IsDir marks a DIRECTORY entry, which is never a prune candidate: `rclone
+	// deletefile` takes a file, so handing it a directory asks for something
+	// bentoolkit cannot mean (R4.3). decodeLsjson drops these entries.
+	//
+	// This field looks like dead weight and is not — do NOT delete it as such.
+	// A listing scoped to one subvolume's prefix contains no directories BY
+	// CONSTRUCTION, so the prune paths as they stand today never see one. But
+	// this story gives every subvolume its own DIRECTORY under the remote root
+	// (ArchivePrefix), so a caller that listed the remote ROOT would get one
+	// entry per subvolume. Without this field the struct cannot even express the
+	// difference: such entries decode as ordinary objects, gfsSelect buckets them
+	// by ModTime like anything else, and the losers go straight to deletefile.
+	IsDir bool `json:"IsDir"`
+}
+
+// decodeLsjson decodes `rclone lsjson` output and drops every directory entry
+// (R4.3). BOTH prune paths decode through here so neither can carry a copy of
+// the filter that the other forgets — the exact failure mode this story exists
+// to fix — and so a third caller inherits the guard for free.
+//
+// The drop happens BEFORE gfsSelect rather than before deletefile on purpose:
+// a directory that reached the selector would still occupy a calendar bucket and,
+// being newer, could win the bucket's single representative slot and evict the
+// real object that belongs there. Filtering only at the delete site would spare
+// the directory and delete that object instead.
+//
+// The unmarshal error is returned unwrapped: each caller adds the remote it was
+// listing and applies its own fatality contract (pruneRemote warns and skips the
+// prune, PruneRemoteOnDemand returns a failed stage).
+func decodeLsjson(out []byte) ([]rcloneObject, error) {
+	var decoded []rcloneObject
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		return nil, err
+	}
+	// Filter in place: the decoded backing array has no other referent.
+	objs := decoded[:0]
+	for _, o := range decoded {
+		if o.IsDir {
+			continue
+		}
+		objs = append(objs, o)
+	}
+	return objs, nil
 }
 
 // gfsSelect partitions objects into keep/delete under a grandfather-father-son
@@ -336,8 +381,8 @@ func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 		return
 	}
 
-	var objs []rcloneObject
-	if err := json.Unmarshal(out, &objs); err != nil {
+	objs, err := decodeLsjson(out)
+	if err != nil {
 		warnLogf("snapshot: ship %q: parsing rclone lsjson output failed; skipping prune: %v", a.Name(), err)
 		return
 	}
@@ -397,8 +442,8 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 	if err != nil {
 		return fmt.Errorf("rclone lsjson %s: %w", a.remote, err)
 	}
-	var objs []rcloneObject
-	if err := json.Unmarshal(out, &objs); err != nil {
+	objs, err := decodeLsjson(out)
+	if err != nil {
 		return fmt.Errorf("parse rclone lsjson output for %s: %w", a.remote, err)
 	}
 
