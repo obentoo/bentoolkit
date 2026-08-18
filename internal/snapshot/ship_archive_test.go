@@ -1069,6 +1069,71 @@ func TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes(t *testing.T) {
 	})
 }
 
+// TestArchiveShipper_Send_LeavesObjectsOutsideEveryPrefixUntouched is R4.1 on the
+// POST-SHIP path. TestArchiveShipper_PruneOnDemand_PrunesEachSubvolume asserts the
+// same rule on the on-demand path; this is the half it does not reach, and the
+// story's quality gate asks for both.
+//
+// The stray sits under "-var", a prefix no configured subvolume maps to — left by
+// hand, by another tool, or by the pre-038 flat layout. Two guards keep the green
+// honest. The stray's ModTime is old enough that gfsSelect WOULD drop it if it
+// ever reached the selector (asserted, not assumed), so its survival can only come
+// from the scoping and never from retention happening to keep it. And an equally
+// old object under the SHIPPED subvolume's own prefix must be deleted in the same
+// run, which proves the prune was actively deleting rather than skipped — without
+// it, a prune that did nothing at all would pass this test.
+func TestArchiveShipper_Send_LeavesObjectsOutsideEveryPrefixUntouched(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+	shipAt := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	oldAt := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC) // a different, older day bucket
+
+	strayKey := ArchiveObjectName("/var", "v.old")   // under NO configured subvolume
+	doomedKey := ArchiveObjectName("/home", "h.old") // under the shipped subvolume
+
+	run := newGrowingArchiveRunner(remote)
+	run.objects = append(run.objects,
+		rcloneObject{Name: strayKey, ModTime: oldAt},
+		rcloneObject{Name: doomedKey, ModTime: oldAt},
+	)
+
+	// Guard one: under this policy the stray is genuinely out of policy, so a
+	// prune that saw it would delete it.
+	_, del := gfsSelect([]rcloneObject{
+		{Name: strayKey, ModTime: oldAt},
+		{Name: "fresh.zst", ModTime: shipAt},
+	}, Retention{Daily: 1})
+	if !slices.ContainsFunc(del, func(o rcloneObject) bool { return o.Name == strayKey }) {
+		t.Fatalf("fixture does not exercise R4.1: retention would keep %q anyway, so surviving proves nothing", strayKey)
+	}
+
+	a := &archiveShipper{
+		remote:    remote,
+		mode:      "incremental",
+		compress:  "zstd",
+		run:       run,
+		parents:   newMapParentStore(),
+		retention: Retention{Daily: 1},
+	}
+	_ = captureWarn(t) // a subvolume's first ship has no recorded parent and warns
+
+	run.modTime = shipAt
+	if _, err := a.Send(t.Context(), Snapshot{ID: "home.A", Subvolume: "/home", Path: "/snaps/home.A"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	targets := deleteTargets(run.Calls)
+
+	// Guard two: the prune ran and deleted, so "the stray survived" is a decision
+	// and not the absence of one.
+	if doomed := remote + "/" + doomedKey; !slices.Contains(targets, doomed) {
+		t.Fatalf("deletefile targets = %v, want %q among them — the prune deleted nothing, so this test cannot show R4.1", targets, doomed)
+	}
+
+	if stray := remote + "/" + strayKey; slices.Contains(targets, stray) {
+		t.Errorf("rclone deletefile %q — an object under no configured subvolume's prefix must be left untouched (R4.1)", stray)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 038 — a directory entry is never a prune candidate (R4, R4.3)
 // ---------------------------------------------------------------------------
