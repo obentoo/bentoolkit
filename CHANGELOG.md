@@ -281,6 +281,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that counted them would be non-zero forever and ignored within a week. No
   baseline tree at all is the one non-zero condition.
 
+- **BREAKING — `overlay validate --json` changes shape.** Per ebuild, the keys
+  `options`, `qa`, `reason` and `findings` are gone. In their place: `gates`, an
+  array of `{gate, outcome, reason?, findings?}`, plus `depth`,
+  `depth_requested` and `depth_reason`. `package`, `version` and `sources` are
+  unchanged. A `jq` expression written against the old keys will break.
+
+  Two fixed outcome fields cannot carry five gates, and the single shared
+  `reason` was already being overwritten: an option gate skipping for a missing
+  distfile and a QA gate skipping for a missing `pkgcheck` rendered as one line,
+  whichever was written last. More sharply, `ExitCode` filtered findings on the
+  option gate — so an error from the configure gate, the gate that reproduces
+  issue #33 by running the build's own configure step, was invisible to the exit
+  code and the command exited 0. It now counts an error finding from any gate
+  except `pkgcheck`'s, which stays advisory so a `metadata.xml` DOCTYPE typo
+  cannot fail the whole tree.
+
+- **BREAKING — the `pending.json` state machine `--list` renders has changed.**
+  `validated` now sits *after* the static gates and means "passed the static
+  gates" — not "ready to publish", and on the staged path no longer "the ebuild
+  is in the overlay". A bump can sit at `validated` having failed a later gate
+  and never been promoted, and the column has to be read that way.
+
 ### Fixed
 - **An archive prune no longer deletes another subvolume's backups.** With two
   or more subvolumes shipping to one rclone remote, every successful ship
@@ -669,30 +691,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then asks once for the whole run when any gate above `options` would run, and
   reports the proved, errored and skipped tallies at the end.
 
-### Changed
-- **BREAKING — `overlay validate --json` changes shape.** Per ebuild, the keys
-  `options`, `qa`, `reason` and `findings` are gone. In their place: `gates`, an
-  array of `{gate, outcome, reason?, findings?}`, plus `depth`,
-  `depth_requested` and `depth_reason`. `package`, `version` and `sources` are
-  unchanged. A `jq` expression written against the old keys will break.
-
-  Two fixed outcome fields cannot carry five gates, and the single shared
-  `reason` was already being overwritten: an option gate skipping for a missing
-  distfile and a QA gate skipping for a missing `pkgcheck` rendered as one line,
-  whichever was written last. More sharply, `ExitCode` filtered findings on the
-  option gate — so an error from the configure gate, the gate that reproduces
-  issue #33 by running the build's own configure step, was invisible to the exit
-  code and the command exited 0. It now counts an error finding from any gate
-  except `pkgcheck`'s, which stays advisory so a `metadata.xml` DOCTYPE typo
-  cannot fail the whole tree.
-
-- **BREAKING — the `pending.json` state machine `--list` renders has changed.**
-  `validated` now sits *after* the static gates and means "passed the static
-  gates" — not "ready to publish", and on the staged path no longer "the ebuild
-  is in the overlay". A bump can sit at `validated` having failed a later gate
-  and never been promoted, and the column has to be read that way.
-
-### Fixed
 - **A commit-tracked bump no longer fails on `COMMIT="<sha>"`, and a failed
   substitution no longer leaves an ebuild behind.** Two defects, one incident.
   The commit-hash rewrite matched four variable names across two patterns, and
