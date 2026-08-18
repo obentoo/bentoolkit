@@ -238,6 +238,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claims. Declining is **exit 0**: nothing failed, a decision was taken.
 
 ### Changed
+- **Archive objects are stored at `<remote>/<subvolume>/<id>.zst`, and
+  `snapshot restore` gained `--subvolume`.** The subvolume is now a directory
+  under the remote instead of a fragment of the filename, which is what lets a
+  prune scope itself by listing one path. The directory name uses the existing
+  sanitize rule with no special case, so `/home` is `-home` and the root
+  subvolume `/` is the directory `-`. Joining with `/` also removes an ambiguity
+  the old `-` join had: `sanitize` emits `-` itself, so subvolume `/home` with id
+  `otaku-42` and subvolume `/home/otaku` with id `42` produced the *same* key.
+
+  Because each subvolume has its own directory, a restore must know which one to
+  read. With **exactly one** subvolume configured it is inferred and nothing
+  changes — that is the deployed configuration and it needs no editing. With
+  **two or more**, `--subvolume` is required: without it the command exits
+  non-zero naming the configured subvolumes, **before any subprocess runs**,
+  rather than silently reading the wrong one. Naming an unconfigured subvolume
+  fails the same way.
+
+  The check applies whichever driver the named ship uses, including `restic`,
+  which discards the value. That is deliberate: a gate conditioned on the driver
+  is a gate a future driver has to remember to join, and forgetting it would
+  restore the silent wrong-subvolume read this release removes. The practical
+  effect is narrow — a `restic` restore on a config with two or more subvolumes
+  now needs a flag it ignores, and the error names it.
+
 - **`overlay compare` without `--realign` is unchanged** — the same output, the
   same exit code, the same package set, the same summary arithmetic. This is a
   shipped command and the regression was the risk, so the promise is mechanical
@@ -258,6 +282,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline tree at all is the one non-zero condition.
 
 ### Fixed
+- **An archive prune no longer deletes another subvolume's backups.** With two
+  or more subvolumes shipping to one rclone remote, every successful ship
+  destroyed part of another subvolume's history — not rarely, not under a race,
+  but on every run, by construction.
+
+  The objects lived in one flat namespace: `<remote>/<subvolume>-<id>.zst`. The
+  retention policy buckets objects by calendar period and keeps the newest in
+  each bucket, so objects from *different* subvolumes landed in the *same*
+  bucket and competed for its single slot. Shipping `/root` deleted `/home`'s
+  backup. Nothing reported a problem: the `deletefile` succeeded, so the run was
+  green; the next `/home` ship still worked, because `btrfs send -p` references
+  the parent's local path and that snapshot is still on disk. The damage
+  surfaced only at restore, arbitrarily later, when the chain's base was gone —
+  and incremental is the default mode, so this was the default path.
+
+  A prune now lists **one subvolume's directory** and can therefore only see, and
+  only delete, that subvolume's own objects. The protection is structural rather
+  than a check: other subvolumes' backups are not spared by a guard, they are not
+  candidates at all. `bentoo snapshot prune` applies the policy independently to
+  each configured subvolume, reading every subvolume's lineage head **before**
+  deleting anything, so a failure to read one leaves the remote untouched rather
+  than half-pruned. A subvolume nothing has been shipped for yet is skipped with
+  a warning naming it, which is the ordinary first-run state and not a failure.
+  A directory entry is never passed to `rclone deletefile`.
+
+  **No migration is needed and none is offered.** No archive ship is enabled in
+  any deployed configuration, so no object exists under the old layout. If one
+  did, it would simply be left alone: a prune only lists configured subvolumes'
+  own directories, so anything outside that layout is never a deletion candidate.
+
 - **A staged file whose final flush fails is now reported instead of copied
   half-way.** `copyRegularFile` closed the destination twice: once explicitly
   with the error handled, once through a deferred `Close` that discarded it. The
