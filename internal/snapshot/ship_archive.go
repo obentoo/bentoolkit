@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -249,6 +250,59 @@ func decodeLsjson(out []byte) ([]rcloneObject, error) {
 	return objs, nil
 }
 
+// rclone's "the path is not there" signature, measured against rclone 1.75.0:
+// `lsjson` on a non-existent path exits 3, writes "directory not found" to
+// stderr, and prints a bare "[" on stdout — invalid JSON, which is why callers
+// must test for this BEFORE handing the output to decodeLsjson.
+const (
+	// rcloneExitDirNotFound is rclone's documented exit code for a missing
+	// directory. It is the precise signal: only this condition produces it.
+	rcloneExitDirNotFound = 3
+	// rcloneDirNotFoundText is the message rclone writes to stderr for the same
+	// condition. runnerEnv pins LC_ALL=C on every child, so it is not localized.
+	rcloneDirNotFoundText = "directory not found"
+)
+
+// isRemoteDirNotFound reports whether err is rclone's "the path is not there"
+// rather than a real failure.
+//
+// Why this is benign at all: it never happens after a ship (the object was just
+// written, so its directory exists). It happens on a MANUAL prune of a remote or
+// a subvolume prefix that was never shipped — the ordinary first-run state.
+// Treating that as a failure would make `snapshot prune` fail on a correctly
+// configured, freshly installed system (038 R4.2).
+//
+// It tests two things, and BOTH are load-bearing:
+//
+//   - an *exec.ExitError with code rcloneExitDirNotFound — the PRECISE signal,
+//     rclone's own documented code, reached through the errors.Join that
+//     execRunner.Run builds (errors.As walks a Join's tree, so the joined stderr
+//     alongside it does not hide the ExitError);
+//   - the text rcloneDirNotFoundText anywhere in the error. This is not
+//     belt-and-braces padding. The Runner joins the child's stderr onto the error
+//     and pins LC_ALL=C (runnerEnv) precisely so that output is stable, and a
+//     Runner MOCK cannot realistically construct an *exec.ExitError — without the
+//     text branch the benign path would be untestable through the seam every
+//     other prune test uses.
+//
+// Trade-off, deliberately accepted and recorded here so a later reader does not
+// "tighten" it away unaware: an UNRELATED failure whose text happens to contain
+// that phrase is read as "nothing to prune". The worst outcome is that one
+// subvolume goes unpruned this run — stale objects linger and are reconsidered
+// next run; nothing is ever deleted because of it. The failure mode of the
+// alternative (exit code only) is the opposite kind of bug: a failed command on
+// a healthy system, every first run, for every subvolume not yet shipped.
+func isRemoteDirNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == rcloneExitDirNotFound {
+		return true
+	}
+	return strings.Contains(err.Error(), rcloneDirNotFoundText)
+}
+
 // gfsSelect partitions objects into keep/delete under a grandfather-father-son
 // policy. For each granularity with a positive count in policy, objects are
 // bucketed by the CALENDAR period of their ModTime (in UTC): hour, day, ISO-week,
@@ -440,6 +494,18 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 
 	out, err := a.run.Run(ctx, "rclone", []string{"lsjson", a.remote}, nil)
 	if err != nil {
+		// A path that is not there is NOT a failure: it is the ordinary state of
+		// a remote nothing has been shipped to yet, and failing here would make
+		// `snapshot prune` fail on a freshly installed, correctly configured
+		// system (038 R4.2). There is nothing to prune, so return success without
+		// deleting anything. This test comes BEFORE decodeLsjson deliberately:
+		// rclone prints a bare "[" on stdout in this case, which does not parse.
+		//
+		// Every OTHER failure is still returned, unchanged: a manual prune is the
+		// user's primary action and must surface as a failed stage.
+		if isRemoteDirNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("rclone lsjson %s: %w", a.remote, err)
 	}
 	objs, err := decodeLsjson(out)

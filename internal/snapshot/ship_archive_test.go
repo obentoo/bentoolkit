@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"slices"
 	"sort"
 	"strings"
@@ -1133,5 +1134,182 @@ func TestDecodeLsjson_DropsIsDirEntries(t *testing.T) {
 	want := []string{ArchiveObjectLeaf("mid"), ArchiveObjectLeaf("old"), ArchiveObjectLeaf("recent")}
 	if got := names(objs); !slices.Equal(got, want) {
 		t.Errorf("decodeLsjson names = %v, want %v (directory entries dropped)", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 038 — a missing remote path is nothing to prune, not a failure (R4, R4.2)
+// ---------------------------------------------------------------------------
+
+// exitErrWithCode runs a trivial `sh -c "exit N"` to manufacture a REAL
+// *exec.ExitError carrying the given code, so the errors.As/ExitCode() branch of
+// isRemoteDirNotFound is exercised against the same type os/exec produces in
+// production rather than a hand-rolled stand-in. It asserts the fixture itself:
+// if sh is missing the process never starts, the error is an *exec.Error, and
+// the test must say so loudly instead of silently proving nothing.
+func exitErrWithCode(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("fixture broken: `sh -c \"exit %d\"` gave %[2]T (%[2]v), want a real *exec.ExitError", code, err)
+	}
+	if got := exitErr.ExitCode(); got != code {
+		t.Fatalf("fixture broken: exit code = %d, want %d", got, code)
+	}
+	return err
+}
+
+// runnerShapedErr rebuilds the error execRunner.Run returns for a failed command:
+// the *exec.ExitError joined with the child's trimmed stderr (runner.go:82-86).
+// The predicate has to see through that Join, which is the whole reason the
+// exit-code branch is reachable at all in production.
+func runnerShapedErr(t *testing.T, code int, stderr string) error {
+	t.Helper()
+	return errors.Join(exitErrWithCode(t, code), errors.New(stderr))
+}
+
+// TestIsRemoteDirNotFound covers BOTH branches of the predicate and both of their
+// negatives (038 R4.2). The exit-code branch is tested with a real *exec.ExitError
+// reached THROUGH an errors.Join, because that traversal is exactly what a
+// refactor of the Runner's error shape would silently break; its stderr text
+// deliberately omits the phrase, so only the code branch can be answering.
+func TestIsRemoteDirNotFound(t *testing.T) {
+	// rclone 1.75.0's real stderr for a missing path, under LC_ALL=C.
+	const rcloneStderr = "2026/08/18 12:00:00 ERROR : : error listing: directory not found"
+
+	t.Run("text phrase alone is benign", func(t *testing.T) {
+		// The shape a Runner MOCK can produce: no ExitError anywhere, text only.
+		if !isRemoteDirNotFound(errors.New(rcloneStderr)) {
+			t.Errorf("isRemoteDirNotFound(%q) = false, want true (text branch)", rcloneStderr)
+		}
+	})
+
+	t.Run("exit code 3 through errors.Join is benign", func(t *testing.T) {
+		// Stderr WITHOUT the phrase, so the text branch cannot answer: a true
+		// result here can only come from errors.As finding the ExitError.
+		err := runnerShapedErr(t, rcloneExitDirNotFound, "rclone: transfer log line")
+		if strings.Contains(err.Error(), rcloneDirNotFoundText) {
+			t.Fatalf("fixture leaks the phrase into the text, so it cannot isolate the exit-code branch: %v", err)
+		}
+		if !isRemoteDirNotFound(err) {
+			t.Errorf("isRemoteDirNotFound(%v) = false, want true (exit code %d through errors.Join)",
+				err, rcloneExitDirNotFound)
+		}
+	})
+
+	t.Run("unrelated error is not benign", func(t *testing.T) {
+		err := errors.New("rclone: connection reset by peer")
+		if isRemoteDirNotFound(err) {
+			t.Errorf("isRemoteDirNotFound(%v) = true, want false — a real failure must stay a failure", err)
+		}
+	})
+
+	t.Run("another exit code without the phrase is not benign", func(t *testing.T) {
+		err := runnerShapedErr(t, 1, "rclone: NOTICE: config file not found")
+		if isRemoteDirNotFound(err) {
+			t.Errorf("isRemoteDirNotFound(%v) = true, want false — only exit %d means directory not found",
+				err, rcloneExitDirNotFound)
+		}
+	})
+
+	t.Run("nil is not benign", func(t *testing.T) {
+		if isRemoteDirNotFound(nil) {
+			t.Error("isRemoteDirNotFound(nil) = true, want false")
+		}
+	})
+}
+
+// TestArchiveShipper_PruneOnDemand_MissingRemoteIsNotAFailure is the R4.2 wiring:
+// a manual prune of a remote that was never shipped to must succeed with nothing
+// deleted, not fail. Both error SHAPES are covered — the text-only one a mock
+// produces and the ExitError+stderr Join production actually builds — because the
+// predicate has two branches and the caller must be reached by either.
+//
+// The lsjson call itself is asserted, not just the nil return: with an all-zero
+// retention PruneRemoteOnDemand returns nil BEFORE listing, so "no error, no
+// deletes" would otherwise pass without the benign path ever being taken.
+func TestArchiveShipper_PruneOnDemand_MissingRemoteIsNotAFailure(t *testing.T) {
+	const remote = "gdrive:bentoo-backups"
+
+	cases := []struct {
+		name   string
+		lsjson func(t *testing.T) error
+	}{
+		{
+			name:   "text-only error (Runner mock shape)",
+			lsjson: func(*testing.T) error { return errors.New("2026/08/18 ERROR : : error listing: directory not found") },
+		},
+		{
+			name: "ExitError joined with stderr (production Runner shape)",
+			lsjson: func(t *testing.T) error {
+				return runnerShapedErr(t, rcloneExitDirNotFound,
+					"2026/08/18 ERROR : : error listing: directory not found")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A non-empty listing is scripted on purpose: it never reaches the
+			// selector (lsjson fails), so if the benign branch ever regressed into
+			// "parse whatever came back", the deletes would show up here.
+			mr := archivePruneRunner(gfsFixture(), tc.lsjson(t))
+			a := &archiveShipper{
+				remote:    remote,
+				mode:      "full",
+				compress:  "zstd",
+				run:       mr,
+				parents:   newMapParentStore(), // nothing shipped yet → no protected head
+				retention: Retention{Hourly: 2, Daily: 3},
+			}
+
+			if err := a.PruneRemoteOnDemand(t.Context(), []string{"/home", "/root"}); err != nil {
+				t.Fatalf("PruneRemoteOnDemand returned %v, want nil — a path that was never shipped to is nothing to prune", err)
+			}
+			if got := deleteTargets(mr.Calls); len(got) != 0 {
+				t.Errorf("deletefile calls = %v, want none — the benign path must never delete", got)
+			}
+			var listed int
+			for _, c := range mr.Calls {
+				if c.Name == "rclone" && len(c.Args) > 0 && c.Args[0] == "lsjson" {
+					listed++
+				}
+			}
+			if listed != 1 {
+				t.Fatalf("rclone lsjson calls = %d, want 1 — without the listing this test proves nothing", listed)
+			}
+		})
+	}
+}
+
+// TestArchiveShipper_PruneOnDemand_SurfacesRealLsjsonFailure is the other half of
+// the contract (Unchanged Behavior: a manual prune still returns its errors). A
+// missing directory is the ONE newly-benign case; a genuine listing failure must
+// still come back as an error, with its cause preserved for the failed stage.
+func TestArchiveShipper_PruneOnDemand_SurfacesRealLsjsonFailure(t *testing.T) {
+	lsErr := errors.New("rclone: connection reset by peer")
+	mr := archivePruneRunner(gfsFixture(), lsErr)
+	a := &archiveShipper{
+		remote:    "gdrive:bentoo-backups",
+		mode:      "full",
+		compress:  "zstd",
+		run:       mr,
+		parents:   newMapParentStore(),
+		retention: Retention{Hourly: 2, Daily: 3},
+	}
+
+	err := a.PruneRemoteOnDemand(t.Context(), []string{"/home"})
+	if err == nil {
+		t.Fatal("PruneRemoteOnDemand returned nil, want the lsjson failure surfaced as a failed stage")
+	}
+	if !errors.Is(err, lsErr) {
+		t.Errorf("returned error %v does not wrap the lsjson cause %v", err, lsErr)
+	}
+	if !strings.Contains(err.Error(), "rclone lsjson") {
+		t.Errorf("returned error %q does not name the failing command", err)
+	}
+	if got := deleteTargets(mr.Calls); len(got) != 0 {
+		t.Errorf("deletefile calls = %v, want none after a failed listing", got)
 	}
 }
