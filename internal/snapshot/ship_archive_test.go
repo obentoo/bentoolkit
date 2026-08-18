@@ -13,7 +13,9 @@ import (
 
 // TestArchivePipeStages_FullSend asserts the pure stage builder for a FULL send
 // (parentPath==""): stage 1 is `btrfs send <snap.Path>` with NO `-p` flag, stage 2
-// is the compressor, stage 3 is `rclone rcat <remote>/<obj>` (R2.1).
+// is the compressor, stage 3 is `rclone rcat <remote>/<prefix>/<leaf>` — the
+// destination is pinned EXACTLY, so a regression to the old flat key turns this
+// test red (R2.1, R3.1).
 func TestArchivePipeStages_FullSend(t *testing.T) {
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	stages := archivePipeStages(snap, "", "gdrive:bentoo-backups", "zstd")
@@ -50,15 +52,31 @@ func TestArchivePipeStages_FullSend(t *testing.T) {
 	if !slices.Contains(s3.args, "rcat") {
 		t.Errorf("stage3 args %v missing rcat", s3.args)
 	}
+	// The upload destination is pinned EXACTLY, and by TWO assertions that bite
+	// different regressions. A `HasPrefix(remote+"/")` check would not: it is
+	// true of ANY key, the old flat one included, so it can never notice the
+	// layout changing back.
+	//
+	//  1. Composed HERE from ArchivePrefix + "/" + ArchiveObjectLeaf — never
+	//     from ArchiveObjectName, which is the builder under test: re-deriving
+	//     the expectation through it would be tautological and stay green under
+	//     any separator it chose. This is what catches a change to the JOIN.
+	//  2. A literal, which catches a change INSIDE either half — a regression
+	//     the composition in (1) would silently follow.
 	dest := s3.args[len(s3.args)-1]
-	if !strings.HasPrefix(dest, "gdrive:bentoo-backups/") {
-		t.Errorf("stage3 dest = %q, want prefix gdrive:bentoo-backups/", dest)
+	if want := "gdrive:bentoo-backups/" + ArchivePrefix(snap.Subvolume) + "/" + ArchiveObjectLeaf(snap.ID); dest != want {
+		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
+	}
+	if want := "gdrive:bentoo-backups/-home/home.2026.zst"; dest != want {
+		t.Errorf("stage3 dest = %q, want literal %q", dest, want)
 	}
 }
 
 // TestArchivePipeStages_Incremental proves the builder supports the incremental
 // form needed by T3.2: a non-empty parentPath puts `-p <parentPath>` BEFORE the
-// snapshot path in stage 1 (R2.1).
+// snapshot path in stage 1 (R2.1). It also pins that the parent stays OUT of the
+// remote key: an incremental send uploads to the same <remote>/<prefix>/<leaf> a
+// full send would (R3.1) — the key identifies the snapshot, not the delta.
 func TestArchivePipeStages_Incremental(t *testing.T) {
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	parent := "/snaps/home.2025"
@@ -79,14 +97,44 @@ func TestArchivePipeStages_Incremental(t *testing.T) {
 	if pIdx >= pathIdx {
 		t.Errorf("stage1 args %v: -p (at %d) must come before snap path (at %d)", s1.args, pIdx, pathIdx)
 	}
+
+	// Stage 3 destination, pinned exactly (see FullSend for why the composed
+	// form deliberately avoids ArchiveObjectName).
+	s3 := stages[2]
+	dest := s3.args[len(s3.args)-1]
+	if want := "gdrive:bentoo-backups/" + ArchivePrefix(snap.Subvolume) + "/" + ArchiveObjectLeaf(snap.ID); dest != want {
+		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
+	}
+	if want := "gdrive:bentoo-backups/-home/home.2026.zst"; dest != want {
+		t.Errorf("stage3 dest = %q, want literal %q", dest, want)
+	}
+
+	full := archivePipeStages(snap, "", "gdrive:bentoo-backups", "zstd")
+	if fullDest := full[2].args[len(full[2].args)-1]; dest != fullDest {
+		t.Errorf("incremental dest %q != full-send dest %q — the parent must not leak into the remote key",
+			dest, fullDest)
+	}
 }
 
 // TestArchivePipeStages_DefaultCompressor asserts an empty compress string falls
-// back to zstd compressing stdin→stdout.
+// back to zstd compressing stdin→stdout, and that the destination is unaffected
+// by that fallback. The subvolume here ("root") contains no separator of its own,
+// which is the point: sanitize leaves it untouched, the single '/' is inserted by
+// the key builder, and the object still lands in its OWN directory (R3.1) — the
+// prefix is never folded into the filename.
 func TestArchivePipeStages_DefaultCompressor(t *testing.T) {
 	stages := archivePipeStages(Snapshot{ID: "x", Subvolume: "root", Path: "/s/x"}, "", "r:bkt", "")
 	if stages[1].name != "zstd" {
 		t.Errorf("default compressor = %q, want zstd", stages[1].name)
+	}
+
+	s3 := stages[2]
+	dest := s3.args[len(s3.args)-1]
+	if want := "r:bkt/" + ArchivePrefix("root") + "/" + ArchiveObjectLeaf("x"); dest != want {
+		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
+	}
+	if want := "r:bkt/root/x.zst"; dest != want {
+		t.Errorf("stage3 dest = %q, want literal %q", dest, want)
 	}
 }
 

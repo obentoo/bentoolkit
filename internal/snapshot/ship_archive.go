@@ -137,7 +137,9 @@ type pipeStage struct {
 //     for T3.1 and would be configured against a wrapper.
 //   - Stage 3 `rclone rcat <remote>/<objectName>`: reads the compressed stream on
 //     stdin and writes it to the remote object. rcat is the streaming upload (it
-//     consumes stdin) as opposed to `copy`, which needs a source file.
+//     consumes stdin) as opposed to `copy`, which needs a source file. objectName
+//     carries the per-subvolume prefix DIRECTORY (R3.1) and still needs no mkdir
+//     stage: rcat creates the parent on its own (verified against rclone 1.75.0).
 func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pipeStage {
 	send := []string{"send"}
 	if parentPath != "" {
@@ -168,13 +170,27 @@ func compressorStage(compress string) (name string, args []string) {
 	return prog, []string{"-c"}
 }
 
-// archiveObjectName derives the deterministic remote object name for snap:
-// "<sanitized-subvolume>-<snap.ID>.zst". The subvolume is sanitized with the same
-// safe-byte rule used for parent-store filenames (sanitize) so a path like
-// "/home" cannot introduce extra path separators into the remote key, and the
-// snapshot ID disambiguates successive snapshots of the same subvolume. The .zst
-// suffix matches the default zstd codec; a different codec would still upload here
-// (the suffix is a naming convention, not a content guarantee in T3.1).
+// archiveObjectName derives the deterministic remote object KEY for snap by
+// delegating to ArchiveObjectName: "<sanitize(snap.Subvolume)>/<snap.ID>.zst".
+// The subvolume is a DIRECTORY under the remote, not part of the filename
+// (R3.1), so a listing can be scoped to one subvolume by URL. Delegating keeps
+// this ship-side helper and its exported twin on ONE convention, which is what
+// guarantees the restore reads back exactly the key the shipper wrote (R5.2).
+//
+// Why exactly ONE separator is safe when arbitrary ones are not: sanitize
+// replaces every byte outside [A-Za-z0-9._-] with '-', so it can NEVER emit
+// '/'. The '/' ArchiveObjectName inserts is therefore the only one in the key,
+// which makes the prefix/leaf boundary unique — no sanitized subvolume can
+// contain it and no snapshot ID can fake it. Handing the RAW subvolume to the
+// remote would forfeit that: "/home/otaku" would scatter the key across a
+// directory tree whose shape bentoolkit no longer controls. The old flat scheme
+// packed both halves into a single filename joined by '-', a byte sanitize CAN
+// emit, so the boundary was indistinguishable from sanitized content: subvolume
+// "/home" with ID "otaku-42" and subvolume "/home/otaku" with ID "42" both
+// rendered "-home-otaku-42.zst" — one key for two subvolumes.
+//
+// The .zst suffix matches the default zstd codec; a different codec would still
+// upload here (the suffix is a naming convention, not a content guarantee).
 func archiveObjectName(snap Snapshot) string {
 	return ArchiveObjectName(snap.Subvolume, snap.ID)
 }
