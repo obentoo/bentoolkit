@@ -704,3 +704,142 @@ func TestPublishedManifestBytes_AnUnreadableManifestIsStillAFault(t *testing.T) 
 			"candidate nobody could describe")
 	}
 }
+
+// =============================================================================
+// Story 040, sub-task 3.1 and 3.2 — R3, R3.1, R3.2, R3.3.
+//
+// Story 039 taught publishedManifestBytes that a missing Manifest is the normal
+// state of a package with no distfile in a thin tree. Its sibling below did not
+// learn: ReadManifestDistFilenames reports the underlying read failure, and a
+// missing file IS one, so every acct-group/*, acct-user/*, virtual/* — and
+// net-dns/bind-tools, app-eselect/eselect-nodejs and sys-kernel/linux-firmware
+// in ::bentoo — has its option gate decline with "the published Manifest could
+// not be read". That is a fault about the CHECKOUT, reported for a package whose
+// truth is that it declares no archive and there was never anything to look for.
+//
+// The two seams read the SAME FILE for the same package. Leaving them disagreeing
+// about what its absence means is the divergence story 039's R5.3 existed to
+// prevent, arrived at from the other side.
+
+// TestPublishedManifestDistNames_AMissingManifestNamesNoArchive — R3.1.
+func TestPublishedManifestDistNames_AMissingManifestNamesNoArchive(t *testing.T) {
+	pkgDir := t.TempDir() // a package directory with no Manifest in it
+
+	names, err := publishedManifestDistNames(pkgDir)
+
+	if err != nil {
+		t.Fatalf("publishedManifestDistNames reported an error for a package that simply has no Manifest (%v);\n"+
+			"its sibling publishedManifestBytes already answers this case with no content and no error, and the "+
+			"two read the same file for the same package — so the option gate is told the checkout is broken for "+
+			"every metapackage in the tree (R3.1)", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("the seam named %v for a package with no Manifest; there is nothing to name, and inventing an "+
+			"archive name would send the gate looking for a file no ebuild declares", names)
+	}
+}
+
+// TestPublishedManifestDistNames_AnUnreadableManifestKeepsItsSentence — R3.2,
+// and it is what stops the fix above from becoming "any read problem is fine".
+//
+// The unreadable Manifest here is a DIRECTORY of that name rather than a file
+// sealed with chmod 0o000. Both are "exists and cannot be read", but only this
+// one is still unreadable when the suite runs as root — which `act -j test`
+// does, and which makes the chmod form silently stop asserting there.
+func TestPublishedManifestDistNames_AnUnreadableManifestKeepsItsSentence(t *testing.T) {
+	pkgDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(pkgDir, "Manifest"), 0o755); err != nil {
+		t.Fatalf("creating the unreadable Manifest: %v", err)
+	}
+
+	_, err := publishedManifestDistNames(pkgDir)
+	if err == nil {
+		t.Fatal("a Manifest that exists and could not be read was reported as a package naming no archive; " +
+			"that hands the option gate an empty list on its own authority for a package that may well have " +
+			"digests, and the gate then reports about a candidate nobody could describe (R3.2)")
+	}
+
+	want := "reading the published Manifest of " + pkgDir + ", to name the archives the option gate looks for: "
+	if !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("the sentence changed.\ngot:  %q\nwant prefix: %q\noperators read this line; story 039's R5.3 "+
+			"kept it byte-identical when the mechanism moved, and narrowing what counts as a fault must not "+
+			"reword what still is one", err.Error(), want)
+	}
+}
+
+// TestOptionGate_ANoDistfilePackageIsReportedAsTheClass — R3.3, sub-task 3.2.
+//
+// The end-to-end outcome, because the unit above only proves the seam changed
+// its answer. What an operator reads is the option gate's reason, and it must
+// name the absent archive rather than the unreadable file — the sentence
+// selectDistfile already carries, which story 031 shipped. Nothing new is
+// written for this: the seam merely stops reporting a fault in front of it.
+//
+// It must ALSO stay SKIPPED. A package nothing was compared against has not been
+// validated, and turning this into a PASS would be the fix overshooting into the
+// vacuity every gate in this tree exists to deny.
+func TestOptionGate_ANoDistfilePackageIsReportedAsTheClass(t *testing.T) {
+	overlay := t.TempDir()
+	pkgDir := filepath.Join(overlay, "acct-group", "nodistfile")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("creating the package directory: %v", err)
+	}
+	ebuild := "# Copyright 2026 Gentoo Authors\n" +
+		"# Distributed under the terms of the GNU General Public License v2\n\n" +
+		"EAPI=8\n\n" +
+		"DESCRIPTION=\"A group, which declares no archive at all\"\n" +
+		"HOMEPAGE=\"https://example.com\"\n" +
+		"SRC_URI=\"https://example.com/nodistfile-1.0.tar.gz\"\n" +
+		"LICENSE=\"MIT\"\n" +
+		"SLOT=\"0\"\n" +
+		"KEYWORDS=\"~amd64\"\n"
+	if err := os.WriteFile(filepath.Join(pkgDir, "nodistfile-1.0.ebuild"), []byte(ebuild), 0o644); err != nil {
+		t.Fatalf("writing the ebuild: %v", err)
+	}
+	// No Manifest is written: that is the whole subject.
+
+	report, err := validate.Run(context.Background(), validate.Options{
+		Overlay:   overlay,
+		Distdir:   t.TempDir(),
+		Selector:  "acct-group/nodistfile",
+		Depth:     "options",
+		DistNames: publishedManifestDistNames,
+	})
+	if err != nil {
+		t.Fatalf("the run itself failed: %v", err)
+	}
+	if len(report.Results) == 0 {
+		t.Fatalf("the run reported no result for the package: %+v", report)
+	}
+
+	var gate *validate.GateResult
+	for i := range report.Results[0].Gates {
+		if report.Results[0].Gates[i].Gate == validate.GateOptions {
+			gate = &report.Results[0].Gates[i]
+			break
+		}
+	}
+	if gate == nil {
+		t.Fatalf("the run produced no option gate: %+v", report.Results[0].Gates)
+	}
+
+	if gate.Outcome != validate.OutcomeSkipped {
+		t.Errorf("the option gate reported %s, want SKIPPED — nothing was compared against this package, so it "+
+			"has not been validated and must not read as though it had (R3.3)\nreason: %q", gate.Outcome, gate.Reason)
+	}
+	// The sentence today, measured before this was authored: "the distfile names
+	// for acct-group/nodistfile-1.0 could not be produced, … : reading the
+	// published Manifest of …: open …/Manifest: no such file or directory". It
+	// blames the checkout for a package whose Manifest was never part of the
+	// question, so the fault sentence must be gone entirely — not merely reworded.
+	if strings.Contains(gate.Reason, "reading the published Manifest of") {
+		t.Errorf("the option gate blames the checkout: %q\nthe package declares no archive; there was never a "+
+			"Manifest to read, and an operator sent to look for a broken checkout is sent to fix nothing (R3, R3.3)",
+			gate.Reason)
+	}
+	if !strings.Contains(gate.Reason, "names no distfile, so there was no archive to look for in ") {
+		t.Errorf("the option gate does not report the class: %q\nwant selectDistfile's existing named refusal, "+
+			"which story 031 shipped and which is the correct sentence for a package that declares no archive",
+			gate.Reason)
+	}
+}

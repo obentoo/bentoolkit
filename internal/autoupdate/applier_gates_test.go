@@ -1006,3 +1006,37 @@ func TestApplyGates_TheVacuityRefusalDoesNotReachAHostThatCannotBuild(t *testing
 			result.Error)
 	}
 }
+
+// TestPublishedDistNames_TheApplierSideSiblingIsUnchanged — story 040, R3.4.
+//
+// Sub-task 3.1 teaches cmd/bentoo's publishedManifestDistNames that a missing
+// Manifest is a package declaring no archive. This one must NOT learn it, and
+// the reason is not symmetry-for-its-own-sake: the two wrappers answer different
+// questions.
+//
+// This one answers for ONE bump on the APPLY path, where the candidate's
+// Manifest has just been produced by the manifest step — so its absence means
+// that step did not do what it reported, which is a fault. cmd/bentoo's answers
+// for a package at its PUBLISHED version, where a thin tree legitimately carries
+// no Manifest for a package with no distfile.
+//
+// An unrequired change to the apply path is exactly what story 039's requirement
+// 1.6 was protecting against, and this test is the pin that says so out loud.
+func TestPublishedDistNames_TheApplierSideSiblingIsUnchanged(t *testing.T) {
+	overlay := t.TempDir()
+	const pkg = "app-misc/appliersibling"
+	createTestEbuildFile(t, overlay, pkg, "1.0.0")
+	// Deliberately no Manifest beside it.
+
+	_, err := publishedDistNames(overlay, pkg, "1.0.0")("")
+	if err == nil {
+		t.Fatal("the applier-side sibling answered a missing Manifest with no error; on the apply path the " +
+			"manifest step has just run, so an absent Manifest is that step not having done what it reported — " +
+			"and answering the option gate an empty list on this seam's own authority validates a bump against " +
+			"nothing (S040-R3.4)")
+	}
+	if !strings.Contains(err.Error(), "reading the published Manifest of "+pkg) {
+		t.Errorf("the sentence changed: %q\nstory 039's R5.3 kept it byte-identical and nothing in story 040 "+
+			"asks this seam to change at all", err.Error())
+	}
+}
