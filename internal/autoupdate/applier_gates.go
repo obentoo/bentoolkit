@@ -342,15 +342,20 @@ func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string
 				fmt.Errorf("naming the published package directory of %s: %w", pkg, err))
 		}
 		manifestPath := filepath.Join(published.pkgDir, "Manifest")
-		// Read once to prove the file is READABLE, because the parser below cannot
-		// say so: ParseManifestDistFilenames answers a missing or unreadable
-		// Manifest with an empty slice, which through this seam would be read as an
-		// answer rather than as the failure to produce one it is.
-		if _, err := os.ReadFile(manifestPath); err != nil { //nolint:gosec // the path is derived from the overlay this applier was constructed for
+		// The parser asked here is the one that can SAY the file was unreadable.
+		// ParseManifestDistFilenames answers a missing or unreadable Manifest with
+		// an empty slice, which through this seam would be read as an answer rather
+		// than as the failure to produce one it is; recovering the distinction used
+		// to mean reading the file once to prove it readable and then parsing it
+		// again, here and in cmd/bentoo's publishedManifestDistNames alike.
+		// ReadManifestDistFilenames reports it from a single read (S039-R5.1), and
+		// the sentence below is unchanged to the byte (S039-R5.3).
+		names, err := distfiles.ReadManifestDistFilenames(manifestPath)
+		if err != nil {
 			return nil, namingFailure(pkg, version,
 				fmt.Errorf("reading the published Manifest of %s: %w", pkg, err))
 		}
-		return distfiles.ParseManifestDistFilenames(manifestPath), nil
+		return names, nil
 	}
 }
 

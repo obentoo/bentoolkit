@@ -244,6 +244,29 @@ func (o Options) distNames() distNameLookup {
 // Inventing an error return would replace that reported outcome with a different
 // sentence for every package directory that has no Manifest, which is every
 // staged tree and precisely the case this story is about.
+//
+// # Staying out of the unification is a REQUIREMENT, not an oversight (S039-R5.4)
+//
+// Story 039 sub-task 5.1 unified the other two readers of "which archives does
+// this Manifest name" — cmd/bentoo's publishedManifestDistNames and
+// internal/autoupdate's publishedDistNames — onto the error-returning sibling
+// distfiles.ReadManifestDistFilenames, because each was recovering the
+// missing-versus-empty distinction with a second read of its own. This is the
+// THIRD reader and it was deliberately left where it is.
+//
+// Those two answer about a PUBLISHED package directory, where a Manifest that
+// cannot be read is a fault. This one answers about a STAGED tree, where "no
+// Manifest" is the normal case: it is what a staged tree looks like, and it
+// already reaches the operator as an outcome of its own — selectDistfile's named
+// refusal, in the words story 031 shipped. Folding it in would exchange that
+// sentence for a different one on EVERY staged tree, which is every package this
+// seam is ever asked about, and would break S037-R1.2's byte-for-byte promise
+// along the way.
+//
+// So a later reader who "finishes" the merge is breaking a promise, not tidying
+// up. TestManifestDistNames_StaysOutOfTheUnification pins the signature at
+// compile time so the drift is caught where it happens, rather than in whatever
+// report starts reading differently.
 func manifestDistNames(pkgDir string) []string {
 	return distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 }

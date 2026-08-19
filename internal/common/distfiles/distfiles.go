@@ -519,29 +519,103 @@ func ResolveCache(userDir, distdir string) string {
 	return abs
 }
 
-// ParseManifestDistFilenames extracts the filenames listed on `DIST <name> ...`
-// lines of a Gentoo Manifest. Missing files, read errors, or malformed lines
-// yield an empty slice — prepopulation treats this as "nothing to reuse".
-func ParseManifestDistFilenames(manifestPath string) []string {
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, line := range strings.Split(string(data), "\n") {
+// eachManifestDistRecord walks a Manifest body and hands every DIST record to
+// visit, as the untouched line AND its whitespace-split fields.
+//
+// This is the ONE place in this package that decides what a DIST record is.
+// Three answers are derived from that decision — the archive names the option
+// gate looks for (ParseManifestDistFilenames), the same names plus whether the
+// file could be read at all (ReadManifestDistFilenames), and the records a
+// staged Manifest carries (ManifestDistLines) — and they read the same file for
+// the same run. A line that is a DIST record to one and not to another produces
+// a report that proves and denies the same file at once, so the test lives here
+// once rather than being spelled out beside each answer.
+//
+// The test is a field split rather than HasPrefix("DIST "), which is the more
+// permissive of the two shapes: an indented record, or one separated by a tab,
+// is still a record. The line is handed over UNTOUCHED because Portage verifies
+// these digests against the archive on disk, and a record that survived a
+// round-trip through some normalised form is a record the build gates fail on.
+func eachManifestDistRecord(body []byte, visit func(line string, fields []string)) {
+	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] != "DIST" {
+		if len(fields) == 0 || fields[0] != "DIST" {
 			continue
+		}
+		visit(line, fields)
+	}
+}
+
+// manifestDistFilenames names the archives a Manifest body declares.
+//
+// A record with no second field names nothing, so it is skipped rather than
+// reported: a Manifest is read here to learn which files to look for, and a
+// malformed line simply contributes no file.
+func manifestDistFilenames(body []byte) []string {
+	var names []string
+	eachManifestDistRecord(body, func(_ string, fields []string) {
+		if len(fields) < 2 {
+			return
 		}
 		name := fields[1]
 		// Reject path traversal: filenames in Manifest are basenames by
 		// spec — anything else means the file is malformed (or hostile).
 		if name == "" || strings.ContainsAny(name, "/\\") {
-			continue
+			return
 		}
 		names = append(names, name)
+	})
+	return names
+}
+
+// ParseManifestDistFilenames extracts the filenames listed on `DIST <name> ...`
+// lines of a Gentoo Manifest. Missing files, read errors, or malformed lines
+// yield an empty slice — prepopulation treats this as "nothing to reuse".
+func ParseManifestDistFilenames(manifestPath string) []string {
+	names, err := ReadManifestDistFilenames(manifestPath)
+	if err != nil {
+		return nil
 	}
 	return names
+}
+
+// ReadManifestDistFilenames is ParseManifestDistFilenames' error-returning
+// sibling: the same names for a file that can be read, and the read failure
+// itself for one that cannot.
+//
+// # Why it exists
+//
+// ParseManifestDistFilenames answers a missing or unreadable Manifest with nil,
+// and nil is indistinguishable from "readable, and declaring no DIST". That is
+// the right answer for prepopulation, which reads both as "nothing to reuse".
+// It is the wrong answer for a caller whose empty slice is AUTHORITATIVE — "I
+// looked, this package publishes no archive" (S037-D2) — because it lets "I
+// could not look" be reported as a fact nothing ever measured.
+//
+// Callers that needed the distinction were recovering it with a probe: read the
+// file once and discard the data, only to learn it was readable, then parse it
+// again. The distinction belongs at the source instead, and this is it.
+//
+// # Why one read rather than two
+//
+// A probe and a parse are two reads of a path, not two reads of a file. A
+// Manifest replaced between them answers one question about one file and another
+// about a different one, and the caller cannot tell that it happened. One read
+// cannot disagree with itself that way.
+//
+// # Why the error travels unwrapped
+//
+// Each call site already has a sentence of its own for this failure, kept to the
+// byte because operators read those reports (S039-R5.3, and namingFailure's own
+// wording from S037-R3.5). Adding a layer here would reword every one of them.
+// Unwrapped also keeps errors.Is(err, fs.ErrNotExist) answerable by callers that
+// distinguish an absent Manifest from an unreadable one.
+func ReadManifestDistFilenames(manifestPath string) ([]string, error) {
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	return manifestDistFilenames(body), nil
 }
 
 // PrepopulateFromCache symlinks each cached distfile into distdir so pkgdev
@@ -600,26 +674,13 @@ func PrepopulateFromCache(distdir, cacheDir string, names []string) int {
 // has answered, and its caller reads nil as "this describes nothing".
 func ManifestDistLines(body []byte) []byte {
 	var kept []string
-	for _, line := range strings.Split(string(body), "\n") {
-		// The SAME test ParseManifestDistFilenames applies, and that is the whole
-		// point of spelling it this way rather than as HasPrefix("DIST ").
-		//
-		// The two functions read the same file for the same run: one decides
-		// which archives the option gate looks for, the other decides which
-		// records the staged Manifest carries. A line that is a DIST record to
-		// one and not to the other — an indented one, or one separated by a tab —
-		// produces a report that proves and denies the same file at once. The
-		// field split is the more permissive of the two, so it is the one both
-		// converge on.
-		//
-		// The line is appended UNTOUCHED whatever its shape: Portage verifies
-		// these digests against the archive on disk, and a record that survived a
-		// round-trip through some normalised form is a record the build gates
-		// fail on.
-		if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "DIST" {
-			kept = append(kept, line)
-		}
-	}
+	// The SAME test the name-producing answers apply, because it is literally
+	// the same code: eachManifestDistRecord holds this package's one copy of the
+	// DIST-line grammar, and the reasons the two cannot be allowed to drift are
+	// recorded there. The line is kept UNTOUCHED, digests and spacing included.
+	eachManifestDistRecord(body, func(line string, _ []string) {
+		kept = append(kept, line)
+	})
 	if len(kept) == 0 {
 		return nil
 	}

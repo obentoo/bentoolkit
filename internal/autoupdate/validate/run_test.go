@@ -1957,3 +1957,29 @@ func TestRunPreparedBuild_TheNoDistfileClassStillCarriesTheResolvedDistdir(t *te
 			"that is the bypass R4.3 makes a checked property instead of a promise", found, distdir)
 	}
 }
+
+// TestManifestDistNames_StaysOutOfTheUnification is story 039's R5.4.
+//
+// manifestDistNames is a THIRD reader of "which archives does this Manifest
+// name", and it is deliberately excluded from sub-task 5.1's unification. Its
+// no-error signature is a byte-for-byte promise from story 037's requirement 1.2:
+// for a STAGED tree, "no Manifest" is the normal case and already has a reported
+// outcome of its own through selectDistfile's named refusal. Folding it into the
+// error-returning sibling would replace that outcome with a different sentence
+// for every staged tree — which is every package this seam is ever asked about.
+//
+// The exclusion is recorded as a requirement, and pinned here, so that a later
+// reader cannot "finish" the merge and break the promise while believing they
+// were tidying up.
+func TestManifestDistNames_StaysOutOfTheUnification(t *testing.T) {
+	// A package directory with no Manifest: exactly what a staged tree is.
+	if got := manifestDistNames(t.TempDir()); len(got) != 0 {
+		t.Errorf("manifestDistNames named %v for a directory with no Manifest", got)
+	}
+
+	// The signature itself is the promise, held at compile time. If a later
+	// change gives it an error return this line stops compiling, which is the
+	// point: the drift is caught where it happens rather than in whatever
+	// report starts reading differently.
+	var _ func(string) []string = manifestDistNames //nolint:staticcheck // QF1011: the explicit type IS the assertion
+}

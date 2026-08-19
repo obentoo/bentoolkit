@@ -405,16 +405,23 @@ func publishedManifestBytes(pkgDir string) ([]byte, error) {
 // with os.Stat in the distdir — so the shared parser in internal/common/distfiles
 // answers, and this command holds no second copy of the DIST-line grammar.
 //
-// The read below is not redundant with that parser: ParseManifestDistFilenames
-// answers a missing or unreadable Manifest with an empty slice, and through a
-// non-nil seam an empty slice is an ANSWER (S037-D2). Reading first is what keeps
-// "I could not look" from being reported as "this package publishes no archive".
+// The parser this calls is the ERROR-RETURNING one, and that is the whole
+// difference: ParseManifestDistFilenames answers a missing or unreadable Manifest
+// with an empty slice, and through a non-nil seam an empty slice is an ANSWER
+// (S037-D2). This command used to recover the distinction by reading the file
+// once and discarding the data, only to learn it was readable, then parsing it
+// again — as did internal/autoupdate's publishedDistNames, in its own copy of the
+// same work-around. ReadManifestDistFilenames reports the read failure at the
+// source instead, from a single read (S039-R5.1), so what keeps "I could not
+// look" from being reported as "this package publishes no archive" is now the
+// parser's answer rather than a probe above it. The sentence below is unchanged
+// to the byte (S039-R5.3): the mechanism moved, the report did not.
 func publishedManifestDistNames(pkgDir string) ([]string, error) {
-	path := publishedManifestPath(pkgDir)
-	if _, err := os.ReadFile(path); err != nil { //nolint:gosec // the path is the package directory the runner is walking, joined with a fixed filename
+	names, err := distfiles.ReadManifestDistFilenames(publishedManifestPath(pkgDir))
+	if err != nil {
 		return nil, fmt.Errorf("reading the published Manifest of %s, to name the archives the option gate looks for: %w", pkgDir, err)
 	}
-	return distfiles.ParseManifestDistFilenames(path), nil
+	return names, nil
 }
 
 // publishedManifestPath is the one place this command spells out where a package
