@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,17 +348,49 @@ func runValidate(cmd *cobra.Command, args []string) {
 // files out of a synthetic tree, and it is what the retired manifestDistLines
 // did before the seam replaced it.
 //
-// # A Manifest that cannot be read is an ERROR, never empty bytes
+// # A MISSING Manifest is an answer; a Manifest that cannot be READ is a fault
 //
-// A non-nil seam is a caller taking responsibility for the answer, so an empty
-// result is AUTHORITATIVE — "I looked, and this package publishes nothing"
-// (S037-D2). A package whose Manifest could not be opened has said no such
-// thing. The error travels instead, and validate renders it as a build gate
-// reported SKIPPED carrying these words verbatim (S037-R4.4) — which is why the
-// sentence names what was attempted and the directory needed to reproduce it,
-// rather than only what the operating system said.
+// The two used to be one branch, and collapsing them kept an entire class of
+// package out of every build gate. Under thin-manifests a Manifest holds DIST
+// lines and NOTHING else, so a package with no distfile has no Manifest file at
+// all — not an empty one. That is the normal, expected state of a very common
+// shape: every acct-group/*, every acct-user/* and every virtual/*, and in
+// ::bentoo today net-dns/bind-tools, app-eselect/eselect-nodejs and
+// sys-kernel/linux-firmware. Reporting their normal state as a fault made the
+// prepared build read "a Manifest was expected and its production failed", which
+// is a reported skip — so those packages were never measured, and nothing inside
+// validate could reach them, because the answer was decided here.
+//
+// So an absent file returns NO CONTENT AND NO ERROR: the seam's third answer,
+// which validate answers by staging an empty Manifest and letting Portage
+// discriminate (prepareStagedManifest, validate/run.go). Measured rather than
+// assumed — with an empty Manifest present Portage runs the phases of an ebuild
+// with no SRC_URI, and refuses one WITH a SRC_URI at digest verification before
+// attempting any fetch (.draft/d4-portage-evidence.md).
+//
+// A Manifest that EXISTS and could not be opened keeps travelling as an error,
+// with the sentence it has always carried. A non-nil seam is a caller taking
+// responsibility for the answer, so no content is AUTHORITATIVE — "I looked, and
+// this package publishes nothing" (S037-D2) — and a package whose Manifest was
+// unreadable has said no such thing. Handing that back as the no-distfile class
+// would stage an empty Manifest over a package that HAS digests, and the gate
+// would then report on a candidate nobody could describe. That is D6's
+// conflation exactly: "I could not look" and "there is nothing there" are two
+// answers, and a report that merges them denies what it also proves.
+//
+// The distinction is read off the error VALUE, with errors.Is. A stat before the
+// read would be a race — the file can vanish between the two calls — and matching
+// on the message text would break the moment the operating system reworded it.
+//
+// validate renders the error case as a build gate reported SKIPPED carrying
+// these words verbatim (S037-R4.4), which is why the sentence names what was
+// attempted and the directory needed to reproduce it, rather than only what the
+// operating system said.
 func publishedManifestBytes(pkgDir string) ([]byte, error) {
 	body, err := os.ReadFile(publishedManifestPath(pkgDir)) //nolint:gosec // the path is the package directory the runner is walking, joined with a fixed filename
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading the published Manifest of %s, to give its staged copy the digests Portage verifies: %w", pkgDir, err)
 	}

@@ -659,6 +659,12 @@ type preparedBuild struct {
 // plus the run-level reason the depth went unreached — empty when the gates
 // themselves answered, because each then carries its own.
 //
+// ONE class breaks that habit on purpose. A candidate that needs no distfile
+// reaches the gates AND carries a reason (R4.4): "the gates ran" is not the
+// whole answer there, because which class the candidate was placed in — and why
+// its staged tree carries an empty Manifest — is the half an operator acts on.
+// See prepareStagedManifest.
+//
 // # Why this is a function of its own (R1.5)
 //
 // Building a candidate is ONE operation with two halves, and only the lower half
@@ -790,7 +796,15 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		return out
 	}
 
-	if err := materializeStagedManifest(stagedRoot, req.target, req.manifest); err != nil {
+	// The seam has THREE answers and only two of them are faults; the third is a
+	// candidate that legitimately needs no distfile (R4.1). It is settled BEFORE
+	// materializeStagedManifest is reached rather than by softening it (R4.2),
+	// and classReason is how the result says which class was chosen (R4.4).
+	//
+	// It sits at exactly the point the real Manifest was written at, because the
+	// order above is the contract: stage, then the Manifest, then the gates.
+	classReason, err := prepareStagedManifest(stagedRoot, req.target, req.manifest)
+	if err != nil {
 		// A tree that was staged and then could not be given its Manifest is NOT
 		// a tree nobody prepared: it exists, it is where anyone diagnosing this
 		// looks, and it stays on the result. The fault is a reported skip and
@@ -876,7 +890,13 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		out.GatesErr = err
 		return out
 	}
-	return PreparedBuild{StagedRoot: stagedRoot, Gates: gates}
+	// classReason is empty for every candidate but the no-distfile class, so this
+	// is the same empty Reason every gates-answered run has always carried. The
+	// two branches above return BEFORE it: a host that cannot build and a request
+	// that could not be started are more specific answers than the class, and
+	// overwriting either with "no Manifest was required" would bury the fact the
+	// operator has to act on.
+	return PreparedBuild{StagedRoot: stagedRoot, Gates: gates, Reason: classReason}
 }
 
 // preparedBuildGates is runPreparedBuildGates, held by a package-level variable
@@ -1170,6 +1190,114 @@ func materializeStagedManifest(stagedRoot string, target ebuildTarget, manifest 
 			target.atom, target.version, path, err)
 	}
 	return nil
+}
+
+// prepareStagedManifest gives the staged tree the Manifest a build gate needs,
+// and reports which of THREE answers the seam gave — because a candidate that
+// needs no distfile is not a candidate whose Manifest failed to arrive (R4.1).
+//
+// It returns the reason naming that class when the third answer is taken, empty
+// otherwise, and an error for the two faults — which stay materializeStagedManifest's
+// own sentences, produced by calling it rather than by restating them here.
+//
+// # Why Portage decides the class, and no heuristic here does
+//
+// MEASURED on a host before this branch existed, and recorded because both
+// obvious alternatives look reasonable until they are run:
+//
+//   - Portage answers NOTHING about an ebuild in a thin-manifest tree that has
+//     no Manifest FILE. `portageq metadata / ebuild <cpv> SRC_URI` and
+//     `ebuild <path> depend` both stop at "Manifest not found". So the class
+//     cannot be asked of Portage BEFORE a Manifest exists: reading "this needs
+//     no distfile" out of the ebuild's metadata is not a probe that can run.
+//   - With an EMPTY Manifest present, Portage answers, and answers correctly. An
+//     ebuild with no SRC_URI passes the fetch and verify checks and its phases
+//     run; an ebuild WITH a SRC_URI dies at "VERIFY FAILED! Reason: Insufficient
+//     data for checksum verification", exit 1.
+//   - That refusal happens BEFORE any fetch is attempted. Measured with
+//     SRC_URI="http://127.0.0.1:9/..." — a port where nothing listens — and no
+//     connection error appeared and the distdir stayed empty. This path CANNOT
+//     reach the network on a candidate whose digests are unknown, and it is
+//     Portage's own ordering that guarantees it, not a rule this package keeps.
+//
+// So the empty file is not a guess standing in for digests: it is the smallest
+// input that makes Portage answer the question at all, and Portage then
+// discriminates. Nothing here scans SRC_URI, and nothing here reads the inherit
+// list.
+//
+// # The seam is asked at most once, and only when the tree lacks a Manifest
+//
+// Both rules are materializeStagedManifest's, and both are kept by ORDER rather
+// than by a second copy: the stat below is its own guard's predicate, and the
+// two branches that take it hand the ORIGINAL lookup straight to it. When the
+// seam is asked, its answer is memoised into a lookup of its own, so a producer
+// that costs a subprocess is not paid for twice — and a producer that could
+// answer differently the second time cannot classify one way and write another.
+func prepareStagedManifest(stagedRoot string, target ebuildTarget, manifest stagedManifestLookup) (string, error) {
+	path, err := stagedManifestPath(stagedRoot, target)
+	if err != nil {
+		// Unreachable after a successful Stage, which split the same atom. Handed
+		// on rather than answered here, so a malformed atom keeps producing the
+		// one sentence it has always produced.
+		return "", materializeStagedManifest(stagedRoot, target, manifest)
+	}
+	if _, err := os.Stat(path); err == nil {
+		// A staged tree that already carries a Manifest is left alone AND the
+		// seam is not asked at all — the apply path's `pkgdev manifest` wrote it,
+		// and classifying a candidate whose Manifest is already on disk would
+		// turn a run that succeeds today into a skip the moment the published
+		// tree has no Manifest to read.
+		return "", materializeStagedManifest(stagedRoot, target, manifest)
+	}
+
+	body, prodErr := manifest(target.dir)
+	if prodErr == nil && len(body) == 0 {
+		return emptyStagedManifest(path, target)
+	}
+	// Either of the two faults, or real content: all three are materializeStagedManifest's
+	// to answer, and it is handed the answer ALREADY IN HAND rather than the
+	// producer, so the seam is asked exactly once per staged tree.
+	answered := func(string) ([]byte, error) { return body, prodErr }
+	return "", materializeStagedManifest(stagedRoot, target, answered)
+}
+
+// stagedManifestPath names the file Portage reads a package's digests from
+// inside a staged tree.
+//
+// It is materializeStagedManifest's own join, held here for the ONE caller that
+// needs the path without writing through that function. The duplication is
+// deliberate and narrow: materializeStagedManifest is frozen by R4.2 — a test
+// asserts both of its errors still fire — so it keeps its inline copy rather
+// than being edited to call this.
+func stagedManifestPath(stagedRoot string, target ebuildTarget) (string, error) {
+	category, pkg, err := splitStagedAtom(target.atom)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stagedRoot, category, pkg, "Manifest"), nil
+}
+
+// emptyStagedManifest writes the third answer's Manifest and states the class
+// (R4.4).
+//
+// The file is EMPTY and 0600 — the same path and the same stagedFileMode the
+// real one would have had, because the difference between this class and a
+// digested one belongs in the file's contents, not in where it lands.
+//
+// The reason deliberately does NOT reuse the expected-Manifest fault's sentence.
+// Telling an operator that a metapackage "would describe no archive and Portage
+// would refuse the candidate before any phase ran" sends them to regenerate a
+// Manifest that was never supposed to exist.
+func emptyStagedManifest(path string, target ebuildTarget) (string, error) {
+	if err := os.WriteFile(path, nil, stagedFileMode); err != nil {
+		return "", fmt.Errorf("the empty Manifest placing %s-%s in the no-distfile class could not be written "+
+			"to %s, so the staged tree carries no Manifest file and Portage answers nothing about the ebuild: %v",
+			target.atom, target.version, path, err)
+	}
+	return fmt.Sprintf("no Manifest content was supplied for %s-%s, so it is taken as a candidate that requires "+
+		"no distfile: the staged tree at %s carries an empty Manifest, which is what lets Portage answer about "+
+		"the ebuild at all, and a candidate that does require an archive after all is refused at digest "+
+		"verification — before any fetch is attempted", target.atom, target.version, path), nil
 }
 
 // gateRungs maps a gate back to the rung of the ladder its PASS proves. It is

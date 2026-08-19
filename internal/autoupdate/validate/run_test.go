@@ -1677,3 +1677,283 @@ func TestRunPreparedBuild_ShallowDepthStagesNothing(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 4.1 — R4, R4.1, R4.2, R4.4.
+//
+// materializeStagedManifest errors hard in two cases: content that could not be
+// produced, and content that came back empty. The second is correct for the case
+// it was written for — a Manifest WAS expected and nothing arrived — but with a
+// thin tree, a git-r3 ebuild or a metapackage legitimately has no Manifest,
+// because there is no distfile to digest. So this whole class of package has
+// never been exercised by a build gate: it became skippedBuildGates every time.
+//
+// # Why Portage decides the class, and not a heuristic here
+//
+// Measured on this host before the change (see .draft evidence): Portage
+// refuses to answer ANY question about an ebuild in a thin-manifest tree with no
+// Manifest FILE — `portageq metadata` and `ebuild <path> depend` both stop at
+// "Manifest not found". So the class cannot be asked of Portage before a
+// Manifest exists, and both obvious probes are dead.
+//
+// With an EMPTY Manifest present, Portage answers, and correctly:
+//
+//   - no SRC_URI      → the fetch and verify checks pass, the build phases run
+//   - SRC_URI present → "VERIFY FAILED! Insufficient data for checksum
+//     verification", and NO FETCH IS ATTEMPTED — measured with SRC_URI pointing
+//     at 127.0.0.1:9, where no connection error appeared and the distdir stayed
+//     empty
+//
+// That last fact is R4.3's whole concern, answered by Portage's own ordering
+// rather than by a rule this package would have to keep right. So the third
+// answer is simply "the producer supplied no content", and the response is to
+// write an empty Manifest and let the gates run.
+//
+// materializeStagedManifest is NOT taught to tolerate emptiness. The empty case
+// is decided BEFORE it is called, so both of its hard errors stay exactly as
+// they are (R4.2).
+// ---------------------------------------------------------------------------
+
+// TestRunPreparedBuild_ACandidateNeedingNoDistfileReachesTheGates is R4.1.
+//
+// The fixture puts `emerge` on PATH and leaves `ebuild` off it, the same trick
+// TestRun_DepthAboveOptionsExecutesTheBuildGates uses: the dependency pre-check
+// can answer, so the run gets past it, and `ebuild`'s absence is then
+// RunBuildGates' OWN sentence — produced at exactly one place in this package,
+// which is what makes it usable as proof of arrival.
+func TestRunPreparedBuild_ACandidateNeedingNoDistfileReachesTheGates(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, err := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the fixture ebuild: %v", err)
+	}
+
+	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
+		Overlay:     overlay,
+		StagingRoot: t.TempDir(),
+		Atom:        "media-plugins/gst-plugins-qt6",
+		Version:     "1.28.6",
+		PackageDir:  pkgDir,
+		Ebuild:      body,
+		Depth:       DepthConfigure,
+		// The third answer: the producer ran, and this candidate needs no
+		// Manifest. Not an error, and not "I produced nothing by accident".
+		StagedManifest: func(string) ([]byte, error) { return nil, nil },
+	})
+
+	if result.StagedRoot == "" {
+		t.Fatal("no tree was staged for a candidate that needs no Manifest; the class is supposed to REACH " +
+			"the gates, and a gate cannot run in a tree that does not exist (R4.1)")
+	}
+	if len(result.Gates) == 0 {
+		t.Fatal("the run produced no gate at all")
+	}
+
+	// The staged tree carries an empty Manifest: present, so Portage answers at
+	// all, and empty, so it refuses at the digest check if this candidate did
+	// require an archive after all.
+	staged := filepath.Join(result.StagedRoot, "media-plugins", "gst-plugins-qt6", "Manifest")
+	info, statErr := os.Stat(staged)
+	if statErr != nil {
+		t.Fatalf("the staged tree carries no Manifest file (%v); without one Portage refuses to answer any "+
+			"question about the ebuild — it stops at \"Manifest not found\" before every phase", statErr)
+	}
+	if info.Size() != 0 {
+		t.Errorf("the staged Manifest is %d bytes, want empty; content nobody produced would be a guess, and "+
+			"a guessed digest is worse than none", info.Size())
+	}
+
+	for _, gate := range []string{GatePatches, GateConfigure} {
+		g := gateOf(t, EbuildResult{Gates: result.Gates}, gate)
+		if !strings.Contains(g.Reason, "ebuild was not found on PATH") {
+			t.Errorf("the %s gate does not carry RunBuildGates' own answer (%q); this fixture leaves `ebuild` "+
+				"off PATH precisely so that arriving inside RunBuildGates is the only way to produce that "+
+				"sentence — anything else means the gates were skipped for want of a Manifest again (R4.1)",
+				gate, g.Reason)
+		}
+	}
+}
+
+// TestRunPreparedBuild_TheReasonNamesTheClass is R4.4. An operator reading a
+// gate outcome for a metapackage has to be able to tell "this candidate needs no
+// archive" from "somebody forgot to generate the Manifest", and the two produce
+// very different next actions.
+func TestRunPreparedBuild_TheReasonNamesTheClass(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, _ := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+
+	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
+		Overlay:        overlay,
+		StagingRoot:    t.TempDir(),
+		Atom:           "media-plugins/gst-plugins-qt6",
+		Version:        "1.28.6",
+		PackageDir:     pkgDir,
+		Ebuild:         body,
+		Depth:          DepthConfigure,
+		StagedManifest: func(string) ([]byte, error) { return nil, nil },
+	})
+
+	if result.Reason == "" {
+		t.Fatal("the run states no reason for the class it placed this candidate in (R4.4)")
+	}
+	if !strings.Contains(result.Reason, "Manifest") {
+		t.Errorf("the reason %q does not name the Manifest; the whole point of the class is what was NOT "+
+			"required, and a reader cannot infer that from silence (R4.4)", result.Reason)
+	}
+	// The class placed, not the old fault. "the Manifest content supplied is
+	// empty, so the staged tree would describe no archive and Portage would
+	// refuse the candidate before any phase ran" is the sentence for a Manifest
+	// that WAS expected — reusing it here would tell an operator to go and fix
+	// a metapackage that is perfectly correct.
+	if strings.Contains(result.Reason, "would refuse the candidate before any phase ran") {
+		t.Errorf("the reason %q is the EXPECTED-Manifest fault's own sentence; a candidate that legitimately "+
+			"needs no archive is not a candidate whose Manifest failed to arrive (R4.2, R4.4)", result.Reason)
+	}
+	if !strings.Contains(result.Reason, "no ") && !strings.Contains(result.Reason, "not ") {
+		t.Errorf("the reason %q does not say that no Manifest was REQUIRED; naming the class means saying "+
+			"which one, and this reads as a report about a Manifest that should have been there", result.Reason)
+	}
+}
+
+// TestMaterializeStagedManifest_KeepsBothHardErrors is R4.2 and Unchanged
+// Behavior 6, asked of the function directly.
+//
+// Widening what counts as legitimately Manifest-less must leave this function
+// untouched. Relaxing its errors would make a real production failure
+// indistinguishable from a legitimate absence, which is the same conflation D6
+// is about.
+func TestMaterializeStagedManifest_KeepsBothHardErrors(t *testing.T) {
+	target := ebuildTarget{
+		atom:    "media-plugins/gst-plugins-qt6",
+		version: "1.28.6",
+		dir:     t.TempDir(),
+	}
+	staged := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "media-plugins", "gst-plugins-qt6"), 0o750); err != nil {
+			t.Fatalf("laying out the staged tree: %v", err)
+		}
+		return root
+	}
+
+	t.Run("production failed", func(t *testing.T) {
+		err := materializeStagedManifest(staged(t), target, func(string) ([]byte, error) {
+			return nil, errors.New("pkgdev manifest: no digest could be computed")
+		})
+		if err == nil {
+			t.Fatal("a Manifest whose production FAILED was accepted; the bytes were never made, and that " +
+				"is a different fault from a candidate that needs none")
+		}
+		if !strings.Contains(err.Error(), "could not be produced") {
+			t.Errorf("the error %q does not say the content was never made", err)
+		}
+	})
+
+	t.Run("production returned empty", func(t *testing.T) {
+		err := materializeStagedManifest(staged(t), target, func(string) ([]byte, error) {
+			return nil, nil
+		})
+		if err == nil {
+			t.Fatal("materializeStagedManifest accepted empty content; its two errors are correct for the " +
+				"case they were written for — a Manifest WAS expected — and the new class must be decided " +
+				"BEFORE this function is called, not by softening it (R4.2)")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 4.2 — R4, R4.3.
+//
+// R4.3 says the ordering is a requirement and not a sequencing preference: "a
+// Manifest-less package built without an enforced DISTDIR reaches the network",
+// so R4.1 must not take effect unless R3.1 holds. It asks for that to be a
+// CHECKED PROPERTY, because "we did task 3 first" is not a property of the code
+// — a later refactor can reorder what a plan cannot.
+//
+// # The premise was measured, and it is not what the story assumed
+//
+// A Manifest-less candidate does NOT reach the network. Measured on this host
+// (see .draft/d4-portage-evidence.md): with an empty Manifest and a SRC_URI
+// pointing at 127.0.0.1:9, where nothing listens, Portage refused at
+// "VERIFY FAILED! Insufficient data for checksum verification" — no connection
+// error appeared and the distdir stayed empty. The digest check runs BEFORE any
+// fetch, so the class cannot fetch whatever DISTDIR says.
+//
+// Refusing to build the class without a resolved distdir would therefore buy no
+// safety and would cost the capability outright: `overlay compare --realign`
+// registers no --distdir flag, so its distdir is legitimately empty (R3.2), and
+// a guard keyed on "no distdir, no build" would switch R4.1 off on the entire
+// realign path — the path story 039 exists to fix.
+//
+// So the property worth checking is the one that is actually load-bearing, and
+// it is the one R4.3 means by "R3.1 holds": THIS CLASS IS NOT A HOLE IN TASK 3'S
+// MECHANISM. A candidate placed in the no-distfile class carries the resolved
+// distdir into the build child exactly like every other candidate. A refactor
+// that gave the class its own path to RunBuildGates would reintroduce the
+// bypass, and this test is what fails when it does.
+// ---------------------------------------------------------------------------
+
+// TestRunPreparedBuild_TheNoDistfileClassStillCarriesTheResolvedDistdir is R4.3.
+func TestRunPreparedBuild_TheNoDistfileClassStillCarriesTheResolvedDistdir(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	distdir := t.TempDir()
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, err := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the fixture ebuild: %v", err)
+	}
+
+	spy := &buildSpy{}
+	deps := buildSeam(spy, configureOKLog, nil)
+	// The host probe must answer "satisfied" or the run stops in front of the
+	// build gates and this test would measure nothing.
+	deps.ExecCommand = func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		spy.spawns++
+		spy.names = append(spy.names, name)
+		spy.argv = append(spy.argv, arg)
+		cmd := exec.CommandContext(ctx, "true")
+		spy.lastCmd = cmd
+		return cmd
+	}
+
+	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
+		Overlay:     overlay,
+		StagingRoot: t.TempDir(),
+		Atom:        "media-plugins/gst-plugins-qt6",
+		Version:     "1.28.6",
+		PackageDir:  pkgDir,
+		Ebuild:      body,
+		Depth:       DepthConfigure,
+		Distdir:     distdir,
+		// The no-distfile class: the producer ran and supplied no content.
+		StagedManifest: func(string) ([]byte, error) { return nil, nil },
+		Deps:           deps,
+	})
+
+	if len(result.Gates) == 0 {
+		t.Fatal("the run produced no gate; the class is supposed to reach the build gates")
+	}
+	if spy.envAtSpawn == nil {
+		t.Fatalf("no build child was ever spawned for a candidate in the no-distfile class (reason %q); "+
+			"R4.1 puts this class under a build gate, and a class that never spawns is still unmeasured",
+			result.Reason)
+	}
+
+	var found []string
+	for _, kv := range spy.envAtSpawn {
+		if strings.HasPrefix(kv, "DISTDIR=") {
+			found = append(found, kv)
+		}
+	}
+	if len(found) != 1 || found[0] != "DISTDIR="+distdir {
+		t.Errorf("the no-distfile class reached the build child with %v, want exactly [DISTDIR=%s]; this "+
+			"class must not be a second path to RunBuildGates that story 039's task 3 does not cover — "+
+			"that is the bypass R4.3 makes a checked property instead of a promise", found, distdir)
+	}
+}
