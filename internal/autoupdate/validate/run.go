@@ -575,7 +575,13 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		manifestSupplied: supplied,
 		requireIsolation: opts.RequireIsolation,
 		logDir:           opts.LogDir,
-		deps:             BuildDeps{},
+		// The run's own --distdir, unresolved: Options.Distdir is what the
+		// operator typed, and empty means the run named no directory — which the
+		// build gate answers by setting no DISTDIR at all and leaving Portage its
+		// own configuration, the same fall-through distfiles.Locate applies to
+		// the static gate (S039-R3.1, R3.2).
+		distdir: opts.Distdir,
+		deps:    BuildDeps{},
 	})
 
 	return r.Gates, r.Reason
@@ -630,6 +636,17 @@ type preparedBuild struct {
 	// logDir is the whole transcript, kept for whoever has to go past the summary.
 	// Empty is still accepted and the gate's reason still says so.
 	logDir string
+
+	// distdir is the directory the build reads its archives from, carried into
+	// BuildRequest.Distdir and set on the child as DISTDIR (S039-R3.1).
+	//
+	// It is CARRIED and never resolved here, like every other field of this
+	// struct: the two entry points answer it differently — Run has the run's own
+	// --distdir, realign has whatever the command layer resolved for it — and a
+	// core that picked one would be selecting, which is the half its callers
+	// legitimately do for themselves. Empty stays empty all the way down and sets
+	// nothing (R3.2).
+	distdir string
 
 	// deps is the command seam RunBuildGates and the host probe run through.
 	// BuildDeps{} — the zero value, meaning the real commands — is what every
@@ -821,6 +838,7 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		Depth:            req.depth,
 		RequireIsolation: req.requireIsolation,
 		LogDir:           req.logDir,
+		Distdir:          req.distdir,
 	}, req.deps)
 	if err != nil {
 		// AN INTERRUPTION IS NOT A REQUEST THAT COULD NOT BE STARTED, and this
@@ -931,6 +949,15 @@ type PreparedBuildRequest struct {
 	// (R1.4). Empty is still accepted and the gate's reason still says so.
 	LogDir string
 
+	// Distdir is the directory the build reads its archives from, set on the
+	// child as DISTDIR (S039-R3.1). It is the caller's answer and never one
+	// derived here — see BuildRequest.Distdir for why it travels as a field
+	// instead of through the environment.
+	//
+	// Empty sets nothing and invents nothing (S039-R3.2), which is the same
+	// answer a caller that never knew about this field gets.
+	Distdir string
+
 	// Deps is the command seam RunBuildGates and the host probe run through. Its
 	// zero value means the real commands, which is what every production caller
 	// passes.
@@ -1010,6 +1037,7 @@ func RunPreparedBuild(ctx context.Context, req PreparedBuildRequest) PreparedBui
 		manifestSupplied: supplied,
 		requireIsolation: req.RequireIsolation,
 		logDir:           req.LogDir,
+		distdir:          req.Distdir,
 		deps:             req.Deps,
 	})
 }

@@ -188,6 +188,20 @@ type Options struct {
 	// case where the summary is not enough (R1.4).
 	LogDir string
 
+	// Distdir is the directory the build reads its archives from, carried into
+	// the prepared build and set on the child as DISTDIR (S039-R3.1).
+	//
+	// Carried, never resolved: this package adds no rule of its own about where
+	// archives come from, exactly as it adds none about depth or isolation. A
+	// realignment is a SAME-VERSION edit, so no fetch of its own has produced an
+	// archive — whatever directory already holds the release's tarball is the
+	// command layer's answer to give.
+	//
+	// Empty sets nothing and invents nothing (S039-R3.2): the build then reads
+	// the host's own configured DISTDIR, which is what every realign proof did
+	// before this field existed.
+	Distdir string
+
 	// Deps are the process- and host-level seams the build gates run through,
 	// passed to RunBuildGates untouched. Its zero value means "use the real
 	// thing" — every field is normalised by validate itself — so a caller with
@@ -289,6 +303,7 @@ func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error) {
 		StagedManifest:   opts.StagedManifest,
 		RequireIsolation: opts.RequireIsolation,
 		LogDir:           opts.LogDir,
+		Distdir:          opts.Distdir,
 		Deps:             opts.Deps,
 	})
 

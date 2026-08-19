@@ -610,6 +610,17 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 		Depth:            depth,
 		RequireIsolation: a.requireIsolation,
 		LogDir:           a.logsDir,
+		// The SAME directory the static gate reads, resolved by the same helper
+		// (S039-R3.1). The question staticGateDistdir answers is "which distdir
+		// holds this apply's archive" — the run's own fetch first, the shared one
+		// when that fetch brought nothing back — and the build has exactly that
+		// question: the manifest step downloaded the candidate's tarball into the
+		// private directory, so a build pointed anywhere else would fetch it a
+		// second time, or fail with the archive already on disk a directory away.
+		// Two resolvers here would be the same decision made twice, and the first
+		// run where they disagreed would gate a tarball the option gate never
+		// read.
+		Distdir: a.staticGateDistdir(cand),
 	}
 	gates, err := validate.RunBuildGates(a.ctx, req, deps)
 	if err != nil {

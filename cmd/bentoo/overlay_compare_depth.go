@@ -457,6 +457,20 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			StagedManifest:   publishedManifestBytes,
 			RequireIsolation: requireIsolation,
 			LogDir:           logDir,
+			// Distdir is left EMPTY, and that is a decision rather than an
+			// oversight (S039-R3.2). `overlay compare` registers no --distdir
+			// flag, and the sibling command's answer comes from exactly that
+			// flag and from nowhere else — validate.Options.Distdir states it
+			// outright: there is no configured rung between the flag and the
+			// host, "the command passes --distdir here or nothing". So there is
+			// no resolved directory to carry here, and the two ways to pretend
+			// otherwise are both worse than empty: a new flag is a CLI surface
+			// this sub-task was told not to invent, and reading some other key
+			// would make `overlay compare --depth` build against a directory
+			// `overlay validate --depth` would not have used. Empty sets no
+			// DISTDIR on the child, so the build reads the host's own
+			// configuration — which is what every realign proof has always done.
+			//
 			// Deps is left at its zero value, which validate normalises into the
 			// real process and host seams. There is nothing to substitute here: a
 			// test never reaches this line, because realignProve is the seam.
