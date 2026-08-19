@@ -516,6 +516,27 @@ func presentArchive(distdir, manifestPath, version string) string {
 	return found
 }
 
+// hostDeclinedGates is validate.SkippedGates with the cause stamped on every
+// gate: THIS HOST could not answer (S039-R2.1, S033-R3.12).
+//
+// The cause is data rather than prose because validate.PromotionDecision now
+// REFUSES a bump whose every deciding gate declined over the CANDIDATE, and
+// these two skips are the other side of that rule — the machine is missing
+// something, the ebuild is not. Untagged they would read as "cause unrecorded",
+// which keeps today's answer today; stating it is what keeps the applier right
+// if the unrecorded default is ever tightened.
+//
+// It stamps the field rather than calling a validate-side constructor because
+// SkippedGates' exported signature is fixed: outside callers hold it, and which
+// gates a depth owes an outcome for must keep having exactly one definition.
+func hostDeclinedGates(depth validate.Depth, reason string) []validate.GateResult {
+	gates := validate.SkippedGates(depth, reason)
+	for i := range gates {
+		gates[i].Declined = validate.DeclineHost
+	}
+	return gates
+}
+
 // runBuildGates runs the gates that need the sources unpacked — patches,
 // configure, compile — at the selected depth, and reports one outcome per gate
 // the depth covers (R3, R5, R6).
@@ -554,14 +575,24 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 	case err != nil:
 		// UNDETERMINED. The caller still skips, but must NOT name a missing
 		// dependency, because it does not know of one (R6.2).
-		return validate.SkippedGates(depth, fmt.Sprintf(
+		//
+		// Declined = host (S039-R2.1). Without it PromotionDecision would read
+		// this all-SKIPPED list as a candidate nothing measured and REFUSE the
+		// bump — the flat reading R3.12 exists to prevent. The probe failing to
+		// answer is this machine's problem, not the ebuild's.
+		return hostDeclinedGates(depth, fmt.Sprintf(
 			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
 			pkg, version, err)), nil
 	case !satisfied:
 		// R5.3/R3.12: determined and unsatisfied. The atoms are named because
 		// they are the operator's next action, and the promotion report says the
 		// depth this bump therefore did not reach.
-		return validate.SkippedGates(depth, fmt.Sprintf(
+		//
+		// Declined = host, and this is R3.12's own case: the operator's next
+		// action is `emerge` on THIS BOX. Refusing here would make
+		// `overlay autoupdate --apply` inert on any workstation that does not
+		// already hold the bump's build dependencies, which is most of them.
+		return hostDeclinedGates(depth, fmt.Sprintf(
 			"this host does not hold the build dependencies of %s-%s, so no build phase was run; install %s to validate it here",
 			pkg, version, strings.Join(missing, ", "))), nil
 	}

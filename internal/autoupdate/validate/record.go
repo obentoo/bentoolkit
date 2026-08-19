@@ -220,17 +220,47 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 }
 
 // Proves answers R10.1's half of the promotion condition: does this record show
-// every gate PASS or SKIPPED at a depth not below want. The string explains the
-// answer in BOTH directions, because a promotion that cannot say why it skipped
-// the gates is indistinguishable from a bump nobody validated.
+// a candidate that was actually MEASURED, at a depth not below want. The string
+// explains the answer in BOTH directions, because a promotion that cannot say
+// why it skipped the gates is indistinguishable from a bump nobody validated.
 //
-// # SKIPPED counts, and PASS-only would be the bug
+// # A record whose deciding gates ALL reported SKIPPED is not a proof
+//
+// This used to ask "every gate PASS or SKIPPED", which is the same vacuity
+// S039-R2.1 denies in PromotionDecision — arriving here one reader later and by
+// a different door. A run that staged a tree and then stopped before any gate
+// read it (a Manifest that could not be produced, an interrupt) records the
+// depth it REQUESTED plus a full list of SKIPPED gates, and this accepted that
+// as evidence; the reuse path it gates consults neither refuseUnproved nor
+// PromotionDecision, so nothing downstream would have caught it and the bump
+// published one run later instead of not at all. At least one deciding gate
+// must now report PASS (S039-R2.4).
+//
+// # Why this keys on the OUTCOME where PromotionDecision keys on the CAUSE
+//
+// PromotionDecision refuses only when a skip named the CANDIDATE
+// (GateResult.Declined == DeclineCandidate), so that a host which simply cannot
+// build still promotes (S033-R3.12). The two rules must NOT be unified, for two
+// reasons:
+//
+//   - Declined is `json:"-"`. It does not survive this record's round-trip
+//     through disk, so every gate of a RELOADED record reads DeclineUnrecorded.
+//     Keyed on the cause, the refusal here would be a rule that silently never
+//     fires.
+//   - A wrong refusal does not cost the same on the two sides. There it STOPS
+//     AN APPLY on any workstation that merely lacks the bump's build
+//     dependencies. Here it costs one re-validation — the tree is proved again,
+//     which is what every release before R10.1 did. Fail-closed is cheap on
+//     this side and expensive on the other.
+//
+// # SKIPPED still counts, beside a measurement
 //
 // R3.3 promotes on "PASS or SKIPPED" and R3.12 has the outcome name its own
 // reach: a host that could not run the configure gate for want of an installed
-// dependency produced a promotable result that says so. Reading "PASS or
-// SKIPPED" as "PASS only" here would revalidate — and then re-skip — every such
-// bump on every run, which is the loop this sub-task exists to break.
+// dependency produced a promotable result that says so, and a record holding
+// that skip BESIDE a pass is still a proof. Reading this as "every deciding
+// gate must PASS" would revalidate — and then re-skip — every such bump on
+// every run, which is the loop R10.1 exists to break.
 //
 // # The QA gate never decides
 //
@@ -251,14 +281,21 @@ func (r StageRecord) Proves(want Depth) (bool, string) {
 	}
 
 	deciding := 0
-	var failed []string
+	var failed, passed []string
 	for _, gate := range r.Gates {
 		if gate.Gate == GateQA {
 			continue
 		}
 		deciding++
-		if gate.Outcome == OutcomeFailed {
+		switch gate.Outcome {
+		case OutcomeFailed:
 			failed = append(failed, gate.Gate)
+		case OutcomePass:
+			passed = append(passed, gate.Gate)
+		case OutcomeSkipped:
+			// Named so that a skip is a deliberate non-entry in both lists: the
+			// refusal below is "nothing PASSED", never "something SKIPPED", so a
+			// skip standing beside a real measurement still promotes.
 		}
 	}
 
@@ -268,8 +305,11 @@ func (r StageRecord) Proves(want Depth) (bool, string) {
 	case len(failed) > 0:
 		return false, fmt.Sprintf("the retained tree's own record shows %s FAILED, so it is evidence that this bump did NOT pass",
 			gateList(failed))
+	case len(passed) == 0:
+		return false, "the retained tree's record shows every gate that decides anything reporting SKIPPED, so nothing was ever measured about this candidate and it will be proved again"
 	}
-	return true, fmt.Sprintf("the retained tree was already proved at depth %s: every gate reported PASS or SKIPPED", r.Depth)
+	return true, fmt.Sprintf("the retained tree was already proved at depth %s: %s reported PASS and no gate that decides anything FAILED",
+		r.Depth, gateList(passed))
 }
 
 // DigestBytes is the one spelling of "the content of this input", used for every

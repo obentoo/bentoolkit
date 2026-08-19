@@ -1037,3 +1037,82 @@ func TestProveStagingFailureStaysAnErrorThroughTheCore(t *testing.T) {
 		t.Error("a proof of a tree that was never staged came back Passed")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 2.2 — R2, R2.4, R2.6.
+//
+// R2.4 requires the vacuity refusal to be MEASURED at each call site rather
+// than inferred from the unit test of the rule. This package holds two of the
+// three: Prove reads it to answer Passed, and refuseUnprovedRealignment reads it
+// to refuse a publish. They are separate assertions because they have separate
+// consequences — one is a word in a report, the other is a write into an overlay
+// that auto-commits and pushes within minutes.
+// ---------------------------------------------------------------------------
+
+// realignCandidateSkips is a gate list that declined over the CANDIDATE: the
+// staged tree could not be given the Manifest Portage verifies, so no gate
+// could read this ebuild. Story 039's D2 is that this list used to answer
+// "promotable".
+func realignCandidateSkips() []validate.GateResult {
+	gates := validate.SkippedGates(validate.DepthCompile, "the Manifest content could not be produced")
+	for i := range gates {
+		gates[i].Declined = validate.DeclineCandidate
+	}
+	return gates
+}
+
+// TestProveDoesNotPassAProofNothingRead is the first realign call site (R2.4).
+//
+// The comment above this call site used to assert that PromotionDecision
+// "encodes it together with the vacuity it has to deny". It did not — the only
+// branch that refused anything was the staging error, which both realign call
+// sites pass nil to by construction. A comment describing an absent protection
+// is worse than no comment: it stops the next reader from looking.
+func TestProveDoesNotPassAProofNothingRead(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	rec := &realignPreparedRecorder{result: validate.PreparedBuild{
+		StagedRoot: filepath.Join(stagingRoot, "media-libs", "gst-plugins-qt6", "1.29.2"),
+		Gates:      realignCandidateSkips(),
+	}}
+	realignSwapPreparedSeam(t, rec)
+
+	proof, err := Prove(context.Background(), proposal, Options{
+		Overlay:     overlayRoot,
+		StagingRoot: stagingRoot,
+		Depth:       validate.DepthCompile,
+	})
+	if err != nil {
+		t.Fatalf("Prove: %v — a gate list is a reported outcome, not a failed run", err)
+	}
+	if len(proof.Gates) == 0 {
+		t.Fatal("the fixture produced no gate, so this test would pass through the empty-list branch instead")
+	}
+	if proof.Passed {
+		t.Error("a realignment no gate could read came back Passed; Passed is what the approval step reads " +
+			"as permission to ASK, and asking about a candidate nothing measured is asking about nothing (R2.4)")
+	}
+}
+
+// TestPromoteRefusesAProofNothingRead is the second realign call site (R2.4),
+// and it is the one with teeth: this is the guard between a proposal and a tree
+// that publishes itself on a timer.
+func TestPromoteRefusesAProofNothingRead(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	before := realignTreeHash(t, overlayRoot)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Gates = realignCandidateSkips()
+
+	err := Promote(proposal, proof, true, overlayRoot)
+
+	if err == nil {
+		t.Fatal("a realignment whose every gate declined over the candidate was published; the overlay " +
+			"auto-commits within minutes, so this is a release nothing read (R2.4)")
+	}
+	if !errors.Is(err, ErrNotPromoted) {
+		t.Errorf("the refusal %v does not carry ErrNotPromoted; a caller cannot tell a refusal — the system "+
+			"working — from a write that broke", err)
+	}
+	if after := realignTreeHash(t, overlayRoot); after != before {
+		t.Errorf("the refused realignment changed the published overlay: %s -> %s", before, after)
+	}
+}

@@ -326,15 +326,27 @@ func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error) {
 	}
 
 	// R5.3's first half — every gate reported PASS or SKIPPED — asked of
-	// validate's own rule rather than re-derived here. PromotionDecision encodes
-	// it together with the vacuity it has to deny, and a second copy of a rule
+	// validate's own rule rather than re-derived here: a second copy of a rule
 	// whose entire value is that there is one copy would be the first place the
 	// two could disagree about publishing.
 	//
+	// WHAT THAT RULE DENIES, AND WHAT IT DELIBERATELY DOES NOT (S039-R2.1,
+	// R2.6). It denies the vacuity that names the CANDIDATE: a gate list whose
+	// every deciding gate declined over the proposal itself is refused, so
+	// Passed comes back false and nothing is offered. It does NOT deny the other
+	// shape — a list that declined over THIS HOST still promotes (S033-R3.12),
+	// because a machine that lacks the build dependencies has said nothing about
+	// the realignment, and refusing there would stop the operation on most
+	// workstations. So Passed is still NOT sufficient on its own, and the
+	// remaining guard is not here: cmd/bentoo's realignProofCarriesEvidence
+	// requires at least one gate to have reported PASS before the publish
+	// question is put at all.
+	//
 	// The staging error is nil BY CONSTRUCTION: the only path that reaches this
 	// line is one where Stage returned a tree, because the alternative returned
-	// above without consulting a gate. That early return is where this package
-	// denies the vacuity, exactly as the applier's prepareInStagingTree does.
+	// above without consulting a gate. That early return denies the STAGING
+	// vacuity — a different one from the gate-list vacuity above, and this
+	// package's own — exactly as the applier's prepareInStagingTree does.
 	//
 	// The reason string is deliberately not carried on Proof. Every actionable
 	// word of a refusal is already in the failing GateResult's own Reason; the

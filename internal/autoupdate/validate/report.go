@@ -18,6 +18,53 @@ const (
 	OutcomeSkipped Outcome = "SKIPPED"
 )
 
+// DeclineCause says WHY a SKIPPED gate declined, in the ONE dimension a
+// promotion decision turns on: was the thing that stopped the gate a fact about
+// the CANDIDATE, or a fact about THIS MACHINE (S039-R2.1).
+//
+// # Why this is a field and not a sentence
+//
+// Every skip already carries a Reason, and the reason already says which it is —
+// in prose. Prose is free to be reworded, and PromotionDecision now REFUSES a
+// bump on this distinction, so reading it back out of the sentence would make a
+// wording change silently start (or stop) publishing unmeasured ebuilds. The
+// cause therefore travels as data from the producer that knows it to the rule
+// that needs it, and nothing anywhere pattern-matches a Reason string.
+//
+// # The same split D1(c) already makes, one level up
+//
+// unbuildableHereReason exists because "this host lacks the dependency" and
+// "this ebuild is broken" must not reach the same verdict. DeclineCause is that
+// distinction carried past the gate and into the promotion rule: R2.1 refuses a
+// list that measured nothing ABOUT THE CANDIDATE; S033-R3.12 promotes a list
+// that measured nothing because THIS MACHINE could not answer, because refusing
+// those makes `overlay autoupdate --apply` inert on an ordinary workstation.
+type DeclineCause string
+
+const (
+	// DeclineUnrecorded is a skip whose producer has not named its cause. It
+	// keeps today's answer — it does NOT refuse — and that fail-open is
+	// DELIBERATE, not a gap waiting to be closed.
+	//
+	// The refusal names a KNOWN vacuity. A rule that refused on silence would
+	// refuse every skip no producer has been taught to tag yet, which is the
+	// flat "every deciding gate SKIPPED → refuse" reading that takes
+	// `overlay autoupdate` down on any host that cannot build the package.
+	// Each producer that learns to name its cause TIGHTENS the rule; nobody
+	// should "fix" this into fail-closed in one edit.
+	DeclineUnrecorded DeclineCause = ""
+	// DeclineCandidate: something about THIS EBUILD stopped the gate — no
+	// Manifest could be produced for it, its tree could not be staged. Nothing
+	// read the candidate, and the bentoo overlay auto-commits and pushes within
+	// minutes, so promoting on this publishes an unmeasured ebuild (R2.1).
+	DeclineCandidate DeclineCause = "candidate"
+	// DeclineHost: something about THIS MACHINE stopped it — a build dependency
+	// is not installed, no privilege to isolate, no `ebuild` on PATH. The
+	// machine says nothing about the bump, so the bump is promoted with the
+	// depth it did not reach named (S033-R3.12).
+	DeclineHost DeclineCause = "host"
+)
+
 // GateResult is what ONE gate has to say about one ebuild.
 //
 // # Why the reason lives here and not on the result
@@ -41,11 +88,29 @@ const (
 // Findings are the ones THIS gate produced. Each also carries its own Gate
 // field, which looks redundant here and is not: a renderer flattening every
 // gate's findings into one list must still be able to say which check spoke.
+//
+// # Declined is deliberately NOT serialized, and that costs something
+//
+// `json:"-"` is a requirement, not a default. This document is the one S039-R1.6
+// and story 031's R11.3 pin BYTE-FOR-BYTE, and the same struct is also
+// StageRecord.Gates on disk (record.go). A new key in either changes bytes this
+// story promised not to change — including the records already written by every
+// installed copy of the tool.
+//
+// The price is real and is stated here so nobody discovers it as a surprise: a
+// gate list ROUND-TRIPPED THROUGH A StageRecord comes back DeclineUnrecorded,
+// whatever it was when it was written. So the vacuity rule below decides on a
+// list held in memory by the run that produced it, and a reload sees only
+// "SKIPPED, cause unrecorded" — which fails open, by DeclineUnrecorded's rule.
 type GateResult struct {
 	Gate     string    `json:"gate"`
 	Outcome  Outcome   `json:"outcome"`
 	Reason   string    `json:"reason,omitempty"`
 	Findings []Finding `json:"findings,omitempty"`
+
+	// Declined is why a SKIPPED gate declined. It is meaningless on PASS and
+	// FAILED, which measured something and therefore declined nothing.
+	Declined DeclineCause `json:"-"`
 }
 
 // EbuildResult is everything the run has to say about one ebuild version.

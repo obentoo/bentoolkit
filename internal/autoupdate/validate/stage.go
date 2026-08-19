@@ -644,10 +644,27 @@ var buildGates = map[Depth]string{
 //
 // A depth below DepthPatches covers no build gate and correctly yields nothing:
 // an options-deep run never needed a staged tree, so nothing was taken from it.
+//
+// IT LEAVES THE CAUSE UNRECORDED, and its SIGNATURE IS FIXED. Callers outside
+// this package hold it, so a cause cannot be bolted on as a third parameter
+// without breaking them — and one of those callers (the applier's dependency
+// probe) genuinely knows its cause. declinedGates is the sibling that takes one;
+// this stays the spelling for a producer that does not know, and
+// DeclineUnrecorded is exactly that: today's answer, unchanged.
 func SkippedGates(d Depth, reason string) []GateResult {
+	return declinedGates(d, reason, DeclineUnrecorded)
+}
+
+// declinedGates is SkippedGates with the cause named (S039-R2.1).
+//
+// It is unexported and SkippedGates delegates to it, rather than the two being
+// written out separately, so that "which gates does this depth owe an outcome
+// for" keeps having exactly one answer — the property SkippedGates' own note
+// explains at length.
+func declinedGates(d Depth, reason string, cause DeclineCause) []GateResult {
 	var gates []GateResult
 	eachBuildGate(d, func(gate string, _ buildPhase) {
-		gates = append(gates, GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: reason})
+		gates = append(gates, GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: reason, Declined: cause})
 	})
 	return gates
 }
@@ -668,6 +685,15 @@ func SkippedGates(d Depth, reason string) []GateResult {
 // other direction: what is published is what was validated, and here nothing
 // was. So a staging failure does not merely skip, it WITHDRAWS the bump (R3.10).
 //
+// FOR A LONG TIME THIS SAID SO AND DID NOT DO IT (S039-R2.1). stageErr was the
+// only branch that refused anything, and stageErr is only ever non-nil when
+// Stage itself failed. Every OTHER way a gate list can measure nothing about the
+// candidate — a Manifest that could not be produced or written, a tree staged by
+// a caller that reports the fault as a skip rather than as an error — arrived
+// here with stageErr nil and every deciding gate SKIPPED, and was answered
+// `true`. The vacuity the paragraph above describes is now DENIED rather than
+// merely described.
+//
 // # And why that does not become "any skip blocks promotion"
 //
 // A gate skipped because THIS HOST could not answer — an unsatisfied dependency,
@@ -676,6 +702,20 @@ func SkippedGates(d Depth, reason string) []GateResult {
 // withdraws it. The argument list is the distinction: a skip is data about a
 // gate, a staging failure is an error about the tree every gate needed, and they
 // arrive separately for exactly that reason.
+//
+// THAT SPLIT IS NOW A FIELD RATHER THAN A SENTENCE. GateResult.Declined carries
+// it from the producer that knows it to here, and the two sides are one rule:
+// S039-R2.1 refuses a list that measured nothing about the CANDIDATE, S033-R3.12
+// promotes a list that measured nothing because THIS MACHINE could not answer.
+// Read as one flat rule — "every deciding gate SKIPPED, therefore refuse" —
+// `overlay autoupdate --apply` stops publishing on every workstation that does
+// not hold the bump's build dependencies, which is most of them. It is the same
+// conflation unbuildableHereReason (D1(c)) exists to prevent, one level up: a
+// host that lacks a dependency is not an ebuild that fails to build.
+//
+// A cause nobody recorded is NOT read as the candidate's. See DeclineUnrecorded
+// for why that fail-open is deliberate: the refusal names a known vacuity, and
+// each producer that learns to name its cause tightens the rule.
 //
 // # What this deliberately does NOT decide
 //
@@ -702,11 +742,18 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 		return false, fmt.Sprintf("not promoted: the staged tree could not be prepared, so no build gate ever read this candidate (%v)", stageErr)
 	}
 
-	var failed, skipped []string
+	var failed, skipped, passed []string
+	// Whether ANY deciding gate declined over the candidate itself. One is
+	// enough: if nothing measured this ebuild and one of the things that stopped
+	// a gate was the ebuild's own, promoting on the strength of the host's
+	// excuses for the others would publish it.
+	candidateDeclined := false
 	for _, gate := range gates {
 		if gate.Gate == GateQA {
 			// The one gate that never decides — the same exclusion, for the same
-			// D8 reason, that Report.ExitCode and WorstOutcome already make.
+			// D8 reason, that Report.ExitCode and WorstOutcome already make. It
+			// is excluded in BOTH directions: a QA PASS is not evidence either,
+			// or one metadata.xml verdict would stand in for a build nobody ran.
 			continue
 		}
 		switch gate.Outcome {
@@ -714,15 +761,33 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 			failed = append(failed, gate.Gate)
 		case OutcomeSkipped:
 			skipped = append(skipped, gate.Gate)
+			if gate.Declined == DeclineCandidate {
+				candidateDeclined = true
+			}
+		case OutcomePass:
+			passed = append(passed, gate.Gate)
 		}
 	}
 
 	switch {
 	case len(failed) > 0:
 		return false, fmt.Sprintf("not promoted: %s reported FAILED", gateList(failed))
+	case len(skipped) > 0 && len(passed) == 0 && candidateDeclined:
+		// R2.1. The sentence names the VACUITY, not the gates: an operator told
+		// "the patches, configure, compile gates reported SKIPPED" goes looking
+		// for three problems when there is one — nothing ran. It also stays well
+		// clear of the FAILED wording above, because the two send that operator
+		// to different places: one to a gate's findings, the other to whatever
+		// stopped the run before any gate could speak.
+		return false, "not promoted: every gate that could have decided reported SKIPPED, so nothing was measured about this candidate — see each gate's own reason for what stopped it"
 	case len(skipped) > 0:
 		return true, fmt.Sprintf("promoted: every gate reported PASS or SKIPPED, and %s did not run — see each gate's own reason", gateList(skipped))
 	default:
+		// Also the DEPTH-NONE shape (R2.5): a run that was never meant to build
+		// covers no build gate, so the deciding list is EMPTY and lands here.
+		// Nothing declined, because nothing was asked — which is why the vacuity
+		// branch keys on a skip that named the candidate rather than on the
+		// absence of a pass.
 		return true, "promoted: every gate reported PASS"
 	}
 }

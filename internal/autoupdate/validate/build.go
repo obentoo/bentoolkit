@@ -271,15 +271,21 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	isolated, isolationReason := deps.isolationProbe()()
 	if !isolated && req.RequireIsolation {
 		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
-		return SkippedGates(req.Depth, label.clean(refused)), nil
+		// DeclineHost (S039-R2.1): an isolation refusal is this machine saying it
+		// has no privilege to build under the conditions the caller demanded. It
+		// is not a fact about the candidate, so it must not withdraw the bump.
+		return declinedGates(req.Depth, label.clean(refused), DeclineHost), nil
 	}
 
 	// A host with no Portage produces NO ANSWER, never a cheerful one — the same
 	// rule DependenciesSatisfied applies to `emerge`, and the reason the lookup
 	// is a seam of its own.
 	if _, err := deps.binaryLookup()("ebuild"); err != nil {
-		return SkippedGates(req.Depth, label.clean(fmt.Sprintf(
-			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err))), nil
+		// DeclineHost, and the reason says so in its own words too: a machine
+		// with no Portage cannot answer for any ebuild. Every candidate would
+		// decline here identically, which is the definition of a host cause.
+		return declinedGates(req.Depth, label.clean(fmt.Sprintf(
+			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err)), DeclineHost), nil
 	}
 
 	// `ebuild` is invoked DIRECTLY, as the user who started the sweep — no sudo,
@@ -729,11 +735,23 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 
 	case r.runErr != nil:
 		// The run died before this phase began, so this gate measured nothing.
+		//
+		// Declined is LEFT UNRECORDED, deliberately (S039-R2.1). notReachedReason
+		// itself says why: a death before `>>> Source prepared.` is "a host or
+		// distfile fault" — the ebuild's SRC_URI and the box's network are both
+		// live possibilities and this code cannot tell them apart. Guessing
+		// `candidate` would withdraw bumps over a flaky mirror; guessing `host`
+		// would publish a bump whose sources do not exist. An unrecorded cause
+		// keeps today's answer, and the phase that DID die reports FAILED in its
+		// own gate whenever that phase is one the depth covers.
 		return GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: r.notReachedReason(gate, phase)}
 
 	default:
 		// A zero exit with no marker to prove the phase finished. Rare, and
 		// deliberately not read as a pass.
+		//
+		// Unrecorded for the same reason: unmeasuredReason describes evidence
+		// that did not arrive, which names neither the candidate nor the host.
 		return GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: r.unmeasuredReason(phase)}
 	}
 }

@@ -963,3 +963,46 @@ func TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead(t *testing.T) {
 			"Manifest names, which declares only qt6", msg)
 	}
 }
+
+// TestApplyGates_TheVacuityRefusalDoesNotReachAHostThatCannotBuild is story
+// 039's R2.4 at the third call site — `applier.go:1060`, the one nobody asked to
+// change.
+//
+// Story 039 refuses to promote a candidate no gate measured. That rule is held
+// in validate.PromotionDecision, which this call site reads, so the applier
+// inherited it without a line of its own changing. R2.4 requires each site to be
+// MEASURED rather than inferred from the unit test, and this is the measurement
+// that matters here: story 039's Unchanged Behavior clause 2 promises the
+// applier's answer is unchanged for every non-vacuous list, and a host that
+// cannot build is not a vacuous list — it is R3.12's case, where the machine
+// says nothing about the bump.
+//
+// Read together with TestApplyGates_UnsatisfiedDependenciesPromoteWithTheUnreachedDepthNamed:
+// that test says the bump publishes, this one says WHY a later change that broke
+// it would be wrong, by naming the refusal that must not appear.
+func TestApplyGates_TheVacuityRefusalDoesNotReachAHostThatCannotBuild(t *testing.T) {
+	setup := seriesBump()
+	setup.emergeOutput = "[ebuild  N    ] media-libs/gst-plugins-base-1.29.2\n" +
+		"[ebuild  N    ] dev-qt/qtbase-6.9.1\n" +
+		"[ebuild  N    ] media-plugins/gst-plugins-qt6-1.29.2\n"
+
+	applier, _, _, _, pkg := gatesFixture(t, setup)
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if !result.Success {
+		t.Fatalf("the bump was refused: %v", result.Error)
+	}
+	// The specific wrong answer, named so the next reader knows which rule
+	// broke: a flat "every deciding gate SKIPPED, therefore refuse" would stop
+	// `overlay autoupdate --apply` publishing on any workstation that does not
+	// hold the bump's build dependencies, which is most of them.
+	if result.Error != nil && strings.Contains(result.Error.Error(), "nothing was measured about this candidate") {
+		t.Errorf("story 039's vacuity refusal reached a host-caused skip (%q); the refusal is about the "+
+			"CANDIDATE, and a machine missing a dependency says nothing about the bump (R2.4, R3.12)",
+			result.Error)
+	}
+}

@@ -733,7 +733,11 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 	if !req.manifestSupplied {
 		// Nothing travels, so nothing is staged and nothing is built: exactly
 		// the bytes every run produced before the seam existed (S037-R2).
-		return skippedPreparedBuild("", req.depth, buildDepthNotRunReason(req.depth, req.stagingRoot))
+		// UNRECORDED, and that is the right answer rather than a gap: nothing
+		// went wrong here. The caller did not wire the Manifest seam, so no tree
+		// was ever asked for — the same shape a depth the caller never meant to
+		// build produces, and not a statement about the candidate OR the host.
+		return skippedPreparedBuild("", req.depth, buildDepthNotRunReason(req.depth, req.stagingRoot), DeclineUnrecorded)
 	}
 
 	body, err := req.ebuild()
@@ -754,9 +758,13 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 	if err != nil {
 		// Stage's own sentence already opens with "the staged tree could not be
 		// prepared", so this one says what that COST rather than repeating it.
+		// DeclineCandidate (S039-R2.1): the ebuild could not be read, or the tree
+		// holding it could not be built. Either way nothing read THIS CANDIDATE,
+		// and the published overlay auto-commits — so a promotion here is an
+		// unmeasured ebuild pushed within minutes, not a host saying "not me".
 		out := skippedPreparedBuild("", req.depth, fmt.Sprintf(
 			"the build gates for %s-%s had no staged tree to run in, so none of them read this candidate: %v",
-			req.target.atom, req.target.version, err))
+			req.target.atom, req.target.version, err), DeclineCandidate)
 		// Unrendered, and CHAINED rather than restated: ErrStageUnpreparable is
 		// the sentinel Stage promises on every one of its failure paths, and a
 		// caller reacts to staging having failed without enumerating the ways it
@@ -772,7 +780,11 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		// nothing more — StageErr means "no tree was ever prepared", and saying
 		// so here would tell realign.Prove to abandon a realignment whose staged
 		// tree is sitting on the disk.
-		return skippedPreparedBuild(stagedRoot, req.depth, err.Error())
+		// DeclineCandidate: Portage refuses an ebuild whose Manifest does not
+		// describe its archive, so a tree that never got one is a tree in which
+		// no gate could read the candidate. The missing thing is this bump's own
+		// digest, not something an operator installs on the box.
+		return skippedPreparedBuild(stagedRoot, req.depth, err.Error(), DeclineCandidate)
 	}
 
 	// A host that lacks a build dependency is not an ebuild that fails to build,
@@ -795,7 +807,11 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		// R1.2 for both entry points at once: the reason is reported and no
 		// verdict is recorded against the ebuild, because the missing thing is
 		// on this machine rather than in the candidate.
-		return skippedPreparedBuild(stagedRoot, req.depth, reason)
+		// DeclineHost, which is S033-R3.12 made structural: the missing thing is
+		// on this machine, so the bump is still promoted with the depth it did
+		// not reach named. Refusing these instead would make the feature inert
+		// on every workstation that does not hold the bump's build deps.
+		return skippedPreparedBuild(stagedRoot, req.depth, reason, DeclineHost)
 	}
 
 	gates, err := RunBuildGates(ctx, BuildRequest{
@@ -832,7 +848,13 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		// on one branch and unrendered on the other. It is CHAINED rather than
 		// restated, so a caller asks errors.Is about the cancellation instead of
 		// reading the sentence above for the word.
-		out := skippedPreparedBuild(stagedRoot, req.depth, reason)
+		// UNRECORDED on both branches. A cancellation is a fact about the RUN,
+		// and a malformed request is a fact about the CALLER; neither is a
+		// statement about the candidate, and neither is this host lacking
+		// something. The interrupt has its own guard at the write
+		// (Applier.refuseOnInterrupt) precisely because a gate list is the wrong
+		// shape for "you stopped me".
+		out := skippedPreparedBuild(stagedRoot, req.depth, reason, DeclineUnrecorded)
 		out.GatesErr = err
 		return out
 	}
@@ -1030,8 +1052,15 @@ func unbuildableHereReason(ctx context.Context, stagedRoot string, target ebuild
 // answers: every build gate the depth covers reporting SKIPPED with the reason,
 // and the same sentence on DepthReason so a reader who never opens the gate list
 // still learns why the depth went unreached.
-func skippedBuildGates(depth Depth, reason string) ([]GateResult, string) {
-	return SkippedGates(depth, reason), reason
+//
+// cause is what the skip DECLINED over (S039-R2.1) and it is a required argument
+// for the same reason the reason itself is: a stopping condition whose cause
+// nobody stated is a stopping condition PromotionDecision cannot judge, and the
+// place that knows the cause is the branch that detected the condition — never
+// a later reader of the sentence. DeclineUnrecorded is a legitimate value where
+// the cause genuinely is not one or the other; guessing is not.
+func skippedBuildGates(depth Depth, reason string, cause DeclineCause) ([]GateResult, string) {
+	return declinedGates(depth, reason, cause), reason
 }
 
 // skippedPreparedBuild is that same rendering on the core's result, so the two
@@ -1041,8 +1070,8 @@ func skippedBuildGates(depth Depth, reason string) ([]GateResult, string) {
 // stagedRoot is a parameter because half the stopping conditions happen with a
 // tree on disk and half without one, and the difference is what a maintainer
 // needs: an empty root says there is nothing to go and look at.
-func skippedPreparedBuild(stagedRoot string, depth Depth, reason string) PreparedBuild {
-	gates, rendered := skippedBuildGates(depth, reason)
+func skippedPreparedBuild(stagedRoot string, depth Depth, reason string, cause DeclineCause) PreparedBuild {
+	gates, rendered := skippedBuildGates(depth, reason, cause)
 	return PreparedBuild{StagedRoot: stagedRoot, Gates: gates, Reason: rendered}
 }
 
