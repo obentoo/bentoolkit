@@ -1144,11 +1144,18 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 				results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep, Err: ctx.Err()}
 				return
 			}
-			// nolint:contextcheck — the sweeper was built with THIS ctx
-			// (withSweeperContext above), so runManifest derives its deadline
-			// from it and a cancellation still kills the spawned pkgdev. The
-			// linter cannot see a context carried on a struct, which is the
-			// same shape Applier uses.
+			// Why the directive on the next line is safe: the sweeper was
+			// built with THIS ctx (withSweeperContext above), so runManifest
+			// derives its deadline from it and a cancellation still kills the
+			// spawned pkgdev. The linter cannot see a context carried on a
+			// struct, which is the same shape Applier uses.
+			//
+			// This justification is deliberately NOT written as a second
+			// `nolint` line. A directive golangci-lint recognises has no space
+			// after the slashes and separates its reason with `//`, so a
+			// `// nolint:... —` line suppresses nothing; leaving one here would
+			// read as the suppression and invite deleting the inline directive
+			// that actually does the work.
 			results[i] = sweepOneDir(s, dir) //nolint:contextcheck
 		}(i, dir)
 	}

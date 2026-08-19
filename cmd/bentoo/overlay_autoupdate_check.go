@@ -578,6 +578,14 @@ func reportedDepth(result validate.EbuildResult, entry validationPlanEntry) stri
 // skipReason is why a package produced no verdict. A skip ALWAYS carries a
 // reason — the gate's own where there is one, the plan's depth reason otherwise
 // — because a skipped package with no reason reads as a result.
+//
+// The last return is that promise kept rather than assumed. All three sources
+// are free-form strings nothing forces to be populated, so the cascade can run
+// out; when it does, the caller prints "not validated ()" and an operator reads
+// the empty parenthesis as "checked, nothing to say" — the exact misreading the
+// paragraph above forbids. Naming the silence instead is honest: it says no
+// verdict was produced AND that nothing explained why, which is a reportable
+// defect in whatever left every reason blank.
 func skipReason(result validate.EbuildResult, entry validationPlanEntry) string {
 	for _, gate := range result.Gates {
 		if gate.Outcome == validate.OutcomeSkipped && gate.Reason != "" {
@@ -587,7 +595,10 @@ func skipReason(result validate.EbuildResult, entry validationPlanEntry) string 
 	if result.DepthReason != "" {
 		return result.DepthReason
 	}
-	return entry.Reason
+	if entry.Reason != "" {
+		return entry.Reason
+	}
+	return "no reason reported: neither the gates, the depth nor the plan stated one"
 }
 
 // printValidationTally is the last thing on screen (R9.5): the three counts, and
