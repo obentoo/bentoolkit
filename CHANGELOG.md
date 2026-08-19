@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Manifest and the gates run. Manifest production failing, or a Manifest that
   exists and cannot be read, are still hard errors.
 
+  Portage refuses before any *phase marker* as well, which the first cut of this
+  did not account for: the gate list came back entirely skipped with no cause
+  recorded, and an unrecorded cause promotes — so the class reported its own
+  misclassification as a pass. A gate of this class that never reached a phase is
+  now blamed on the candidate, because the empty Manifest is a bet this tool
+  placed. Only this class, and only where no cause was recorded: for an ordinary
+  candidate a build that dies that early may have died of a flaky mirror, and
+  blaming the ebuild there would withdraw a bump over a fact about the network.
+
 - **A sweeper for staged trees that have left scope.** Staging replaced the tree
   of the package it was staging and nothing removed the others, so a `--depth`
   run over the whole overlay left one tree per package under the staging root,
