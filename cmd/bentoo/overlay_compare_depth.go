@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -393,6 +394,47 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 		return
 	}
 
+	// The policy and the log directory, resolved ONCE for the whole pass and the
+	// same way `overlay validate --depth` resolves them (S039-R1.3, R1.4). Per
+	// candidate would be the same three answers re-derived N times, and the first
+	// place two of them could differ inside one run.
+	//
+	// It sits BELOW the "nothing to prove" return, which is where the sibling
+	// command's own `if depth > validate.DepthOptions` puts it: the only thing
+	// either resolution can say out loud is that logs will not be retained, and
+	// saying it to an operator who is about to be told there is nothing to prove
+	// describes a cost no run of theirs is going to pay. Still above the loop,
+	// though — that is not negotiable, it is why there is a block here at all.
+	//
+	// requireIsolation is read from the SAME key `overlay autoupdate` reads
+	// (autoupdate.validate.require_isolation), because the gates it governs are
+	// the same gates. A config that could not be loaded leaves it false, which is
+	// the shipped behaviour of every command that builds with the key unset — the
+	// run is not refused over a missing config file, it simply carries no policy
+	// to apply. The overlay path is NOT taken from here: this function was handed
+	// one, and taking a second answer for the same question is how a run proves
+	// one overlay and reports on another.
+	var requireIsolation bool
+	if appCtx, cerr := loadAppContextNoValidation(); cerr == nil {
+		requireIsolation = appCtx.Config.Autoupdate.Validate.GetRequireIsolation()
+	}
+
+	// A build gate that FAILED says so on its own, but the reason upstream broke
+	// — the option `meson` refused — is only in `ebuild`'s log. The same
+	// directory the apply path and `overlay validate` retain their logs in, so an
+	// operator looking for "the log of the thing that just failed" has one place
+	// to look regardless of which command ran the gates. A failure to place it is
+	// NOT fatal: the gates still run and their reason says the log was not
+	// retained, which is worth more than refusing to prove anything at all — and
+	// it is said BEFORE the confirmation, so an operator agreeing to a build
+	// knows in advance that a failure will leave no transcript.
+	var logDir string
+	if configDir, cerr := autoupdateConfigDir(); cerr == nil {
+		logDir = filepath.Join(configDir, "logs")
+	} else {
+		output.Warning.Printf("\n  Build logs will not be retained: %v\n", cerr)
+	}
+
 	plan := realignPlan{Atoms: realignPlanAtoms(candidates), Depth: depth.String()}
 	printRealignPlan(plan)
 	if !confirmRealignPlan(plan) {
@@ -404,6 +446,17 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			Overlay:     overlayPath,
 			StagingRoot: stagingRoot,
 			Depth:       depth,
+			// The composition design D1 puts in cmd/bentoo and nowhere else:
+			// validate accepts only what a caller supplies, autoupdate owns
+			// Manifest GENERATION, and this is the one layer that imports both.
+			// A realignment is a SAME-VERSION edit — it bumps nothing, so no
+			// fetch has produced a new archive — which makes the published
+			// Manifest the record describing the archive actually on disk. It is
+			// the same source and the same function `overlay validate` reads,
+			// for the same reason.
+			StagedManifest:   publishedManifestBytes,
+			RequireIsolation: requireIsolation,
+			LogDir:           logDir,
 			// Deps is left at its zero value, which validate normalises into the
 			// real process and host seams. There is nothing to substitute here: a
 			// test never reaches this line, because realignProve is the seam.

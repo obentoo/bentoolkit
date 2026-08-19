@@ -21,6 +21,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1423,5 +1424,256 @@ func TestRun_RequireIsolationReachesTheBuildGates(t *testing.T) {
 	}
 	if !strings.Contains(on.Reason, "isolation was required") {
 		t.Errorf("the gate does not name the isolation refusal (%q)", on.Reason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 1.1 — R1, R1.5, R1.6.
+//
+// validate.Run is not a wrapper around Stage and RunBuildGates: it is where the
+// setup a build gate needs happens — the Manifest seam, the staged tree, the
+// Manifest written into it, the host probe, and the two policy fields of
+// BuildRequest. Everything that reaches RunBuildGates by a second path starts
+// from none of it, which is what realign.Prove did.
+//
+// R1.5 answers that by requiring ONE copy of the ladder, and it says a second
+// implementation is a defect "even when both copies agree". A test comparing
+// two outputs cannot see that defect — agreeing copies produce equal bytes. So
+// the assertion below is structural: buildDepthGates is observed GOING THROUGH
+// the core, through the same package-level-variable idiom realign already holds
+// Stage and RunBuildGates by. Re-inline the body and the counter stays at zero.
+// ---------------------------------------------------------------------------
+
+// TestBuildDepthGates_GoesThroughThePreparedBuildCore pins that the prepared
+// build lives in exactly one function and that buildDepthGates reaches it — and,
+// in the same pass, that the four things D1 found missing on the realign path
+// travel INTO that function rather than being filled in after it.
+//
+// The four are asserted here rather than only on the realign side because this
+// is the entry point that has them today: a core that dropped RequireIsolation
+// or LogDir on the way in would give the realign path a bypass again the moment
+// it starts calling the same function.
+func TestBuildDepthGates_GoesThroughThePreparedBuildCore(t *testing.T) {
+	overlay := t.TempDir()
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("laying out the package directory: %v", err)
+	}
+	ebuildPath := filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild")
+	body := []byte("EAPI=8\nDESCRIPTION=\"the candidate the core must be handed\"\n")
+	if err := os.WriteFile(ebuildPath, body, 0o600); err != nil {
+		t.Fatalf("writing the candidate ebuild: %v", err)
+	}
+	target := ebuildTarget{
+		atom:    "media-plugins/gst-plugins-qt6",
+		version: "1.28.6",
+		dir:     pkgDir,
+		path:    ebuildPath,
+	}
+
+	stub := func(t *testing.T, out []GateResult, reason string) (*preparedBuild, *int) {
+		t.Helper()
+		var got preparedBuild
+		calls := 0
+		restore := preparedBuildGates
+		preparedBuildGates = func(_ context.Context, req preparedBuild) PreparedBuild {
+			calls++
+			got = req
+			return PreparedBuild{Gates: out, Reason: reason}
+		}
+		t.Cleanup(func() { preparedBuildGates = restore })
+		return &got, &calls
+	}
+
+	t.Run("the request carries the whole of the setup", func(t *testing.T) {
+		want := SkippedGates(DepthConfigure, "the core answered")
+		got, calls := stub(t, want, "the core answered")
+
+		gates, reason := buildDepthGates(context.Background(), target, DepthConfigure, Options{
+			Overlay:          overlay,
+			StagingRoot:      filepath.Join(t.TempDir(), "staging"),
+			RequireIsolation: true,
+			LogDir:           filepath.Join(t.TempDir(), "logs"),
+			StagedManifest: func(string) ([]byte, error) {
+				return []byte("DIST gst-plugins-qt6-1.28.6.tar.xz 1 BLAKE2B ab SHA512 cd\n"), nil
+			},
+		})
+
+		if *calls != 1 {
+			t.Fatalf("buildDepthGates reached the prepared-build core %d times, want exactly 1; a depth path "+
+				"that prepares its own build is the second copy of the ladder R1.5 forbids", *calls)
+		}
+		if got.target != target {
+			t.Errorf("the core was handed target %+v, want %+v", got.target, target)
+		}
+		if got.depth != DepthConfigure {
+			t.Errorf("the core was handed depth %v, want %v; a core that re-derives the depth answers a "+
+				"question the caller already answered", got.depth, DepthConfigure)
+		}
+		if !got.manifestSupplied {
+			t.Error("the core was told no Manifest source was supplied, but Options.StagedManifest is set; " +
+				"the seam is D1(a) — the whole of the realign bypass was reaching the gates without it")
+		}
+		if !got.requireIsolation {
+			t.Error("RequireIsolation did not reach the core (D1d): the refusal in RunBuildGates fires only " +
+				"when the request carries it, which is the bypass commit 0bc206b closed for overlay validate")
+		}
+		if got.logDir == "" {
+			t.Error("LogDir did not reach the core (D1d): a FAILED gate then retains no log, and the run that " +
+				"needs one is exactly the run that failed")
+		}
+		if got.overlay != overlay {
+			t.Errorf("the core was handed overlay %q, want %q", got.overlay, overlay)
+		}
+		if got.stagingRoot == "" {
+			t.Error("the core was handed no staging root; it is what Stage refuses to place inside the overlay")
+		}
+		if got.ebuild == nil {
+			t.Fatal("the core was handed no way to read the candidate's bytes")
+		}
+		read, err := got.ebuild()
+		if err != nil {
+			t.Fatalf("the core's reader could not produce the candidate's bytes: %v", err)
+		}
+		if string(read) != string(body) {
+			t.Errorf("the core's reader produced %q, want the bytes on disk %q; a staged tree built from "+
+				"anything else is not the candidate the overlay holds", read, body)
+		}
+		if len(gates) != len(want) || reason != "the core answered" {
+			t.Errorf("buildDepthGates returned (%d gates, %q) instead of the core's own answer (%d gates, %q); "+
+				"post-processing the core's verdict is how two entry points start disagreeing",
+				len(gates), reason, len(want), "the core answered")
+		}
+	})
+
+	// The nil seam is answered INSIDE the core, not in front of it. If
+	// buildDepthGates short-circuits here, the realign path calling the core
+	// gets no Manifest check at all — which is D1(a) reintroduced one level up.
+	t.Run("a nil Manifest seam still reaches the core", func(t *testing.T) {
+		got, calls := stub(t, nil, "the core answered")
+
+		buildDepthGates(context.Background(), target, DepthConfigure, Options{
+			Overlay:     overlay,
+			StagingRoot: filepath.Join(t.TempDir(), "staging"),
+		})
+
+		if *calls != 1 {
+			t.Fatalf("a nil Manifest seam stopped %d calls short of the core; the seam's answer belongs to "+
+				"the core so that every caller of it is answered the same way (D1a)", *calls)
+		}
+		if got.manifestSupplied {
+			t.Error("the core was told a Manifest source was supplied when Options.StagedManifest is nil")
+		}
+		if got.manifest == nil {
+			t.Fatal("the core was handed a nil lookup; the nil path must stay CALLABLE — answered rather " +
+				"than forbidden — so no branch inside can reach a nil and panic")
+		}
+		content, err := got.manifest(pkgDir)
+		if err != nil || len(content) != 0 {
+			t.Errorf("the nil seam's lookup answered (%q, %v), want no content and no error", content, err)
+		}
+	})
+}
+
+// TestRunPreparedBuild_ShallowDepthStagesNothing pins the one thing joining the
+// two halves of a build could quietly change: WHAT A DEPTH THAT BUILDS NOTHING
+// COSTS.
+//
+// Below DepthPatches, RunBuildGates has always answered with an empty list from
+// its own `!runs` branch, so a caller that reached it directly paid nothing to
+// learn that. Reaching it through the prepared build puts four steps in front of
+// that answer — a staged tree in the SHARED staging root, a Manifest written
+// into it, and `emerge --pretend` started as a child process — for a question no
+// gate was ever going to be asked.
+//
+// The assertions are therefore about the COST and not only about the answer: an
+// empty result that arrived after staging a tree would satisfy a test that
+// checked the return value alone, and would still be the regression.
+//
+// It sits on this entry point because the other one is guarded twice over:
+// noteBuildDepth returns at this same comparison before buildDepthGates is
+// called at all. The guard nevertheless lives in the core, so the next caller
+// inherits it rather than having to remember it.
+func TestRunPreparedBuild_ShallowDepthStagesNothing(t *testing.T) {
+	for _, depth := range []Depth{DepthNone, DepthOptions} {
+		t.Run(depth.String(), func(t *testing.T) {
+			overlay := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(overlay, "media-plugins", "gst-plugins-qt6"), 0o750); err != nil {
+				t.Fatalf("laying out the package directory: %v", err)
+			}
+			stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+			manifestCalls := 0
+			result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
+				Overlay:     overlay,
+				StagingRoot: stagingRoot,
+				Atom:        "media-plugins/gst-plugins-qt6",
+				Version:     "1.28.6",
+				PackageDir:  filepath.Join(overlay, "media-plugins", "gst-plugins-qt6"),
+				Ebuild:      []byte("EAPI=8\n"),
+				Depth:       depth,
+				// A NON-NIL seam, which is the whole point: the nil-seam branch
+				// returns early for a different reason, so a nil one here would
+				// let the guard be absent and the test still pass.
+				StagedManifest: func(string) ([]byte, error) {
+					manifestCalls++
+					return []byte("DIST gst-plugins-qt6-1.28.6.tar.xz 1 BLAKE2B ab SHA512 cd\n"), nil
+				},
+				Deps: BuildDeps{
+					ExecCommand: func(_ context.Context, name string, arg ...string) *exec.Cmd {
+						t.Fatalf("a depth that builds nothing started %s %v; the host probe is a real child "+
+							"process, and paying for it to learn there is no gate to run is the regression", name, arg)
+						return nil
+					},
+					RunAttached: func(*exec.Cmd) ([]byte, error) {
+						t.Fatal("a depth that builds nothing ran a command")
+						return nil, nil
+					},
+					LookPath: func(name string) (string, error) {
+						t.Fatalf("a depth that builds nothing looked for %q on the host", name)
+						return "", nil
+					},
+				},
+			})
+
+			// The observable that matters: the staging root is SHARED with
+			// `overlay validate --depth` and `overlay autoupdate --apply`, so a
+			// tree staged for a run that gates nothing is a directory those two
+			// have to live with.
+			entries, err := os.ReadDir(stagingRoot)
+			if err == nil && len(entries) > 0 {
+				names := make([]string, 0, len(entries))
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Errorf("a depth of %s staged %v under the shared staging root; below DepthPatches nothing "+
+					"is built, so nothing is prepared either", depth, names)
+			} else if err != nil && !os.IsNotExist(err) {
+				t.Fatalf("reading the staging root: %v", err)
+			}
+			if manifestCalls != 0 {
+				t.Errorf("the Manifest seam was asked %d time(s) at depth %s; there was no staged tree for it "+
+					"to answer about", manifestCalls, depth)
+			}
+
+			// The answer itself is the empty one, unchanged from what a caller
+			// got when it reached RunBuildGates directly. Gates is asserted NIL
+			// rather than merely short: PromotionDecision has to be reached with
+			// the same argument it was reached with then.
+			if result.Gates != nil {
+				t.Errorf("depth %s produced %+v, want no gates at all", depth, result.Gates)
+			}
+			if result.Reason != "" {
+				t.Errorf("depth %s produced the reason %q; inventing one changes the outcome a depth=none run "+
+					"has always produced (R2.5)", depth, result.Reason)
+			}
+			if result.StagedRoot != "" {
+				t.Errorf("depth %s named the staged root %q, and no tree was staged", depth, result.StagedRoot)
+			}
+			if result.StageErr != nil || result.GatesErr != nil {
+				t.Errorf("depth %s reported faults (stage %v, gates %v); nothing was attempted, so nothing failed",
+					depth, result.StageErr, result.GatesErr)
+			}
+		})
 	}
 }
