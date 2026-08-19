@@ -2138,3 +2138,124 @@ func TestRunPreparedBuild_CarriesThePolicyFieldsIntoTheBuildRequest(t *testing.T
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Story 039, post-audit fix — R2.1, R4.1.
+//
+// The audit found, and an isolated reproduction against HEAD confirmed, that the
+// class this story ADDED produces a promotable proof of nothing when it
+// misclassifies:
+//
+//	gate=patches   outcome=SKIPPED declined=""
+//	gate=configure outcome=SKIPPED declined=""
+//	PromotionDecision -> promote=true
+//
+// The transcript that produces it is the one d4-portage-evidence.md records for
+// "a candidate in the no-distfile class that did require an archive":
+// `VERIFY FAILED! Insufficient data for checksum verification`. Portage refuses
+// before any fetch — which is what makes the class SAFE — but it refuses before
+// any phase marker too, and derive's `case r.runErr != nil` leaves such a skip's
+// cause unrecorded. Unrecorded promotes.
+//
+// So the gamble this class makes — write an empty Manifest, let Portage arbitrate
+// — reported its own loss as a pass.
+//
+// # Why the fix is narrow, and stays narrow
+//
+// The unrecorded bucket is deliberate everywhere else: a build that dies before
+// its first phase may have died of a flaky mirror, and guessing "candidate"
+// there withdraws a bump over a fact about the network. That reasoning still
+// holds for an ordinary candidate and is left alone.
+//
+// It does NOT hold for this class. Here the empty Manifest is a bet this package
+// placed, and a build that never reached a phase is the bet losing. The cost is
+// asymmetric in the other direction too: a wrong refusal means the candidate is
+// proved again, while a wrong promotion publishes an ebuild nothing measured —
+// which is the whole of what story 039 exists to prevent.
+// ---------------------------------------------------------------------------
+
+// verifyFailedTranscript is what Portage emits for a staged tree carrying an
+// empty Manifest when the candidate does declare an archive. Copied from the
+// measurement in .draft/d4-portage-evidence.md, not invented.
+const verifyFailedTranscript = "!!! Fetched file: gst-plugins-good-1.28.6.tar.gz VERIFY FAILED!\n" +
+	"!!! Reason: Insufficient data for checksum verification\n"
+
+// diedBeforeAnyPhase drives a build that produces the transcript above and exits
+// non-zero, so no phase marker is ever seen.
+func diedBeforeAnyPhase() BuildDeps {
+	return BuildDeps{
+		ExecCommand: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "true")
+		},
+		RunAttached: func(*exec.Cmd) ([]byte, error) {
+			return []byte(verifyFailedTranscript), errors.New("exit status 1")
+		},
+		LookPath:       func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		IsolationProbe: func() (bool, string) { return true, "" },
+	}
+}
+
+// TestRunPreparedBuild_TheNoDistfileClassCannotPromoteItsOwnMisclassification
+// is the fix, and its control is the half that keeps it narrow.
+func TestRunPreparedBuild_TheNoDistfileClassCannotPromoteItsOwnMisclassification(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, err := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the fixture ebuild: %v", err)
+	}
+	run := func(manifest stagedManifestLookup) PreparedBuild {
+		t.Helper()
+		return RunPreparedBuild(context.Background(), PreparedBuildRequest{
+			Overlay:        overlay,
+			StagingRoot:    t.TempDir(),
+			Atom:           "media-plugins/gst-plugins-qt6",
+			Version:        "1.28.6",
+			PackageDir:     pkgDir,
+			Ebuild:         body,
+			Depth:          DepthConfigure,
+			StagedManifest: manifest,
+			Deps:           diedBeforeAnyPhase(),
+		})
+	}
+
+	t.Run("the class refuses its own losing bet", func(t *testing.T) {
+		// The third answer: the producer ran and supplied no content.
+		result := run(func(string) ([]byte, error) { return nil, nil })
+		if len(result.Gates) == 0 {
+			t.Fatal("the run produced no gate at all")
+		}
+		for _, g := range result.Gates {
+			if g.Outcome == OutcomeSkipped && g.Declined != DeclineCandidate {
+				t.Errorf("the %s gate declined with cause %q, want %q; the empty Manifest is a bet THIS "+
+					"PACKAGE placed, and a build that never reached a phase is the bet losing — an "+
+					"unrecorded cause promotes (R2.1)", g.Gate, g.Declined, DeclineCandidate)
+			}
+		}
+		if promote, why := PromotionDecision(result.Gates, nil); promote {
+			t.Errorf("a candidate in the no-distfile class that never reached a build phase was cleared "+
+				"for promotion (%q); Portage refused it at digest verification, and reporting that as "+
+				"promotable is the vacuity this whole story exists to deny", why)
+		}
+	})
+
+	// The control, and it is what keeps the fix from becoming "any build that
+	// died before a phase blames the ebuild". An ordinary candidate may have
+	// died of a flaky mirror, and withdrawing it over that is a bump abandoned
+	// for a fact about the network.
+	t.Run("an ordinary candidate is left alone", func(t *testing.T) {
+		result := run(func(string) ([]byte, error) {
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		})
+		if len(result.Gates) == 0 {
+			t.Fatal("the run produced no gate at all")
+		}
+		for _, g := range result.Gates {
+			if g.Outcome == OutcomeSkipped && g.Declined == DeclineCandidate {
+				t.Errorf("the %s gate of an ORDINARY candidate was blamed for a build that died before any "+
+					"phase (%q); that build may have died of a flaky mirror, and this fix is not supposed "+
+					"to reach it", g.Gate, g.Reason)
+			}
+		}
+	})
+}

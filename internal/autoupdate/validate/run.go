@@ -919,6 +919,34 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 	// that could not be started are more specific answers than the class, and
 	// overwriting either with "no Manifest was required" would bury the fact the
 	// operator has to act on.
+	// THE CLASS OWNS ITS OWN LOSING BET (S039 post-audit, R2.1).
+	//
+	// The no-distfile class writes an EMPTY Manifest and lets Portage arbitrate,
+	// which is what makes it safe: a candidate that does declare an archive is
+	// refused at "VERIFY FAILED! Insufficient data for checksum verification",
+	// before any fetch is attempted. But Portage refuses before any PHASE MARKER
+	// too, so derive reads the run as "died before this gate began" and leaves
+	// the skip's cause unrecorded — and an unrecorded cause PROMOTES. The class
+	// this story added was therefore reporting its own misclassification as a
+	// pass, measured against the real ladder and confirmed before this fix.
+	//
+	// Only this class, and only the unrecorded ones. For an ordinary candidate a
+	// build that died before its first phase may have died of a flaky mirror,
+	// and blaming the ebuild there withdraws a bump over a fact about the
+	// network — that reasoning still holds and is left alone. Here the empty
+	// Manifest is a bet THIS PACKAGE placed, so the loss is the candidate's. The
+	// costs are asymmetric in the same direction: a wrong refusal proves the
+	// candidate again, a wrong promotion publishes an ebuild nothing measured.
+	//
+	// DeclineHost survives untouched: a missing `ebuild` and a refused isolation
+	// are this machine's faults whichever class the candidate is in.
+	if classReason != "" {
+		for i := range gates {
+			if gates[i].Outcome == OutcomeSkipped && gates[i].Declined == DeclineUnrecorded {
+				gates[i].Declined = DeclineCandidate
+			}
+		}
+	}
 	return PreparedBuild{StagedRoot: stagedRoot, Gates: gates, Reason: classReason}
 }
 
