@@ -1983,3 +1983,158 @@ func TestManifestDistNames_StaysOutOfTheUnification(t *testing.T) {
 	// report starts reading differently.
 	var _ func(string) []string = manifestDistNames //nolint:staticcheck // QF1011: the explicit type IS the assertion
 }
+
+// TestRunPreparedBuild_AHostThatCannotBuildIsNotAVerdict is D1(c), and it exists
+// so that defect has a test of its own (R7.1).
+//
+// unbuildableHereReason is the probe that separates "this host lacks the
+// dependency" from "this ebuild is broken". `ebuild` does no dependency
+// resolution at all: it starts the phase, the phase dies on the missing header,
+// and derive reads that as FAILED — a confident verdict against a candidate that
+// may be perfectly fine, with exit 1 behind it. realign.Prove reached
+// RunBuildGates by a second path and never ran the probe, so the same host gave
+// opposite answers depending on which command asked.
+//
+// The probe comes with the shared core now. This asserts it is reached FROM the
+// core, which is the thing a refactor can quietly undo.
+func TestRunPreparedBuild_AHostThatCannotBuildIsNotAVerdict(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, err := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the fixture ebuild: %v", err)
+	}
+
+	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
+		Overlay:     overlay,
+		StagingRoot: t.TempDir(),
+		Atom:        "media-plugins/gst-plugins-qt6",
+		Version:     "1.28.6",
+		PackageDir:  pkgDir,
+		Ebuild:      body,
+		Depth:       DepthConfigure,
+		StagedManifest: func(string) ([]byte, error) {
+			return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+		},
+		// A host missing two of the candidate's build dependencies.
+		Deps: newDepsSeam(&depsSeam{}, emergeWithMissingDeps, false),
+	})
+
+	if len(result.Gates) == 0 {
+		t.Fatal("the run produced no gate at all")
+	}
+	for _, g := range result.Gates {
+		if g.Outcome == OutcomeFailed {
+			t.Errorf("the %s gate reported FAILED (%q) on a host that simply does not hold the candidate's "+
+				"build dependencies; that is a verdict against an ebuild for something only this machine is "+
+				"missing (R1.2, D1c)", g.Gate, g.Reason)
+		}
+	}
+
+	configure := gateOf(t, EbuildResult{Gates: result.Gates}, GateConfigure)
+	if !strings.Contains(configure.Reason, "does not hold the build dependencies") {
+		t.Errorf("the configure gate does not carry the host probe's answer (%q); without the probe the "+
+			"phase starts, dies on the missing header, and derive reads that as a failure of the bump (D1c)",
+			configure.Reason)
+	}
+	// The operator's next action is on THIS BOX, and the reason has to name it.
+	if !strings.Contains(configure.Reason, "install ") {
+		t.Errorf("the skip %q names no atom to install; without them it is not an instruction", configure.Reason)
+	}
+	// And the decline is the host's, so it must not be read as a vacuity that
+	// refuses promotion — that is story 033's R3.12, which story 039 kept.
+	if configure.Declined != DeclineHost {
+		t.Errorf("the host probe's skip is tagged %q, want %q; tagged otherwise it turns every workstation "+
+			"missing a dependency into a refusal (R2.1, R3.12)", configure.Declined, DeclineHost)
+	}
+}
+
+// TestRunPreparedBuild_CarriesThePolicyFieldsIntoTheBuildRequest is D1(d), and
+// it exists because story 039's own mutation matrix found nothing failing when
+// that defect was reintroduced alone (R7.1).
+//
+// The two sibling tests assert the fields on the way IN — one on the
+// preparedBuild the core is handed, one on the PreparedBuildRequest realign
+// builds. Neither watches them reach the BuildRequest at the far end, so a
+// refactor could drop them inside the core and the whole suite would stay green.
+// That is precisely the shape of the original defect: Prove filled StagedRoot,
+// Atom, Version and Depth, and the two policy fields stayed at their zero value
+// where nobody was looking.
+//
+// The observables are the two refusals those fields govern: RunBuildGates
+// refuses an unisolatable build only when the request carries RequireIsolation,
+// and a FAILED gate names a retained log only when it carries a LogDir.
+func TestRunPreparedBuild_CarriesThePolicyFieldsIntoTheBuildRequest(t *testing.T) {
+	overlay, _ := seamDepthFixture(t)
+	pkgDir := filepath.Join(overlay, "media-plugins", "gst-plugins-qt6")
+	body, err := os.ReadFile(filepath.Join(pkgDir, "gst-plugins-qt6-1.28.6.ebuild"))
+	if err != nil {
+		t.Fatalf("reading the fixture ebuild: %v", err)
+	}
+	prepared := func(deps BuildDeps, requireIsolation bool, logDir string) PreparedBuild {
+		t.Helper()
+		return RunPreparedBuild(context.Background(), PreparedBuildRequest{
+			Overlay:          overlay,
+			StagingRoot:      t.TempDir(),
+			Atom:             "media-plugins/gst-plugins-qt6",
+			Version:          "1.28.6",
+			PackageDir:       pkgDir,
+			Ebuild:           body,
+			Depth:            DepthConfigure,
+			RequireIsolation: requireIsolation,
+			LogDir:           logDir,
+			StagedManifest: func(string) ([]byte, error) {
+				return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n"), nil
+			},
+			Deps: deps,
+		})
+	}
+
+	t.Run("RequireIsolation reaches the refusal", func(t *testing.T) {
+		deps := buildSeam(&buildSpy{}, configureOKLog, nil)
+		// A host that cannot create the namespace — the ordinary case for an
+		// unprivileged user, and the only one where the policy is observable.
+		deps.IsolationProbe = func() (bool, string) { return false, "unshare --net: Operation not permitted" }
+
+		required := prepared(deps, true, t.TempDir())
+		configure := gateOf(t, EbuildResult{Gates: required.Gates}, GateConfigure)
+		if !strings.Contains(strings.ToLower(configure.Reason), "isolation was required") {
+			t.Errorf("the gate does not name the isolation refusal (%q); the refusal inside RunBuildGates "+
+				"fires only when the BuildRequest carries RequireIsolation, so a core that drops it on the "+
+				"way through reinstates the policy bypass commit 0bc206b closed (R1.3, D1d)", configure.Reason)
+		}
+
+		// And the control: the same host with the policy off runs the build, so
+		// the assertion above is measuring the field and not the host.
+		off := prepared(deps, false, t.TempDir())
+		offGate := gateOf(t, EbuildResult{Gates: off.Gates}, GateConfigure)
+		if strings.Contains(strings.ToLower(offGate.Reason), "isolation was required") {
+			t.Errorf("the gate refused for isolation with the policy OFF (%q); the field is being asserted "+
+				"somewhere rather than carried", offGate.Reason)
+		}
+	})
+
+	t.Run("LogDir reaches the retained log", func(t *testing.T) {
+		logDir := t.TempDir()
+		// A build that FAILED is the only run whose log the gate names — and the
+		// only run whose log anybody wants.
+		deps := buildSeam(&buildSpy{}, configureFailLog, errors.New("exit status 1"))
+
+		failed := prepared(deps, false, logDir)
+		var named bool
+		for _, g := range failed.Gates {
+			if strings.Contains(g.Reason, logDir) {
+				named = true
+			}
+		}
+		if !named {
+			var reasons []string
+			for _, g := range failed.Gates {
+				reasons = append(reasons, g.Gate+": "+g.Reason)
+			}
+			t.Errorf("no gate names the retained log under %s (%v); LogDir is what a FAILED gate needs to "+
+				"point at, and the run that needs it is exactly the run that failed (R1.4, D1d)",
+				logDir, reasons)
+		}
+	})
+}
