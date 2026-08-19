@@ -499,3 +499,71 @@ func TestCheckRun_AnEscalationInsideTheConfirmedDepthRunsWithoutFuss(t *testing.
 			"a gate that asks twice for the same permission gets answered without being read", prompts)
 	}
 }
+
+// skipReason's contract is the one its own doc comment states: a skip ALWAYS
+// carries a reason. The cascade has three sources and none of them is a field
+// anything forces to be populated, so "always" is only true if the function
+// answers for the case where all three are blank.
+//
+// The empty case is asserted on the RENDERED line, not just on the return
+// value, because the defect is what an operator reads: printValidationResults
+// wraps this in parentheses, so an empty return prints "not validated ()" and
+// the empty parenthesis reads as "checked, nothing to say".
+func TestSkipReason_NeverReportsASkipWithoutAReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		result validate.EbuildResult
+		entry  validationPlanEntry
+		want   string
+	}{
+		{
+			name: "a skipped gate's own reason wins over both fallbacks",
+			result: validate.EbuildResult{
+				Gates: []validate.GateResult{
+					{Gate: "build", Outcome: validate.OutcomeSkipped, Reason: "gate said so"},
+				},
+				DepthReason: "depth said so",
+			},
+			entry: validationPlanEntry{Reason: "plan said so"},
+			want:  "gate said so",
+		},
+		{
+			name:   "the depth reason is next when no gate carries one",
+			result: validate.EbuildResult{DepthReason: "depth said so"},
+			entry:  validationPlanEntry{Reason: "plan said so"},
+			want:   "depth said so",
+		},
+		{
+			name:   "the plan's reason is last",
+			result: validate.EbuildResult{},
+			entry:  validationPlanEntry{Reason: "plan said so"},
+			want:   "plan said so",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := skipReason(tc.result, tc.entry); got != tc.want {
+				t.Errorf("skipReason() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// The case the cascade used to fall out of: nothing populated anywhere.
+	t.Run("every source blank still names the silence", func(t *testing.T) {
+		got := skipReason(validate.EbuildResult{
+			// A skipped gate that states no reason must not be mistaken for a
+			// reason: this is the shape skippedBuildGates produces when a depth
+			// reason was expected and never supplied.
+			Gates: []validate.GateResult{{Gate: "build", Outcome: validate.OutcomeSkipped}},
+		}, validationPlanEntry{})
+
+		if got == "" {
+			t.Fatal("skipReason() returned \"\": the caller prints it as \"not validated ()\", " +
+				"and an empty parenthesis reads as a result rather than as an unexplained skip")
+		}
+		if strings.TrimSpace(got) == "" {
+			t.Fatalf("skipReason() = %q: whitespace reads the same as empty once parenthesised", got)
+		}
+	})
+}

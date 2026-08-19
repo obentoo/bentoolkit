@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A package skipped by `overlay autoupdate --check` can no longer be reported
+  without a reason.** `skipReason` cascades through three sources — the skipped
+  gate's own reason, the resolved depth's reason, then the plan's — and all
+  three are free-form strings nothing forces to be populated. When the cascade
+  ran out it returned empty, and the caller printed `not validated ()`: an
+  operator reads that empty parenthesis as "checked, nothing to say", which is
+  the opposite of what a skip means. The cascade now ends by naming the silence
+  instead, so an unexplained skip reports itself as one.
+
+### Changed
+- **The justification above the sweeper's `contextcheck` suppression no longer
+  looks like a second suppression.** It was written as `// nolint:contextcheck
+  — …`, which golangci-lint does not recognise as a directive (a directive takes
+  no space after the slashes and separates its reason with `//`). The
+  suppression was never missing — the inline `//nolint:contextcheck` on the
+  statement itself does that work — but a line that reads as the directive and
+  is not one invites deleting the one that matters. It is now plainly prose and
+  says why.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added
