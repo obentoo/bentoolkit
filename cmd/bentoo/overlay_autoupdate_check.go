@@ -171,7 +171,15 @@ func planValidation(
 		// ClassifyForDepth returns a NOTE, not an error: a version it cannot
 		// read is charged the deepest class, and the note says so. Dropping the
 		// note would leave the deepest depth looking like a policy choice.
-		class, note := validate.ClassifyForDepth(update.CurrentVersion, update.NewVersion)
+		//
+		// The pending value is normalized with the SAME strip Validate applies
+		// before ITS classification (applier_check.go): a pending entry written
+		// by an older binary can still carry the upstream tag prefix
+		// ("v3.2.3"), and classifying the raw value here would price the bump
+		// as major in the plan the operator confirms while the run executes it
+		// as patch — a plan that lies about its own cost.
+		class, note := validate.ClassifyForDepth(update.CurrentVersion,
+			autoupdate.NormalizeUpstreamVersion(update.NewVersion))
 
 		decision := validate.ResolveDepth(validate.DepthRequest{
 			Package: update.Package,

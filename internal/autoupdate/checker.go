@@ -1517,6 +1517,17 @@ func (c *Checker) fetchUpstreamVersion(pkg string, cfg *PackageConfig) (string, 
 	if err != nil {
 		return "", err
 	}
+
+	// The tag prefix ("v3.2.3", "release-1.2") is stripped here, on the same
+	// single convergence point, and not left to each consumer. compareVersions
+	// and the applier already strip defensively, but the RAW value used to flow
+	// into CheckResult, the pending list and the validation plan — where
+	// ClassifyForDepth cannot read "v3.2.3" as a Gentoo version and charges the
+	// bump the deepest class, pricing a patch bump as major in the plan the
+	// operator confirms. Stripping before applySuffix keeps the suffix logic
+	// working on a bare version, and the strip is idempotent for entries whose
+	// transform already removed the prefix.
+	version = NormalizeUpstreamVersion(version)
 	version = applySuffix(version, cfg)
 
 	// An entry restricted to a release line must never report a version from

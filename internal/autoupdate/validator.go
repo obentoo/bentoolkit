@@ -120,6 +120,18 @@ func normalizeVersion(version string) string {
 	return strings.TrimSpace(version)
 }
 
+// NormalizeUpstreamVersion trims whitespace and removes a common tag prefix
+// ("v", "release-", …) from an upstream version value. It is the ONE
+// normalization every consumer of an upstream version must agree on: the
+// checker applies it before a value reaches CheckResult and the pending list,
+// and the validation plan applies it before classifying a pending entry that
+// may have been written by an older binary with the prefix still on. Plan and
+// run classifying different values is exactly the bug this exists to prevent
+// ("v3.2.3" charged as major in the plan, run as patch by Validate).
+func NormalizeUpstreamVersion(version string) string {
+	return stripVersionPrefix(strings.TrimSpace(version))
+}
+
 // stripVersionPrefix removes common version prefixes like 'v', 'V', 'version-', etc.
 func stripVersionPrefix(version string) string {
 	// Common prefixes to strip (ordered from longest to shortest to avoid partial matches)
