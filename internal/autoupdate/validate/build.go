@@ -426,8 +426,8 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		trace:        tracePhases(transcript),
 		transcript:   transcript,
 		runErr:       runErr,
-		fidelityNote: isolationFidelityNote(isolated, isolationReason),
-		distdirNote:  distdirEvidenceNote(req.Distdir),
+		fidelityNote: IsolationFidelityNote(isolated, isolationReason),
+		distdirNote:  DistdirEvidenceNote(req.Distdir),
 	}
 	if runErr != nil {
 		run.logNote = retainedLogNote(req.LogDir, atom, version, output)
@@ -547,7 +547,7 @@ func isolationRefusedReason(pv, probeReason, privTool string) string {
 	return reason + fmt.Sprintf(". Either run this where the namespace can be created, or drop --require-isolation to build anyway with every pass labelled %q", labelUnverifiedIsolation)
 }
 
-// isolationFidelityNote is the sentence a PASS carries when the run happened
+// IsolationFidelityNote is the sentence a PASS carries when the run happened
 // without a verified network namespace — story 031's label, applied to the build
 // gates (R6.6, D11).
 //
@@ -561,7 +561,18 @@ func isolationRefusedReason(pv, probeReason, privTool string) string {
 //
 // It returns "" on a verified run, so the label stays a signal: a sentence
 // printed under every gate on every host is one nobody reads.
-func isolationFidelityNote(isolated bool, probeReason string) string {
+//
+// # It is exported because it now serves TWO callers (S040-R2.5)
+//
+// The depth-driven ladder reaches it through gateFor, below; the applier's
+// privileged `--compile` gate calls it directly, because that path already knows
+// its own exit status and routing it through gateFor would re-derive an answer it
+// was handed. What both paths must share is not the derivation but the SENTENCE:
+// one word — PASS — cannot be allowed to describe two different amounts of
+// evidence, and a copy of this text in the applier would drift the first time
+// someone reworded one of them. So there is exactly one copy, here, and a
+// rewording lands on both paths at once.
+func IsolationFidelityNote(isolated bool, probeReason string) string {
 	if isolated {
 		return ""
 	}
@@ -574,12 +585,12 @@ func isolationFidelityNote(isolated bool, probeReason string) string {
 	return note
 }
 
-// distdirEvidenceNote is the sentence a PASS carries about the distdir the run
+// DistdirEvidenceNote is the sentence a PASS carries about the distdir the run
 // read from (R3.4).
 //
 // # Why a pass has to say this
 //
-// isolationFidelityNote, directly above, already worries in the code about "the
+// IsolationFidelityNote, directly above, already worries in the code about "the
 // pass does not prove the sources came from DISTDIR alone". Sub-task 3.1 made
 // that directory real by exporting it on the child; a pass that does not SAY
 // which one it exported still cannot support the sentence, because a reader has
@@ -598,7 +609,18 @@ func isolationFidelityNote(isolated bool, probeReason string) string {
 // An operator cannot read an absence, so the empty case says out loud that the
 // build answered from the host's own configuration (R3.2's honest answer, made
 // legible).
-func distdirEvidenceNote(distdir string) string {
+//
+// # It is exported because it now serves TWO callers (S040-R2.5)
+//
+// Like IsolationFidelityNote above: the depth-driven ladder reaches it through
+// gateFor, and the applier's privileged `--compile` gate calls it directly for
+// the two states it shares with this path — nothing resolved, and resolved and
+// carried into the child. (Its third state, a directory the privilege tool could
+// not carry, exists only there and is worded there.) The point of the export is
+// that there is ONE copy of each sentence: a rewording of either lands on the
+// privileged and the unprivileged pass at once, instead of leaving one of them
+// quietly making the older claim.
+func DistdirEvidenceNote(distdir string) string {
 	if distdir = strings.TrimSpace(distdir); distdir == "" {
 		return "; the gate exported no DISTDIR, so the build read whatever the host's own Portage configuration names"
 	}

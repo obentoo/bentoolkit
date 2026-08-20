@@ -873,6 +873,20 @@ func (a *Applier) buildDeps(runAttached func(cmd *exec.Cmd) ([]byte, error)) val
 // It is a SKIPPED and not a PASS when --require-isolation refused the build:
 // runCompile answers ("", nil) there, and a caller cannot tell that from a pass —
 // which is precisely the silence this story removes rather than reproduces.
+//
+// # The PASS carries the same fidelity statements its unprivileged sibling does
+//
+// One word — PASS — cannot describe two different amounts of evidence (S040-R2.5).
+// Since stories 031 and 039 every `--depth compile` pass has stated which DISTDIR
+// it enforced and whether its isolation was verified; this gate hand-rolled its
+// reason and stated neither, so a reader could not tell an enforced build from an
+// ambient one. It now appends both, in gateFor's own order and BY CALLING
+// gateFor's own note-producing functions — one copy of each sentence, so a
+// rewording lands on the privileged and the unprivileged pass at once.
+//
+// It does NOT route through buildRun.gateFor to get them. That function derives
+// an outcome from the phase markers in a transcript; this path already knows its
+// exit status, so routing it would re-derive an answer it was handed.
 func (a *Applier) compileGateResult(cand candidatePaths, pkg, version string, result *ApplyResult) []validate.GateResult {
 	if !cand.staged {
 		return nil
@@ -895,12 +909,60 @@ func (a *Applier) compileGateResult(cand candidatePaths, pkg, version string, re
 				pkg, version, result.IsolationReason),
 		}}
 	}
+	// The verdict's own sentence is untouched — this adds fidelity, it does not
+	// reword what the gate concluded.
+	reason := fmt.Sprintf("the compile phase completed for %s-%s; a compile pass does not cover src_install, which this ladder deliberately stops short of",
+		pkg, version)
+
+	// ORDER IS DELIBERATE, and it is gateFor's (validate/build.go): the isolation
+	// note CLOSES by warning that an unisolated build could have reached past the
+	// directory, so the sentence naming that directory has to be read first for
+	// the caveat to have an antecedent. The isolation note is appended
+	// unconditionally because it returns "" on a verified run, which is what keeps
+	// the label a signal rather than decoration under every gate on every host.
+	reason += compileDistdirNote(result)
+	reason += validate.IsolationFidelityNote(result.IsolationVerified, result.IsolationReason)
+
 	return []validate.GateResult{{
 		Gate:    validate.GateCompile,
 		Outcome: validate.OutcomePass,
-		Reason: fmt.Sprintf("the compile phase completed for %s-%s; a compile pass does not cover src_install, which this ladder deliberately stops short of",
-			pkg, version),
+		Reason:  reason,
 	}}
+}
+
+// compileDistdirNote is the distdir half of the privileged PASS's fidelity
+// (S040-R2.5), and the one place that path has a state its unprivileged sibling
+// does not.
+//
+// The two paths SHARE two states, and both are answered by validate's own
+// sentence so there is no second copy of it here: this run resolved no directory
+// (Portage then answers from its own configuration, R3.2's honest answer), or it
+// resolved one and the privilege tool carried it into the child.
+//
+// # The third state is this path's own, so it is worded here (S040-R2.3)
+//
+// A directory can be resolved and still not reach the build: privilegedDistdirArgs
+// carries it as `sudo DISTDIR=<dir> ebuild …`, measured on this host, and `doas`
+// has no VAR=value argument form at all to carry it with. Saying nothing would let
+// the pass imply a hermeticity this run never had, and borrowing the enforced
+// sentence would be a claim about an export that did not happen — so the gate
+// says the directory could not be enforced, and names it, because an operator who
+// wants the enforcement needs to know which directory was going to be used.
+//
+// IT IS STILL A PASS. The build ran and the compile phase completed; what the
+// privilege tool could not carry changes what the pass may CLAIM, not whether the
+// ebuild built.
+func compileDistdirNote(result *ApplyResult) string {
+	switch {
+	case result.CompileDistdir == "":
+		return validate.DistdirEvidenceNote("")
+	case result.CompileDistdirEnforced:
+		return validate.DistdirEvidenceNote(result.CompileDistdir)
+	default:
+		return fmt.Sprintf("; this run resolved %s for the build's archives but the privilege tool it escalated through "+
+			"has no argument form that carries an environment assignment, so the directory could not be enforced and "+
+			"the privileged Portage answered from its own configuration instead", result.CompileDistdir)
+	}
 }
 
 // recordDepthReached states, on the result, how far validation actually got and —

@@ -103,6 +103,32 @@ type ApplyResult struct {
 	// exactly when IsolationVerified is true. On a run skipped by
 	// --require-isolation it is the reason the compile never happened.
 	IsolationReason string
+	// CompileDistdir is the directory THIS RUN resolved for the privileged
+	// compile gate's archives — the apply's own fetch, then --distdir, then the
+	// configured one, whichever staticGateDistdir chose. It is recorded WHATEVER
+	// then happened to it, which is the point: a reader who only saw the
+	// enforced directory could not tell a run that resolved none from one whose
+	// privilege tool could not carry the one it had.
+	//
+	// It is empty when the compile did not run at all — including the run
+	// --require-isolation refused — and when this run resolved no directory of
+	// its own, which is R3.2's honest answer rather than an invented default:
+	// Portage then answers from its own configuration.
+	CompileDistdir string
+	// CompileDistdirEnforced reports whether that directory actually reached the
+	// ebuild child, and it is a separate fact because the privilege tool decides
+	// it. Measured on this host (story 040, sub-task 2.1): sudo's env_reset
+	// discards an exported DISTDIR, so what carries the value is sudo's own
+	// argument form, `sudo DISTDIR=<dir> ebuild …`. `doas` has no such form —
+	// handed one it would try to execute a program named "DISTDIR=…" — so on a
+	// doas host the directory is resolved and NOT enforced.
+	//
+	// The pair therefore states three things a single field could not: nothing
+	// resolved (empty, false), resolved and enforced (dir, true), resolved but
+	// uncarriable (dir, false). The compile gate's reason is what says the third
+	// one out loud, rather than letting a PASS imply a hermeticity the run never
+	// had.
+	CompileDistdirEnforced bool
 	// CleanedOldVersion is the highest version whose ebuild --clean removed. It
 	// is the single-version view of CleanRemoved, kept because callers that
 	// print one "Removed: pkg-X.ebuild" line predate the sweep; empty when clean
@@ -2159,6 +2185,12 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 	}
 
 	first := a.compileOnce(cand, pkg, version, privTool)
+	// Recorded as soon as a child has actually run, and on both outcomes: the
+	// gate below has to be able to say which directory this build read and
+	// whether the privilege tool could be made to honour it (S040-R2.3). The
+	// paths above return before any build, and leave both facts unset — there is
+	// nothing to state about a compile that did not happen.
+	recordCompileDistdir(result, first)
 	if first.err == nil {
 		return "", nil
 	}
@@ -2185,6 +2217,76 @@ type buildAttempt struct {
 	logPath string
 	// err is the failure, already wrapped in ErrCompileFailed, or nil.
 	err error
+	// resolvedDistdir is the directory this attempt resolved for the build's
+	// archives, and enforcedDistdir the one the privilege tool actually carried
+	// to the child: equal to it under sudo, empty under a tool with no argument
+	// form for an environment assignment (see privilegedDistdirArgs).
+	//
+	// Both are carried out of the attempt rather than re-derived by the caller
+	// so that the directory REPORTED and the directory the child was handed are
+	// the same resolution, not two runs of the same resolver a moment apart —
+	// staticGateDistdir prefers the private fetch directory only WHILE it holds
+	// something, so a second call is a second reading of the filesystem.
+	//
+	// They stay empty on the depth-driven build gates (applier_gates.go), whose
+	// child is unprivileged and gets its DISTDIR assigned inside the validate
+	// package; nothing on that path reads these.
+	resolvedDistdir string
+	enforcedDistdir string
+}
+
+// privilegedDistdirArgs decides HOW — and whether — a resolved distdir crosses
+// the privilege boundary, returning the argument that carries it and the
+// directory the child will therefore really read.
+//
+// # The mechanism was measured, not assumed (S040-R2.2)
+//
+// Measured on this host as the real operator, 2026-08-20, under sudo-rs 0.2.14
+// (.epic/stories/040-unreached-producers/.draft/d2-privilege-env-evidence.md):
+// with env_reset in force NOTHING Portage-related survives into what the child
+// sees, so an exported DISTDIR — anything this process puts in cmd.Env — reaches
+// `ebuild` not at all. What DOES cross is sudo's own argument form,
+// `sudo DISTDIR=<dir> ebuild …`, which that host granted. It is chosen over
+// --preserve-env because the value is then a LITERAL ARGUMENT this run computed:
+// nothing crosses from the operator's shell, which is R2.4 in its strongest
+// reading and the same distinction validate/build.go draws between an assigned
+// value and an allow-listed one.
+//
+// # The tool is a BRANCH, and that is correctness rather than caution
+//
+// `doas` has no VAR=value argument form at all: handed one it would try to
+// execute a program literally named "DISTDIR=…", and the compile gate would fail
+// outright on every host that has doas — which detectPrivilegeTool PREFERS. doas
+// was not installed on the measured host, so per R2.3 nothing is invented for it:
+// it runs exactly as it ran before, and the gate says the distdir could not be
+// enforced rather than letting a PASS imply a hermeticity the run never had.
+//
+// EMPTY RESOLVES TO NOTHING (R3.2, mirroring validate/build.go): no assignment
+// and no invented default, so Portage answers from its own configuration.
+func privilegedDistdirArgs(privTool, distdir string) (assignment []string, enforced string) {
+	if distdir == "" {
+		return nil, ""
+	}
+	switch privTool {
+	case "sudo":
+		return []string{"DISTDIR=" + distdir}, distdir
+	default:
+		return nil, ""
+	}
+}
+
+// recordCompileDistdir carries one compile attempt's distdir facts onto the
+// result, so the gate that reports this run can tell apart the three states R2.3
+// needs: nothing resolved, resolved and enforced, resolved and uncarriable.
+//
+// It is called for every attempt that actually SPAWNED a child, including the
+// authoritative re-run after a repair, because the last build that ran is the
+// one the verdict is about. A compile that never happened leaves both fields at
+// their zero value, which reads as "this run resolved nothing" — true, since it
+// resolved nothing it could have used.
+func recordCompileDistdir(result *ApplyResult, attempt buildAttempt) {
+	result.CompileDistdir = attempt.resolvedDistdir
+	result.CompileDistdirEnforced = attempt.enforcedDistdir != ""
 }
 
 // compileOnce spawns the build child EXACTLY ONCE and, on failure, retains its
@@ -2201,14 +2303,42 @@ type buildAttempt struct {
 // capturing its streams through a StreamCapture pipe, and the default runAttached
 // is exactly cmd.CombinedOutput so the retained log stays byte-identical to the
 // pre-TUI behaviour (S010-R3.3/S010-R7.1).
+//
+// # The distdir this run resolved is the one the child reads (S040-R2.1)
+//
+// It used to read whatever the host's Portage configuration happened to name,
+// while the unprivileged ladder has exported a computed DISTDIR since story 039
+// — one word, "PASS", covering two different amounts of evidence. The directory
+// is resolved by staticGateDistdir, the SAME resolver the option gate and the
+// depth-driven build gates use: a build reading a different directory from the
+// gate that vetted its archive is the divergence one resolver exists to prevent.
+// How it crosses the privilege boundary, and when it cannot, is
+// privilegedDistdirArgs' decision and its comment carries the measurement.
 func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string) buildAttempt {
-	// sudo/doas ebuild <path> clean compile, bound to the applier's parent context
-	// so a SIGINT or deadline kills the spawned process.
-	cmd := a.execCommand(a.ctx, privTool, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
+	distdir := a.staticGateDistdir(cand)
+	assignment, enforced := privilegedDistdirArgs(privTool, distdir)
+
+	// sudo [DISTDIR=<dir>] ebuild <path> clean compile, bound to the applier's
+	// parent context so a SIGINT or deadline kills the spawned process. The
+	// assignment PRECEDES the command, because sudo reads the first non-assignment
+	// argument as the program to run.
+	args := append(assignment, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
+	cmd := a.execCommand(a.ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
 
+	// cmd.Env is deliberately left nil here (S040-R2.4), which is a MEASURED
+	// decision and not an omission. validate/build.go installs an allow-list on
+	// its child because that child inherits this process's environment; this one
+	// does not — the measurement showed sudo's env_reset discarding the inherited
+	// environment before `ebuild` ever sees it. An allow-list on the sudo PARENT
+	// would therefore filter variables the privilege tool throws away a moment
+	// later, buying nothing, while risking the password prompt itself: TERM, and
+	// DISPLAY/XAUTHORITY on a host with a graphical askpass, are in the preserved
+	// set for a reason. The surface stays exactly today's, and the one value this
+	// run needed the child to have travels as an argument instead.
+
 	output, err := a.runAttached(cmd)
-	attempt := buildAttempt{transcript: string(output)}
+	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
 	if err != nil {
 		attempt.logPath = a.saveCompileLog(pkg, version, output)
 		attempt.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
@@ -2319,6 +2449,9 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	// the agent's account of what it did.
 	a.reporter.TaskStage(pkg, "re-check")
 	second := a.compileOnce(cand, pkg, version, privTool)
+	// The re-run is the verdict (R8.2), so its distdir facts are the ones the
+	// gate must report: this build is the one the PASS would be about.
+	recordCompileDistdir(result, second)
 	if second.err != nil {
 		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
 			first.err, compileGatePhase, second.err)
