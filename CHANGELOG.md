@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The upstream tag prefix is stripped once, at the checker.** A GitHub-style
+  tag ("v3.2.3") used to flow raw into the check display, `--list`, and
+  `pending.json`. The applier and `Validate` stripped it defensively before
+  acting, but the validation plan classified the raw value, could not read it
+  as a Gentoo version, and charged a patch bump the deepest class — the plan
+  priced hours of configure the run would then not spend, so the operator
+  confirmed a cost that was not real (observed live: `dev-libs/imath`,
+  `app-editors/vim`, `app-editors/vim-core` planned at configure for a patch
+  bump). The checker now normalizes at its single convergence point via the new
+  `NormalizeUpstreamVersion`, and the plan applies the same helper before
+  classifying, so a pending entry written by an older binary is priced as the
+  run will execute it.
+
 ### Added
 - **`bentoo overlay staged clean` — a caller for the staged-tree sweep.** Story
   039 shipped the sweeper deliberately without one: a sweeper whose report nobody
