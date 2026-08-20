@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -433,6 +434,17 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		attachQA(ctx, &res, target, qa)
 		report.Results = append(report.Results, res)
 
+		// After the result is complete, and reading it rather than re-deriving
+		// it: what the operator was shown and what the tree carries have to be
+		// the same account of the same package (R4.1).
+		//
+		// The context travels with it because this record is the one thing here
+		// that OUTLIVES the run, so a run that was stopped has to be able to
+		// refuse to leave one behind (R4.2). The cancellation check below cannot
+		// stand in for it: that one answers whether the RUN ends as an error, and
+		// it is reached only once the record would already be on disk.
+		recordStagedGates(ctx, res, target, depth, opts)
+
 		// Cancelled DURING this package, rather than before it. The check above
 		// catches packages the sweep never started; this one catches the package
 		// it was in the middle of, whose gates were killed rather than answered.
@@ -461,6 +473,213 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+// recordStagedGates writes, beside the tree one package was staged into, what
+// this run's gates said about it and how deep the run asked them to go (R4.1).
+//
+// Its two inputs answer two different questions and neither is read for the
+// other's: target IDENTIFIES the package — it holds the very key and version
+// Stage was handed, so the tree is named from the same values it was created
+// from — while res carries what was REPORTED about it. Taking the identity out
+// of the reported result instead would be a second source for a path, which is
+// the class of drift StagedTreePath exists to prevent.
+//
+// # Why a command that changes nothing writes anything at all
+//
+// A staged tree carrying no record is KEPT, because "its outcome is unknown"
+// (recordKeepsIt, sweep.go). Until this existed, WriteStageRecord had exactly one
+// production caller — two defers inside the applier — and this package only ever
+// READ records. So every tree an `overlay validate --depth` run left behind was
+// permanently unremovable: a sweep over that staging root would report every one
+// of them kept and take nothing away, which is precisely the accumulation the
+// sweep was written to stop (R4.4). Nothing else can classify these trees,
+// because nothing else knows what was measured about them.
+//
+// # It is EVIDENCE and not a licence, which is why the producer is named
+//
+// ProducedByValidate, never the applier's constant. The reuse path publishes a
+// bump on the strength of a record (R10.1), and this run staged nothing it means
+// to publish — it MEASURED a tree, by contract. The refusal that keeps the two
+// apart lives in stagedReuse and keys on exactly this value (S041-R5.1), so
+// naming the wrong producer here would quietly turn a read-only command into a
+// producer of publication evidence.
+//
+// # An interrupted run records nothing, and that invariant is INHERITED (R4.2)
+//
+// The applier already refuses to write under a cancelled context, in so many
+// words: "Writing this record would turn 'Ctrl-C does not publish' into 'Ctrl-C
+// publishes one run later'" (recordStagedProof, promote_reuse.go). The refusal
+// is repeated here for the same reason, one reader further along.
+//
+// Gates that were STOPPED report SKIPPED, and so do gates that were asked and
+// had nothing to do — the two are indistinguishable in a gate list. A record
+// written under cancellation is therefore an account of a run nobody
+// interrupted, and it is read as one: the sweep's retention rule classifies the
+// tree by it (recordKeepsIt, sweep.go) and can take away the very artifact the
+// stopped run left behind, while the reuse path reads the same list through it.
+//
+// Nothing is lost by refusing, and that is what makes the refusal cheap. A tree
+// carrying no record is KEPT, with the unknown outcome an unrecorded tree has
+// always had — one tree that stays, never a tree removed on evidence no gate
+// produced.
+//
+// # A record that cannot be written never fails a run
+//
+// The applier's rule (recordStagedProof, promote_reuse.go) for the applier's
+// reason: the cost of a missing record is one tree that stays, reported by the
+// sweep as an unknown outcome — which is what every release before this one did
+// with every tree this command left.
+//
+// It is still SAID OUT LOUD (R4.3). The failure changes what a later sweep does
+// with this tree, and an operator who is never told cannot tell a tree nothing
+// measured from a tree whose measurement could not be filed.
+//
+// # Why this warns instead of reporting a gate
+//
+// Everything else in this file answers a stopping condition with a reported gate
+// and a reason, and this deliberately does not. A record is bookkeeping ABOUT a
+// tree rather than a statement about the ebuild, and the report's bytes are
+// pinned (R1.6, R11.3): a new gate — or a new field — would change the JSON
+// document every `overlay validate --json` consumer already parses, to say
+// something that is not a verdict on the candidate.
+func recordStagedGates(ctx context.Context, res EbuildResult, target ebuildTarget, depth Depth, opts Options) {
+	// THE CONDITION IS "A TREE WAS STAGED", NOT "THE DEPTH WAS HIGH ENOUGH", and
+	// the two branches here are only its necessary half.
+	//
+	// A run that named no staging root staged nothing anywhere, and a depth at or
+	// below DepthOptions prepares nothing at all — runPreparedBuildGates returns
+	// before Stage is reached. Under either condition a tree standing at this path
+	// belongs to some OTHER run, and its record is not this one's to overwrite:
+	// the applier retains the tree of a bump that FAILED as the artifact an
+	// operator still needs, and the retention rule that keeps it reads the record
+	// beside it.
+	//
+	// Neither is sufficient on its own, which is what the stat below is for: a
+	// package above DepthOptions can still decline staging — its ebuild could not
+	// be read, or Stage refused — and WriteStageRecord errors on a directory that
+	// is not there. A depth-only condition would therefore produce one failure per
+	// declining package and bury a real write failure in that noise.
+	//
+	// The root is TRIMMED because Stage trims it before naming the tree, so an
+	// untrimmed value here would name a different directory than the one that was
+	// actually staged.
+	stagingRoot := strings.TrimSpace(opts.StagingRoot)
+	if stagingRoot == "" || depth <= DepthOptions {
+		return
+	}
+
+	// The layout is asked of the one function that spells it, which is the one
+	// Stage itself goes through: a second spelling of
+	// <staging>/<category>/<package>/<version> would be a second spelling that can
+	// go stale, and it would fail in silence — the record lands where nothing
+	// reads it, and every tree this command leaves stays unremovable exactly as it
+	// did before. It is not a hypothetical shape either: splitStagedAtom KEEPS a
+	// key's ":slot" or "@label" where splitContentAtom strips it, so a path
+	// rebuilt from the parts of a suffixed key names a directory Stage never
+	// wrote.
+	//
+	// A path this cannot name is not a path this may write to. The failure is a
+	// malformed atom or version — a registry key is a file a maintainer edits by
+	// hand — rather than a fact about the disk, so it is said out loud and names
+	// the package it is about.
+	staged, err := StagedTreePath(stagingRoot, target.atom, target.version)
+	if err != nil {
+		logger.Warn("what the gates reported about %s-%s is NOT recorded, because the staged tree it would be "+
+			"recorded beside cannot be named: %v (the run's own report is unaffected; a tree left under the "+
+			"staging root keeps the unknown outcome an unrecorded tree has always had)",
+			target.atom, target.version, err)
+		return
+	}
+
+	// The tree ITSELF is what says a record is owed here, and its absence is the
+	// ordinary answer rather than a fault: this run declined to stage this
+	// package.
+	//
+	// Silence is right, and it adds no silence. Every reason there is no readable
+	// directory at this path is a reason the run ALREADY rendered as a reported
+	// gate carrying its own sentence — the candidate could not be read, the tree
+	// could not be prepared, the caller wired no Manifest seam — so an operator is
+	// told what stopped this package by the report they asked for. Repeating it
+	// here would be a second, differently worded account of one fact.
+	//
+	// WHAT THIS CANNOT DISTINGUISH, stated rather than left to be discovered. A
+	// directory standing here says a tree was staged for this package and version;
+	// it does not say THIS run staged it. The one case where the two differ is a
+	// package that reached the build depths and then declined staging while an
+	// earlier producer's tree still stood at the same path, and the record written
+	// then describes gates that never read it. Two things bound it: Stage
+	// REPLACES, so every package that does stage is describing its own tree
+	// (R3.7); and the applier only retains a tree at a version this command
+	// validates once that version is published, which is to say once it PASSED —
+	// so the record being replaced is not the failure artifact an operator kept
+	// the tree for, and the cost is one revalidation. Closing it exactly would
+	// mean carrying Stage's own answer back out through buildDepthGates, whose
+	// two-value shape is asserted elsewhere; it is a known gap, not an oversight.
+	info, err := os.Stat(staged)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	// THE INTERRUPT INVARIANT, INHERITED FROM THE APPLIER — see the note above
+	// for why a record of stopped gates is worse than no record at all.
+	//
+	// It is asked HERE — after the tree has been found, immediately before the
+	// write — where the applier asks it first thing. What differs is only the
+	// point at which each function knows a record is OWED: the applier's
+	// `root == ""` return settles that on its own, while here it takes the staging
+	// root, the depth and the stat above together. Refusing any EARLIER would
+	// announce a missing record for a package that was never going to have one —
+	// a run below the build depths, or a package that declined staging — which is
+	// noise in the one report an operator reads after stopping a sweep. Refusing
+	// any LATER is not refusing: the record is already on disk.
+	//
+	// It withholds the WRITE and nothing else. The tree itself stays on disk as
+	// the stopped run's evidence, and stays kept.
+	if err := ctx.Err(); err != nil {
+		logger.Warn("the run was interrupted, so what the gates of %s-%s reported is NOT recorded beside %s: "+
+			"they were stopped rather than answered, and recording them would hand the next reader an account "+
+			"of a run nobody interrupted. The tree stays under the staging root, keeping the unknown outcome "+
+			"an unrecorded tree has always had (%v)",
+			target.atom, target.version, staged, err)
+		return
+	}
+
+	// The gates as REPORTED, outcome for outcome, and never a second reading of
+	// the same run: the retention rule reads this list (recordKeepsIt), so a gate
+	// that FAILED and was recorded as anything else takes away the artifact an
+	// operator is keeping the tree for.
+	//
+	// The depth is the one the run SELECTED — the depth the gates were asked to
+	// cover — because that is what StageRecord.Depth means and what both of its
+	// readers compare against. res.Depth is the depth REACHED, which is a
+	// different question with a different answer whenever a gate stopped short,
+	// and recording it would understate every tree this command leaves.
+	//
+	// The three digests are left EMPTY, which is a decision and not an omission.
+	// They exist for the reuse path's question, "is this evidence about the very
+	// bytes I am about to publish" — and that path refuses a record this command
+	// wrote on its provenance alone, before it looks at a digest. Computing them
+	// would mean re-reading the candidate and the Manifest to produce values whose
+	// only consumer has already declined to read them.
+	//
+	// A failure never fails the run, so the error is deliberately not returned to
+	// the loop: this is bookkeeping beside a tree, and the run's own outcome — the
+	// report the operator asked for — is complete either way. It is REPORTED and
+	// not discarded (R4.3), because the two silences are different: a tree with no
+	// record is one an operator may reasonably read as never measured, and only
+	// this sentence distinguishes it from one whose measurement could not be filed.
+	if err := WriteStageRecord(staged, StageRecord{
+		Package:    target.atom,
+		Version:    target.version,
+		ProducedBy: ProducedByValidate,
+		Depth:      depth,
+		Gates:      res.Gates,
+	}); err != nil {
+		logger.Warn("could not record what the gates said about %s-%s beside %s: %v (the run's own report is "+
+			"unaffected; the tree stays under the staging root, keeping the unknown outcome an unrecorded "+
+			"tree has always had)", target.atom, target.version, staged, err)
+	}
 }
 
 // unvalidatedResult is what DepthNone reports for one ebuild: a SKIPPED option

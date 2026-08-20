@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -57,14 +58,91 @@ type SweepReport struct {
 	Kept    []SweptEntry
 }
 
+// StagedSweepPlan is what one sweep WOULD do. Nothing in producing it removes
+// anything.
+//
+// The two lists partition everything the walk saw: a directory is a planned
+// removal or a keep with a reason, never both and never neither. That is what
+// makes a printed plan auditable — an entry in neither list is a tree the plan
+// says nothing about, and an operator reads silence as "it will not be touched".
+//
+// StagingRoot rides along because the executor acts on the root the PLAN names.
+// A plan that did not carry it could only be executed against whatever root the
+// caller happened to be holding, which is the one mistake this shape exists to
+// make impossible.
+//
+// Both lists are sorted, so two plans over one staging root diff cleanly.
+type StagedSweepPlan struct {
+	StagingRoot string
+	Remove      []string     // trees this sweep would remove, sorted
+	Kept        []SweptEntry // everything else, with the reason it stays, sorted
+}
+
 // SweepStagedTrees removes the staged trees the current run no longer needs, and
 // reports everything it kept with a reason each (R6, R6.1, R6.4).
 //
+// It is the plan followed by its effect and nothing else: PlanStagedSweep
+// reaches every verdict — including the refusal of a staging root inside the
+// overlay, which still happens before a single entry is read — and
+// ExecuteStagedSweep is the only thing in this file that acts on them. The
+// retention policy is documented on PlanStagedSweep, where it is applied.
+//
+// # Why it is RETAINED
+//
+// This is the surface story 039's R6 tests assert, and those tests are the only
+// thing guarding the behaviour the split refactors: the same verdicts, in the
+// same order, with a failed removal still reported as a keep carrying the error.
+// Keeping the function is what lets them stay the proof they were written to be.
+// The alternative — deleting it and rewriting its four tests against the new
+// pair — would have replaced the evidence with assertions written by the same
+// change they are supposed to check, which proves nothing about what was
+// preserved (S041-R7.2).
+//
+// # It has NO production caller
+//
+// Nothing outside tests calls it. The subcommand this story adds holds
+// PlanStagedSweep and ExecuteStagedSweep directly, because it prints the plan
+// and asks before executing it, and there is no point in this shape at which it
+// could interject. That is stated here rather than left to be found, because
+// THIS story exists precisely because this capability shipped in 0.25.0 with no
+// caller — this file's own header says so, at the top. A second uncalled
+// function in the same file at least declares itself.
+//
+// # Why context.Background() is not a shortcut here
+//
+// The signature takes no context and could only gain one by changing, which
+// R7.2 forbids. An entry point that cannot be cancelled is acceptable because
+// the caller that needs cancellation is the subcommand, which passes its own
+// context to ExecuteStagedSweep so a SIGINT lands between trees. What is
+// uncancellable is this test surface, not the path an operator interrupts.
+func SweepStagedTrees(req SweepRequest) (SweepReport, error) {
+	plan, err := PlanStagedSweep(req)
+	if err != nil {
+		// Propagated unchanged: the refusal an operator sees through this door
+		// has to be the one PlanStagedSweep reached, not a second wording of it.
+		return SweepReport{}, err
+	}
+	return ExecuteStagedSweep(context.Background(), plan), nil // SAFE: non-cancellable retained surface; the subcommand that needs cancellation passes its own ctx to ExecuteStagedSweep (S041-R7.2)
+}
+
+// PlanStagedSweep walks one staging root, classifies every entry it finds, and
+// leaves the filesystem exactly as it found it (S041-R1.1).
+//
+// # Why the decision is separate from the effect
+//
+// The sweeper used to judge and os.RemoveAll in the same traversal, so there was
+// no point at which a complete report existed and nothing had yet been removed:
+// nothing to show an operator before the deletions, and nothing a caller could
+// decline. The house convention is the opposite in four places already —
+// PlanOverlaySweep/ExecuteOverlaySweep, PlanPrune/ExecutePrune, PlanApply/Apply
+// — and this is that same split. Producing a plan is a read-only act; that is
+// the whole point of it, not an incidental property of the current code.
+//
 // # The retention policy, and why it is not "keep the last N"
 //
-// A tree is removed when all three hold: this package RECOGNISES it as one of
-// its own, it is not in req.InScope, and its record shows no deciding gate
-// FAILED. Everything else is kept and reported.
+// A tree is planned for removal when all three hold: this package RECOGNISES it
+// as one of its own, it is not in req.InScope, and its record shows no deciding
+// gate FAILED. Everything else is kept and reported.
 //
 // The reason to keep a staged tree at all is to look at it after something went
 // wrong. A tree whose gates PASSED has served its purpose the moment the verdict
@@ -74,33 +152,126 @@ type SweepReport struct {
 // mid-investigation on.
 //
 // A tree with no readable record is a tree whose outcome is UNKNOWN. It is kept,
-// and the report says so. Fail-closed is right here: the cost of a wrong keep is
+// and the plan says so. Fail-closed is right here: the cost of a wrong keep is
 // disk, the cost of a wrong removal is the artifact an operator was about to
 // open.
 //
-// # Safety (R6.2)
+// # Safety (R6.2), and why the check is the FIRST statement
 //
 // The overlay check is ensureOutsideOverlay — the SAME one Stage uses, not a
-// second one — and it runs before any entry is touched. A deletion routine with
-// its own idea of what is inside the overlay is how a sweeper eventually eats a
-// published package, and a sweeper that deletes half a tree and then discovers
-// where it is has already done the damage.
-func SweepStagedTrees(req SweepRequest) (SweepReport, error) {
-	// First, and before anything is read, listed or removed.
+// second one. A deletion routine with its own idea of what is inside the overlay
+// is how a sweeper eventually eats a published package. It came first when one
+// function both judged and deleted, and it comes first here for a second reason:
+// this is now the thing that READS the staging root, and a reader that walks
+// first and refuses afterwards has already listed the published overlay by the
+// time it says no.
+//
+// inScopeTreePaths comes next and propagates its error unchanged, for the reason
+// stated there: a request whose scope cannot be named is refused, never silently
+// swept. Both refusals return the zero plan — a refusal carrying a populated
+// plan is an invitation to execute it.
+func PlanStagedSweep(req SweepRequest) (StagedSweepPlan, error) {
+	// First, and before anything is read or listed.
 	if err := ensureOutsideOverlay(req.Overlay, req.StagingRoot); err != nil {
-		return SweepReport{}, err
+		return StagedSweepPlan{}, err
 	}
 
 	inScope, err := inScopeTreePaths(req)
 	if err != nil {
-		return SweepReport{}, err
+		return StagedSweepPlan{}, err
 	}
 
 	sweep := sweeper{root: req.StagingRoot, inScope: inScope}
 	if err := sweep.walkStagingRoot(); err != nil {
-		return SweepReport{}, err
+		return StagedSweepPlan{}, err
 	}
-	return sweep.report(), nil
+	return sweep.plan(), nil
+}
+
+// ExecuteStagedSweep removes exactly the trees plan.Remove names, and reports
+// what it did and what it left (S041-R1.4, R3.1, R3.2).
+//
+// # Why it acts on the plan and never decides again
+//
+// The plan is what an operator was shown, and at a confirmation prompt it is
+// what they said yes to. An executor that walked the staging root a second time
+// would reach its own verdicts on a root that has moved since: a tree staged
+// between the printing and the answer is removable by every rule in the policy
+// and appears nowhere in the list that was approved. So the walk happens once,
+// in PlanStagedSweep, and this reads plan.Remove and nothing else — every path
+// it touches was named by the plan, under the root the plan walked.
+//
+// # Why it returns no error
+//
+// It matches ExecuteOverlaySweep. A tree that could not be removed is reported
+// as a keep carrying the error as its reason, which is the fact an operator
+// staring at a staging root that did not shrink actually needs. A batch-level
+// error on top of that would either repeat it or, worse, be read as "the sweep
+// failed" and discard the removals that did succeed.
+//
+// # Cancellation (R3.1), and where R3.2 actually lives
+//
+// ctx is consulted BEFORE each removal rather than after, so a SIGINT lands
+// between trees while the next one is still whole. Every tree the sweep did not
+// reach is then reported as a keep naming the interruption: "you stopped me" is
+// a reason, and a report that simply stopped listing would be indistinguishable
+// from a completed sweep over a shorter plan.
+//
+// That check decides WHICH trees are touched. What makes R3.2's "wholly present
+// or wholly absent" true of a tree that IS touched is removeStagedTree being one
+// os.RemoveAll that is never split — the reasoning is on that function, and it
+// is the half of the invariant no amount of checking here could provide.
+func ExecuteStagedSweep(ctx context.Context, plan StagedSweepPlan) SweepReport {
+	// Cloned rather than appended to in place. The plan is the record of what
+	// was decided, and possibly what an operator was shown; a sweep that grew
+	// the caller's copy of the keeps would leave it holding something other than
+	// what it agreed to.
+	report := SweepReport{Kept: slices.Clone(plan.Kept)}
+
+	for i, dir := range plan.Remove {
+		if err := ctx.Err(); err != nil {
+			// From i, not from i+1: the tree at i is one of the ones not reached.
+			report.Kept = append(report.Kept, unreachedKeeps(plan.Remove[i:], err)...)
+			break
+		}
+		if err := removeStagedTree(dir); err != nil {
+			// It is still there, so it is a keep — reported as one rather than
+			// swallowed, because a removal that failed is exactly the thing an
+			// operator staring at an unchanged staging root needs to see.
+			report.Kept = append(report.Kept, SweptEntry{
+				Path:   dir,
+				Reason: fmt.Sprintf("it could not be removed (%v)", err),
+			})
+			continue
+		}
+		report.Removed = append(report.Removed, dir)
+	}
+
+	// Removed is a subsequence of the already sorted plan.Remove, so only the
+	// keeps can have left their order: a failed removal and an unreached tree
+	// both join them after the plan was sorted.
+	sortKept(report.Kept)
+	return report
+}
+
+// unreachedKeeps names every tree a stopped sweep did not get to (R3.1).
+//
+// It exists as its own function because "kept" is doing two different jobs in
+// this file, and only one of them is a decision: PlanStagedSweep's keeps are
+// verdicts about the tree itself, these are verdicts about the sweep. Both have
+// to appear in the same list — the report covers the whole plan or it trails
+// off, and a report that trails off reads as a shorter plan that completed —
+// but the reason has to say which kind it is, which is why it names the
+// interruption instead of describing the tree.
+func unreachedKeeps(unreached []string, err error) []SweptEntry {
+	keeps := make([]SweptEntry, 0, len(unreached))
+	for _, dir := range unreached {
+		keeps = append(keeps, SweptEntry{
+			Path:   dir,
+			Reason: fmt.Sprintf("the sweep was interrupted before it reached this tree (%v)", err),
+		})
+	}
+	return keeps
 }
 
 // inScopeTreePaths is the set of trees the current run still needs, keyed by the
@@ -130,8 +301,8 @@ type sweeper struct {
 	root    string
 	inScope map[string]struct{}
 
-	removed []string
-	kept    []SweptEntry
+	remove []string
+	kept   []SweptEntry
 }
 
 // walkStagingRoot reads the staging root itself, the first of the three levels.
@@ -182,7 +353,12 @@ func (s *sweeper) walkPackage(packageDir, pkg string) {
 }
 
 // decide applies the retention policy to one directory sitting where a staged
-// tree sits. It is the only place in this file that removes anything.
+// tree sits, and RECORDS the verdict instead of acting on it.
+//
+// It used to os.RemoveAll right here, in the same pass that judged. Appending
+// the path instead is the whole of S041-R1.1 at the level where it is decided:
+// every branch below either keeps or plans, none of them touches the disk, and
+// the two lists it feeds partition everything the walk saw.
 func (s *sweeper) decide(dir, pkg, version string) {
 	if recognised, why := recognisedStagedTree(dir, pkg, version); !recognised {
 		s.keep(dir, why)
@@ -196,14 +372,7 @@ func (s *sweeper) decide(dir, pkg, version string) {
 		s.keep(dir, why)
 		return
 	}
-	if err := removeStagedTree(dir); err != nil {
-		// It is still there, so it is a keep — reported as one rather than
-		// swallowed, because a removal that failed is exactly the thing an
-		// operator staring at an unchanged staging root needs to see.
-		s.keep(dir, fmt.Sprintf("it could not be removed (%v)", err))
-		return
-	}
-	s.removed = append(s.removed, dir)
+	s.remove = append(s.remove, dir)
 }
 
 // removeStagedTree takes one recognised tree out as a UNIT (R6.5).
@@ -323,12 +492,19 @@ func (s *sweeper) keep(path, reason string) {
 	s.kept = append(s.kept, SweptEntry{Path: path, Reason: reason})
 }
 
-// report sorts both lists so that two sweeps over one staging root produce a
-// report an operator can diff. os.ReadDir already returns entries in order, but
-// the guarantee belongs to the report rather than to the traversal that happens
-// to provide it.
-func (s *sweeper) report() SweepReport {
-	slices.Sort(s.removed)
-	slices.SortFunc(s.kept, func(a, b SweptEntry) int { return strings.Compare(a.Path, b.Path) })
-	return SweepReport{Removed: s.removed, Kept: s.kept}
+// plan sorts both lists so that two plans over one staging root are something an
+// operator can diff. os.ReadDir already returns entries in order, but the
+// guarantee belongs to the plan rather than to the traversal that happens to
+// provide it.
+func (s *sweeper) plan() StagedSweepPlan {
+	slices.Sort(s.remove)
+	sortKept(s.kept)
+	return StagedSweepPlan{StagingRoot: s.root, Remove: s.remove, Kept: s.kept}
+}
+
+// sortKept is the one spelling of the keeps' order, shared by the plan and by
+// anything that adds a keep after the plan was made — a failed removal being the
+// case that exists today. Two orders would be two diffs of the same sweep.
+func sortKept(kept []SweptEntry) {
+	slices.SortFunc(kept, func(a, b SweptEntry) int { return strings.Compare(a.Path, b.Path) })
 }

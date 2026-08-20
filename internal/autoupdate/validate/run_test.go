@@ -20,6 +20,7 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2258,4 +2259,381 @@ func TestRunPreparedBuild_TheNoDistfileClassCannotPromoteItsOwnMisclassification
 			}
 		}
 	})
+}
+
+// ===== Story 041, task 3.1 — R4.1, R4.4 =====
+
+// runRecordManifest is the Manifest the depth fixture's package needs. One
+// spelling, so the three tests below cannot drift on it.
+func runRecordManifest() []byte {
+	return []byte("DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n")
+}
+
+// runRecordStagedTree is the ROOT of the staged tree the depth fixture's one
+// package is staged into, or a fatal error naming what that means for the test
+// that asked.
+//
+// It is deliberately NOT seamStagedCandidateDir, and the difference is the whole
+// reason this helper exists. That one returns the directory holding the candidate
+// ebuild — <tree>/media-plugins/gst-plugins-qt6, the package directory INSIDE the
+// staged repository, which is what the Manifest tests seal. The record sits at
+// the tree's own root, <staging>/<category>/<package>/<version>. Asking about
+// ".bentoo-stage-record.json" one level down would make every "there is no
+// record" assertion in this file pass without the guard it is about, since no
+// record is ever written there.
+//
+// The path comes from StagedTreePath, which is the one spelling of the layout
+// and the one Stage itself uses — a second spelling here could go stale and the
+// failure would be silent in exactly the same way.
+func runRecordStagedTree(t *testing.T, staging string) string {
+	t.Helper()
+	root, err := StagedTreePath(staging, "media-plugins/gst-plugins-qt6", "1.28.6")
+	if err != nil {
+		t.Fatalf("naming the staged tree of the fixture package: %v", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("no staged tree at %s (%v), so the run never reached the depth path; every assertion about a "+
+			"file beside that tree would hold for the wrong reason", root, err)
+	}
+	return root
+}
+
+// =============================================================================
+// Task 3.1 — R4.1: a validation run above the options depth records what its
+// gates said, and names itself as the producer
+// =============================================================================
+
+// TestRun_ADepthRunRecordsWhatItsGatesSaidBesideTheStagedTree is R4.1, and it is
+// the fix without which this whole story is a gate that passes vacuously.
+//
+// validate.WriteStageRecord has exactly one production caller today — two defers
+// inside the applier. The validate package only READS records. Since a tree with
+// no record is kept as "its outcome is unknown" (sweep.go, recordKeepsIt), every
+// tree an `overlay validate --depth` run leaves is permanently unremovable, and
+// a sweep over that staging root would report 100% kept and remove nothing.
+//
+// Three things are asserted, and the third is the one that makes the record
+// worth reading:
+//
+//   - a record exists beside the tree and is readable;
+//   - it names "validate" as its producer, which is what D6 keys the reuse
+//     refusal on;
+//   - its gates are the gates this run REPORTED, outcome for outcome. A record
+//     saying something other than what the operator was shown is worse than no
+//     record: the sweep's retention rule reads it, so a gate that FAILED and was
+//     recorded as anything else takes the artifact away.
+func TestRun_ADepthRunRecordsWhatItsGatesSaidBesideTheStagedTree(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+
+	staging := t.TempDir()
+	got, err := Run(context.Background(), Options{
+		Overlay:        overlay,
+		Distdir:        distdir,
+		Depth:          "configure",
+		StagingRoot:    staging,
+		StagedManifest: func(string) ([]byte, error) { return runRecordManifest(), nil },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	staged := runRecordStagedTree(t, staging)
+	record, err := ReadStageRecord(staged)
+	if err != nil {
+		t.Fatalf("no readable validation record beside %s: %v — a tree carrying no record is kept as \"outcome "+
+			"unknown\" forever, which is the accumulation this story exists to stop (R4.1, R4.4)", staged, err)
+	}
+
+	if record.ProducedBy != "validate" {
+		t.Errorf("the record names ProducedBy=%q, want \"validate\"; a read-only run's record that claims the "+
+			"applier's provenance is a licence to publish, which is precisely what D6 refuses (R4.1, R5.1)",
+			record.ProducedBy)
+	}
+
+	res := onlyResult(t, got)
+	if len(res.Gates) == 0 {
+		t.Fatal("the run reported no gate at all, so comparing the record against the report asserts nothing")
+	}
+	if record.Depth != DepthConfigure {
+		t.Errorf("the record's depth is %v and the run SELECTED configure; the sweep and the reuse path both "+
+			"compare against the depth that was asked for, not the one that was reached (R4.1)", record.Depth)
+	}
+	if res.DepthRequested != "configure" {
+		t.Errorf("DepthRequested = %q; the fixture is wrong, not the record", res.DepthRequested)
+	}
+
+	recorded := map[string]Outcome{}
+	for _, gate := range record.Gates {
+		recorded[gate.Gate] = gate.Outcome
+	}
+	for _, reported := range res.Gates {
+		outcome, ok := recorded[reported.Gate]
+		if !ok {
+			t.Errorf("the run reported the %s gate and the record does not mention it; the record has to say what "+
+				"the run said, or the sweep classifies this tree on a partial account of it (R4.1)", reported.Gate)
+			continue
+		}
+		if outcome != reported.Outcome {
+			t.Errorf("the %s gate reported %v and was recorded as %v; a recorded outcome that differs from the "+
+				"reported one is read later by the retention rule, which then keeps or removes the wrong tree",
+				reported.Gate, reported.Outcome, outcome)
+		}
+	}
+}
+
+// ===== Story 041, task 3.2 — R4.2, R4.3 =====
+
+// =============================================================================
+// Task 3.2 — R4.2 and R4.3: an interrupted run records nothing, and a record
+// that cannot be written changes no outcome
+// =============================================================================
+
+// TestRun_AnInterruptedDepthRunLeavesNoRecordBesideItsStagedTree is R4.2, and it
+// is the interrupt invariant inherited rather than re-derived.
+//
+// The applier already refuses to write under a cancelled context, in so many
+// words: "Writing this record would turn 'Ctrl-C does not publish' into 'Ctrl-C
+// publishes one run later'" (promote_reuse.go, recordStagedProof). The same
+// refusal has to apply here for the same reason. Gates that were STOPPED report
+// SKIPPED, and a record full of SKIPPED gates is an account of a run nobody
+// interrupted. Downstream, the sweep would then classify the tree by that
+// account and remove the very artifact the interrupted run left behind.
+//
+// THE ASSERTION IS THE ABSENCE, STATED POSITIVELY. It is not "the run returned
+// an error" — the run already does that today, so an assertion on the error
+// alone would pass with the guard deleted. It is: the staged tree IS on disk
+// (checked first, so the absence below is not vacuous) and the record file is
+// NOT.
+func TestRun_AnInterruptedDepthRunLeavesNoRecordBesideItsStagedTree(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+
+	staging := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// The cancellation lands INSIDE the run, after the tree has been staged: the
+	// seam is consulted about a staged tree that lacks a Manifest, so staging has
+	// already happened when this fires. That is the shape of a real Ctrl-C
+	// mid-package, and it is the only shape in which a record could be written
+	// at all.
+	var seamCalls int
+	_, err := Run(ctx, Options{
+		Overlay:     overlay,
+		Distdir:     distdir,
+		Depth:       "configure",
+		StagingRoot: staging,
+		StagedManifest: func(string) ([]byte, error) {
+			seamCalls++
+			cancel()
+			return runRecordManifest(), nil
+		},
+	})
+
+	if seamCalls == 0 {
+		t.Fatal("the Manifest seam never ran, so the cancellation never fired and this test asserted nothing")
+	}
+	if err == nil {
+		t.Fatal("a cancelled run reported no error; the fixture is wrong and the assertion below would be about " +
+			"an ordinary complete run")
+	}
+
+	staged := runRecordStagedTree(t, staging)
+	if _, statErr := os.Stat(StageRecordPath(staged)); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("a record sits beside %s after an interrupted run (stat: %v). Gates that were stopped rather "+
+			"than answered are recorded as answers, and the next reader — the sweep's retention rule, and the "+
+			"reuse path through it — acts on them (R4.2)", staged, statErr)
+	}
+}
+
+// TestRun_ARecordThatCannotBeWrittenLeavesTheRunsOutcomeUnchanged is R4.3.
+//
+// The rule is the applier's, unchanged: "the cost of a missing record is one
+// tree that stays" — never a failed run. A validation run that started failing
+// because a bookkeeping file could not be written would trade the whole report
+// an operator asked for against a file nobody reads directly.
+//
+// The failure is injected without chmod, so the test means the same thing when
+// the suite runs as root (`act` does): a NON-EMPTY DIRECTORY is placed exactly
+// where the record goes. WriteStageRecord removes any previous record before
+// writing (writeStagedFile), and os.Remove on a non-empty directory fails, so
+// the write cannot succeed however it is implemented.
+//
+// Two runs, compared: the sabotaged one must report gate for gate what the
+// clean one reported. Asserting only "no error" would pass against a run that
+// swallowed the failure by skipping the gates it could no longer record.
+func TestRun_ARecordThatCannotBeWrittenLeavesTheRunsOutcomeUnchanged(t *testing.T) {
+	runOnce := func(t *testing.T, sabotage bool) EbuildResult {
+		t.Helper()
+		overlay, distdir := seamDepthFixture(t)
+		t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+		staging := t.TempDir()
+
+		got, err := Run(context.Background(), Options{
+			Overlay:     overlay,
+			Distdir:     distdir,
+			Depth:       "configure",
+			StagingRoot: staging,
+			StagedManifest: func(string) ([]byte, error) {
+				if sabotage {
+					// INSTRUMENT REPAIR (story 041, task 3.2). This originally named
+					// the record path from seamStagedCandidateDir, which walks to the
+					// directory holding the .ebuild — the package directory INSIDE
+					// the staged repo. The record does not live there: the writer
+					// names it with StagedTreePath, the staged tree's ROOT. So the
+					// sabotage blocked a path nothing writes to, the real write
+					// succeeded, and this test's own guard fired. Naming it the way
+					// the WRITER names it is the only spelling that can block it.
+					dir, pathErr := StagedTreePath(staging, "media-plugins/gst-plugins-qt6", "1.28.6")
+					if pathErr != nil {
+						t.Errorf("naming the staged tree whose record path is to be blocked: %v", pathErr)
+						return runRecordManifest(), nil
+					}
+					if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+						t.Error("nothing was staged before the Manifest seam was consulted, so the record path " +
+							"could not be blocked and the sabotage did not happen")
+						return runRecordManifest(), nil
+					}
+					blocked := StageRecordPath(dir)
+					if err := os.MkdirAll(filepath.Join(blocked, "occupied"), 0o750); err != nil {
+						t.Errorf("blocking the record path %s: %v", blocked, err)
+					}
+				}
+				return runRecordManifest(), nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run (sabotage=%v): %v — a validation run must not fail over a record it could not write "+
+				"(R4.3)", sabotage, err)
+		}
+
+		if sabotage {
+			staged := runRecordStagedTree(t, staging)
+			if _, readErr := ReadStageRecord(staged); readErr == nil {
+				t.Fatal("the record was written despite the record path being blocked, so this run is not the " +
+					"failure case it was set up to be and the comparison below proves nothing")
+			}
+		}
+		return onlyResult(t, got)
+	}
+
+	clean := runOnce(t, false)
+	sabotaged := runOnce(t, true)
+
+	if len(clean.Gates) == 0 {
+		t.Fatal("the clean run reported no gate, so there is nothing to compare against")
+	}
+	if sabotaged.DepthRequested != clean.DepthRequested || sabotaged.Depth != clean.Depth {
+		t.Errorf("the run whose record could not be written reports depth %q/%q against the clean run's %q/%q; "+
+			"the outcome of a run does not depend on a bookkeeping file (R4.3)",
+			sabotaged.Depth, sabotaged.DepthRequested, clean.Depth, clean.DepthRequested)
+	}
+	if len(sabotaged.Gates) != len(clean.Gates) {
+		t.Fatalf("the sabotaged run reports %d gates and the clean run %d; a record that could not be written "+
+			"must not remove an answer from the report an operator asked for (R4.3)",
+			len(sabotaged.Gates), len(clean.Gates))
+	}
+	for i, gate := range clean.Gates {
+		if sabotaged.Gates[i].Gate != gate.Gate || sabotaged.Gates[i].Outcome != gate.Outcome {
+			t.Errorf("gate %d: the sabotaged run says %s=%v, the clean run says %s=%v",
+				i, sabotaged.Gates[i].Gate, sabotaged.Gates[i].Outcome, gate.Gate, gate.Outcome)
+		}
+	}
+}
+
+// ===== Story 041, task 3.3 — R4.4 =====
+
+// =============================================================================
+// Task 3.3 — R4.4: the join. A tree a REAL --depth run left is classified by
+// its recorded outcome, not as unknown
+// =============================================================================
+
+// TestPlanStagedSweep_ClassifiesATreeLeftByARealDepthRunByItsRecordedOutcome is
+// the one test that runs both halves of this story against each other, and
+// without it the suite is exactly the vacuity the story was written to end.
+//
+// # Why every other test here can pass while the feature does not work
+//
+// Each half is tested against a fixture of its own: the sweep's tests lay out
+// trees with Stage plus a hand-written WriteStageRecord, and the run's tests
+// read back the record the run wrote. Both would keep passing if the record
+// landed at the wrong PATH, carried the wrong DEPTH, or named its gates in a
+// shape recordKeepsIt reads differently — because no fixture in either half is
+// produced by the other half. The operator's outcome would be unchanged from
+// today: `overlay staged clean` reports "kept: its outcome is unknown" for 100%
+// of the trees a whole-overlay `--depth` run leaves, removes nothing, and the
+// staging root goes on growing by one tree per package forever.
+//
+// So: NOTHING is hand-written here. The run stages the tree and writes the
+// record; the planner then reads that root with an empty InScope, which is what
+// a standalone `overlay staged clean` passes (D4 — there is no current run, so
+// nothing is in scope). If the record has to be faked for this to pass, the
+// story's central fix is not in place.
+//
+// # Why the tree is expected in Remove
+//
+// `ebuild` is off PATH, so the build gates report SKIPPED rather than FAILED,
+// and the retention rule keeps only what a deciding gate FAILED. A skip is not a
+// failure: nothing here is the artifact an operator is mid-investigation on.
+func TestPlanStagedSweep_ClassifiesATreeLeftByARealDepthRunByItsRecordedOutcome(t *testing.T) {
+	overlay, distdir := seamDepthFixture(t)
+	t.Setenv("PATH", fakeBinDir(t, map[string]string{"emerge": "#!/bin/sh\nexit 0\n"}))
+
+	staging := t.TempDir()
+	if _, err := Run(context.Background(), Options{
+		Overlay:        overlay,
+		Distdir:        distdir,
+		Depth:          "configure",
+		StagingRoot:    staging,
+		StagedManifest: func(string) ([]byte, error) { return runRecordManifest(), nil },
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Fatal if the run staged nothing: a plan over an empty staging root would
+	// report no removals for the most boring reason there is, and the assertions
+	// below would read as a feature that does not work.
+	staged := runRecordStagedTree(t, staging)
+
+	// The standalone invocation's own request: no overlay run is in progress, so
+	// nothing is in scope and the only protections are recognition, the retention
+	// policy and the operator's confirmation.
+	plan, err := PlanStagedSweep(SweepRequest{Overlay: overlay, StagingRoot: staging})
+	if err != nil {
+		t.Fatalf("PlanStagedSweep over the root a --depth run just wrote into: %v", err)
+	}
+
+	planned := false
+	for _, path := range plan.Remove {
+		if path == staged {
+			planned = true
+		}
+	}
+	keptReason := ""
+	for _, entry := range plan.Kept {
+		if entry.Path == staged {
+			keptReason = entry.Reason
+		}
+	}
+
+	if !planned && keptReason == "" {
+		t.Fatalf("the plan does not mention %s in either list, although a --depth run just staged it there; the "+
+			"sweep's walk and the run's layout disagree about where a staged tree lives, and every other test in "+
+			"this suite would still pass (R4.4)", staged)
+	}
+	if !planned {
+		t.Errorf("the tree a --depth run left at %s is KEPT, for the reason %q. R4.4 is that such a tree is "+
+			"classified by its recorded outcome, and a sweep that keeps all of them removes nothing — which is "+
+			"the accumulation this whole story exists to stop", staged, keptReason)
+	}
+	// Named apart from the assertion above because it is a different defect with
+	// the same symptom: "outcome unknown" means the planner found NO readable
+	// record beside the tree, so the record the run wrote is missing, unreadable,
+	// or sitting somewhere the planner does not look.
+	if strings.Contains(strings.ToLower(keptReason), "unknown") {
+		t.Errorf("the planner reports %s as having an unknown outcome (%q) after a run that answered its gates. "+
+			"The record was written where the reader does not read it, or in a shape it cannot parse — the two "+
+			"halves of this story are not joined (R4.1, R4.4)", staged, keptReason)
+	}
 }

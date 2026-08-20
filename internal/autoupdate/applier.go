@@ -891,7 +891,20 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// Taken BEFORE anything is staged, for the reason staging itself makes
 	// unavoidable: validate.Stage replaces the retained tree (R3.7), so a question
 	// asked after it is a question about a tree this run just rebuilt.
-	var inputs stagedInputs
+	//
+	// retainedVerdict is what that question was ANSWERED with, kept in a variable
+	// rather than only on the result because the reviewer's re-decision below
+	// reassigns result.DepthReason wholesale. Without it the answer survives only
+	// on the promoting path — which returns before that line — and every REFUSAL
+	// this file computes ("its record shows configure FAILED", "no readable
+	// record", "produced by validate rather than by the applier") reaches the
+	// operator as an ordinary slow apply with no explanation attached. R10.3 is
+	// "state per package which of the two happened", and the half that is worth
+	// stating is the half where the retained tree was NOT used.
+	var (
+		inputs          stagedInputs
+		retainedVerdict string
+	)
 	if a.stagingRoot != "" {
 		captured, err := a.stagedInputsFor(pkg, currentVersion, update)
 		if err != nil {
@@ -910,7 +923,8 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			// happened" is already on the result and in the summary line; what
 			// this adds is the WHY, and "there was no retained tree" explains
 			// nothing an operator did not know from the absence of one.
-			result.DepthReason = appendDepthReason(result.DepthReason, reuse.reason)
+			retainedVerdict = reuse.reason
+			result.DepthReason = appendDepthReason(result.DepthReason, retainedVerdict)
 		}
 		if reuse.err != nil {
 			// The retained tree matched this bump exactly and its distfile moved
@@ -1020,7 +1034,10 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// A run with no reviewer wired passes the policy depth straight through.
 	depth = a.reviewBump(cand, pkg, currentVersion, newVersion, depth, &gates)
 	result.DepthRequested = depth.Depth.String()
-	result.DepthReason = depth.Reason
+	// The reviewer may have raised the depth, so its reason REPLACES the policy's
+	// — but the retained tree's verdict answers a different question and is put
+	// back beside it. Assigning depth.Reason alone here is what used to drop it.
+	result.DepthReason = appendDepthReason(depth.Reason, retainedVerdict)
 
 	// The build gates, at the depth selected above (R3, R5, R6). They are the
 	// generalisation of the compile gate below, so the two never both run: with

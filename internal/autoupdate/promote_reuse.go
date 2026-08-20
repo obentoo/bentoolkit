@@ -211,6 +211,26 @@ type stagedReuse struct {
 // evidence here — refusing the apply over ITS distfile would report a mismatch
 // about a bump nobody is trying to promote.
 //
+// # A record is a licence only if the applier wrote it
+//
+// A read-only `overlay validate --depth` stages a tree and records what its
+// gates said, and nothing about that record LOOKS wrong here: same package, same
+// version, same digests, because it measured the very candidate this run would
+// stage. The tree path carries the version, so the collision is usually avoided
+// by accident — but only usually, and a realign proposal or an `overlay compare
+// --depth` reaches it routinely. Promoting on such a record publishes an ebuild
+// on the output of a command whose contract says it changes nothing.
+//
+// Provenance is therefore asked BEFORE anything the record CLAIMS is read: a
+// record that is not a licence is not turned into one by proving something. It
+// is asked AFTER the record is read, so an unreadable one keeps R10.5's own,
+// more specific reason — the zero value of a record that could not be read names
+// no producer at all, and would otherwise be blamed on its provenance.
+//
+// The comparison is against the applier's OWN name rather than against
+// validate's, and that direction is the guard: a producer this version has never
+// heard of costs one revalidation instead of a publication (R5.1).
+//
 // # Why a changed distfile digest is a refusal and not a revalidation
 //
 // Every other mismatch means "the retained tree does not answer this question",
@@ -256,6 +276,25 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 			logger.Warn("the validation record beside %s could not be read (%v); %s-%s is validated again", root, err, pkg, newVersion)
 		}
 		return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree %s carries no readable validation record, and absence of a claim is not a passing claim (R10.5)", root)}
+	}
+
+	// R5.1. A producer this version does not RECOGNISE lands here too, by
+	// construction: ReadStageRecord passes an unknown name through verbatim rather
+	// than refusing to read a well-formed record left by a release this one is too
+	// old to know about, and this side refuses everything that is not the
+	// applier's own name. An ABSENT producer never arrives here as absence —
+	// ReadStageRecord reads it as the applier (R5.2), because every record already
+	// on an operator's disk predates the field and came from the applier.
+	//
+	// The name is quoted because it is text found on disk rather than a value this
+	// run chose, and an operator diagnosing a refusal has to see what is really in
+	// the file.
+	if record.ProducedBy != validate.ProducedByApplier {
+		return stagedReuse{root: root, reason: fmt.Sprintf(
+			"the retained tree's record was produced by %q rather than by the applier, so it is evidence about a "+
+				"different question — what a run MEASURED about this tree, not whether this bump may be published "+
+				"without running a gate again (R5.1)",
+			record.ProducedBy)}
 	}
 
 	proved, why := record.Proves(want)
@@ -345,9 +384,16 @@ func (a *Applier) recordStagedProof(root, pkg, version string, inputs stagedInpu
 		return
 	}
 
+	// R5.3, and it is what keeps R5.1 from being a rule that can only refuse. The
+	// reuse path above promotes on this exact value and on no other, so an applier
+	// that stopped naming itself — or named itself in some other spelling — would
+	// see every tree it retains refuse its own evidence on the next run: R10.1's
+	// whole saving switched off with nothing in the output saying why. The named
+	// constant rather than a literal is that spelling being fixed in one place.
 	err := validate.WriteStageRecord(root, validate.StageRecord{
 		Package:            pkg,
 		Version:            version,
+		ProducedBy:         validate.ProducedByApplier,
 		Depth:              depth,
 		Gates:              gates,
 		EbuildDigest:       inputs.ebuild,
