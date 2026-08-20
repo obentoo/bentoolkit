@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`bentoo overlay staged clean` — a caller for the staged-tree sweep.** Story
+  039 shipped the sweeper deliberately without one: a sweeper whose report nobody
+  has read is not something to publish blind. This is that caller. It plans,
+  prints every removal and every keep with the reason it stays, takes a
+  confirmation, and only then removes. A plan that removes nothing says WHICH
+  emptiness it is — nothing found, or everything present protected — and returns
+  without asking.
+
+  Three gates in trust order: `--yes` warns and proceeds; a non-interactive
+  session prints the plan, removes nothing and names `--yes`; otherwise one
+  prompt covers the whole plan. The executor is unreachable until a gate has
+  passed, so a declined sweep is harmless by construction rather than by care.
+
+  Measured on a real staging root rather than asserted: 41 trees,
+  **21 removable, 20 kept**. Every one of the 20 was kept for the same reason —
+  no validation record, outcome unknown.
+
+- **A validation run now records what its gates said.** This is what makes the
+  count above stop being zero. `validate.WriteStageRecord` had exactly one
+  production caller, inside the applier; the `validate` package only read
+  records. Since the retention rule keeps every recordless tree as "outcome
+  unknown", **every tree an `overlay validate --depth` run left was permanently
+  unremovable** — precisely the accumulation the sweeper was written to stop.
+  A run above the options depth now leaves a record beside each tree it staged,
+  carrying the gates it reported and the depth it selected.
+
+  An interrupted run records nothing: gates that were stopped are not gates that
+  answered, and recording them would turn Ctrl-C into a promotion one run later.
+  A record that cannot be written never fails the run — the cost is one tree that
+  stays.
+
+- **A stage record names what produced it.** A record is not neutral metadata: it
+  feeds the promotion reuse path, where a later `--apply` promotes a bump without
+  running a gate again. Teaching a read-only command to write one would make
+  `overlay validate` a producer of publication evidence. So records carry
+  `produced_by`, and the reuse path requires the applier's own provenance. A
+  record with no producer reads as applier-produced, so every record already on
+  disk keeps its meaning.
+
+### Fixed
+- **A reuse REFUSAL no longer loses its reason.** The reviewer's re-decision
+  reassigned the depth reason wholesale, discarding whichever of the five
+  mismatch reasons the reuse path had computed. All five were affected; the
+  promoting path escaped only because it returns before that line. An operator
+  now learns why a retained tree was not used instead of seeing an ordinary slow
+  apply.
+
+### Reach, stated rather than implied
+- Trees left by `overlay compare --depth` **stay kept as outcome-unknown**. It
+  shares the staging root but was never taught to record. Named here rather than
+  left to be discovered.
+- There is **no lock** on the staging root, deliberately: the retention rule is
+  expressed by the path, and a central index would put back the one file every
+  worker writes through. A sweep running beside an `--apply` or a `--depth` can
+  therefore remove a tree that run is using. Nothing detects it; the cost is
+  bounded to that one run, which fails as an environment failure and publishes
+  nothing. The command's help states this.
+
 ## [0.25.0] - 2026-08-20
 
 ### Added
