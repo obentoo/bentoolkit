@@ -115,7 +115,16 @@ func TestEnvironmentVerdict_MissingWorkdirNeverReachesTheFixer(t *testing.T) {
 // TestEnvironmentVerdict_AnExitedCommandStillReachesTheFixer is R5.5's guard: a
 // command that RAN and exited non-zero is pkgdev telling us about the ebuild,
 // and the fixer must still get to see it. The missing-workdir class is keyed on
-// a failure to start, never on an *exec.ExitError.
+// a failure to START, never on an *exec.ExitError.
+//
+// THE SECOND CASE IS THE ONE THAT MATTERS, and the first alone would not have
+// caught its loss. A plain `false` carries no ENOENT anywhere, so it stays
+// unclassified whether or not the ExitError guard exists — the test would pass
+// over a missing guard. The shape that actually occurs is pkgdev EXITING
+// non-zero over a distfile it could not find: the chain then carries ENOENT AND
+// an ExitError at once, and only the guard keeps the fixer reachable for it.
+// That is the case a bump with a stale SRC_URI arrives as, which is the repair
+// the fixer exists to make.
 func TestEnvironmentVerdict_AnExitedCommandStillReachesTheFixer(t *testing.T) {
 	exitErr := exec.Command("false").Run()
 	if exitErr == nil {
@@ -126,8 +135,27 @@ func TestEnvironmentVerdict_AnExitedCommandStillReachesTheFixer(t *testing.T) {
 		t.Fatalf("instrument: %v is not an *exec.ExitError", exitErr)
 	}
 
-	if verdict := environmentVerdict(stagedManifestFailure(exitErr)); verdict != nil {
-		t.Errorf("environmentVerdict = %v for a plain non-zero exit; a command that ran is evidence "+
-			"about the ebuild, and refusing the fixer here would lose repairs the gate exists to allow", verdict)
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "a plain non-zero exit", err: exitErr},
+		{
+			// pkgdev ran, looked for an archive, did not find it, and exited.
+			name: "an exit whose chain also carries ENOENT",
+			err:  fmt.Errorf("%w: the distfile named by SRC_URI: %w", exitErr, fs.ErrNotExist),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !errors.As(tc.err, &exit) {
+				t.Fatalf("instrument: %v carries no *exec.ExitError", tc.err)
+			}
+			if verdict := environmentVerdict(stagedManifestFailure(tc.err)); verdict != nil {
+				t.Errorf("environmentVerdict = %v for %s; a command that RAN is evidence about the "+
+					"ebuild, and refusing the fixer here would lose the repairs the gate exists to allow",
+					verdict, tc.name)
+			}
+		})
 	}
 }

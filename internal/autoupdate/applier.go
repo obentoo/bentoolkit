@@ -2322,7 +2322,15 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	// parent context so a SIGINT or deadline kills the spawned process. The
 	// assignment PRECEDES the command, because sudo reads the first non-assignment
 	// argument as the program to run.
-	args := append(assignment, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
+	//
+	// Built into a slice of its OWN rather than appended onto the one
+	// privilegedDistdirArgs returned: appending to a caller's slice writes into
+	// that slice's backing array whenever it has spare capacity, so the argv of
+	// this run would depend on how the assignment was allocated somewhere else.
+	// It costs one allocation and removes a class of bug entirely.
+	args := make([]string, 0, len(assignment)+4)
+	args = append(args, assignment...)
+	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
 	cmd := a.execCommand(a.ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
 
