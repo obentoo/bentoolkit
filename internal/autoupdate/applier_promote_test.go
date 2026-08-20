@@ -1379,3 +1379,77 @@ func TestApplierPromote_TheApplierNamesItselfAsTheProducerOfItsRecord(t *testing
 			"next run and every retained tree pays for its gates twice (R5.3)", written.ProducedBy)
 	}
 }
+
+// TestApplierPromote_ARecordNamingAProducerThisVersionDoesNotKnowIsRefusedToo
+// pins the DIRECTION of R5.1's comparison, which R5.1's own test cannot.
+//
+// The guard is spelled `record.ProducedBy != ProducedByApplier` — accept ONLY
+// the applier. The plausible-looking inversion is
+// `record.ProducedBy == ProducedByValidate` — refuse only the read-only producer
+// this version happens to know the name of. Against every other test in this
+// file the two are indistinguishable, because every other fixture names either
+// "applier" or "validate", and both spellings agree on those two. They disagree
+// on exactly one input: a producer neither name covers.
+//
+// That input is not hypothetical. ReadStageRecord passes an unrecognised
+// producer through VERBATIM rather than refusing the record (record.go:265-273),
+// deliberately, so that a record written by a newer release stays readable by
+// this one. The wire shape's whole promise is that such records arrive. So the
+// question this test asks is the one D6 was written about: when a name arrives
+// that this version cannot classify, does the reuse path fail closed?
+//
+// Under the inversion it fails OPEN, and the cost is the worst outcome this
+// codebase has: a perfect-match tree is promoted with ZERO child processes, so a
+// bump is published on evidence some other command produced, with the result
+// still labelled "staged" as though a gate had answered.
+//
+// Three assertions, and the third is the one that is new. The first two repeat
+// ...ARecordTheApplierDidNotProduceIsNotALicenceToPublish's shape because a
+// refusal has to be visible as both a label and a real re-run. The third asserts
+// the unknown name appears in the reason EXACTLY AS IT WAS FOUND ON DISK, which
+// pins two things at once: that the refusal is attributable to a specific
+// producer an operator can go look up, and that ReadStageRecord's verbatim
+// pass-through survives — a normalization added there later would rewrite the
+// name to something this run chose and silently drop the evidence.
+func TestApplierPromote_ARecordNamingAProducerThisVersionDoesNotKnowIsRefusedToo(t *testing.T) {
+	// A name that is neither constant, and that reads like what it stands in for:
+	// a release, or a sibling command, that learned to record after this binary
+	// was built. Nothing in the program compares against it.
+	const unknownProducer = "overlay-compare"
+
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	body := candidateBody(t, overlayDir)
+
+	// Perfect in every other respect — same package, same version, same bytes,
+	// same digests, gates all PASS at the requested depth. The producer is the
+	// only thing wrong with it, so a promotion here can be attributed to nothing
+	// else.
+	staged := stageCandidateFor(t, applier.StagingRoot(), overlayDir, body)
+	record := provedRecord(validate.DepthConfigure, digestOf(body), stagedDistfileDigest)
+	record.ProducedBy = unknownProducer
+	if err := validate.WriteStageRecord(staged, record); err != nil {
+		t.Fatalf("writing the stage record: %v", err)
+	}
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource == ValidationSourceStaged {
+		t.Errorf("ValidationSource = %q: a record naming the unrecognised producer %q was accepted as a licence "+
+			"to publish. The guard has to accept only the applier's own name; refusing merely the read-only "+
+			"producer it knows about lets every future one through (R5.1)", result.ValidationSource, unknownProducer)
+	}
+	if watch.spawns == spawnsBefore {
+		t.Errorf("no child process ran: the retained tree was reused on a record produced by %q. A bump was "+
+			"published without a gate answering for it, which is the exact outcome D6 exists to prevent (R5.1)",
+			unknownProducer)
+	}
+	if !strings.Contains(result.DepthReason, unknownProducer) {
+		t.Errorf("the run explains itself with %q, which does not carry the producer %q found on disk. Either the "+
+			"refusal is unattributable to the operator, or ReadStageRecord stopped passing an unknown producer "+
+			"through verbatim and rewrote it to a name this run chose (R5.1)", result.DepthReason, unknownProducer)
+	}
+}

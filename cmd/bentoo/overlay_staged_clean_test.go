@@ -576,18 +576,51 @@ func TestStagedClean_HelpStatesThatAConcurrentRunsTreeCanBeRemoved(t *testing.T)
 	cmd := stagedCleanCmd(t)
 	help := strings.ToLower(cmd.Short + "\n" + cmd.Long)
 
-	saysConcurrent := strings.Contains(help, "concurrent") ||
-		strings.Contains(help, "at the same time") ||
-		strings.Contains(help, "another run") ||
-		strings.Contains(help, "running beside")
-	if !saysConcurrent {
-		t.Errorf("the help never mentions another run happening at the same time: %q. There is no lock on the "+
+	// INSTRUMENT REPAIR (story 041, validate mode). The removal half of this
+	// assertion used to search the WHOLE help for "remove", which could not fail:
+	// the Long says "remove"/"removed" five separate times — in the paragraph
+	// about what the retention rule removes, in the one about the confirmation,
+	// in the exit codes and in the examples — none of which is about a concurrent
+	// run. A help text that deleted the hazard entirely would still have passed.
+	//
+	// R6.3 is ONE claim, not two words: a sweep running beside another run can
+	// remove THAT RUN'S tree. So the removal has to be stated where the
+	// concurrency is stated. The window is how "where" is measured: in the
+	// delivered text the two sit 16-31 characters apart, and the nearest
+	// unrelated "remove" is 344 away, so 160 accepts a rewrite that splits the
+	// claim over two sentences while still failing if the claim is dropped and
+	// only the far-away paragraphs are left.
+	const claimWindow = 160
+
+	var windows []string
+	for _, marker := range []string{"concurrent", "at the same time", "another run", "running beside"} {
+		for at := 0; ; {
+			found := strings.Index(help[at:], marker)
+			if found < 0 {
+				break
+			}
+			found += at
+			windows = append(windows, help[max(0, found-claimWindow):min(len(help), found+len(marker)+claimWindow)])
+			at = found + len(marker)
+		}
+	}
+	if len(windows) == 0 {
+		// Fatal rather than an error: the removal assertion below asks WHERE the
+		// concurrency is stated, and there is no where.
+		t.Fatalf("the help never mentions another run happening at the same time: %q. There is no lock on the "+
 			"staging root by design, so this is the only warning an operator gets (R6.3, D8)", cmd.Long)
 	}
 
-	saysItCanBeRemoved := strings.Contains(help, "remove") || strings.Contains(help, "delete")
+	saysItCanBeRemoved := false
+	for _, window := range windows {
+		if strings.Contains(window, "remove") || strings.Contains(window, "delete") {
+			saysItCanBeRemoved = true
+			break
+		}
+	}
 	if !saysItCanBeRemoved {
-		t.Errorf("the help mentions a concurrent run but not that its tree can be REMOVED: %q. The hazard is "+
-			"the removal, and a help text that only says \"be careful\" states nothing (R6.3)", cmd.Long)
+		t.Errorf("the help mentions a concurrent run but not, anywhere near it, that its tree can be REMOVED. "+
+			"Searched %d passage(s) around the mention: %q. The hazard is the removal, and a help text that "+
+			"only says \"be careful\" states nothing (R6.3)", len(windows), windows)
 	}
 }
