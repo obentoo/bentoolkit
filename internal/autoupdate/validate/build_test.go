@@ -682,7 +682,7 @@ func TestRunBuildGates_ChildGetsAnAllowListedEnvironment(t *testing.T) {
 	joined := strings.Join(spy.envAtSpawn, "\n")
 	for _, want := range []string{"PATH=", "PORTAGE_TMPDIR="} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("the child environment is missing %s; the allow-list is PATH, HOME, TERM, PORTAGE_*, FEATURES, MAKEOPTS and DISTDIR", want)
+			t.Errorf("the child environment is missing %s; the allow-list is PATH, HOME, TERM, PORTAGE_*, FEATURES and MAKEOPTS; DISTDIR left it in story 039 and is now set as a computed value instead", want)
 		}
 	}
 	// And the parent's own environment is untouched — the gate builds a child
@@ -816,4 +816,208 @@ func TestPromotionDecision_RefusesNothingRatherThanPromotingIt(t *testing.T) {
 		t.Skip("PromotionDecision no longer promotes on all-SKIPPED; the interrupt hazard this guards is gone")
 	}
 	t.Logf("confirmed: an all-SKIPPED list promotes (%q) — which is why an interrupt must not produce one", reason)
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 3.1 — R3, R3.1, R3.2, R3.3.
+//
+// DISTDIR sat on buildEnvAllowed, which reads as "we pass it". It is not what
+// that list does: allowedBuildEnv filters the PARENT's environment, so the entry
+// meant "we let the invoking shell's value through, if it had one" — the weakest
+// of the three possible behaviours and the one nobody would choose on purpose.
+// The value the operator resolved with --distdir was consumed only by
+// distfiles.Locate, for READING; a grep for `DISTDIR=` over internal/ and cmd/
+// returned nothing outside tests. Nothing exported it.
+//
+// So a build gate ran against whatever distdir the shell happened to name, or
+// against the host's default, and a PASS could not support the sentence
+// isolationFidelityNote already worries about: that the sources came from
+// DISTDIR alone.
+//
+// The fix is a COMPUTED value, not a wider allow-list. The allow-list's purpose
+// is that the parent's environment cannot leak in; the resolved distdir is an
+// input to this run, so it belongs with the run's own variables.
+// ---------------------------------------------------------------------------
+
+// distdirEntries returns every DISTDIR= assignment in a child environment. It
+// returns them all rather than the first, because "exactly once" is half the
+// contract: exec.Cmd's duplicate-key behaviour is not a decision anyone should
+// inherit.
+func distdirEntries(env []string) []string {
+	var got []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "DISTDIR=") {
+			got = append(got, kv)
+		}
+	}
+	return got
+}
+
+// TestRunBuildGates_TheResolvedDistdirReachesTheChild is R3.1.
+func TestRunBuildGates_TheResolvedDistdirReachesTheChild(t *testing.T) {
+	distdir := t.TempDir()
+	spy := &buildSpy{}
+
+	req := buildRequestFor(t, DepthConfigure)
+	req.Distdir = distdir
+
+	if _, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+	if spy.envAtSpawn == nil {
+		t.Fatal("cmd.Env was never set, so there is nothing to ask about DISTDIR")
+	}
+
+	got := distdirEntries(spy.envAtSpawn)
+	if len(got) != 1 {
+		t.Fatalf("the child environment carries %d DISTDIR entries (%v), want exactly 1; a gate that passes "+
+			"without a distdir it can name cannot support the claim that the sources came from DISTDIR alone "+
+			"(R3.1)", len(got), got)
+	}
+	if got[0] != "DISTDIR="+distdir {
+		t.Errorf("the child was given %q, want %q — the value the operator resolved, not one this package "+
+			"invented", got[0], "DISTDIR="+distdir)
+	}
+}
+
+// TestRunBuildGates_NoResolvedDistdirInventsNothing is R3.2 and R3.3 together,
+// and it is the assertion that keeps the fix from becoming a wider allow-list.
+//
+// The parent exports DISTDIR; the request resolves none. Today's entry on
+// buildEnvAllowed would let the shell's value through, which is precisely the
+// behaviour that made a PASS unable to say where its sources came from. With
+// nothing resolved, nothing crosses — and this package invents no value of its
+// own either.
+func TestRunBuildGates_NoResolvedDistdirInventsNothing(t *testing.T) {
+	t.Setenv("DISTDIR", "/var/cache/distfiles-from-the-invoking-shell")
+	spy := &buildSpy{}
+
+	req := buildRequestFor(t, DepthConfigure) // Distdir left empty on purpose.
+
+	if _, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if got := distdirEntries(spy.envAtSpawn); len(got) != 0 {
+		t.Errorf("the child environment carries %v with nothing resolved; the parent's value crossing in is "+
+			"the leak the allow-list exists to prevent (R3.2, R3.3), and inventing one would be worse", got)
+	}
+}
+
+// TestRunBuildGates_TheParentCannotOverrideTheResolvedDistdir is the third case,
+// and the one exec.Cmd would otherwise decide by its duplicate-key rule.
+//
+// Leaving DISTDIR on buildEnvAllowed while also setting it explicitly makes the
+// answer depend on which entry wins — a decision nobody made, recorded nowhere.
+// Removing it from the list makes the computed value the only source, so the
+// parent cannot influence the build at all.
+func TestRunBuildGates_TheParentCannotOverrideTheResolvedDistdir(t *testing.T) {
+	t.Setenv("DISTDIR", "/var/cache/distfiles-from-the-invoking-shell")
+	resolved := t.TempDir()
+	spy := &buildSpy{}
+
+	req := buildRequestFor(t, DepthConfigure)
+	req.Distdir = resolved
+
+	if _, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	got := distdirEntries(spy.envAtSpawn)
+	if len(got) != 1 || got[0] != "DISTDIR="+resolved {
+		t.Errorf("the child was given %v, want exactly [DISTDIR=%s]; the parent's DISTDIR must not compete "+
+			"with the resolved one, and the winner must not be exec.Cmd's duplicate-key behaviour (R3.3)",
+			got, resolved)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 3.2 — R3, R3.4.
+//
+// isolationFidelityNote already worries, in the code, about the exact claim this
+// pins: an unisolated run "could reach the network and the pass does not prove
+// the sources came from DISTDIR alone". Sub-task 3.1 made the distdir real by
+// exporting it; a PASS that does not SAY which one it read still cannot support
+// that sentence, because the reader has no way to tell an enforced distdir from
+// the host's ambient one.
+//
+// It rides on a PASS only, for the reason gateFor already documents: the label
+// answers an OVERCLAIM, and a pass is the only outcome that claims to have
+// proved anything. A FAILED gate is not made less true by where its sources came
+// from, and a SKIPPED gate measured nothing to qualify.
+// ---------------------------------------------------------------------------
+
+// TestRunBuildGates_APassNamesTheDistdirItRead is R3.4's first half.
+func TestRunBuildGates_APassNamesTheDistdirItRead(t *testing.T) {
+	distdir := t.TempDir()
+	req := buildRequestFor(t, DepthConfigure)
+	req.Distdir = distdir
+
+	gates, err := RunBuildGates(context.Background(), req, buildSeam(&buildSpy{}, configureOKLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	configure := gateNamed(t, gates, GateConfigure)
+	if configure.Outcome != OutcomePass {
+		t.Fatalf("the configure gate reported %s (%q), and this test measures what a PASS says",
+			configure.Outcome, configure.Reason)
+	}
+	if !strings.Contains(configure.Reason, distdir) {
+		t.Errorf("the PASS %q does not name the distdir it read (%s); a gate that passes without saying "+
+			"where its sources came from cannot support the hermeticity claim this story exists to make "+
+			"true (R3.4)", configure.Reason, distdir)
+	}
+}
+
+// TestRunBuildGates_APassWithoutADistdirSaysSo is R3.4's second half, and it is
+// the half that makes the first one worth reading.
+//
+// If only the enforced case spoke, a reason without a distdir would be
+// ambiguous between "this run enforced none" and "this sentence predates the
+// change". Saying so out loud is what lets an operator read the absence.
+func TestRunBuildGates_APassWithoutADistdirSaysSo(t *testing.T) {
+	req := buildRequestFor(t, DepthConfigure) // Distdir left empty on purpose.
+
+	gates, err := RunBuildGates(context.Background(), req, buildSeam(&buildSpy{}, configureOKLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	configure := gateNamed(t, gates, GateConfigure)
+	if configure.Outcome != OutcomePass {
+		t.Fatalf("the configure gate reported %s (%q)", configure.Outcome, configure.Reason)
+	}
+	if !strings.Contains(configure.Reason, "distdir") && !strings.Contains(configure.Reason, "DISTDIR") {
+		t.Errorf("the PASS %q says nothing about the distdir; with none exported the build read whatever "+
+			"the host's own configuration names, and an operator cannot tell that from an enforced run "+
+			"unless the reason says it (R3.4)", configure.Reason)
+	}
+}
+
+// TestRunBuildGates_OnlyAPassCarriesTheDistdirEvidence keeps the new sentence
+// from becoming decoration on every line of every report — the rule gateFor
+// already states for the isolation label, asserted for this one too.
+func TestRunBuildGates_OnlyAPassCarriesTheDistdirEvidence(t *testing.T) {
+	distdir := t.TempDir()
+	req := buildRequestFor(t, DepthCompile)
+	req.Distdir = distdir
+
+	// configureOKLog stops after configure, so at compile depth the compile gate
+	// is the one that measured nothing.
+	gates, err := RunBuildGates(context.Background(), req, buildSeam(&buildSpy{}, configureOKLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	for _, g := range gates {
+		if g.Outcome == OutcomePass {
+			continue
+		}
+		if strings.Contains(g.Reason, distdir) {
+			t.Errorf("the %s gate reported %s and still carries the distdir evidence (%q); the sentence "+
+				"answers an OVERCLAIM, and an outcome that claims nothing has nothing to qualify",
+				g.Gate, g.Outcome, g.Reason)
+		}
+	}
 }

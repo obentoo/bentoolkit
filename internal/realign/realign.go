@@ -125,16 +125,25 @@ type Proof struct {
 // is built from, where the staged tree goes, how deep to gate, and the seams the
 // build runs through.
 //
-// Two fields of validate.BuildRequest are deliberately absent rather than
-// hard-coded with a note. RequireIsolation stays at story 031's unmoved default
-// (design D11 there): a build that runs without a proven network namespace says
-// so in its own PASS reason, so the fidelity is reported rather than assumed.
-// LogDir stays empty, which BuildRequest documents as retaining nothing and
-// SAYING that it retained nothing — an honest gap, and the command layer of this
-// group is where an operator-visible log directory would come from if one is
-// wanted.
+// The three fields the prepared build needs and cannot work out — the Manifest
+// source, and the two POLICY fields of validate.BuildRequest — are carried
+// through here from the caller's effective configuration. They used to be absent
+// on the stated grounds that leaving them out was honest: RequireIsolation would
+// stay at story 031's unmoved default and a build without a proven namespace
+// would say so in its own PASS reason, LogDir would stay empty and BuildRequest
+// documents an empty one as retaining nothing and SAYING it retained nothing.
 //
-// _Requirements: R5.1, R5.2_
+// That stance was wrong, and specifically so. An operator's decision that builds
+// must be isolated is read from one config key, and it was being applied by one
+// of the two commands that build — a policy that governs whichever command you
+// happened to run is not a policy, it is a coin toss with a config file. And the
+// run whose log somebody needs is exactly the run that FAILED, so "retains
+// nothing" was an honest description of the one gap that costs an operator the
+// diagnosis. Neither field is decided here: this package still adds no rule of
+// its own, it carries the decision the command layer already resolved (R1.3,
+// R1.4).
+//
+// _Requirements: R1.1, R1.3, R1.4, R5.1, R5.2_
 type Options struct {
 	// Overlay is the published overlay the staged tree copies its eclasses and
 	// profiles out of (R3.8 in story 033). It is READ here and never written:
@@ -156,6 +165,43 @@ type Options struct {
 	// the place that owes a realign run a depth worth having.
 	Depth validate.Depth
 
+	// StagedManifest answers, for the PUBLISHED package directory, the Manifest
+	// content the staged tree must carry before a build gate can run in it.
+	//
+	// It is the seam `overlay validate --depth` already goes through, and this
+	// package neither produces the bytes nor knows where they come from: design
+	// D1 puts Manifest GENERATION in autoupdate and leaves validate accepting
+	// only what a caller supplies. Nil means NOTHING TRAVELS — nothing is staged
+	// and nothing is built — which is validate's rule verbatim rather than a
+	// second one stated here (R1.1).
+	StagedManifest func(pkgDir string) ([]byte, error)
+
+	// RequireIsolation is the operator's policy, carried and never asserted. The
+	// refusal it governs lives inside RunBuildGates and fires only when the
+	// request carries it; hardcoding a true here would refuse every build on a
+	// host that cannot create the namespace, which is the ordinary case (R1.3).
+	RequireIsolation bool
+
+	// LogDir is where the build's whole transcript is kept for whoever has to go
+	// past the summary. Empty is still accepted — the gate's own reason then
+	// says the log was not retained — but a FAILED gate with no log is the one
+	// case where the summary is not enough (R1.4).
+	LogDir string
+
+	// Distdir is the directory the build reads its archives from, carried into
+	// the prepared build and set on the child as DISTDIR (S039-R3.1).
+	//
+	// Carried, never resolved: this package adds no rule of its own about where
+	// archives come from, exactly as it adds none about depth or isolation. A
+	// realignment is a SAME-VERSION edit, so no fetch of its own has produced an
+	// archive — whatever directory already holds the release's tarball is the
+	// command layer's answer to give.
+	//
+	// Empty sets nothing and invents nothing (S039-R3.2): the build then reads
+	// the host's own configured DISTDIR, which is what every realign proof did
+	// before this field existed.
+	Distdir string
+
 	// Deps are the process- and host-level seams the build gates run through,
 	// passed to RunBuildGates untouched. Its zero value means "use the real
 	// thing" — every field is normalised by validate itself — so a caller with
@@ -163,31 +209,42 @@ type Options struct {
 	Deps validate.BuildDeps
 }
 
-// stageRealignment and runRealignGates are story 033's two entry points, held as
-// package-level variables so that a test can answer for them without a build ever
-// running. It is the discipline archive.go states for exec.CommandContext,
-// applied one level up: production code never reaches past these names.
+// provedRealignment is story 033's prepared build, held as a package-level
+// variable so that a test can answer for it without a build ever running. It is
+// the discipline archive.go states for exec.CommandContext, applied one level
+// up: production code never reaches past this name.
 //
-// THEY ARE THE 033 FUNCTIONS THEMSELVES, not adapters over them, and that is
-// load-bearing in two directions. Mechanically, the var's type IS the function's
-// signature, so a change to either signature stops this file compiling instead of
-// quietly changing what a realignment is proved by. And by intent: an adapter is
-// where a second copy of the ladder starts — the first well-meant "just normalise
-// the request here" is how this package would acquire a rule of its own about
-// what gets gated, which is precisely the authority design D8 gave to somebody
-// else.
+// IT IS THE 033 FUNCTION ITSELF, not an adapter over it, and that is load-bearing
+// in two directions. Mechanically, the var's type IS the function's signature, so
+// a change to it stops this file compiling instead of quietly changing what a
+// realignment is proved by. And by intent: an adapter is where a second copy of
+// the ladder starts — the first well-meant "just normalise the request here" is
+// how this package would acquire a rule of its own about what gets gated, which
+// is precisely the authority design D8 gave to somebody else.
 //
-// The gates are swapped through this seam rather than driven through
+// # Why it is ONE name where it used to be two
+//
+// It was Stage and RunBuildGates, and those two are the LOWER HALF of building a
+// candidate. Holding only them meant this package started from none of the upper
+// half — no Manifest seam, no Manifest in the staged tree, no host probe, and a
+// BuildRequest whose two policy fields stayed at their zero value — so its gates
+// reported SKIPPED for a file the run was supposed to write, and a host missing a
+// build dependency became a verdict against the ebuild. Assembling that upper
+// half here would have been the second copy of the ladder in the most literal
+// sense. So the seam moved to the function that holds the WHOLE operation. It is
+// still 033's own function, still not an adapter, and the constraint is unchanged
+// rather than relaxed: one copy of the ladder, reached by both entry points
+// (R1.5).
+//
+// The build is swapped through this seam rather than driven through
 // validate.BuildDeps because driving the real runner means a real
 // `ebuild … clean compile`: a network fetch, a writable DISTDIR and portage on
 // the host. The real ladder is story 033's own tests to exercise; what this
-// package owes is that it CALLS it, with the depth it was given, and adds nothing.
+// package owes is that it CALLS it, with the depth and the policy it was given,
+// and adds nothing.
 //
-// _Requirements: R5, R5.1, R5.2_
-var (
-	stageRealignment = validate.Stage
-	runRealignGates  = validate.RunBuildGates
-)
+// _Requirements: R1, R1.1, R1.5, R5, R5.1, R5.2_
+var provedRealignment = validate.RunPreparedBuild
 
 // Prove materialises a realigned ebuild in a staged tree outside the published
 // overlay (R5.1) and runs story 033's build gates against it, up to the depth the
@@ -232,47 +289,79 @@ var (
 func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error) {
 	atom := p.atom()
 
-	stagedRoot, err := stageRealignment(validate.StageRequest{
-		Overlay:     opts.Overlay,
-		StagingRoot: opts.StagingRoot,
-		Atom:        atom,
-		Version:     p.Version,
-		EbuildBytes: p.Ebuild,
+	// The published package directory, which is what the Manifest seam is asked
+	// about — never the staged copy. The staged tree is the thing that LACKS a
+	// Manifest, which is the whole reason there is a seam to ask.
+	result := provedRealignment(ctx, validate.PreparedBuildRequest{
+		Overlay:          opts.Overlay,
+		StagingRoot:      opts.StagingRoot,
+		Atom:             atom,
+		Version:          p.Version,
+		PackageDir:       filepath.Join(opts.Overlay, p.Category, p.Package),
+		Ebuild:           p.Ebuild,
+		Depth:            opts.Depth,
+		StagedManifest:   opts.StagedManifest,
+		RequireIsolation: opts.RequireIsolation,
+		LogDir:           opts.LogDir,
+		Distdir:          opts.Distdir,
+		Deps:             opts.Deps,
 	})
-	if err != nil {
+
+	if err := result.StageErr; err != nil {
 		// The ErrStageUnpreparable sentinel survives the wrap, which is the point
 		// of wrapping rather than restating: a caller reacts to staging having
 		// failed without enumerating the ways it can fail. The staging root is
 		// named because it is the thing the operator has to go and fix.
+		//
+		// The prepared build ALSO rendered this as a list of SKIPPED gates, and
+		// they are deliberately dropped here. That rendering is validate.Run's
+		// rule — every stopping condition is a reported skip, so the rest of the
+		// overlay is still validated — and this package's rule is the opposite
+		// one for the opposite reason: a realignment reported as a proof that
+		// found nothing is a change abandoned on the strength of an unwritable
+		// directory.
 		return Proof{}, fmt.Errorf("staging the realignment of %s-%s under %s: %w", atom, p.Version, opts.StagingRoot, err)
 	}
 
-	gates, err := runRealignGates(ctx, validate.BuildRequest{
-		StagedRoot: stagedRoot,
-		Atom:       atom,
-		Version:    p.Version,
-		Depth:      opts.Depth,
-	}, opts.Deps)
-	if err != nil {
+	stagedRoot, gates := result.StagedRoot, result.Gates
+	if err := result.GatesErr; err != nil {
 		// RunBuildGates' error is about the REQUEST — a malformed atom, no
 		// version, no staged tree — and never about the build, which reports
 		// itself as a FAILED gate. So this is our bug, not the realignment's, and
 		// it must not be recorded as a realignment that does not build. The staged
 		// root travels on the proof even so: the tree exists, and it is where
 		// anyone diagnosing this looks first.
+		//
+		// An INTERRUPTION arrives here too, and it is not a request that could
+		// not be started: the build ran and was killed. Both are alike in the one
+		// way that decides this branch — no gate reached a verdict — so neither
+		// may be recorded as a realignment that does not build, and the
+		// cancellation stays chained for a caller that asks errors.Is about it.
 		return Proof{StagedRoot: stagedRoot}, fmt.Errorf("running the build gates for the realignment of %s-%s in %s: %w", atom, p.Version, stagedRoot, err)
 	}
 
 	// R5.3's first half — every gate reported PASS or SKIPPED — asked of
-	// validate's own rule rather than re-derived here. PromotionDecision encodes
-	// it together with the vacuity it has to deny, and a second copy of a rule
+	// validate's own rule rather than re-derived here: a second copy of a rule
 	// whose entire value is that there is one copy would be the first place the
 	// two could disagree about publishing.
 	//
+	// WHAT THAT RULE DENIES, AND WHAT IT DELIBERATELY DOES NOT (S039-R2.1,
+	// R2.6). It denies the vacuity that names the CANDIDATE: a gate list whose
+	// every deciding gate declined over the proposal itself is refused, so
+	// Passed comes back false and nothing is offered. It does NOT deny the other
+	// shape — a list that declined over THIS HOST still promotes (S033-R3.12),
+	// because a machine that lacks the build dependencies has said nothing about
+	// the realignment, and refusing there would stop the operation on most
+	// workstations. So Passed is still NOT sufficient on its own, and the
+	// remaining guard is not here: cmd/bentoo's realignProofCarriesEvidence
+	// requires at least one gate to have reported PASS before the publish
+	// question is put at all.
+	//
 	// The staging error is nil BY CONSTRUCTION: the only path that reaches this
 	// line is one where Stage returned a tree, because the alternative returned
-	// above without consulting a gate. That early return is where this package
-	// denies the vacuity, exactly as the applier's prepareInStagingTree does.
+	// above without consulting a gate. That early return denies the STAGING
+	// vacuity — a different one from the gate-list vacuity above, and this
+	// package's own — exactly as the applier's prepareInStagingTree does.
 	//
 	// The reason string is deliberately not carried on Proof. Every actionable
 	// word of a refusal is already in the failing GateResult's own Reason; the
@@ -336,9 +425,10 @@ var ErrNotPromoted = errors.New("the realignment stays unpublished")
 //
 // # What gets published, and why it is not read back out of the staged tree
 //
-// The proposal's own bytes. They are the same slice Prove handed to
-// validate.Stage, which writes EbuildBytes unchanged, so they ARE the bytes the
-// gates ran against: R5.5 is satisfied by identity rather than by resemblance.
+// The proposal's own bytes. They are the same slice Prove handed to the prepared
+// build, which passes them to validate.Stage and writes them into the staged tree
+// unchanged, so they ARE the bytes the gates ran against: R5.5 is satisfied by
+// identity rather than by resemblance.
 // Anything re-derived at this point — the ebuild re-rendered, the diff applied
 // again, the proposal rebuilt from the baseline — would publish a file no gate
 // ever read, however faithful the derivation.

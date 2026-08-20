@@ -56,6 +56,33 @@ type BuildRequest struct {
 	// LogDir retains nothing and says so in the gate's reason, because a log
 	// nobody was told about is a log nobody will read.
 	LogDir string
+
+	// Distdir is the directory this run resolved for the build's archives. It is
+	// SET on the child as DISTDIR when it is non-empty (R3.1).
+	//
+	// # It is a COMPUTED input, and that distinction is the whole point
+	//
+	// Every other variable the child carries is FILTERED OUT OF THE PARENT'S:
+	// allowedBuildEnv reads os.Environ() and lets an allow-listed set through, so
+	// that something exported in the invoking shell cannot reach a build whose
+	// verdict is then read as a statement about the ebuild. DISTDIR used to be on
+	// that list, which reads as "we pass it" and in fact meant "we let the
+	// SHELL's value through, if it had one": the gate ran against whatever
+	// distdir the operator's terminal happened to name, and the value they
+	// resolved with --distdir reached the fetch not at all.
+	//
+	// This field is the other kind of value entirely. It is resolved BY this run
+	// — from --distdir, or from the private directory an apply's own manifest
+	// step filled — so it travels as a request field and is assigned explicitly,
+	// rather than being admitted through a widened allow-list. The allow-list
+	// then keeps meaning exactly one thing, which is what makes it worth having:
+	// NOTHING crosses in from outside.
+	//
+	// EMPTY RESOLVES TO NOTHING (R3.2). No DISTDIR is set and none is invented,
+	// so the child's environment is left precisely as the allow-list built it and
+	// Portage answers from its own configuration — which is the honest answer for
+	// a run that resolved no directory of its own.
+	Distdir string
 }
 
 // The phase markers `ebuild` prints, START and DONE for each phase, measured on
@@ -141,14 +168,25 @@ const labelUnverifiedIsolation = "unverified isolation"
 // and the compilers put their caches; TERM keeps the child's output legible when
 // it is attached to a real terminal; PORTAGE_* carries the whole staged-build
 // configuration, PORTAGE_TMPDIR and PORTAGE_REPOSITORIES above all; FEATURES and
-// MAKEOPTS are the two knobs an operator legitimately overrides per run; DISTDIR
-// points the fetch at the scratch directory a staged run uses instead of the
-// host's shared one (D3).
+// MAKEOPTS are the two knobs an operator legitimately overrides per run.
+//
+// # DISTDIR is NOT here, and its ABSENCE is what makes the distdir trustworthy
+//
+// It was here, and what the entry actually did was let the INVOKING SHELL's
+// DISTDIR through — this list filters the PARENT's environment, it never passes
+// anything of ours. The directory a run resolves is now set explicitly on the
+// child instead (BuildRequest.Distdir, assigned in RunBuildGates), which makes
+// the computed value the ONLY source of DISTDIR and leaves the parent unable to
+// influence it at all. Keeping the name on the list as well would put the
+// shell's value into the same environment as the computed one and leave
+// exec.Cmd's duplicate-key behaviour to choose between them: a decision nobody
+// made, written down nowhere, and not the one an operator who typed --distdir is
+// expecting (R3.3).
 //
 // Nothing here is a secret, and that is deliberate: an allow-list is also the
 // mechanism that keeps a token exported in the invoking shell out of a child
 // whose log this package retains on disk.
-var buildEnvAllowed = []string{"PATH", "HOME", "TERM", "FEATURES", "MAKEOPTS", "DISTDIR"}
+var buildEnvAllowed = []string{"PATH", "HOME", "TERM", "FEATURES", "MAKEOPTS"}
 
 // buildEnvAllowedPrefix is the family that crosses whole: every variable Portage
 // itself reads is spelled PORTAGE_something, and enumerating them would be a
@@ -271,15 +309,21 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	isolated, isolationReason := deps.isolationProbe()()
 	if !isolated && req.RequireIsolation {
 		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
-		return SkippedGates(req.Depth, label.clean(refused)), nil
+		// DeclineHost (S039-R2.1): an isolation refusal is this machine saying it
+		// has no privilege to build under the conditions the caller demanded. It
+		// is not a fact about the candidate, so it must not withdraw the bump.
+		return declinedGates(req.Depth, label.clean(refused), DeclineHost), nil
 	}
 
 	// A host with no Portage produces NO ANSWER, never a cheerful one — the same
 	// rule DependenciesSatisfied applies to `emerge`, and the reason the lookup
 	// is a seam of its own.
 	if _, err := deps.binaryLookup()("ebuild"); err != nil {
-		return SkippedGates(req.Depth, label.clean(fmt.Sprintf(
-			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err))), nil
+		// DeclineHost, and the reason says so in its own words too: a machine
+		// with no Portage cannot answer for any ebuild. Every candidate would
+		// decline here identically, which is the definition of a host cause.
+		return declinedGates(req.Depth, label.clean(fmt.Sprintf(
+			"ebuild was not found on PATH, so no build phase could be run for %s on this host: %v", label.pv, err)), DeclineHost), nil
 	}
 
 	// `ebuild` is invoked DIRECTLY, as the user who started the sweep — no sudo,
@@ -303,6 +347,21 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// (overlay_autoupdate.go): that override touches Stdout, Stderr and Stdin and
 	// never Env, so what is set here is what the child gets.
 	cmd.Env = allowedBuildEnv(os.Environ())
+
+	// R3.1. The resolved distdir is ASSIGNED, not allow-listed, and the two are
+	// different mechanisms on purpose: the filter above exists so the parent's
+	// environment cannot leak in, while this is an input THIS RUN computed. With
+	// DISTDIR off buildEnvAllowed, the line below is the single source of the
+	// variable — the child gets the directory the operator resolved, and the
+	// invoking shell's own DISTDIR cannot compete with it.
+	//
+	// Empty resolves to NOTHING (R3.2): no assignment, no invented default, the
+	// environment left exactly as the allow-list built it. Appending
+	// `DISTDIR=` instead would point the fetch at the process's working
+	// directory, which is a value this package made up.
+	if req.Distdir != "" {
+		cmd.Env = append(cmd.Env, "DISTDIR="+req.Distdir)
+	}
 
 	output, runErr := deps.attachedRunner()(cmd)
 
@@ -353,6 +412,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		transcript:   transcript,
 		runErr:       runErr,
 		fidelityNote: isolationFidelityNote(isolated, isolationReason),
+		distdirNote:  distdirEvidenceNote(req.Distdir),
 	}
 	if runErr != nil {
 		run.logNote = retainedLogNote(req.LogDir, atom, version, output)
@@ -497,6 +557,37 @@ func isolationFidelityNote(isolated bool, probeReason string) string {
 		note += " — " + probeReason
 	}
 	return note
+}
+
+// distdirEvidenceNote is the sentence a PASS carries about the distdir the run
+// read from (R3.4).
+//
+// # Why a pass has to say this
+//
+// isolationFidelityNote, directly above, already worries in the code about "the
+// pass does not prove the sources came from DISTDIR alone". Sub-task 3.1 made
+// that directory real by exporting it on the child; a pass that does not SAY
+// which one it exported still cannot support the sentence, because a reader has
+// no way to tell a distdir this run enforced from the ambient one the host's
+// own Portage configuration names.
+//
+// It states the ACT — what was exported — and not a conclusion about where the
+// archives actually came from. That distinction is what lets it sit in front of
+// the isolation note without contradicting it: this sentence says the gate set
+// DISTDIR, and that one says an unisolated build could have reached past it.
+//
+// # BOTH directions speak, and the empty one is the load-bearing half
+//
+// If only the enforced case had a sentence, its absence would be ambiguous
+// between "this run enforced no distdir" and "this reason predates the change".
+// An operator cannot read an absence, so the empty case says out loud that the
+// build answered from the host's own configuration (R3.2's honest answer, made
+// legible).
+func distdirEvidenceNote(distdir string) string {
+	if distdir = strings.TrimSpace(distdir); distdir == "" {
+		return "; the gate exported no DISTDIR, so the build read whatever the host's own Portage configuration names"
+	}
+	return fmt.Sprintf("; the gate exported DISTDIR=%s for this build, rather than inheriting one from the invoking shell", distdir)
 }
 
 // buildPhase is one `ebuild` phase, ordered as Portage runs them so that "the
@@ -681,10 +772,18 @@ type buildRun struct {
 	// when isolation was verified. One invocation has ONE fidelity, so every gate
 	// derived from it says the same thing about it.
 	fidelityNote string
+
+	// distdirNote is the sentence a PASS carries about the distdir this run
+	// exported, and it is NEVER empty: both directions speak, because an absent
+	// sentence cannot be told from a reason written before the gate said this at
+	// all. One invocation has ONE distdir, so — like fidelityNote — it is
+	// computed once here rather than per gate.
+	distdirNote string
 }
 
 // gateFor derives one gate's outcome from the run's markers, and is the ONE
-// place the D13 re-labelling and the isolation label are applied.
+// place the D13 re-labelling, the isolation label and the distdir evidence are
+// applied.
 //
 // It is a funnel rather than a call in each branch for the same reason Stage
 // applies its sentinel at a single boundary: a branch added later cannot forget
@@ -693,15 +792,29 @@ type buildRun struct {
 //
 // # Why only a PASS is labelled
 //
-// The label answers an OVERCLAIM: a build that ran with the network reachable
-// proved less than one that did not, and a pass is the only outcome that claims
-// to have proved anything (R6.6, story 031's rule). A FAILED gate is not made
+// Both labels answer an OVERCLAIM, and a pass is the only outcome that claims to
+// have proved anything.
+//
+// For the isolation label: a build that ran with the network reachable proved
+// less than one that did not (R6.6, story 031's rule). A FAILED gate is not made
 // less true by an unisolated run — if anything the network made it easier to
-// pass — and a SKIPPED gate measured nothing to qualify. Putting the sentence on
-// all three would turn the signal into decoration on every line of every report.
+// pass — and a SKIPPED gate measured nothing to qualify.
+//
+// The distdir evidence is the same rule read once more (R3.4). A pass asserts
+// hermeticity, so a pass is what owes the evidence for it: which DISTDIR the
+// gate exported, or that it exported none. A FAILED gate is not made less true
+// by where its sources came from, and a SKIPPED gate has no sources to place.
+//
+// Putting either sentence on all three would turn the signal into decoration on
+// every line of every report.
 func (r buildRun) gateFor(gate string, phase buildPhase) GateResult {
 	result := r.derive(gate, phase)
 	if result.Outcome == OutcomePass {
+		// ORDER IS DELIBERATE. The isolation note ENDS by qualifying the claim
+		// the distdir note makes — "the pass does not prove the sources came from
+		// DISTDIR alone" — so the sentence naming the directory has to be read
+		// first for that caveat to have an antecedent.
+		result.Reason += r.distdirNote
 		result.Reason += r.fidelityNote
 	}
 
@@ -729,11 +842,23 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 
 	case r.runErr != nil:
 		// The run died before this phase began, so this gate measured nothing.
+		//
+		// Declined is LEFT UNRECORDED, deliberately (S039-R2.1). notReachedReason
+		// itself says why: a death before `>>> Source prepared.` is "a host or
+		// distfile fault" — the ebuild's SRC_URI and the box's network are both
+		// live possibilities and this code cannot tell them apart. Guessing
+		// `candidate` would withdraw bumps over a flaky mirror; guessing `host`
+		// would publish a bump whose sources do not exist. An unrecorded cause
+		// keeps today's answer, and the phase that DID die reports FAILED in its
+		// own gate whenever that phase is one the depth covers.
 		return GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: r.notReachedReason(gate, phase)}
 
 	default:
 		// A zero exit with no marker to prove the phase finished. Rare, and
 		// deliberately not read as a pass.
+		//
+		// Unrecorded for the same reason: unmeasuredReason describes evidence
+		// that did not arrive, which names neither the candidate nor the host.
 		return GateResult{Gate: gate, Outcome: OutcomeSkipped, Reason: r.unmeasuredReason(phase)}
 	}
 }

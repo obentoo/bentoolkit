@@ -338,3 +338,133 @@ func TestManifestDistLinesAgreesWithParseManifestDistFilenames(t *testing.T) {
 		t.Error("a DISTANT line was read as a DIST record")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 5.1 — R5, R5.1, R5.2, R5.3.
+//
+// Two call sites read a Manifest to learn which archives it names:
+// cmd/bentoo's publishedManifestDistNames and internal/autoupdate's
+// publishedDistNames. They are NOT two parsers — both already delegate to
+// ParseManifestDistFilenames. What is duplicated is the work-around above it:
+//
+//	if _, err := os.ReadFile(path); err != nil {   // read once, discard the data
+//	    return nil, fmt.Errorf(...)                 // only to learn it is readable
+//	}
+//	return ParseManifestDistFilenames(path), nil
+//
+// Both exist for one reason, which applier_gates.go states outright:
+// ParseManifestDistFilenames answers a missing OR unreadable Manifest with nil,
+// and nil is indistinguishable from "readable, declares no DIST". Each call site
+// that needs to tell those apart re-reads the file to find out — so the file is
+// opened twice, and the distinction is recovered by a probe instead of being
+// available at the source.
+//
+// The sibling below reads once and reports the read failure. The duplicated
+// probe then has nothing left to do.
+// ---------------------------------------------------------------------------
+
+// TestReadManifestDistFilenames_TellsUnreadableFromEmpty is R5.2: the
+// distinction the probes existed to recover, available at the source.
+func TestReadManifestDistFilenames_TellsUnreadableFromEmpty(t *testing.T) {
+	t.Run("readable with entries", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "Manifest")
+		const body = "DIST gst-plugins-good-1.28.6.tar.gz 100 BLAKE2B ab SHA512 cd\n" +
+			"DIST gst-plugins-good-1.28.6.tar.xz 90 BLAKE2B ef SHA512 01\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("writing the Manifest: %v", err)
+		}
+
+		got, err := ReadManifestDistFilenames(path)
+		if err != nil {
+			t.Fatalf("a readable Manifest reported an error: %v", err)
+		}
+		// R5.3, asked of the two implementations rather than asserted about
+		// them: the sibling and the canonical parser must not be able to
+		// disagree about a file they can both read.
+		want := ParseManifestDistFilenames(path)
+		if len(got) != len(want) {
+			t.Fatalf("the sibling named %v and the canonical parser named %v; one Manifest cannot have two "+
+				"answers about which archives it declares (R5.1)", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("name %d: sibling %q, parser %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("readable and declaring nothing", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "Manifest")
+		if err := os.WriteFile(path, []byte("EBUILD foo-1.0.ebuild 100 BLAKE2B ab\n"), 0o600); err != nil {
+			t.Fatalf("writing the Manifest: %v", err)
+		}
+
+		got, err := ReadManifestDistFilenames(path)
+		if err != nil {
+			t.Fatalf("a Manifest that declares no DIST reported an error (%v); \"I looked, there is nothing "+
+				"there\" is an ANSWER, and reporting it as a failure is the conflation this sibling removes", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("the sibling named %v for a Manifest with no DIST line", got)
+		}
+	})
+
+	t.Run("unreadable", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: an unreadable file is still readable, so this case cannot be observed here")
+		}
+		path := filepath.Join(t.TempDir(), "Manifest")
+		if err := os.WriteFile(path, []byte("DIST x-1.0.tar.gz 1 BLAKE2B ab\n"), 0o600); err != nil {
+			t.Fatalf("writing the Manifest: %v", err)
+		}
+		if err := os.Chmod(path, 0o000); err != nil {
+			t.Fatalf("sealing the Manifest: %v", err)
+		}
+
+		if _, err := ReadManifestDistFilenames(path); err == nil {
+			t.Error("an unreadable Manifest reported no error; that is exactly the answer both call sites " +
+				"re-read the file to avoid, and it makes \"I could not look\" indistinguishable from " +
+				"\"this package publishes no archive\" (R5.2)")
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		_, err := ReadManifestDistFilenames(filepath.Join(t.TempDir(), "Manifest"))
+		if err == nil {
+			t.Error("a missing Manifest reported no error; both of today's call sites answer this with a " +
+				"failure, and R5.3 keeps their output byte-identical on the inputs where they already agree")
+		}
+	})
+}
+
+// TestReadManifestDistFilenames_ReadsTheFileOnce is R5.1's mechanical half.
+//
+// The whole point of the sibling is that the probe above it disappears. If it
+// re-read the file internally the duplication would simply have moved, and the
+// two reads could still disagree — a Manifest replaced between them answers one
+// question about one file and another about a different one.
+func TestReadManifestDistFilenames_ReadsTheFileOnce(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Manifest")
+	if err := os.WriteFile(path, []byte("DIST only-1.0.tar.gz 1 BLAKE2B ab\n"), 0o600); err != nil {
+		t.Fatalf("writing the Manifest: %v", err)
+	}
+
+	got, err := ReadManifestDistFilenames(path)
+	if err != nil {
+		t.Fatalf("ReadManifestDistFilenames: %v", err)
+	}
+	if len(got) != 1 || got[0] != "only-1.0.tar.gz" {
+		t.Fatalf("the sibling named %v, want [only-1.0.tar.gz]", got)
+	}
+
+	// A directory where the file should be: one read fails, and the failure is
+	// reported rather than turned into "this package declares no archive".
+	other := filepath.Join(t.TempDir(), "Manifest")
+	if err := os.Mkdir(other, 0o750); err != nil {
+		t.Fatalf("laying out the directory: %v", err)
+	}
+	if _, err := ReadManifestDistFilenames(other); err == nil {
+		t.Error("a directory in place of the Manifest reported no error")
+	}
+}

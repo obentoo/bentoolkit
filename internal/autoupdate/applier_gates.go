@@ -342,15 +342,20 @@ func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string
 				fmt.Errorf("naming the published package directory of %s: %w", pkg, err))
 		}
 		manifestPath := filepath.Join(published.pkgDir, "Manifest")
-		// Read once to prove the file is READABLE, because the parser below cannot
-		// say so: ParseManifestDistFilenames answers a missing or unreadable
-		// Manifest with an empty slice, which through this seam would be read as an
-		// answer rather than as the failure to produce one it is.
-		if _, err := os.ReadFile(manifestPath); err != nil { //nolint:gosec // the path is derived from the overlay this applier was constructed for
+		// The parser asked here is the one that can SAY the file was unreadable.
+		// ParseManifestDistFilenames answers a missing or unreadable Manifest with
+		// an empty slice, which through this seam would be read as an answer rather
+		// than as the failure to produce one it is; recovering the distinction used
+		// to mean reading the file once to prove it readable and then parsing it
+		// again, here and in cmd/bentoo's publishedManifestDistNames alike.
+		// ReadManifestDistFilenames reports it from a single read (S039-R5.1), and
+		// the sentence below is unchanged to the byte (S039-R5.3).
+		names, err := distfiles.ReadManifestDistFilenames(manifestPath)
+		if err != nil {
 			return nil, namingFailure(pkg, version,
 				fmt.Errorf("reading the published Manifest of %s: %w", pkg, err))
 		}
-		return distfiles.ParseManifestDistFilenames(manifestPath), nil
+		return names, nil
 	}
 }
 
@@ -516,6 +521,27 @@ func presentArchive(distdir, manifestPath, version string) string {
 	return found
 }
 
+// hostDeclinedGates is validate.SkippedGates with the cause stamped on every
+// gate: THIS HOST could not answer (S039-R2.1, S033-R3.12).
+//
+// The cause is data rather than prose because validate.PromotionDecision now
+// REFUSES a bump whose every deciding gate declined over the CANDIDATE, and
+// these two skips are the other side of that rule — the machine is missing
+// something, the ebuild is not. Untagged they would read as "cause unrecorded",
+// which keeps today's answer today; stating it is what keeps the applier right
+// if the unrecorded default is ever tightened.
+//
+// It stamps the field rather than calling a validate-side constructor because
+// SkippedGates' exported signature is fixed: outside callers hold it, and which
+// gates a depth owes an outcome for must keep having exactly one definition.
+func hostDeclinedGates(depth validate.Depth, reason string) []validate.GateResult {
+	gates := validate.SkippedGates(depth, reason)
+	for i := range gates {
+		gates[i].Declined = validate.DeclineHost
+	}
+	return gates
+}
+
 // runBuildGates runs the gates that need the sources unpacked — patches,
 // configure, compile — at the selected depth, and reports one outcome per gate
 // the depth covers (R3, R5, R6).
@@ -554,14 +580,24 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 	case err != nil:
 		// UNDETERMINED. The caller still skips, but must NOT name a missing
 		// dependency, because it does not know of one (R6.2).
-		return validate.SkippedGates(depth, fmt.Sprintf(
+		//
+		// Declined = host (S039-R2.1). Without it PromotionDecision would read
+		// this all-SKIPPED list as a candidate nothing measured and REFUSE the
+		// bump — the flat reading R3.12 exists to prevent. The probe failing to
+		// answer is this machine's problem, not the ebuild's.
+		return hostDeclinedGates(depth, fmt.Sprintf(
 			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
 			pkg, version, err)), nil
 	case !satisfied:
 		// R5.3/R3.12: determined and unsatisfied. The atoms are named because
 		// they are the operator's next action, and the promotion report says the
 		// depth this bump therefore did not reach.
-		return validate.SkippedGates(depth, fmt.Sprintf(
+		//
+		// Declined = host, and this is R3.12's own case: the operator's next
+		// action is `emerge` on THIS BOX. Refusing here would make
+		// `overlay autoupdate --apply` inert on any workstation that does not
+		// already hold the bump's build dependencies, which is most of them.
+		return hostDeclinedGates(depth, fmt.Sprintf(
 			"this host does not hold the build dependencies of %s-%s, so no build phase was run; install %s to validate it here",
 			pkg, version, strings.Join(missing, ", "))), nil
 	}
@@ -579,6 +615,17 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 		Depth:            depth,
 		RequireIsolation: a.requireIsolation,
 		LogDir:           a.logsDir,
+		// The SAME directory the static gate reads, resolved by the same helper
+		// (S039-R3.1). The question staticGateDistdir answers is "which distdir
+		// holds this apply's archive" — the run's own fetch first, the shared one
+		// when that fetch brought nothing back — and the build has exactly that
+		// question: the manifest step downloaded the candidate's tarball into the
+		// private directory, so a build pointed anywhere else would fetch it a
+		// second time, or fail with the archive already on disk a directory away.
+		// Two resolvers here would be the same decision made twice, and the first
+		// run where they disagreed would gate a tarball the option gate never
+		// read.
+		Distdir: a.staticGateDistdir(cand),
 	}
 	gates, err := validate.RunBuildGates(a.ctx, req, deps)
 	if err != nil {

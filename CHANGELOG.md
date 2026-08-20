@@ -7,7 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A package that legitimately carries no Manifest is now build-tested.** With
+  a thin tree a `git-r3` ebuild or a metapackage has no Manifest, because there
+  is no distfile to digest — and the class is not exotic: `acct-group/*`,
+  `acct-user/*`, every `virtual/*`, plus `net-dns/bind-tools` and
+  `sys-kernel/linux-firmware` in ::bentoo. Manifest production answering with no
+  content was a hard error, so that whole class had never been exercised by a
+  build gate.
+
+  The class is decided by Portage rather than by a heuristic, because a
+  heuristic here is unsafe and the obvious probes do not work: Portage refuses
+  to answer any question at all about an ebuild in a thin-manifest tree with no
+  Manifest FILE. With an empty one present it answers correctly — an ebuild with
+  no `SRC_URI` reaches the build phases, and one with `SRC_URI` is refused at
+  digest verification **before any fetch is attempted**, measured with the URI
+  pointing at a port where nothing listens. So the staged tree gets an empty
+  Manifest and the gates run. Manifest production failing, or a Manifest that
+  exists and cannot be read, are still hard errors.
+
+  Portage refuses before any *phase marker* as well, which the first cut of this
+  did not account for: the gate list came back entirely skipped with no cause
+  recorded, and an unrecorded cause promotes — so the class reported its own
+  misclassification as a pass. A gate of this class that never reached a phase is
+  now blamed on the candidate, because the empty Manifest is a bet this tool
+  placed. Only this class, and only where no cause was recorded: for an ordinary
+  candidate a build that dies that early may have died of a flaky mirror, and
+  blaming the ebuild there would withdraw a bump over a fact about the network.
+
+- **A sweeper for staged trees that have left scope.** Staging replaced the tree
+  of the package it was staging and nothing removed the others, so a `--depth`
+  run over the whole overlay left one tree per package under the staging root,
+  permanently. The sweeper keeps the trees whose gates FAILED — that is the
+  artifact an operator still needs — and removes the rest. It recognises only
+  what it produced, by a marker that must agree with the path it sits at, keeps
+  and reports anything else, and refuses a staging root inside the published
+  overlay through the same check staging already uses. No command calls it yet.
+
 ### Fixed
+- **`overlay compare --realign --depth` now proves a candidate through the same
+  prepared build `overlay validate --depth` runs.** Validation is not a wrapper
+  around staging and the gate ladder: it is where the Manifest seam is resolved,
+  the Manifest is written into the staged tree, the host is probed for whether
+  it can build at all, and two policy fields of the build request are filled.
+  The realign path reached the ladder by a second route and started from none of
+  it. So its gates were skipped for want of a Manifest, a host missing a build
+  dependency became a verdict against the ebuild, `require_isolation` never
+  fired its refusal — the same bypass already closed for `overlay validate` —
+  and a failed gate retained no log. The upper half now has a name and both
+  entry points call it.
+
+- **A candidate no gate measured is no longer promotable.** The promotion rule
+  documents itself as existing to stop a bump satisfying "PASS or SKIPPED"
+  vacuously, and it did not: the only refusal was a staging failure, so a
+  Manifest that could not be produced left every deciding gate SKIPPED and the
+  answer was still "promote". It now refuses that — but only where the skips are
+  about the CANDIDATE. A host that simply lacks the build dependencies still
+  promotes, because the machine says nothing about the bump and refusing there
+  would stop `overlay autoupdate --apply` publishing on most workstations.
+
+  The same rule reached a fourth reader. A retained tree's record re-implemented
+  "PASS or SKIPPED promotes" without the vacuity clause, and `overlay autoupdate
+  --check` writes that record before its manifest step — so a manifest failure
+  recorded a proof of nothing and the next `--apply` promoted an ebuild nothing
+  had read. That reader now refuses such a record.
+
+- **A build gate reads the distdir it was given.** `DISTDIR` sat on the
+  environment allow-list, which filters the PARENT's environment — so the entry
+  meant "we let the invoking shell's value through, if it had one", and the
+  value resolved by `--distdir` was never exported to the ebuild child at all.
+  It is now set explicitly as a computed value and removed from the allow-list,
+  so the parent cannot compete with it, and a passing gate states which distdir
+  it read. Nothing resolved still means nothing set.
+
 - **A package skipped by `overlay autoupdate --check` can no longer be reported
   without a reason.** `skipReason` cascades through three sources — the skipped
   gate's own reason, the resolved depth's reason, then the plan's — and all
@@ -18,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead, so an unexplained skip reports itself as one.
 
 ### Changed
+- **One reader for the DIST names a Manifest declares.** Two call sites read the
+  file once only to prove it readable and then handed the path to a parser that
+  reads it again, because that parser answers a missing or unreadable Manifest
+  the same way it answers one that declares nothing. An error-returning sibling
+  now reads once and reports the failure, and both probes are gone. The DIST
+  grammar itself turned out to have a third copy, and now has one.
+
 - **The justification above the sweeper's `contextcheck` suppression no longer
   looks like a second suppression.** It was written as `// nolint:contextcheck
   — …`, which golangci-lint does not recognise as a directive (a directive takes

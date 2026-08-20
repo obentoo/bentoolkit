@@ -643,3 +643,64 @@ func TestOverlayValidate_RequireIsolationReachesTheRunner(t *testing.T) {
 			"is the operator's policy silently not applying to one of the two commands that build")
 	}
 }
+
+// TestPublishedManifestBytes_AMissingManifestIsTheNoDistfileClass is story 039's
+// R4.1 reaching the package class it was written for.
+//
+// Under thin-manifests a Manifest holds DIST lines and nothing else, so a
+// package with no distfile has NO MANIFEST FILE AT ALL — not an empty one. That
+// is not a rare shape: acct-group/*, acct-user/*, virtual/* and, in ::bentoo,
+// net-dns/bind-tools, app-eselect/eselect-nodejs and sys-kernel/linux-firmware
+// all look like this today.
+//
+// This seam answered a missing file with an ERROR, which the prepared build
+// reads as "a Manifest was expected and its production failed" and turns into a
+// reported skip. So every one of those packages stayed permanently unmeasured —
+// the exact class R4.1 exists to bring under a build gate — and no amount of
+// work inside validate could reach them, because the fault was decided here.
+//
+// The distinction this restores is the same one story 039's D6 is about: "I
+// could not look" and "I looked, there is nothing there" are different answers,
+// and collapsing them into one is how a report comes to deny what it also proves.
+func TestPublishedManifestBytes_AMissingManifestIsTheNoDistfileClass(t *testing.T) {
+	pkgDir := t.TempDir() // a package directory with no Manifest in it
+
+	got, err := publishedManifestBytes(pkgDir)
+
+	if err != nil {
+		t.Fatalf("publishedManifestBytes reported an error for a package that simply has no Manifest (%v); "+
+			"under thin-manifests that is what a candidate needing no distfile LOOKS like, and reporting it "+
+			"as a fault keeps the whole class out of every build gate (R4.1)", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("the seam produced %q for a package with no Manifest; there is nothing to produce, and "+
+			"inventing content would be a guessed digest", got)
+	}
+}
+
+// TestPublishedManifestBytes_AnUnreadableManifestIsStillAFault is the other half,
+// and it is what stops the fix above from becoming "any read problem is fine".
+//
+// A Manifest that EXISTS and cannot be read is a fault about this host or this
+// checkout, and it must keep travelling as an error: taking it for "no distfile
+// required" would stage an empty Manifest over a package that has digests, and
+// the gate would then report on a candidate nobody could describe.
+func TestPublishedManifestBytes_AnUnreadableManifestIsStillAFault(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: an unreadable file is still readable, so this case cannot be observed here")
+	}
+	pkgDir := t.TempDir()
+	path := filepath.Join(pkgDir, "Manifest")
+	if err := os.WriteFile(path, []byte("DIST x-1.0.tar.gz 1 BLAKE2B ab SHA512 cd\n"), 0o600); err != nil {
+		t.Fatalf("writing the Manifest: %v", err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("sealing the Manifest: %v", err)
+	}
+
+	if _, err := publishedManifestBytes(pkgDir); err == nil {
+		t.Error("a Manifest that exists and could not be read was reported as no Manifest at all; that " +
+			"stages an empty Manifest over a package that has digests, and the gate then reports on a " +
+			"candidate nobody could describe")
+	}
+}

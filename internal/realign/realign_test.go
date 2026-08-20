@@ -19,21 +19,30 @@
 //	type Options struct {
 //	    Overlay, StagingRoot string
 //	    Depth                validate.Depth
+//	    StagedManifest       func(pkgDir string) ([]byte, error)
+//	    RequireIsolation     bool
+//	    LogDir               string
 //	    Deps                 validate.BuildDeps
 //	}
 //	func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error)
 //
-//	// package-level seams over story 033, swapped by tests and restored with
+//	// package-level seam over story 033, swapped by tests and restored with
 //	// t.Cleanup — the discipline validate/archive.go:21-24 already states for
 //	// exec.CommandContext, applied one level up.
-//	var stageRealignment = validate.Stage
-//	var runRealignGates  = validate.RunBuildGates
+//	var provedRealignment = validate.RunPreparedBuild
 //
-// The seams are typed as the 033 functions themselves, which is how "consumed
-// unchanged" is held mechanically: if either signature moves, the var assignment
+// The seam is typed as the 033 function itself, which is how "consumed
+// unchanged" is held mechanically: if the signature moves, the var assignment
 // stops compiling. The explicit compile-time assertions in
 // TestRealignConsumesStory033Unchanged say the same thing where a reader will
-// see it. Nothing here wraps or re-declares those functions.
+// see it. Nothing here wraps or re-declares that function.
+//
+// It is ONE name where story 033 left two. Stage and RunBuildGates are the lower
+// half of building a candidate, and a caller holding only them starts without the
+// upper half — the Manifest seam, the Manifest in the staged tree, the host probe
+// and the two policy fields of BuildRequest. Assembling that half here would be
+// the second copy of the ladder in the most literal sense, so the seam moved to
+// the function that holds the whole operation (story 039, R1.5).
 //
 // Two notes on where this lives and what it drives:
 //
@@ -172,38 +181,48 @@ func realignStageFixture(t *testing.T) (overlayRoot, stagingRoot string, proposa
 
 // realignSeamRecorder captures what the realignment path asked story 033 to do
 // and answers with a canned result, so no build ever runs.
+//
+// It records ONE call where it used to record two, because staging and gating
+// are one operation behind one seam. What each test asserted is unchanged: the
+// bytes, the atom and the depth that used to be read off two requests are all
+// fields of the single one, and the staged root — chosen inside the prepared
+// build rather than handed to it — is read off the answer instead.
 type realignSeamRecorder struct {
-	stageCalls []validate.StageRequest
-	buildCalls []validate.BuildRequest
+	calls      []validate.PreparedBuildRequest
 	stagedRoot string
 	gates      []validate.GateResult
 	stageErr   error
 	gatesErr   error
 }
 
-// realignSwapSeams installs the recorder and restores the real functions with
+// realignSwapSeams installs the recorder and restores the real function with
 // t.Cleanup, the convention this repository uses everywhere a package-level seam
 // stands in for a subprocess.
 func realignSwapSeams(t *testing.T, rec *realignSeamRecorder) {
 	t.Helper()
-	origStage, origGates := stageRealignment, runRealignGates
-	t.Cleanup(func() { stageRealignment, runRealignGates = origStage, origGates })
+	orig := provedRealignment
+	t.Cleanup(func() { provedRealignment = orig })
 
-	stageRealignment = func(req validate.StageRequest) (string, error) {
-		rec.stageCalls = append(rec.stageCalls, req)
+	provedRealignment = func(_ context.Context, req validate.PreparedBuildRequest) validate.PreparedBuild {
+		rec.calls = append(rec.calls, req)
 		if rec.stageErr != nil {
-			return "", rec.stageErr
+			// What the real core answers on this path: the fault UNRENDERED, and
+			// the SKIPPED gates it renders the fault into, both. Returning only
+			// the error would let a Prove that reported those gates as a proof
+			// pass this test anyway, and reporting them is exactly the confusion
+			// between "we could not look" and "it does not build".
+			return validate.PreparedBuild{
+				StageErr: rec.stageErr,
+				Gates:    validate.SkippedGates(req.Depth, rec.stageErr.Error()),
+				Reason:   rec.stageErr.Error(),
+			}
 		}
 		// A real staged tree, so "outside the overlay" is a claim about a path
 		// that exists rather than about a string.
 		if err := os.MkdirAll(rec.stagedRoot, 0o750); err != nil {
 			t.Fatalf("creating the staged root: %v", err)
 		}
-		return rec.stagedRoot, nil
-	}
-	runRealignGates = func(_ context.Context, req validate.BuildRequest, _ validate.BuildDeps) ([]validate.GateResult, error) {
-		rec.buildCalls = append(rec.buildCalls, req)
-		return rec.gates, rec.gatesErr
+		return validate.PreparedBuild{StagedRoot: rec.stagedRoot, Gates: rec.gates, GatesErr: rec.gatesErr}
 	}
 }
 
@@ -222,21 +241,25 @@ func realignPassingGates() []validate.GateResult {
 // staticcheck's QF1011 reads `var _ T = expr` as a redundant annotation and
 // offers to drop the T, because the right-hand side already has that type. Here
 // the T IS the assertion and the right-hand side is the thing under test: drop
-// it and `var _ = validate.Stage` states nothing at all, so the suggested
-// simplification would delete the only check in this function while leaving it
-// compiling and green. The signature drift these four lines exist to catch — a
-// parameter added to Stage, a return value moved on RunBuildGates — would then
-// reach a reader as nothing.
+// it and `var _ = validate.RunPreparedBuild` states nothing at all, so the
+// suggested simplification would delete the only check in this function while
+// leaving it compiling and green. The signature drift these two lines exist to
+// catch — a parameter added to the request, a return value moved on the answer —
+// would then reach a reader as nothing.
 //
-// _Requirements: R5, R5.1, R5.2_
+// The two assertions are one seam where they used to be two, and that is the
+// point of story 039 rather than a loss of coverage: what this package consumes
+// IS the whole prepared build now, and Stage and RunBuildGates are no longer
+// reached from here at all, so pinning their signatures here would pin functions
+// this package does not call.
+//
+// _Requirements: R1, R1.5, R5, R5.1, R5.2_
 func TestRealignConsumesStory033Unchanged(t *testing.T) {
-	var _ func(validate.StageRequest) (string, error) = validate.Stage                                                             //nolint:staticcheck // QF1011: the explicit type is the assertion
-	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = validate.RunBuildGates //nolint:staticcheck // QF1011: the explicit type is the assertion
+	var _ func(context.Context, validate.PreparedBuildRequest) validate.PreparedBuild = validate.RunPreparedBuild //nolint:staticcheck // QF1011: the explicit type is the assertion
 
-	// The seams are the SAME functions, not adapters around them. An adapter is
+	// The seam is the SAME function, not an adapter around it. An adapter is
 	// where a second copy of the ladder starts.
-	var _ func(validate.StageRequest) (string, error) = stageRealignment                                                    //nolint:staticcheck // QF1011: the explicit type is the assertion
-	var _ func(context.Context, validate.BuildRequest, validate.BuildDeps) ([]validate.GateResult, error) = runRealignGates //nolint:staticcheck // QF1011: the explicit type is the assertion
+	var _ func(context.Context, validate.PreparedBuildRequest) validate.PreparedBuild = provedRealignment //nolint:staticcheck // QF1011: the explicit type is the assertion
 }
 
 // TestProveStagesAndGatesAtTheRequestedDepth is R5.1 and R5.2: the
@@ -261,26 +284,29 @@ func TestProveStagesAndGatesAtTheRequestedDepth(t *testing.T) {
 		t.Fatalf("Prove returned %v, want nil", err)
 	}
 
-	if len(rec.stageCalls) != 1 {
-		t.Fatalf("validate.Stage was called %d times, want 1", len(rec.stageCalls))
+	if len(rec.calls) != 1 {
+		t.Fatalf("the prepared build was asked for %d times, want 1", len(rec.calls))
 	}
-	staged := rec.stageCalls[0]
-	if string(staged.EbuildBytes) != realignProposedEbuild {
-		t.Errorf("Stage received %q, want the proposed bytes verbatim — what is proved must be what was proposed (R5.5 begins here)", staged.EbuildBytes)
+	staged := rec.calls[0]
+	if string(staged.Ebuild) != realignProposedEbuild {
+		t.Errorf("the prepared build received %q, want the proposed bytes verbatim — what is proved must be what was proposed (R5.5 begins here)", staged.Ebuild)
 	}
 	if staged.Atom != "media-libs/gst-plugins-qt6" || staged.Version != "1.29.2" {
-		t.Errorf("Stage received atom %q version %q, want media-libs/gst-plugins-qt6 at 1.29.2", staged.Atom, staged.Version)
+		t.Errorf("the prepared build received atom %q version %q, want media-libs/gst-plugins-qt6 at 1.29.2", staged.Atom, staged.Version)
 	}
 
-	if len(rec.buildCalls) != 1 {
-		t.Fatalf("validate.RunBuildGates was called %d times, want 1", len(rec.buildCalls))
+	if staged.Depth != validate.DepthConfigure {
+		t.Errorf("the gates ran at depth %v, want %v — a realignment proved at a shallower depth than requested is a proof of something the operator did not ask about (R5.2)", staged.Depth, validate.DepthConfigure)
 	}
-	build := rec.buildCalls[0]
-	if build.Depth != validate.DepthConfigure {
-		t.Errorf("the gates ran at depth %v, want %v — a realignment proved at a shallower depth than requested is a proof of something the operator did not ask about (R5.2)", build.Depth, validate.DepthConfigure)
+	if staged.StagingRoot != stagingRoot {
+		t.Errorf("the tree was staged under %q, want the root the caller named %q", staged.StagingRoot, stagingRoot)
 	}
-	if build.StagedRoot != rec.stagedRoot {
-		t.Errorf("the gates ran against %q, want the staged root %q; gating anything else proves the wrong bytes", build.StagedRoot, rec.stagedRoot)
+	// The staged root is chosen INSIDE the prepared build now, so "the gates ran
+	// against the staged tree" is asserted where it is observable from here: the
+	// proof names the tree the build produced, and gating anything else would
+	// prove the wrong bytes.
+	if proof.StagedRoot != rec.stagedRoot {
+		t.Errorf("the proof names staged root %q, want the one the prepared build produced %q", proof.StagedRoot, rec.stagedRoot)
 	}
 	if !proof.Passed {
 		t.Error("Passed is false although every gate reported PASS or SKIPPED; R5.3 accepts both")
@@ -406,8 +432,14 @@ func TestProveStagingFailureIsAnError(t *testing.T) {
 	if proof.Passed {
 		t.Error("Passed is true after a staging failure")
 	}
-	if len(rec.buildCalls) != 0 {
-		t.Errorf("the gates ran %d time(s) after staging failed; there is nothing to gate", len(rec.buildCalls))
+	// "There is nothing to gate", asserted where the single seam leaves it
+	// observable. The prepared build DID hand back a list of SKIPPED gates —
+	// that rendering is validate.Run's rule and the recorder reproduces it — and
+	// a proof that carried them would be reporting gates about a tree that was
+	// never staged, which is the vacuous "nothing FAILED" this package refuses.
+	if len(proof.Gates) != 0 {
+		t.Errorf("the proof carries %d gate(s) after staging failed: %+v — there was nothing to gate, and a "+
+			"list of SKIPPED gates is precisely the vacuity PromotionDecision exists to deny", len(proof.Gates), proof.Gates)
 	}
 	if got := realignTreeHash(t, overlayRoot); got != before {
 		t.Errorf("a failed staging attempt changed the published overlay (hash %s -> %s)", before, got)
@@ -790,5 +822,297 @@ func TestPromoteChangesTheBytesAndNothingElse(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("the package directory holds %v, want only the published ebuild; the overlay auto-commits, so a temporary file left inside it is a temporary file published", names)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 1.2 — R1, R1.1, R1.2, R1.3, R1.4.
+//
+// validate.Run is not a wrapper around Stage and RunBuildGates. It is where four
+// things happen before a gate can run: the Manifest seam is resolved, the
+// Manifest is written into the staged tree, the host is probed for whether it
+// can build at all, and the two POLICY fields of BuildRequest are filled. Prove
+// reached the lower half by a second path and therefore started from none of it
+// — so its gates were SKIPPED for want of a Manifest, a host missing a build
+// dependency became a verdict against the ebuild, RequireIsolation never fired
+// its refusal, and a FAILED gate retained no log.
+//
+// The seam is still story 033's own function and still not an adapter; it is
+// simply the function that has the WHOLE operation, instead of the two that had
+// its lower half. That is the constraint at the seam declaration restated, not
+// relaxed: one copy of the ladder, reached by both entry points.
+// ---------------------------------------------------------------------------
+
+// realignPreparedRecorder captures the prepared build the realignment path asked
+// validate for, and answers with a canned result so no build ever runs.
+type realignPreparedRecorder struct {
+	calls  []validate.PreparedBuildRequest
+	result validate.PreparedBuild
+}
+
+// realignSwapPreparedSeam installs the recorder over the single seam and
+// restores the real function with t.Cleanup.
+func realignSwapPreparedSeam(t *testing.T, rec *realignPreparedRecorder) {
+	t.Helper()
+	orig := provedRealignment
+	t.Cleanup(func() { provedRealignment = orig })
+	provedRealignment = func(_ context.Context, req validate.PreparedBuildRequest) validate.PreparedBuild {
+		rec.calls = append(rec.calls, req)
+		return rec.result
+	}
+}
+
+// TestProveGoesThroughThePreparedBuild is R1.1, R1.3 and R1.4 in one pass: the
+// realignment is proved by the SAME prepared build validate.Run performs, and
+// every field that build needs arrives filled rather than zero.
+//
+// The four assertions are one test because they share a cause. Splitting them
+// would suggest four independent regressions are possible, when in fact there is
+// one — Prove reaching past the prepared build — and it takes all four out
+// together.
+func TestProveGoesThroughThePreparedBuild(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	stagedRoot := filepath.Join(stagingRoot, "media-libs", "gst-plugins-qt6", "1.29.2")
+	logDir := filepath.Join(t.TempDir(), "logs")
+	manifestBody := []byte("DIST gst-plugins-qt6-1.29.2.tar.xz 42 BLAKE2B ab SHA512 cd\n")
+
+	rec := &realignPreparedRecorder{result: validate.PreparedBuild{
+		StagedRoot: stagedRoot,
+		Gates:      realignPassingGates(),
+	}}
+	realignSwapPreparedSeam(t, rec)
+
+	proof, err := Prove(context.Background(), proposal, Options{
+		Overlay:     overlayRoot,
+		StagingRoot: stagingRoot,
+		Depth:       validate.DepthConfigure,
+		LogDir:      logDir,
+		// The policy's own answer, and the interesting one: true is what a
+		// hardcoded field would also produce, so the false case below is what
+		// actually proves the value was CARRIED.
+		RequireIsolation: true,
+		StagedManifest: func(string) ([]byte, error) {
+			return manifestBody, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Prove: %v", err)
+	}
+
+	if len(rec.calls) != 1 {
+		t.Fatalf("the realignment reached the prepared build %d times, want exactly 1; a path that prepares "+
+			"its own build is the second copy of the ladder the seam exists to prevent (R1.5)", len(rec.calls))
+	}
+	req := rec.calls[0]
+
+	// D1(a) and D1(b). Without the seam the staged tree carries no Manifest, and
+	// Portage refuses an ebuild whose Manifest does not describe its archive —
+	// so every gate came back SKIPPED for a file this run was supposed to write.
+	if req.StagedManifest == nil {
+		t.Fatal("the prepared build was handed no Manifest source (D1a): the staged tree then carries no " +
+			"Manifest, Portage refuses the candidate, and every gate reports SKIPPED for want of one (R1.1)")
+	}
+	body, mErr := req.StagedManifest(filepath.Join(overlayRoot, "media-libs", "gst-plugins-qt6"))
+	if mErr != nil || string(body) != string(manifestBody) {
+		t.Errorf("the Manifest seam answered (%q, %v), want the caller's own bytes %q; a seam that is not "+
+			"the one supplied is a second source of digests", body, mErr, manifestBody)
+	}
+	// The seam is asked about the PUBLISHED package directory, not the staged
+	// copy: the staged tree is the thing that lacks a Manifest, which is the
+	// whole reason it is being asked.
+	if want := filepath.Join(overlayRoot, "media-libs", "gst-plugins-qt6"); req.PackageDir != want {
+		t.Errorf("the prepared build was handed package directory %q, want the published one %q", req.PackageDir, want)
+	}
+
+	// D1(d), first half. The refusal inside RunBuildGates fires only when the
+	// request carries this; leaving it zero was the same policy bypass commit
+	// 0bc206b closed for `overlay validate`, still open on this path.
+	if !req.RequireIsolation {
+		t.Error("RequireIsolation did not reach the prepared build (R1.3): the operator's decision that " +
+			"builds must be isolated then applies to one of the two commands that build, which is not a policy")
+	}
+	// D1(d), second half. A FAILED gate is exactly the run whose log someone
+	// needs, and an empty LogDir retains none.
+	if req.LogDir != logDir {
+		t.Errorf("LogDir reached the prepared build as %q, want %q (R1.4); a FAILED gate then retains no log",
+			req.LogDir, logDir)
+	}
+
+	// The depth is the operator's and is passed through unchanged: a realignment
+	// proved shallower than asked is a proof of something nobody asked about.
+	if req.Depth != validate.DepthConfigure {
+		t.Errorf("the prepared build was handed depth %v, want %v", req.Depth, validate.DepthConfigure)
+	}
+	if req.Atom != "media-libs/gst-plugins-qt6" || req.Version != "1.29.2" {
+		t.Errorf("the prepared build was handed %s-%s, want media-libs/gst-plugins-qt6-1.29.2", req.Atom, req.Version)
+	}
+	if string(req.Ebuild) != realignProposedEbuild {
+		t.Error("the prepared build was handed bytes other than the proposal's; a tree staged from anything " +
+			"else is not the realignment that was proved")
+	}
+	if req.Overlay != overlayRoot || req.StagingRoot != stagingRoot {
+		t.Errorf("the prepared build was handed overlay %q and staging root %q, want %q and %q",
+			req.Overlay, req.StagingRoot, overlayRoot, stagingRoot)
+	}
+
+	// Prove adds no gate and re-words none: the ladder's list travels onto the
+	// proof exactly as it came back.
+	if len(proof.Gates) != len(rec.result.Gates) {
+		t.Errorf("the proof carries %d gates, want the ladder's %d", len(proof.Gates), len(rec.result.Gates))
+	}
+	if proof.StagedRoot != stagedRoot {
+		t.Errorf("the proof names staged root %q, want the one the prepared build produced %q; the tree is "+
+			"the evidence a maintainer reads, so a proof that cannot name it is a failure nobody can inspect",
+			proof.StagedRoot, stagedRoot)
+	}
+}
+
+// TestProveCarriesAPolicyOfFalseUnchanged is the other half of R1.3, and the
+// half a hardcoded `true` would pass without.
+//
+// "Carry the policy" and "require isolation" are different instructions, and
+// only one of them is the requirement. A host that cannot create the namespace —
+// an ordinary user, which is most of them — has its build REFUSED rather than
+// labelled, if this field arrives true when the operator left it false.
+func TestProveCarriesAPolicyOfFalseUnchanged(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	rec := &realignPreparedRecorder{result: validate.PreparedBuild{
+		StagedRoot: filepath.Join(stagingRoot, "media-libs", "gst-plugins-qt6", "1.29.2"),
+		Gates:      realignPassingGates(),
+	}}
+	realignSwapPreparedSeam(t, rec)
+
+	if _, err := Prove(context.Background(), proposal, Options{
+		Overlay:     overlayRoot,
+		StagingRoot: stagingRoot,
+		Depth:       validate.DepthConfigure,
+	}); err != nil {
+		t.Fatalf("Prove: %v", err)
+	}
+
+	if len(rec.calls) != 1 {
+		t.Fatalf("the realignment reached the prepared build %d times, want exactly 1", len(rec.calls))
+	}
+	if rec.calls[0].RequireIsolation {
+		t.Error("an unset isolation policy reached the prepared build as true (R1.3): the field must be " +
+			"CARRIED from the policy, not asserted here — hardcoding it refuses every build on a host that " +
+			"cannot create the namespace, which is the ordinary case")
+	}
+}
+
+// TestProveStagingFailureStaysAnErrorThroughTheCore is R1.2 seen from this
+// package's own contract, and it is the reason the prepared build reports the
+// staging fault SEPARATELY from the gates it renders it into.
+//
+// validate.Run's governing rule turns every stopping condition into a reported
+// SKIP, and for Run that is right: the rest of the overlay is still validated
+// and this ebuild says what stopped it. Prove's rule is the opposite one, and
+// it is right for the opposite reason — a realignment abandoned on the strength
+// of an unwritable directory is a change discarded for a fact about the disk.
+// So "the gates examined this and said no" and "nothing was ever examined" must
+// stay two answers after the move, not one.
+func TestProveStagingFailureStaysAnErrorThroughTheCore(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	rec := &realignPreparedRecorder{result: validate.PreparedBuild{
+		StageErr: errors.New("the staged tree could not be prepared: read-only file system"),
+		Gates:    validate.SkippedGates(validate.DepthConfigure, "no staged tree to run in"),
+		Reason:   "no staged tree to run in",
+	}}
+	realignSwapPreparedSeam(t, rec)
+
+	proof, err := Prove(context.Background(), proposal, Options{
+		Overlay:     overlayRoot,
+		StagingRoot: stagingRoot,
+		Depth:       validate.DepthConfigure,
+	})
+	if err == nil {
+		t.Fatal("a prepared build that never staged a tree returned no error; reported as a proof, " +
+			"\"we could not look\" reads as \"it does not build\" and the realignment is abandoned over a disk")
+	}
+	if !strings.Contains(err.Error(), "read-only file system") {
+		t.Errorf("the error %q does not carry the staging fault's own words; the operator has to be told "+
+			"WHICH thing to go and fix", err)
+	}
+	if proof.Passed {
+		t.Error("a proof of a tree that was never staged came back Passed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 2.2 — R2, R2.4, R2.6.
+//
+// R2.4 requires the vacuity refusal to be MEASURED at each call site rather
+// than inferred from the unit test of the rule. This package holds two of the
+// three: Prove reads it to answer Passed, and refuseUnprovedRealignment reads it
+// to refuse a publish. They are separate assertions because they have separate
+// consequences — one is a word in a report, the other is a write into an overlay
+// that auto-commits and pushes within minutes.
+// ---------------------------------------------------------------------------
+
+// realignCandidateSkips is a gate list that declined over the CANDIDATE: the
+// staged tree could not be given the Manifest Portage verifies, so no gate
+// could read this ebuild. Story 039's D2 is that this list used to answer
+// "promotable".
+func realignCandidateSkips() []validate.GateResult {
+	gates := validate.SkippedGates(validate.DepthCompile, "the Manifest content could not be produced")
+	for i := range gates {
+		gates[i].Declined = validate.DeclineCandidate
+	}
+	return gates
+}
+
+// TestProveDoesNotPassAProofNothingRead is the first realign call site (R2.4).
+//
+// The comment above this call site used to assert that PromotionDecision
+// "encodes it together with the vacuity it has to deny". It did not — the only
+// branch that refused anything was the staging error, which both realign call
+// sites pass nil to by construction. A comment describing an absent protection
+// is worse than no comment: it stops the next reader from looking.
+func TestProveDoesNotPassAProofNothingRead(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	rec := &realignPreparedRecorder{result: validate.PreparedBuild{
+		StagedRoot: filepath.Join(stagingRoot, "media-libs", "gst-plugins-qt6", "1.29.2"),
+		Gates:      realignCandidateSkips(),
+	}}
+	realignSwapPreparedSeam(t, rec)
+
+	proof, err := Prove(context.Background(), proposal, Options{
+		Overlay:     overlayRoot,
+		StagingRoot: stagingRoot,
+		Depth:       validate.DepthCompile,
+	})
+	if err != nil {
+		t.Fatalf("Prove: %v — a gate list is a reported outcome, not a failed run", err)
+	}
+	if len(proof.Gates) == 0 {
+		t.Fatal("the fixture produced no gate, so this test would pass through the empty-list branch instead")
+	}
+	if proof.Passed {
+		t.Error("a realignment no gate could read came back Passed; Passed is what the approval step reads " +
+			"as permission to ASK, and asking about a candidate nothing measured is asking about nothing (R2.4)")
+	}
+}
+
+// TestPromoteRefusesAProofNothingRead is the second realign call site (R2.4),
+// and it is the one with teeth: this is the guard between a proposal and a tree
+// that publishes itself on a timer.
+func TestPromoteRefusesAProofNothingRead(t *testing.T) {
+	overlayRoot, stagingRoot, proposal := realignStageFixture(t)
+	before := realignTreeHash(t, overlayRoot)
+	proof := realignProvenProof(t, stagingRoot)
+	proof.Gates = realignCandidateSkips()
+
+	err := Promote(proposal, proof, true, overlayRoot)
+
+	if err == nil {
+		t.Fatal("a realignment whose every gate declined over the candidate was published; the overlay " +
+			"auto-commits within minutes, so this is a release nothing read (R2.4)")
+	}
+	if !errors.Is(err, ErrNotPromoted) {
+		t.Errorf("the refusal %v does not carry ErrNotPromoted; a caller cannot tell a refusal — the system "+
+			"working — from a write that broke", err)
+	}
+	if after := realignTreeHash(t, overlayRoot); after != before {
+		t.Errorf("the refused realignment changed the published overlay: %s -> %s", before, after)
 	}
 }

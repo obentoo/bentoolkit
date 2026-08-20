@@ -700,3 +700,216 @@ func TestCopyRegularFile_ExistingDestinationIsRefused(t *testing.T) {
 		t.Errorf("the refused copy still rewrote the destination to %q", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Story 039, sub-task 2.1 — R2, R2.1, R2.2, R2.3, R2.5.
+//
+// PromotionDecision's own doc-comment says it exists to stop a bump satisfying
+// "PASS or SKIPPED" VACUOUSLY. It did not: the only branch that refused anything
+// was stageErr, and every OTHER way a gate list can measure nothing — an
+// unwritable Manifest, a host missing a build dependency, a probe that could not
+// answer — arrives with stageErr nil and every deciding gate SKIPPED, which the
+// function answered `true`.
+//
+// The distinction the refusal keys on is "gates that were EXPECTED TO DECIDE and
+// all declined", never "the list contains a SKIPPED". Getting that wrong turns
+// every depth-none run into a refusal, which is the failure mode this has to be
+// tested against rather than reviewed for (R2.5).
+// ---------------------------------------------------------------------------
+
+// candidateSkips is an all-SKIPPED list whose gates declined because of the
+// CANDIDATE: the Manifest it needs could not be produced, so no gate could read
+// it. This is the vacuity R2.1 refuses.
+func candidateSkips(d Depth, reason string) []GateResult {
+	gates := SkippedGates(d, reason)
+	for i := range gates {
+		gates[i].Declined = DeclineCandidate
+	}
+	return gates
+}
+
+// hostSkips is an all-SKIPPED list whose gates declined because of THIS HOST:
+// a build dependency is not installed. R3.12 promotes this — the machine says
+// nothing about the bump, and refusing every one of them would make the feature
+// inert on an ordinary workstation.
+func hostSkips(d Depth, reason string) []GateResult {
+	gates := SkippedGates(d, reason)
+	for i := range gates {
+		gates[i].Declined = DeclineHost
+	}
+	return gates
+}
+
+// TestPromotionDecision_AListThatMeasuredNothingIsRefused is R2.1: the case
+// PromotionDecision claims to deny, actually denied.
+func TestPromotionDecision_AListThatMeasuredNothingIsRefused(t *testing.T) {
+	const stopped = "the Manifest supplied for media-libs/gst-plugins-qt6-1.29.2 is empty"
+	gates := candidateSkips(DepthCompile, stopped)
+	if len(gates) == 0 {
+		t.Fatal("the fixture produced no gate at all, so this test would pass without measuring the rule")
+	}
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if promote {
+		t.Fatalf("a candidate whose every deciding gate reported SKIPPED was cleared for promotion (%q); "+
+			"nothing read this ebuild, and an overlay that auto-commits would receive it on the strength of "+
+			"no gate having failed (R2.1)", why)
+	}
+	// R2.1 names the vacuity rather than the individual gates: an operator told
+	// "the patches, configure, compile gates reported SKIPPED" goes looking for
+	// three problems, when there is one — nothing ran.
+	for _, want := range []string{"SKIPPED", "nothing"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the refusal %q does not carry %q; it has to say that nothing was measured, not merely "+
+				"that some gate did not run", why, want)
+		}
+	}
+	// The vacuity refusal and the FAILED refusal must not be one sentence: they
+	// send an operator to different places — one to a gate's findings, the other
+	// to whatever stopped the run.
+	if strings.Contains(why, "reported FAILED") {
+		t.Errorf("the refusal %q reuses the FAILED wording; a candidate no gate read did not fail", why)
+	}
+}
+
+// TestPromotionDecision_AHostThatCannotBuildStillPromotes is R3.12 of story 033,
+// which this story must not run over.
+//
+// The two requirements are one rule seen from two sides. R2.1 refuses a list
+// that measured nothing ABOUT THE CANDIDATE; R3.12 promotes a list that measured
+// nothing because THIS MACHINE could not answer. Reading them as one — "every
+// deciding gate SKIPPED, therefore refuse" — makes `overlay autoupdate --apply`
+// stop publishing on any workstation that does not hold the bump's build
+// dependencies, which is most of them. That is the same conflation D1(c) exists
+// to prevent, applied one level up: a host that lacks a dependency is not an
+// ebuild that fails to build.
+func TestPromotionDecision_AHostThatCannotBuildStillPromotes(t *testing.T) {
+	gates := hostSkips(DepthCompile,
+		"this host does not hold the build dependencies of media-plugins/gst-plugins-qt6-1.29.2, so no build phase was run")
+	if len(gates) == 0 {
+		t.Fatal("the fixture produced no gate at all")
+	}
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if !promote {
+		t.Fatalf("a bump was refused because THIS HOST lacks its build dependencies (%q); that says nothing "+
+			"about the bump, and refusing every one of them makes the feature inert on an ordinary "+
+			"workstation (R3.12)", why)
+	}
+}
+
+// TestPromotionDecision_OneCandidateDeclineIsEnoughToRefuse is the mixed case,
+// and it is fail-closed on purpose.
+//
+// If one gate declined over the candidate and the rest declined over the host,
+// nothing measured this ebuild and one of the things that stopped a gate was the
+// ebuild's own. Promoting on the strength of the host's excuses would publish it.
+func TestPromotionDecision_OneCandidateDeclineIsEnoughToRefuse(t *testing.T) {
+	gates := hostSkips(DepthCompile, "a build dependency is not installed")
+	if len(gates) < 2 {
+		t.Fatalf("the fixture produced %d gates; this test needs at least two to mix the causes", len(gates))
+	}
+	gates[0].Declined = DeclineCandidate
+	gates[0].Reason = "the Manifest content could not be produced"
+
+	if promote, why := PromotionDecision(gates, nil); promote {
+		t.Errorf("a list in which the candidate itself stopped a gate was promoted (%q); the host's excuses "+
+			"for the other gates do not turn an unmeasured ebuild into a measured one", why)
+	}
+}
+
+// TestPromotionDecision_QAPassCannotRescueAVacuousList is R2.2 held against the
+// new branch, and it is the subtle way this fix could be written wrong.
+//
+// The QA gate never decides — the same D8 exclusion Report.ExitCode and
+// WorstOutcome make, because the overlay carries pre-existing pkgcheck findings
+// that have nothing to do with any bump. A refusal that counted QA's PASS as
+// evidence would let one metadata.xml verdict stand in for a build nobody ran,
+// which is the vacuity wearing a different hat.
+func TestPromotionDecision_QAPassCannotRescueAVacuousList(t *testing.T) {
+	gates := append(candidateSkips(DepthCompile, "no staged tree"),
+		GateResult{Gate: GateQA, Outcome: OutcomePass})
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if promote {
+		t.Errorf("a PASS from the one gate that never decides cleared a candidate no build gate read (%q); "+
+			"QA is excluded from the decision in BOTH directions or it is not excluded at all (R2.2)", why)
+	}
+}
+
+// TestPromotionDecision_QAOnlyListBehavesAsToday is the other half of R2.2:
+// excluding QA must not turn a list that holds nothing else into a refusal. The
+// deciding set is then EMPTY, which is the depth-none shape, not a vacuity.
+func TestPromotionDecision_QAOnlyListBehavesAsToday(t *testing.T) {
+	for _, outcome := range []Outcome{OutcomePass, OutcomeSkipped, OutcomeFailed} {
+		t.Run(string(outcome), func(t *testing.T) {
+			promote, why := PromotionDecision([]GateResult{{Gate: GateQA, Outcome: outcome}}, nil)
+			if !promote {
+				t.Errorf("a list holding only the QA gate (%s) was refused (%q); QA decides nothing, so a "+
+					"list without any deciding gate is the depth-none shape and keeps today's outcome (R2.2, R2.5)",
+					outcome, why)
+			}
+		})
+	}
+}
+
+// TestPromotionDecision_ADepthThatBuiltNothingIsNotRefused is R2.5, and it is
+// the failure mode the design named: a refusal keyed on "the list contains a
+// SKIPPED" would turn every run that was never meant to build into a refusal.
+//
+// A depth at or below `options` covers no build gate, so SkippedGates yields
+// nothing and the ladder returns an empty list. Nothing declined, because
+// nothing was asked.
+func TestPromotionDecision_ADepthThatBuiltNothingIsNotRefused(t *testing.T) {
+	t.Run("an empty list", func(t *testing.T) {
+		promote, why := PromotionDecision(nil, nil)
+		if !promote {
+			t.Errorf("a run that was never meant to build was refused (%q); depth=none produces no gate at "+
+				"all, and refusing it turns the vacuity guard into a ban on shallow runs (R2.5)", why)
+		}
+	})
+
+	// The shape a depth-none/-options run really produces, asked of the
+	// function that produces it rather than of a hand-written literal.
+	for _, d := range []Depth{DepthNone, DepthOptions} {
+		t.Run(d.String(), func(t *testing.T) {
+			gates := SkippedGates(d, "no staged tree was needed")
+			if len(gates) != 0 {
+				t.Fatalf("SkippedGates(%v) produced %d gates; this test assumes a depth below patches covers "+
+					"none, and that assumption is now wrong", d, len(gates))
+			}
+			if promote, why := PromotionDecision(gates, nil); !promote {
+				t.Errorf("a %v-depth run was refused (%q)", d, why)
+			}
+		})
+	}
+}
+
+// TestPromotionDecision_OnePassIsEnoughToKeepTodaysAnswer is R2.3: the mixed
+// list keeps promoting, and keeps the WORDING it has today. The vacuity refusal
+// may change the answer only where every deciding gate declined — a list with
+// one real measurement in it is not that list.
+func TestPromotionDecision_OnePassIsEnoughToKeepTodaysAnswer(t *testing.T) {
+	gates := []GateResult{
+		{Gate: GatePatches, Outcome: OutcomePass},
+		{Gate: GateConfigure, Outcome: OutcomeSkipped, Reason: "dev-libs/unsatisfied-1.0 is not installed"},
+		{Gate: GateCompile, Outcome: OutcomeSkipped, Reason: "dev-libs/unsatisfied-1.0 is not installed"},
+	}
+
+	promote, why := PromotionDecision(gates, nil)
+
+	if !promote {
+		t.Fatalf("a list holding a real PASS was refused (%q); R2.3 keeps this promoting, and the applier's "+
+			"answer for every non-vacuous list is unchanged", why)
+	}
+	// Byte-for-byte: the applier reads this sentence today and Unchanged
+	// Behavior clause 2 keeps its answer for every list holding a deciding PASS.
+	const want = "promoted: every gate reported PASS or SKIPPED, and the configure, compile gates did not run — see each gate's own reason"
+	if why != want {
+		t.Errorf("the promotion reason changed.\n got: %q\nwant: %q\nthe mixed case keeps today's wording; "+
+			"rewording it in the commit that adds a refusal makes the refusal unreviewable", why, want)
+	}
+}
