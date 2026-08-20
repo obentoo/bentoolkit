@@ -536,7 +536,7 @@ func stageCandidateFor(t *testing.T, stagingRoot, overlayDir, body string) strin
 	staged, err := validate.Stage(validate.StageRequest{
 		Overlay:     overlayDir,
 		StagingRoot: stagingRoot,
-		Atom:        "media-plugins/gst-plugins-qt6",
+		Key:         "media-plugins/gst-plugins-qt6",
 		Version:     "1.29.2",
 		EbuildBytes: []byte(body),
 	})

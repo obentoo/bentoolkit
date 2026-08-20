@@ -22,7 +22,7 @@ import (
 
 // StagedCandidate names one package/version the current run still needs.
 type StagedCandidate struct {
-	Atom    string // category/package
+	Key     string // registry key: category/package, possibly :slot or @label
 	Version string
 }
 
@@ -114,10 +114,10 @@ func SweepStagedTrees(req SweepRequest) (SweepReport, error) {
 func inScopeTreePaths(req SweepRequest) (map[string]struct{}, error) {
 	paths := make(map[string]struct{}, len(req.InScope))
 	for _, candidate := range req.InScope {
-		path, err := StagedTreePath(req.StagingRoot, candidate.Atom, candidate.Version)
+		path, err := StagedTreePath(req.StagingRoot, candidate.Key, candidate.Version)
 		if err != nil {
 			return nil, fmt.Errorf("sweeping %s: naming the staged tree of %s-%s: %w",
-				req.StagingRoot, candidate.Atom, candidate.Version, err)
+				req.StagingRoot, candidate.Key, candidate.Version, err)
 		}
 		paths[path] = struct{}{}
 	}

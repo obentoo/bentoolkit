@@ -125,15 +125,18 @@ var ErrStageUnpreparable = errors.New("the staged tree could not be prepared")
 // no index file and no lock, which is what lets several packages be staged
 // concurrently without coordination.
 //
-// Atom is the full category/package, e.g. "media-plugins/gst-plugins-qt6".
+// Key is the registry key: category/package, possibly carrying ":slot" or
+// "@label" — e.g. "media-plugins/gst-plugins-qt6" or "app-editors/zed-bin@preview".
+// The content paths inside the staged tree derive from its suffix-stripped form
+// (splitContentAtom); the stage root and the repository name keep the full key.
 // Version is the PV, e.g. "1.29.2"; together they name the ebuild file.
 //
 // EbuildBytes is the candidate's body, written verbatim. Staging must not
 // reformat or regenerate what the gates are about to judge, or a gate result
 // would describe a file that never existed anywhere else.
 type StageRequest struct {
-	Overlay, StagingRoot, Atom, Version string
-	EbuildBytes                         []byte
+	Overlay, StagingRoot, Key, Version string
+	EbuildBytes                        []byte
 }
 
 // Stage builds a self-consistent single-package Portage repository holding one
@@ -223,21 +226,38 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 	version := strings.TrimSpace(req.Version)
 
 	if overlayRoot == "" {
-		return "", fmt.Errorf("staging %s-%s: no overlay given to copy eclasses and profiles from", req.Atom, version)
+		return "", fmt.Errorf("staging %s-%s: no overlay given to copy eclasses and profiles from", req.Key, version)
 	}
 	if stagingRoot == "" {
-		return "", fmt.Errorf("staging %s-%s: no staging root given; Stage never picks one, because the path is where the retention rule is recorded (D1)", req.Atom, version)
+		return "", fmt.Errorf("staging %s-%s: no staging root given; Stage never picks one, because the path is where the retention rule is recorded (D1)", req.Key, version)
 	}
 	if len(req.EbuildBytes) == 0 {
-		return "", fmt.Errorf("staging %s-%s: no ebuild body given; an empty candidate stages a tree whose gates fail for a reason that has nothing to do with the bump", req.Atom, version)
+		return "", fmt.Errorf("staging %s-%s: no ebuild body given; an empty candidate stages a tree whose gates fail for a reason that has nothing to do with the bump", req.Key, version)
 	}
 
-	category, pkg, err := splitStagedAtom(req.Atom)
+	// The key is split TWICE, because a registry key has two roles and each
+	// split answers for one of them (design D4). splitContentAtom answers role
+	// B: the category and package that name the staged repository's CONTENT —
+	// the package directory, the ebuild filename, files/ — which must be free of
+	// a key's ":slot" or "@label" suffix because Portage accepts neither
+	// character in a package name. splitStagedAtom, below, answers role A: the
+	// retention identity, which KEEPS the suffix.
+	category, pkg, err := splitContentAtom(req.Key)
+	if err != nil {
+		return "", err
+	}
+	// Role A's other half in this function: the repository NAME derives from the
+	// SUFFIXED package (R5.4), so two release lines of one package staged at the
+	// same version never answer to one repository name — a duplicate name is a
+	// repository-level conflict in Portage regardless of which two repositories
+	// collide. stagedRepoName folds the ':' or '@' to '_', which is what keeps
+	// the name Portage-legal even though the raw key is not.
+	_, suffixedPkg, err := splitStagedAtom(req.Key)
 	if err != nil {
 		return "", err
 	}
 	if err := usableAsPathElement("version", version); err != nil {
-		return "", fmt.Errorf("staging %s: %w", req.Atom, err)
+		return "", fmt.Errorf("staging %s: %w", req.Key, err)
 	}
 
 	// The overlay is checked before anything is created, so a mistyped overlay
@@ -254,7 +274,7 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 	// Through StagedTreePath rather than joined here, so that the layout a
 	// promoting run looks a retained tree up by (R10.1) and the layout this
 	// function creates are the same line of code.
-	stagedRoot, err = StagedTreePath(stagingRoot, req.Atom, version)
+	stagedRoot, err = StagedTreePath(stagingRoot, req.Key, version)
 	if err != nil {
 		return "", err
 	}
@@ -283,8 +303,9 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 
-	// After the profiles/ copy, never before: see the repo_name note above.
-	if err := writeStagedRepoName(stagedRoot, pkg, version); err != nil {
+	// After the profiles/ copy, never before: see the repo_name note above. The
+	// SUFFIXED package, never the content one — see the split at the top (R5.4).
+	if err := writeStagedRepoName(stagedRoot, suffixedPkg, version); err != nil {
 		return "", err
 	}
 
@@ -333,9 +354,67 @@ func splitStagedAtom(atom string) (category, pkg string, err error) {
 	return category, pkg, nil
 }
 
+// splitContentAtom reads a registry key into the category and package that name
+// the staged repository's CONTENT, dropping any ":slot" or "@label" suffix
+// first.
+//
+// A registry key has two roles, and this function answers only the second
+// (design D4). Role A is the retention identity — the stage root under which
+// one key's trees are retained and replaced — and it KEEPS the suffix, so slot
+// 4.1 and slot 6 of one package never collapse into one tree; that is
+// splitStagedAtom's answer, above. Role B is everything Portage READS inside
+// the staged repository — the package directory, the ebuild filename, files/,
+// the Manifest — and every atom handed to a Portage tool. Portage accepts
+// neither ':' nor '@' in a package name, so role B must be the suffix-stripped
+// key.
+//
+// The strip mirrors splitPkgAtom (internal/autoupdate/ebuild_select.go), which
+// the PROMOTING side already derives its paths from: everything from the first
+// '@' goes (the label; a slot may precede it, as in "cat/pkg:4.1@stable"), then
+// everything from the first ':' (the slot). The two sides converging on one
+// rule is the whole fix — the failure this closes was exactly their
+// disagreement, content staged under the suffixed name while every later gate
+// chdir-failed into the clean directory that never existed.
+//
+// A ':' or '@' that SURVIVES the strip is refused here, by name (R5.3). With
+// the strip as written that residue is unreachable — but "unreachable" is a
+// property of today's strip, not of this function. The day someone reorders or
+// narrows the strip, the leak fails at this seam, immediately and named, not as
+// a ghost directory three gates later.
+func splitContentAtom(key string) (category, pkg string, err error) {
+	stripped := strings.TrimSpace(key)
+	if i := strings.IndexByte(stripped, '@'); i >= 0 {
+		stripped = stripped[:i]
+	}
+	if i := strings.IndexByte(stripped, ':'); i >= 0 {
+		stripped = stripped[:i]
+	}
+
+	category, pkg, found := strings.Cut(stripped, "/")
+	if !found {
+		return "", "", fmt.Errorf("the package key %q does not name category/package once its \":slot\" or \"@label\" suffix is dropped", key)
+	}
+	for _, half := range []struct{ kind, value string }{{"category", category}, {"package", pkg}} {
+		if err := usableAsPathElement(half.kind, half.value); err != nil {
+			return "", "", fmt.Errorf("the package key %q: %w", key, err)
+		}
+		if strings.ContainsAny(half.value, ":@") {
+			return "", "", fmt.Errorf("the package key %q still carries ':' or '@' in its %s %q after the slot/label strip; "+
+				"Portage accepts neither character in a name it reads, so the key is refused here rather than staged as content no later gate can address",
+				key, half.kind, half.value)
+		}
+	}
+	return category, pkg, nil
+}
+
 // usableAsPathElement refuses the values that would make a joined path mean
 // something other than "one directory named this": empty, the two relative
 // directory names, a separator of either flavour, and a NUL byte.
+//
+// It deliberately says nothing about ':' or '@'. Role A's path elements — the
+// stage root's — legitimately carry both, because the retention identity is the
+// full registry key; only role B refuses them, and it does so in
+// splitContentAtom where the refusal can name the seam it guards.
 func usableAsPathElement(kind, value string) error {
 	switch {
 	case value == "":

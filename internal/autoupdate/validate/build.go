@@ -16,10 +16,10 @@ import (
 // what to call it in the report, how deep to go, and where a failed run's log is
 // kept.
 //
-// # Atom and Version are the REPORT's names, not the build's
+// # Key and Version are the REPORT's names, not the build's
 //
 // The build reads the staged tree, and Portage will stamp its own errors with
-// the STAGING repository's name — a repository the operator never created. Atom
+// the STAGING repository's name — a repository the operator never created. Key
 // and Version are what those errors are re-labelled to before any of it reaches
 // a report (D13). They are therefore not decoration: without them this package
 // could only quote Portage, and quoting Portage here means showing somebody a
@@ -38,8 +38,9 @@ type BuildRequest struct {
 	// NOT checked for existence here; see RunBuildGates.
 	StagedRoot string
 
-	// Atom is the real package, category/package, as the operator asked about it.
-	Atom string
+	// Key is the registry key as the operator asked about the package:
+	// category/package, possibly carrying ":slot" or "@label".
+	Key string
 
 	// Version is the candidate version being validated.
 	Version string
@@ -279,18 +280,30 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		return nil, nil
 	}
 
-	atom := strings.TrimSpace(req.Atom)
+	atom := strings.TrimSpace(req.Key)
 	version := strings.TrimSpace(req.Version)
 	stagedRoot := strings.TrimSpace(req.StagedRoot)
 
-	// The atom is split first because splitStagedAtom is also the validator: a
+	// The atom is split first because the split is also the validator: a
 	// malformed atom must fail as a malformed atom rather than as an `ebuild`
-	// invocation pointed somewhere unintended.
-	category, pkg, err := splitStagedAtom(atom)
+	// invocation pointed somewhere unintended. splitContentAtom, because this
+	// split names the candidate INSIDE the staged repository — Stage writes that
+	// content from the suffix-stripped key (design D4, role B), so a registry
+	// key's ":slot" or "@label" reaching the path handed to `ebuild` below would
+	// name a file that was never staged.
+	category, pkg, err := splitContentAtom(atom)
 	if err != nil {
-		// Wrapped rather than passed through: splitStagedAtom words its errors
-		// for Stage ("staging …"), and an operator reading one here is not
-		// staging anything.
+		// Wrapped rather than passed through: the split's own words name the key,
+		// and this names what was being attempted with it.
+		return nil, fmt.Errorf("running the build gates: %w", err)
+	}
+	// Role A's half of the same key: the staged repository's NAME was written
+	// from the SUFFIXED package (stage.go, R5.4), so the recomputing fallback in
+	// stagedRepoNameAt must be handed the same one — a clean package here would
+	// have a tree missing its repo_name file resolve under a name Stage never
+	// wrote. splitStagedAtom words its errors for Stage, hence the same wrap.
+	_, suffixedPkg, err := splitStagedAtom(atom)
+	if err != nil {
 		return nil, fmt.Errorf("running the build gates: %w", err)
 	}
 	if version == "" {
@@ -300,7 +313,9 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		return nil, fmt.Errorf("running the build gates for %s-%s: no staged tree given to build from", atom, version)
 	}
 
-	label := reportLabel{pv: atom + "-" + version, stagedRepo: stagedRepoNameAt(stagedRoot, pkg, version)}
+	// label.pv keeps the FULL key: it is the report's name for the operator
+	// (D13), who knows the bump by its registry spelling, suffix and all.
+	label := reportLabel{pv: atom + "-" + version, stagedRepo: stagedRepoNameAt(stagedRoot, suffixedPkg, version)}
 
 	// Measured BEFORE anything is looked up or spawned, exactly where story 031
 	// put it: a build --require-isolation will refuse must not first cost this

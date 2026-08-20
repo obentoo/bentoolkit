@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1286,7 +1287,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	stagedRoot, err := validate.Stage(validate.StageRequest{
 		Overlay:     a.overlayPath,
 		StagingRoot: a.stagingRoot,
-		Atom:        pkg,
+		Key:         pkg,
 		Version:     newVersion,
 		EbuildBytes: body,
 	})
@@ -1910,6 +1911,21 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 // "uncertain means repairable" has nothing to say about them: nothing was
 // uncertain.
 //
+// # A command that could not start
+//
+// The third recognised class (S040-R5.5) is a spawned command whose working
+// directory does not exist: chdir fails before the child's first instruction,
+// so pkgdev never read the ebuild and nothing about the failure is a statement
+// about it. It is keyed on a PROPERTY of the failure — the chain satisfies
+// errors.Is(_, fs.ErrNotExist) and carries no *exec.ExitError — not on which
+// site raised it. The ExitError guard is what keeps the key honest: an
+// ExitError exists only once the command RAN, and a command that ran is
+// evidence about the ebuild no matter what ENOENT text its output happened to
+// wrap, so it must still reach the fixer. Measured (2026-08-19, S040-D4): a
+// suffixed registry key staged content under the suffixed name, the manifest
+// step chdir-failed into the clean directory this gate did not recognise, and
+// the fixer was invoked with the same nonexistent directory as its own cwd.
+//
 // # What this does NOT cover, and why it is not fixed here
 //
 // Three more pre-pkgdev refusals are equally the machine's and still fall
@@ -1919,15 +1935,22 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 // created, taken, or inspected (internal/common/distfiles/lock.go). None of
 // them carries a sentinel, so none of them is recognisable here.
 //
-// Adding a fourth errors.Is is deliberately NOT the fix. This gate was already
-// keyed on one condition and missed the pre-flight; keying it on an enumeration
-// means every future step that can refuse is a clause somebody must remember to
-// add, and the rung that gets forgotten is the one that invokes an agent
-// against a machine fault. The shape that closes all of them at once is to mark
-// the PHASE rather than the cause — every refusal raised while preparing the
-// shared directory is, by construction, not a verdict about an ebuild pkgdev
-// never read. That is a change to this gate's contract and belongs in its own
-// story, not bolted on here.
+// Adding one more errors.Is against an enumerated CAUSE is deliberately NOT
+// the fix. This gate was already keyed on one condition and missed the
+// pre-flight; keying it on an enumeration means every future step that can
+// refuse is a clause somebody must remember to add, and the rung that gets
+// forgotten is the one that invokes an agent against a machine fault. The
+// shape that closes all of them at once is to mark the PHASE rather than the
+// cause — every refusal raised while preparing the shared directory is, by
+// construction, not a verdict about an ebuild pkgdev never read. That is a
+// change to this gate's contract and belongs in its own story, not bolted on
+// here.
+//
+// The missing-workdir check is not that enumerated clause. Could-not-start
+// plus ENOENT is a fact the failure itself carries, observable on any chain
+// from any raiser without anyone remembering to enrol a new one — the same
+// kind of key the paragraph above asks for. It marks a different phase (the
+// spawn itself) than the one still missing (preparing the shared directory).
 //
 // Missing this was the original gap. The pre-flight failure carries no
 // *manifestRunError — that type is built only where pkgdev itself fails — so a
@@ -1956,6 +1979,20 @@ func environmentVerdict(firstErr error) error {
 		// under it reachable, so the operator still reads which directory or
 		// which distfile, and which process held it.
 		return fmt.Errorf("%w: %w", ErrManifestEnvironment, firstErr)
+	}
+
+	// The spawned command's working directory does not exist (S040-R5.5): a
+	// failure to start, never a failure of what ran. The guard is structural —
+	// any *exec.ExitError in the chain means the command DID run, and then this
+	// class must not fire whatever ENOENT its wrapped output mentions. It sits
+	// before the *manifestRunError gate below because both production shapes
+	// carry the start failure reachably: the staged path wraps cmd.Run's error
+	// plainly (sweep_staged.go), the published path wraps it inside
+	// *manifestRunError, whose Unwrap keeps the chain open.
+	var exitErr *exec.ExitError
+	if errors.Is(firstErr, fs.ErrNotExist) && !errors.As(firstErr, &exitErr) {
+		return fmt.Errorf("%w: the spawned command's working directory does not exist, so the command never started and said nothing about the ebuild: %w",
+			ErrManifestEnvironment, firstErr)
 	}
 
 	var runErr *manifestRunError

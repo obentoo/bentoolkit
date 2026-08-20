@@ -698,7 +698,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 
 	req := validate.BuildRequest{
 		StagedRoot:       cand.repoRoot,
-		Atom:             pkg,
+		Key:              pkg,
 		Version:          version,
 		Depth:            depth,
 		RequireIsolation: a.requireIsolation,

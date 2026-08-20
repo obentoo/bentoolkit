@@ -415,10 +415,22 @@ func buildManifestFixInstruction(req ManifestFixRequest) string {
 	return sb.String()
 }
 
-// exitCodeString renders a process exit status for an error message. It extracts
-// the numeric code from an *exec.ExitError (AD5: errors.As + ExitCode); when
-// runErr is not an ExitError (e.g. the process never started), it falls back to
-// the wrapped error text so the cause is never lost.
+// couldNotStart reports whether runErr is a failure to START the fixer process:
+// a non-nil run error carrying no *exec.ExitError. An ExitError exists only
+// once the process ran to an exit status; everything else — a working directory
+// that does not exist, an unrunnable binary — happened before the child's first
+// instruction, so there is no exit code to speak of (S040-R5.6).
+func couldNotStart(runErr error) bool {
+	var exitErr *exec.ExitError
+	return runErr != nil && !errors.As(runErr, &exitErr)
+}
+
+// exitCodeString renders a process exit status for an error message by
+// extracting the numeric code from an *exec.ExitError (AD5: errors.As +
+// ExitCode). Both call sites sit behind formatFixerError's could-not-start case
+// (S040-R5.6), so an ExitError is guaranteed present by the time this runs; the
+// fallback keeps the cause text visible anyway rather than trusting that
+// guarantee with a blank.
 func exitCodeString(runErr error) string {
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
@@ -436,6 +448,9 @@ func exitCodeString(runErr error) string {
 //
 //   - ctxErr (caller context cancelled or deadline elapsed) — AD4/S009-R1.3, takes
 //     precedence over any exit-code framing;
+//   - a run error carrying no *exec.ExitError — the process could not start, so
+//     there is no exit code to print and the failure is said as what it is
+//     ("could not start: <cause>") — S040-R5.6;
 //   - a non-zero exit paired with a self-reported success envelope as an explicit
 //     contradiction ("exited N but reported success") — AD3/S009-R1.2, never an empty
 //     tail;
@@ -454,6 +469,15 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 	case ctxErr != nil:
 		// AD4/S009-R1.3: cancellation or deadline takes precedence over exit framing.
 		sb.WriteString(fmt.Sprintf("claude fixer aborted: %v", ctxErr))
+	case couldNotStart(runErr):
+		// S040-R5.6: the process never ran, so there is no exit code to print.
+		// Rendering the raw error where a number was promised produced the
+		// measured garble "failed: exit chdir …: no such file or directory" — an
+		// operator reads that as a corrupted exit code, not as what it was. The
+		// cause text stays visible; only the framing changes. It sits above the
+		// contradiction case because a command that never started cannot have
+		// reported anything: an envelope here would be stale bytes.
+		sb.WriteString(fmt.Sprintf("claude fixer could not start: %v", runErr))
 	case runErr != nil && jsonErr == nil && !env.IsError && env.Subtype == "success":
 		// AD3/S009-R1.2: non-zero exit but a self-reported success envelope.
 		sb.WriteString(fmt.Sprintf("claude fixer exited %s but reported success (subtype=%s)",

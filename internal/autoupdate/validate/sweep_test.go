@@ -80,7 +80,7 @@ func TestSweepStagedTrees_RemovesWhatLeftScopeAndKeepsTheFailures(t *testing.T) 
 	report, err := SweepStagedTrees(SweepRequest{
 		Overlay:     overlay,
 		StagingRoot: staging,
-		InScope:     []StagedCandidate{{Atom: "media-plugins/gst-plugins-qt6", Version: "1.29.2"}},
+		InScope:     []StagedCandidate{{Key: "media-plugins/gst-plugins-qt6", Version: "1.29.2"}},
 	})
 	if err != nil {
 		t.Fatalf("SweepStagedTrees: %v", err)
