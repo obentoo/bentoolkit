@@ -94,14 +94,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   else, so a package with no distfile has no Manifest file at all. One of the
   two seams that read it already knew that; its sibling — the one naming the
   archives the option gate looks for — still reported the absence as a read
-  failure. So every `acct-group/*`, `acct-user/*` and `virtual/*`, and
-  `net-dns/bind-tools`, `app-eselect/eselect-nodejs` and
-  `sys-kernel/linux-firmware` in ::bentoo, had its option gate decline with
-  "the published Manifest could not be read" — a fault about the checkout,
+  failure. So a package of that class — every `acct-group/*`, `acct-user/*` and
+  `virtual/*`, and `net-dns/bind-tools`, `app-eselect/eselect-nodejs` and
+  `sys-kernel/linux-firmware` in ::bentoo — had its option gate decline with
+  the distfile names "could not be produced": a fault about the checkout,
   sending an operator to repair a file that was never meant to exist. It now
-  reports what is true: the package names no distfile, so there was no archive
-  to look for. Nothing new was written for that sentence; it has been there
-  since the gate shipped, behind a fault report. The outcome is unchanged and
+  reports what is true: the caller's list names no distfile, so there was no
+  archive to look for. Nothing new was written for that sentence; it has been
+  there since the gate shipped, behind a fault report.
+
+  The reach is narrower than it looks, and it is worth stating rather than
+  leaving to be discovered: that seam is only wired for `--depth` ABOVE
+  `options`, so the default read-only `overlay validate` never reached it and
+  its reports are byte-identical before and after — measured over all 357
+  packages of ::bentoo. What changes is a build-depth run, where the class used
+  to read as a broken checkout. The outcome is unchanged and
   deliberately so — still a reported SKIP, because a package nothing was
   compared against has not been validated. A Manifest that exists and cannot be
   read is still an error, on both seams, with its sentence unchanged.
