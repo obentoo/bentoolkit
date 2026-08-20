@@ -53,6 +53,29 @@ const stageRecordName = ".bentoo-stage-record.json"
 // the operator's machine and only one of them is worth a warning.
 var ErrNoStageRecord = errors.New("the staged tree carries no validation record")
 
+// ProducedByApplier and ProducedByValidate name what wrote a stage record (D6).
+// They are the only two values StageRecord.ProducedBy is ever written with.
+//
+// They are constants because these STRINGS are on-disk vocabulary rather than
+// internal spelling: a record has to be readable by the version that wrote it AND
+// by the next one, so renaming a value in the file is the one change that breaks
+// reuse silently — nothing fails to compile, and a later run simply stops
+// recognising the records an earlier release left beside its trees.
+//
+// # Why the producer decides anything at all
+//
+// A stage record is a licence to publish WITHOUT running the gates again
+// (R10.1): a later `--apply` promotes a bump on the strength of what an earlier
+// run recorded. The applier writes such a record having staged the very
+// candidate it means to publish. A read-only validation run writes one having
+// only MEASURED a tree — it promotes nothing, by contract — so its record is
+// evidence about an outcome and NOT a licence, and the reuse path has to be able
+// to tell the two apart from the bytes on disk alone.
+const (
+	ProducedByApplier  = "applier"
+	ProducedByValidate = "validate"
+)
+
 // StageRecord is what one validation run leaves beside its staged tree so that a
 // later run can promote it without paying for the same hours twice (R10.1,
 // R10.4).
@@ -73,6 +96,16 @@ type StageRecord struct {
 	// whatever these two say.
 	Package string `json:"package,omitempty"`
 	Version string `json:"version,omitempty"`
+
+	// ProducedBy names what wrote this record: ProducedByApplier or
+	// ProducedByValidate. A record written by a read-only validation run is
+	// evidence about a tree's outcome, NOT a licence to publish it.
+	//
+	// EMPTY MEANS ProducedByApplier, and the read path is where that is said —
+	// see ReadStageRecord (R5.2). Every record already on an operator's disk was
+	// written before this field existed, and every one of them came from the
+	// applier.
+	ProducedBy string `json:"produced_by,omitempty"`
 
 	// Depth is the depth this run SELECTED, which is the depth the gates below
 	// were asked to cover — not the depth they reached. R10.1 compares it
@@ -126,6 +159,7 @@ type StageRecord struct {
 type stageRecordWire struct {
 	Package            string       `json:"package,omitempty"`
 	Version            string       `json:"version,omitempty"`
+	ProducedBy         string       `json:"produced_by,omitempty"`
 	Depth              string       `json:"depth"`
 	Gates              []GateResult `json:"gates"`
 	EbuildDigest       string       `json:"ebuild_digest"`
@@ -148,6 +182,13 @@ func StageRecordPath(stagedRoot string) string {
 // A failure is the caller's to decide about, and every caller in this repository
 // treats it as a warning rather than as a failed bump: the cost of an unwritten
 // record is one revalidation, which is the behaviour that predates R10 entirely.
+//
+// rec.ProducedBy is written exactly as the caller stated it and is never
+// defaulted here. A writer is the one thing that KNOWS what it is, so filling a
+// producer in on this side would let a future one inherit the applier's
+// provenance by merely forgetting to name itself. Absence is given its meaning
+// on the way back in, in ReadStageRecord, where the records that predate the
+// field are (R5.2).
 func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 	info, err := os.Stat(stagedRoot)
 	if err != nil {
@@ -160,6 +201,7 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 	body, err := json.MarshalIndent(stageRecordWire{
 		Package:            rec.Package,
 		Version:            rec.Version,
+		ProducedBy:         rec.ProducedBy,
 		Depth:              rec.Depth.String(),
 		Gates:              rec.Gates,
 		EbuildDigest:       rec.EbuildDigest,
@@ -208,9 +250,33 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 		return StageRecord{}, fmt.Errorf("reading the validation record %s: %w", path, err)
 	}
 
+	// R5.2: a record carrying no producer at all is applier-produced.
+	//
+	// The normalization lives here, beside ParseDepth, because this is where the
+	// on-disk shape is turned into what the value MEANS — but it is deliberately
+	// not ParseDepth's shape. An unknown depth is a malformed record and fails
+	// loudly; an ABSENT producer is a perfectly well-formed record from before
+	// the field existed, and all of those were written by the applier. Read
+	// absence as anything else and the provenance check on the reuse path refuses
+	// every tree an earlier release staged: R10.1's whole saving switched off in
+	// silence, every bump paying for its gates a second time with nothing in the
+	// output saying why.
+	//
+	// A producer this version does not RECOGNISE is passed through as it stands
+	// rather than rejected. The record is still well-formed; the reuse path is
+	// fail-closed on anything that is not ProducedByApplier, so the worst an
+	// unknown name can cost is one revalidation — while refusing to read it here
+	// would break the promise the wire shape exists to keep, that a record stays
+	// readable by the next version of this program.
+	producer := wire.ProducedBy
+	if producer == "" {
+		producer = ProducedByApplier
+	}
+
 	return StageRecord{
 		Package:            wire.Package,
 		Version:            wire.Version,
+		ProducedBy:         producer,
 		Depth:              depth,
 		Gates:              wire.Gates,
 		EbuildDigest:       wire.EbuildDigest,

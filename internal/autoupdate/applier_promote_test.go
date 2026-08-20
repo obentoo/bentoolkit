@@ -27,6 +27,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -1263,5 +1264,118 @@ func TestApplierPromote_AnInterruptedRunRecordsNoProofForTheNextRun(t *testing.T
 		t.Errorf("the interrupted run left a record the next --apply promotes on without running a gate (%s); "+
 			"the reuse path consults neither refuseUnproved nor PromotionDecision, so the bump reaches the "+
 			"overlay one run later instead of not at all", why)
+	}
+}
+
+// ===== Story 041, task 2.2 — R5.1, R5.3 =====
+
+// TestApplierPromote_ARecordTheApplierDidNotProduceIsNotALicenceToPublish is
+// R5.1, and it is the guard that keeps D7 from being a security regression.
+//
+// Once `overlay validate --depth` writes a record (D7), a read-only command
+// starts leaving publication evidence on disk. The tree path carries the
+// version, so a validate-written record USUALLY names a bump the applier is not
+// staging — but usually is the problem: a realign proposal or an
+// `overlay compare --depth` can stage the same version, and the failure mode is
+// a bump published on evidence produced by a command whose contract says it
+// changes nothing.
+//
+// The fixture is therefore a PERFECT match in every other respect: same package,
+// same version, same bytes, same digests, gates all PASS at the requested depth.
+// The single thing wrong with it is who wrote it, and that has to be enough —
+// exactly the shape of ...ARecordShowingAFailedGateIsRevalidated above.
+//
+// Two assertions, because either alone can be satisfied by a bug. The label
+// alone would pass against a run that reused the tree and merely called the
+// result "this-run"; the spawn count alone would pass against a run that ran the
+// gates for an unrelated reason. Together they say the reuse path was not taken.
+func TestApplierPromote_ARecordTheApplierDidNotProduceIsNotALicenceToPublish(t *testing.T) {
+	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+	body := candidateBody(t, overlayDir)
+
+	staged := stageCandidateFor(t, applier.StagingRoot(), overlayDir, body)
+	record := provedRecord(validate.DepthConfigure, digestOf(body), stagedDistfileDigest)
+	record.ProducedBy = "validate"
+	if err := validate.WriteStageRecord(staged, record); err != nil {
+		t.Fatalf("writing the stage record: %v", err)
+	}
+	spawnsBefore := watch.spawns
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if result.ValidationSource == ValidationSourceStaged {
+		t.Errorf("ValidationSource = %q: the bump was promoted on a record produced by a read-only validation "+
+			"run. `overlay validate` says it changes nothing, and this publishes an ebuild on its output (R5.1)",
+			result.ValidationSource)
+	}
+	if watch.spawns == spawnsBefore {
+		t.Error("no child process ran, so the gates were not re-run: the retained tree was reused despite its " +
+			"record naming a producer that is not the applier. A label saying \"this-run\" over a reuse is the " +
+			"same publication with a better name (R5.1)")
+	}
+	if !strings.Contains(strings.ToLower(result.DepthReason), "produc") {
+		t.Errorf("the run explains itself with %q, which does not name the producer as the reason; R10.3 is "+
+			"\"state per package which of the two happened\", and a refusal an operator cannot attribute reads "+
+			"as an ordinary slow apply (R5.1)", result.DepthReason)
+	}
+}
+
+// TestApplierPromote_TheApplierNamesItselfAsTheProducerOfItsRecord is R5.3, and
+// without it R5.1 is a rule that can only ever refuse.
+//
+// The provenance check is a comparison against "applier". If the applier stopped
+// writing that value — or wrote it in some other spelling — every record it
+// produces would fail its own check on the next run, every retained tree would
+// revalidate, and R10.1's whole saving would be switched off with nothing in the
+// output saying why. The value is asserted as it lands ON DISK, through a real
+// apply, rather than at the call site.
+//
+// R5.2's other half is already pinned upstairs and is deliberately not repeated
+// here: ...AMatchingProvedTreeIsPromotedWithoutRunningAGate stages a record from
+// provedRecord, which names no producer at all, and still expects
+// ValidationSource "staged". That test IS the "absence reads as applier"
+// regression guard at this surface, and it earns that by being unmodified.
+func TestApplierPromote_TheApplierNamesItselfAsTheProducerOfItsRecord(t *testing.T) {
+	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
+
+	result, err := applier.Apply(pkg, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("the fixture apply did not succeed (%v), so no record was written and this test asserts nothing",
+			result.Error)
+	}
+
+	staged, err := validate.StagedTreePath(applier.StagingRoot(), pkg, "1.29.2")
+	if err != nil {
+		t.Fatalf("deriving the staged tree path: %v", err)
+	}
+	// INSTRUMENT REPAIR (story 041, task 2.2). This assertion originally read the
+	// record through validate.ReadStageRecord, which normalizes an ABSENT producer
+	// to "applier" — that is R5.2, and it is correct. But it made this test unable
+	// to fail: it passed against an applier that wrote no producer at all, which a
+	// probe confirmed was the state on disk. R5.3 is about what the applier WRITES,
+	// so the bytes are the only place it can be asked. The expectation is
+	// unchanged; only where it looks moved. tasks.md's Tests field for this
+	// sub-task says "on disk" for exactly this reason.
+	rawRecord, err := os.ReadFile(validate.StageRecordPath(staged)) //nolint:gosec // path derived from the test's own staging root
+	if err != nil {
+		t.Fatalf("no stage record beside %q: %v", staged, err)
+	}
+	var onDisk struct {
+		ProducedBy string `json:"produced_by"`
+	}
+	if err := json.Unmarshal(rawRecord, &onDisk); err != nil {
+		t.Fatalf("the record beside %q is not readable JSON: %v", staged, err)
+	}
+	written := onDisk
+	if written.ProducedBy != "applier" {
+		t.Errorf("the applier recorded ProducedBy=%q, want \"applier\"; the reuse path compares against that "+
+			"exact value, so a record the applier writes under any other name refuses its own evidence on the "+
+			"next run and every retained tree pays for its gates twice (R5.3)", written.ProducedBy)
 	}
 }
