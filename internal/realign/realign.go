@@ -295,7 +295,7 @@ func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error) {
 	result := provedRealignment(ctx, validate.PreparedBuildRequest{
 		Overlay:          opts.Overlay,
 		StagingRoot:      opts.StagingRoot,
-		Atom:             atom,
+		Key:              atom,
 		Version:          p.Version,
 		PackageDir:       filepath.Join(opts.Overlay, p.Category, p.Package),
 		Ebuild:           p.Ebuild,

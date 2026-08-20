@@ -1607,7 +1607,7 @@ func TestRunPreparedBuild_ShallowDepthStagesNothing(t *testing.T) {
 			result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
 				Overlay:     overlay,
 				StagingRoot: stagingRoot,
-				Atom:        "media-plugins/gst-plugins-qt6",
+				Key:         "media-plugins/gst-plugins-qt6",
 				Version:     "1.28.6",
 				PackageDir:  filepath.Join(overlay, "media-plugins", "gst-plugins-qt6"),
 				Ebuild:      []byte("EAPI=8\n"),
@@ -1734,7 +1734,7 @@ func TestRunPreparedBuild_ACandidateNeedingNoDistfileReachesTheGates(t *testing.
 	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
 		Overlay:     overlay,
 		StagingRoot: t.TempDir(),
-		Atom:        "media-plugins/gst-plugins-qt6",
+		Key:         "media-plugins/gst-plugins-qt6",
 		Version:     "1.28.6",
 		PackageDir:  pkgDir,
 		Ebuild:      body,
@@ -1790,7 +1790,7 @@ func TestRunPreparedBuild_TheReasonNamesTheClass(t *testing.T) {
 	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
 		Overlay:        overlay,
 		StagingRoot:    t.TempDir(),
-		Atom:           "media-plugins/gst-plugins-qt6",
+		Key:            "media-plugins/gst-plugins-qt6",
 		Version:        "1.28.6",
 		PackageDir:     pkgDir,
 		Ebuild:         body,
@@ -1925,7 +1925,7 @@ func TestRunPreparedBuild_TheNoDistfileClassStillCarriesTheResolvedDistdir(t *te
 	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
 		Overlay:     overlay,
 		StagingRoot: t.TempDir(),
-		Atom:        "media-plugins/gst-plugins-qt6",
+		Key:         "media-plugins/gst-plugins-qt6",
 		Version:     "1.28.6",
 		PackageDir:  pkgDir,
 		Ebuild:      body,
@@ -2008,7 +2008,7 @@ func TestRunPreparedBuild_AHostThatCannotBuildIsNotAVerdict(t *testing.T) {
 	result := RunPreparedBuild(context.Background(), PreparedBuildRequest{
 		Overlay:     overlay,
 		StagingRoot: t.TempDir(),
-		Atom:        "media-plugins/gst-plugins-qt6",
+		Key:         "media-plugins/gst-plugins-qt6",
 		Version:     "1.28.6",
 		PackageDir:  pkgDir,
 		Ebuild:      body,
@@ -2076,7 +2076,7 @@ func TestRunPreparedBuild_CarriesThePolicyFieldsIntoTheBuildRequest(t *testing.T
 		return RunPreparedBuild(context.Background(), PreparedBuildRequest{
 			Overlay:          overlay,
 			StagingRoot:      t.TempDir(),
-			Atom:             "media-plugins/gst-plugins-qt6",
+			Key:              "media-plugins/gst-plugins-qt6",
 			Version:          "1.28.6",
 			PackageDir:       pkgDir,
 			Ebuild:           body,
@@ -2209,7 +2209,7 @@ func TestRunPreparedBuild_TheNoDistfileClassCannotPromoteItsOwnMisclassification
 		return RunPreparedBuild(context.Background(), PreparedBuildRequest{
 			Overlay:        overlay,
 			StagingRoot:    t.TempDir(),
-			Atom:           "media-plugins/gst-plugins-qt6",
+			Key:            "media-plugins/gst-plugins-qt6",
 			Version:        "1.28.6",
 			PackageDir:     pkgDir,
 			Ebuild:         body,

@@ -99,6 +99,14 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 		// is one SKIPPED gate per build gate the depth covers, which is the same
 		// discharge validate.SkippedGates gives the apply path — the set of gates
 		// that owe an outcome must not depend on which command asked.
+		//
+		// BOTH halves carry DeclineCandidate (S040-R1.1), not just the build-gate
+		// list. The option gate is absent from SkippedGates' ladder — it reads the
+		// ebuild's own text and never wanted a staged tree — so stamping only the
+		// ladder would leave the one gate that ALWAYS appears here reading as a
+		// cause nobody recorded; and at a depth that covers no build gate the
+		// ladder is empty and that gate is the entire list. It is the same fault
+		// either way: nothing read this candidate.
 		return validate.EbuildResult{
 			Package:        pkg,
 			Version:        newVersion,
@@ -106,10 +114,11 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 			DepthRequested: depth.Depth.String(),
 			DepthReason:    depth.Reason,
 			Gates: append([]validate.GateResult{{
-				Gate:    validate.GateOptions,
-				Outcome: validate.OutcomeSkipped,
-				Reason:  fmt.Sprintf("the staged tree of %s-%s could not be prepared, so no gate ever read this candidate: %v", pkg, newVersion, err),
-			}}, validate.SkippedGates(depth.Depth, fmt.Sprintf("the staged tree of %s-%s could not be prepared: %v", pkg, newVersion, err))...),
+				Gate:     validate.GateOptions,
+				Outcome:  validate.OutcomeSkipped,
+				Reason:   fmt.Sprintf("the staged tree of %s-%s could not be prepared, so no gate ever read this candidate: %v", pkg, newVersion, err),
+				Declined: validate.DeclineCandidate,
+			}}, candidateDeclinedGates(depth.Depth, fmt.Sprintf("the staged tree of %s-%s could not be prepared: %v", pkg, newVersion, err))...),
 		}
 	}
 
@@ -127,12 +136,20 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 	defer removeStagedDistdir(fetchedDistdir)
 	cand.fetchedDistdir = fetchedDistdir
 	if err != nil {
+		// DeclineCandidate on both halves (S040-R1.2), for the reason the staging
+		// fault above states and one more that is specific to this step: Portage
+		// refuses an ebuild whose Manifest does not describe its archive, so a
+		// candidate that never got one is a candidate no gate could have read.
+		// validate's own core already answers this exact condition with the
+		// candidate's cause (run.go, prepareStagedManifest); reaching it through
+		// the applier instead must not change whose fault it is.
 		gates = append(gates, validate.GateResult{
-			Gate:    validate.GateOptions,
-			Outcome: validate.OutcomeSkipped,
-			Reason:  fmt.Sprintf("the manifest step failed for %s-%s, so the candidate has no digested distfile for any gate to read: %v", pkg, newVersion, err),
+			Gate:     validate.GateOptions,
+			Outcome:  validate.OutcomeSkipped,
+			Reason:   fmt.Sprintf("the manifest step failed for %s-%s, so the candidate has no digested distfile for any gate to read: %v", pkg, newVersion, err),
+			Declined: validate.DeclineCandidate,
 		})
-		gates = append(gates, validate.SkippedGates(depth.Depth, fmt.Sprintf("the manifest step failed for %s-%s: %v", pkg, newVersion, err))...)
+		gates = append(gates, candidateDeclinedGates(depth.Depth, fmt.Sprintf("the manifest step failed for %s-%s: %v", pkg, newVersion, err))...)
 		return checkResult(pkg, newVersion, local, depth, gates)
 	}
 
@@ -208,6 +225,22 @@ func checkResult(pkg, version string, local *ApplyResult, depth validate.DepthDe
 // It reports ONE skipped gate rather than none, because a result carrying no gate
 // at all is indistinguishable from a package that was never planned — and the
 // reason is required, since a skip nobody can read is a pass.
+//
+// # Its cause is left unrecorded, because five callers do not share one (S040-R1.5)
+//
+// This helper answers for a pending entry that went stale, a NewVersion no
+// ebuild filename can carry, a current version the overlay would not resolve, a
+// run built with no staging root, and a policy that resolved to depth none.
+// Only the second is about the candidate: the fourth is this run's own
+// configuration, and the fifth is not a fault at all — the policy decided this
+// bump needs no gate, and stamping the candidate's cause on that answer would
+// turn "there was nothing to prove" into "nothing was measured".
+//
+// So the cause here is genuinely mixed rather than merely unexamined, and one
+// stamp would make one claim on behalf of all five. Splitting it per caller is a
+// change to what `--check` reports about four conditions R1.1 and R1.2 do not
+// name; DeclineUnrecorded keeps today's answer for all of them, which is what
+// that default is for.
 func checkSkipped(pkg, version, reason string) validate.EbuildResult {
 	return validate.EbuildResult{
 		Package:        pkg,

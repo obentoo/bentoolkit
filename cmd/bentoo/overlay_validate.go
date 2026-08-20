@@ -416,8 +416,57 @@ func publishedManifestBytes(pkgDir string) ([]byte, error) {
 // look" from being reported as "this package publishes no archive" is now the
 // parser's answer rather than a probe above it. The sentence below is unchanged
 // to the byte (S039-R5.3): the mechanism moved, the report did not.
+//
+// # A MISSING Manifest names no archive; one that cannot be READ is still a fault
+//
+// This is publishedManifestBytes' distinction, above, applied to the same file
+// for the same package (S040-R3.1). Under thin-manifests a Manifest holds DIST
+// lines and NOTHING else, so a package with no distfile has no Manifest file at
+// all — not an empty one — and that is the normal state of a very common shape:
+// every acct-group/*, every acct-user/* and every virtual/*, and in ::bentoo
+// today net-dns/bind-tools, app-eselect/eselect-nodejs and
+// sys-kernel/linux-firmware. Reporting it through the error return made the
+// option gate say "the distfile names could not be produced: … no such file or
+// directory", which blames the CHECKOUT for a package whose truth is that it
+// declares nothing, and sends an operator to repair a file that was never meant
+// to exist.
+//
+// NOTHING NEW IS WRITTEN for the sentence that replaces it. With no names and no
+// error the gate reaches selectDistfile, and its existing named refusal — "<the
+// source> names no distfile, so there was no archive to look for in <distdir>",
+// story 031's words — is already the right report for a package that declares no
+// archive. The outcome also stays a reported SKIPPED (S040-R3.3): nothing was
+// compared against this package, so it has not been validated, and widening what
+// counts as "declares no archive" must not widen into a pass.
+//
+// The two seams read the SAME FILE for the same package. Story 039 taught the
+// distinction to publishedManifestBytes and left this one reporting the file's
+// absence as a fault; its task-4 commit (907a33e) recorded this half as "task
+// 5's", and task 5 could not take it without breaking its own R5.3, which held
+// the two wrappers byte-identical on inputs where they already AGREED. They
+// agreed that a missing file is a fault, and they should not have — leaving them
+// disagreeing about what one file's absence means is the divergence R5.3 existed
+// to prevent, arrived at from the other side. This discharges that deferral.
+//
+// The distinction is read off the error VALUE, with errors.Is, for the reasons
+// publishedManifestBytes' comment gives at length: a stat before the read is a
+// race, because the file can vanish between the two calls, and matching on the
+// message text breaks the moment the operating system rewords it.
+//
+// # The applier-side sibling is NOT this, and stays as it is (S040-R3.4)
+//
+// internal/autoupdate's publishedDistNames answers for ONE bump on the APPLY
+// path, where the candidate's Manifest has just been produced by the manifest
+// step — so an absent Manifest there is that step not having done what it
+// reported, which is a fault and remains one. This one answers for a package at
+// its PUBLISHED version, where a thin tree legitimately carries no Manifest at
+// all. Same file name, two different propositions, and an unrequired change on
+// the apply path is what story 039's R1.6 was protecting against.
 func publishedManifestDistNames(pkgDir string) ([]string, error) {
 	names, err := distfiles.ReadManifestDistFilenames(publishedManifestPath(pkgDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading the published Manifest of %s, to name the archives the option gate looks for: %w", pkgDir, err)
 	}

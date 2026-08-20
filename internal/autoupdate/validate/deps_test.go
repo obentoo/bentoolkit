@@ -283,3 +283,68 @@ func TestDependenciesSatisfied_AsksNoQuestionWhenEmergeIsAbsent(t *testing.T) {
 		t.Errorf("spawned %d processes although the binary lookup failed", spy.spawns)
 	}
 }
+
+// TestDependenciesSatisfied_SuffixedKeyPinsTheCleanAtom is story 040's R5.1 at
+// the resolver: the atom pinned in `emerge -p` derives from the suffix-stripped
+// key. `=app-editors/zed-bin@preview-1.17.0::…` names a package that exists in
+// no repository — the staged tree holds the CLEAN package — so the pretend run
+// would fail on every suffixed registry entry, one gate after the manifest step.
+func TestDependenciesSatisfied_SuffixedKeyPinsTheCleanAtom(t *testing.T) {
+	stagedRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(stagedRoot, "profiles"), 0o755); err != nil {
+		t.Fatalf("laying out the staged tree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stagedRoot, "profiles", "repo_name"), []byte("zed-preview-line\n"), 0o644); err != nil {
+		t.Fatalf("writing the staged repo_name: %v", err)
+	}
+
+	spy := &depsSeam{}
+	deps := newDepsSeam(spy, "[ebuild  N    ] app-editors/zed-bin-1.17.0\n", false)
+
+	ok, missing, err := DependenciesSatisfied(context.Background(), stagedRoot, "app-editors/zed-bin@preview", "1.17.0", deps)
+	if err != nil {
+		t.Fatalf("DependenciesSatisfied: %v", err)
+	}
+	if spy.spawns != 1 || len(spy.args) != 1 || len(spy.args[0]) == 0 {
+		t.Fatalf("expected exactly one emerge invocation, got %d (%v)", spy.spawns, spy.args)
+	}
+
+	spec := spy.args[0][len(spy.args[0])-1]
+	const want = "=app-editors/zed-bin-1.17.0::zed-preview-line"
+	if spec != want {
+		t.Errorf("the pretend run pinned %q, want %q; the `::` qualifier keeps the WRITER's repository "+
+			"name while the atom itself must be the clean package Portage can resolve", spec, want)
+	}
+	if !ok || len(missing) != 0 {
+		t.Errorf("ok=%v missing=%v; a pretend run listing only the bump itself is a satisfied host, and "+
+			"the bump has to be recognised under its CLEAN atom to be subtracted from the merge list", ok, missing)
+	}
+}
+
+// TestDependenciesSatisfied_SuffixedKeyFallbackRecomputesTheWriterName is story
+// 040's R5.4 on the reading side: a staged tree with no profiles/repo_name file
+// answers the SAME name Stage would have written — derived from the full key,
+// suffix included — or the writer and the fallback silently diverge and the `::`
+// qualifier points at a repository nothing registered. A regression pin (the
+// suffixed pkg already feeds both today); task 4.1's mutation ledger proves it.
+func TestDependenciesSatisfied_SuffixedKeyFallbackRecomputesTheWriterName(t *testing.T) {
+	stagedRoot := t.TempDir() // no profiles/repo_name: the fallback answers
+
+	spy := &depsSeam{}
+	deps := newDepsSeam(spy, "[ebuild  N    ] app-editors/zed-bin-1.17.0\n", false)
+
+	if _, _, err := DependenciesSatisfied(context.Background(), stagedRoot, "app-editors/zed-bin@preview", "1.17.0", deps); err != nil {
+		t.Fatalf("DependenciesSatisfied: %v", err)
+	}
+	if spy.spawns != 1 || len(spy.args) != 1 || len(spy.args[0]) == 0 {
+		t.Fatalf("expected exactly one emerge invocation, got %d (%v)", spy.spawns, spy.args)
+	}
+
+	spec := spy.args[0][len(spy.args[0])-1]
+	want := "=app-editors/zed-bin-1.17.0::" + stagedRepoName("zed-bin@preview", "1.17.0")
+	if spec != want {
+		t.Errorf("the fallback pinned %q, want %q; stagedRepoNameAt's recomputation must use the same "+
+			"suffixed package the writer used, or a tree missing its repo_name file resolves under a name "+
+			"Stage never wrote", spec, want)
+	}
+}

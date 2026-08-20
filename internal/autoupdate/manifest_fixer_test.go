@@ -591,3 +591,43 @@ func TestBuildFixInstruction_BoundsArgvSize(t *testing.T) {
 		t.Errorf("instruction length %d would exceed MAX_ARG_STRLEN %d", len(instruction), maxArgStrlen)
 	}
 }
+
+// TestFormatFixerError_AStartFailureIsSaidAsOne is story 040's R5.6: a fixer
+// command that could not start is reported distinctly from one that exited with
+// a code. Measured in the field (2026-08-19): a chdir-ENOENT start failure was
+// rendered as `claude fixer failed: exit chdir …/zed-bin@preview/…: no such
+// file or directory` — a whole error printed where a number was promised, which
+// an operator reads as a garbled exit code rather than as what it was.
+func TestFormatFixerError_AStartFailureIsSaidAsOne(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.Dir = filepath.Join(t.TempDir(), "vanished")
+	startErr := cmd.Run()
+	if startErr == nil {
+		t.Fatalf("instrument: running in a nonexistent directory succeeded; no start failure to render")
+	}
+
+	got := formatFixerError(nil, startErr, claudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	if !strings.Contains(got, "could not start") {
+		t.Errorf("a start failure is rendered as %q; it must say the command could not start rather than "+
+			"framing the raw error as an exit code", got)
+	}
+	if !strings.Contains(got, "vanished") {
+		t.Errorf("the rendered failure %q lost the cause; the operator still needs to read WHAT could "+
+			"not start and why", got)
+	}
+}
+
+// TestFormatFixerError_AnExitFailureKeepsItsCode is R5.6's other half: the
+// numeric rendering of a command that ran and exited non-zero is unchanged.
+func TestFormatFixerError_AnExitFailureKeepsItsCode(t *testing.T) {
+	exitErr := exec.Command("false").Run()
+	if exitErr == nil {
+		t.Fatalf("instrument: `false` exited zero; no exit failure to render")
+	}
+
+	got := formatFixerError(nil, exitErr, claudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	if !strings.Contains(got, "exit 1") {
+		t.Errorf("a non-zero exit is rendered as %q; the numeric code is the contract today's operators "+
+			"and tests read, and the start-failure fix must not reword it", got)
+	}
+}

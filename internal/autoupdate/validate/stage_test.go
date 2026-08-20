@@ -25,7 +25,7 @@ package validate
 // Measured (design M-C): a staged skeleton plus one package is 24 KB, which is
 // what makes R3.7's one-tree-per-package-version retention a non-question.
 //
-// This file pins `StageRequest{Overlay, StagingRoot, Atom, Version, EbuildBytes}`
+// This file pins `StageRequest{Overlay, StagingRoot, Key, Version, EbuildBytes}`
 // and `Stage(StageRequest) (string, error)`.
 //
 // hashTree comes from golden_test.go and is reused, never reimplemented.
@@ -78,7 +78,7 @@ func stagedFor(t *testing.T, overlay, stagingRoot, body string) StageRequest {
 	return StageRequest{
 		Overlay:     overlay,
 		StagingRoot: stagingRoot,
-		Atom:        "media-plugins/gst-plugins-qt6",
+		Key:         "media-plugins/gst-plugins-qt6",
 		Version:     "1.29.2",
 		EbuildBytes: []byte(body),
 	}
@@ -911,5 +911,173 @@ func TestPromotionDecision_OnePassIsEnoughToKeepTodaysAnswer(t *testing.T) {
 	if why != want {
 		t.Errorf("the promotion reason changed.\n got: %q\nwant: %q\nthe mixed case keeps today's wording; "+
 			"rewording it in the commit that adds a refusal makes the refusal unreviewable", why, want)
+	}
+}
+
+// --- Story 040, task 5 (R5.1, R5.2, R5.4) ----------------------------------
+//
+// A registry key — `net-libs/webkit-gtk:4.1`, `app-editors/zed-bin@preview` —
+// has two roles and only one of them is a path Portage reads. Role A, the
+// retention identity, keeps the suffix: it is what stops slot 4.1 overwriting
+// slot 6 under the staging root. Role B, the staged repo CONTENT — the package
+// directory, the ebuild filename, files/ — must be suffix-free, because Portage
+// accepts neither `:` nor `@` in a package name. Measured on the maintainer's
+// host (2026-08-19): `--apply all` failed 4/4 suffixed entries with
+// `chdir …/<pkg>@<label>/…/<pkg>: no such file or directory`.
+
+// suffixedSourceOverlay lays out an overlay whose PUBLISHED package directory is
+// the clean one — which is what a real overlay holds; the suffix exists only in
+// the registry key — including a files/ patch that must travel into the staged
+// tree even when the key is suffixed.
+func suffixedSourceOverlay(t *testing.T, category, pkg string) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, body string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("laying out %q: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("writing %q: %v", rel, err)
+		}
+	}
+	write("profiles/repo_name", sourceRepoName+"\n")
+	write("metadata/layout.conf", "masters = gentoo\nthin-manifests = true\n")
+	write(filepath.Join(category, pkg, "files", "keep-me.patch"), "--- a\n+++ b\n")
+	return root
+}
+
+// TestStage_SuffixedKeyStagesContentPortageCanAddress is R5.1: every path inside
+// the staged repository derives from the suffix-stripped key, while the stage
+// root — role A — keeps the full key (R5.2's seam, asserted through
+// StagedTreePath so the two layouts cannot drift apart silently).
+func TestStage_SuffixedKeyStagesContentPortageCanAddress(t *testing.T) {
+	cases := []struct {
+		key, category, cleanPkg string
+	}{
+		{key: "net-libs/webkit-gtk:4.1", category: "net-libs", cleanPkg: "webkit-gtk"},
+		{key: "app-editors/zed-bin@preview", category: "app-editors", cleanPkg: "zed-bin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			overlay := suffixedSourceOverlay(t, tc.category, tc.cleanPkg)
+			stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+			staged, err := Stage(StageRequest{
+				Overlay:     overlay,
+				StagingRoot: stagingRoot,
+				Key:         tc.key,
+				Version:     "1.0",
+				EbuildBytes: []byte("EAPI=8\n"),
+			})
+			if err != nil {
+				t.Fatalf("Stage(%q): %v", tc.key, err)
+			}
+
+			// Role A: the root is the retention identity and keeps the suffix.
+			wantRoot, err := StagedTreePath(stagingRoot, tc.key, "1.0")
+			if err != nil {
+				t.Fatalf("StagedTreePath(%q): %v", tc.key, err)
+			}
+			if staged != wantRoot {
+				t.Errorf("Stage returned %q, want the retention path %q; the stage root must keep "+
+					"deriving from the FULL key or two release lines of one package collapse into one tree", staged, wantRoot)
+			}
+
+			// Role B: everything inside is the clean package.
+			cleanDir := filepath.Join(staged, tc.category, tc.cleanPkg)
+			for _, rel := range []string{
+				filepath.Join(cleanDir, tc.cleanPkg+"-1.0.ebuild"),
+				filepath.Join(cleanDir, "files", "keep-me.patch"),
+			} {
+				if _, err := os.Stat(rel); err != nil {
+					t.Errorf("the staged tree is missing %s: %v\nPortage cannot address a package "+
+						"directory carrying the registry key's suffix, so the content must be staged clean", rel, err)
+				}
+			}
+
+			// And the suffixed spelling must not exist inside the tree at all: a
+			// directory named after the key is exactly the ghost the manifest step
+			// chdir-failed into.
+			suffixedPkg := tc.key[strings.IndexByte(tc.key, '/')+1:]
+			if _, err := os.Stat(filepath.Join(staged, tc.category, suffixedPkg)); err == nil {
+				t.Errorf("the staged tree carries a package directory named %q; the suffix belongs to the "+
+					"stage root (retention), never to the staged repository's content", suffixedPkg)
+			}
+		})
+	}
+}
+
+// TestStage_TwoSlotsOfOnePackageRetainDistinctTrees is R5.2: the suffix strip is
+// role B's alone. Two slots of one package stage under distinct roots, and
+// staging the second must leave the first standing — a strip that reached the
+// stage root would make slot 6 a restaging of slot 4.1 (R3.7's replace rule
+// pointed at the wrong tree).
+func TestStage_TwoSlotsOfOnePackageRetainDistinctTrees(t *testing.T) {
+	overlay := suffixedSourceOverlay(t, "net-libs", "webkit-gtk")
+	stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+	stageOne := func(key string) string {
+		t.Helper()
+		staged, err := Stage(StageRequest{
+			Overlay:     overlay,
+			StagingRoot: stagingRoot,
+			Key:         key,
+			Version:     "1.0",
+			EbuildBytes: []byte("EAPI=8\n"),
+		})
+		if err != nil {
+			t.Fatalf("Stage(%q): %v", key, err)
+		}
+		return staged
+	}
+
+	first := stageOne("net-libs/webkit-gtk:4.1")
+	second := stageOne("net-libs/webkit-gtk:6")
+
+	if first == second {
+		t.Fatalf("both slots staged into %q; the retention identity must keep the suffix so two "+
+			"release lines of one package retain distinct staged trees", first)
+	}
+	if _, err := os.Stat(filepath.Join(first, "net-libs", "webkit-gtk", "webkit-gtk-1.0.ebuild")); err != nil {
+		t.Errorf("staging slot 6 removed slot 4.1's candidate: %v\nR3.7 replaces the tree OF THE PACKAGE "+
+			"BEING STAGED, and these are two different retained trees", err)
+	}
+}
+
+// TestStage_TwoReleaseLinesKeepDistinctRepoNames is R5.4: the staged repository's
+// name derives from the FULL key, so two release lines at the same version never
+// collide on a repository name — a duplicate name is a repository-level conflict
+// in Portage regardless of which two repositories collide. This arrives as a
+// regression pin (the suffixed pkg already feeds the writer today); the mutation
+// ledger of task 4.1 is what proves it can fail.
+func TestStage_TwoReleaseLinesKeepDistinctRepoNames(t *testing.T) {
+	overlay := suffixedSourceOverlay(t, "app-editors", "zed-bin")
+	stagingRoot := filepath.Join(t.TempDir(), "staging")
+
+	nameOf := func(key string) string {
+		t.Helper()
+		staged, err := Stage(StageRequest{
+			Overlay:     overlay,
+			StagingRoot: stagingRoot,
+			Key:         key,
+			Version:     "1.16.1",
+			EbuildBytes: []byte("EAPI=8\n"),
+		})
+		if err != nil {
+			t.Fatalf("Stage(%q): %v", key, err)
+		}
+		raw, err := os.ReadFile(filepath.Join(staged, "profiles", "repo_name"))
+		if err != nil {
+			t.Fatalf("reading the staged repo_name of %q: %v", key, err)
+		}
+		return strings.TrimSpace(string(raw))
+	}
+
+	stable := nameOf("app-editors/zed-bin@stable")
+	preview := nameOf("app-editors/zed-bin@preview")
+	if stable == preview {
+		t.Errorf("two release lines at one version share the repository name %q; the name must keep "+
+			"deriving from the full key or registering the second staged tree is a Portage repository conflict", stable)
 	}
 }

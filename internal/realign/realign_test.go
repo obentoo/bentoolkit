@@ -291,8 +291,8 @@ func TestProveStagesAndGatesAtTheRequestedDepth(t *testing.T) {
 	if string(staged.Ebuild) != realignProposedEbuild {
 		t.Errorf("the prepared build received %q, want the proposed bytes verbatim — what is proved must be what was proposed (R5.5 begins here)", staged.Ebuild)
 	}
-	if staged.Atom != "media-libs/gst-plugins-qt6" || staged.Version != "1.29.2" {
-		t.Errorf("the prepared build received atom %q version %q, want media-libs/gst-plugins-qt6 at 1.29.2", staged.Atom, staged.Version)
+	if staged.Key != "media-libs/gst-plugins-qt6" || staged.Version != "1.29.2" {
+		t.Errorf("the prepared build received atom %q version %q, want media-libs/gst-plugins-qt6 at 1.29.2", staged.Key, staged.Version)
 	}
 
 	if staged.Depth != validate.DepthConfigure {
@@ -943,8 +943,8 @@ func TestProveGoesThroughThePreparedBuild(t *testing.T) {
 	if req.Depth != validate.DepthConfigure {
 		t.Errorf("the prepared build was handed depth %v, want %v", req.Depth, validate.DepthConfigure)
 	}
-	if req.Atom != "media-libs/gst-plugins-qt6" || req.Version != "1.29.2" {
-		t.Errorf("the prepared build was handed %s-%s, want media-libs/gst-plugins-qt6-1.29.2", req.Atom, req.Version)
+	if req.Key != "media-libs/gst-plugins-qt6" || req.Version != "1.29.2" {
+		t.Errorf("the prepared build was handed %s-%s, want media-libs/gst-plugins-qt6-1.29.2", req.Key, req.Version)
 	}
 	if string(req.Ebuild) != realignProposedEbuild {
 		t.Error("the prepared build was handed bytes other than the proposal's; a tree staged from anything " +

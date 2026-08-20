@@ -796,7 +796,7 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		stagedRoot, err = Stage(StageRequest{
 			Overlay:     req.overlay,
 			StagingRoot: req.stagingRoot,
-			Atom:        req.target.atom,
+			Key:         req.target.atom,
 			Version:     req.target.version,
 			EbuildBytes: body,
 		})
@@ -870,7 +870,7 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 
 	gates, err := RunBuildGates(ctx, BuildRequest{
 		StagedRoot:       stagedRoot,
-		Atom:             req.target.atom,
+		Key:              req.target.atom,
 		Version:          req.target.version,
 		Depth:            req.depth,
 		RequireIsolation: req.requireIsolation,
@@ -983,9 +983,10 @@ type PreparedBuildRequest struct {
 	Overlay     string
 	StagingRoot string
 
-	// Atom is category/package and Version is the version being built. They name
-	// the candidate to Portage; nothing here parses them back out of a filename.
-	Atom    string // category/package
+	// Key is the registry key — category/package, possibly carrying ":slot" or
+	// "@label" — and Version is the version being built. They name the candidate
+	// to Portage; nothing here parses them back out of a filename.
+	Key     string // registry key: category/package, possibly :slot or @label
 	Version string
 
 	// PackageDir is the PUBLISHED package directory the Manifest seam is asked
@@ -1089,7 +1090,7 @@ func RunPreparedBuild(ctx context.Context, req PreparedBuildRequest) PreparedBui
 
 	return preparedBuildGates(ctx, preparedBuild{
 		target: ebuildTarget{
-			atom:    req.Atom,
+			atom:    req.Key,
 			version: req.Version,
 			dir:     req.PackageDir,
 			// path stays empty, and deliberately: this caller holds the
@@ -1195,7 +1196,11 @@ func skippedPreparedBuild(stagedRoot string, depth Depth, reason string, cause D
 // The mode is stagedFileMode, 0600: the same stance every file staging writes
 // takes, because the tree holds a candidate nobody has reviewed yet.
 func materializeStagedManifest(stagedRoot string, target ebuildTarget, manifest stagedManifestLookup) error {
-	category, pkg, err := splitStagedAtom(target.atom)
+	// splitContentAtom, not splitStagedAtom: the Manifest must land in the
+	// package directory Stage actually wrote, which is the suffix-stripped one
+	// (design D4, role B). Joined from a key's ":slot" or "@label" spelling, the
+	// file would sit in a directory Portage never reads, beside nothing.
+	category, pkg, err := splitContentAtom(target.atom)
 	if err != nil {
 		// Unreachable after a successful Stage, which split the same atom through
 		// this same function — checked anyway, because "unreachable" is a property
@@ -1321,7 +1326,11 @@ func prepareStagedManifest(stagedRoot string, target ebuildTarget, manifest stag
 // asserts both of its errors still fire — so it keeps its inline copy rather
 // than being edited to call this.
 func stagedManifestPath(stagedRoot string, target ebuildTarget) (string, error) {
-	category, pkg, err := splitStagedAtom(target.atom)
+	// splitContentAtom, in lockstep with materializeStagedManifest's inline
+	// copy of this join: both must name the suffix-stripped directory Stage
+	// wrote (design D4, role B), or the stat guarding the no-distfile class and
+	// the write it guards would disagree about where the Manifest lives.
+	category, pkg, err := splitContentAtom(target.atom)
 	if err != nil {
 		return "", err
 	}

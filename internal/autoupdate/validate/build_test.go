@@ -32,7 +32,7 @@ package validate
 // compare against their own run.
 //
 // This file pins the names design.md fixes in prose but not in code:
-// `BuildRequest{StagedRoot, Atom, Version, Depth, RequireIsolation, LogDir}`,
+// `BuildRequest{StagedRoot, Key, Version, Depth, RequireIsolation, LogDir}`,
 // `BuildDeps{ExecCommand, RunAttached, LookPath, IsolationProbe}` and
 // `RunBuildGates(ctx, BuildRequest, BuildDeps) ([]GateResult, error)`.
 
@@ -187,7 +187,7 @@ func buildRequestFor(t *testing.T, depth Depth) BuildRequest {
 	t.Helper()
 	return BuildRequest{
 		StagedRoot: filepath.Join(t.TempDir(), "staging", "media-plugins", "gst-plugins-qt6", "1.29.2"),
-		Atom:       "media-plugins/gst-plugins-qt6",
+		Key:        "media-plugins/gst-plugins-qt6",
 		Version:    "1.29.2",
 		Depth:      depth,
 		LogDir:     t.TempDir(),
@@ -1019,5 +1019,35 @@ func TestRunBuildGates_OnlyAPassCarriesTheDistdirEvidence(t *testing.T) {
 				"answers an OVERCLAIM, and an outcome that claims nothing has nothing to qualify",
 				g.Gate, g.Outcome, g.Reason)
 		}
+	}
+}
+
+// TestRunBuildGates_SuffixedKeyHandsEbuildTheCleanPath is story 040's R5.1 at
+// the build gate: the path handed to `ebuild … clean <phase>` derives from the
+// suffix-stripped key, because the staged tree's content is the clean package
+// (stage_test.go pins that half) and a suffixed path names a file that never
+// existed. Measured on the maintainer's host (2026-08-19), this is the third
+// gate the leak would reach after the manifest step and the Manifest reads.
+func TestRunBuildGates_SuffixedKeyHandsEbuildTheCleanPath(t *testing.T) {
+	spy := &buildSpy{}
+	req := BuildRequest{
+		StagedRoot: filepath.Join(t.TempDir(), "staging", "app-editors", "zed-bin@preview", "1.17.0"),
+		Key:        "app-editors/zed-bin@preview",
+		Version:    "1.17.0",
+		Depth:      DepthConfigure,
+		LogDir:     t.TempDir(),
+	}
+
+	if _, err := RunBuildGates(context.Background(), req, buildSeam(spy, configureOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+	if len(spy.argv) == 0 || len(spy.argv[0]) == 0 {
+		t.Fatalf("no child was spawned; the seam should have received one `ebuild` invocation")
+	}
+
+	want := filepath.Join(req.StagedRoot, "app-editors", "zed-bin", "zed-bin-1.17.0.ebuild")
+	if got := spy.argv[0][0]; got != want {
+		t.Errorf("ebuild was pointed at %q, want %q; the registry key's suffix is the stage root's "+
+			"retention identity and must not reach the candidate's path inside the staged repository", got, want)
 	}
 }

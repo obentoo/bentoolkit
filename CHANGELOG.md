@@ -89,6 +89,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the opposite of what a skip means. The cascade now ends by naming the silence
   instead, so an unexplained skip reports itself as one.
 
+- **A package that declares no archive is no longer reported as a broken
+  checkout.** Under thin manifests a Manifest holds DIST lines and nothing
+  else, so a package with no distfile has no Manifest file at all. One of the
+  two seams that read it already knew that; its sibling — the one naming the
+  archives the option gate looks for — still reported the absence as a read
+  failure. So a package of that class — every `acct-group/*`, `acct-user/*` and
+  `virtual/*`, and `net-dns/bind-tools`, `app-eselect/eselect-nodejs` and
+  `sys-kernel/linux-firmware` in ::bentoo — had its option gate decline with
+  the distfile names "could not be produced": a fault about the checkout,
+  sending an operator to repair a file that was never meant to exist. It now
+  reports what is true: the caller's list names no distfile, so there was no
+  archive to look for. Nothing new was written for that sentence; it has been
+  there since the gate shipped, behind a fault report.
+
+  The reach is narrower than it looks, and it is worth stating rather than
+  leaving to be discovered: that seam is only wired for `--depth` ABOVE
+  `options`, so the default read-only `overlay validate` never reached it and
+  its reports are byte-identical before and after — measured over all 357
+  packages of ::bentoo. What changes is a build-depth run, where the class used
+  to read as a broken checkout. The outcome is unchanged and
+  deliberately so — still a reported SKIP, because a package nothing was
+  compared against has not been validated. A Manifest that exists and cannot be
+  read is still an error, on both seams, with its sentence unchanged.
+
+- **The applier now names the cause of its own candidate declines.** The
+  promotion rule refuses a bump whose every deciding gate declined over the
+  candidate, and reads that cause from a field rather than from prose. Three
+  producers were taught to set it; the applier's own two — a staged tree that
+  could not be prepared, a manifest step that failed — were not, and those are
+  almost word for word the vacuity the rule exists to deny. Both now name the
+  candidate. Measured rather than claimed: this changes no promotion outcome
+  today, because the apply path already refuses both faults by a different
+  route and the field cannot survive a retained tree's record on disk. What it
+  ends is the applier being the one producer whose vacuities are
+  indistinguishable from a host that merely cannot build. A host that cannot
+  build still publishes, unchanged. Every skip producer left unstamped now says
+  at its own site why its cause is genuinely unknown rather than merely
+  unexamined.
+
+- **A registry key with a `:slot` or `@label` suffix now stages a tree Portage
+  can address.** Such a key has two roles and only one of them is a path
+  Portage reads: the stage root is the retention identity and must keep the
+  suffix, or slot 4.1 and slot 6 of one package collapse into a single tree,
+  while everything INSIDE the staged repository — the package directory, the
+  ebuild filename, `files/`, the Manifest — and every atom handed to `ebuild`
+  or `emerge` must be free of it, because Portage accepts neither `:` nor `@`
+  in a package name. One function served both roles and stripped nothing, so
+  the content was written under the suffixed name while every consumer looked
+  for the clean one. Measured in the field: `overlay autoupdate --apply all`
+  failed 4 of 4 suffixed entries at the manifest step, which chdir'd into a
+  directory that had never existed. That step was only the first gate to reach
+  the divergence — repairing it alone would have carried the bump into the
+  Manifest reads, then the ebuild path, then the emerge atom, one gate per
+  apply. The content now derives from a second, suffix-stripping split that
+  also refuses a key whose suffix survives it, so a future leak fails at the
+  seam by name instead of as a ghost directory three gates later. The staged
+  repository's NAME still derives from the full key, on the writer and on the
+  recomputing fallback alike, so two release lines at one version cannot
+  collide on a repository name. An unsuffixed key stages byte-identically.
+
+  The failure it caused also stops burning the LLM fixer. A spawned command
+  whose working directory does not exist is the machine's fault, never the
+  ebuild's — no rewrite of an intact file can repair it — so it is now
+  classified as an environment failure and the fixer is not invoked. A command
+  that RAN and exited non-zero still reaches the fixer, which is the repair
+  that gate exists to allow. And a fixer command that could not start is
+  reported as that, instead of printing the whole error where an exit code was
+  promised.
+
+- **A privileged `--compile` PASS now means what a `--depth compile` PASS
+  means.** The privileged path set no environment at all, so the distdir the
+  run resolved reached the `ebuild` child not at all, while the unprivileged
+  ladder has exported a computed one since the gates learned to say where their
+  sources came from. Setting it on the spawned command would not have fixed it,
+  and that was measured rather than assumed: with `env_reset` in force nothing
+  Portage-related survives the privilege boundary, so an exported value is
+  discarded before `ebuild` ever sees it. What does survive is the privilege
+  tool's own argument form, so the resolved directory now travels as
+  `sudo DISTDIR=<dir> ebuild …` — a literal argument this run computed, which
+  is why nothing new crosses from the operator's shell. A run that resolved no
+  directory still sets nothing and invents nothing.
+
+  `doas` is treated as its own case rather than assumed equivalent: it has no
+  argument form for an environment assignment and would try to execute a
+  program by that name, so on a doas host nothing is passed and the gate says
+  the distdir could not be enforced. A pass that cannot support its
+  hermeticity claim must not imply one. The privileged PASS also carries the
+  same two fidelity statements the unprivileged one carries — the distdir it
+  read and its isolation label — produced by the same functions rather than by
+  a second copy of their text, so a rewording lands on both paths at once.
+
 ### Changed
 - **One reader for the DIST names a Manifest declares.** Two call sites read the
   file once only to prove it readable and then handed the path to a parser that

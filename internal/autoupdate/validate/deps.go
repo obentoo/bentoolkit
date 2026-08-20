@@ -232,13 +232,30 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	atom = strings.TrimSpace(atom)
 	version = strings.TrimSpace(version)
 
-	// The atom is split before anything else because splitStagedAtom is also the
+	// The atom is split before anything else because the split is also the
 	// validator: a malformed atom must fail as a malformed atom, not as an
-	// `emerge` invocation that means something unintended.
-	_, pkg, err := splitStagedAtom(atom)
+	// `emerge` invocation that means something unintended. It is split TWICE,
+	// because a registry key has two roles here (design D4). splitContentAtom
+	// answers role B: the atom PINNED in the pretend run, which must be the
+	// suffix-stripped category/package — "=cat/pkg@label-1.0::repo" names a
+	// package that exists in no repository, the staged tree included, since
+	// Stage writes its content clean. splitStagedAtom answers role A: the
+	// SUFFIXED package the staged repository's NAME was written from (R5.4),
+	// which stagedRepoNameAt's recomputing fallback must be handed too, or a
+	// tree missing its repo_name file resolves under a name Stage never wrote.
+	category, pkg, err := splitContentAtom(atom)
 	if err != nil {
 		return nil, err
 	}
+	_, suffixedPkg, err := splitStagedAtom(atom)
+	if err != nil {
+		return nil, err
+	}
+	// The clean spelling of the key, for the two places Portage has to
+	// recognise the candidate by: the pinned spec below and the subtraction of
+	// the bump itself from the merge list. The error messages keep naming the
+	// full key — the operator knows the bump by its registry spelling.
+	cleanAtom := category + "/" + pkg
 	if version == "" {
 		return nil, fmt.Errorf("resolving %s: no version given, so no exact atom can be pinned for the pretend run", atom)
 	}
@@ -263,7 +280,7 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 		return nil, fmt.Errorf("emerge was not found on PATH, so no dependency resolve is possible on this host: %w", err)
 	}
 
-	repoName := stagedRepoNameAt(stagedRoot, pkg, version)
+	repoName := stagedRepoNameAt(stagedRoot, suffixedPkg, version)
 	repositories, err := composePortageRepositories(stagedRoot, repoName)
 	if err != nil {
 		return nil, err
@@ -272,7 +289,7 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	ctx, cancel := context.WithTimeout(ctx, depsResolveTimeout)
 	defer cancel()
 
-	spec := "=" + atom + "-" + version + "::" + repoName
+	spec := "=" + cleanAtom + "-" + version + "::" + repoName
 	// --color=n because the merge list is PARSED here: escape sequences around
 	// the atoms would make the answer depend on whether stdout looked like a
 	// terminal to Portage.
@@ -286,7 +303,11 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("the pretend resolve of %s failed%s: %w", spec, diagnostic(stderr.String()), err)
 	}
-	return unsatisfiedFrom(stdout.String(), atom), nil
+	// The CLEAN atom, matching the spec above: emerge's merge list names the
+	// package as Portage knows it, so the bump subtracts itself from the list
+	// only under its clean spelling — matched against the suffixed key, the
+	// candidate would count as its own unsatisfied dependency.
+	return unsatisfiedFrom(stdout.String(), cleanAtom), nil
 }
 
 // stagedRepoNameAt answers by what name Portage will know the staged tree.
