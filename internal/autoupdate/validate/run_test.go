@@ -2663,7 +2663,9 @@ func TestDeepestPassedRung_InstallIsReachableOnTheStandalonePath(t *testing.T) {
 
 	// PASS-ONLY. A failed install gate measured a failure, not a reach, and
 	// reading it as one would let a report claim a depth no gate ever proved.
-	failed := append(passing[:len(passing)-1:len(passing)-1], GateResult{Gate: GateInstall, Outcome: OutcomeFailed})
+	failed := make([]GateResult, 0, len(passing))
+	failed = append(failed, passing[:len(passing)-1]...)
+	failed = append(failed, GateResult{Gate: GateInstall, Outcome: OutcomeFailed})
 	if got := deepestPassedRung(failed, DepthInstall); got != DepthCompile {
 		t.Errorf("deepestPassedRung(install FAILED, install) = %v, want compile — the deepest rung whose OWN gate "+
 			"passed", got)

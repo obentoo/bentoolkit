@@ -1123,8 +1123,9 @@ func TestRecordDepthReached_APassingInstallGateRecordsInstall(t *testing.T) {
 
 	// PASS-ONLY. A FAILED gate measured a failure, not a reach: recording it
 	// would let a report claim a depth no gate ever proved.
-	failed := append(passing[:len(passing)-1:len(passing)-1],
-		validate.GateResult{Gate: validate.GateInstall, Outcome: validate.OutcomeFailed})
+	failed := make([]validate.GateResult, 0, len(passing))
+	failed = append(failed, passing[:len(passing)-1]...)
+	failed = append(failed, validate.GateResult{Gate: validate.GateInstall, Outcome: validate.OutcomeFailed})
 
 	var notReached ApplyResult
 	applier.recordDepthReached(&notReached, failed, validate.DepthInstall)

@@ -944,6 +944,144 @@ func TestRunBuildGates_CompilePassStillNamesSrcInstall(t *testing.T) {
 	}
 }
 
+// TestRunBuildGates_TheInstallGateDecidesBothWays is S042-R7.1 and R7.2 — the
+// mutation proof, with BOTH outcomes in one place because either alone proves
+// the wrong thing.
+//
+// A green on a healthy package is indistinguishable from a gate nobody wired.
+// What tells them apart is the same candidate FAILING when its src_install is
+// broken and PASSING when the break is removed, so neither half is allowed to
+// stand on its own here.
+//
+// The mutation is on the TRANSCRIPT, which is the only thing these tests can
+// mutate: buildSeam fakes the child entirely — ExecCommand returns a harmless
+// `true` and RunAttached answers with the scripted output — so no real ebuild is
+// ever built at this level. The break is `newins` on a file upstream renamed,
+// which is the honest shape because it is the failure this rung was added for.
+// The evidence that the marker strings match a REAL Portage rather than a
+// synthetic transcript is sub-task 6.3's live run; no unit test can establish it.
+func TestRunBuildGates_TheInstallGateDecidesBothWays(t *testing.T) {
+	t.Run("broken src_install FAILS the gate and is not counted as reach", func(t *testing.T) {
+		spy := &buildSpy{}
+		gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall),
+			buildSeam(spy, installDiesLog, errors.New("exit status 1")))
+		if err != nil {
+			t.Fatalf("RunBuildGates: %v", err)
+		}
+
+		got := gateNamed(t, gates, GateInstall)
+		if got.Outcome != OutcomeFailed {
+			t.Fatalf("install gate: got %q (reason %q), want FAILED — src_install began and never completed", got.Outcome, got.Reason)
+		}
+		if len(got.Findings) == 0 {
+			t.Error("the FAILED install gate carries no findings; Report.ExitCode counts error findings, and a " +
+				"failure that exits 0 is the silent pass in another costume")
+		}
+
+		// R7.1's second half: a failed gate must not promote the bump, and the
+		// reach calculation is where that shows up.
+		if reached := deepestPassedRung(gates, DepthInstall); reached == DepthInstall {
+			t.Errorf("a FAILED install gate reported the reach as %v; a failure measured a failure, not a rung", reached)
+		}
+	})
+
+	t.Run("the same candidate repaired PASSES", func(t *testing.T) {
+		spy := &buildSpy{}
+		gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall),
+			buildSeam(spy, installOKLog, nil))
+		if err != nil {
+			t.Fatalf("RunBuildGates: %v", err)
+		}
+
+		got := gateNamed(t, gates, GateInstall)
+		if got.Outcome != OutcomePass {
+			t.Fatalf("install gate: got %q (reason %q), want PASS — the break was removed and nothing else changed",
+				got.Outcome, got.Reason)
+		}
+		if reached := deepestPassedRung(gates, DepthInstall); reached != DepthInstall {
+			t.Errorf("a passing install gate reported the reach as %v, want install (R2.5)", reached)
+		}
+	})
+
+	t.Run("exit 0 without the completion marker is underivable, never a pass", func(t *testing.T) {
+		spy := &buildSpy{}
+		gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall),
+			buildSeam(spy, compiledLog, nil))
+		if err != nil {
+			t.Fatalf("RunBuildGates: %v", err)
+		}
+
+		got := gateNamed(t, gates, GateInstall)
+		if got.Outcome == OutcomePass {
+			t.Fatalf("the install gate PASSED on a zero exit that never printed the completion marker: %q", got.Reason)
+		}
+		if reached := deepestPassedRung(gates, DepthInstall); reached == DepthInstall {
+			t.Errorf("an underivable install gate reported the reach as %v; the one rule this story must not "+
+				"weaken is that a gate which could not run reports SKIPPED, never PASS", reached)
+		}
+	})
+}
+
+// TestRunBuildGates_CompileDepthFingerprintIsUnchangedByStory042 is S042-R6.1
+// and R6.3, measured rather than asserted in prose.
+//
+// The expected values below were CAPTURED FROM THE PRE-STORY TREE, not written
+// from the post-story code: a probe using only API that exists in both trees was
+// run in a worktree detached at 6029e9f (the base this branch forked from) and
+// again at HEAD, and the two fingerprints diffed byte-identical. What is pinned
+// here is that measurement.
+//
+// The environment line is the one that matters most. A wrongly-scoped ` -test`
+// changes NOTHING an operator sees until a host that sets FEATURES=test runs a
+// compile — so the parent below deliberately carries `test`, and the assertion
+// is that the child still receives it.
+func TestRunBuildGates_CompileDepthFingerprintIsUnchangedByStory042(t *testing.T) {
+	t.Setenv("FEATURES", "test ccache sandbox network-sandbox userpriv")
+
+	spy := &buildSpy{}
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthCompile), buildSeam(spy, compiledLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if spy.spawns != 1 {
+		t.Errorf("spawns = %d, want 1", spy.spawns)
+	}
+
+	// The gate list, in order, with its outcomes. Nothing else asserts that a
+	// compile-depth run reports exactly these three and no install gate.
+	want := []struct{ gate, outcome string }{
+		{GatePatches, string(OutcomePass)},
+		{GateConfigure, string(OutcomePass)},
+		{GateCompile, string(OutcomePass)},
+	}
+	if len(gates) != len(want) {
+		t.Fatalf("a compile-depth run reported %d gates, want %d: %+v — the install gate must not appear for a "+
+			"depth that did not ask for it", len(gates), len(want), gates)
+	}
+	for i, w := range want {
+		if gates[i].Gate != w.gate || string(gates[i].Outcome) != w.outcome {
+			t.Errorf("gate %d is %s/%s, want %s/%s", i, gates[i].Gate, gates[i].Outcome, w.gate, w.outcome)
+		}
+	}
+
+	// The compile reason, verbatim from the pre-story tree minus the distdir
+	// note, which every PASS carries and which this story does not touch.
+	const wantCompileReason = "the compile phase completed for media-plugins/gst-plugins-qt6-1.29.2; " +
+		"a compile pass does not cover src_install, which this ladder deliberately stops short of"
+	if !strings.HasPrefix(gates[2].Reason, wantCompileReason) {
+		t.Errorf("the compile reason changed.\n got: %s\nwant prefix: %s", gates[2].Reason, wantCompileReason)
+	}
+
+	// R6.1's hardest half: the parent carries `test` and the compile child still
+	// receives it, unmodified.
+	entries := featuresEntries(spy.envAtSpawn)
+	if len(entries) != 1 || entries[0] != "FEATURES=test ccache sandbox network-sandbox userpriv" {
+		t.Errorf("the compile child received %v, want exactly the parent's own value; this is the assertion that "+
+			"fails if the ` -test` composition is ever applied outside the install phase", entries)
+	}
+}
+
 // unverifiedIsolationLabel is story 031's wording, kept verbatim so the two
 // gates cannot drift into describing the same fidelity in two ways.
 const unverifiedIsolationLabel = "unverified isolation"
