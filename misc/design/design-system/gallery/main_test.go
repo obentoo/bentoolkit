@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -62,7 +63,9 @@ func TestSelectModes_UnknownNameIsRefused(t *testing.T) {
 // actually shows all of it.
 func TestRender_DrawsEverySampleInTheCatalogue(t *testing.T) {
 	var buf bytes.Buffer
-	render(&buf, theme.Plain)
+	if err := render(&buf, theme.Plain); err != nil {
+		t.Fatalf("render returned %v", err)
+	}
 	out := buf.String()
 
 	for _, s := range component.Catalogue() {
@@ -81,7 +84,9 @@ func TestRender_DrawsEverySampleInTheCatalogue(t *testing.T) {
 // prose and legitimately quote the glyphs they discuss.
 func TestRender_PlainOutputStaysASCIIExceptForTheGallerysOwnProse(t *testing.T) {
 	var buf bytes.Buffer
-	render(&buf, theme.Plain)
+	if err := render(&buf, theme.Plain); err != nil {
+		t.Fatalf("render returned %v", err)
+	}
 
 	for _, ln := range strings.Split(buf.String(), "\n") {
 		if !strings.HasPrefix(ln, "    ") {
@@ -123,4 +128,60 @@ func TestWrap_AWordLongerThanTheWidthIsNotSplit(t *testing.T) {
 	if got != long {
 		t.Errorf("wrap split an over-long token: %q", got)
 	}
+}
+
+// failingWriter fails after n successful writes, so the latch can be observed
+// both stopping early and surfacing the cause.
+type failingWriter struct {
+	ok   int
+	errs error
+}
+
+func (f *failingWriter) Write(p []byte) (int, error) {
+	if f.ok > 0 {
+		f.ok--
+		return len(p), nil
+	}
+	return 0, f.errs
+}
+
+// TestRender_SurfacesAWriteFailureInsteadOfExitingZero. Writing to stdout does
+// fail in practice — a full disk, a closed pipe — and a gallery that returns
+// nil after failing to print would have main exit 0 on a lie.
+func TestRender_SurfacesAWriteFailureInsteadOfExitingZero(t *testing.T) {
+	boom := errors.New("disk full")
+	w := &failingWriter{ok: 2, errs: boom}
+
+	err := render(w, theme.Plain)
+	if err == nil {
+		t.Fatal("render returned nil after the writer failed")
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("render returned %v, which lost the underlying cause %v", err, boom)
+	}
+}
+
+// TestRender_StopsWritingOnceAWriteHasFailed pins the latch itself: without it
+// every remaining line would be attempted against a writer already known to be
+// broken.
+func TestRender_StopsWritingOnceAWriteHasFailed(t *testing.T) {
+	w := &countingWriter{failAfter: 1, err: errors.New("boom")}
+	_ = render(w, theme.Plain)
+	if w.attempts != 2 {
+		t.Errorf("render attempted %d writes, want 2 — one success and one failure, then stop", w.attempts)
+	}
+}
+
+type countingWriter struct {
+	failAfter int
+	attempts  int
+	err       error
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.attempts++
+	if c.attempts > c.failAfter {
+		return 0, c.err
+	}
+	return len(p), nil
 }

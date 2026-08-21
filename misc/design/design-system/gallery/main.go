@@ -40,7 +40,10 @@ func main() {
 		if i > 0 {
 			fmt.Println()
 		}
-		render(os.Stdout, m)
+		if err := render(os.Stdout, m); err != nil {
+			fmt.Fprintln(os.Stderr, "gallery:", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -68,33 +71,56 @@ func selectModes(all bool, forced string) ([]theme.Mode, error) {
 	}
 }
 
+// lineWriter writes whole lines and LATCHES the first error, so render makes
+// one check at the end instead of one per line.
+//
+// The alternative is an `if err != nil` after every Fprintln, which would
+// triple the length of a function whose entire job is layout, or discarding the
+// error, which is what errcheck exists to stop. Writing to stdout does fail in
+// practice — a full disk, a closed pipe — and exiting 0 after failing to print
+// is a lie.
+type lineWriter struct {
+	w   io.Writer
+	err error
+}
+
+// line writes one line, or does nothing once a write has already failed.
+func (lw *lineWriter) line(a ...any) {
+	if lw.err != nil {
+		return
+	}
+	_, lw.err = fmt.Fprintln(lw.w, a...)
+}
+
 // render draws the whole catalogue for one mode.
 //
 // It takes an io.Writer rather than the *os.File it is always called with in
 // main, so a test can assert on what it produced. The mode is a parameter for
 // the same reason: nothing here reads the terminal.
-func render(w io.Writer, m theme.Mode) {
+func render(w io.Writer, m theme.Mode) error {
 	t := theme.New(m)
+	out := &lineWriter{w: w}
 
-	fmt.Fprintln(w, component.Rule{Label: "mode: " + m.String(), Width: component.DefaultWidth}.Render(t))
+	out.line(component.Rule{Label: "mode: " + m.String(), Width: component.DefaultWidth}.Render(t))
 	// The prose under each name is the GALLERY's text, not a component's, and it
 	// quotes glyphs like ─ and → because those are what it is talking about. Only
 	// the indented block below each description is component output, and only that
 	// block is what the mode contract governs.
-	fmt.Fprintln(w, t.Paint(theme.Muted, "(indented blocks are component output; the prose above each is the gallery's own)"))
-	fmt.Fprintln(w)
+	out.line(t.Paint(theme.Muted, "(indented blocks are component output; the prose above each is the gallery's own)"))
+	out.line()
 
 	for _, s := range component.Catalogue() {
-		fmt.Fprintln(w, t.Paint(theme.Heading, s.Name))
+		out.line(t.Paint(theme.Heading, s.Name))
 		for _, ln := range strings.Split(wrap(s.Why, component.DefaultWidth-2), "\n") {
-			fmt.Fprintln(w, t.Paint(theme.Muted, "  "+ln))
+			out.line(t.Paint(theme.Muted, "  "+ln))
 		}
-		fmt.Fprintln(w)
+		out.line()
 		for _, ln := range strings.Split(s.C.Render(t), "\n") {
-			fmt.Fprintln(w, "    "+ln)
+			out.line("    " + ln)
 		}
-		fmt.Fprintln(w)
+		out.line()
 	}
+	return out.err
 }
 
 // wrap breaks s at width on word boundaries. Deliberately naive: it is the
