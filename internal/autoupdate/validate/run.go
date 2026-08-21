@@ -1594,6 +1594,7 @@ var gateRungs = map[string]Depth{
 	GatePatches:   DepthPatches,
 	GateConfigure: DepthConfigure,
 	GateCompile:   DepthCompile,
+	GateInstall:   DepthInstall,
 }
 
 // deepestPassedRung answers "how far did this get": the deepest rung whose own
