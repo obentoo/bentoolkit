@@ -118,7 +118,7 @@ Examples:
 	// (R11.3): `--depth` absent and `--depth=options` are the same run, and the
 	// value is read off THIS command below, never from a package variable.
 	cmd.Flags().String("depth", validate.DepthOptions.String(),
-		"Validate to this rung of the ladder — none, options, patches, configure or compile, each including every rung before it. "+
+		"Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. "+
 			"Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in")
 	return cmd
 }
