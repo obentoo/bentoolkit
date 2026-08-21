@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A design system for the terminal UI, under `misc/design/design-system`.**
+  Thirteen components — status lines, transitions, rules, boxes, groups, trees,
+  tables, key/value blocks, gate lists, tallies, progress and prompts — plus the
+  theme they draw with, and a gallery that renders the whole catalogue:
+  `go run ./misc/design/design-system/gallery`.
+
+  It exists because bentoo had TWO visual grammars that did not know about each
+  other: `internal/common/output` on fatih/color, consumed by 24 command files,
+  and `internal/common/tui` on lipgloss, consumed by one. Nothing made "success"
+  the same decision in both, 305 direct `fmt.Print*` calls bypassed both, and
+  the glyph inventory had drifted far enough to spell one symbol two ways.
+  Every component was read out of an existing call site; none was invented.
+
+  A render has THREE faces rather than two, because `NO_COLOR` is a statement
+  about colour and not about UTF-8: `Plain` assumes nothing and is pure ASCII,
+  `Unicode` drops the colour and keeps the glyphs, `Styled` has both. `Plain` is
+  the zero value, so code that forgets to choose gets the face that is safe
+  everywhere. `--json` is deliberately NOT a fourth face: a component is a typed
+  value with json tags, so the machine-readable output cannot disagree with the
+  human one about what happened.
+
+  **Nothing is wired into any command.** `make build-all` still produces exactly
+  the two release binaries, no existing output changes, and the gallery is not
+  shipped. It is a proposal that compiles — wiring it in means changing output
+  that scripts already consume, which is a decision to take per command rather
+  than as a side effect of adding a package.
+
 ## [0.26.0] - 2026-08-20
 
 ### Added
