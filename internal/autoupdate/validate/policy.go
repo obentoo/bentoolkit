@@ -84,7 +84,7 @@ type DepthPolicy struct {
 //
 // # Why an empty policy must not be the same thing as this one
 //
-// classDepth's last fallback is the deepest rung, and that is right for a table
+// classDepth's last fallback is DepthCompile, and that is right for a table
 // somebody filled in and left a hole in: not knowing how far a bump moved is not
 // evidence that it moved a little. It is the WRONG answer for a table nobody
 // filled in at all, because then the fallback is not covering a hole, it IS the
@@ -232,13 +232,23 @@ func flagDepth(req DepthRequest) (Depth, string, bool) {
 // classDepth reads the configured depth for a class (R2.2).
 //
 // A class absent from the table falls through to the major row, and a table with
-// no major row falls through to the deepest rung. NEITHER falls through to
+// no major row falls through to DepthCompile. NEITHER falls through to
 // DepthNone, which is what a bare map lookup would return: not knowing how far a
 // bump moved is not evidence that it moved a little, and the failure mode that
-// rule exists to prevent is a bump ending up with no depth instead of the
-// deepest one. It is the same reading Classify applies when it answers
-// ClassMajor for a version it cannot parse, and the same one
-// config.GetDepthForClass applies to an unrecognised class name.
+// rule exists to prevent is a bump ending up with no depth instead of a deep
+// one.
+//
+// # The fallback STAYS at compile now that the ladder goes deeper
+//
+// It was the deepest rung until story 042 added DepthInstall, and the wording
+// here said so. It deliberately does NOT follow the ladder's new top: this is a
+// fail-safe covering a hole in a table somebody filled in, not a place to raise
+// what an unconfigured bump costs (S042-R1.4). A reader who "fixes" the
+// inconsistency by returning DepthInstall changes a shipped cost.
+//
+// It is the same reading Classify applies when it answers ClassMajor for a
+// version it cannot parse, and the same one config.GetDepthForClass applies to
+// an unrecognised class name.
 func classDepth(policy DepthPolicy, class Class) (Depth, string) {
 	if depth, ok := policy.ByClass[class]; ok {
 		return depth, fmt.Sprintf("policy: a %s bump is validated to %s", class, depth)
@@ -246,7 +256,7 @@ func classDepth(policy DepthPolicy, class Class) (Depth, string) {
 	if depth, ok := policy.ByClass[ClassMajor]; ok {
 		return depth, fmt.Sprintf("policy: no depth is configured for a %s bump, so the major row (%s) applies", class, depth)
 	}
-	return DepthCompile, fmt.Sprintf("policy: no depth is configured for a %s bump, nor for major, so the deepest rung (%s) applies rather than none", class, DepthCompile)
+	return DepthCompile, fmt.Sprintf("policy: no depth is configured for a %s bump, nor for major, so %s applies rather than none", class, DepthCompile)
 }
 
 // applyOverride applies a per-package override on top of the depth the class and

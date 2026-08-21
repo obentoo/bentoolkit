@@ -48,6 +48,7 @@ var gateDepths = map[string]validate.Depth{
 	validate.GatePatches:   validate.DepthPatches,
 	validate.GateConfigure: validate.DepthConfigure,
 	validate.GateCompile:   validate.DepthCompile,
+	validate.GateInstall:   validate.DepthInstall,
 }
 
 // RequiresSerialApply reports whether a run validating at depth d must apply one

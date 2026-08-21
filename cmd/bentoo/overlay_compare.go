@@ -139,7 +139,7 @@ func init() {
 	// build nobody asked for. Absent means report-only, which is what `--realign`
 	// shipped as.
 	compareCmd.Flags().StringVar(&compareDepth, "depth", "",
-		"Prove each proposed realignment by building it to this rung of the ladder — patches, configure or compile, each including every rung before it. "+
+		"Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. "+
 			"Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built")
 	compareCmd.Flags().BoolVar(&compareYes, "yes", false, "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag")
 	overlayCmd.AddCommand(compareCmd)

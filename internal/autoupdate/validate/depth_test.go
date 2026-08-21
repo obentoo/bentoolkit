@@ -14,14 +14,18 @@ package validate
 // configure". A reader who takes the constants as a menu rather than a ladder
 // writes a runner that skips the patch gate on a configure request.
 //
-// `install` IS DELIBERATELY ABSENT (story Out of Scope). The ladder stops at
-// compile, and R6.4 makes a compile pass SAY that src_install went uncovered.
-// The test below keeps the gap deliberate: a future reader who assumes the
+// `qmerge` IS DELIBERATELY ABSENT — one rung up from where this note sat until
+// story 042. The ladder stopped at compile then; what it stops at now is the
+// package IMAGE under ${D}, because 042 added the install rung. qmerge touches
+// the RUNNING SYSTEM and is a different activity, not a deeper rung, and
+// S042-D2 says permanently. The test below keeps THAT gap deliberate on exactly
+// the terms story 033 kept the install one: a future reader who assumes the
 // absence is an oversight and adds the name has to change a test that says
-// otherwise, which is where they will read why.
+// otherwise, which is where they will read why. 042 was that reader, and this
+// note is what it read.
 //
 // This file pins `type Depth` with `DepthNone, DepthOptions, DepthPatches,
-// DepthConfigure, DepthCompile`, `Depth.String()` and
+// DepthConfigure, DepthCompile, DepthInstall`, `Depth.String()` and
 // `ParseDepth(string) (Depth, error)`.
 
 import (
@@ -31,7 +35,7 @@ import (
 
 // theLadder is the whole ordered set, shallowest first. Every test below reads
 // it, so a new depth is added in exactly one place.
-var theLadder = []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, DepthCompile}
+var theLadder = []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, DepthCompile, DepthInstall}
 
 // TestDepth_OrderingHoldsUnderLessThan is R2.1. Without it, `max(floor,
 // proposed)` in the policy silently picks whichever constant happens to hold the
@@ -48,14 +52,14 @@ func TestDepth_OrderingHoldsUnderLessThan(t *testing.T) {
 	// And transitively, so no pair is left to chance: the shallowest is below
 	// the deepest by more than one step.
 	//nolint:staticcheck // QF1001: see the note above — the requirement is stated positively and negated, not restated as its own failure.
-	if !(DepthNone < DepthCompile) {
-		t.Errorf("DepthNone (%v) is not below DepthCompile (%v)", DepthNone, DepthCompile)
+	if !(DepthNone < DepthInstall) {
+		t.Errorf("DepthNone (%v) is not below DepthInstall (%v)", DepthNone, DepthInstall)
 	}
 	if DepthNone != theLadder[0] {
 		t.Errorf("the shallowest depth is %v, want DepthNone", theLadder[0])
 	}
-	if DepthCompile != theLadder[len(theLadder)-1] {
-		t.Errorf("the deepest depth is %v, want DepthCompile", theLadder[len(theLadder)-1])
+	if DepthInstall != theLadder[len(theLadder)-1] {
+		t.Errorf("the deepest depth is %v, want DepthInstall", theLadder[len(theLadder)-1])
 	}
 }
 
@@ -146,18 +150,69 @@ func TestParseDepth_UnknownNameListsTheValidSet(t *testing.T) {
 	}
 }
 
-// TestParseDepth_InstallIsNotADepth keeps the gap deliberate. The ladder stops
-// at compile by decision, not by omission: R6.4 requires a compile pass to state
-// that src_install went uncovered, which names the gap without building a gate
-// for it.
-func TestParseDepth_InstallIsNotADepth(t *testing.T) {
+// TestParseDepth_InstallIsARung is R1.1 and R1.3, and it is the exact inverse
+// of the guard story 033 left here. The ladder gained a rung that runs
+// src_install, so the name it used to refuse is the name it must now answer.
+//
+// The two directions are pinned TOGETHER on purpose: parsing must yield a depth
+// that sorts DEEPER than compile. A rung that parses but ties with compile
+// compares equal under `max(floor, proposed)`, and an install request would
+// quietly receive a compile run — a validation hole that still reports a pass.
+func TestParseDepth_InstallIsARung(t *testing.T) {
 	got, err := ParseDepth("install")
+	if err != nil {
+		t.Fatalf("ParseDepth(%q): %v — install additionally runs src_install and is the deepest rung (R1.1)", "install", err)
+	}
 
+	if name := got.String(); name != "install" {
+		t.Errorf("ParseDepth(%q).String() = %q; String and ParseDepth are exact inverses, so a rung that "+
+			"parses under one name and prints another is a depth a report can name but a flag cannot request", "install", name)
+	}
+
+	//nolint:staticcheck // QF1001: see the ordering tests above — the requirement is stated positively and negated, not restated as its own failure.
+	if !(DepthCompile < got) {
+		t.Errorf("install (%v) does not sort deeper than compile (%v); the ladder is an order, and a rung that "+
+			"ties with compile makes max(floor, proposed) answer compile for an install request", got, DepthCompile)
+	}
+}
+
+// TestParseDepth_UnknownNameOffersInstall is R1.3. The rejection message is
+// DERIVED from depthLadder rather than retyped, so this asserts the derivation
+// actually reached the new rung: a rung appended to the ladder but missing from
+// the offered set is a capability the operator is never told exists.
+//
+// The typo is one letter SHORT of the name, never one letter long. ParseDepth
+// quotes the offender back, so a probe of "installl" would find "install"
+// inside the quoted typo and pass without the valid set naming the rung at all
+// — the same false guard found in story 041.
+func TestParseDepth_UnknownNameOffersInstall(t *testing.T) {
+	got, err := ParseDepth("instal")
 	if err == nil {
-		t.Fatalf("ParseDepth(\"install\") returned %v with no error; the ladder stops at compile by decision "+
-			"(story Out of Scope) — adding the rung is a story of its own, not a parser change", got)
+		t.Fatalf("ParseDepth(\"instal\") returned %v with no error; a mistyped depth must be refused", got)
 	}
 	if !strings.Contains(err.Error(), "install") {
+		t.Errorf("the rejection %q does not offer install among the valid depths; the ladder gained a rung "+
+			"the operator can only discover by reading the source", err)
+	}
+}
+
+// TestParseDepth_QmergeIsNotADepth keeps the gap deliberate, one rung up from
+// where story 033 put it. The ladder stops at install by decision, not by
+// omission: `ebuild … install` assembles the image under ${D} inside
+// PORTAGE_TMPDIR, and the phase that would touch the running system is qmerge —
+// the package manager's activity, and out of this ladder permanently (S042-D2).
+//
+// This is the same tripwire 033 wrote, moved rather than deleted. Deleting it
+// would leave the NEW ceiling unguarded, which is the one property the ladder
+// has never given up: every rung states where it stops.
+func TestParseDepth_QmergeIsNotADepth(t *testing.T) {
+	got, err := ParseDepth("qmerge")
+
+	if err == nil {
+		t.Fatalf("ParseDepth(\"qmerge\") returned %v with no error; the ladder stops at install by decision "+
+			"(S042-D2) — installing a package onto the host is the package manager's question, not a validator's", got)
+	}
+	if !strings.Contains(err.Error(), "qmerge") {
 		t.Errorf("the error %q does not quote the rejected name", err)
 	}
 }

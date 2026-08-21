@@ -160,6 +160,12 @@ type ValidateConfig struct {
 
 // ValidateDepths is the per-class depth table under `autoupdate.validate.depths`.
 //
+// Each value is a rung spelled exactly as
+// internal/autoupdate/validate.ParseDepth accepts it: none, options, patches,
+// configure, compile, install — shallowest first, each including every rung
+// before it. This package does not validate them; ParseDepth is the validator,
+// and the import runs the other way.
+//
 // It is a struct and not a map[string]string so that a mistyped CLASS name
 // ("revison:") is caught by the strict re-decode in LoadFrom and reported on
 // stderr. A map would accept the typo silently and the class it was meant for
@@ -181,11 +187,11 @@ type ValidateDepths struct {
 type ValidatePackageOverride struct {
 	// Depth is a rung of the validation ladder, spelled exactly as
 	// internal/autoupdate/validate.ParseDepth accepts it: none, options,
-	// patches, configure, compile. It is stored and reported verbatim — this
-	// package deliberately neither trims nor case-folds it, because ParseDepth
-	// does not either, and a config layer that silently repaired " Compile "
-	// would make the name in the file and the name in the report two different
-	// strings.
+	// patches, configure, compile, install. It is stored and reported verbatim
+	// — this package deliberately neither trims nor case-folds it, because
+	// ParseDepth does not either, and a config layer that silently repaired
+	// " Compile " would make the name in the file and the name in the report two
+	// different strings.
 	Depth string `yaml:"depth"`
 	// Reason is why this package departs from its class depth. It is required:
 	// see OverrideErrors.
@@ -701,6 +707,13 @@ func (c *AutoupdateConfig) GetDistfilesCache() string {
 // cheap, frequent bumps and stop at the static gate; series and major cross a
 // boundary upstream chose to mark, so they earn a configure. No class defaults
 // to compile — see ValidateConfig's doc comment.
+//
+// THEY DID NOT MOVE WHEN THE INSTALL RUNG WAS ADDED, and that is a decision
+// rather than an omission (S042-R1.4). Adding a rung is a capability; promoting
+// a default is a cost decision belonging to whoever pays for the hours, and an
+// operator who upgrades the binary without reading the changelog must find
+// yesterday's sweep costing what it cost yesterday. `install` is reached by
+// --depth=install or by an explicit key here, never by default.
 const (
 	DefaultDepthRevision = "options"
 	DefaultDepthPatch    = "options"

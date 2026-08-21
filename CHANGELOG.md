@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`--depth=install` — the ladder gains a rung that validates `src_install`.**
+  The staged validation ladder proved that a bumped package builds; it stopped
+  one phase short of proving that the package ASSEMBLES. `src_install` is where
+  a `doins` of a file upstream renamed dies, where an
+  `emake DESTDIR="${D}" install` rule that stopped working surfaces, and where
+  most of Portage's QA notices are produced. The gap was named three times in
+  the protocol this ladder was built from and deferred on purpose; this closes
+  it.
+
+  The rung is accepted wherever a depth is configured — `--depth=install` on
+  `overlay autoupdate`, `overlay validate` and `overlay compare`, every
+  per-class config key, and every per-package override — and it costs a compile
+  plus `src_install`, not two compiles: the phases cascade inside a single
+  `ebuild` invocation.
+
+  A pass STATES ITS OWN CEILING, as every rung of this ladder does. It names
+  both things it did not cover: `qmerge`, which is the package manager's
+  activity and stays out of this ladder permanently, and `src_test`, which this
+  gate switches off. A compile pass keeps saying that `src_install` went
+  uncovered, because at compile depth that is still true.
+
+  **`src_test` is disabled inside the build child, so the verdict is a fact
+  about the candidate rather than about the host.** `src_test` runs between
+  compile and install, so on a machine configured with `FEATURES=test` the new
+  rung would silently run upstream's suite and two machines would disagree
+  about the same bump. The child receives exactly one `FEATURES` assignment —
+  the inherited value with ` -test` appended, composed rather than added as a
+  second entry — which subtracts that one feature and preserves `sandbox`,
+  `network-sandbox`, `userpriv`, `ccache` and everything else the host set. The
+  report says so, because it is a subtraction the operator did not ask for.
+
+  A failed `src_install` reaches the same repair loop every other build gate
+  reaches: the fixer is told `install`, the authoritative re-run runs the
+  install gate, and a failure the MACHINE caused still refuses to spend an
+  agent invocation.
+
+### Changed
+- **`--compile` now states its ceiling in its own help.** The privileged gate
+  still stops at `src_compile` and is unchanged; what is new is that it says so,
+  and names `--depth=install` as the unprivileged path that goes further.
+- **No shipped default moved.** `revision` and `patch` stay at `options`,
+  `series` and `major` stay at `configure`. Adding a rung is a capability;
+  promoting a default is a cost decision, and an upgrade must not make
+  yesterday's sweep more expensive than the operator agreed to. `install` is
+  reached only by asking for it.
+
 ## [0.26.0] - 2026-08-20
 
 ### Added
