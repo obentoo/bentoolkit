@@ -114,9 +114,18 @@ const (
 	// /usr/lib/portage/python3.14/phase-functions.sh:636 prints
 	// `>>> Install ${CATEGORY}/${PF} into ${D}` and :654 prints
 	// `>>> Completed installing ${CATEGORY}/${PF} into ${D}`. Both go through
-	// __vecho, which is why this gate must keep passing no --quiet and why
-	// PORTAGE_QUIET must stay unreachable through the environment allow-list
-	// (S042-D5).
+	// __vecho, which suppresses them under __quiet_mode — which is why this
+	// gate must keep passing no --quiet.
+	//
+	// # PORTAGE_QUIET IS reachable, and the gate is safe anyway
+	//
+	// Do not read the allow-list as a guard here: buildEnvAllows admits the
+	// whole PORTAGE_ family BY PREFIX, so an operator who exported
+	// PORTAGE_QUIET does reach the child and does suppress these lines. What
+	// that buys is not a false green. With the markers gone, completed() never
+	// sees the done marker, derive() takes its default branch, and the gate
+	// reports SKIPPED quoting the line it needed. Underivable, never PASS
+	// (S042-D5, R2.4).
 	markerStartInstall = ">>> Install "
 	markerDoneInstall  = ">>> Completed installing "
 )

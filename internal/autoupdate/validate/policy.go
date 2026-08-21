@@ -244,9 +244,11 @@ func flagDepth(req DepthRequest) (Depth, string, bool) {
 // here said so. It deliberately does NOT follow the ladder's new top: this is a
 // fail-safe covering a hole in a table somebody filled in, not a place to raise
 // what an unconfigured bump costs (S042-R1.4). A reader who "fixes" the
-// inconsistency by returning DepthInstall changes a shipped cost. It is the same reading Classify applies when it answers
-// ClassMajor for a version it cannot parse, and the same one
-// config.GetDepthForClass applies to an unrecognised class name.
+// inconsistency by returning DepthInstall changes a shipped cost.
+//
+// It is the same reading Classify applies when it answers ClassMajor for a
+// version it cannot parse, and the same one config.GetDepthForClass applies to
+// an unrecognised class name.
 func classDepth(policy DepthPolicy, class Class) (Depth, string) {
 	if depth, ok := policy.ByClass[class]; ok {
 		return depth, fmt.Sprintf("policy: a %s bump is validated to %s", class, depth)

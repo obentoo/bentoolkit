@@ -187,11 +187,11 @@ type ValidateDepths struct {
 type ValidatePackageOverride struct {
 	// Depth is a rung of the validation ladder, spelled exactly as
 	// internal/autoupdate/validate.ParseDepth accepts it: none, options,
-	// patches, configure, compile, install. It is stored and reported verbatim — this
-	// package deliberately neither trims nor case-folds it, because ParseDepth
-	// does not either, and a config layer that silently repaired " Compile "
-	// would make the name in the file and the name in the report two different
-	// strings.
+	// patches, configure, compile, install. It is stored and reported verbatim
+	// — this package deliberately neither trims nor case-folds it, because
+	// ParseDepth does not either, and a config layer that silently repaired
+	// " Compile " would make the name in the file and the name in the report two
+	// different strings.
 	Depth string `yaml:"depth"`
 	// Reason is why this package departs from its class depth. It is required:
 	// see OverrideErrors.
