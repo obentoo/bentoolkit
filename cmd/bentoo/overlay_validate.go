@@ -88,12 +88,12 @@ pkgcheck is installed. They never affect the exit code: the overlay carries
 pre-existing QA findings unrelated to any bump, and letting them decide the
 status would fail the whole tree and reduce this command to noise.
 
---depth selects how far up the ladder to go: none, options, patches, configure
-or compile, each rung including every rung before it. It defaults to options,
-which is this command as it has always been — read-only, unprivileged, building
-nothing. Above options the gates need a tree to build in, and that tree is a
-staged copy under ~/.config/bentoo/autoupdate/staging: the published overlay is
-never built in and never written to.
+--depth selects how far up the ladder to go: none, options, patches,
+configure, compile or install, each rung including every rung before it. It
+defaults to options, which is this command as it has always been — read-only,
+unprivileged, building nothing. Above options the gates need a tree to build
+in, and that tree is a staged copy under ~/.config/bentoo/autoupdate/staging:
+the published overlay is never built in and never written to.
 
 Exit codes:
   0  every gate outcome was PASS or SKIPPED

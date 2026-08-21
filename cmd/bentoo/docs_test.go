@@ -100,56 +100,101 @@ func TestCHANGELOG_HasV020(t *testing.T) {
 	)
 }
 
-// depthEnumeration returns just the list of rung names out of a --depth usage
-// string: the run of text that ENDS at ", each including every rung before it"
-// and BEGINS after the em dash introducing it.
+// depthEnumeration returns just the list of rung names out of a surface that
+// enumerates the ladder: the run of text between the phrase that INTRODUCES the
+// list and the phrase that CLOSES it, both supplied by the caller.
 //
-// Matching against this slice rather than against the whole usage string is the
-// entire point. A document-wide search for "install" passes on any unrelated
+// Matching against this slice rather than against the whole text is the entire
+// point. A document-wide search for "install" passes on any unrelated
 // occurrence — "src_install", "installed", a sentence about --depth=install
 // elsewhere in the same help — and story 041 found exactly that false guard.
-func depthEnumeration(t *testing.T, where, usage string) string {
+//
+// Both delimiters are per-surface and MANDATORY. They differ — a flag usage
+// introduces its list with an em dash, the validate command's Long text
+// introduces it with "ladder to go: " and closes it with a different phrase —
+// and a delimiter that silently failed to match would hand the whole document
+// back and restore the very false guard this function exists to prevent. A miss
+// is a t.Fatalf, never a fallback.
+func depthEnumeration(t *testing.T, where, text, intro, tail string) string {
 	t.Helper()
 
-	const tail = ", each including every rung before it"
-	end := strings.Index(usage, tail)
+	end := strings.Index(text, tail)
 	if end < 0 {
-		t.Fatalf("%s: the --depth usage does not carry %q, so its enumeration cannot be isolated and every "+
-			"assertion below would be searching the whole sentence:\n%s", where, tail, usage)
+		t.Fatalf("%s: the text does not carry %q, so its enumeration cannot be isolated and every "+
+			"assertion below would be searching the whole document:\n%s", where, tail, text)
 	}
-	head := usage[:end]
+	head := text[:end]
 
-	const dash = "— "
-	if start := strings.LastIndex(head, dash); start >= 0 {
-		head = head[start+len(dash):]
+	start := strings.LastIndex(head, intro)
+	if start < 0 {
+		t.Fatalf("%s: the enumeration is not introduced by %q, so it cannot be isolated and every "+
+			"assertion below would be searching the whole document:\n%s", where, intro, text)
 	}
-	return head
+	return head[start+len(intro):]
 }
 
 // TestDepthFlags_EveryEnumerationNamesTheInstallRung is S042-R5.1 and R5.2.
 //
-// The three enumerations are deliberately NOT unified. Each names a different
-// subset for a reason: compare's path builds only what a realignment proposes
-// and reports nothing at all below patches, so collapsing the three sentences
-// would widen compare's documented surface as a side effect.
+// The enumerations are deliberately NOT unified. Each names a different subset
+// for a reason: compare's path builds only what a realignment proposes and
+// reports nothing at all below patches, so collapsing the sentences would widen
+// compare's documented surface as a side effect.
+//
+// # A flag usage is not the only surface an operator reads
+//
+// The fourth case is `overlay validate`'s Long text, and it is here because it
+// was MISSED. Story 042 updated the three flag usages, and this test guarded
+// exactly those three — so a fourth enumeration inside the SAME --help output
+// went on telling the operator the ladder stopped at compile, five lines above
+// the flag that said otherwise. A contradiction, not an omission, and the guard
+// could not see it because it read Flags().Lookup("depth").Usage and nothing
+// else.
+//
+// Any surface that spells the rungs belongs in this table. A guard scoped to
+// one KIND of surface is a guard the next rung walks around.
 func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
+	const (
+		dash     = "— "
+		flagTail = ", each including every rung before it"
+	)
+
 	for _, tt := range []struct {
 		where  string
-		usage  string
+		text   string
+		intro  string
+		tail   string
 		absent []string
 	}{
-		{where: "overlay autoupdate --depth", usage: autoupdateCmd.Flags().Lookup("depth").Usage},
-		{where: "overlay validate --depth", usage: newValidateCmd().Flags().Lookup("depth").Usage},
+		{
+			where: "overlay autoupdate --depth",
+			text:  autoupdateCmd.Flags().Lookup("depth").Usage,
+			intro: dash, tail: flagTail,
+		},
+		{
+			where: "overlay validate --depth",
+			text:  newValidateCmd().Flags().Lookup("depth").Usage,
+			intro: dash, tail: flagTail,
+		},
 		{
 			where: "overlay compare --depth",
-			usage: compareCmd.Flags().Lookup("depth").Usage,
+			text:  compareCmd.Flags().Lookup("depth").Usage,
+			intro: dash, tail: flagTail,
 			// compare reports or builds nothing below patches, so these two must
 			// stay out of ITS list even though the other two carry them.
 			absent: []string{"none", "options"},
 		},
+		{
+			where: "overlay validate --help (Long)",
+			text:  newValidateCmd().Long,
+			// The Long carries an em dash of its own, paragraphs earlier, so it
+			// names the phrase that actually introduces ITS list — and its closing
+			// phrase differs from the flags' by one word.
+			intro: "ladder to go: ",
+			tail:  ", each rung including every rung before it",
+		},
 	} {
 		t.Run(tt.where, func(t *testing.T) {
-			enumeration := depthEnumeration(t, tt.where, tt.usage)
+			enumeration := depthEnumeration(t, tt.where, tt.text, tt.intro, tt.tail)
 
 			if !strings.Contains(enumeration, "install") {
 				t.Errorf("%s enumerates %q and does not offer install; a capability an operator paid for is not "+
