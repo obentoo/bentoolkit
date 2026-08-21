@@ -865,6 +865,85 @@ func TestRunBuildGates_CompileEnvIsUntouchedByTheInstallRule(t *testing.T) {
 	}
 }
 
+// TestRunBuildGates_InstallPassNamesQmergeAndSrcTest is R2.1, R2.2 and R2.3.
+//
+// Every rung of this ladder states its own ceiling, and adding one that did not
+// would be the single change that makes the ladder less honest than it was. An
+// install pass has TWO omissions and they have different causes: qmerge is out
+// of the ladder permanently (S042-D2), and src_test did not run because this
+// gate switched it off for determinism (S042-D3). An operator reading a green
+// must not have to know the ladder's history to learn what it bought.
+//
+// Asserted on the RENDERED STRING rather than on a struct field: a field can
+// change while the sentence an operator actually reads does not.
+func TestRunBuildGates_InstallPassNamesQmergeAndSrcTest(t *testing.T) {
+	spy := &buildSpy{}
+
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall), buildSeam(spy, installOKLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	got := gateNamed(t, gates, GateInstall)
+	if got.Outcome != OutcomePass {
+		t.Fatalf("install gate: got %q (reason %q), want PASS", got.Outcome, got.Reason)
+	}
+
+	for _, uncovered := range []string{"qmerge", "src_test"} {
+		if !strings.Contains(got.Reason, uncovered) {
+			t.Errorf("the install PASS reason %q does not name %q as uncovered; a green that does not say where "+
+				"it stops reads as \"it installs\", and that overclaim is what this rung exists to avoid",
+				got.Reason, uncovered)
+		}
+	}
+
+	// And it must not claim the opposite of what it did. src_install assembles
+	// an IMAGE under ${D}; nothing was merged onto any system.
+	if strings.Contains(got.Reason, "installed on") || strings.Contains(got.Reason, "installed onto") {
+		t.Errorf("the install PASS reason %q reads as though the package was installed somewhere; the phase "+
+			"assembles an image under ${D} inside PORTAGE_TMPDIR and merges nothing", got.Reason)
+	}
+
+	if !strings.Contains(got.Reason, "gst-plugins-qt6-1.29.2") {
+		t.Errorf("the install PASS reason %q does not name the package it is about", got.Reason)
+	}
+}
+
+// TestRunBuildGates_CompilePassStillNamesSrcInstall is R2.6 and R6.3 — a
+// REGRESSION GUARD with no production change behind it.
+//
+// The compile sentence is exactly the kind that gets "helpfully" updated when a
+// deeper rung arrives, and it is still true: a compile-depth run still stops
+// short of src_install. The existing compile test asserts only that the reason
+// contains "install", which the word "src_install" satisfies and so would the
+// word "installing" — this pins the specific claim.
+func TestRunBuildGates_CompilePassStillNamesSrcInstall(t *testing.T) {
+	spy := &buildSpy{}
+
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthCompile), buildSeam(spy, compiledLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	got := gateNamed(t, gates, GateCompile)
+	if got.Outcome != OutcomePass {
+		t.Fatalf("compile gate: got %q (reason %q), want PASS", got.Outcome, got.Reason)
+	}
+	if !strings.Contains(got.Reason, "src_install") {
+		t.Errorf("the compile PASS reason %q no longer states that src_install went uncovered; it is STILL TRUE "+
+			"at compile depth, and story 033 made that promise before this ladder had a rung above it", got.Reason)
+	}
+
+	// The compile sentence is about compile, not about the rung above it: it
+	// must not have acquired the install pass's own omissions.
+	for _, notHere := range []string{"qmerge", "src_test"} {
+		if strings.Contains(got.Reason, notHere) {
+			t.Errorf("the compile PASS reason %q names %q; that is the INSTALL gate's ceiling, and a compile run "+
+				"never reached the phase it is about", got.Reason, notHere)
+		}
+	}
+}
+
 // unverifiedIsolationLabel is story 031's wording, kept verbatim so the two
 // gates cannot drift into describing the same fidelity in two ways.
 const unverifiedIsolationLabel = "unverified isolation"

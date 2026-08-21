@@ -1065,8 +1065,25 @@ func (r buildRun) passReason(gate string) string {
 		return fmt.Sprintf("the configure phase completed for %s; a configure pass does not cover compilation, which this depth never ran", r.label.pv)
 
 	case GateCompile:
-		// R6.4.
+		// R6.4. STILL TRUE at compile depth, and deliberately unchanged by story
+		// 042: a compile-depth run does stop there. What 042 added is the
+		// sentence below, for the rung that does not.
 		return fmt.Sprintf("the compile phase completed for %s; a compile pass does not cover src_install, which this ladder deliberately stops short of", r.label.pv)
+
+	case GateInstall:
+		// S042-R2.2 and R2.3. Two omissions in one sentence, because they have
+		// DIFFERENT CAUSES and an operator reading a green should need neither
+		// the ladder's history nor its source to learn what the green bought:
+		// qmerge is out of this ladder permanently (D2), while src_test is a
+		// subtraction THIS GATE MADE for determinism (D3) — one the operator did
+		// not ask for, which is exactly why it is stated.
+		//
+		// It says "assembling the package image under ${D}" and never that
+		// anything was installed anywhere: src_install writes an image inside
+		// PORTAGE_TMPDIR and merges nothing onto any system.
+		return fmt.Sprintf("src_install completed for %s, assembling the package image under ${D}: a pass here does not "+
+			"cover qmerge, which stays out of this ladder, and src_test did not run because this gate disables it so the "+
+			"verdict is a fact about the candidate rather than about the host", r.label.pv)
 
 	default:
 		return fmt.Sprintf("the %s gate passed for %s", gate, r.label.pv)
