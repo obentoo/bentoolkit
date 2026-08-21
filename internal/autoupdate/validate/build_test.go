@@ -141,6 +141,34 @@ const unpackFailLog = ">>> Unpacking source...\n" +
 	"tar: Unexpected EOF in archive\n" +
 	"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (unpack phase):\n"
 
+// compiledLog is a clean run as far as `>>> Source compiled.` — the ceiling the
+// ladder had before story 042.
+const compiledLog = configureOKLog +
+	">>> Compiling source in /var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work ...\n" +
+	">>> Source compiled.\n"
+
+// installOKLog carries the two install lines MEASURED on this host rather than
+// invented: /usr/lib/portage/python3.14/phase-functions.sh:636 prints
+// ">>> Install ${CATEGORY}/${PF} into ${D}" and :654 prints
+// ">>> Completed installing ${CATEGORY}/${PF} into ${D}".
+//
+// The package name is interpolated IMMEDIATELY AFTER each marker, with a single
+// space between. That is the whole reason the trailing space belongs to the
+// marker and the match is a prefix match — a marker written without it would
+// also match a line like ">>> Installing", and one written with the package
+// name in it would match nothing at all.
+const installOKLog = compiledLog +
+	">>> Install media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/image\n" +
+	">>> Completed installing media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/image\n"
+
+// installDiesLog is the failure this rung exists to catch: src_install began and
+// never completed. A `doins` of a file upstream renamed is the honest shape,
+// because it is the one that motivated the rung.
+const installDiesLog = compiledLog +
+	">>> Install media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/image\n" +
+	"!!! ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (install phase):\n" +
+	"!!!   newins: /var/tmp/portage/media-plugins/gst-plugins-qt6-1.29.2/work/README.md does not exist\n"
+
 // buildSpy records what the runner spawned, so "exactly one process" and "the
 // argv named one phase" are observable rather than assumed.
 type buildSpy struct {
@@ -551,6 +579,289 @@ func TestRunBuildGates_CompileDepthRunsTheCompilePhaseAndNamesItsReach(t *testin
 	}
 	if !strings.Contains(strings.ToLower(got.Reason), "install") {
 		t.Errorf("the compile PASS reason %q does not state that a compile pass does not cover the install phase (R6.4)", got.Reason)
+	}
+}
+
+// TestRunBuildGates_InstallDepthRunsTheInstallPhaseInOneInvocation is R1.1,
+// R1.5 and R2.1 together. One `ebuild … clean install`, and a gate that reports
+// on it — the phases cascade inside that single invocation, so a second spawn
+// would be a correctness-neutral change that doubles what every install-depth
+// bump costs (D4).
+func TestRunBuildGates_InstallDepthRunsTheInstallPhaseInOneInvocation(t *testing.T) {
+	spy := &buildSpy{}
+
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall), buildSeam(spy, installOKLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	if spy.spawns != 1 {
+		t.Errorf("spawned %d processes for an install-depth request, want exactly 1 — the phases cascade (D4)", spy.spawns)
+	}
+	if len(spy.argv) > 0 {
+		if argv := strings.Join(spy.argv[0], " "); !strings.Contains(argv, "install") {
+			t.Errorf("argv %q does not run the install phase for an install-depth request; deepestPhaseFor reads "+
+				"deepest-first, so a case added below `>= DepthCompile` is unreachable and quietly compiles instead", argv)
+		}
+	}
+
+	got := gateNamed(t, gates, GateInstall)
+	if got.Outcome != OutcomePass {
+		t.Fatalf("install gate: got %q (reason %q), want PASS", got.Outcome, got.Reason)
+	}
+}
+
+// TestRunBuildGates_InstallWithoutItsDoneMarkerIsNotAPass is R2.4. A zero exit
+// is not evidence that src_install finished — __vecho suppresses the marker
+// under __quiet_mode, and a gate that read the exit status alone would report a
+// pass for a phase it has no evidence ran.
+func TestRunBuildGates_InstallWithoutItsDoneMarkerIsNotAPass(t *testing.T) {
+	spy := &buildSpy{}
+
+	// compiledLog exits 0 and stops one phase short: no `>>> Completed
+	// installing` line anywhere in it.
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall), buildSeam(spy, compiledLog, nil))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	got := gateNamed(t, gates, GateInstall)
+	if got.Outcome == OutcomePass {
+		t.Fatalf("the install gate reported PASS on a run that never printed the completion marker; "+
+			"reason %q — an install gate that could not run reports SKIPPED, never PASS", got.Reason)
+	}
+	if !strings.Contains(got.Reason, ">>> Completed installing") {
+		t.Errorf("the underivable install gate reads %q and does not quote the marker it needed; "+
+			"naming the missing evidence is what makes the outcome actionable", got.Reason)
+	}
+}
+
+// TestRunBuildGates_InstallFailureDoesNotDragTheCompileGateDown is R7.1 and R6.1
+// in one assertion, and it is the case the ladder gets WRONG the moment a rung
+// is added above compile without revisiting `completed`.
+//
+// `completed` treats compile as the exception whose authority is the child's
+// EXIT STATUS, because compile used to be the deepest phase any request
+// invoked. On an install-depth run it is not deepest any more: a src_install
+// that dies makes runErr non-nil, and compile — whose own `>>> Source compiled.`
+// marker is right there in the transcript — would be reported FAILED for a
+// phase that demonstrably finished.
+func TestRunBuildGates_InstallFailureDoesNotDragTheCompileGateDown(t *testing.T) {
+	spy := &buildSpy{}
+
+	gates, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall),
+		buildSeam(spy, installDiesLog, errors.New("exit status 1")))
+	if err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	install := gateNamed(t, gates, GateInstall)
+	if install.Outcome != OutcomeFailed {
+		t.Errorf("install gate: got %q (reason %q), want FAILED — src_install began and never completed", install.Outcome, install.Reason)
+	}
+
+	compile := gateNamed(t, gates, GateCompile)
+	if compile.Outcome != OutcomePass {
+		t.Errorf("the compile gate reported %q (reason %q) on a run whose transcript contains %q; the exit status "+
+			"stops being evidence about compile once the child went deeper than it, and blaming compile for an "+
+			"install failure sends the operator to the wrong phase",
+			compile.Outcome, compile.Reason, ">>> Source compiled.")
+	}
+}
+
+// TestDeepestPhaseFor_EveryRungMapsWhereItDid is R1.1 and R1.5 as a table over
+// the WHOLE ladder rather than a spot check on the new rung.
+//
+// deepestPhaseFor is a deepest-first switch, so a case in the wrong position is
+// not a compile error — it is a rung that silently STEALS the phase of the rung
+// below it. A test that only asserted install maps to phaseInstall would pass
+// just as happily with compile broken, which is why every member of depthLadder
+// is named here and the count is asserted at the end.
+func TestDeepestPhaseFor_EveryRungMapsWhereItDid(t *testing.T) {
+	want := map[Depth]struct {
+		phase  buildPhase
+		builds bool
+	}{
+		DepthNone:      {phaseSetup, false},
+		DepthOptions:   {phaseSetup, false},
+		DepthPatches:   {phasePrepare, true},
+		DepthConfigure: {phaseConfigure, true},
+		DepthCompile:   {phaseCompile, true},
+		DepthInstall:   {phaseInstall, true},
+	}
+
+	for _, rung := range depthLadder {
+		expected, named := want[rung]
+		if !named {
+			t.Errorf("depthLadder holds %v and this table does not name it; a rung added without revisiting "+
+				"deepestPhaseFor is a rung that runs some other rung's phase", rung)
+			continue
+		}
+		phase, builds := deepestPhaseFor(rung)
+		if phase != expected.phase || builds != expected.builds {
+			t.Errorf("deepestPhaseFor(%v) = (%v, %t), want (%v, %t)", rung, phase, builds, expected.phase, expected.builds)
+		}
+	}
+
+	if len(want) != len(depthLadder) {
+		t.Errorf("the table names %d rungs and the ladder holds %d; the two must be the same set, or this test "+
+			"passes over a rung nobody mapped", len(want), len(depthLadder))
+	}
+}
+
+// TestPhaseTrace_LastStartedReachesTheDeepestPhase pins the ceiling of
+// lastStarted's loop.
+//
+// HONESTY NOTE: this is a regression PIN, not a test-first proof. It cannot be
+// written as a Red — it names phaseInstall, and a Go package that references an
+// identifier which does not exist yet does not compile, so no test in it runs at
+// all. The defect it guards is also currently UNOBSERVABLE through the public
+// surface: lastStarted is read only by notReachedReason (build.go), and with
+// install at the top of the ladder there is no gate above install whose "not
+// reached" sentence could quote the wrong phase. It is pinned anyway because the
+// loop read `phaseCompile` as its ceiling until story 042, and the next rung
+// added above install would re-introduce the mis-attribution in silence.
+func TestPhaseTrace_LastStartedReachesTheDeepestPhase(t *testing.T) {
+	if got := tracePhases(installDiesLog).lastStarted(); got != phaseInstall {
+		t.Errorf("lastStarted() = %v for a transcript whose last marker is %q, want install; the loop's ceiling "+
+			"must follow the enum (phaseCount-1) rather than name a phase, or a rung added above it is skipped",
+			got, strings.TrimSpace(markerStartInstall))
+	}
+
+	// And the phase below it is still found when nothing deeper began, so the
+	// widened ceiling did not turn into "always answer the deepest".
+	if got := tracePhases(compiledLog).lastStarted(); got != phaseCompile {
+		t.Errorf("lastStarted() = %v for a transcript that stops at %q, want compile",
+			got, strings.TrimSpace(markerDoneCompile))
+	}
+}
+
+// featuresEntries returns every FEATURES assignment in a composed environment.
+// It returns the whole slice rather than the first match on purpose: "exactly
+// one entry" is the property R3.3 is about, and a helper that answered with the
+// first would make a duplicate invisible to every test below.
+func featuresEntries(env []string) []string {
+	var found []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "FEATURES=") {
+			found = append(found, kv)
+		}
+	}
+	return found
+}
+
+// sameEnv reports byte-identity of two composed environments, order included.
+// Joining on NUL is what makes it byte-identity rather than set equality: a
+// reordering is a different environment to exec.Cmd's duplicate-key behaviour.
+func sameEnv(a, b []string) bool {
+	return strings.Join(a, "\x00") == strings.Join(b, "\x00")
+}
+
+// TestRunBuildGates_InstallComposesOneFeaturesEntryEndingInMinusTest is R3.1,
+// R3.2 and R3.3 together, asserted on the COMPOSED environment the child would
+// actually receive rather than on a flag or a struct field — a field can change
+// while nothing observable does.
+//
+// The value is COMPOSED, never appended as a second assignment. allowedBuildEnv
+// may already have placed a FEATURES entry there, and adding a second would
+// leave exec.Cmd's duplicate-key behaviour to choose between them: the exact
+// hazard build.go documents as the reason DISTDIR was taken off the allow-list.
+//
+// Measured on the maintainer's host, not assumed: FEATURES is INCREMENTAL — 42
+// features at baseline, and FEATURES="-userpriv" yields 41 with only that one
+// gone. So ` -test` subtracts src_test and preserves sandbox, network-sandbox,
+// userpriv, ccache and everything else the host configured (S042-M3).
+func TestRunBuildGates_InstallComposesOneFeaturesEntryEndingInMinusTest(t *testing.T) {
+	t.Setenv("FEATURES", "test ccache sandbox network-sandbox userpriv")
+	spy := &buildSpy{}
+
+	if _, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall), buildSeam(spy, installOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	entries := featuresEntries(spy.envAtSpawn)
+	if len(entries) != 1 {
+		t.Fatalf("the install child received %d FEATURES assignments (%v), want exactly 1 — two entries leave "+
+			"exec.Cmd to choose, which is a decision nobody made (R3.3)", len(entries), entries)
+	}
+	if !strings.HasSuffix(entries[0], " -test") {
+		t.Errorf("the install child received %q, which does not end in ` -test`; src_test runs between compile "+
+			"and install, so a host carrying FEATURES=test would silently run upstream's suite and two machines "+
+			"would return different verdicts for the same bump (R3.1)", entries[0])
+	}
+	for _, keep := range []string{"ccache", "sandbox", "network-sandbox", "userpriv"} {
+		if !strings.Contains(entries[0], keep) {
+			t.Errorf("the install child received %q, which dropped %q; -test must SUBTRACT one feature, not "+
+				"overwrite the set — the sandbox and privilege-dropping features are the ones that matter most (R3.2)",
+				entries[0], keep)
+		}
+	}
+}
+
+// TestRunBuildGates_InstallAddsFeaturesWhenTheParentCarriesNone covers the
+// degenerate half of R3.3: with nothing to replace, exactly one entry is
+// APPENDED, and it is still exactly one.
+func TestRunBuildGates_InstallAddsFeaturesWhenTheParentCarriesNone(t *testing.T) {
+	// t.Setenv first so its cleanup restores whatever the host really had; the
+	// unset is what the case under test needs.
+	t.Setenv("FEATURES", "placeholder")
+	if err := os.Unsetenv("FEATURES"); err != nil {
+		t.Fatalf("Unsetenv: %v", err)
+	}
+
+	spy := &buildSpy{}
+	if _, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthInstall), buildSeam(spy, installOKLog, nil)); err != nil {
+		t.Fatalf("RunBuildGates: %v", err)
+	}
+
+	entries := featuresEntries(spy.envAtSpawn)
+	if len(entries) != 1 || entries[0] != "FEATURES=-test" {
+		t.Errorf("the install child received %v, want exactly one entry `FEATURES=-test`; a parent with no "+
+			"FEATURES must still get src_test disabled, or the determinism the rung promises depends on the host "+
+			"happening to set the variable", entries)
+	}
+}
+
+// TestRunBuildGates_CompileEnvIsUntouchedByTheInstallRule is the R6.1 half of
+// this sub-task, and the one that fails SILENTLY if the phase condition is
+// dropped: a wrongly-scoped -test changes nothing an operator sees until a host
+// that sets FEATURES=test runs a compile.
+func TestRunBuildGates_CompileEnvIsUntouchedByTheInstallRule(t *testing.T) {
+	for _, parent := range []struct {
+		name  string
+		value string
+		unset bool
+	}{
+		{name: "parent carries FEATURES", value: "test ccache sandbox"},
+		{name: "parent carries none", unset: true},
+	} {
+		t.Run(parent.name, func(t *testing.T) {
+			t.Setenv("FEATURES", parent.value)
+			if parent.unset {
+				if err := os.Unsetenv("FEATURES"); err != nil {
+					t.Fatalf("Unsetenv: %v", err)
+				}
+			}
+
+			want := allowedBuildEnv(os.Environ())
+			spy := &buildSpy{}
+			if _, err := RunBuildGates(context.Background(), buildRequestFor(t, DepthCompile), buildSeam(spy, compiledLog, nil)); err != nil {
+				t.Fatalf("RunBuildGates: %v", err)
+			}
+
+			if !sameEnv(spy.envAtSpawn, want) {
+				t.Errorf("a compile-depth child received\n  %v\nwant the parent-filtered set byte-identical\n  %v\n"+
+					"R6.1: a run that does not ask for the new rung behaves exactly as it did before, in cost AND in output",
+					spy.envAtSpawn, want)
+			}
+			for _, kv := range featuresEntries(spy.envAtSpawn) {
+				if strings.Contains(kv, "-test") {
+					t.Errorf("a compile-depth child received %q; src_test runs BETWEEN compile and install, so a "+
+						"compile run would never have reached it — subtracting it there is provably inert and still "+
+						"a change to the environment of every existing gate", kv)
+				}
+			}
+		})
 	}
 }
 
