@@ -30,10 +30,11 @@ const (
 //
 // # The names are the ladder's own names
 //
-// patches, configure and compile are spelled exactly as Depth.String spells the
-// rungs they belong to. That is deliberate: a report saying `depth=configure`
-// and a gate named `configure` are talking about the same thing, and an
-// operator should not have to learn two vocabularies for one ladder.
+// patches, configure, compile and install are spelled exactly as Depth.String
+// spells the rungs they belong to. That is deliberate: a report saying
+// `depth=configure` and a gate named `configure` are talking about the same
+// thing, and an operator should not have to learn two vocabularies for one
+// ladder.
 //
 // qa and review are the two that name no rung, because neither is one. pkgcheck
 // runs beside the ladder and is advisory (D8); the reviewer raises scrutiny and
@@ -45,6 +46,7 @@ const (
 	GatePatches   = "patches"
 	GateConfigure = "configure"
 	GateCompile   = "compile"
+	GateInstall   = "install"
 	GateReview    = "review"
 )
 

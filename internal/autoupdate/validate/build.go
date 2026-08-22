@@ -102,6 +102,32 @@ const (
 	markerDoneConfigure  = ">>> Source configured."
 	markerStartCompile   = ">>> Compiling source in"
 	markerDoneCompile    = ">>> Source compiled."
+
+	// THE TRAILING SPACE IS PART OF BOTH, and it is not a typo to be tidied
+	// away. Portage interpolates ${CATEGORY}/${PF} immediately after each of
+	// these, and matchPhaseMarker compares by PREFIX: without the space
+	// ">>> Install" would also match a hypothetical ">>> Installing", and with
+	// the package name baked in it would match nothing at all.
+	//
+	// Read from the Portage installed on the maintainer's host rather than
+	// guessed, so a future reader can re-verify instead of trusting:
+	// /usr/lib/portage/python3.14/phase-functions.sh:636 prints
+	// `>>> Install ${CATEGORY}/${PF} into ${D}` and :654 prints
+	// `>>> Completed installing ${CATEGORY}/${PF} into ${D}`. Both go through
+	// __vecho, which suppresses them under __quiet_mode — which is why this
+	// gate must keep passing no --quiet.
+	//
+	// # PORTAGE_QUIET IS reachable, and the gate is safe anyway
+	//
+	// Do not read the allow-list as a guard here: buildEnvAllows admits the
+	// whole PORTAGE_ family BY PREFIX, so an operator who exported
+	// PORTAGE_QUIET does reach the child and does suppress these lines. What
+	// that buys is not a false green. With the markers gone, completed() never
+	// sees the done marker, derive() takes its default branch, and the gate
+	// reports SKIPPED quoting the line it needed. Underivable, never PASS
+	// (S042-D5, R2.4).
+	markerStartInstall = ">>> Install "
+	markerDoneInstall  = ">>> Completed installing "
 )
 
 // SourcePrepareStarted reports whether a build transcript shows that src_prepare
@@ -363,6 +389,21 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// never Env, so what is set here is what the child gets.
 	cmd.Env = allowedBuildEnv(os.Environ())
 
+	// R3.1, and it is applied to the INSTALL PHASE ONLY — that narrowness IS
+	// R6.1 (S042-D3).
+	//
+	// src_test runs between compile and install, so a -test imposed on a
+	// patches, configure or compile run subtracts a feature that phase would
+	// never have reached: provably inert, and still a change to the environment
+	// of every existing gate. The ladder promises that a run which does not ask
+	// for the new rung behaves exactly as it did before, in cost AND in output,
+	// and the cheapest way to keep that promise is to not touch those runs at
+	// all. deepestPhaseFor has already resolved the phase by the time we get
+	// here, so the condition costs one comparison.
+	if phase == phaseInstall {
+		cmd.Env = withSrcTestDisabled(cmd.Env)
+	}
+
 	// R3.1. The resolved distdir is ASSIGNED, not allow-listed, and the two are
 	// different mechanisms on purpose: the filter above exists so the parent's
 	// environment cannot leak in, while this is an input THIS RUN computed. With
@@ -423,6 +464,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	transcript := stripANSI(string(output))
 	run := buildRun{
 		label:        label,
+		phase:        phase,
 		trace:        tracePhases(transcript),
 		transcript:   transcript,
 		runErr:       runErr,
@@ -491,6 +533,64 @@ func allowedBuildEnv(parent []string) []string {
 		}
 	}
 	return env
+}
+
+// withSrcTestDisabled returns env with src_test subtracted from FEATURES, as
+// exactly ONE assignment (R3.1, R3.3).
+//
+// # Why the value is composed and not appended as a second entry
+//
+// allowedBuildEnv may already have placed a FEATURES entry here. Adding a second
+// would leave exec.Cmd's duplicate-key behaviour to choose between them, which
+// is precisely the hazard documented above as the reason DISTDIR came off the
+// allow-list: a decision nobody made, written down nowhere.
+//
+// # Why appending ` -test` SUBTRACTS rather than overwrites
+//
+// FEATURES is INCREMENTAL, measured on the maintainer's host rather than assumed
+// (S042-M3): 42 features at baseline, and FEATURES="-userpriv" yields 41 with
+// only that one gone. So this preserves sandbox, network-sandbox, userpriv,
+// ccache and everything else the host configured (R3.2) and removes one thing.
+//
+// The measurement was taken against a feature the host actually HAS, because
+// this host does not carry `test` (S042-M4) and a -test that removed nothing
+// would have proved nothing.
+//
+// The LAST assignment is the one read, matching os/exec's own dedupEnv:
+// composing from an earlier duplicate would disable src_test in a value the
+// child never sees.
+func withSrcTestDisabled(env []string) []string {
+	const key = "FEATURES="
+
+	value, found := "", false
+	for _, kv := range env {
+		if after, ok := strings.CutPrefix(kv, key); ok {
+			value, found = after, true
+		}
+	}
+
+	// TrimSpace so a parent carrying no value yields `FEATURES=-test` rather
+	// than `FEATURES= -test`, whose empty first token is a value nobody wrote.
+	composed := key + strings.TrimSpace(value+" -test")
+
+	out := make([]string, 0, len(env)+1)
+	if !found {
+		return append(append(out, env...), composed)
+	}
+
+	// Replaced IN THE FIRST ENTRY'S POSITION, and any further duplicate the
+	// parent carried is dropped: "exactly one" is the property R3.3 states.
+	replaced := false
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, key) {
+			out = append(out, kv)
+			continue
+		}
+		if !replaced {
+			out, replaced = append(out, composed), true
+		}
+	}
+	return out
 }
 
 // buildEnvAllows reports whether one variable NAME crosses into the build.
@@ -641,6 +741,12 @@ const (
 	phasePrepare
 	phaseConfigure
 	phaseCompile
+
+	// phaseInstall runs src_install, which assembles the package image under
+	// ${D}. It is the deepest phase this ladder invokes: qmerge is a different
+	// activity and is out permanently (S042-D2).
+	phaseInstall
+
 	phaseCount
 )
 
@@ -657,6 +763,8 @@ func (p buildPhase) String() string {
 		return "configure"
 	case phaseCompile:
 		return "compile"
+	case phaseInstall:
+		return "install"
 	default:
 		return "setup or unpack"
 	}
@@ -671,6 +779,11 @@ func (p buildPhase) String() string {
 // exactly the second invocation D4 exists to prevent.
 func deepestPhaseFor(d Depth) (buildPhase, bool) {
 	switch {
+	// FIRST, because the switch reads deepest-first: a case placed below
+	// `>= DepthCompile` is unreachable, and an install request would quietly
+	// receive a compile run.
+	case d >= DepthInstall:
+		return phaseInstall, true
 	case d >= DepthCompile:
 		return phaseCompile, true
 	case d >= DepthConfigure:
@@ -702,6 +815,8 @@ var phaseMarkers = []phaseMarker{
 	{markerDoneConfigure, phaseConfigure, true},
 	{markerStartCompile, phaseCompile, false},
 	{markerDoneCompile, phaseCompile, true},
+	{markerStartInstall, phaseInstall, false},
+	{markerDoneInstall, phaseInstall, true},
 }
 
 // matchPhaseMarker reads one transcript line as a phase marker, if it is one.
@@ -738,7 +853,12 @@ type phaseTrace struct {
 // belongs to. Nothing started resolves to phaseSetup, whose name covers setup
 // and unpack together because setup prints no marker to tell them apart.
 func (t phaseTrace) lastStarted() buildPhase {
-	for p := phaseCompile; p > phaseSetup; p-- {
+	// The bound is phaseCount-1, NOT the deepest phase spelled by name. It read
+	// `phaseCompile` until story 042 added a rung above it, at which point the
+	// loop would have stopped one phase short and attributed an install failure
+	// to compile. Deriving the ceiling from the enum is what keeps the next rung
+	// from re-introducing that silently.
+	for p := phaseCount - 1; p > phaseSetup; p-- {
 		if t.started[p] {
 			return p
 		}
@@ -799,6 +919,12 @@ type buildRun struct {
 	trace      phaseTrace
 	transcript string
 	runErr     error
+
+	// phase is the deepest phase THIS invocation asked for — what
+	// deepestPhaseFor resolved. `completed` needs it to know whether the child's
+	// exit status is evidence about a given phase or merely evidence that
+	// something after it went wrong.
+	phase buildPhase
 
 	// logNote is the sentence naming the retained log — or saying why there is
 	// none. It is computed once for the run, because one invocation produces one
@@ -902,13 +1028,27 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 
 // completed reports whether a phase finished successfully.
 //
-// compile is the exception and the exception is the rule R6 states: it is the
-// deepest phase a compile-depth request invokes, so the child's own EXIT STATUS
-// is the authority on it. Every shallower phase is judged by its marker instead,
+// compile is the exception and the exception is the rule R6 states: when it is
+// the deepest phase THIS invocation ran, the child's own EXIT STATUS is the
+// authority on it. Every shallower phase is judged by its marker instead,
 // because a zero exit at the end says nothing about which of the phases before
 // it ran.
+//
+// # Why the exception is scoped to r.phase and not to compile alone
+//
+// It read `if p == phaseCompile` while compile WAS the deepest phase any request
+// could invoke, so the two conditions were the same condition. Story 042 added
+// a rung above it and split them: on an install-depth run a dying src_install
+// makes runErr non-nil, and an unscoped exception would report the compile gate
+// FAILED for a phase whose own `>>> Source compiled.` marker is sitting in the
+// transcript — blaming compile for an install failure and sending the operator
+// to the wrong file.
+//
+// install is NOT given the same exception, and that is R2.4 rather than an
+// omission: a zero exit without `>>> Completed installing ` is a gate that could
+// not be derived, never a pass.
 func (r buildRun) completed(p buildPhase) bool {
-	if p == phaseCompile {
+	if p == phaseCompile && r.phase == phaseCompile {
 		return r.runErr == nil
 	}
 	return r.trace.completed[p]
@@ -934,8 +1074,25 @@ func (r buildRun) passReason(gate string) string {
 		return fmt.Sprintf("the configure phase completed for %s; a configure pass does not cover compilation, which this depth never ran", r.label.pv)
 
 	case GateCompile:
-		// R6.4.
+		// R6.4. STILL TRUE at compile depth, and deliberately unchanged by story
+		// 042: a compile-depth run does stop there. What 042 added is the
+		// sentence below, for the rung that does not.
 		return fmt.Sprintf("the compile phase completed for %s; a compile pass does not cover src_install, which this ladder deliberately stops short of", r.label.pv)
+
+	case GateInstall:
+		// S042-R2.2 and R2.3. Two omissions in one sentence, because they have
+		// DIFFERENT CAUSES and an operator reading a green should need neither
+		// the ladder's history nor its source to learn what the green bought:
+		// qmerge is out of this ladder permanently (D2), while src_test is a
+		// subtraction THIS GATE MADE for determinism (D3) — one the operator did
+		// not ask for, which is exactly why it is stated.
+		//
+		// It says "assembling the package image under ${D}" and never that
+		// anything was installed anywhere: src_install writes an image inside
+		// PORTAGE_TMPDIR and merges nothing onto any system.
+		return fmt.Sprintf("src_install completed for %s, assembling the package image under ${D}: a pass here does not "+
+			"cover qmerge, which stays out of this ladder, and src_test did not run because this gate disables it so the "+
+			"verdict is a fact about the candidate rather than about the host", r.label.pv)
 
 	default:
 		return fmt.Sprintf("the %s gate passed for %s", gate, r.label.pv)

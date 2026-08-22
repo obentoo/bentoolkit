@@ -2637,3 +2637,44 @@ func TestPlanStagedSweep_ClassifiesATreeLeftByARealDepthRunByItsRecordedOutcome(
 			"halves of this story are not joined (R4.1, R4.4)", staged, keptReason)
 	}
 }
+
+// TestDeepestPassedRung_InstallIsReachableOnTheStandalonePath is S042-R2.5 on
+// the entry point the story's plan did not name.
+//
+// There are TWO tables answering "how far did this get": gateRungs here, read by
+// deepestPassedRung for res.Depth, and gateDepths in the applier, read by
+// recordDepthReached. gateRungs' own comment says "Two entry points, one rule",
+// so keeping them in sync IS the documented rule — and a rung added to only one
+// of them makes `overlay validate --depth=install` report the depth reached as
+// "compile" on a passing install gate, while the apply path reports "install"
+// for the same bump.
+func TestDeepestPassedRung_InstallIsReachableOnTheStandalonePath(t *testing.T) {
+	passing := []GateResult{
+		{Gate: GateOptions, Outcome: OutcomePass},
+		{Gate: GatePatches, Outcome: OutcomePass},
+		{Gate: GateConfigure, Outcome: OutcomePass},
+		{Gate: GateCompile, Outcome: OutcomePass},
+		{Gate: GateInstall, Outcome: OutcomePass},
+	}
+	if got := deepestPassedRung(passing, DepthInstall); got != DepthInstall {
+		t.Errorf("deepestPassedRung(all passing, install) = %v, want install; a rung whose gate passed and which "+
+			"the run was asked for IS the reach, and gateRungs is the only place that can say so", got)
+	}
+
+	// PASS-ONLY. A failed install gate measured a failure, not a reach, and
+	// reading it as one would let a report claim a depth no gate ever proved.
+	failed := make([]GateResult, 0, len(passing))
+	failed = append(failed, passing[:len(passing)-1]...)
+	failed = append(failed, GateResult{Gate: GateInstall, Outcome: OutcomeFailed})
+	if got := deepestPassedRung(failed, DepthInstall); got != DepthCompile {
+		t.Errorf("deepestPassedRung(install FAILED, install) = %v, want compile — the deepest rung whose OWN gate "+
+			"passed", got)
+	}
+
+	// And the entry must not steal a shallower request: never deeper than what
+	// was asked for.
+	if got := deepestPassedRung(passing, DepthCompile); got != DepthCompile {
+		t.Errorf("deepestPassedRung(all passing, compile) = %v, want compile; a gate that ran deeper than the "+
+			"request cannot raise the reach above it", got)
+	}
+}

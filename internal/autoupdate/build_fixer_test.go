@@ -31,6 +31,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
 // TestBuildFixAllowedTools_HasNoShellAndNoWrite is D7, and it is the assertion
@@ -276,6 +278,20 @@ const (
 		"cc: error: unable to write output: No space left on device\n" +
 		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase):\n"
 
+	installFailsOutOfDisk = cleanCompile +
+		">>> Install media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/work/image\n" +
+		"cp: error writing '/var/tmp/portage/work/image/usr/lib/libgstqt6.so': No space left on device\n" +
+		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (install phase):\n"
+
+	installFailsOnTheEbuild = cleanCompile +
+		">>> Install media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/work/image\n" +
+		"!!! ERROR: newins: /var/tmp/portage/work/src/README.md does not exist\n" +
+		"ERROR: media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (install phase):\n"
+
+	cleanInstall = cleanCompile +
+		">>> Install media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/work/image\n" +
+		">>> Completed installing media-plugins/gst-plugins-qt6-1.29.2 into /var/tmp/portage/work/image\n"
+
 	cleanCompile = ">>> Source unpacked in /var/tmp/portage/work\n" +
 		">>> Preparing source in /var/tmp/portage/work/src ...\n" +
 		">>> Source prepared.\n" +
@@ -425,7 +441,10 @@ func TestBuildFixer_TheSameGateIsRerun(t *testing.T) {
 // phaseOf returns the deepest ebuild phase named in an argv string. It is a test
 // helper and deliberately dumb: the phases are a closed set.
 func phaseOf(argv string) string {
-	for _, phase := range []string{"compile", "configure", "prepare", "unpack"} {
+	// install FIRST: the list is read deepest-first, and a phase missing from it
+	// makes phaseOf answer "" for both argvs — so a test comparing them would
+	// pass while comparing nothing. The set is closed but it is not frozen.
+	for _, phase := range []string{"install", "compile", "configure", "prepare", "unpack"} {
 		if strings.Contains(argv, phase) {
 			return phase
 		}
@@ -451,5 +470,87 @@ func TestBuildFixer_NoFixerWiredKeepsTheFailFastBehaviour(t *testing.T) {
 	}
 	if h.runs != 1 {
 		t.Errorf("the build child ran %d time(s) with no fixer wired; there is nothing to re-run", h.runs)
+	}
+}
+
+// TestBuildFixer_InstallMachineFaultNeverReachesTheModel is S042-R4.3.
+//
+// The refusal lives in the SHARED repair path, so the new rung inherits it
+// without an edit — and that is exactly the kind of inherited protection a later
+// refactor of that path drops without any test noticing. It is asserted here on
+// the FIXER DOUBLE'S CALL COUNT rather than on the returned error alone: a
+// refusal that still paid for the agent looks identical from the outside.
+func TestBuildFixer_InstallMachineFaultNeverReachesTheModel(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "should never be called"}}
+	h := buildFixFixture(t, spy, buildRun{output: installFailsOutOfDisk, err: errors.New("exit status 1")})
+	WithApplierDepth(validate.DepthInstall)(h.applier)
+
+	// Apply's second argument is FALSE, and that is load-bearing rather than
+	// incidental. `true` selects the PRIVILEGED --compile gate, which is
+	// mutually exclusive with the depth gates (applier.go:1046) and has a repair
+	// loop of its own (repairBuildAndRerun). Every other test in this file
+	// passes true and therefore exercises that other loop; the install rung
+	// lives on the depth path, whose repair loop is repairBuildGatesAndRerun —
+	// the one gateForDepth is read by.
+	result, _ := h.applier.Apply(h.pkg, false)
+
+	if len(spy.calls) != 0 {
+		t.Errorf("the fixer was invoked %d time(s) for an install that ran the device out of space; a machine "+
+			"fault is never handed to a model, and the agent's only available repair would be to rewrite an "+
+			"ebuild that is fine (R4.3)", len(spy.calls))
+	}
+	if result.Success {
+		t.Error("a build whose src_install filled the device reported success")
+	}
+}
+
+// TestBuildFixer_InstallFailureIsHandedToTheModelAsInstall is S042-R4.1 and
+// R4.2 — the positive case, without which the refusal above could be satisfied
+// by never invoking the fixer at all.
+//
+// It pins the GATE NAME and the RE-RUN PHASE together. A fixer told to repair
+// one phase must not be graded by a shallower one: re-running compile after
+// repairing src_install would clear the failure with a green that says nothing
+// about it.
+func TestBuildFixer_InstallFailureIsHandedToTheModelAsInstall(t *testing.T) {
+	spy := &buildFixSpy{result: BuildFixResult{Summary: "dropped the doins of the renamed README"}}
+	h := buildFixFixture(t, spy,
+		buildRun{output: installFailsOnTheEbuild, err: errors.New("exit status 1")},
+		buildRun{output: cleanInstall}, // the authoritative re-run succeeds
+	)
+	WithApplierDepth(validate.DepthInstall)(h.applier)
+
+	// Apply's second argument is FALSE, and that is load-bearing rather than
+	// incidental. `true` selects the PRIVILEGED --compile gate, which is
+	// mutually exclusive with the depth gates (applier.go:1046) and has a repair
+	// loop of its own (repairBuildAndRerun). Every other test in this file
+	// passes true and therefore exercises that other loop; the install rung
+	// lives on the depth path, whose repair loop is repairBuildGatesAndRerun —
+	// the one gateForDepth is read by.
+	result, _ := h.applier.Apply(h.pkg, false)
+
+	if len(spy.calls) != 1 {
+		t.Fatalf("the fixer was invoked %d time(s) for an install failure, want exactly 1 — one class of failure "+
+			"must not be silently exempt from the capability the operator paid for (R4.1)", len(spy.calls))
+	}
+	if got := spy.calls[0].Gate; got != validate.GateInstall {
+		t.Errorf("the fix request names gate %q, want %q; gateForDepth is what tells the agent WHICH phase to "+
+			"repair", got, validate.GateInstall)
+	}
+
+	if len(h.argv) < 2 {
+		t.Fatalf("only %d build invocation(s) were recorded; one failing run plus one authoritative re-run is 2", len(h.argv))
+	}
+	first, second := strings.Join(h.argv[0], " "), strings.Join(h.argv[1], " ")
+	if phaseOf(first) != "install" {
+		t.Errorf("the first invocation ran phase %q, want install — the fixture did not reach the rung under test", phaseOf(first))
+	}
+	if phaseOf(second) != phaseOf(first) {
+		t.Errorf("the re-run ran phase %q after a failure in phase %q; the SAME phase must decide (R4.2)\nfirst:  %s\nsecond: %s",
+			phaseOf(second), phaseOf(first), first, second)
+	}
+
+	if !result.Success {
+		t.Errorf("the authoritative re-run of the install gate succeeded and the apply still failed: %v", result.Error)
 	}
 }

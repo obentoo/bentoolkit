@@ -698,6 +698,7 @@ var buildGates = map[Depth]string{
 	DepthPatches:   GatePatches,
 	DepthConfigure: GateConfigure,
 	DepthCompile:   GateCompile,
+	DepthInstall:   GateInstall,
 }
 
 // SkippedGates reports one SKIPPED gate, carrying reason, for every build gate

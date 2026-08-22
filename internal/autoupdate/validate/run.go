@@ -40,8 +40,8 @@ type Options struct {
 	// every ebuild in the overlay.
 	Selector string
 	// Depth is how far up the ladder this run goes, spelled the way `--depth`
-	// and the config key spell it: none, options, patches, configure or
-	// compile, each including every rung before it (R2, R11.1).
+	// and the config key spell it: none, options, patches, configure, compile
+	// or install, each including every rung before it (R2, R11.1).
 	//
 	// EMPTY MEANS "options", AND THAT IS THE WHOLE COMPATIBILITY PROMISE
 	// (R11.3). Every caller written before the ladder existed leaves this field
@@ -1594,6 +1594,7 @@ var gateRungs = map[string]Depth{
 	GatePatches:   DepthPatches,
 	GateConfigure: DepthConfigure,
 	GateCompile:   DepthCompile,
+	GateInstall:   DepthInstall,
 }
 
 // deepestPassedRung answers "how far did this get": the deepest rung whose own

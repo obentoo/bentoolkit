@@ -2377,3 +2377,74 @@ func TestValidateConfig_OverrideWithoutAReasonIsInvalidAndNamesThePackage(t *tes
 		t.Errorf("one invalid override discarded the valid ones (gst depth = %q)", got)
 	}
 }
+
+// TestValidateConfig_InstallIsAcceptedAndTheShippedDefaultsDidNotMove is
+// S042-R1.4 and R5.1 in one test, because they are two halves of one promise:
+// the rung became REACHABLE from configuration, and nothing became more
+// expensive for an operator who did not ask for it.
+//
+// HONESTY NOTE on the second half: it is a PIN, not a test-first proof.
+// ValidateDepths holds strings and this package never validated them —
+// ParseDepth is the validator, and the import runs the other way — so "install"
+// round-tripped through the config layer before story 042 as happily as any
+// other typo. What story 042 changed is that ParseDepth now ANSWERS it, which is
+// asserted in the validate package (TestParseDepth_InstallIsARung). What this
+// pins is that the two layers agree on the spelling and that the defaults stayed
+// where they were.
+func TestValidateConfig_InstallIsAcceptedAndTheShippedDefaultsDidNotMove(t *testing.T) {
+	shipped := []struct{ class, want string }{
+		{"revision", "options"},
+		{"patch", "options"},
+		{"series", "configure"},
+		{"major", "configure"},
+	}
+
+	t.Run("no default moved", func(t *testing.T) {
+		cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML)
+		v := &cfg.Autoupdate.Validate
+
+		for _, tt := range shipped {
+			if got := v.GetDepthForClass(tt.class); got != tt.want {
+				t.Errorf("GetDepthForClass(%q) = %q, want %q — adding a rung is a capability; promoting a "+
+					"default is a cost decision belonging to whoever pays for the hours, and a binary upgrade "+
+					"must not make yesterday's sweep more expensive than the operator agreed to (R1.4)",
+					tt.class, got, tt.want)
+			}
+			if got := v.GetDepthForClass(tt.class); got == "install" {
+				t.Errorf("class %q now defaults to install; no class defaults to a rung that builds and installs", tt.class)
+			}
+		}
+	})
+
+	t.Run("install is accepted for every class key and for a package override", func(t *testing.T) {
+		cfg, _ := writeValidateConfig(t, minimalValidateConfigYAML+
+			"autoupdate:\n"+
+			"  validate:\n"+
+			"    depths:\n"+
+			"      revision: install\n"+
+			"      patch: install\n"+
+			"      series: install\n"+
+			"      major: install\n"+
+			"    packages:\n"+
+			"      media-plugins/gst-plugins-qt6:\n"+
+			"        depth: install\n"+
+			"        reason: this one assembles differently on every series\n")
+		v := &cfg.Autoupdate.Validate
+
+		for _, tt := range shipped {
+			if got := v.GetDepthForClass(tt.class); got != "install" {
+				t.Errorf("GetDepthForClass(%q) = %q after an explicit `%s: install`; the rung must be reachable "+
+					"from every per-class key (R5.1)", tt.class, got, tt.class)
+			}
+		}
+
+		override, ok := v.Packages["media-plugins/gst-plugins-qt6"]
+		if !ok {
+			t.Fatal("the per-package override was not read at all")
+		}
+		if override.Depth != "install" {
+			t.Errorf("the per-package override carries depth %q, want install; R5.1 says WHEREVER a depth is "+
+				"configured, and a per-package override is one of those places", override.Depth)
+		}
+	})
+}

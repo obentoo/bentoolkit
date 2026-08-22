@@ -22,11 +22,13 @@ import (
 // the constants does not rename anything — it silently changes which validation
 // a bump gets.
 //
-// INSTALL IS DELIBERATELY ABSENT. The ladder stops at DepthCompile because
-// src_install is out of scope for this story, not because anybody forgot it.
-// R6.4 makes a compile pass state that src_install went uncovered, which names
-// the gap without building a gate for it; adding the rung is a story of its own,
-// not a parser change.
+// QMERGE IS DELIBERATELY ABSENT, AND ALWAYS WILL BE. The ladder stops at
+// DepthInstall, which assembles the package IMAGE under ${D} inside
+// PORTAGE_TMPDIR. The phase that touches the running system is qmerge, and it is
+// not a deeper rung of this ladder — it is a different activity. This ladder
+// answers "does this bump still hold together"; installing a package onto the
+// host answers "do I want this version", which is the package manager's question
+// and not a validator's (S042-D2).
 type Depth int
 
 const (
@@ -52,16 +54,32 @@ const (
 	// error. It includes DepthPatches, and therefore DepthOptions.
 	DepthConfigure
 
-	// DepthCompile additionally compiles the sources — the deepest rung and the
-	// most expensive. It includes DepthConfigure, and therefore everything
-	// below it. It stops short of src_install: see the note on Depth.
+	// DepthCompile additionally compiles the sources. It includes
+	// DepthConfigure, and therefore everything below it. It stops short of
+	// src_install, and a compile pass SAYS so — the rung above is where that
+	// phase runs.
 	DepthCompile
+
+	// DepthInstall additionally runs src_install, which assembles the package
+	// image under ${D}: the phase where a `doins` of a file upstream renamed
+	// dies, where an `emake DESTDIR="${D}" install` rule that stopped working
+	// surfaces, and where most of Portage's QA notices are produced. It is the
+	// deepest rung, and it includes DepthCompile and therefore everything below
+	// it.
+	//
+	// It costs a compile plus src_install, not two compiles: the phases cascade
+	// inside a single `ebuild` invocation (S042-D4).
+	//
+	// The gate additionally disables src_test, which runs between compile and
+	// install, so that the verdict is a fact about the CANDIDATE rather than
+	// about the host's FEATURES (S042-D3). A pass states both omissions.
+	DepthInstall
 )
 
 // depthLadder is the whole ordered set, shallowest first. ParseDepth and the
 // error it returns both read it, so a new rung is added in exactly one place and
 // cannot end up parseable but unlisted.
-var depthLadder = []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, DepthCompile}
+var depthLadder = []Depth{DepthNone, DepthOptions, DepthPatches, DepthConfigure, DepthCompile, DepthInstall}
 
 // ErrUnknownDepth reports that a depth name came from a flag or a config key and
 // does not name a rung of the ladder.
@@ -87,6 +105,8 @@ func (d Depth) String() string {
 		return "configure"
 	case DepthCompile:
 		return "compile"
+	case DepthInstall:
+		return "install"
 	default:
 		return "Depth(" + strconv.Itoa(int(d)) + ")"
 	}

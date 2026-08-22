@@ -643,12 +643,44 @@ func TestRequiresSerialApply_AnyBuildDepthSerialises(t *testing.T) {
 		{validate.DepthPatches, true, "unpacks a tarball and runs src_prepare"},
 		{validate.DepthConfigure, true, "60 MB under PORTAGE_TMPDIR for one gst configure, measured"},
 		{validate.DepthCompile, true, "the rule --compile already follows"},
+		{validate.DepthInstall, true, "src_install writes a whole package image under PORTAGE_TMPDIR (S042-R4.4)"},
 	}
 
 	for _, tt := range tests {
 		if got := RequiresSerialApply(tt.depth); got != tt.want {
 			t.Errorf("RequiresSerialApply(%v) = %v, want %v — %s", tt.depth, got, tt.want, tt.why)
 		}
+	}
+
+	// S042-R4.4. RequiresSerialApply answers install correctly BY ARITHMETIC
+	// ACCIDENT — `d > DepthOptions` happens to cover every rung ever added
+	// above it — and a property that holds by accident and is asserted nowhere
+	// is a property the next refactor of that predicate removes in silence. So
+	// the table is checked for COMPLETENESS against the ladder, not just for
+	// the rows somebody remembered to write.
+	//
+	// The ladder is enumerated rather than retyped: depthLadder is unexported,
+	// and Depth.String() answering "Depth(N)" for a value that names no rung is
+	// the only signal available from outside the validate package. The bound is
+	// a guard against that contract changing, not an expected limit.
+	covered := make(map[validate.Depth]bool, len(tests))
+	for _, tt := range tests {
+		covered[tt.depth] = true
+	}
+	rungs := 0
+	for d := validate.DepthNone; int(d) < 32; d++ {
+		if strings.HasPrefix(d.String(), "Depth(") {
+			break
+		}
+		rungs++
+		if !covered[d] {
+			t.Errorf("the ladder holds %v and this table does not name it; a rung added without revisiting "+
+				"concurrency is a rung that fails a production sweep instead of a test", d)
+		}
+	}
+	if rungs < len(tests) {
+		t.Errorf("enumerated %d rungs but the table names %d; Depth.String()'s unknown-value form must have "+
+			"changed, and this completeness check is no longer checking anything", rungs, len(tests))
 	}
 }
 
@@ -1038,5 +1070,67 @@ func TestPublishedDistNames_TheApplierSideSiblingIsUnchanged(t *testing.T) {
 	if !strings.Contains(err.Error(), "reading the published Manifest of "+pkg) {
 		t.Errorf("the sentence changed: %q\nstory 039's R5.3 kept it byte-identical and nothing in story 040 "+
 			"asks this seam to change at all", err.Error())
+	}
+}
+
+// TestGateForDepth_InstallNamesTheInstallGate is S042-R4.1, and it is asserted
+// over the WHOLE ladder rather than on the new rung alone.
+//
+// gateForDepth picks the deepest gate at or below the depth, so a wrong entry
+// does not fail loudly — it STEALS a shallower depth's gate, and the fixer is
+// then told to repair one phase while the authoritative re-run grades a
+// different one. That is a green which proves nothing about the failure it
+// claims to have repaired.
+func TestGateForDepth_InstallNamesTheInstallGate(t *testing.T) {
+	for _, tt := range []struct {
+		depth validate.Depth
+		want  string
+	}{
+		{validate.DepthPatches, validate.GatePatches},
+		{validate.DepthConfigure, validate.GateConfigure},
+		{validate.DepthCompile, validate.GateCompile},
+		{validate.DepthInstall, validate.GateInstall},
+	} {
+		if got := gateForDepth(tt.depth); got != tt.want {
+			t.Errorf("gateForDepth(%v) = %q, want %q — the gate NAMED to the fixer and the gate the authoritative "+
+				"re-run decides on are read from this one table and cannot be allowed to drift", tt.depth, got, tt.want)
+		}
+	}
+}
+
+// TestRecordDepthReached_APassingInstallGateRecordsInstall is S042-R2.5 on the
+// apply path. Its twin on the standalone path is
+// TestDeepestPassedRung_InstallIsReachableOnTheStandalonePath in the validate
+// package — two entry points, one rule, and both are asserted because a rung
+// added to only one table makes the same bump report two different reaches.
+func TestRecordDepthReached_APassingInstallGateRecordsInstall(t *testing.T) {
+	applier := &Applier{}
+
+	passing := []validate.GateResult{
+		{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+		{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+		{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+		{Gate: validate.GateCompile, Outcome: validate.OutcomePass},
+		{Gate: validate.GateInstall, Outcome: validate.OutcomePass},
+	}
+
+	var reached ApplyResult
+	applier.recordDepthReached(&reached, passing, validate.DepthInstall)
+	if reached.DepthReached != "install" {
+		t.Errorf("DepthReached = %q, want %q — a passing install gate IS the evidence the install rung was reached",
+			reached.DepthReached, "install")
+	}
+
+	// PASS-ONLY. A FAILED gate measured a failure, not a reach: recording it
+	// would let a report claim a depth no gate ever proved.
+	failed := make([]validate.GateResult, 0, len(passing))
+	failed = append(failed, passing[:len(passing)-1]...)
+	failed = append(failed, validate.GateResult{Gate: validate.GateInstall, Outcome: validate.OutcomeFailed})
+
+	var notReached ApplyResult
+	applier.recordDepthReached(&notReached, failed, validate.DepthInstall)
+	if notReached.DepthReached == "install" {
+		t.Errorf("DepthReached = %q for a FAILED install gate; the deepest rung whose OWN gate passed is compile",
+			notReached.DepthReached)
 	}
 }
