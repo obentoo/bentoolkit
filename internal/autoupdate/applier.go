@@ -2335,6 +2335,32 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	distdir := a.staticGateDistdir(cand)
 	assignment, enforced := privilegedDistdirArgs(privTool, distdir)
 
+	// The `portage` group is opened HERE and not at the moment either directory
+	// was created, because this is the only gate that escalates — and escalating
+	// is what makes Portage drop to uid `portage` to read them (portage_access.go
+	// carries the measurement). Doing it now also catches whatever the manifest
+	// step and the build fixer wrote in between: a repair that lands a fresh 0600
+	// ebuild moments before the re-run would otherwise reintroduce the very
+	// failure this fixes, on the second attempt only.
+	//
+	// Only what this run OWNS is touched: the staged tree, the directories
+	// leading down to it, and the private distdir this run's manifest step
+	// filled. A published overlay is not ours to re-permission, and neither is
+	// the host's own DISTDIR — which is already portage's, being where Portage
+	// keeps its archives.
+	if err := a.grantCompileAccess(cand); err != nil {
+		// No transcript, and that is the honest shape of it: no child ran, so
+		// there is nothing a build said. The attribution gate reads an empty
+		// transcript as "src_prepare never started", which is exactly right —
+		// this is the host, and no fixer will be invoked to edit an ebuild that
+		// was never the problem.
+		return buildAttempt{
+			err:             fmt.Errorf("%w: %v", ErrCompileFailed, err),
+			resolvedDistdir: distdir,
+			enforcedDistdir: enforced,
+		}
+	}
+
 	// sudo [DISTDIR=<dir>] ebuild <path> clean compile, bound to the applier's
 	// parent context so a SIGINT or deadline kills the spawned process. The
 	// assignment PRECEDES the command, because sudo reads the first non-assignment
