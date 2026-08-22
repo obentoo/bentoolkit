@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-22
+
 ### Added
 - **`--depth=install` — the ladder gains a rung that validates `src_install`.**
   The staged validation ladder proved that a bumped package builds; it stopped
