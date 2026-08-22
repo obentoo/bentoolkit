@@ -54,6 +54,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yesterday's sweep more expensive than the operator agreed to. `install` is
   reached only by asking for it.
 
+## [0.26.1] - 2026-08-22
+
+### Fixed
+- **A privileged compile gate no longer dies before it reads the ebuild.** The
+  gate escalates (`sudo ebuild <path> clean compile`), and running as root is
+  exactly what makes Portage honour `FEATURES="userpriv userfetch"` — from that
+  point the repository is read, and distfiles are fetched, by uid `portage`.
+  Everything the gate handed it was built for the invoking operator alone: a
+  staged tree at 0750/0600 and a private distdir at `os.MkdirTemp`'s 0700. uid
+  `portage` could not traverse the staged tree at all, so every bump reaching a
+  privileged compile died identically on
+
+      !!! Permission Denied: <staged>/profiles/thirdpartymirrors
+
+  before unpack, before `src_prepare`, before anything about the candidate had
+  been exercised. The attribution gate called it the host's fault, correctly,
+  and the bump still could not be applied.
+
+  The directories this run OWNS are now opened to the `portage` group
+  immediately before the privileged child is spawned: the staged tree, the
+  directories leading down to it from the staging root, and the private distdir.
+  Opening the tree without opening the path to it would have fixed nothing — uid
+  `portage` is refused at the staging root and never reaches the tree whose
+  modes were just corrected.
+
+  The group, and not a wider mode: a candidate nobody has reviewed, plus
+  whatever a fixer wrote into it, still does not belong in a world-readable
+  directory, so group bits MIRROR the owner's and never exceed them. The staged
+  tree is opened for reading only; the distdir also for writing, because that is
+  what a fetch under `userfetch` does. Ancestors get traversal alone, never read.
+  The published overlay and the host's own DISTDIR are deliberately untouched —
+  neither is this gate's to re-permission.
+
+  Doing it at spawn time rather than at creation time is what also covers the
+  manifest step and the build fixer: a repair landing a fresh 0600 ebuild moments
+  before the re-run would otherwise have reintroduced the same failure on the
+  second attempt only. A host with no `portage` group is a no-op.
+
 ## [0.26.0] - 2026-08-20
 
 ### Added
