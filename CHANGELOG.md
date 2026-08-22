@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-08-22
+
 ### Fixed
 - **A privileged compile gate no longer dies before it reads the ebuild.** The
   gate escalates (`sudo ebuild <path> clean compile`), and running as root is
