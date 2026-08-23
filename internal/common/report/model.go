@@ -122,6 +122,23 @@ type Report struct {
 	// that turns a short result list into a stated gap rather than a silent
 	// one.
 	NotEvaluated int `json:"not_evaluated"`
+	// DistfilesToFetch is how many packages this run has to hold a tarball
+	// for: an upper bound per package, not a download count, since a distfile
+	// the host already holds is not fetched again and a package with several
+	// SRC_URI entries still counts once.
+	//
+	// It is the ONE run-level fact that could not be recomputed from anything
+	// else here. It means "the packages this run takes past the shallowest
+	// depth", and the model deliberately does not know the depth ladder's
+	// ordering — Depth is a string spelled the way the flag spells it, with no
+	// notion of which rung is deeper. So a renderer, or a reader of the JSON
+	// export, cannot derive it from Plan: the producer must carry it across or
+	// the number is lost.
+	//
+	// It matters because it is the figure an operator decides on. Every depth
+	// above the shallowest reads the new archive, so on a metered connection
+	// or a laptop this is what makes the answer no.
+	DistfilesToFetch int `json:"distfiles_to_fetch"`
 }
 
 // Reconciles reports whether the tally accounts for every planned package

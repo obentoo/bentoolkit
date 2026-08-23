@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -127,7 +128,7 @@ func runManifest(cmd *cobra.Command, args []string) {
 	// race with its rendering.
 	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
 
-	reporter, finishUI := chooseManifestReporter(manifestFlags.DryRun, runCtx, cancel)
+	reporter, finishUI := chooseManifestReporter(ctx.Config, manifestFlags.DryRun, runCtx, cancel)
 
 	opts := &overlay.ManifestOptions{
 		Keep:           manifestFlags.Keep,
@@ -160,15 +161,23 @@ func runManifest(cmd *cobra.Command, args []string) {
 }
 
 // chooseManifestReporter picks the reporter for the current run: the live TUI
-// when interactive (AD7 gate via tui.Enabled), a plain ANSI-free reporter
-// otherwise. Dry-run skips the reporter entirely since there are no pkgdev
-// invocations to track. The returned func tears the UI down and must be called
-// before any post-run logging or exit; for the non-TUI paths it is a no-op.
-func chooseManifestReporter(dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
+// when the resolved UI mode draws one, a plain ANSI-free reporter otherwise.
+//
+// The gate is manifestUsesTUI (S044-R3.8), NOT tui.Enabled. This command used
+// to decide for itself; it now inherits the same ui.mode / BENTOO_UI answer
+// `autoupdate` resolves, so one setting governs both commands. For an operator
+// who configured no ui.mode the answer is unchanged — inline on a terminal,
+// plain off one, and plain under any of the three opt-outs, which is exactly
+// what tui.Enabled returned here before (R3.7).
+//
+// Dry-run skips the reporter entirely since there are no pkgdev invocations to
+// track. The returned func tears the UI down and must be called before any
+// post-run logging or exit; for the non-TUI paths it is a no-op.
+func chooseManifestReporter(cfg *config.Config, dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
 	if dryRun {
 		return tui.Noop(), func() {}
 	}
-	if tui.Enabled(tui.Options{}) {
+	if manifestUsesTUI(cfg) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
 		return r, func() { prog.Stop(); _ = prog.Wait() }
