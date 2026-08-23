@@ -567,3 +567,268 @@ func TestSkipReason_NeverReportsASkipWithoutAReason(t *testing.T) {
 		}
 	})
 }
+
+// --- story 043, sub-task 4.2 ------------------------------------------------
+//
+// THE ANSWER, RECORDED SO THE NEXT READER DOES NOT RE-DERIVE IT: the tally does
+// NOT feed this command's exit code, and cannot, because nothing reads it.
+//
+// runValidationCheck returns a validationTally. Its ONE production caller
+// (overlay_autoupdate_check.go:474) discards the return value, and the whole
+// check path contains no call to osExit — verified by grep over
+// overlay_autoupdate_check.go, which has none. The counts are printed by
+// printValidationTally and go nowhere else. So `bentoo overlay autoupdate
+// --check` exits 0 whether it proved everything or nothing.
+//
+// That is what closes the design's open risk ("Changing the check's outcome may
+// change its exit code") by MEASUREMENT rather than by assumption, and it is why
+// sub-task 4.1 is free to move packages between the three columns.
+//
+// This test is the pin. It is written and passing BEFORE 4.1 lands, deliberately:
+// written afterwards it would pin the NEW behaviour and prove nothing about
+// whether the change moved the exit code.
+
+// TestCheckExitCodeUnchanged is that pin. A run containing one proved, one
+// failed and one not-validated package must reach its end without the process
+// being exited — including the FAILED one, which is the row a future author is
+// most likely to reach for osExit over.
+func TestCheckExitCodeUnchanged(t *testing.T) {
+	var exits []int
+	origExit := osExit
+	osExit = func(code int) { exits = append(exits, code) }
+	t.Cleanup(func() { osExit = origExit })
+
+	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
+
+	outcomes := map[string]validate.Outcome{
+		"media-plugins/gst-plugins-qt6": validate.OutcomeFailed,
+		"dev-libs/quiet":                validate.OutcomePass,
+		"app-editors/vscode-bin":        validate.OutcomeSkipped,
+	}
+
+	var tally validationTally
+	_ = captureStdout(t, func() {
+		tally = runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
+			outcome := outcomes[entry.Package]
+			res := validate.EbuildResult{
+				Package: entry.Package,
+				Version: entry.Version,
+				Depth:   entry.Depth,
+				Gates:   []validate.GateResult{{Gate: validate.GateOptions, Outcome: outcome, Reason: "fixture"}},
+			}
+			if outcome == validate.OutcomeFailed {
+				res.Gates[0].Findings = []validate.Finding{{
+					Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is undeclared upstream",
+				}}
+			}
+			return res
+		})
+	})
+
+	if len(exits) != 0 {
+		t.Errorf("the check exited with %v; today it exits 0 whatever the tally says, and a change that moves "+
+			"the exit code is a CI-visible behaviour change needing its own Unchanged-Behavior assertion", exits)
+	}
+
+	// The fixture has to have exercised all three columns, or the assertion above
+	// is about a run that never met the interesting case.
+	if tally.Proved+tally.Errored+tally.Skipped != len(plan.Entries) {
+		t.Fatalf("the tally accounts for %d of %d planned packages; this test cannot fail for its own reason",
+			tally.Proved+tally.Errored+tally.Skipped, len(plan.Entries))
+	}
+	if tally.Errored == 0 {
+		t.Fatal("no package errored in this run, so the row most likely to justify a non-zero exit was never reached")
+	}
+}
+
+// --- story 043, sub-task 4.1 ------------------------------------------------
+//
+// APPENDED to this existing file, not replacing it: the tests above are the
+// check path's own suite and stay exactly as they are.
+
+// R4.1 + R4.4 — dev-libs/icu-compat, verbatim from the 2026-08-22 run: two
+// SKIPPED gates and two PASS, one of which is the depth the policy selected.
+// The old rule collapsed all four into "not validated" and then printed the
+// FIRST skip reason, so the operator was told about a missing distfile and
+// never told the package had configured.
+func TestCheckOutcomeNamesTheDepthReached(t *testing.T) {
+	res := validate.EbuildResult{
+		Depth: "configure",
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped, Reason: "no distfile named by the Manifest is present"},
+			{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: "no archive on disk for the previous version"},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+		},
+	}
+	entry := validationPlanEntry{Package: "dev-libs/icu-compat", Version: "78.3", Depth: "configure"}
+
+	outcome, detail := checkOutcome(res, entry)
+	if outcome != validate.OutcomePass {
+		t.Errorf("outcome = %v, want PASS: the configure gate is the depth the policy selected and it passed", outcome)
+	}
+	if !contains(detail, "configure") || !contains(detail, "patches") {
+		t.Errorf("detail %q does not name the gates that passed (R4.4)", detail)
+	}
+}
+
+// R4.2 — nothing here relaxes failure. A FAILED gate outranks every PASS,
+// exactly as today.
+func TestCheckOutcomeStillFailsOnAFailedGate(t *testing.T) {
+	res := validate.EbuildResult{
+		Depth: "configure",
+		Gates: []validate.GateResult{
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomeFailed, Reason: "configure died"},
+		},
+	}
+	outcome, _ := checkOutcome(res, validationPlanEntry{Depth: "configure"})
+	if outcome != validate.OutcomeFailed {
+		t.Errorf("outcome = %v, want FAILED", outcome)
+	}
+}
+
+// R4.3 — the case the strict rule exists for is preserved: when the selected
+// depth's gate did not pass, nothing was proved and the reason is named. A
+// vacuous `patches` PASS must NOT be enough (this is why RC4-c was rejected).
+func TestCheckOutcomeWithNoDepthGatePass(t *testing.T) {
+	cases := []struct {
+		name  string
+		gates []validate.GateResult
+	}{
+		{"all skipped", []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped, Reason: "binary record"},
+		}},
+		{"only a vacuous patches pass", []validate.GateResult{
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomeSkipped, Reason: "build system undetermined"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := validate.EbuildResult{Depth: "configure", Gates: tc.gates}
+			outcome, detail := checkOutcome(res, validationPlanEntry{Depth: "configure"})
+			if outcome == validate.OutcomePass {
+				t.Error("nothing measured the selected depth, so nothing was proved")
+			}
+			if detail == "" {
+				t.Error("a skip with no reason reads as a result (R4.3)")
+			}
+		})
+	}
+}
+
+// R4.2, Unchanged Behavior — an unparseable depth must fall through to
+// not-validated, never guess a depth to compare against.
+func TestCheckOutcomeWithUnparseableDepth(t *testing.T) {
+	res := validate.EbuildResult{
+		Depth: "",
+		Gates: []validate.GateResult{{Gate: validate.GatePatches, Outcome: validate.OutcomePass}},
+	}
+	if outcome, _ := checkOutcome(res, validationPlanEntry{Depth: "nonsense"}); outcome == validate.OutcomePass {
+		t.Error("a depth nobody could parse must not produce a proved verdict")
+	}
+}
+
+// Unchanged Behavior 6 — `bentoo overlay validate` shares WorstOutcome and is
+// deliberately left byte-identical, so the new rule must not have been smuggled
+// into it. The four gate sets below are the ones whose readings DIVERGE between
+// the two rules; if WorstOutcome ever agreed with checkOutcome on all of them,
+// one of the two had been changed to be the other.
+func TestWorstOutcomeIsUnchangedByTheCheckPathRule(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		gates []validate.GateResult
+		want  validate.Outcome
+	}{
+		{"the icu-compat shape: two skips outrank two passes", []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped, Reason: "no distfile"},
+			{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: "no archive"},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+		}, validate.OutcomeSkipped},
+		{"every deciding gate passed", []validate.GateResult{
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+		}, validate.OutcomePass},
+		{"a failure outranks everything", []validate.GateResult{
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomeFailed, Reason: "died"},
+		}, validate.OutcomeFailed},
+		{"no deciding gate at all", nil, validate.OutcomeSkipped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := validate.EbuildResult{Depth: "configure", Gates: tc.gates}
+			if got := res.WorstOutcome(); got != tc.want {
+				t.Errorf("WorstOutcome = %v, want %v — `overlay validate` consumes this and is out of scope (Unchanged Behavior 6)", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- orchestrator-authored, Run mode ----------------------------------------
+//
+// Two guards closing gaps the sub-task 4.1 mutation proof measured. Recorded in
+// .draft/deviations.yaml.
+
+// R4.2, Unchanged Behavior — the anti-guess guard, widened.
+//
+// TestCheckOutcomeWithUnparseableDepth above carries only a `patches` PASS, so a
+// mutant that GUESSES a depth is caught only when the guess resolves to
+// `patches`: guessing `configure` lands on a gate the fixture does not have, so
+// the verdict is not-validated anyway and the assertion is never reached. That
+// was measured, not suspected — mutating the fallback to guess DepthConfigure
+// left the suite green.
+//
+// A gate set holding a PASS at every rung a guess could name closes it: whatever
+// the mutant guesses, it finds a PASS, and only refusing to guess at all keeps
+// the verdict honest.
+func TestCheckOutcomeWithUnparseableDepthRefusesEveryGuess(t *testing.T) {
+	res := validate.EbuildResult{
+		Depth: "",
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+			{Gate: validate.GateInstall, Outcome: validate.OutcomePass},
+		},
+	}
+	outcome, detail := checkOutcome(res, validationPlanEntry{Depth: "nonsense"})
+	if outcome == validate.OutcomePass {
+		t.Errorf("a depth nobody could parse produced a proved verdict (%q); every rung passed here, "+
+			"so ANY guess finds a PASS and only refusing to guess keeps the answer honest", detail)
+	}
+	if detail == "" {
+		t.Error("a verdict with no reason reads as a result (R4.3)")
+	}
+}
+
+// R4.1 — the fallback ORDER, which nothing else pins.
+//
+// checkOutcome takes the selected depth from entry.Depth and falls back to
+// result.Depth only when the entry names none. The inverse order is circular:
+// result.Depth is the depth the run REACHED, so the gate for it passed by
+// definition and every result would read as proved — the exact over-report this
+// story exists to remove, arrived at from the other side.
+//
+// Both orders pass every other test in this file, because the only fixture that
+// exercises the fallback has result.Depth == "". This one separates them: the
+// plan asked for `compile`, the run only reached `patches`, and `patches` passed.
+// Read entry-first that is not validated; read result-first it is proved.
+func TestCheckOutcomePrefersThePlannedDepthOverTheDepthReached(t *testing.T) {
+	res := validate.EbuildResult{
+		Depth: "patches",
+		Gates: []validate.GateResult{
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomeSkipped, Reason: "the build did not get this far"},
+		},
+	}
+	outcome, detail := checkOutcome(res, validationPlanEntry{Package: "dev-libs/x", Version: "2.0", Depth: "compile"})
+	if outcome == validate.OutcomePass {
+		t.Errorf("a bump asked for `compile` that only reached `patches` reads as proved (%q); "+
+			"taking the depth from the RESULT is circular — the reached depth's gate passed by definition", detail)
+	}
+	if detail == "" {
+		t.Error("a verdict with no reason reads as a result (R4.3)")
+	}
+}

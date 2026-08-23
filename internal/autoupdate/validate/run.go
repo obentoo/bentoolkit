@@ -1617,6 +1617,32 @@ func deepestPassedRung(gates []GateResult, requested Depth) Depth {
 	return reached
 }
 
+// GateForDepth names the gate whose OWN pass proves a run reached rung d. It is
+// the other question gateRungs answers, read in the other direction, so the
+// mapping stays in one table.
+//
+// IT IS EXPORTED FOR THE CHECK PATH (S043-R4.1). `overlay autoupdate --check`
+// decides whether the depth the POLICY SELECTED was actually measured, which
+// takes the gate that stands for that rung; a table of its own in cmd/bentoo
+// would be a fourth spelling of this mapping, and the bug that produces is a
+// command reporting a rung the runner never proved.
+//
+// ok IS FALSE WHEN NO GATE PROVES d, which today means DepthNone and nothing
+// else. The applier asks a DIFFERENT question with a similar name — which gate a
+// repair should be aimed at (gateForDepth, applier_gates.go:863) — and falls
+// back to the patch gate there, because a repair always has a target. This one
+// must not: a depth-none bump ran no gate, and a fallback here would hand the
+// caller a gate whose pass would read as proof of a rung nobody climbed.
+func GateForDepth(d Depth) (string, bool) {
+	gate, best := "", DepthNone
+	for name, rung := range gateRungs {
+		if rung <= d && rung > best {
+			gate, best = name, rung
+		}
+	}
+	return gate, gate != ""
+}
+
 // buildDepthNotRunReason is the sentence every skipped build gate of a
 // standalone run carries: what stopped it, where its tree would have gone, and
 // the command that does run it.

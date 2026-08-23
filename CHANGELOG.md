@@ -32,6 +32,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`cmd/bentoo/overlay_autoupdate_markauto.go`).
 
 ### Fixed
+- **`--check` now names the depth a bump reached instead of its weakest gate.**
+  `dev-libs/icu-compat` ran its `configure` gate — the depth the policy selected
+  — and passed it, and passed `patches` too. The summary printed
+  `78.3 not validated (no distfile named by the Manifest is present …)`: the
+  operator was told about a missing distfile and never told the package had
+  configured. `WorstOutcome` returns PASS only when every deciding gate passed,
+  so one SKIPPED collapsed the result, and `skipReason` then printed the FIRST
+  skipped gate's reason.
+
+  The check path gains its own rule (`cmd/bentoo/overlay_autoupdate_check.go`),
+  applied in this order: any deciding gate FAILED wins; else the gate for the
+  depth the plan selected reporting PASS means proved at that depth; else not
+  validated, with the reason. Either way the gates that passed are named, so a
+  partial measurement is legible without opening the stage record. The summary
+  line and the tally now come from one evaluation rather than two, so they
+  cannot disagree.
+
+  `bentoo overlay validate` is deliberately untouched: `WorstOutcome`
+  (`internal/autoupdate/validate/report.go`) and `overlay_validate.go` are
+  byte-identical, and a guard pins `WorstOutcome`'s readings on exactly the gate
+  sets where the two rules diverge. There are now two definitions of proved in
+  this binary — the strict one for `overlay validate`, the depth-aware one for
+  `--check` — and both are labelled, which is what the old arrangement was not.
+
+  "At least one PASS and none FAILED" was considered and rejected: `patches`
+  passes vacuously when an ebuild has no patch, so a package nothing measured
+  would have read as proved. An unparseable depth falls through to not-validated
+  rather than guessing one, and the planned depth is preferred over the depth
+  reached — reading the reached depth would be circular, since its own gate
+  passed by definition.
+
+  The exit code is unchanged, and that was measured rather than assumed: the
+  tally's counts are printed and read by nothing, so no rearrangement of them
+  can move it. `validate.GateForDepth` is exported for the check path
+  (`internal/autoupdate/validate/run.go`), reading the table that was already
+  there.
+
 - **A build that cannot succeed on this host is diagnosed once, not once per
   run.** Two packages produced thirteen identical build logs over two days:
   `net-wireless/mt7927-dkms` wanting `/etc/kernel/keys/module-signing.key`

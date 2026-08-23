@@ -512,13 +512,20 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 		entry.ConfirmedDepth = confirmed.String()
 
 		result := run(entry)
-		reportValidationOutcome(entry, result, confirmed)
 
-		// Exactly one column per package. WorstOutcome answers SKIPPED for a
-		// result carrying no deciding gate at all, which is the honest answer:
-		// nothing was said about that bump, and "nothing" read as a pass is the
-		// defect this whole story exists to remove.
-		switch result.WorstOutcome() {
+		// ONE reading of the result, handed to the line AND to the column it is
+		// counted in. Reading it twice is what would let the summary print
+		// "proved at configure" beside a tally counting the same package as not
+		// validated — a contradiction worse than the one this rule removes.
+		outcome, detail := checkOutcome(result, entry)
+		reportValidationOutcome(entry, result, confirmed, outcome, detail)
+
+		// Exactly one column per package. checkOutcome answers SKIPPED for a
+		// result whose selected depth no gate measured, which is the honest
+		// answer: nothing was said about that bump at the depth it was planned
+		// at, and "nothing" read as a pass is the defect this whole story
+		// exists to remove.
+		switch outcome {
 		case validate.OutcomePass:
 			tally.Proved++
 		case validate.OutcomeFailed:
@@ -544,11 +551,19 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 // runner can hold there, and the line below names the raise and the ceiling so
 // the hold is never silent — a held bump the operator cannot see is just a
 // missing result.
-func reportValidationOutcome(entry validationPlanEntry, result validate.EbuildResult, confirmed validate.Depth) {
-	outcome := result.WorstOutcome()
+// THE VERDICT IS THE CALLER'S, not this function's. outcome and detail come from
+// checkOutcome, computed once by runValidationCheck and used both here and for
+// the tally, so the line and the column can never disagree about one package.
+func reportValidationOutcome(entry validationPlanEntry, result validate.EbuildResult, confirmed validate.Depth,
+	outcome validate.Outcome, detail string) {
 	switch outcome {
 	case validate.OutcomePass:
-		output.Success.Printf("  %-45s %s proved at %s\n", entry.Package, entry.Version, reportedDepth(result, entry))
+		// The depth is still the one the RUNNER reported (reportedDepth), not
+		// the one checkOutcome held it against: they are the same rung on the
+		// ordinary path, and where they differ the runner's is the number a
+		// gate actually stands behind. detail names which gates passed (R4.4),
+		// which is what makes a partial measurement legible on this line.
+		output.Success.Printf("  %-45s %s proved at %s (%s)\n", entry.Package, entry.Version, reportedDepth(result, entry), detail)
 	case validate.OutcomeFailed:
 		output.Error.Printf("  %-45s %s FAILED at %s\n", entry.Package, entry.Version, reportedDepth(result, entry))
 		for _, gate := range result.Gates {
@@ -557,7 +572,7 @@ func reportValidationOutcome(entry validationPlanEntry, result validate.EbuildRe
 			}
 		}
 	default:
-		output.Warning.Printf("  %-45s %s not validated (%s)\n", entry.Package, entry.Version, skipReason(result, entry))
+		output.Warning.Printf("  %-45s %s not validated (%s)\n", entry.Package, entry.Version, detail)
 	}
 
 	// R9.6. ParseDepth failing means the runner did not report a depth at all,
@@ -570,6 +585,126 @@ func reportValidationOutcome(entry validationPlanEntry, result validate.EbuildRe
 	output.Warning.Printf("      the reviewer raised this bump to %s, past the %s this run's plan confirmed.\n", actual, confirmed)
 	output.Info.Printf("      A raise past the confirmed depth is held at %s rather than spent unasked (R9.6); re-run with --yes to approve the deeper gates for the whole run.\n",
 		confirmed)
+}
+
+// checkOutcome is THE CHECK PATH'S definition of proved, and it is the second
+// one in this binary. Both are right, for different questions; having both
+// unlabelled is what produced the bug this replaces.
+//
+//   - validate.WorstOutcome is the STRICT rule: PASS only when EVERY deciding
+//     gate passed. `bentoo overlay validate` keeps it and must
+//     (overlay_validate.go, Unchanged Behavior 6) — that command sweeps a whole
+//     overlay, renders every gate's own outcome beside the headline, and its
+//     reader is auditing rather than pricing one bump, so a gate that measured
+//     nothing genuinely downgrades the reading.
+//   - checkOutcome is the DEPTH-AWARE rule, used HERE AND NOWHERE ELSE. `--check`
+//     runs each bump at the depth THE POLICY SELECTED for it, so the question it
+//     must answer is "did the run reach that depth" — and the shallower gates
+//     that could not run answer a question nobody asked.
+//
+// THE MEASURED CASE is dev-libs/icu-compat, 2026-08-22: options and review
+// SKIPPED for a missing distfile, patches and configure PASS, `configure` the
+// selected depth. The strict rule collapsed that to "not validated (no distfile
+// named by the Manifest is present...)", so the operator was told about a
+// tarball and never told the package configured.
+//
+// This is the existing second definition being NAMED rather than a third one
+// invented: the tree-reuse rule already reads "reported PASS and no gate that
+// decides FAILED" (validate/record.go:377).
+//
+// THE ORDER IS THE RULE (S043-D4), and each step is one of R4.1-R4.3:
+//
+//  1. any DECIDING gate FAILED wins, whatever else passed (R4.2).
+//  2. the gate for the SELECTED depth reporting PASS is proof of that depth,
+//     that gate and no other (R4.1). "at least one PASS and none FAILED" was
+//     considered and rejected (RC4-c): `patches` passes vacuously on an ebuild
+//     that carries no patches, so that rule would turn "nothing was measured"
+//     into "proved" — the same misreading, in the other direction.
+//  3. anything else is not validated, and NAMES why (R4.3).
+//
+// Both non-failing answers also name the gates that DID pass (R4.4), so a
+// partial measurement is legible without opening the stage record.
+func checkOutcome(res validate.EbuildResult, entry validationPlanEntry) (validate.Outcome, string) {
+	if failed := gatesReporting(res, validate.OutcomeFailed); len(failed) > 0 {
+		return validate.OutcomeFailed, "failed at " + strings.Join(failed, ", ")
+	}
+
+	passed := gatesReporting(res, validate.OutcomePass)
+
+	// The depth the POLICY selected, which is the PLAN entry's — not
+	// result.Depth, which is how far the run got. Holding a run against its own
+	// reach would be circular: the gate for the depth reached passed by
+	// definition, so every result would read as proved. result.Depth is the
+	// fallback for an entry that names no depth at all, the same two sources
+	// reportedDepth cascades over, in the order this question needs them.
+	selected := entry.Depth
+	if selected == "" {
+		selected = res.Depth
+	}
+
+	depth, depthErr := validate.ParseDepth(selected)
+	if depthErr == nil {
+		// ok is false when NO gate proves that rung, which today means depth
+		// `none`: a bump nothing ran for is not validated (R2.6), and there is
+		// no gate whose pass could say otherwise.
+		if gate, ok := validate.GateForDepth(depth); ok && reportedPass(res, gate) {
+			return validate.OutcomePass, "gates that passed: " + strings.Join(passed, ", ")
+		}
+	}
+
+	reason := skipReason(res, entry)
+	if depthErr != nil {
+		// FALLING THROUGH, NOT GUESSING. Substituting a plausible depth here
+		// would hold the run against a rung nobody selected, and the verdict
+		// would be about a number this binary invented rather than one the
+		// policy chose. The parse error is quoted because it names both the
+		// offender and the depths that exist.
+		reason = fmt.Sprintf("the depth this bump was planned at could not be read (%v), so no gate could be held against it; %s",
+			depthErr, reason)
+	}
+	return validate.OutcomeSkipped, withPasses(reason, passed)
+}
+
+// gatesReporting lists the DECIDING gates that answered `outcome`, in the order
+// the runner reported them.
+//
+// QA IS EXCLUDED, for the reason WorstOutcome and ExitCode exclude it (D8): the
+// QA gate skips on every ebuild of a host without pkgcheck, so letting it decide
+// would make the verdict a fact about the host rather than about the bump. It is
+// still rendered and still carries its own reason.
+func gatesReporting(res validate.EbuildResult, outcome validate.Outcome) []string {
+	var gates []string
+	for _, gate := range res.Gates {
+		if gate.Gate == validate.GateQA {
+			continue
+		}
+		if gate.Outcome == outcome {
+			gates = append(gates, gate.Gate)
+		}
+	}
+	return gates
+}
+
+// reportedPass answers whether the gate NAMED passed — the one question R4.1
+// turns on. A gate that is absent from the result answers false: an unreported
+// gate said nothing, and reading silence as a pass is this story's defect.
+func reportedPass(res validate.EbuildResult, gate string) bool {
+	for _, reported := range res.Gates {
+		if reported.Gate == gate && reported.Outcome == validate.OutcomePass {
+			return true
+		}
+	}
+	return false
+}
+
+// withPasses appends the gates that passed to a not-validated reason (R4.4).
+// A package can measure three rungs and still miss the one it was planned at,
+// and an operator who is only told what failed to run cannot see that.
+func withPasses(reason string, passed []string) string {
+	if len(passed) == 0 {
+		return reason
+	}
+	return reason + "; gates that passed: " + strings.Join(passed, ", ")
 }
 
 // reportedDepth is the depth the runner says it ran at, falling back to the
@@ -586,6 +721,12 @@ func reportedDepth(result validate.EbuildResult, entry validationPlanEntry) stri
 // skipReason is why a package produced no verdict. A skip ALWAYS carries a
 // reason — the gate's own where there is one, the plan's depth reason otherwise
 // — because a skipped package with no reason reads as a result.
+//
+// IT STILL OWNS THE CASCADE, it is just no longer printed directly: checkOutcome
+// calls it for the not-validated branch and appends the gates that DID pass
+// (R4.4). Keeping one definition of "why nothing was proved" is the point — a
+// second reason cascade grown inside checkOutcome would drift from this one, and
+// the drift would show up as two different explanations for one package.
 //
 // The last return is that promise kept rather than assumed. All three sources
 // are free-form strings nothing forces to be populated, so the cascade can run
