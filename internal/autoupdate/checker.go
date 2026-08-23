@@ -825,8 +825,10 @@ func (c *Checker) getCurrentVersion(pkg string) (string, error) {
 	return best.Version, nil
 }
 
-// DisableOrphans marks each package as disabled (enabled = false) and records
-// the checker as the origin of that disable (disabled_by = "auto"), both in the
+// DisableOrphans marks each package as disabled (enabled = false) and, where the
+// record states no origin yet, records the checker as the origin of that disable
+// (disabled_by = "auto") — an entry that already names a human origin keeps it,
+// or this function would erase the intent it exists to respect — both in the
 // overlay's packages.toml and in the in-memory config, so a package whose ebuild
 // was removed from the overlay stops being processed on subsequent runs — and so
 // the reconciliation in CheckAll can tell this disable from one a human wrote
@@ -850,9 +852,12 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 	for _, pkg := range pkgs {
 		if cfg, ok := c.config.Packages[pkg]; ok {
 			cfg.Enabled = &disabled
-			// Unconditional, matching the writer: DisablePackagesInConfig
-			// restates the origin as "auto" over whatever the record carried.
-			cfg.DisabledBy = disabledByAuto
+			// Matching the writer: DisablePackagesInConfig stamps the automatic
+			// origin only where the record states none, so an entry that already
+			// names a human origin keeps it and stays out of the reconciliation.
+			if cfg.DisabledBy == "" {
+				cfg.DisabledBy = disabledByAuto
+			}
 			c.config.Packages[pkg] = cfg
 		}
 	}

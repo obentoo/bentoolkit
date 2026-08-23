@@ -1633,6 +1633,21 @@ func deepestPassedRung(gates []GateResult, requested Depth) Depth {
 // back to the patch gate there, because a repair always has a target. This one
 // must not: a depth-none bump ran no gate, and a fallback here would hand the
 // caller a gate whose pass would read as proof of a rung nobody climbed.
+//
+// THE LOOP RETURNS THE DEEPEST GATE AT OR BELOW d, NOT A GATE PINNED TO d. The
+// two coincide only while gateRungs covers every depth a plan can select, which
+// it does today (options, patches, configure, compile, install). Give a depth no
+// gate of its own — or hand `review` a rung — and a bump planned at that depth
+// would read as proved on a SHALLOWER gate's pass, which is the over-report
+// S043-R4.1 exists to remove, arrived at from the other side. Add the depth and
+// its gate to gateRungs together, or make this exact. deepestPassedRung above is
+// the exact form, for reference.
+//
+// FOLLOW-UP, DELIBERATELY NOT DONE HERE (S043): the depth↔gate mapping is spelt
+// by three tables — gateDepths (applier_gates.go:46), gateRungs above, and
+// buildGates (stage.go:697) — read by two functions with near-identical names.
+// Collapsing them was rejected as out of scope because it would change the
+// applier's repair-target fallback, which is behaviour, not bookkeeping.
 func GateForDepth(d Depth) (string, bool) {
 	gate, best := "", DepthNone
 	for name, rung := range gateRungs {

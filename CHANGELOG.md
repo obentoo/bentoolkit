@@ -34,6 +34,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Examples:` prose were widened to name the migration).
 
 ### Fixed
+- **A re-disable no longer erases the origin it is supposed to read.**
+  `disabled_by` exists so a scan can tell its own bookkeeping from a decision a
+  human wrote. Both writers then stamped `"auto"` over whatever the record
+  already carried: `setPackagesEnabled` rewrote an existing `disabled_by` line
+  in place, and `DisableOrphans` mirrored that unconditionally into the
+  in-memory config. An entry stating a human origin came back out of the writer
+  stating the automatic one, which is exactly what `reconcilesAutomatically`
+  clears — the revocation this release removes, reached through the field that
+  removes it.
+
+  The reach is narrow but real. `CheckAll` cannot get there: it filters
+  `!IsEnabled() || IsHeld()` before checking, so a pin never enters the orphan
+  path. `CheckPackage` consults neither, so
+  `bentoo overlay autoupdate <a pinned package whose ebuild has been removed>`
+  does. Now a stated origin is left exactly where it stands, and only a record
+  carrying none is stamped — the `enabled` line remains the single site that may
+  introduce one, so an auto-disable still records itself and R1.3's fail-safe
+  does not freeze it (`internal/autoupdate/config.go`,
+  `internal/autoupdate/checker.go`).
+
+  Comment-only alongside it: `internal/autoupdate/validate/run.go` records that
+  `GateForDepth` returns the deepest gate at or below the depth asked for rather
+  than one pinned to it — harmless while `gateRungs` covers every selectable
+  depth, an over-report the moment one is added without its gate — and carries
+  the follow-up that the depth↔gate mapping is spelt by three tables read by two
+  near-identically named functions.
+
 - **`--check` now names the depth a bump reached instead of its weakest gate.**
   `dev-libs/icu-compat` ran its `configure` gate — the depth the policy selected
   — and passed it, and passed `patches` too. The summary printed
