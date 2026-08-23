@@ -31,13 +31,16 @@ const (
 // Options is everything a caller may decide about one rendering. It holds no
 // fact about the run — those all come from the report.
 //
-// # It is a screen concern, and only Plain takes one
+// # It is a screen concern, and only the screen modes take one
 //
 // Both fields below describe a terminal: a line budget, and a list short enough
-// to scroll past. An export has neither, so Markdown takes no Options at all —
-// an omission that is the requirement rather than an oversight (R9.3). Giving
-// an export path a parameter of this type would be giving it the two questions
-// an export must never ask.
+// to scroll past. Plain and Inline are the two modes printed to one, so both
+// take it — Inline is a screen mode, so a --all it ignored would be a flag that
+// worked in plain and silently did nothing in the default mode (R2.2). An
+// export has neither question to answer, so Markdown and JSON take no Options
+// at all — an omission that is the requirement rather than an oversight (R9.3).
+// Giving an export path a parameter of this type would be giving it the two
+// questions an export must never ask.
 type Options struct {
 	// Width is the line budget in display cells: no rendered line exceeds it.
 	// Zero means "ask the device", which is terminalWidth's job, so a caller
@@ -538,14 +541,64 @@ type style struct {
 	table func(out *lineWriter, t table)
 }
 
-// plainStyle is the terminal syntax: a title over a rule, prose wrapped to the
-// budget, and columns measured from the values then padded with spaces.
-func plainStyle(width int) style {
-	return style{
-		heading: func(out *lineWriter, title string) { writePlainHeading(out, title, width) },
-		prose:   func(out *lineWriter, text string) { writeProse(out, text, width) },
-		table:   func(out *lineWriter, t table) { writePlainTable(out, t, width) },
+// paint is the decoration half of the terminal syntax: which escape sequences a
+// finished line is wrapped in, and nothing else.
+//
+// # It receives a line that is already laid out
+//
+// Every function here is handed a COMPLETE line — indent, padded cells, gaps,
+// the lot — and may only return it wrapped. It never sees a cell, so it cannot
+// change a width, a shortening, an order or a word, and the visible characters
+// of a decorated render are produced by exactly the same code as an undecorated
+// one. That is what makes R2.4 — same content in every mode, presentation apart
+// — hold by construction rather than by two writers being kept in agreement.
+//
+// The consequence is a real constraint on what may be put in one of these
+// fields: a style that PADS (lipgloss's Width, Padding, Margin, Border) adds
+// visible cells and breaks the property. Bold, faint and a foreground colour do
+// not.
+//
+// # A nil field is the identity
+//
+// The zero paint decorates nothing, so plainStyle passes paint{} and emits byte
+// for byte what it emitted before this seam existed — which is what keeps R2.1
+// (no escape sequence reaches a log) true without a branch to remember.
+type paint struct {
+	// heading wraps a section title.
+	heading func(string) string
+	// rule wraps the line under a title.
+	rule func(string) string
+	// header wraps a table's header row.
+	header func(string) string
+	// detail wraps a row's reason, the indent included.
+	detail func(string) string
+}
+
+// decorate applies f to s, or returns s untouched when f is nil.
+func decorate(f func(string) string, s string) string {
+	if f == nil {
+		return s
 	}
+	return f(s)
+}
+
+// textStyle is the terminal syntax at a line budget, decorated by p: a title
+// over a rule, prose wrapped to the budget, and columns measured from the values
+// then padded with spaces.
+//
+// Both terminal modes are built from this one call, differing only in the paint
+// they hand it (D8, extended to a third style).
+func textStyle(width int, p paint) style {
+	return style{
+		heading: func(out *lineWriter, title string) { writePlainHeading(out, title, width, p) },
+		prose:   func(out *lineWriter, text string) { writeProse(out, text, width) },
+		table:   func(out *lineWriter, t table) { writePlainTable(out, t, width, p) },
+	}
+}
+
+// plainStyle is that syntax with no decoration at all (R2.1).
+func plainStyle(width int) style {
+	return textStyle(width, paint{})
 }
 
 // markdownStyle is the document syntax: an ATX heading, prose written whole, and
@@ -613,11 +666,11 @@ func writeSection(out *lineWriter, s section, st style) {
 
 // writePlainHeading prints a section title and the rule under it, both held to
 // the width budget that section building deliberately knows nothing about.
-func writePlainHeading(out *lineWriter, title string, width int) {
+func writePlainHeading(out *lineWriter, title string, width int, p paint) {
 	fitted := shorten(title, width)
-	out.line(fitted)
+	out.line(decorate(p.heading, fitted))
 	if line := rule(lipgloss.Width(fitted)); line != "" {
-		out.line(line)
+		out.line(decorate(p.rule, line))
 	}
 }
 
@@ -631,10 +684,10 @@ func writePlainHeading(out *lineWriter, title string, width int) {
 // package has to re-find the column instead of following it down. The cut is
 // marked (R6.4) and the model still holds the whole string, so a syntax with no
 // width budget prints all of it (R7.4).
-func writePlainTable(out *lineWriter, t table, width int) {
+func writePlainTable(out *lineWriter, t table, width int, p paint) {
 	widths := plainColumnWidths(t, width)
 
-	out.line(plainRow(t.headers, widths))
+	out.line(decorate(p.header, plainRow(t.headers, widths)))
 	for _, r := range t.rows {
 		out.line(plainRow(r.cells, widths))
 
@@ -643,7 +696,7 @@ func writePlainTable(out *lineWriter, t table, width int) {
 		// the indent anyway would put a line of pure whitespace in a log and in
 		// every golden file.
 		if detail := shorten(r.detail, width-detailIndent); detail != "" {
-			out.line(strings.Repeat(" ", detailIndent) + detail)
+			out.line(decorate(p.detail, strings.Repeat(" ", detailIndent)+detail))
 		}
 	}
 }
