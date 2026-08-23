@@ -148,13 +148,26 @@ func Markdown(w io.Writer, r report.Report) error {
 // listEvery is the only thing building a section ever needed from a caller, and
 // taking it alone is what keeps Options off the export path: there is no Width
 // field here for an export to be handed by accident (R9.3).
+//
+// # A run that stopped early says so before it says anything else
+//
+// The label is built HERE rather than in a writer, which is what makes plain,
+// Markdown and inline all inherit it from one sentence (R4.3). It is read off
+// Complete and NotEvaluated and nothing else, so no renderer is ever told
+// whether a TUI was involved — an interrupted run is reported in identical
+// words whichever mode was on screen when it was interrupted.
 func sections(r report.Report, listEvery bool) []section {
-	return []section{
+	var blocks []section
+	if !r.Complete {
+		blocks = append(blocks, interruptedSection(r))
+	}
+
+	return append(blocks,
 		versionCheckSection(r, listEvery),
 		validationPlanSection(r),
 		validationResultsSection(r),
 		validationSummarySection(r),
-	}
+	)
 }
 
 // everyScannedPackage is what an export passes sections: list every package the
@@ -203,6 +216,45 @@ type row struct {
 }
 
 // ---------------------------------------------------------------- the sections
+
+// interruptedSection is the label R4.3 asks for: a report that stopped before
+// the end of its plan says so, and says how much of the plan it never reached.
+//
+// # It reads two fields, and they are the whole input
+//
+// Complete and NotEvaluated. Nothing here asks which mode was on screen, and
+// nothing here could answer — that absence is the requirement rather than an
+// omission, because the same interrupt has to read the same way in a terminal,
+// in a pull request comment and in a log file. The JSON export needs no part of
+// this: it serializes both fields already, which is the same fact in the form a
+// machine reader can act on.
+//
+// # It goes FIRST, not beside the counts it qualifies
+//
+// Every section under it is short by the packages the run never reached — the
+// results list most of all — so a reader who meets the qualifier only at the
+// bottom has already drawn a conclusion from tables that were missing rows. The
+// fullscreen viewport cuts from the bottom as well (pane.fit), so the top is
+// also the one place the label survives a terminal too short for the report.
+//
+// # The count is stated even when it is zero
+//
+// A run interrupted once its last package had already been evaluated lost
+// nothing, and "0 of 4" is what says so. Suppressing the number there would
+// leave the reader unable to tell that case from the one where the report is
+// silent about how much is missing.
+func interruptedSection(r report.Report) section {
+	return section{
+		title: "Run Interrupted",
+		lead: []string{
+			fmt.Sprintf("This report is incomplete: the run was interrupted, and %d of %d planned package(s) were not evaluated.",
+				r.NotEvaluated, len(r.Plan)),
+		},
+		notes: []string{
+			"The counts below cover only the packages the run reached; the rest are counted in no column.",
+		},
+	}
+}
 
 // versionCheckSection is what the scan found, one row per package (R8.2, R8.3).
 //

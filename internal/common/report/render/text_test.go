@@ -5,6 +5,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -343,4 +345,118 @@ func TestMarkdownIsNotPlain(t *testing.T) {
 	if renderMarkdown(t) == renderPlain(t, Options{Width: 100}) {
 		t.Fatal("the Markdown export is byte-identical to the plain render — the style parameter is not being applied")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-task 5.3 — an interrupted run says so. APPENDED to text_test.go.
+// ---------------------------------------------------------------------------
+
+// interruptedFixture is the fixture as a run stopped halfway would leave it:
+// four packages planned, two evaluated, two never reached.
+func interruptedFixture() report.Report {
+	r := fixtureReport()
+	r.Results = r.Results[:2]
+	r.Tally = report.Tally{Proved: 1, Errored: 1}
+	r.Complete = false
+	r.NotEvaluated = len(r.Plan) - len(r.Results)
+	return r
+}
+
+// TestIncompleteIsLabelled pins R4.3 across every format that carries text. No
+// renderer learns that a TUI was involved — they read Complete and
+// NotEvaluated, which is what lets an interrupted run be reported identically
+// whether it was interrupted in fullscreen, inline or plain.
+func TestIncompleteIsLabelled(t *testing.T) {
+	r := interruptedFixture()
+
+	var plain bytes.Buffer
+	if err := Plain(&plain, r, Options{Width: 100}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	var markdown bytes.Buffer
+	if err := Markdown(&markdown, r); err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+
+	for _, format := range []struct {
+		name string
+		out  string
+	}{
+		{"plain", plain.String()},
+		{"markdown", markdown.String()},
+	} {
+		if !saysIncomplete(format.out) {
+			t.Errorf("the %s render does not say the run was incomplete (R4.3)\n--- %s ---\n%s", format.name, format.name, format.out)
+		}
+		if !countAppearsInTheLabel(format.out, r.NotEvaluated) {
+			t.Errorf("the %s render labels the run incomplete but does not state the %d packages that were not evaluated (R4.3)\n--- %s ---\n%s",
+				format.name, r.NotEvaluated, format.name, format.out)
+		}
+	}
+
+	// JSON carries it as data rather than as a sentence, which is the same
+	// fact in the form a machine reader can act on.
+	var doc bytes.Buffer
+	if err := JSON(&doc, r); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if !strings.Contains(doc.String(), `"complete": false`) {
+		t.Errorf("the JSON export does not report the run as incomplete\n%s", doc.String())
+	}
+	if !strings.Contains(doc.String(), `"not_evaluated": 2`) {
+		t.Errorf("the JSON export does not carry the not-evaluated count\n%s", doc.String())
+	}
+}
+
+// TestCompleteHasNoLabel is the guard, and it is the half that keeps the label
+// meaningful. A label printed unconditionally satisfies the test above while
+// making every report look interrupted.
+func TestCompleteHasNoLabel(t *testing.T) {
+	r := fixtureReport() // Complete: true, NotEvaluated: 0
+
+	var plain bytes.Buffer
+	if err := Plain(&plain, r, Options{Width: 100}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	var markdown bytes.Buffer
+	if err := Markdown(&markdown, r); err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+
+	for _, format := range []struct {
+		name string
+		out  string
+	}{
+		{"plain", plain.String()},
+		{"markdown", markdown.String()},
+	} {
+		if saysIncomplete(format.out) {
+			t.Errorf("a complete run was labelled incomplete in the %s render\n--- %s ---\n%s", format.name, format.name, format.out)
+		}
+	}
+}
+
+// countAppearsInTheLabel looks for the number in the LABEL, not anywhere in the
+// document.
+//
+// Scoping is the whole assertion here. A bare Contains(out, "2") over the whole
+// render is satisfied by "1.28.0", by "0.5.92" and by "2 package(s) are up to
+// date" — so a label printing the WRONG count passes it. Measured, not
+// supposed: a mutation that hard-coded 0 in the label went uncaught until this
+// was scoped.
+//
+// The window is the label's own paragraph: from the line that admits
+// incompleteness through the next four, which is where the sentence lives even
+// when it wraps. Package versions do not appear there.
+func countAppearsInTheLabel(rendered string, want int) bool {
+	lines := strings.Split(rendered, "\n")
+
+	for i, line := range lines {
+		if !saysIncomplete(line) {
+			continue
+		}
+		window := strings.Join(lines[i:min(i+5, len(lines))], " ")
+		return regexp.MustCompile(`\b` + strconv.Itoa(want) + `\b`).MatchString(window)
+	}
+	return false
 }
