@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -522,6 +523,88 @@ func pkgdevFailsPrinting(out string) func(ctx context.Context, name string, arg 
 	}
 }
 
+// pkgdevFailsUntilFixed returns an exec seam whose FIRST `pkgdev` call fails and
+// whose every later one succeeds; every non-`pkgdev` command succeeds (S043).
+//
+// It is the two-sided seam the fix path needs: the first failure is what drives
+// runManifestWithFix past refuseFixOnEnvironmentFailure and into the fixer, and
+// the success that follows is what lets the authoritative re-check pass — so a
+// test using it exercises a repair that WORKED, which is the case story 043 is
+// about. A repair that failed is the other row, and pkgdevFailsPrinting is that.
+//
+// The failure PRINTS a fetch diagnostic rather than exiting silently, for the
+// reason TestRepairableFailureStillInvokesTheFixer prints one: the environment
+// classifier reads what pkgdev said, and a failure that says nothing about the
+// machine is what makes the verdict "repairable" — the seam has to reach the
+// fixer or the tests below cannot fail for their own reason. The text is passed
+// as an ARGUMENT to sh, never interpolated into the script.
+//
+// The counter lives in the closure because the call site takes no arguments and
+// returns one value; the mutex is there because applyAllPackages runs applies
+// concurrently and a seam is shared by construction.
+func pkgdevFailsUntilFixed() func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	var mu sync.Mutex
+	calls := 0
+	return func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' "$0"; exit 1`,
+				"SRC_URI is unreachable: 404 Not Found")
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+}
+
+// gateDistdirFrom answers WHICH DIRECTORY THIS RUN'S GATES WERE POINTED AT, and
+// "" when no gate of this run reported one (S043-R2.1, R2.4).
+//
+// # Why this observation point and not another
+//
+// It reads result.CompileDistdir, which recordCompileDistdir sets to
+// staticGateDistdir(cand) — literally the same resolver the option gate is given
+// through validate.Options.Distdir, called once per attempt so the directory
+// REPORTED and the directory the child was handed are one resolution rather than
+// two readings of a filesystem a moment apart (see buildAttempt). So a directory
+// answered here is the directory the gates of this apply searched, which is the
+// claim the tests using it make.
+//
+// The stage record beside a staged tree carries the same fact in its gate
+// reasons — it is the artefact the 2026-08-22 defect was diagnosed from — and it
+// would be the richer source. It is not reachable from this harness: newGateApplier
+// builds an applier with NO staging root, runStaticGates returns nil for an
+// unstaged candidate, and giving the harness a staging root would take the four
+// story-030 tests that share it off the path their gate exists on (the pre-flight
+// that raises ErrDistdirUnusable is runManifest's, and the staged manifest has
+// none), turning six passing environment-classification tests red for a reason
+// that has nothing to do with them.
+//
+// # The host dependency, stated rather than hidden
+//
+// CompileDistdir is populated only once a build child has actually spawned, and
+// reaching that costs a privilege tool: detectPrivilegeTool (applier.go) calls
+// exec.LookPath DIRECTLY, not through the a.lookPath seam, so it cannot be
+// injected. On a host with neither sudo nor doas the compile gate returns before
+// compileOnce and there is nothing to observe — so this SKIPS, in the same shape
+// and for the same reason TestApplierCompileLogPreserved already skips. A skip is
+// reported; a "" quietly returned would let a guard pass while observing nothing,
+// which is the failure story 043 exists to correct.
+func gateDistdirFrom(t *testing.T, res *ApplyResult) string {
+	t.Helper()
+	if !hasPrivilegeTool() {
+		t.Skip("the compile gate's distdir is only observable where sudo/doas is on PATH (detectPrivilegeTool)")
+	}
+	if res == nil {
+		return ""
+	}
+	return res.CompileDistdir
+}
+
 // gatePkg is one pending bump for newGateApplier.
 type gatePkg struct{ name, from, to string }
 
@@ -557,6 +640,13 @@ func newGateApplier(t *testing.T, seam func(ctx context.Context, name string, ar
 		WithExecCommand(seam),
 		WithApplierFixer(fixer),
 		WithApplierReporter(rec),
+		// Answered explicitly (S043). The four story-030 tests apply with
+		// compile=false and never reach the prompt, so nothing here changes for
+		// them; what changes is that the tests which DO reach it stop being
+		// answered by accident — the default reads os.Stdin, and under `go test`
+		// that is a closed file whose EOF reads as "no", so a compile gate would
+		// decline for a reason no test wrote down.
+		WithConfirmFunc(func(string) bool { return true }),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
