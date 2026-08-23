@@ -32,6 +32,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`cmd/bentoo/overlay_autoupdate_markauto.go`).
 
 ### Fixed
+- **A repaired bump's gates now read the distfiles the repair fetched.** After
+  the LLM fixer succeeded, the archive it had downloaded was deleted before any
+  gate looked at it, and the gate then reported SKIPPED against a directory that
+  did not hold the file. The two groups of packages in one run differed by
+  exactly whether the fixer had run: those it skipped named the run's own
+  `/var/tmp/bentoo-staged-distfiles-…`, those it repaired named
+  `/var/cache/distfiles`.
+
+  Every part behaved as written; the composition did not. The fixer holds
+  `Bash(pkgdev *)` and runs `pkgdev manifest` itself, so after a successful
+  repair the Manifest is COMPLETE — and `pkgdev manifest` without `--force` does
+  not re-manifest a complete package. The authoritative re-check therefore
+  downloaded nothing into its fresh directory, `staticGateDistdir` found that
+  directory empty and fell back to the host `DISTDIR`, and on a host that had
+  never fetched the release the gate read an empty room. For `dev-libs/icu-compat`
+  the archive appeared in `/var/cache/distfiles` 23 seconds AFTER the gate that
+  needed it had already declined; for `media-libs/mesa`, 134 MB were fetched and
+  discarded, and would have been fetched again the next day.
+
+  The change is ownership, not lifetime. `runStagedManifestIn`
+  (`internal/autoupdate/sweep_staged.go`) can now run against a caller-supplied
+  distdir — seeding skipped, since the directory is already the answer, and
+  `--force` added so a complete Manifest is recomputed by bentoo rather than
+  accepted from the agent. `runManifestWithFix`
+  (`internal/autoupdate/applier.go`) hands it the directory the agent downloaded
+  into instead of deleting it, and returns that path to the caller whose removal
+  already covers every exit — so the run still removes what it fetched, on the
+  failure paths too.
+
+  Two things deliberately unchanged: a repair that fetched NOTHING still falls
+  back exactly as before, because an empty private directory means "nothing was
+  fetched" and not "nothing is there"; and `--force` re-digests the bytes the
+  agent brought, which makes the Manifest bentoo's own but is not independent
+  verification against upstream. Both are stated in the code rather than left to
+  be rediscovered.
+
 - **A disable a maintainer wrote is no longer revoked by the next scan.**
   `enabled = false` was read as bookkeeping the overlay may always override, and
   the reconciliation in `CheckAll` re-enabled every disabled entry whose ebuild
