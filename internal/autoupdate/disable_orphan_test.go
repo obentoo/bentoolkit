@@ -73,6 +73,7 @@ parser = "json"
 	want := `# header comment
 ["dev-util/claude-code"]
 enabled = false
+disabled_by = "auto"
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
 path = "dist-tags.latest"
@@ -111,8 +112,11 @@ path = "v"
 		t.Fatalf("DisablePackagesInConfig: %v", err)
 	}
 	got, _ := os.ReadFile(configPath)
+	// The origin lands directly below the rewritten assignment, which is where
+	// CanonicalFieldOrder puts it (story 043, R1.1).
 	want := `["a/b"]
 enabled = false
+disabled_by = "auto"
 url = "https://x/y"
 parser = "json"
 path = "v"
@@ -140,6 +144,7 @@ transform = [
 	got, _ := os.ReadFile(configPath)
 	want := `["a/b"]
 enabled = false
+disabled_by = "auto"
 url = "https://x/y"
 parser = "json"
 path = "v"

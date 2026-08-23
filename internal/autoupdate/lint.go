@@ -43,6 +43,13 @@ const recordEndMarker = "# END"
 // the churn bill above falls due on every LATER move, once records do carry
 // it (R1.4).
 //
+// `disabled_by` was placed the same way and for the same kind of reason: it sits
+// immediately after `enabled` because it qualifies that key and nothing else —
+// it names WHO wrote the `enabled = false` it rides beside, so the two read as
+// one statement and splitting them reads as half of it (story 043, R1.1). It too
+// costs zero record rewrites today, no record carrying the field yet, which is
+// again why the position had to be chosen deliberately rather than later.
+//
 // It covers every `toml:` tag of PackageConfig exactly once, which
 // TestCanonicalFieldOrderCoversPackageConfig pins — a field missing from here
 // would silently stop being ordered at all. `binary` is deliberately absent: it
@@ -50,7 +57,7 @@ const recordEndMarker = "# END"
 //
 // Treat it as read-only; canonicalFieldRank below is built from it once.
 var CanonicalFieldOrder = []string{
-	"enabled", "hold", "track",
+	"enabled", "disabled_by", "hold", "track",
 	"url", "parser", "path", "pattern", "selector", "xpath", "script",
 	"transform", "select", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",

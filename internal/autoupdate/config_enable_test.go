@@ -282,9 +282,11 @@ path = "v"`
 	}
 }
 
-// Disable is unchanged and must stay asymmetric to enable: `enabled = false` is
-// the only way to express disabled, so it is written down — rewritten in place
-// when present, inserted after the header when absent.
+// Disable must stay asymmetric to enable: disabled is a state that has to be
+// written down, so the pair is written — `enabled` rewritten in place when
+// present and inserted after the header when absent, with `disabled_by = "auto"`
+// beside it. Enable stays a deletion, because enabled is the default and is
+// spelled by both keys being ABSENT (story 043, R1.1).
 func TestDisablePackagesInConfigStillWritesTheAssignment(t *testing.T) {
 	content := `["a/b"]
 url = "https://x/y"
@@ -300,10 +302,12 @@ url = "https://x/z"
 	got, _ := os.ReadFile(configPath)
 	want := `["a/b"]
 enabled = false
+disabled_by = "auto"
 url = "https://x/y"
 
 ["c/d"]
 enabled = false
+disabled_by = "auto"
 url = "https://x/z"
 `
 	if string(got) != want {
