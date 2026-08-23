@@ -86,6 +86,21 @@ var (
 	// defined by what the linter reports — and it writes only behind the same
 	// three gates story 021 built for the version pins (see confirmLintRepair).
 	autoupdateFix bool
+	// autoupdateMarkAutoDisabled is the ONE-SHOT migration of story 043 R1.5: it
+	// stamps disabled_by = "auto" on every entry the checker disabled before that
+	// field existed, so R1.3's fail-safe — an absent origin means a human decided
+	// — does not freeze them permanently.
+	//
+	// It is a MODE, not a modifier, and it writes packages.toml behind the same
+	// gates --lint --fix uses (see confirmAutoDisableMigration). It is meant to be
+	// run once per registry; a second run is a no-op by construction.
+	autoupdateMarkAutoDisabledFlag bool
+	// autoupdateExcept, with --mark-auto-disabled, names the entries the
+	// migration must NOT stamp: the deliberate pins a maintainer disabled on
+	// purpose. Stamping one re-arms the exact defect story 043 removes, so an
+	// entry naming no record in the registry aborts the run rather than being
+	// ignored — a typo here protects nothing and says nothing.
+	autoupdateExcept []string
 	// autoupdateYes approves the post-check registry reconciliation without a
 	// prompt (S021-R3.4). It is REQUIRED for any non-interactive run: with it
 	// absent and no terminal to prompt on, --check reports the divergences and
@@ -236,6 +251,10 @@ Examples:
   bentoo overlay autoupdate --lint                Check packages.toml against the record model
   bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff
   bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)
+  bentoo overlay autoupdate --mark-auto-disabled --except dev-libs/icu-compat,media-libs/libjxl-compat
+                                                  ONE-SHOT: unfreeze the entries the checker disabled before
+                                                  disabled_by existed, sparing the two deliberate pins. Run it
+                                                  once per registry; without --yes it prints the plan and stops
   bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory
   bentoo overlay autoupdate --apply all --distfiles-cache ""       Never reuse a cached distfile`,
 	Run: runAutoupdate,
@@ -270,7 +289,11 @@ func init() {
 	// flag's value placeholder and strips the quotes, which would render a bool
 	// flag as "--fix binary".
 	autoupdateCmd.Flags().BoolVar(&autoupdateFix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
-	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix it rewrites packages.toml, in an overlay that auto-commits and pushes")
+	// No back-quoted words in either usage string below — see the --fix note
+	// above: pflag reads the first one as the flag's value placeholder.
+	autoupdateCmd.Flags().BoolVar(&autoupdateMarkAutoDisabledFlag, "mark-auto-disabled", false, "ONE-SHOT MIGRATION: stamp disabled_by = \"auto\" on every entry the checker disabled before that key existed, so the reconciliation is free to re-enable them when their ebuild returns. Without it those entries state no origin, which now reads as a deliberate decision and freezes them for good. An entry that is held, already stamped, still enabled, or named in --except is left alone, and a second run changes nothing. The full plan is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended migration requires --yes")
+	autoupdateCmd.Flags().StringSliceVar(&autoupdateExcept, "except", nil, "With --mark-auto-disabled: the entries the migration must NOT stamp, comma-separated or repeated. These are the pins a maintainer disabled ON PURPOSE — for this overlay, dev-libs/icu-compat and media-libs/libjxl-compat — and stamping one hands it back to the reconciliation that re-enabled and bumped it before. An entry naming no record in packages.toml ABORTS the run: a typo protects nothing and would otherwise pass in silence")
+	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, a --mark-auto-disabled migration, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix or --mark-auto-disabled it rewrites packages.toml, in an overlay that auto-commits and pushes")
 
 	// The two distfile directories. The names are byte-identical to `overlay
 	// manifest`'s and so is what they mean; the DEFAULT of --distdir is not,
@@ -465,6 +488,30 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// The same reasoning one flag over: --except names what the migration must
+	// spare, so without the migration it spares nothing and states nothing. The
+	// failure mode it prevents is the expensive one — an operator who typed the
+	// exclusion list but forgot the mode would read "nothing to do" and believe
+	// their pins had been protected by a run that never looked at them.
+	if len(autoupdateExcept) > 0 && !autoupdateMarkAutoDisabledFlag {
+		logger.Error("--except names the entries --mark-auto-disabled must not stamp, so it is valid only together with it — run: bentoo overlay autoupdate --mark-auto-disabled --except <atom>[,<atom>...]")
+		osExit(1)
+		return
+	}
+
+	// --lint and --mark-auto-disabled are both MODES, and the dispatch below is a
+	// switch: given both, the first case wins and the other silently does
+	// nothing. That is tolerable for a read-only mode and not for this one — the
+	// migration runs ONCE, and an operator told "record model OK" would have no
+	// way to notice that the ~90 entries they came to unfreeze are still frozen.
+	// Refusing costs one re-run; the silent version costs a scan cycle nobody
+	// knows was skipped.
+	if autoupdateMarkAutoDisabledFlag && autoupdateLint {
+		logger.Error("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other")
+		osExit(1)
+		return
+	}
+
 	appCtx, err := loadAppContextNoValidation()
 	if err != nil {
 		logger.Error("loading config: %v", err)
@@ -520,6 +567,13 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	switch {
 	case autoupdateLint:
 		runLint(overlayPath)
+	case autoupdateMarkAutoDisabledFlag:
+		// Directly below --lint because it reads and writes the same file for the
+		// same kind of reason: both are registry maintenance rather than a
+		// version scan. The two can never both be true here — the guard above
+		// rejects that combination before any file is opened — so the relative
+		// order of these two cases is documentation, not behaviour.
+		runMarkAutoDisabled(overlayPath)
 	case autoupdateCheck:
 		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateList:

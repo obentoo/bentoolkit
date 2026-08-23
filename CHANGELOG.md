@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`--mark-auto-disabled` — the one-shot migration that unfreezes the legacy
+  disables.** The fail-safe below reads an absent origin as a human decision, so
+  the ~90 entries the checker disabled before `disabled_by` existed would have
+  stopped reconciling for good. The migration stamps the automatic origin onto
+  the entries whose disable really was bookkeeping, and onto nothing else: an
+  entry that is held, already stamped, still enabled, or named in `--except` is
+  left alone, and a second run is a no-op that leaves the file byte-identical.
+
+  It decides from the PARSED registry, never from a text scan
+  (`internal/autoupdate/disable_origin_migration.go`) — the registry's own header
+  records what grep does to this question, 98 hits unanchored against 92 real
+  records, and the gap is doc bodies quoting the keys they describe. The write
+  still goes through the comment-preserving section editor, so the prose that
+  made the question hard survives it.
+
+  `--except` names the pins that must NOT be stamped, and an entry naming no
+  record ABORTS the run rather than being ignored: a typo there protects nothing
+  and would otherwise pass in silence. The full plan — what will be stamped, and
+  every group that will not — is printed BEFORE the confirmation, and the write
+  is gated exactly as `--lint --fix` is, because this overlay auto-commits and
+  pushes and an unattended write is a published one
+  (`cmd/bentoo/overlay_autoupdate_markauto.go`).
+
+### Fixed
+- **A disable a maintainer wrote is no longer revoked by the next scan.**
+  `enabled = false` was read as bookkeeping the overlay may always override, and
+  the reconciliation in `CheckAll` re-enabled every disabled entry whose ebuild
+  was present. Two entries had used that key to express intent —
+  `dev-libs/icu-compat` and `media-libs/libjxl-compat`, each with a `comments`
+  block explaining itself in prose no code reads. An automatic commit deleted
+  their `enabled = false`, bumped both, and left `www-client/orion-bin` with an
+  unsatisfiable slot dependency for ten days. The comments survived and are now
+  false.
+
+  The cause was not a wrong branch: a two-valued key was carrying three states —
+  enabled, disabled-because-the-ebuild-vanished, and disabled-because-I-said-so.
+  The registry gains `disabled_by` to separate the last two
+  (`internal/autoupdate/config.go`), the linter learns the key and its canonical
+  position beside `enabled` (`internal/autoupdate/lint.go`), and the
+  reconciliation clears only a disable stamped as the checker's own
+  (`internal/autoupdate/checker.go`).
+
+  **Absent means deliberate**, which is the direction that needs no migration to
+  be safe: every record predating the field now reads as a human decision and
+  survives untouched. Entries frozen that way are NAMED once per run rather than
+  left silent, so a legacy entry that ought to reconcile is a visible repair
+  rather than a package that quietly stopped updating. `hold = true` keeps its
+  own meaning exactly: never auto-flipped, origin or no origin.
+
+  The two registry writers now keep the pair consistent — a disable writes both
+  keys, a revive deletes both — because an origin left behind on an enabled
+  record claims a state the record is no longer in, and the linter reports it.
+
 ## [0.27.0] - 2026-08-22
 
 ### Added

@@ -18,15 +18,24 @@ func hasItem(res BatchResult[CheckResult], pkg string) bool {
 }
 
 // TestCheckAllReconcilesReappearedEbuild covers the overlay-as-source-of-truth
-// rule: a package auto-disabled (enabled = false) whose ebuild is present in the
-// overlay again is re-enabled by CheckAll — both on disk and in memory — and is
-// included in the batch rather than skipped forever.
+// rule: a package auto-disabled whose ebuild is present in the overlay again is
+// re-enabled by CheckAll — both on disk and in memory — and is included in the
+// batch rather than skipped forever.
+//
+// The fixture gained `disabled_by = "auto"` in story 043 and the test's intent
+// is unchanged: what changed is how "auto-disabled" is SPELLED. `enabled =
+// false` alone no longer says the checker disabled the entry — it is exactly
+// what a human writes to pin a package — so the reconciliation now clears only a
+// disable carrying the checker's own origin (R1.2). The legacy shape this
+// fixture used to have is covered by TestCheckAllLeavesALegacyDisableAlone,
+// where it must NOT be revived.
 func TestCheckAllReconcilesReappearedEbuild(t *testing.T) {
 	pkg := "sci-ml/reappeared"
 	srv := jsonVersionServer(t, "1.0.0") // equal to the ebuild: no pending churn
 
 	content := `["sci-ml/reappeared"]
 enabled = false
+disabled_by = "auto"
 url = "` + srv.URL + `"
 parser = "json"
 path = "version"
