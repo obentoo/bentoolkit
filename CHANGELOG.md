@@ -183,6 +183,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tier instead of folding them into a column: an ebuild that could not be read
   established nothing about how the package builds, and counting it as source
   would state a fact the scan never found.
+- **A build that cannot succeed on this host is diagnosed once, not once per
+  run.** Two packages produced thirteen identical build logs over two days:
+  `net-wireless/mt7927-dkms` wanting `/etc/kernel/keys/module-signing.key`
+  (`700 root:root`) and `sys-firmware/edk2` wanting
+  `/var/lib/sbctl/keys/db/db.key` (`400 root:root`). The build gate drops to the
+  `portage` uid, so neither is readable and neither will be without a change on
+  the host. `ErrBuildEnvironment` already classified both correctly and the
+  report already said the ebuild was not at fault — nothing consumed that
+  conclusion, so each run rediscovered it by running the build again.
+
+  A build gate failure that classifies as an environment fault now records the
+  precondition the child named, against the package in `cache.json`
+  (`internal/autoupdate/applier_gates_environment.go`,
+  `internal/autoupdate/cache.go`). Never in `packages.toml`: that file lives in
+  an overlay that auto-commits and pushes. `runBuildGates`
+  (`internal/autoupdate/applier_gates.go`) gains a second pre-check ahead of the
+  dependency probe — a recorded, still-unmet precondition declines the gate
+  through the existing `hostDeclinedGates` seam, so the package is reported as
+  skipped for an environment reason, names the path, and is not counted as an
+  error.
+
+  Two properties are deliberate. The precondition is evaluated **as the build
+  user would see it** — mode bits and the parent's traversability, not `os.Stat`
+  — because a `stat` from the calling user answers a different question and
+  would record something permanently unmet. And the extraction **fails open**:
+  a message it does not understand records nothing and the package is retried,
+  which is today's behaviour. Recording a placeholder would suppress a package
+  forever on the strength of a parse that failed, which is strictly worse than a
+  wasteful retry. A relative path, a bare word, `/`, and a compile-phase failure
+  are all refused for the same reason.
+
+  When the precondition becomes satisfied the record is cleared and the gate
+  runs again — no expiry period and no flag. On a host with no `portage` group
+  at all, including CI, the check cannot score group bits and answers "met", so
+  the mechanism stands down rather than freezing packages on evidence it does
+  not have.
 - **A repaired bump's gates now read the distfiles the repair fetched.** After
   the LLM fixer succeeded, the archive it had downloaded was deleted before any
   gate looked at it, and the gate then reported SKIPPED against a directory that

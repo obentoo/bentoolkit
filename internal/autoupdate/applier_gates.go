@@ -663,6 +663,28 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 		return nil, nil
 	}
 
+	// The SECOND host pre-check (S043-R3.2), and it sits AHEAD of the dependency
+	// probe because it is both the cheaper refusal and the more certain one: the
+	// probe spawns `emerge -p` to learn something about this host, while this
+	// reads back something this host already wrote about itself. Ordering them
+	// the other way would pay for a resolve whose answer cannot change the
+	// outcome.
+	//
+	// It sits BELOW the early return for the mirror reason: at the depths above
+	// it nothing is built, so there is no build to decline — an empty list is
+	// the honest answer there, and a skip would be one more outcome the
+	// promotion report has to explain about a gate that was never going to run.
+	//
+	// hostDeclinedGates, not candidateDeclinedGates: an unreadable key is this
+	// MACHINE's, and the stamp is what keeps R3.4 true — the bump reads as a
+	// package this host could not measure rather than as an errored one, without
+	// the tally logic learning a new case (S039-R2.1).
+	if path, unmet := a.unmetPrecondition(pkg); unmet {
+		return hostDeclinedGates(depth, fmt.Sprintf(
+			"%s is not readable by the build user, so no build phase was run for %s-%s: the last build failed on it and this run declines rather than buy the same failure again; make it readable by the %s group and the gate runs on the next run, with no flag to set and nothing to wait for",
+			path, pkg, version, portageGroupName)), nil
+	}
+
 	deps := a.buildDeps(nil)
 	satisfied, missing, err := validate.DependenciesSatisfied(a.ctx, cand.repoRoot, pkg, version, deps)
 	switch {
