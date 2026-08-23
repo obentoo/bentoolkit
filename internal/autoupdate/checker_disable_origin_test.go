@@ -709,3 +709,97 @@ Anything deciding by text scan will read it as a disabled record.
 		t.Error("an enabled record was stamped")
 	}
 }
+
+// R1.2 + R1.3 — the writers must not manufacture the origin they are supposed
+// to read. `disabled_by` exists so a scan can tell its own bookkeeping from a
+// human decision; a re-disable that stamps "auto" over a stated origin hands the
+// entry straight back to the reconciliation the origin exists to keep it away
+// from, which is the exact defect this story removed — reached through the field
+// that removed it.
+//
+// reconcilesAutomatically already refuses a human origin
+// (TestReconcilesOnlyWhatTheCheckerDisabled, row "human origin"), so the policy
+// was never the gap. Both halves below are about the WRITERS, and both must be
+// asserted: the file is what survives the run, the in-memory mirror is what the
+// same run reads back on its next entry.
+//
+// Reachable through `bentoo overlay autoupdate <pkg>`: CheckPackage does not
+// consult enabled/hold, so an explicitly named pin whose ebuild has been removed
+// reaches DisableOrphans (cmd/bentoo/overlay_autoupdate.go). CheckAll cannot
+// reach it — it filters !IsEnabled() || IsHeld() before checking.
+func TestARedisableKeepsAHumanOrigin(t *testing.T) {
+	const origin = "maintainer"
+
+	content := `["a/b"]
+enabled = false
+disabled_by = "` + origin + `"
+url = "https://x/y"
+parser = "json"
+path = "v"
+comments = """
+Pinned on purpose — do NOT enable.
+"""
+`
+
+	t.Run("the file writer", func(t *testing.T) {
+		overlay, configPath := writePackagesTOML(t, content)
+		if err := DisablePackagesInConfig(overlay, []string{"a/b"}); err != nil {
+			t.Fatalf("DisablePackagesInConfig: %v", err)
+		}
+		cfg, err := LoadPackagesConfig(overlay)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		got := cfg.Packages["a/b"]
+		if got.DisabledBy != origin {
+			t.Errorf("DisabledBy = %q, want %q — the disable overwrote a stated origin:\n%s",
+				got.DisabledBy, origin, mustRead(t, configPath))
+		}
+		if reconcilesAutomatically(got) {
+			t.Error("the entry is now revivable, so the next scan may publish the bump the origin forbade")
+		}
+	})
+
+	t.Run("the in-memory mirror", func(t *testing.T) {
+		overlay, _ := writePackagesTOML(t, content)
+		checker, err := NewChecker(overlay,
+			WithConfigDir(t.TempDir()),
+			WithRateLimiter(unlimitedRateLimiter()),
+		)
+		if err != nil {
+			t.Fatalf("NewChecker: %v", err)
+		}
+		if err := checker.DisableOrphans([]string{"a/b"}); err != nil {
+			t.Fatalf("DisableOrphans: %v", err)
+		}
+		got := checker.Config().Packages["a/b"]
+		if got.DisabledBy != origin {
+			t.Errorf("in memory: DisabledBy = %q, want %q", got.DisabledBy, origin)
+		}
+		if reconcilesAutomatically(got) {
+			t.Error("in memory: the entry is now revivable within this very run")
+		}
+	})
+
+	// The other direction, so the fix cannot be a predicate that never writes:
+	// a record stating NO origin must still be stamped, or DisableOrphans stops
+	// recording its own bookkeeping and every auto-disable freezes under R1.3.
+	t.Run("a record with no origin is still stamped", func(t *testing.T) {
+		overlay, _ := writePackagesTOML(t, `["a/b"]
+enabled = false
+url = "https://x/y"
+parser = "json"
+path = "v"
+`)
+		if err := DisablePackagesInConfig(overlay, []string{"a/b"}); err != nil {
+			t.Fatalf("DisablePackagesInConfig: %v", err)
+		}
+		cfg, err := LoadPackagesConfig(overlay)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if got := cfg.Packages["a/b"]; got.DisabledBy != disabledByAuto {
+			t.Errorf("DisabledBy = %q, want %q", got.DisabledBy, disabledByAuto)
+		}
+	})
+}

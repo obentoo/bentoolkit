@@ -185,6 +185,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tier instead of folding them into a column: an ebuild that could not be read
   established nothing about how the package builds, and counting it as source
   would state a fact the scan never found.
+
+- **`GateForDepth` — the depth↔gate mapping, exported for the check path.**
+  `gateRungs` maps a gate to the rung its pass proves; read the other way it
+  answers which gate stands for a given rung. Exporting it keeps that relation
+  in one table instead of a fourth spelling of it. It returns the deepest gate
+  at or below the depth asked for — harmless while `gateRungs` covers every
+  selectable depth, an over-report the moment one is added without its gate —
+  and it refuses outright for a depth no gate proves, rather than falling back
+  as the applier deliberately does for its own, different question.
+
+  It has no production caller yet. The check-path verdict that would consume
+  it (S043-R4) was left out: stories 044 and 045 settled that question the
+  other way, and `report.Classify` now requires every deciding gate to pass,
+  routing the half-measured case to the `inconclusive` column they added for
+  it. Re-applying R4 here would reverse a decision taken with its own
+  rationale, so only the shared mapping lands.
+
+- **A re-disable no longer erases the origin it is supposed to read.**
+  `disabled_by` exists so a scan can tell its own bookkeeping from a decision a
+  human wrote. Both writers then stamped `"auto"` over whatever the record
+  already carried: `setPackagesEnabled` rewrote an existing `disabled_by` line
+  in place, and `DisableOrphans` mirrored that unconditionally into the
+  in-memory config. An entry stating a human origin came back out of the writer
+  stating the automatic one, which is exactly what `reconcilesAutomatically`
+  clears — the revocation this release removes, reached through the field that
+  removes it.
+
+  The reach is narrow but real. `CheckAll` cannot get there: it filters
+  `!IsEnabled() || IsHeld()` before checking, so a pin never enters the orphan
+  path. `CheckPackage` consults neither, so
+  `bentoo overlay autoupdate <a pinned package whose ebuild has been removed>`
+  does. Now a stated origin is left exactly where it stands, and only a record
+  carrying none is stamped — the `enabled` line remains the single site that may
+  introduce one, so an auto-disable still records itself and R1.3's fail-safe
+  does not freeze it (`internal/autoupdate/config.go`,
+  `internal/autoupdate/checker.go`).
+
+  Comment-only alongside it: `internal/autoupdate/validate/run.go` records that
+  `GateForDepth` returns the deepest gate at or below the depth asked for rather
+  than one pinned to it — harmless while `gateRungs` covers every selectable
+  depth, an over-report the moment one is added without its gate — and carries
+  the follow-up that the depth↔gate mapping is spelt by three tables read by two
+  near-identically named functions.
 - **A build that cannot succeed on this host is diagnosed once, not once per
   run.** Two packages produced thirteen identical build logs over two days:
   `net-wireless/mt7927-dkms` wanting `/etc/kernel/keys/module-signing.key`
@@ -289,7 +332,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--no-tui` — use `--ui=plain`.** Its behaviour has not changed: it is still
   honoured, it is exactly `--ui=plain`, it still outranks `--ui` and `BENTOO_UI`,
   and `NO_COLOR` and `BENTOO_NO_TUI` mean the same thing as passing it.
-
 
 ## [0.27.0] - 2026-08-22
 

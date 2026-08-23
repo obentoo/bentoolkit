@@ -827,11 +827,12 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 	originAssign := fmt.Sprintf("disabled_by = %q", disabledByAuto)
 
 	return editPackagesConfigSections(overlayPath, targets, func(_ string, body []string, inComments []bool) ([]string, bool) {
-		// Whether the record already states an origin decides where a disable
-		// puts one: rewritten where it stands, or inserted below `enabled`. It
-		// has to be known before the walk reaches the `enabled` line, because
-		// the origin may sit after it — a record edited by hand is under no
-		// obligation to be in canonical order.
+		// Whether the record already states an origin decides whether a disable
+		// introduces one at all: an existing origin is left untouched wherever it
+		// stands, and only a record carrying none gets `disabled_by = "auto"`
+		// below `enabled`. It has to be known before the walk reaches the
+		// `enabled` line, because the origin may sit after it — a record edited
+		// by hand is under no obligation to be in canonical order.
 		hasOrigin := false
 		for j, line := range body {
 			if !inComments[j] && disabledByAssignRegex.MatchString(line) {
@@ -859,14 +860,23 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 					}
 					continue
 				}
-				if m := disabledByAssignRegex.FindStringSubmatch(line); m != nil {
-					changed = true
-					// The same asymmetry: enabling deletes the origin, disabling
-					// restates it where it already stands rather than adding a
-					// second copy of the key.
-					if !value {
-						out = append(out, m[1]+originAssign)
+				if disabledByAssignRegex.MatchString(line) {
+					// The same asymmetry, in its safe direction: enabling DELETES
+					// the origin, disabling leaves it exactly as it stands.
+					//
+					// Restating it as "auto" here would be the writer inventing
+					// the answer the reader is about to trust: a record that
+					// already names who disabled it is stating an intent, and
+					// stamping the automatic origin over it hands the entry back
+					// to the very reconciliation the origin exists to keep it
+					// away from (R1.2/R1.3). A record with NO origin is stamped
+					// at the `enabled` line above, which is the only site that
+					// may introduce one.
+					if value {
+						changed = true
+						continue
 					}
+					out = append(out, line)
 					continue
 				}
 			}
