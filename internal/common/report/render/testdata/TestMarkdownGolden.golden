@@ -1,0 +1,40 @@
+## Version Check Results
+
+6 package(s) checked, 4 with a pending update.
+
+| PACKAGE | TYPE | CURRENT | CANDIDATE | STATE |
+| --- | --- | --- | --- | --- |
+| app-misc/jq | source | 1.7.1 | 1.8.0 | update |
+| dev-libs/libayatana-appindicator-glib | source | 0.5.92 | 0.5.93 | update |
+| media-plugins/gst-plugins-adaptivedemux2 | source | 1.28.0 | 1.28.1 | update |
+| sys-apps/portage | source | 3.0.66 | 3.0.67 | update |
+| app-editors/zed | bin | 0.199.5 | 0.199.5 | up to date |
+| dev-lang/go | source | 1.26.0 | 1.26.0 | up to date |
+
+2 package(s) are up to date and are listed above.
+
+## Validation Plan
+
+4 package(s) to evaluate, 1 of them excluded by policy.
+
+| PACKAGE | BUMP | CLASS | DEPTH | REASON |
+| --- | --- | --- | --- | --- |
+| app-misc/jq | 1.7.1 → 1.8.0 | minor | compile | minor bump earns compile |
+| dev-libs/libayatana-appindicator-glib | 0.5.92 → 0.5.93 | patch | configure | patch bump earns configure |
+| media-plugins/gst-plugins-adaptivedemux2 | 1.28.0 → 1.28.1 | patch | manifest | patch bump earns manifest |
+| sys-apps/portage | 3.0.66 → 3.0.67 | patch | none [not validated] | depth resolved to none because the package is configured with depth=none in the overlay registry, and no override was supplied for this run; nothing about this ebuild or this host was consulted, so no gate was planned and none declined |
+
+## Validation Results
+
+| PACKAGE | CANDIDATE | DEPTH | OUTCOME | REASON |
+| --- | --- | --- | --- | --- |
+| app-misc/jq | 1.8.0 | compile | proved | every deciding gate passed |
+| dev-libs/libayatana-appindicator-glib | 0.5.93 | configure | errored | configure failed: missing dependency dev-libs/ayatana-ido |
+| media-plugins/gst-plugins-adaptivedemux2 | 1.28.1 | none | inconclusive | no Manifest could be produced: distfile fetch returned 404 |
+| sys-apps/portage | 3.0.67 | none | skipped |  |
+
+## Validation Summary
+
+4 package(s) evaluated: 1 proved, 1 errored, 1 inconclusive, 1 skipped.
+
+Nothing was published: a check writes no ebuild and no version pin.

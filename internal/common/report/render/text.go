@@ -30,6 +30,14 @@ const (
 
 // Options is everything a caller may decide about one rendering. It holds no
 // fact about the run — those all come from the report.
+//
+// # It is a screen concern, and only Plain takes one
+//
+// Both fields below describe a terminal: a line budget, and a list short enough
+// to scroll past. An export has neither, so Markdown takes no Options at all —
+// an omission that is the requirement rather than an oversight (R9.3). Giving
+// an export path a parameter of this type would be giving it the two questions
+// an export must never ask.
 type Options struct {
 	// Width is the line budget in display cells: no rendered line exceeds it.
 	// Zero means "ask the device", which is terminalWidth's job, so a caller
@@ -73,15 +81,44 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 		width = terminalWidth()
 	}
 
-	out := &lineWriter{w: w}
-	for i, s := range sections(r, opts) {
-		if i > 0 {
-			out.line("")
-		}
-		writePlainSection(out, s, width)
-	}
+	return write(w, sections(r, opts.ShowAll), plainStyle(width))
+}
 
-	return out.err
+// Markdown renders r as a Markdown document: the same report, in the syntax a
+// pull request comment, an issue and a file in a repository all read (R9).
+//
+// # It takes no Options, and that absence IS the requirement
+//
+// R9.3 says an export carries the complete report — every package, every reason
+// in full, no shortening, whatever the terminal was asked for. Stating that as a
+// signature rather than as a branch is what makes it hold: there is no width
+// here to shorten to and no ShowAll here to honour, so an export that mirrored
+// screen truncation is not something to remember not to write. It cannot be
+// written.
+//
+// That matters because such an export is a useless record: a report is kept
+// precisely BECAUSE the terminal is gone, and one missing exactly what the
+// terminal dropped answers no question later. If threading a width in here ever
+// starts to look convenient, that is the defect arriving as a convenience.
+//
+// # Every scanned package is listed
+//
+// The screen counts the up-to-date packages rather than listing them, because
+// they are the bulk of a 269-package overlay and the reader can re-run with
+// --all (R8.3). A file has no such budget and no re-run: a record that named
+// only the interesting packages could not answer "was this one checked at all",
+// which is the question a kept report is kept for.
+//
+// # It differs from Plain by table syntax and nothing else
+//
+// Both build the same sections and hand them to a style (D8). Nothing about
+// what the report SAYS is decided here — including which rows carry a reason of
+// their own, which sections settles once (R7.2, R7.3). A result whose reason
+// repeats its plan entry prints no second copy in the export either, and that
+// drops a DUPLICATE rather than information: the sentence is still in the
+// document, whole, on the plan row that first stated it.
+func Markdown(w io.Writer, r report.Report) error {
+	return write(w, sections(r, everyScannedPackage), markdownStyle())
 }
 
 // sections is the whole report as structure: what it says, in order, with every
@@ -102,14 +139,28 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 // by the writer, which is what lets a syntax with no width budget print the
 // whole reason and keeps the model's promise that shortening is a rendering
 // decision rather than a loss of data (R7.4).
-func sections(r report.Report, opts Options) []section {
+//
+// # One bool, not an Options
+//
+// listEvery is the only thing building a section ever needed from a caller, and
+// taking it alone is what keeps Options off the export path: there is no Width
+// field here for an export to be handed by accident (R9.3).
+func sections(r report.Report, listEvery bool) []section {
 	return []section{
-		versionCheckSection(r, opts),
+		versionCheckSection(r, listEvery),
 		validationPlanSection(r),
 		validationResultsSection(r),
 		validationSummarySection(r),
 	}
 }
+
+// everyScannedPackage is what an export passes sections: list every package the
+// run looked at, instead of counting the ones found up to date.
+//
+// It is a constant rather than a flag read back from the caller. An export never
+// asks what the terminal was told — it lists everything, always (R9.3) — and
+// naming the value keeps the one call site from reading `sections(r, true)`.
+const everyScannedPackage = true
 
 // section is one titled block of a report: a heading, the sentences that frame
 // it, the rows themselves, and the sentences that qualify them.
@@ -152,10 +203,14 @@ type row struct {
 
 // versionCheckSection is what the scan found, one row per package (R8.2, R8.3).
 //
-// The rows a run produces depend on opts.ShowAll and the counts never do: a
+// The rows a run produces depend on listEvery and the counts never do: a
 // package left out of the list is still counted in the note below it, so the
 // short list is a stated omission rather than a silent one (R2.5).
-func versionCheckSection(r report.Report, opts Options) section {
+//
+// listEvery is the screen's --all (R8.2, R8.3) and the export's only setting:
+// an export lists every package it looked at whatever the terminal was asked
+// for (R9.3).
+func versionCheckSection(r report.Report, listEvery bool) section {
 	s := section{title: "Version Check Results"}
 
 	if len(r.Scanned) == 0 {
@@ -168,7 +223,7 @@ func versionCheckSection(r report.Report, opts Options) section {
 
 	s.rows.headers = []string{"PACKAGE", "TYPE", "CURRENT", "CANDIDATE", "STATE"}
 	for _, scanned := range r.Scanned {
-		if conditionOf(scanned) == conditionUpToDate && !opts.ShowAll {
+		if conditionOf(scanned) == conditionUpToDate && !listEvery {
 			// R8.3: counted below, not listed here.
 			continue
 		}
@@ -180,7 +235,7 @@ func versionCheckSection(r report.Report, opts Options) section {
 	}
 
 	if found[conditionUpToDate] > 0 {
-		if opts.ShowAll {
+		if listEvery {
 			// R8.2: the list is IN ADDITION TO the count, never instead of it.
 			// A reader who scrolled past the rows still gets the number, and the
 			// two goldens differ in both places rather than only in one.
@@ -405,8 +460,9 @@ func conditionOf(result report.PackageResult) condition {
 // mutually exclusive, so the counts sum to the number of packages scanned.
 //
 // It is taken in its own pass rather than inside the loop that builds the rows,
-// because a count must not depend on which rows were listed: ShowAll changes the
-// list and may never change the number underneath it (R8.2, R8.3).
+// because a count must not depend on which rows were listed: listing every
+// package changes the list and may never change the number underneath it
+// (R8.2, R8.3).
 func scanCounts(scanned []report.PackageResult) map[condition]int {
 	found := make(map[condition]int, len(scanned))
 	for _, result := range scanned {
@@ -456,33 +512,112 @@ func bump(from, to string) string {
 	return from + " → " + to
 }
 
-// ----------------------------------------------------------- the plain writer
+// ------------------------------------------------------------------ the styles
 
-// writePlainSection prints one section as text, applying the width budget that
-// section building deliberately knows nothing about.
-func writePlainSection(out *lineWriter, s section, width int) {
-	title := shorten(s.title, width)
-	out.line(title)
-	if line := rule(lipgloss.Width(title)); line != "" {
-		out.line(line)
+// style is the syntax half of a renderer: how a heading is written, how a
+// sentence is written, how a table is written.
+//
+// It is the ONLY thing separating plain from Markdown (D8). What a report says,
+// in what order, with which rows carrying a reason, is sections' — both styles
+// are handed the same []section and neither may add to it or take from it.
+//
+// # A width is captured here, or it does not exist
+//
+// plainStyle takes the line budget and closes over it. markdownStyle takes no
+// argument at all, and this struct has no field to hold one, so an export has
+// nowhere to receive a width even from a caller offering it. R9.3 rests on that
+// absence rather than on a branch somebody has to remember.
+type style struct {
+	// heading writes the section title, however this syntax marks one.
+	heading func(out *lineWriter, title string)
+	// prose writes one sentence of lead or of note.
+	prose func(out *lineWriter, text string)
+	// table writes the section's rows, header included. Where a row's detail
+	// goes is this function's problem: the two syntaxes place it differently
+	// and neither placement is a fact about the run.
+	table func(out *lineWriter, t table)
+}
+
+// plainStyle is the terminal syntax: a title over a rule, prose wrapped to the
+// budget, and columns measured from the values then padded with spaces.
+func plainStyle(width int) style {
+	return style{
+		heading: func(out *lineWriter, title string) { writePlainHeading(out, title, width) },
+		prose:   func(out *lineWriter, text string) { writeProse(out, text, width) },
+		table:   func(out *lineWriter, t table) { writePlainTable(out, t, width) },
+	}
+}
+
+// markdownStyle is the document syntax: an ATX heading, prose written whole, and
+// pipe tables.
+//
+// Every field is a plain function and not a closure, because there is nothing
+// for one to close over — which is what an export having no settings looks like
+// in code (R9.3).
+func markdownStyle() style {
+	return style{
+		heading: writeMarkdownHeading,
+		prose:   writeMarkdownProse,
+		table:   writeMarkdownTable,
+	}
+}
+
+// write prints every section of a report in one syntax and returns the first
+// write that failed.
+//
+// The blank line between two sections is here rather than in a style because it
+// is the same line in both: one empty line separates a section from the next, in
+// a terminal and in a document alike.
+func write(w io.Writer, blocks []section, st style) error {
+	out := &lineWriter{w: w}
+	for i, s := range blocks {
+		if i > 0 {
+			out.line("")
+		}
+		writeSection(out, s, st)
 	}
 
+	return out.err
+}
+
+// writeSection prints one section — heading, lead, rows, notes — in that order,
+// in every syntax.
+//
+// The ORDER is shared and the SYNTAX is not, which is the whole of D8. The two
+// blank lines are shared too: a table is preceded by one only when a lead was
+// printed above it, and notes always are, so the shape of a section survives the
+// change of syntax.
+func writeSection(out *lineWriter, s section, st style) {
+	st.heading(out, s.title)
+
 	for _, lead := range s.lead {
-		writeProse(out, lead, width)
+		st.prose(out, lead)
 	}
 
 	if len(s.rows.rows) > 0 {
 		if len(s.lead) > 0 {
 			out.line("")
 		}
-		writePlainTable(out, s.rows, width)
+		st.table(out, s.rows)
 	}
 
 	if len(s.notes) > 0 {
 		out.line("")
 		for _, note := range s.notes {
-			writeProse(out, note, width)
+			st.prose(out, note)
 		}
+	}
+}
+
+// ----------------------------------------------------------- the plain writer
+
+// writePlainHeading prints a section title and the rule under it, both held to
+// the width budget that section building deliberately knows nothing about.
+func writePlainHeading(out *lineWriter, title string, width int) {
+	fitted := shorten(title, width)
+	out.line(fitted)
+	if line := rule(lipgloss.Width(fitted)); line != "" {
+		out.line(line)
 	}
 }
 
@@ -658,6 +793,159 @@ func rule(cells int) string {
 		return ""
 	}
 	return ansi.Truncate(strings.Repeat(segment, cells), cells, "")
+}
+
+// -------------------------------------------------------- the Markdown writer
+
+const (
+	// markdownHeading is the level a section title is written at: two hashes,
+	// so a report pasted into an issue or a pull request comment sits UNDER
+	// whatever title that page already has instead of competing with it.
+	markdownHeading = "## "
+
+	// detailHeader labels the column a row's reason is written in.
+	//
+	// The plain writer puts a reason on a line of its own under the row it
+	// belongs to. A pipe table has no such line — a row IS a line, and anything
+	// between two rows ends the table — so the same value becomes a trailing
+	// cell instead, and a column in this syntax must be labelled. That is the
+	// only word this writer adds to a report, and the model's own name for the
+	// value ("reason", in full, per row) is the word it adds.
+	detailHeader = "REASON"
+
+	// markdownSeparatorCell is the one cell of the row a pipe table needs
+	// between its header and its body. Without that row the header is not a
+	// header and the whole block renders as a paragraph full of pipes.
+	markdownSeparatorCell = "---"
+)
+
+// markdownCellEscaper makes a value safe to put between two pipes, without
+// dropping a character of it.
+//
+// A pipe inside a cell would end the cell, so it is escaped — `\|` renders as
+// the pipe the value held, so nothing is lost. A line break inside a cell would
+// end the ROW, and the syntax has no escape for that one: a row is one line by
+// definition. Folding a break to a space is the single place this writer alters
+// a value, and it alters only the break — every character around it still
+// reaches the reader, which is what separates folding from shortening (R9.3).
+// CRLF is listed before CR so a Windows line ending folds to one space and not
+// to two; a Replacer prefers the pattern given first.
+//
+// Neither case is hypothetical. PackageResult.Error is a failure reported
+// exactly as it arrived, and a subprocess writes what it likes.
+var markdownCellEscaper = strings.NewReplacer(
+	"|", `\|`,
+	"\r\n", " ",
+	"\r", " ",
+	"\n", " ",
+)
+
+// writeMarkdownHeading writes an ATX heading and the blank line under it.
+//
+// The blank line is not decoration: it closes the heading's block, and the
+// pipe table that may follow has to begin one of its own.
+func writeMarkdownHeading(out *lineWriter, title string) {
+	out.line(markdownHeading + title)
+	out.line("")
+}
+
+// writeMarkdownProse writes one sentence, whole.
+//
+// Nothing is wrapped and nothing is cut. A document has no line to fit, and
+// hard-wrapping a paragraph that will be re-flowed by whatever renders it only
+// puts breaks where the reader's window is not (R9.3).
+func writeMarkdownProse(out *lineWriter, text string) {
+	out.line(text)
+}
+
+// writeMarkdownTable writes a table as pipe rows.
+//
+// # Nothing is measured and nothing is padded
+//
+// A pipe table needs no alignment in its source — whatever renders it aligns
+// the columns — so this writer computes no width at all. That is not tidiness:
+// a column width here would be the first place a line budget could enter the
+// export path, and an export carries the complete report (R9.3). Every cell
+// holds its value in full, including the ~230-character reason the terminal
+// shows sixty cells of.
+//
+// # The column count is the plain writer's
+//
+// columnCount reads the header AND every row, so a row carrying an extra cell
+// is printed rather than silently dropped, and the two syntaxes cannot disagree
+// about how many columns a table has.
+//
+// # Each row is COPIED into a slice of its own
+//
+// Never appended to in place. The header and the cells belong to the section,
+// and appending the reason cell onto one of those slices could write into the
+// backing array the section still holds — a renderer quietly editing the report
+// it was given. Copying costs one allocation per row and cannot.
+func writeMarkdownTable(out *lineWriter, t table) {
+	columns := columnCount(t)
+	withDetail := hasDetail(t)
+
+	headers := make([]string, columns, columns+1)
+	copy(headers, t.headers)
+	if withDetail {
+		headers = append(headers, detailHeader)
+	}
+
+	out.line(markdownRow(headers))
+	out.line(markdownSeparator(len(headers)))
+
+	for _, r := range t.rows {
+		cells := make([]string, columns, columns+1)
+		copy(cells, r.cells)
+		if withDetail {
+			cells = append(cells, r.detail)
+		}
+		out.line(markdownRow(cells))
+	}
+}
+
+// hasDetail reports whether any row of the table has a reason to print.
+//
+// A table where none does gets no reason column at all — the same rule the
+// plain writer follows when it omits an empty detail rather than printing a
+// bare indent. A column nothing fills is an empty cell on every row, and a
+// header promising an explanation that never comes.
+func hasDetail(t table) bool {
+	for _, r := range t.rows {
+		if r.detail != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// markdownRow lays one row's cells out between pipes.
+//
+// The leading and trailing pipes are optional in the syntax and written anyway:
+// they make a row that ends in an empty cell — a result whose reason the plan
+// already stated (R7.2) — still show that the cell is there.
+func markdownRow(cells []string) string {
+	escaped := make([]string, len(cells))
+	for i, cell := range cells {
+		escaped[i] = markdownCellEscaper.Replace(cell)
+	}
+
+	return "| " + strings.Join(escaped, " | ") + " |"
+}
+
+// markdownSeparator is the header rule, one cell per column.
+//
+// It goes through markdownRow rather than assembling pipes of its own, so this
+// syntax is written down in exactly one place — which is the point of a style:
+// a second spelling of a row is a second thing to keep in agreement. Escaping a
+// cell of dashes is a no-op, so nothing is paid for the reuse.
+func markdownSeparator(columns int) string {
+	cells := make([]string, columns)
+	for i := range cells {
+		cells[i] = markdownSeparatorCell
+	}
+
+	return markdownRow(cells)
 }
 
 // lineWriter writes whole lines and remembers the first failure.

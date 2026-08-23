@@ -70,16 +70,16 @@ const (
 // columns sum to the number of planned packages (R5.5, Report.Reconciles).
 type Tally struct {
 	// Proved counts the packages whose deciding gates all passed.
-	Proved int
+	Proved int `json:"proved"`
 	// Errored counts the packages with at least one failing deciding gate.
-	Errored int
+	Errored int `json:"errored"`
 	// Inconclusive counts the packages the toolkit could not evaluate, plus
 	// the ones whose results named no cause. Both are limitations of the
 	// toolkit rather than choices of the operator.
-	Inconclusive int
+	Inconclusive int `json:"inconclusive"`
 	// Skipped counts the packages policy said not to evaluate. "Nothing was
 	// said" is never folded into Proved.
-	Skipped int
+	Skipped int `json:"skipped"`
 }
 
 // Total is how many planned packages the tally accounts for.
@@ -100,28 +100,28 @@ type Report struct {
 	// them, whether or not an update was found. It is what makes a package
 	// that is up to date distinguishable from a package that was never
 	// scanned.
-	Scanned []PackageResult
+	Scanned []PackageResult `json:"scanned"`
 	// Plan is the pending updates the run intended to validate, including the
 	// ones policy excluded. Dropping those would produce a reassuring tally
 	// about the easy packages and say nothing about the rest. It is also the
 	// denominator the tally is reconciled against.
-	Plan []PlanEntry
+	Plan []PlanEntry `json:"plan"`
 	// Results is what the gates answered, one row per planned package the run
 	// reached. For an interrupted run it covers only the packages reached
 	// before the interrupt, and NotEvaluated is how many of the rest there
 	// were.
-	Results []ValidationRow
+	Results []ValidationRow `json:"results"`
 	// Tally is the four counts taken over Plan.
-	Tally Tally
+	Tally Tally `json:"tally"`
 	// Complete reports that the run reached the end of its plan. A run stopped
 	// early — by an interrupt — sets this false, and the report still holds
 	// everything it had established up to that point.
-	Complete bool
+	Complete bool `json:"complete"`
 	// NotEvaluated is how many planned packages the run never reached. It is
 	// zero for a complete run, and for an interrupted one it is the number
 	// that turns a short result list into a stated gap rather than a silent
 	// one.
-	NotEvaluated int
+	NotEvaluated int `json:"not_evaluated"`
 }
 
 // Reconciles reports whether the tally accounts for every planned package
@@ -148,36 +148,36 @@ func (r Report) Reconciles() bool {
 // qualifies where the upstream answer came from, not what the answer was.
 type PackageResult struct {
 	// Package is the full atom, category/package.
-	Package string
+	Package string `json:"package"`
 	// Type is the tier the package resolved to, "bin" or "source". It is empty
 	// when the current ebuild could not be read, and empty is meaningful:
 	// nobody resolved it, so nothing may be assumed from it.
-	Type string
+	Type string `json:"type"`
 	// CurrentVersion is the version the overlay holds today.
-	CurrentVersion string
+	CurrentVersion string `json:"current_version"`
 	// CandidateVersion is the version found upstream. It is present even when
 	// it could not be ordered against CurrentVersion, because the unusable
 	// value is exactly what a reader needs to fix the parser configuration.
-	CandidateVersion string
+	CandidateVersion string `json:"candidate_version"`
 	// HasUpdate reports that CandidateVersion is newer than CurrentVersion. It
 	// is false whenever the two could not be compared.
-	HasUpdate bool
+	HasUpdate bool `json:"has_update"`
 	// NotComparable reports that the upstream value could not be ordered
 	// against the current one. It is carried apart from HasUpdate so that a
 	// broken parser is never read as "up to date".
-	NotComparable bool
+	NotComparable bool `json:"not_comparable"`
 	// Orphaned reports that the package no longer has any ebuild in the
 	// overlay. When set, the version fields say nothing.
-	Orphaned bool
+	Orphaned bool `json:"orphaned"`
 	// FromCache reports that the upstream version was answered from cache
 	// rather than fetched, which is why the run may not reflect a bump made in
 	// the last few minutes.
-	FromCache bool
+	FromCache bool `json:"from_cache"`
 	// Error is why the scan could not answer for this package, in full and
 	// exactly as it was reported. It is empty when the scan succeeded, and a
 	// string rather than an error because the model carries facts and has no
 	// behaviour.
-	Error string
+	Error string `json:"error"`
 }
 
 // PlanEntry is one pending update the run intends to validate: the bump, the
@@ -189,29 +189,29 @@ type PackageResult struct {
 // number nobody can check.
 type PlanEntry struct {
 	// Package is the full atom, category/package.
-	Package string
+	Package string `json:"package"`
 	// CurrentVersion and CandidateVersion are the two ends of the bump. Both
 	// are carried because the depth follows the distance between them, and a
 	// reader checking the plan against the policy needs the two values the
 	// classifier saw.
-	CurrentVersion   string
-	CandidateVersion string
+	CurrentVersion   string `json:"current_version"`
+	CandidateVersion string `json:"candidate_version"`
 	// Class is how far the bump moved — how the version distance was
 	// classified.
-	Class string
+	Class string `json:"class"`
 	// Depth is the resolved depth, spelled the way the --depth flag and the
 	// config key spell it, so a plan line can be typed back as a flag.
-	Depth string
+	Depth string `json:"depth"`
 	// Reason names the input that decided the depth, in full, and quotes an
 	// override's stated justification where one exists. It is never shortened
 	// here; a renderer that lacks the room shortens its own copy (R7.4).
-	Reason string
+	Reason string `json:"reason"`
 	// Skipped marks an entry no gate will run for, because policy said so — a
 	// depth of none, or a package type the run excludes. It travels with the
 	// entry rather than being derived when the entry is shown, because the
 	// reason has to travel with it, and because it is what separates Skipped
 	// from Inconclusive in the tally (R5.3).
-	Skipped bool
+	Skipped bool `json:"skipped"`
 }
 
 // ValidationRow is what the gates had to say about one planned package.
@@ -220,17 +220,17 @@ type PlanEntry struct {
 // of the Tally.
 type ValidationRow struct {
 	// Package is the full atom, category/package.
-	Package string
+	Package string `json:"package"`
 	// CandidateVersion is the version that was evaluated.
-	CandidateVersion string
+	CandidateVersion string `json:"candidate_version"`
 	// Outcome is the one verdict that stands for the whole package, across
 	// every gate that spoke for it.
-	Outcome Outcome
+	Outcome Outcome `json:"outcome"`
 	// Depth is how far validation actually got, which is not always how far it
 	// was asked to go — PlanEntry.Depth is the request. Both are needed to say
 	// "compile was asked for, configure is as far as it got", because an
 	// outcome has to name its own reach.
-	Depth string
+	Depth string `json:"depth"`
 	// Reason is why this package earned this outcome, IN FULL: the gate's own
 	// reason where there is one, otherwise the reason the run reported for the
 	// depth or the plan. It is never shortened, never truncated and never
@@ -239,12 +239,12 @@ type ValidationRow struct {
 	//
 	// A row that produced no verdict always carries a reason: a package
 	// reported without one reads as a result.
-	Reason string
+	Reason string `json:"reason"`
 	// SameReasonAsPlan reports that Reason repeats the plan entry's reason
 	// word for word. The run sets it; a renderer uses it to print a reason
 	// once instead of twice (R7.2), and a differing reason is new information
 	// that gets printed (R7.3). It is computed where the two strings are both
 	// in hand rather than by a renderer that would have to go looking for the
 	// plan entry.
-	SameReasonAsPlan bool
+	SameReasonAsPlan bool `json:"same_reason_as_plan"`
 }

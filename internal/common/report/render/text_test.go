@@ -263,3 +263,84 @@ func TestReasonSurvivesShortening(t *testing.T) {
 		t.Errorf("the reason was shortened past the point of being identifiable")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Sub-task 3.1 — Markdown shares the text renderer. APPENDED to text_test.go.
+// ---------------------------------------------------------------------------
+
+// renderMarkdown mirrors renderPlain. Note what it CANNOT take: Markdown has no
+// Options parameter, so there is no width to shorten to and no ShowAll to
+// honour. R9.3 is enforced by the signature rather than by a branch somebody
+// has to remember — an export that mirrored screen truncation would be a
+// useless record, and this is why it cannot.
+func renderMarkdown(t *testing.T) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	if err := Markdown(&buf, fixtureReport()); err != nil {
+		t.Fatalf("Markdown returned an error: %v", err)
+	}
+	return buf.String()
+}
+
+// TestMarkdownGolden pins the export over the same fixture the plain goldens
+// use. Comparing the two goldens is how "differ by table syntax and nothing
+// else" stops being a claim.
+func TestMarkdownGolden(t *testing.T) {
+	golden(t, "TestMarkdownGolden", []byte(renderMarkdown(t)))
+}
+
+// TestExportIsCompleteKeepsEveryReasonWhole pins the first half of R9.3. The
+// terminal shows 96 cells of the 232-character reason; the export shows all
+// 232. Shortening is a rendering decision, and an export is not a rendering of
+// a terminal.
+func TestExportIsCompleteKeepsEveryReasonWhole(t *testing.T) {
+	out := renderMarkdown(t)
+
+	if !strings.Contains(out, planReason) {
+		t.Errorf("the %d-character reason was not exported whole (R9.3)\n--- export ---\n%s", len(planReason), out)
+	}
+	if strings.Contains(out, "…") {
+		t.Errorf("the export carries an ellipsis, so something was shortened (R9.3)")
+	}
+}
+
+// TestExportIsCompleteListsEveryPackage pins the other half of R9.3: every
+// package, regardless of --all. The two up-to-date packages that the plain
+// render hides behind a count must be named here.
+func TestExportIsCompleteListsEveryPackage(t *testing.T) {
+	out := renderMarkdown(t)
+
+	for _, pkg := range fixtureReport().Scanned {
+		if !strings.Contains(out, pkg.Package) {
+			t.Errorf("the export does not name %q — an export that honoured --all would be an incomplete record (R9.3)", pkg.Package)
+		}
+	}
+}
+
+// TestExportIsCompleteRegardlessOfPlainShowAll is the guard that makes the two
+// tests above mean something. Markdown takes no Options, so nothing a caller
+// does to the terminal rendering may change the export: identical bytes either
+// way, by construction.
+func TestExportIsCompleteRegardlessOfPlainShowAll(t *testing.T) {
+	first := renderMarkdown(t)
+
+	// Render plain both ways in between — if any shared state leaked from the
+	// screen renderer into the export, this is where it would show.
+	renderPlain(t, Options{Width: 40})
+	renderPlain(t, Options{Width: 200, ShowAll: true})
+
+	if second := renderMarkdown(t); first != second {
+		t.Error("the Markdown export changed after the plain renderer ran — the export is not independent of the screen")
+	}
+}
+
+// TestMarkdownIsNotPlain guards against the "shares the renderer" refactor
+// collapsing into "is the renderer". They differ by table syntax; if the two
+// outputs were identical, one of the two styles would not be reaching the
+// writer at all.
+func TestMarkdownIsNotPlain(t *testing.T) {
+	if renderMarkdown(t) == renderPlain(t, Options{Width: 100}) {
+		t.Fatal("the Markdown export is byte-identical to the plain render — the style parameter is not being applied")
+	}
+}
