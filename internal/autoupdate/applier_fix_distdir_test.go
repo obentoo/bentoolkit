@@ -162,8 +162,10 @@ func TestStagedManifestWithoutASuppliedDistdirIsUnchanged(t *testing.T) {
 // paths and requiring a separator so /a/bc is not read as being under /a/b.
 func filepathHasPrefix(path, root string) bool {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-	return err == nil && rel != ".." && !filepath.IsAbs(rel) &&
-		!(len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator))
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // --- sub-task 2.2 — the fixer's distdir is transferred, not discarded -------
