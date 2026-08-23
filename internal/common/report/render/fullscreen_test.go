@@ -330,3 +330,95 @@ func TestCompleteRunIsNotLabelledOnTheFullscreenPath(t *testing.T) {
 		t.Errorf("a run that completed normally was labelled incomplete\n--- stdout ---\n%s", ansi.Strip(out))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Quality Gate — "R2.4 honoured: the three modes compared on stripped content,
+// not merely rendered without error". Authored at gate-settlement time, after
+// the task list closed: the sub-tasks compared plain against inline
+// (TestInlineMatchesPlainContent) and checked fullscreen only for the PRESENCE
+// of every section heading, which is a weaker claim than the gate makes.
+// ---------------------------------------------------------------------------
+
+// unframe strips the chrome the fullscreen mode adds and returns the content
+// inside it: the box drawn with borderStyle, and the key-binding line beneath.
+//
+// Removing them is not weakening the comparison — it IS the comparison. R2.4
+// permits the modes to differ in presentation and nothing else, and a border is
+// the clearest case of presentation there is. What must survive unframing is
+// every character of the report.
+func unframe(view string) string {
+	var content []string
+
+	for _, line := range strings.Split(view, "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		// The box's top and bottom edges.
+		if strings.HasPrefix(trimmed, "╭") || strings.HasPrefix(trimmed, "╰") {
+			continue
+		}
+		// A framed line: │ … │
+		if strings.HasPrefix(trimmed, "│") && strings.HasSuffix(trimmed, "│") {
+			inner := strings.TrimSuffix(strings.TrimPrefix(trimmed, "│"), "│")
+			// The box pads its contents by exactly one cell on each side.
+			// Trim that one, never more: TrimLeft would eat the report's own
+			// indentation, which IS content — it is how a detail line is told
+			// from the row it belongs to.
+			inner = strings.TrimPrefix(inner, " ")
+			content = append(content, strings.TrimRight(inner, " "))
+			continue
+		}
+		// Anything outside the box is chrome — the key-binding line.
+	}
+	return strings.Join(content, "\n")
+}
+
+// TestAllThreeModesAgreeOnContent settles the gate. It is the only assertion in
+// the story that puts all three renderers side by side on the same fixture.
+//
+// The three table styles this story removed were not written by a careless
+// author; they were written by three careful ones, independently, with nothing
+// to compare against. This is the comparison.
+func TestAllThreeModesAgreeOnContent(t *testing.T) {
+	opts := Options{Width: 100}
+
+	plain := strings.TrimRight(ansi.Strip(renderPlain(t, opts)), "\n")
+
+	inline := strings.TrimRight(trimTrailing(ansi.Strip(captureStdout(t, func() error {
+		return Inline(fixtureReport(), opts)
+	}))), "\n")
+
+	// A viewport tall enough that nothing is paginated away — pagination is a
+	// property of the screen, not of the report, and R2.5 covers the case where
+	// it does have to omit.
+	model := newModel(fixtureReport(), opts)
+	sized, _ := model.Update(tea.WindowSizeMsg{Width: 104, Height: 200})
+	fullscreen := strings.TrimRight(unframe(ansi.Strip(sized.View())), "\n")
+
+	for _, mode := range []struct {
+		name string
+		got  string
+	}{
+		{"inline", inline},
+		{"fullscreen", fullscreen},
+	} {
+		if mode.got == plain {
+			continue
+		}
+
+		plainLines, gotLines := strings.Split(plain, "\n"), strings.Split(mode.got, "\n")
+		for i := 0; i < len(plainLines) || i < len(gotLines); i++ {
+			var p, g string
+			if i < len(plainLines) {
+				p = plainLines[i]
+			}
+			if i < len(gotLines) {
+				g = gotLines[i]
+			}
+			if p != g {
+				t.Errorf("%s and plain diverge at line %d of %d/%d (R2.4)\n  plain:      %q\n  %s: %q",
+					mode.name, i+1, len(plainLines), len(gotLines), p, mode.name, g)
+				break
+			}
+		}
+	}
+}
