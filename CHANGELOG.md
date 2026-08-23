@@ -29,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every group that will not — is printed BEFORE the confirmation, and the write
   is gated exactly as `--lint --fix` is, because this overlay auto-commits and
   pushes and an unattended write is a published one
-  (`cmd/bentoo/overlay_autoupdate_markauto.go`).
+  (`cmd/bentoo/overlay_autoupdate_markauto.go`, with the flags registered and
+  the mode dispatched in `cmd/bentoo/overlay_autoupdate.go`, whose `--yes` and
+  `Examples:` prose were widened to name the migration).
 
 ### Fixed
 - **`--check` now names the depth a bump reached instead of its weakest gate.**
