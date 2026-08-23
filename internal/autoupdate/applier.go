@@ -251,6 +251,15 @@ type Applier struct {
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
 	logsDir string
+	// configDir is the bentoo autoupdate config directory — in production
+	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
+	// cache.json in it is where a host-caused build failure records the
+	// precondition it found unmet (S043-R3.1). The record may live NOWHERE else;
+	// the obvious alternative, packages.toml, sits in an overlay that
+	// auto-commits and pushes within minutes, so one workstation's unreadable key
+	// would be published as a claim about everyone's. Empty means "no cache to
+	// write to" and is silently skipped, which only a test can produce.
+	configDir string
 	// confirmFunc is a function to prompt for user confirmation (injectable for testing)
 	confirmFunc func(prompt string) bool
 	// execCommand is a function to create exec.Cmd bound to a context
@@ -681,6 +690,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	applier := &Applier{
 		overlayPath: overlayPath,
 		logsDir:     logsDir,
+		configDir:   configDir,
 		confirmFunc: defaultConfirmFunc,
 		execCommand: exec.CommandContext,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
@@ -2593,6 +2603,16 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 	verdict := buildFaultVerdict(ev)
 	if verdict == nil {
 		return nil
+	}
+
+	// S043-R3.1. The verdict says the machine is at fault; this asks the same
+	// transcript WHAT the machine was missing and writes it against the package,
+	// so the next run has something to decline on instead of rebuilding into the
+	// identical failure. It cannot fail this call: the apply is already failing
+	// for the build's own reason, and a transcript that names no path records
+	// nothing — the package is retried, exactly as it is today.
+	if errors.Is(verdict, ErrBuildEnvironment) {
+		a.recordUnmetPrecondition(pkg, ev.transcript)
 	}
 
 	// Reported here, not returned quietly: the apply's own error reaches the
