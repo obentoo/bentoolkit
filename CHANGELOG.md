@@ -69,6 +69,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decision and never a loss of data — the exports carry the whole sentence.
 
 ### Fixed
+- **The commit substitution no longer overwrites a vendored component's
+  revision.** `substituteCommitHash` rewrites the SHA a snapshot ebuild pins, and
+  its quoted pattern had no left-hand boundary — so `<ANYTHING>_COMMIT="<sha>"`
+  matched through the shared suffix and was rewritten with the package's own
+  commit. The comment above it argued this was safe because the whole assignment
+  is captured and written back, preserving the prefix; preserving the prefix was
+  never the question, since the VALUE is what gets replaced. The gap opened in
+  0.24.0, when `COMMIT` joined the alternation to reach
+  `sys-apps/asus-ec-sensors`, and every ebuild pinning a second component's
+  revision has been exposed since:
+
+      app-editors/zed   seven `local *_COMMIT` in src_prepare — the rev= of its
+                        git dependencies, driving the sed that rewrites
+                        [patch.crates-io] from `git =` to `path =`
+      media-libs/mesa   VENUS_PROTOCOL_COMMIT — the venus-protocol subproject
+
+  Nothing fails at apply time: the ebuild parses, the manifest generates, and the
+  damage surfaces only when a user builds. zed shipped broken four times this way
+  before this fix. Both patterns are now anchored to `(?m)^[ \t]*`, which is the
+  anchoring `ebuildCommitRegex` on the read side already used — and already
+  claimed to share. Leading whitespace stays allowed, so mesa's tab-indented
+  `GIT_COMMIT` still matches while `local ASYNC_PROCESS_COMMIT=` no longer does.
+  Measured across the overlay's 16 commit-tracked packages: no package loses a
+  substitution, and the two above stop losing a vendored revision.
 - **`overlay autoupdate --check` no longer states itself twice.** A `--check
   --llm` run printed the heading `Version Check Results` twice, and
   `Validation Plan` twice with every package's bump and depth repeated under it.
