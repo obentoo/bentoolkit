@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/tui"
@@ -17,6 +18,8 @@ var (
 	ErrPathOutsideOverlay = errors.New("path is outside overlay directory")
 	ErrInvalidPath        = errors.New("invalid path")
 	ErrGitCommand         = errors.New("git command failed")
+	ErrNoUpstream         = errors.New("no upstream configured for the current branch")
+	ErrDetachedHead       = errors.New("HEAD is detached; check out a branch first")
 )
 
 // GitRunner executes git commands in a specific working directory
@@ -408,6 +411,84 @@ func (g *GitRunner) Merge(branch string) error {
 		}
 		return err
 	})
+}
+
+// MergeFFOnly merges a branch only when the merge can fast-forward. Where
+// Merge writes a merge commit over diverged history, this refuses and leaves
+// the branch untouched, so the caller can report the divergence instead of
+// burying it in a commit nobody asked for.
+func (g *GitRunner) MergeFFOnly(branch string) error {
+	return g.staged("merge", func() error {
+		stdout, stderr, err := g.runCommand("merge", "--ff-only", branch)
+		if err != nil {
+			// Git reports "Not possible to fast-forward" on stdout, so both
+			// streams have to reach the caller for the refusal to be readable.
+			combinedOutput := strings.TrimSpace(stdout + "\n" + stderr)
+			if combinedOutput != "" {
+				return errors.Join(ErrGitCommand, errors.New(combinedOutput))
+			}
+		}
+		return err
+	})
+}
+
+// Rebase replays the current branch's commits on top of branch. As with
+// Merge, conflict details arrive on stdout and are folded into the error.
+func (g *GitRunner) Rebase(branch string) error {
+	return g.staged("rebase", func() error {
+		stdout, stderr, err := g.runCommand("rebase", branch)
+		if err != nil {
+			combinedOutput := strings.TrimSpace(stdout + "\n" + stderr)
+			if combinedOutput != "" {
+				return errors.Join(ErrGitCommand, errors.New(combinedOutput))
+			}
+		}
+		return err
+	})
+}
+
+// CurrentBranch returns the checked-out branch name. A detached HEAD yields
+// the literal "HEAD" from git, which is not a branch anything can be pulled
+// into, so it is reported as an error.
+func (g *GitRunner) CurrentBranch() (string, error) {
+	stdout, _, err := g.runCommand("rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(stdout)
+	if branch == "" || branch == "HEAD" {
+		return "", ErrDetachedHead
+	}
+	return branch, nil
+}
+
+// Upstream returns the current branch's upstream ref, such as
+// "origin/master". A branch with no upstream yields ErrNoUpstream rather
+// than git's raw "no upstream configured" text.
+func (g *GitRunner) Upstream() (string, error) {
+	stdout, _, err := g.runCommand("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if err != nil {
+		return "", ErrNoUpstream
+	}
+	upstream := strings.TrimSpace(stdout)
+	if upstream == "" {
+		return "", ErrNoUpstream
+	}
+	return upstream, nil
+}
+
+// CountRange returns the number of commits in the range from..to — that is,
+// commits reachable from `to` but not from `from`.
+func (g *GitRunner) CountRange(from, to string) (int, error) {
+	stdout, _, err := g.runCommand("rev-list", "--count", from+".."+to)
+	if err != nil {
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(stdout))
+	if err != nil {
+		return 0, errors.Join(ErrGitCommand, err)
+	}
+	return count, nil
 }
 
 // Ensure GitRunner implements GitExecutor interface
