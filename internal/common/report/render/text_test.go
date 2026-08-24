@@ -556,3 +556,53 @@ func TestExportKeepsThePlanTheScreenSkipped(t *testing.T) {
 		t.Errorf("the JSON export dropped the plan the screen skipped (R2.4)\n%s", js.String())
 	}
 }
+
+// ---- story 045, sub-task 2.1: the tier count note ----
+
+// TestTierCountNote is R5.1: the source/bin tally displayCheckResults printed as
+// "Checked N source, M bin" has to survive its deletion, and it survives inside
+// the section rather than beside it (D5).
+func TestTierCountNote(t *testing.T) {
+	r := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+		{Package: "app-misc/yq", Type: "source", CurrentVersion: "4.44.1", CandidateVersion: "4.44.1"},
+		{Package: "app-editors/zed", Type: "bin", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4"},
+	}}
+
+	for _, showAll := range []bool{false, true} {
+		var buf bytes.Buffer
+		if err := Plain(&buf, r, Options{ShowAll: showAll}); err != nil {
+			t.Fatalf("Plain(ShowAll=%v): %v", showAll, err)
+		}
+		// The count never depends on the listing — story 044's R8.3 rule, applied
+		// to the note this story adds.
+		if got := buf.String(); !strings.Contains(got, "2 source") || !strings.Contains(got, "1 bin") {
+			t.Errorf("ShowAll=%v: the version check does not state the tier tally (want 2 source, 1 bin) (R5.1)\n%s",
+				showAll, got)
+		}
+	}
+}
+
+// TestTierCountIgnoresUnresolved is the hostile half. PackageResult.Type is
+// documented as meaningful when EMPTY — nobody resolved it — so a note that
+// bucketed the unresolved into either column would state a fact the scan never
+// established. The totals deliberately do NOT sum to len(Scanned).
+func TestTierCountIgnoresUnresolved(t *testing.T) {
+	r := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source"},
+		{Package: "app-misc/broken", Type: "", Error: "the current ebuild could not be read"},
+	}}
+
+	var buf bytes.Buffer
+	if err := Plain(&buf, r, Options{}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "1 source") {
+		t.Errorf("the resolved package is not counted (R5.1)\n%s", out)
+	}
+	if strings.Contains(out, "2 source") || strings.Contains(out, "1 bin") {
+		t.Errorf("an unresolved Type was bucketed into a tier column; empty means nobody resolved it\n%s", out)
+	}
+}

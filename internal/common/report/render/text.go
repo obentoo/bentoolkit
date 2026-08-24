@@ -342,6 +342,17 @@ func versionCheckSection(r report.Report, listEvery bool) section {
 		}
 	}
 
+	// R5.1: the source/bin tally the check path printed as its closing line,
+	// said INSIDE the section (D5) because it is a count over the very packages
+	// this section is about, taken from the TYPE column already beside every
+	// row. It is appended LAST for the reason the old line was printed last: the
+	// notes above qualify the rows, and this one qualifies the whole scan.
+	//
+	// It is stated whichever way listEvery went, because it is a count and a
+	// count never depends on the listing (R8.3) — the same rule the up-to-date
+	// note above follows, and the reason every golden gains this line.
+	s.notes = append(s.notes, tierNote(tierCounts(r.Scanned)))
+
 	return s
 }
 
@@ -554,6 +565,78 @@ func scanCounts(scanned []report.PackageResult) map[condition]int {
 		found[conditionOf(result)]++
 	}
 	return found
+}
+
+// tierTally is how a scan's packages divided between the two tiers, and how
+// many landed in neither.
+//
+// unresolved is a THIRD number rather than a remainder folded into one of the
+// other two. PackageResult.Type is documented as meaningful when EMPTY —
+// nobody resolved it — so a package that carries no tier has to be counted
+// somewhere that claims nothing about it (R5.1).
+type tierTally struct {
+	// source and bin are the two spellings the producer emits.
+	source int
+	bin    int
+	// unresolved is everything else: the empty Type of a package whose current
+	// ebuild could not be read, and any spelling this renderer does not know.
+	unresolved int
+}
+
+// tierCounts divides the scanned packages between "source", "bin" and neither.
+//
+// # Exactly two spellings are recognised, and nothing is guessed
+//
+// The two literals are the producer's own (Checker.resolveType answers with one
+// of them, and an operator may set either in packages.toml), and this reproduces
+// the check path's tally switch verbatim so the sentence survives that path's
+// deletion unchanged. Anything else — the empty string, or a typo that reached
+// the registry — is counted as unresolved: defaulting it to "source" would make
+// an unreadable ebuild indistinguishable from a source package, which is the one
+// thing the model's doc comment says may not be assumed.
+//
+// # It is its own pass, like scanCounts
+//
+// A count must not depend on which rows were listed (R8.3), and taking it here
+// rather than inside the row loop is what makes that true by construction
+// instead of by a branch nobody may later move.
+func tierCounts(scanned []report.PackageResult) tierTally {
+	var found tierTally
+	for _, result := range scanned {
+		switch result.Type {
+		case "source":
+			found.source++
+		case "bin":
+			found.bin++
+		default:
+			found.unresolved++
+		}
+	}
+	return found
+}
+
+// tierNote is that tally as the sentence the report states (R5.1): the words
+// the check path this report replaces ended on, "Checked N source, M bin".
+//
+// The wording is separated from the counting for the reason scanState is
+// separated from scanCounts: what the report SAYS about a number and how the
+// number was arrived at are two things, and only one of them changes when the
+// sentence is reworded.
+//
+// # The gap is named, never closed
+//
+// When some package resolved to neither tier the two figures do not add up to
+// the count in the lead, and the sentence says so instead of leaving the reader
+// to subtract. It says it WITHOUT naming a tier, which is the whole point:
+// nobody resolved those packages, so putting them in either column — or quietly
+// defaulting them to source, as the producer's own fallback does — would state
+// a fact the scan never established.
+func tierNote(counted tierTally) string {
+	note := fmt.Sprintf("Checked %d source, %d bin", counted.source, counted.bin)
+	if counted.unresolved > 0 {
+		note += fmt.Sprintf("; %d package(s) resolved to neither tier", counted.unresolved)
+	}
+	return note + "."
 }
 
 // scanState names a package's condition for the STATE column and returns the
