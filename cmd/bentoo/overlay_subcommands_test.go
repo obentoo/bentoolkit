@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/overlay"
+	"github.com/spf13/cobra"
 )
 
 // findOverlaySubcommand returns the overlay subcommand with the given use prefix, or nil.
@@ -28,7 +31,7 @@ func overlaySubcmdExists(usePrefix string) bool {
 
 // TestOverlayExtendedSubcommands tests Requirement 9.4-9.9: overlay subcommands are registered.
 func TestOverlayExtendedSubcommands(t *testing.T) {
-	expected := []string{"compare", "sync", "diff", "init", "log"}
+	expected := []string{"compare", "pull", "diff", "init", "log"}
 	for _, name := range expected {
 		t.Run(name, func(t *testing.T) {
 			if !overlaySubcmdExists(name) {
@@ -40,7 +43,7 @@ func TestOverlayExtendedSubcommands(t *testing.T) {
 
 // TestOverlaySubcommandsHaveDescriptions tests that all overlay subcommands have descriptions.
 func TestOverlaySubcommandsHaveDescriptions(t *testing.T) {
-	names := []string{"compare", "sync", "diff", "init", "log"}
+	names := []string{"compare", "pull", "diff", "init", "log"}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			for _, cmd := range overlayCmd.Commands() {
@@ -62,7 +65,7 @@ func TestOverlaySubcommandsHaveDescriptions(t *testing.T) {
 func TestOverlaySubcommandsHaveRunFunc(t *testing.T) {
 	cmds := map[string]interface{ GetUse() string }{
 		"compare": nil,
-		"sync":    nil,
+		"pull":    nil,
 		"diff":    nil,
 		"log":     nil,
 	}
@@ -73,9 +76,9 @@ func TestOverlaySubcommandsHaveRunFunc(t *testing.T) {
 			if cmd.Run == nil {
 				t.Error("overlay compare should have a Run function")
 			}
-		case cmd.Use == "sync":
+		case cmd.Use == "pull":
 			if cmd.Run == nil {
-				t.Error("overlay sync should have a Run function")
+				t.Error("overlay pull should have a Run function")
 			}
 		case cmd.Use == "diff" || strings.HasPrefix(cmd.Use, "diff "):
 			if cmd.Run == nil {
@@ -198,16 +201,64 @@ func TestInitCommandRegistered(t *testing.T) {
 	}
 }
 
-// TestSyncCommandRegistered tests Requirement 9.6: sync command is registered with correct usage.
-func TestSyncCommandRegistered(t *testing.T) {
-	if syncCmd.Use == "" {
-		t.Error("sync command should have a Use field")
+// TestPullCommandRegistered tests Requirement 9.6: pull command is registered with correct usage.
+func TestPullCommandRegistered(t *testing.T) {
+	if pullCmd.Use == "" {
+		t.Error("pull command should have a Use field")
 	}
-	if syncCmd.Short == "" {
-		t.Error("sync command should have a Short description")
+	if pullCmd.Short == "" {
+		t.Error("pull command should have a Short description")
 	}
-	if syncCmd.Run == nil {
-		t.Error("sync command should have a Run function")
+	if pullCmd.Run == nil {
+		t.Error("pull command should have a Run function")
+	}
+}
+
+// TestPullKeepsSyncAlias proves the name this command shipped under still
+// resolves, so existing scripts and muscle memory keep working.
+func TestPullKeepsSyncAlias(t *testing.T) {
+	cmd, _, err := overlayCmd.Find([]string{"sync"})
+	if err != nil {
+		t.Fatalf("overlay sync should still resolve: %v", err)
+	}
+	if cmd.Name() != "pull" {
+		t.Errorf("overlay sync resolved to %q, want the pull command", cmd.Name())
+	}
+}
+
+// TestPullFlagsAreMutuallyExclusive: --rebase and --merge name conflicting
+// integration strategies, so asking for both must fail rather than let one
+// silently win.
+func TestPullFlagsAreMutuallyExclusive(t *testing.T) {
+	for _, flag := range []string{"rebase", "merge", "dry-run"} {
+		if pullCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("pull command should have a --%s flag", flag)
+		}
+	}
+
+	annotations := pullCmd.Flags().Lookup("rebase").Annotations
+	if _, ok := annotations[cobra.BashCompOneRequiredFlag]; ok {
+		t.Error("--rebase should not be required")
+	}
+}
+
+// TestPullModeFromFlags maps the flag pair to the integration mode.
+func TestPullModeFromFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		rebase, merge bool
+		want          overlay.PullMode
+	}{
+		{"no flags is fast-forward only", false, false, overlay.PullFFOnly},
+		{"--rebase selects rebase", true, false, overlay.PullRebase},
+		{"--merge selects merge", false, true, overlay.PullMerge},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pullModeFromFlags(tc.rebase, tc.merge); got != tc.want {
+				t.Errorf("pullModeFromFlags(%v, %v) = %v, want %v", tc.rebase, tc.merge, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -234,7 +285,7 @@ func TestOverlaySubcommandsWithoutConfig(t *testing.T) {
 		use  string
 	}{
 		{"compare", "compare"},
-		{"sync", "sync"},
+		{"pull", "pull"},
 		{"diff", "diff"},
 		{"log", "log"},
 	}

@@ -4,9 +4,11 @@
 package overlay
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -573,15 +575,15 @@ func setupTestRepoWithUpstream(t *testing.T) (*testRepo, *testRepo, string) {
 	return mainRepo, upstreamRepo, remoteDir
 }
 
-// TestIntegrationSync tests the Sync function with a real git repository.
-// It creates a repo with remote, adds upstream changes, syncs, and verifies merge.
+// TestIntegrationPull tests the Pull function with a real git repository.
+// It creates a repo with remote, adds upstream changes, pulls, and verifies the result.
 // _Requirements: 6.1, 6.2, 6.3, 6.4_
-func TestIntegrationSync(t *testing.T) {
+func TestIntegrationPull(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	t.Run("sync pulls upstream changes", func(t *testing.T) {
+	t.Run("pull brings upstream changes", func(t *testing.T) {
 		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 		defer upstreamRepo.cleanup()
@@ -592,30 +594,34 @@ func TestIntegrationSync(t *testing.T) {
 		upstreamRepo.runGit("commit", "-m", "add(app-misc/upstream-pkg-1.0)")
 		upstreamRepo.runGit("push", "origin", "master")
 
-		// Sync main repo
+		// Pull main repo
 		runner := mainRepo.newGitRunner()
-		result, err := SyncWithRunner(runner, "origin")
+		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
 		if err != nil {
-			t.Fatalf("SyncWithRunner() error = %v", err)
+			t.Fatalf("PullWithRunner() error = %v", err)
 		}
 
-		// Verify sync succeeded
+		// Verify pull succeeded
 		if !result.Success {
-			t.Errorf("SyncWithRunner() Success = false, want true")
+			t.Errorf("PullWithRunner() Success = false, want true")
 		}
 
 		if len(result.Conflicts) > 0 {
-			t.Errorf("SyncWithRunner() Conflicts = %v, want empty", result.Conflicts)
+			t.Errorf("PullWithRunner() Conflicts = %v, want empty", result.Conflicts)
+		}
+
+		if result.CommitsPulled != 1 {
+			t.Errorf("PullWithRunner() CommitsPulled = %d, want 1", result.CommitsPulled)
 		}
 
 		// Verify the upstream file now exists in main repo
 		upstreamFile := filepath.Join(mainRepo.path, "app-misc/upstream-pkg/upstream-pkg-1.0.ebuild")
 		if _, err := os.Stat(upstreamFile); os.IsNotExist(err) {
-			t.Error("Upstream file should exist after sync")
+			t.Error("Upstream file should exist after pull")
 		}
 	})
 
-	t.Run("sync with multiple upstream commits", func(t *testing.T) {
+	t.Run("pull with multiple upstream commits", func(t *testing.T) {
 		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 		defer upstreamRepo.cleanup()
@@ -631,15 +637,20 @@ func TestIntegrationSync(t *testing.T) {
 
 		upstreamRepo.runGit("push", "origin", "master")
 
-		// Sync main repo
+		// Pull main repo
 		runner := mainRepo.newGitRunner()
-		result, err := SyncWithRunner(runner, "origin")
+		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
 		if err != nil {
-			t.Fatalf("SyncWithRunner() error = %v", err)
+			t.Fatalf("PullWithRunner() error = %v", err)
 		}
 
 		if !result.Success {
-			t.Errorf("SyncWithRunner() Success = false, want true")
+			t.Errorf("PullWithRunner() Success = false, want true")
+		}
+
+		// The count is the whole point of the field: two commits, not "some".
+		if result.CommitsPulled != 2 {
+			t.Errorf("PullWithRunner() CommitsPulled = %d, want 2", result.CommitsPulled)
 		}
 
 		// Verify both files exist
@@ -647,35 +658,70 @@ func TestIntegrationSync(t *testing.T) {
 		pkg2File := filepath.Join(mainRepo.path, "app-misc/pkg2/pkg2-1.0.ebuild")
 
 		if _, err := os.Stat(pkg1File); os.IsNotExist(err) {
-			t.Error("pkg1 file should exist after sync")
+			t.Error("pkg1 file should exist after pull")
 		}
 		if _, err := os.Stat(pkg2File); os.IsNotExist(err) {
-			t.Error("pkg2 file should exist after sync")
+			t.Error("pkg2 file should exist after pull")
 		}
 	})
 
-	t.Run("sync when already up-to-date", func(t *testing.T) {
+	t.Run("pull when already up-to-date", func(t *testing.T) {
 		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 		defer upstreamRepo.cleanup()
 
-		// No upstream changes, just sync
+		// No upstream changes, just pull
 		runner := mainRepo.newGitRunner()
-		result, err := SyncWithRunner(runner, "origin")
+		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
 		if err != nil {
-			t.Fatalf("SyncWithRunner() error = %v", err)
+			t.Fatalf("PullWithRunner() error = %v", err)
 		}
 
 		if !result.Success {
-			t.Errorf("SyncWithRunner() Success = false, want true")
+			t.Errorf("PullWithRunner() Success = false, want true")
+		}
+
+		if !result.UpToDate {
+			t.Error("PullWithRunner() UpToDate = false, want true")
 		}
 
 		if len(result.Conflicts) > 0 {
-			t.Errorf("SyncWithRunner() Conflicts = %v, want empty", result.Conflicts)
+			t.Errorf("PullWithRunner() Conflicts = %v, want empty", result.Conflicts)
 		}
 	})
 
-	t.Run("sync with non-conflicting local changes", func(t *testing.T) {
+	// The regression guard, against real git: the command this replaced merged
+	// the remote's default branch on any divergence. Fast-forward-only must
+	// refuse and leave the branch untouched.
+	t.Run("fast-forward only refuses diverged history", func(t *testing.T) {
+		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
+		defer mainRepo.cleanup()
+		defer upstreamRepo.cleanup()
+
+		upstreamRepo.writeFile("app-misc/upstream-pkg/upstream-pkg-1.0.ebuild", "# Upstream\n")
+		upstreamRepo.runGit("add", ".")
+		upstreamRepo.runGit("commit", "-m", "add(app-misc/upstream-pkg-1.0)")
+		upstreamRepo.runGit("push", "origin", "master")
+
+		// A local commit on a different path: no conflict, but diverged.
+		mainRepo.writeFile("app-misc/local-pkg/local-pkg-1.0.ebuild", "# Local\n")
+		mainRepo.runGit("add", ".")
+		mainRepo.runGit("commit", "-m", "add(app-misc/local-pkg-1.0)")
+
+		runner := mainRepo.newGitRunner()
+		_, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		if err == nil {
+			t.Fatal("PullWithRunner() should refuse to fast-forward diverged history")
+		}
+
+		// Nothing was written: no merge commit, and HEAD is still the local one.
+		merges := strings.TrimSpace(mainRepo.runGit("rev-list", "--count", "--merges", "HEAD"))
+		if merges != "0" {
+			t.Errorf("refused pull still wrote %s merge commit(s)", merges)
+		}
+	})
+
+	t.Run("merge mode integrates non-conflicting local changes", func(t *testing.T) {
 		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 		defer upstreamRepo.cleanup()
@@ -691,15 +737,15 @@ func TestIntegrationSync(t *testing.T) {
 		mainRepo.runGit("add", ".")
 		mainRepo.runGit("commit", "-m", "add(app-misc/local-pkg-1.0)")
 
-		// Sync should succeed (no conflicts)
+		// Explicitly asking for a merge should succeed (no conflicts)
 		runner := mainRepo.newGitRunner()
-		result, err := SyncWithRunner(runner, "origin")
+		result, err := PullWithRunner(runner, "origin", PullMerge, false)
 		if err != nil {
-			t.Fatalf("SyncWithRunner() error = %v", err)
+			t.Fatalf("PullWithRunner() error = %v", err)
 		}
 
 		if !result.Success {
-			t.Errorf("SyncWithRunner() Success = false, want true")
+			t.Errorf("PullWithRunner() Success = false, want true")
 		}
 
 		// Both files should exist
@@ -707,14 +753,48 @@ func TestIntegrationSync(t *testing.T) {
 		localFile := filepath.Join(mainRepo.path, "app-misc/local-pkg/local-pkg-1.0.ebuild")
 
 		if _, err := os.Stat(upstreamFile); os.IsNotExist(err) {
-			t.Error("Upstream file should exist after sync")
+			t.Error("Upstream file should exist after pull")
 		}
 		if _, err := os.Stat(localFile); os.IsNotExist(err) {
-			t.Error("Local file should still exist after sync")
+			t.Error("Local file should still exist after pull")
 		}
 	})
 
-	t.Run("sync detects merge conflicts", func(t *testing.T) {
+	t.Run("rebase mode replays local commits on top", func(t *testing.T) {
+		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
+		defer mainRepo.cleanup()
+		defer upstreamRepo.cleanup()
+
+		upstreamRepo.writeFile("app-misc/upstream-pkg/upstream-pkg-1.0.ebuild", "# Upstream\n")
+		upstreamRepo.runGit("add", ".")
+		upstreamRepo.runGit("commit", "-m", "add(app-misc/upstream-pkg-1.0)")
+		upstreamRepo.runGit("push", "origin", "master")
+
+		mainRepo.writeFile("app-misc/local-pkg/local-pkg-1.0.ebuild", "# Local\n")
+		mainRepo.runGit("add", ".")
+		mainRepo.runGit("commit", "-m", "add(app-misc/local-pkg-1.0)")
+
+		runner := mainRepo.newGitRunner()
+		result, err := PullWithRunner(runner, "origin", PullRebase, false)
+		if err != nil {
+			t.Fatalf("PullWithRunner() error = %v", err)
+		}
+		if !result.Success {
+			t.Errorf("PullWithRunner() Success = false, want true")
+		}
+
+		// A rebase keeps history linear: no merge commit, local commit on top.
+		merges := strings.TrimSpace(mainRepo.runGit("rev-list", "--count", "--merges", "HEAD"))
+		if merges != "0" {
+			t.Errorf("rebase wrote %s merge commit(s), want a linear history", merges)
+		}
+		head := strings.TrimSpace(mainRepo.runGit("log", "-1", "--format=%s"))
+		if head != "add(app-misc/local-pkg-1.0)" {
+			t.Errorf("HEAD after rebase is %q, want the local commit replayed on top", head)
+		}
+	})
+
+	t.Run("pull detects merge conflicts", func(t *testing.T) {
 		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 		defer upstreamRepo.cleanup()
@@ -733,40 +813,102 @@ func TestIntegrationSync(t *testing.T) {
 		mainRepo.runGit("add", ".")
 		mainRepo.runGit("commit", "-m", "Update repo name (local)")
 
-		// Sync should detect conflict
+		// An explicit merge should detect the conflict
 		runner := mainRepo.newGitRunner()
-		result, err := SyncWithRunner(runner, "origin")
+		result, err := PullWithRunner(runner, "origin", PullMerge, false)
 
-		// The sync should not return an error, but report conflicts
+		// The pull should not return an error, but report conflicts
 		if err != nil {
-			t.Fatalf("SyncWithRunner() error = %v", err)
+			t.Fatalf("PullWithRunner() error = %v", err)
 		}
 
 		if result.Success {
-			t.Error("SyncWithRunner() Success = true, want false (conflict expected)")
+			t.Error("PullWithRunner() Success = true, want false (conflict expected)")
 		}
 
 		if len(result.Conflicts) == 0 {
-			t.Error("SyncWithRunner() Conflicts should not be empty")
+			t.Error("PullWithRunner() Conflicts should not be empty")
 		}
 
 		// Abort the merge to clean up
 		mainRepo.runGit("merge", "--abort")
 	})
 
-	t.Run("sync with empty remote fails", func(t *testing.T) {
+	t.Run("pull refuses a dirty worktree", func(t *testing.T) {
+		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
+		defer mainRepo.cleanup()
+		defer upstreamRepo.cleanup()
+
+		upstreamRepo.writeFile("app-misc/upstream-pkg/upstream-pkg-1.0.ebuild", "# Upstream\n")
+		upstreamRepo.runGit("add", ".")
+		upstreamRepo.runGit("commit", "-m", "add(app-misc/upstream-pkg-1.0)")
+		upstreamRepo.runGit("push", "origin", "master")
+
+		// Uncommitted local edit to a tracked file
+		mainRepo.writeFile("profiles/repo_name", "work in progress")
+
+		runner := mainRepo.newGitRunner()
+		_, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		if !errors.Is(err, ErrDirtyWorktree) {
+			t.Errorf("PullWithRunner() error = %v, want ErrDirtyWorktree", err)
+		}
+
+		// The uncommitted edit survives untouched.
+		content, readErr := os.ReadFile(filepath.Join(mainRepo.path, "profiles/repo_name"))
+		if readErr != nil {
+			t.Fatalf("reading the edited file: %v", readErr)
+		}
+		if string(content) != "work in progress" {
+			t.Errorf("local edit = %q, want it preserved", string(content))
+		}
+	})
+
+	t.Run("dry-run reports without integrating", func(t *testing.T) {
+		mainRepo, upstreamRepo, _ := setupTestRepoWithUpstream(t)
+		defer mainRepo.cleanup()
+		defer upstreamRepo.cleanup()
+
+		upstreamRepo.writeFile("app-misc/upstream-pkg/upstream-pkg-1.0.ebuild", "# Upstream\n")
+		upstreamRepo.runGit("add", ".")
+		upstreamRepo.runGit("commit", "-m", "add(app-misc/upstream-pkg-1.0)")
+		upstreamRepo.runGit("push", "origin", "master")
+
+		before := strings.TrimSpace(mainRepo.runGit("rev-parse", "HEAD"))
+
+		runner := mainRepo.newGitRunner()
+		result, err := PullWithRunner(runner, "origin", PullFFOnly, true)
+		if err != nil {
+			t.Fatalf("PullWithRunner() error = %v", err)
+		}
+		if result.CommitsPulled != 1 {
+			t.Errorf("CommitsPulled = %d, want 1", result.CommitsPulled)
+		}
+
+		after := strings.TrimSpace(mainRepo.runGit("rev-parse", "HEAD"))
+		if before != after {
+			t.Errorf("dry-run moved HEAD from %s to %s", before, after)
+		}
+
+		// The file it would have brought must not be on disk yet.
+		upstreamFile := filepath.Join(mainRepo.path, "app-misc/upstream-pkg/upstream-pkg-1.0.ebuild")
+		if _, statErr := os.Stat(upstreamFile); statErr == nil {
+			t.Error("dry-run wrote the upstream file")
+		}
+	})
+
+	t.Run("pull with empty remote fails", func(t *testing.T) {
 		mainRepo, _, _ := setupTestRepoWithUpstream(t)
 		defer mainRepo.cleanup()
 
 		runner := mainRepo.newGitRunner()
-		_, err := SyncWithRunner(runner, "")
+		_, err := PullWithRunner(runner, "", PullFFOnly, false)
 
 		if err == nil {
-			t.Error("SyncWithRunner() should fail with empty remote")
+			t.Error("PullWithRunner() should fail with empty remote")
 		}
 
-		if err != ErrNoRemote {
-			t.Errorf("SyncWithRunner() error = %v, want ErrNoRemote", err)
+		if !errors.Is(err, ErrNoRemote) {
+			t.Errorf("PullWithRunner() error = %v, want ErrNoRemote", err)
 		}
 	})
 }
