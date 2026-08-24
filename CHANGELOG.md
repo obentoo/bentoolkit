@@ -68,6 +68,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The full text is always preserved in the model, so shortening is a rendering
   decision and never a loss of data — the exports carry the whole sentence.
 
+### Fixed
+- **`overlay autoupdate --check` no longer states itself twice.** A `--check
+  --llm` run printed the heading `Version Check Results` twice, and
+  `Validation Plan` twice with every package's bump and depth repeated under it.
+  The report the previous release added did not replace the printers it was
+  meant to replace; both survived, side by side, under byte-identical headings.
+  The old printers are now deleted rather than merely disconnected, and what
+  guards the rule from here on counts *producers in the source* — a test that
+  counted headings in captured output could only ever fail while the second
+  producer still existed.
+- **`--ui`, `--all` and `--export` now work on every `--check`, not only on
+  `--llm` runs.** They were accepted, ignored, and exited 0 — `--export` wrote
+  no file and said nothing. The cause was one early return: rendering had been
+  wired inside the branch that decides whether to spend an LLM, so a run that
+  declined to validate also declined to draw. Those are unrelated questions.
+  The gate still means "do not validate"; it no longer means "do not draw".
+- **`overlay autoupdate --check <package>` builds and renders a report.** The
+  single-package path returned before the batch path's report was ever built, so
+  it inherited every flag that did nothing. It now renders the same report for
+  the one package it scanned, and still returns before the registry
+  reconciliation, which remains the batch path's alone.
+- **A check that validated nothing no longer pads its output with empty
+  sections.** A scan-only report stated "No pending update to validate", "No
+  package was evaluated" and "0 package(s) evaluated: 0 proved, 0 errored, 0
+  inconclusive, 0 skipped" — twelve of twenty-three lines reporting that the
+  thing you did not ask for did not happen. Those three sections now omit
+  themselves when there is no plan. A run whose packages were all excluded *by
+  policy* still gets them: it planned them, and the plan is where the exclusion
+  is explained.
+- **`--check --quiet` over an empty registry is still silent.** `--quiet`
+  reaches the logger and reaches neither the terminal styling nor stdout, so a
+  run with no configured package is the one case it can silence today. Rendering
+  a report there would have taken that away. The sentence stays on the logger,
+  nothing is drawn, and a run *with* packages still prints its table under
+  `--quiet` exactly as before — that asymmetry is preserved deliberately, not
+  inherited by accident.
+- **A batch check says when it auto-disables an orphaned package.** An entry
+  whose ebuild has vanished from the overlay is written back to `packages.toml`
+  as `enabled = false`, and the line that announced it went away with the old
+  printer — leaving a hand-maintained file edited in silence. `--check <package>`
+  never lost the notice; only the batch path had gone quiet.
+- **The version check states the source/bin tally again**, as
+  `Checked N source, M bin`. It also names packages that resolved to neither
+  tier instead of folding them into a column: an ebuild that could not be read
+  established nothing about how the package builds, and counting it as source
+  would state a fact the scan never found.
+
 ### Deprecated
 - **`--no-tui` — use `--ui=plain`.** Its behaviour has not changed: it is still
   honoured, it is exactly `--ui=plain`, it still outranks `--ui` and `BENTOO_UI`,
