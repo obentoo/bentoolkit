@@ -114,6 +114,7 @@ autoupdate:
 | `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
 | `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when `api_key_env` resolves to a non-empty key via env or the secrets file, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
 | `llm.max_budget_usd` | `claude-code` only: optional per-call spend cap passed to `claude --max-budget-usd` (unset = no cap) | No |
+| `ui.mode` | How long-running commands render themselves: `auto`, `plain`, `inline` or `fullscreen`. Unset falls through to `auto` (inline on a terminal, plain in a pipe), which is exactly today's behaviour. Overridden by `--ui <mode>` and `BENTOO_UI` | No |
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
 

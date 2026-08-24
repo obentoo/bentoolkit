@@ -8,16 +8,36 @@ package main
 //
 // THE COST. A gate above `options` unpacks and builds, so a check can silently
 // cost hours and a pile of downloaded tarballs. Everything the operator needs to
-// price that — how many packages, at what depth, why, how many distfiles, and
-// how the depths are distributed — is printed BEFORE anything is asked and
-// before the first gate runs (R9.3), and one confirmation covers the whole run
-// (R9.4). The confirmation is confirmSweep's shape, gate for gate
+// price that — how many packages, at what depth, how many distfiles, and how the
+// depths are distributed — is printed BEFORE anything is asked and before the
+// first gate runs (R9.3), and one confirmation covers the whole run (R9.4). The
+// confirmation is confirmSweep's shape, gate for gate
 // (overlay_autoupdate_sweep.go:241), so the two commands read alike.
 //
 // THE REACH. `--check` is documented read-only and the overlay it would write
 // to auto-commits and pushes. Nothing here writes to the overlay on any path:
 // setVersionsForCheck below is the one call that could, and it exists precisely
 // so that a test can watch a seam that is never used (R9.2).
+//
+// WHAT IT SAYS AFTERWARDS is not built here any more (S044). This file used to
+// format each section at the moment it printed it — a padded plan block, a
+// verdict line per package, a three-column tally — so nothing held "what this
+// run found" as a value and nothing could be exported, re-rendered or counted
+// without running the command again. Now the run is assembled into
+// internal/common/report's view model, whole, before any of it is displayed
+// (S044-R1.4), and internal/common/report/render prints it in the mode this run
+// resolved to (S044-R2). Two things still print from here, and both are events
+// of the RUN rather than findings about a package: the price above, which has to
+// precede the first gate, and a raise held at the confirmed depth (R9.6).
+//
+// The four hard-coded field widths this file used to declare are gone with that
+// move. A width typed into a format string cannot be right — the correct one
+// depends on the packages this run produced, which is knowable only after it has
+// produced them — and the renderer measures instead (S044-R6.3).
+//
+// That sentence deliberately does not spell the format verb out. A test greps
+// this file for one and fails on any match, comments included, which is the
+// right reading: a width in a comment is one somebody copies back into code.
 
 import (
 	"context"
@@ -30,6 +50,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
+	"github.com/obentoo/bentoolkit/internal/common/report"
+	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
 
 // setVersionsForCheck is the ONE way this file could publish, held as a variable
@@ -119,21 +141,14 @@ type validationPlan struct {
 	Printed bool
 }
 
-// validationTally is what the operator reads and acts on (R9.5).
-//
-// Each planned package lands in exactly one column. A package counted twice, or
-// in two columns, is worse than no tally at all: it turns the one number anybody
-// remembers into a number nobody can reconcile with the list above it.
-type validationTally struct {
-	// Proved counts packages whose deciding gates all passed.
-	Proved int
-	// Errored counts packages with at least one failing gate.
-	Errored int
-	// Skipped counts packages no deciding gate answered for — depth none, an
-	// unpreparable tree, a missing dependency. "Nothing was said" is never
-	// folded into Proved.
-	Skipped int
-}
+// The tally this file used to declare is report.Tally, and it is produced by
+// report.Classify through buildReport rather than by a switch here. The
+// invariant it protected is unchanged and is now checkable rather than merely
+// intended: each planned package lands in exactly one column, and
+// report.Report.Reconciles reports whether the columns sum to the plan (R5.5).
+// A package counted twice, or in two columns, is worse than no tally at all —
+// it turns the one number anybody remembers into a number nobody can reconcile
+// with the list above it.
 
 // buildValidationPlan prices a run: it resolves the depth for every pending
 // update and nothing else (R9.1, R9.3).
@@ -269,11 +284,38 @@ func (p validationPlan) building() int {
 	return building
 }
 
-// printValidationPlan puts the whole cost on screen before any of it is spent
-// (R9.3): how many packages, each one's depth and the case for it, which are
-// skipped and why, how many distfiles the run needs, and how the depths are
-// distributed across the run.
-func printValidationPlan(plan validationPlan) {
+// printValidationPrice puts the PRICE of the run on screen before any of it is
+// spent (S033-R9.3): how many packages, each one's depth, which are not
+// validated, how many distfiles the run needs, and how the depths are
+// distributed.
+//
+// # What it no longer prints, and why that is the point
+//
+// This is what printValidationPlan used to be. It has lost the three-line
+// block per package — the padded package line, the class line and the whole
+// 230-character reason — because the plan's PRESENTATION is now a section of
+// the report (render's validationPlanSection), rendered once when the run is
+// over, aligned to columns measured from the packages this run actually
+// produced. Printing the reasons here as well would put the same sentence on
+// screen twice in one run, which is the defect R7.2 exists to remove.
+//
+// # It is not a second renderer of the view model
+//
+// It renders the PLAN, which is a producer artefact, at a moment when the
+// model of the run cannot exist yet: nothing has been evaluated, so there is
+// no report to take a value from. R1.3 binds a renderer that displays the view
+// model, and the run-level facts below are precisely the ones the model cannot
+// answer for — `deepest` and the distribution's ordering both need the depth
+// ladder, which the model deliberately does not carry.
+//
+// # There is no width here to get wrong
+//
+// The old lines padded the package to a typed 45 cells, which was too narrow
+// for `gst-plugins-adaptivedemux2@stable` and too wide for everything else.
+// The replacement is not a measured column: it is no column at all. A pre-run
+// price is a list of facts, and the aligned table is the report's job — so
+// this function has nothing left to declare a width for (R6.3).
+func printValidationPrice(plan validationPlan) {
 	fmt.Println()
 	output.Header.Println("Validation Plan")
 	fmt.Println()
@@ -291,15 +333,16 @@ func printValidationPlan(plan validationPlan) {
 			// A package that will not be validated has to say so on its own
 			// line: the operator reads a shorter list of results as progress
 			// unless the plan already told them it would be shorter.
-			tag = "  [not validated]"
+			tag = " [not validated]"
 		}
-		fmt.Printf("  %-45s %s → %s\n", entry.Package, entry.From, entry.Version)
-		fmt.Printf("      %s at depth %s%s\n", entry.Class, entry.Depth, tag)
-		fmt.Printf("      %s\n", entry.Reason)
+		fmt.Printf("  %s %s → %s at depth %s%s\n", entry.Package, entry.From, entry.Version, entry.Depth, tag)
 	}
 	fmt.Println()
 
-	// The two numbers an operator actually decides on.
+	// The two numbers an operator actually decides on. The first appears
+	// nowhere else on screen, and it is the one that decides the answer on a
+	// metered connection; it travels into the report as well
+	// (report.Report.DistfilesToFetch) so the export carries it too.
 	output.Info.Printf("  Distfiles: up to %d to fetch — one per package validated above depth none; anything already in DISTDIR is not fetched again.\n",
 		plan.DistfilesToFetch)
 	output.Info.Printf("  Depth distribution (of %d package(s)): %s\n", len(plan.Entries), depthDistributionLine(plan))
@@ -445,7 +488,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	// confirmation below is about this plan: a question about a cost nobody has
 	// seen is not a confirmation. Printed records that it has been shown, so it is
 	// not repeated.
-	printValidationPlan(plan)
+	printValidationPrice(plan)
 	plan.Printed = true
 	if !confirmValidationRun(plan) {
 		return
@@ -471,7 +514,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	//nolint:contextcheck // ctx is propagated into every spawned child through
 	// WithApplierContext (a.ctx); Validate takes no ctx parameter, by the same
 	// single-source wiring Apply uses.
-	runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
+	finished := runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
 		// The ceiling one confirmation covered. It travels per entry so a
 		// reviewer's raise is held against what the operator approved rather than
 		// against this bump's own depth (R9.6). A depth the plan could not spell
@@ -483,22 +526,46 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		}
 		return applier.Validate(entry.Package, ceiling)
 	})
+
+	// The half buildReport is never handed: it is given the plan and its
+	// results and never sees the scan, so a nil Scanned would mean the JSON
+	// export said `"scanned": null` and the version-check section rendered
+	// empty. This is the one place in the command that holds both — the scan
+	// that ran and the validation that followed it — so this is where the two
+	// are joined, after the run and before anything is displayed.
+	finished.Scanned = scannedFacts(checked)
+
+	presentCheckReport(finished)
 }
 
-// runValidationCheck evaluates every planned package through `run` and reports
-// what each one said (R9.1, R9.5).
+// runValidationCheck evaluates every planned package through `run` and returns
+// the whole run as the view model (R9.1, R1.4).
 //
-// THE PLAN IS PRINTED HERE, not left to the caller. "A plan is printed" is
+// THE PRICE IS PRINTED HERE, not left to the caller. "A plan is printed" is
 // satisfied by printing it beside the results, which is worth nothing: by then
 // the hours are spent. Printing it as the first thing this function does makes
 // "the whole plan precedes the first gate" a property of the function rather
 // than of a calling convention somebody can forget. A caller that already showed
-// the plan in order to ask about it sets plan.Printed and is not repeated.
+// the price in order to ask about it sets plan.Printed and is not repeated.
+//
+// # It RETURNS the report; it does not render it
+//
+// The report is assembled whole, from the plan and every result, and handed
+// back — so a run that then fails to render, or is interrupted on its way to
+// the screen, still holds a complete description of what it found (R1.4). It is
+// also what lets the caller fill in the half this function never sees (the
+// scan) before anything is displayed, and what keeps `--export` a decision of
+// the command rather than of the loop.
+//
+// The counts come from that report and are computed nowhere else: the switch
+// this function used to run over WorstOutcome is now report.Classify's, reached
+// through buildReport, so the tally on screen and the tally in the JSON export
+// cannot disagree (R1.3).
 //
 // It publishes nothing, on every path — see setVersionsForCheck.
-func runValidationCheck(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult) validationTally {
+func runValidationCheck(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult) report.Report {
 	if !plan.Printed {
-		printValidationPlan(plan)
+		printValidationPrice(plan)
 		fmt.Println()
 	}
 
@@ -507,67 +574,108 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 	// approved rather than against the entry's own depth (R9.6).
 	confirmed := plan.deepest()
 
-	var tally validationTally
+	// results[i] answers plan.Entries[i]. buildReport's contract is positional,
+	// and appending exactly once per entry in plan order is what honours it.
+	results := make([]validate.EbuildResult, 0, len(plan.Entries))
 	for _, entry := range plan.Entries {
 		entry.ConfirmedDepth = confirmed.String()
 
 		result := run(entry)
-		reportValidationOutcome(entry, result, confirmed)
-
-		// Exactly one column per package. WorstOutcome answers SKIPPED for a
-		// result carrying no deciding gate at all, which is the honest answer:
-		// nothing was said about that bump, and "nothing" read as a pass is the
-		// defect this whole story exists to remove.
-		switch result.WorstOutcome() {
-		case validate.OutcomePass:
-			tally.Proved++
-		case validate.OutcomeFailed:
-			tally.Errored++
-		default:
-			tally.Skipped++
-		}
+		reportDepthEscalation(entry, result, confirmed)
+		results = append(results, result)
 	}
 
-	printValidationTally(plan, tally)
-	return tally
+	return buildReport(plan, results)
 }
 
-// reportValidationOutcome prints one package's result, and — when the depth that
-// ran is past the depth the operator confirmed — says what happens to that raise
-// (R9.6).
+// presentCheckReport puts the finished report in front of the operator: the
+// terminal first, then the export (R2, R9.1, R9.5).
+//
+// # The terminal render happens first, and that ordering is R9.5
+//
+// An export is a convenience; the report on the terminal is the answer. Writing
+// the file first would make a bad path — a directory that does not exist, a
+// read-only mount — able to cost the operator the report itself. Rendering
+// first makes that impossible rather than merely unlikely, and the export
+// failure is then reported as a warning: it changes no verdict, no count and no
+// exit status (R9.6), because a run's findings do not depend on whether a copy
+// of them could be filed.
+//
+// # A render that fails is reported and does not stop the export
+//
+// The two are independent answers to the same report. A terminal that went away
+// mid-write is no reason to also withhold the file, which may be the only copy
+// left.
+//
+// # The mode is resolved here, not passed in
+//
+// resolveAutoupdateUIMode is a pure function of the flags, the config and the
+// terminal, so asking here gives the same answer any other caller gets. An
+// error is unreachable in a real run — runAutoupdate rejects an unusable --ui
+// before any package work (R3.9) — so it falls back to plain, which is the mode
+// that always works, and says so at debug level rather than telling the
+// operator a second time in a second voice.
+func presentCheckReport(r report.Report) {
+	// Width is left at zero: "ask the device" (render.Options). A number typed
+	// here would be a hard-coded field width in the one path R6.3 binds.
+	opts := render.Options{ShowAll: autoupdateAll}
+
+	mode, err := resolveAutoupdateUIMode(autoupdateUIConfig)
+	if err != nil {
+		logger.Debug("check: the UI mode did not resolve, rendering in plain: %v", err)
+		mode = report.ModePlain
+	}
+
+	if err := renderCheckReportIn(mode, r, opts); err != nil {
+		logger.Warn("the report could not be rendered: %v", err)
+	}
+
+	if autoupdateExport == "" {
+		return
+	}
+	if err := writeExport(autoupdateExport, r); err != nil {
+		// Warn, never fatal: the answer is already on screen, and an export
+		// that changed the exit status would make a display flag decide whether
+		// a run counted as successful.
+		logger.Warn("%v", err)
+	}
+}
+
+// reportDepthEscalation says what happened to a bump the reviewer took past the
+// depth the operator confirmed (R9.6).
+//
+// # It is what remains of reportValidationOutcome, and the rest is the report's
+//
+// The three verdict lines this function used to print — proved, FAILED, not
+// validated, each padded to a typed 45 cells — are now rows of the report's
+// results section, rendered once at the end from values the model carries. What
+// could not move is this: a raise past the ceiling is an event of the RUN, not
+// a finding about the package. The model describes what a run found; it has no
+// field for what the run declined to spend, and inventing one would put a
+// sentence about the operator's confirmation into a record about packages.
 //
 // THE CHOICE THIS IMPLEMENTATION MAKES IS TO HOLD. R9.6 allows either answer,
 // and holding is the one that keeps the promise the plan made: a run whose plan
 // resolved entirely to `options` asks for nothing, so a reviewer raising a bump
 // to `compile` afterwards would spend hours the operator was never shown. The
 // ceiling travels with every entry (validationPlanEntry.ConfirmedDepth) so the
-// runner can hold there, and the line below names the raise and the ceiling so
-// the hold is never silent — a held bump the operator cannot see is just a
-// missing result.
-func reportValidationOutcome(entry validationPlanEntry, result validate.EbuildResult, confirmed validate.Depth) {
-	outcome := result.WorstOutcome()
-	switch outcome {
-	case validate.OutcomePass:
-		output.Success.Printf("  %-45s %s proved at %s\n", entry.Package, entry.Version, reportedDepth(result, entry))
-	case validate.OutcomeFailed:
-		output.Error.Printf("  %-45s %s FAILED at %s\n", entry.Package, entry.Version, reportedDepth(result, entry))
-		for _, gate := range result.Gates {
-			for _, finding := range gate.Findings {
-				fmt.Printf("      %s: %s\n", gate.Gate, finding.Detail)
-			}
-		}
-	default:
-		output.Warning.Printf("  %-45s %s not validated (%s)\n", entry.Package, entry.Version, skipReason(result, entry))
-	}
-
-	// R9.6. ParseDepth failing means the runner did not report a depth at all,
-	// which is not an escalation — only a depth it NAMED can be compared against
-	// the ceiling.
+// runner can hold there, and the lines below name the package, the raise and
+// the ceiling so the hold is never silent — a held bump the operator cannot see
+// is just a missing result.
+//
+// It names the package itself, because it no longer prints under a verdict line
+// that did. A warning about "this bump" with no atom in it is unactionable in a
+// run of forty packages.
+func reportDepthEscalation(entry validationPlanEntry, result validate.EbuildResult, confirmed validate.Depth) {
+	// ParseDepth failing means the runner did not report a depth at all, which
+	// is not an escalation — only a depth it NAMED can be compared against the
+	// ceiling.
 	actual, err := validate.ParseDepth(result.Depth)
 	if err != nil || actual <= confirmed {
 		return
 	}
-	output.Warning.Printf("      the reviewer raised this bump to %s, past the %s this run's plan confirmed.\n", actual, confirmed)
+	output.Warning.Printf("  %s: the reviewer raised this bump to %s, past the %s this run's plan confirmed.\n",
+		entry.Package, actual, confirmed)
 	output.Info.Printf("      A raise past the confirmed depth is held at %s rather than spent unasked (R9.6); re-run with --yes to approve the deeper gates for the whole run.\n",
 		confirmed)
 }
@@ -609,13 +717,10 @@ func skipReason(result validate.EbuildResult, entry validationPlanEntry) string 
 	return "no reason reported: neither the gates, the depth nor the plan stated one"
 }
 
-// printValidationTally is the last thing on screen (R9.5): the three counts, and
-// the reminder that none of it left this machine.
-func printValidationTally(plan validationPlan, tally validationTally) {
-	fmt.Println()
-	output.Header.Println("Validation Result")
-	fmt.Println()
-	output.Info.Printf("  %d package(s) evaluated: %d proved, %d errored, %d not validated.\n",
-		len(plan.Entries), tally.Proved, tally.Errored, tally.Skipped)
-	output.Info.Println("  Nothing was published: a check writes no ebuild and no version pin (R9.2).")
-}
+// The tally that used to be printed here is render's validationSummarySection,
+// and it now has FOUR counts rather than three: the old "not validated" column
+// held both the packages policy excluded and the packages the toolkit could not
+// evaluate, so a defect in the toolkit was reported in the same number as the
+// operator's own choice (R5.1). Proved and errored count exactly what they
+// counted before (R5.7). The reminder that a check publishes nothing moved with
+// it, so it is still the last sentence a reader sees.

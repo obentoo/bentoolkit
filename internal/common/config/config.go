@@ -32,6 +32,38 @@ type Config struct {
 	Git          GitConfig              `yaml:"git"`
 	Autoupdate   AutoupdateConfig       `yaml:"autoupdate,omitempty"`
 	Repositories map[string]*RepoConfig `yaml:"repositories,omitempty"`
+	// UI is the global rendering policy (S044-R3.1). It sits at the top level
+	// rather than under `autoupdate` because it governs every command that
+	// reports progress — `autoupdate` and `overlay manifest` today — and a key
+	// that has to be repeated per command is a key that ends up set in one
+	// place and forgotten in the other.
+	UI UIConfig `yaml:"ui,omitempty"`
+}
+
+// UIConfig is the `ui:` block: how a long-running command renders itself.
+type UIConfig struct {
+	// Mode is the renderer to use: auto, plain, inline or fullscreen
+	// (S044-R3.1) — the same four words the --ui flag and the BENTOO_UI
+	// environment variable accept, so a value that works in one works in the
+	// others.
+	//
+	// IT IS NEITHER VALIDATED NOR DEFAULTED HERE. Both omissions are the
+	// design and not an oversight:
+	//
+	//   - No validation. internal/common/report.ResolveMode owns the legal set
+	//     and names it in its rejection message (R3.9). A loader that checked
+	//     the value too would be a second place keeping that list, and two
+	//     lists disagree eventually. So the value is stored VERBATIM — the same
+	//     treatment ValidatePackageOverride.Depth gets for validate.ParseDepth
+	//     — and the import runs the other way: this package does not depend on
+	//     report.
+	//
+	//   - No default. The empty string means the operator said NOTHING, which
+	//     must stay distinguishable from an explicit `mode: auto` (R3.7): a run
+	//     that was never configured has to behave exactly as it did before this
+	//     key existed, and nothing downstream could check that if the loader
+	//     answered "auto" for both.
+	Mode string `yaml:"mode,omitempty"`
 }
 
 // OverlayConfig holds overlay-specific settings
@@ -294,11 +326,18 @@ type legacyRepo struct {
 // github.token and repositories.*.token — are kept so the strict decode does not
 // report them as unknown; the migration diagnostic reports each with an
 // actionable message instead.
+//
+// THE LIST BEING EXPLICIT MAKES IT A MAINTENANCE OBLIGATION: a new top-level
+// key added to Config must be mirrored here, or every config file that uses the
+// new key draws "field <key> not found in type config.probeConfig" on stderr on
+// every command — the unknown-key warning, fired at a correct key. No test
+// catches it, because LoadFrom prints the warning and loads the value anyway.
 type probeConfig struct {
 	Overlay      OverlayConfig         `yaml:"overlay"`
 	Git          GitConfig             `yaml:"git"`
 	Autoupdate   AutoupdateConfig      `yaml:"autoupdate,omitempty"`
 	Repositories map[string]legacyRepo `yaml:"repositories,omitempty"`
+	UI           UIConfig              `yaml:"ui,omitempty"`
 	GitHub       struct {
 		Token string `yaml:"token"`
 	} `yaml:"github"`

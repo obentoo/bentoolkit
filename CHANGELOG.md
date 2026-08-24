@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **One report, three ways to read it — `overlay autoupdate --check` gains a view
+  model, three renderers and two exports.** The check printed 348 lines to
+  describe four pending updates. Over the story's fixture the same run is now 42.
+  The volume was a symptom: every section formatted at the moment it printed, so
+  nothing held "what this run found" as a value and nothing could be rendered
+  twice, exported, counted or tested without re-running the command. Three table
+  styles appeared on one screen because each was written independently, with
+  nothing for them to agree *with*. There is now something to agree with, and a
+  test proves the model holds no presentation: `internal/common/report` imports
+  no terminal library and nothing from `internal/autoupdate`, and a parser fails
+  the build on either.
+- **A fourth tally column: `inconclusive`.** The third column used to answer two
+  different questions — "this host cannot build the package" and "the operator
+  configured depth none for it" — so a regression in the toolkit was
+  indistinguishable from a policy the operator wrote themselves. The two are now
+  separated from a *typed* cause that already existed, never by matching text in
+  a human-readable sentence. Expect the inconclusive column to be large at first:
+  most skips still arrive untagged, and "the toolkit did not establish why it
+  could not answer" is a toolkit limitation. Each producer that learns to name
+  its cause tightens the rule. Which packages are **proved** or **errored** is
+  unchanged, and a test compares the counts against the previous implementation
+  over every gate shape.
+- **`ui.mode` — one global setting for how output looks.** Accepts `auto`,
+  `plain`, `inline` and `fullscreen`, resolved as `--ui` > `BENTOO_UI` >
+  `ui.mode` > `auto`. `overlay manifest` now inherits the same answer instead of
+  deciding independently, so there is no longer a different switch per command.
+  **With no `ui.mode` and no flags nothing changes**: `auto` yields inline on a
+  terminal and plain off one, which is exactly what the old gate returned,
+  including under `NO_COLOR` and `BENTOO_NO_TUI`.
+- **`--ui=fullscreen` — an alternate-screen report, which never costs the
+  scrollback.** The report is built before the program starts and printed on
+  every exit path: normal completion, the quit key, an interrupt, and a panic.
+  It is never read back from the TUI's state — a panic inside the view would
+  otherwise take the report with it. An interrupted run is labelled incomplete
+  and states how many planned packages it never reached, in every format.
+- **`--export=<path>` — the complete report as a file.** Markdown for `.md`,
+  JSON for `.json`, plain text otherwise. The export is always complete: every
+  package, every reason in full, no shortening, regardless of `--all` or of what
+  the terminal showed. That is enforced by the signature rather than by a branch
+  — the export renderers take no display options at all. An unwritable path is
+  reported and the terminal still gets its report.
+- **`--all` — list the packages behind the up-to-date count.** It changes what is
+  listed and nothing else; a parser fails the build if the flag is referenced
+  anywhere that could narrow what the run acts on.
+
+### Changed
+- **Column widths are measured, not typed.** A column is as wide as its widest
+  value in *this* run, measured in display cells — so a multi-byte character is
+  not counted as several columns and an escape sequence is not counted at all.
+  The four `%-45s` in the check path are gone. 45 was chosen once, by hand, and
+  the correct width depends on the packages a particular run produced, which is
+  knowable only after the run. The three `%-45s` outside the check path are
+  deliberately untouched; `ColumnWidth` and `Shorten` are exported so whoever
+  next touches them has the replacement at hand.
+- **A reason is printed once.** For every skipped package the check printed the
+  same ~230 characters twice, because the plan printed the reason and the result
+  printed it again through a fallback, and neither function knew the other ran.
+  The full text is always preserved in the model, so shortening is a rendering
+  decision and never a loss of data — the exports carry the whole sentence.
+
+### Deprecated
+- **`--no-tui` — use `--ui=plain`.** Its behaviour has not changed: it is still
+  honoured, it is exactly `--ui=plain`, it still outranks `--ui` and `BENTOO_UI`,
+  and `NO_COLOR` and `BENTOO_NO_TUI` mean the same thing as passing it.
+
 ## [0.27.0] - 2026-08-22
 
 ### Added

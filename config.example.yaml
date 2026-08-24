@@ -99,3 +99,23 @@ autoupdate:
 #     branch: main              # default: master/main
 #   # Token do repositório: NÃO vai aqui. Defina BENTOO_REPO_MEU_FORK_TOKEN no
 #   # arquivo ~/.config/bentoo/secrets (chmod 600) ou como variável de ambiente.
+
+# ----------------------------------------------------------------------------
+# ui — como os comandos longos (autoupdate, overlay manifest) se desenham.
+#
+# Modos aceitos: auto | plain | inline | fullscreen
+#   auto        decide sozinho: inline num terminal, plain num pipe/CI.
+#   plain       linha a linha, sem controle de cursor — pipe, log, CI.
+#   inline      redesenha no lugar, dentro do scrollback normal.
+#   fullscreen  toma o terminal inteiro durante a execução (nunca automático).
+#
+# A chave vem COMENTADA de propósito: ausente NÃO é o mesmo que `auto`. Sem
+# ela, os comandos se comportam exatamente como antes desta opção existir
+# (o resultado prático coincide com `auto`, mas escrever a chave é uma escolha
+# explícita, e é isso que o código consegue distinguir).
+#
+# Precedência: `--ui <modo>` > BENTOO_UI > ui.mode > auto.
+# `--no-tui`, BENTOO_NO_TUI e NO_COLOR equivalem a plain e vencem os três.
+# ----------------------------------------------------------------------------
+# ui:
+#   mode: auto

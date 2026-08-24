@@ -25,12 +25,20 @@ package main
 // below are the contract; those identifiers are the negotiable part.
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/report"
+	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
 
 // checkPlanUpdates is the pending list these cases plan against: one series
@@ -67,7 +75,7 @@ func TestCheckPlan_NamesEveryPackageItsDepthAndWhy(t *testing.T) {
 			len(plan.Entries), len(checkPlanUpdates()))
 	}
 
-	out := captureStdout(t, func() { printValidationPlan(plan) })
+	out := captureStdout(t, func() { printValidationPrice(plan) })
 
 	for _, want := range []string{"media-plugins/gst-plugins-qt6", "dev-libs/quiet", "app-editors/vscode-bin"} {
 		if !strings.Contains(out, want) {
@@ -262,7 +270,7 @@ func TestCheckRun_TallyCountsEachOutcomeExactlyOnce(t *testing.T) {
 		"app-editors/vscode-bin":        validate.OutcomeSkipped,
 	}
 
-	var tally validationTally
+	var tally report.Tally
 	_ = captureStdout(t, func() {
 		tally = runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
 			outcome := outcomes[entry.Package]
@@ -277,7 +285,7 @@ func TestCheckRun_TallyCountsEachOutcomeExactlyOnce(t *testing.T) {
 				}}
 			}
 			return res
-		})
+		}).Tally
 	})
 
 	if tally.Proved != 1 {
@@ -341,7 +349,7 @@ func TestCheckPlan_EveryPendingUpdateIsEvaluated(t *testing.T) {
 func TestCheckPlan_NamesTheDistfilesToBeFetchedAndTheDepthDistribution(t *testing.T) {
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
-	out := captureStdout(t, func() { printValidationPlan(plan) })
+	out := captureStdout(t, func() { printValidationPrice(plan) })
 
 	// The fetch count is a number the operator can act on, so it is carried on
 	// the plan rather than only printed: the confirmation prompt reads it too.
@@ -566,4 +574,155 @@ func TestSkipReason_NeverReportsASkipWithoutAReason(t *testing.T) {
 			t.Fatalf("skipReason() = %q: whitespace reads the same as empty once parenthesised", got)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Sub-task 6.5 — the check renders through the report. APPENDED.
+// ---------------------------------------------------------------------------
+
+// renderCheckReport renders the fixture report in one mode and returns what
+// reached stdout. It is the seam between "the command built a report" and "the
+// operator read something", which is the only place the two can disagree.
+func renderCheckReport(t *testing.T, mode report.Mode) string {
+	t.Helper()
+
+	original := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the capture pipe: %v", err)
+	}
+	os.Stdout = w
+
+	captured := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		captured <- buf.String()
+	}()
+
+	renderErr := func() error {
+		defer func() {
+			_ = w.Close()
+			os.Stdout = original
+		}()
+		return renderCheckReportIn(mode, exportFixture(), render.Options{Width: 100})
+	}()
+
+	out := <-captured
+	_ = r.Close()
+
+	if renderErr != nil {
+		t.Fatalf("rendering in %q: %v", mode, renderErr)
+	}
+	return out
+}
+
+// TestCheckRendersThroughReport is the end of the wire this story exists to
+// build: the command's output comes from the view model rather than from
+// Printf calls scattered across the moment each section prints.
+func TestCheckRendersThroughReport(t *testing.T) {
+	out := renderCheckReport(t, report.ModePlain)
+
+	if strings.IndexByte(out, 0x1b) >= 0 {
+		t.Error("the plain render carries an escape sequence — this is what cron captures (R2.1)")
+	}
+
+	fixture := exportFixture()
+	if !fixture.Reconciles() {
+		t.Errorf("the tally does not reconcile: %+v sums to %d over a plan of %d (R5.5)",
+			fixture.Tally, fixture.Tally.Total(), len(fixture.Plan))
+	}
+
+	for _, column := range []string{"proved", "errored", "inconclusive", "skipped"} {
+		if !strings.Contains(strings.ToLower(out), column) {
+			t.Errorf("the rendered check does not name the %q column (R5.1)", column)
+		}
+	}
+}
+
+// TestModesAgreeOnContent is R2.4 measured at the command rather than at the
+// renderer. Each mode is compared on ANSI-stripped content, not merely observed
+// to run without error — a mode that dropped a section would pass the weaker
+// check, and three table styles on one screen is exactly what came of nobody
+// making the stronger one.
+func TestModesAgreeOnContent(t *testing.T) {
+	plain := stripForComparison(renderCheckReport(t, report.ModePlain))
+
+	for _, mode := range []report.Mode{report.ModeInline} {
+		got := stripForComparison(renderCheckReport(t, mode))
+		if got == plain {
+			continue
+		}
+
+		plainLines, gotLines := strings.Split(plain, "\n"), strings.Split(got, "\n")
+		for i := 0; i < len(plainLines) || i < len(gotLines); i++ {
+			var p, g string
+			if i < len(plainLines) {
+				p = plainLines[i]
+			}
+			if i < len(gotLines) {
+				g = gotLines[i]
+			}
+			if p != g {
+				t.Fatalf("%q and plain diverge at line %d (R2.4 — the modes differ in presentation, not in content)\n  plain: %q\n  %s: %q",
+					mode, i+1, p, mode, g)
+			}
+		}
+	}
+}
+
+// stripForComparison removes styling and the trailing padding a styled renderer
+// leaves behind. Trailing spaces are invisible on a terminal and are exactly
+// the "presentation" R2.4 permits the modes to differ in.
+func stripForComparison(s string) string {
+	lines := strings.Split(ansi.Strip(s), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// TestNoLineExceedsWidth pins R6.3 on the command's real output. A line wider
+// than the terminal wraps, and one wrapped line destroys the alignment of every
+// column below it — which is the defect the four hand-typed %-45s produced and
+// could not fix, because the correct width depends on the packages in THIS run.
+func TestNoLineExceedsWidth(t *testing.T) {
+	const width = 100
+
+	for i, line := range strings.Split(renderCheckReport(t, report.ModePlain), "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d is %d cells wide, %d over the %d asked for: %q", i+1, w, w-width, width, line)
+		}
+	}
+}
+
+// TestCheckPathHasNoHardCodedWidths pins R6.3 mechanically, in the file the
+// story names. The three %-45s sites OUTSIDE the check path are explicitly Out
+// of Scope and must not be touched, so this is scoped to the one file.
+func TestCheckPathHasNoHardCodedWidths(t *testing.T) {
+	body, err := os.ReadFile("overlay_autoupdate_check.go")
+	if err != nil {
+		t.Fatalf("reading the check path: %v", err)
+	}
+
+	if matches := regexp.MustCompile(`%-\d+s`).FindAllString(string(body), -1); len(matches) > 0 {
+		t.Errorf("overlay_autoupdate_check.go still declares %d hard-coded field width(s): %v (R6.3). "+
+			"A width typed into a format string cannot be right: the correct one depends on the packages this run produced.",
+			len(matches), matches)
+	}
+}
+
+// TestOutOfScopeWidthsAreUntouched is the other half, and it guards the story's
+// own boundary. Removing those three would be an improvement nobody asked for,
+// in files this story does not test.
+func TestOutOfScopeWidthsAreUntouched(t *testing.T) {
+	for _, file := range []string{"overlay_prune.go", "overlay_autoupdate_sweep.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		if !regexp.MustCompile(`%-\d+s`).MatchString(string(body)) {
+			t.Errorf("%s no longer declares a hard-coded width — it is listed Out of Scope and should have been left alone", file)
+		}
+	}
 }

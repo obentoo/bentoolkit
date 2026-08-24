@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/report"
+
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
@@ -2447,4 +2449,87 @@ func TestValidateConfig_InstallIsAcceptedAndTheShippedDefaultsDidNotMove(t *test
 				"configured, and a per-package override is one of those places", override.Depth)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Sub-task 6.1 — the ui.mode config key. APPENDED to config_test.go.
+// ---------------------------------------------------------------------------
+
+// writeUIConfig writes a config file and loads it, failing the test on either
+// step. It exercises the real LoadFrom path rather than yaml.Unmarshal, so a
+// key that parses in isolation but is dropped by Load is still caught.
+func writeUIConfig(t *testing.T, body string) *Config {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the config: %v", err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(%s): %v\n--- config ---\n%s", path, err, body)
+	}
+	return cfg
+}
+
+// TestUIModeAbsent pins the half of R3.7 that lives in the config. An absent
+// ui block must stay DISTINGUISHABLE from `mode: auto` — if the loader
+// defaulted the field to "auto", nothing downstream could tell "the operator
+// chose auto" from "the operator said nothing", and R3.7's promise that an
+// unconfigured user sees no change would be untestable.
+func TestUIModeAbsent(t *testing.T) {
+	cfg := writeUIConfig(t, `
+overlay:
+  path: /var/db/repos/bentoo
+  remote: git@github.com:obentoo/bentoo.git
+`)
+
+	if cfg.UI.Mode != "" {
+		t.Fatalf("UI.Mode = %q for a config with no ui block, want the empty string: "+
+			"absent must not be defaulted to a value, or R3.7 cannot be checked", cfg.UI.Mode)
+	}
+}
+
+// TestUIModeParses — the key is read when it is there.
+func TestUIModeParses(t *testing.T) {
+	for _, mode := range []string{"auto", "plain", "inline", "fullscreen"} {
+		cfg := writeUIConfig(t, `
+overlay:
+  path: /var/db/repos/bentoo
+  remote: git@github.com:obentoo/bentoo.git
+ui:
+  mode: `+mode+`
+`)
+
+		if cfg.UI.Mode != mode {
+			t.Errorf("UI.Mode = %q, want %q", cfg.UI.Mode, mode)
+		}
+	}
+}
+
+// TestUIModeUnknownValueIsNotRejectedHere pins the layering, and the layering
+// is the point rather than an accident.
+//
+// The config loader's job is to report what the file says. Deciding that
+// "bogus" is not a mode belongs to ResolveMode, which owns the legal set and
+// can name it in the error (R3.9). A loader that validated it too would be a
+// second place to keep that list, and two lists disagree eventually.
+func TestUIModeUnknownValueIsNotRejectedHere(t *testing.T) {
+	cfg := writeUIConfig(t, `
+overlay:
+  path: /var/db/repos/bentoo
+  remote: git@github.com:obentoo/bentoo.git
+ui:
+  mode: bogus
+`)
+
+	if cfg.UI.Mode != "bogus" {
+		t.Fatalf("UI.Mode = %q, want the value the file held: the loader reports, it does not judge", cfg.UI.Mode)
+	}
+
+	// And the layer that DOES judge, rejects it — naming the legal set.
+	if _, _, err := report.ResolveMode(report.ModeInputs{Config: cfg.UI.Mode}); err == nil {
+		t.Error("ResolveMode accepted the unknown mode the config carried (R3.9)")
+	}
 }

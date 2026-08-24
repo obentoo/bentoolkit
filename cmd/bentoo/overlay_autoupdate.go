@@ -264,12 +264,37 @@ func init() {
 	autoupdateCmd.Flags().BoolVar(&autoupdateReviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	autoupdateCmd.Flags().StringVar(&autoupdateRevive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	autoupdateCmd.Flags().BoolVar(&autoupdateRevivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
-	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "Disable the live TUI; stream plain output (also honors NO_COLOR and BENTOO_NO_TUI)")
+	// --no-tui is DEPRECATED IN ITS HELP TEXT ONLY (S044-R3.5). Its behaviour is
+	// untouched: it still disables the live TUI, it still answers to NO_COLOR
+	// and BENTOO_NO_TUI, and it still outranks --ui and BENTOO_UI, because it is
+	// applied as ModePlain at the flag layer rather than as a competing
+	// mechanism (S044-R3.4).
+	//
+	// pflag's MarkDeprecated is deliberately NOT used. It hides the flag from
+	// --help and prints a notice on every use, and both are behaviour changes —
+	// the requirement asks for a word in the help text and explicitly not for a
+	// change in what the flag does. A hidden flag is also the opposite of what a
+	// deprecation is for: the operator who still passes it is exactly the reader
+	// who needs to be told what replaced it.
+	autoupdateCmd.Flags().BoolVar(&autoupdateNoTUI, "no-tui", false, "DEPRECATED, use --ui=plain instead. It is still honoured and its behaviour has not changed: it disables the live TUI and streams plain output, it is exactly --ui=plain, and it OUTRANKS both --ui and BENTOO_UI — so --no-tui --ui=fullscreen renders plain, because an opt-out a flag could override would not be an opt-out. The two environment variables it has always answered to, NO_COLOR and BENTOO_NO_TUI, are unchanged and mean the same thing as passing it")
 	autoupdateCmd.Flags().BoolVar(&autoupdateLint, "lint", false, "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)")
 	// No back-quoted words in this usage string: pflag reads the first one as the
 	// flag's value placeholder and strips the quotes, which would render a bool
 	// flag as "--fix binary".
 	autoupdateCmd.Flags().BoolVar(&autoupdateFix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
+	// The presentation flags. All three change what this run SHOWS and none of
+	// them changes what it does: the same packages are scanned, validated and
+	// acted upon, and the exit status is the same, whichever way they are set
+	// (S044-R8.4, S044-R9.6). Their variables live beside the plumbing that
+	// consumes them, in overlay_autoupdate_ui.go.
+	//
+	// No back-quoted words in any of the three usage strings — see the --fix
+	// note above: pflag reads the first one as the flag's value placeholder, so
+	// a quoted ".md" here would render this as "--export .md".
+	autoupdateCmd.Flags().StringVar(&autoupdateUI, "ui", "", "Renderer for this run: auto, plain, inline or fullscreen. auto is the default and picks inline on a terminal and plain off one; it never picks fullscreen, because taking over somebody's screen is not something configuring nothing should do. plain contains no escape sequence at all and is what a pipe, a log file and a CI job want. This flag outranks the BENTOO_UI environment variable, which outranks the ui.mode configuration key; --no-tui outranks all three. A value outside that set is rejected and NOTHING runs")
+	autoupdateCmd.Flags().BoolVar(&autoupdateAll, "all", false, "List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines")
+	autoupdateCmd.Flags().StringVar(&autoupdateExport, "export", "", "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had")
+
 	autoupdateCmd.Flags().BoolVarP(&autoupdateYes, "yes", "y", false, "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix it rewrites packages.toml, in an overlay that auto-commits and pushes")
 
 	// The two distfile directories. The names are byte-identical to `overlay
@@ -354,12 +379,18 @@ func sanitizeConfiguredDir(key, path string) string {
 	return ""
 }
 
-// tuiEnabledForApply is the apply-path gate: it defers entirely to tui.Enabled
-// (the single decision point, AD7), feeding it the --no-tui flag. Enabled also
-// honors NO_COLOR / BENTOO_NO_TUI and requires stdout to be a TTY, so a piped or
-// opted-out run selects the plain backend (R2.1, R2.2).
+// tuiEnabledForApply is the apply-path gate: the live region is on iff the mode
+// this run resolved to draws one (autoupdateUsesTUI, S044-R3.8).
+//
+// It no longer calls tui.Enabled. The decision moved to report.ResolveMode so
+// that one ui.mode governs this command AND `overlay manifest` instead of each
+// deciding for itself. Nothing changes for an operator who configured nothing:
+// with no ui.mode and no flags the resolution is `auto`, which yields inline on
+// a terminal and plain off one — precisely the two answers tui.Enabled gave
+// (R3.7). All three opt-outs are still honoured, the --no-tui flag among them;
+// resolveUIMode folds it together with NO_COLOR and BENTOO_NO_TUI (R2.1, R2.2).
 func tuiEnabledForApply() bool {
-	return tui.Enabled(tui.Options{NoTUI: autoupdateNoTUI})
+	return autoupdateUsesTUI(autoupdateUIConfig)
 }
 
 // buildApplyReporter selects the apply backend per the gate (tuiEnabledForApply)
@@ -515,6 +546,35 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// The same block, unresolved, for the two --llm capabilities: their keys are
 	// tri-state and only mean something next to the flag (S033-R7.2).
 	autoupdateValidateCfg = appCtx.Config.Autoupdate.Validate
+
+	// The renderer, resolved here for the same reason and in the same place as
+	// the two above: --ui, --no-tui and the ui.mode key are only all in scope
+	// once the config is parsed (S044-D4).
+	//
+	// The ANSWER is deliberately not kept. resolveAutoupdateUIMode is a pure
+	// function of the flags, the config and the terminal, so whoever needs the
+	// mode asks for it where it is used and gets the same value; see its doc
+	// comment for why a package variable holding it would be worse than the
+	// three os.Getenv calls it saves. What this call is for is the two things
+	// that must happen BEFORE any package work:
+	//
+	//   - S044-R3.9 — a --ui that does not name a mode stops the run here, with
+	//     no scan, no validation and no write behind it. Falling back to a
+	//     default would render in a mode the operator did not ask for, which is
+	//     doing work they did not ask for.
+	//   - S044-R3.6 — the downgrade sentence reaches stderr, and warnUIDowngrade
+	//     keeps it to one line however many times the mode is resolved after
+	//     this.
+	// The apply path's gate is two call frames below runApply and carries no
+	// config of its own, so the value it resolves against is parked here — the
+	// same once-per-run hand-down the three decisions above use.
+	autoupdateUIConfig = appCtx.Config
+
+	if _, err := resolveAutoupdateUIMode(appCtx.Config); err != nil {
+		logger.Error("%v", err)
+		osExit(1)
+		return
+	}
 
 	// Handle different modes
 	switch {
