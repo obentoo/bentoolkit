@@ -181,7 +181,7 @@ func newModel(r report.Report, opts Options) tea.Model {
 // newInterruptibleModel is newModel with the caller's interrupt bit attached.
 func newInterruptibleModel(r report.Report, opts Options, interrupted *atomic.Bool) tea.Model {
 	return fullscreenModel{
-		blocks:      sections(r, opts.ShowAll),
+		blocks:      sections(r, opts.ShowAll, opts.SkipPlan),
 		askedWidth:  opts.Width,
 		paint:       inlinePaint(),
 		interrupted: interrupted,

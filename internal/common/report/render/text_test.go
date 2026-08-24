@@ -460,3 +460,99 @@ func countAppearsInTheLabel(rendered string, want int) bool {
 	}
 	return false
 }
+
+// ---- story 045, sub-tasks 1.1 and 1.2: SkipPlan ----
+
+// story045PlannedReport is a report whose plan section is non-empty, which is
+// the only shape where SkipPlan can be observed at all.
+func story045PlannedReport() report.Report {
+	return report.Report{
+		Complete: true,
+		Scanned: []report.PackageResult{
+			{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+		},
+		Plan: []report.PlanEntry{
+			{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Depth: "configure",
+				Reason: "a minor bump earns the configure rung from the default depth policy"},
+		},
+	}
+}
+
+// TestSkipPlanOmitsThePlanSection is R2.3 at the renderer. The plan was already
+// put on screen before the confirmation prompt (overlay_autoupdate_check.go:491),
+// so the report must not state it a second time.
+func TestSkipPlanOmitsThePlanSection(t *testing.T) {
+	r := story045PlannedReport()
+
+	var shown, skipped bytes.Buffer
+	if err := Plain(&shown, r, Options{}); err != nil {
+		t.Fatalf("Plain(SkipPlan=false): %v", err)
+	}
+	if err := Plain(&skipped, r, Options{SkipPlan: true}); err != nil {
+		t.Fatalf("Plain(SkipPlan=true): %v", err)
+	}
+
+	if !strings.Contains(shown.String(), "Validation Plan") {
+		t.Fatal("the fixture renders no plan section with SkipPlan=false — it cannot measure the option")
+	}
+	if strings.Contains(skipped.String(), "Validation Plan") {
+		t.Errorf("SkipPlan=true still rendered the plan section (R2.3)\n%s", skipped.String())
+	}
+}
+
+// TestSkipPlanChangesNothingElse is the half that keeps the option from becoming
+// a blunt instrument: it must remove ONE section, not quietly reshape the rest.
+// Everything before and after the plan section has to be byte-identical.
+func TestSkipPlanChangesNothingElse(t *testing.T) {
+	r := story045PlannedReport()
+
+	var shown, skipped bytes.Buffer
+	if err := Plain(&shown, r, Options{}); err != nil {
+		t.Fatalf("Plain(SkipPlan=false): %v", err)
+	}
+	if err := Plain(&skipped, r, Options{SkipPlan: true}); err != nil {
+		t.Fatalf("Plain(SkipPlan=true): %v", err)
+	}
+
+	// The version-check section is what precedes the plan; it must survive untouched.
+	for _, marker := range []string{"Version Check Results", "app-misc/jq", "1.8.0"} {
+		if !strings.Contains(skipped.String(), marker) {
+			t.Errorf("SkipPlan=true dropped %q, which belongs to another section (R2.3)\n%s", marker, skipped.String())
+		}
+	}
+	if len(skipped.String()) >= len(shown.String()) {
+		t.Errorf("SkipPlan=true produced %d bytes against %d — omitting a section must make the output shorter",
+			len(skipped.String()), len(shown.String()))
+	}
+}
+
+// TestExportKeepsThePlanTheScreenSkipped is R2.4, and story 044 already made it
+// nearly free: Markdown and JSON take no Options at all, so neither CAN honour a
+// screen setting. This asserts the property rather than trusting it, because the
+// day someone gives Markdown an Options parameter is the day it stops holding.
+func TestExportKeepsThePlanTheScreenSkipped(t *testing.T) {
+	r := story045PlannedReport()
+
+	var screen bytes.Buffer
+	if err := Plain(&screen, r, Options{SkipPlan: true}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	if strings.Contains(screen.String(), "Validation Plan") {
+		t.Fatal("the screen render did not skip the plan — the export comparison below would prove nothing")
+	}
+
+	var md, js bytes.Buffer
+	if err := Markdown(&md, r); err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if err := JSON(&js, r); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	if !strings.Contains(md.String(), "Validation Plan") {
+		t.Errorf("the Markdown export dropped the plan the screen skipped — a record missing the plan answers no question later (R2.4)\n%s", md.String())
+	}
+	if !strings.Contains(js.String(), "app-misc/jq") {
+		t.Errorf("the JSON export dropped the plan the screen skipped (R2.4)\n%s", js.String())
+	}
+}

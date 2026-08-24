@@ -33,14 +33,15 @@ const (
 //
 // # It is a screen concern, and only the screen modes take one
 //
-// Both fields below describe a terminal: a line budget, and a list short enough
-// to scroll past. Plain and Inline are the two modes printed to one, so both
-// take it — Inline is a screen mode, so a --all it ignored would be a flag that
-// worked in plain and silently did nothing in the default mode (R2.2). An
-// export has neither question to answer, so Markdown and JSON take no Options
-// at all — an omission that is the requirement rather than an oversight (R9.3).
-// Giving an export path a parameter of this type would be giving it the two
-// questions an export must never ask.
+// Every field below describes a terminal: a line budget, a list short enough to
+// scroll past, and a section this terminal has already shown. Plain, Inline and
+// Fullscreen are the modes printed to one, so all three take it — Inline is a
+// screen mode, so a --all it ignored would be a flag that worked in plain and
+// silently did nothing in the default mode (R2.2). An export has none of those
+// questions to answer, so Markdown and JSON take no Options at all — an
+// omission that is the requirement rather than an oversight (R9.3). Giving an
+// export path a parameter of this type would be giving it questions an export
+// must never ask.
 type Options struct {
 	// Width is the line budget in display cells: no rendered line exceeds it.
 	// Zero means "ask the device", which is terminalWidth's job, so a caller
@@ -53,6 +54,11 @@ type Options struct {
 	// date packages are the bulk of a 269-package overlay and listing them by
 	// default is most of why a check that found four updates prints 348 lines.
 	ShowAll bool
+	// SkipPlan omits the validation-plan section. It exists for exactly one
+	// caller: the on-screen render of a run whose plan was already printed
+	// before the confirmation prompt. An export must never set it — a record
+	// missing the plan answers no question later (R2.4).
+	SkipPlan bool
 }
 
 // Plain renders r as text with no escape sequence in it (R2.1).
@@ -84,7 +90,7 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 		width = terminalWidth()
 	}
 
-	return write(w, sections(r, opts.ShowAll), plainStyle(width))
+	return write(w, sections(r, opts.ShowAll, opts.SkipPlan), plainStyle(width))
 }
 
 // Markdown renders r as a Markdown document: the same report, in the syntax a
@@ -121,7 +127,7 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 // drops a DUPLICATE rather than information: the sentence is still in the
 // document, whole, on the plan row that first stated it.
 func Markdown(w io.Writer, r report.Report) error {
-	return write(w, sections(r, everyScannedPackage), markdownStyle())
+	return write(w, sections(r, everyScannedPackage, keepThePlan), markdownStyle())
 }
 
 // sections is the whole report as structure: what it says, in order, with every
@@ -143,11 +149,21 @@ func Markdown(w io.Writer, r report.Report) error {
 // whole reason and keeps the model's promise that shortening is a rendering
 // decision rather than a loss of data (R7.4).
 //
-// # One bool, not an Options
+// # Two bools, not an Options
 //
-// listEvery is the only thing building a section ever needed from a caller, and
-// taking it alone is what keeps Options off the export path: there is no Width
-// field here for an export to be handed by accident (R9.3).
+// listEvery and skipPlan are everything building a section ever needed from a
+// caller, and taking them one at a time is what keeps Options off the export
+// path: there is no Width field here for an export to be handed by accident,
+// and no way to hand this function a screen setting without naming it (R9.3).
+//
+// # The plan is the one section a caller may drop
+//
+// skipPlan omits it, and only it — every other section is built exactly as it
+// would have been, so the option removes a block rather than reshaping a report
+// (R2.3). It is dropped HERE rather than in a writer because a section a report
+// does not state is a fact about WHAT it says: the three screen modes inherit
+// the omission from this one line instead of each deciding it, which is what
+// keeps the heading from appearing twice in one of them (R2.2).
 //
 // # A run that stopped early says so before it says anything else
 //
@@ -156,15 +172,18 @@ func Markdown(w io.Writer, r report.Report) error {
 // Complete and NotEvaluated and nothing else, so no renderer is ever told
 // whether a TUI was involved — an interrupted run is reported in identical
 // words whichever mode was on screen when it was interrupted.
-func sections(r report.Report, listEvery bool) []section {
+func sections(r report.Report, listEvery, skipPlan bool) []section {
 	var blocks []section
 	if !r.Complete {
 		blocks = append(blocks, interruptedSection(r))
 	}
 
+	blocks = append(blocks, versionCheckSection(r, listEvery))
+	if !skipPlan {
+		blocks = append(blocks, validationPlanSection(r))
+	}
+
 	return append(blocks,
-		versionCheckSection(r, listEvery),
-		validationPlanSection(r),
 		validationResultsSection(r),
 		validationSummarySection(r),
 	)
@@ -177,6 +196,17 @@ func sections(r report.Report, listEvery bool) []section {
 // asks what the terminal was told — it lists everything, always (R9.3) — and
 // naming the value keeps the one call site from reading `sections(r, true)`.
 const everyScannedPackage = true
+
+// keepThePlan is the other half of what an export passes sections: state the
+// validation-plan section, whatever the screen was told to do with it (R2.4).
+//
+// It is a constant for everyScannedPackage's reason, and one step further. A
+// report is kept precisely BECAUSE the terminal is gone, so a record missing
+// the plan the terminal had already shown answers no question later — the plan
+// is where a package's reason is stated at all (R7.2), so dropping it from a
+// file would not shorten the record, it would empty it. A named false says
+// that at the call site; a bare false would only say something was off.
+const keepThePlan = false
 
 // section is one titled block of a report: a heading, the sentences that frame
 // it, the rows themselves, and the sentences that qualify them.
