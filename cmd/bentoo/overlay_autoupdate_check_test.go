@@ -1116,3 +1116,123 @@ func TestListHintAbsentWithNoUpdates(t *testing.T) {
 		t.Errorf("the hint was printed for a scan with no pending update (R5.2)\n%s", out)
 	}
 }
+
+// ---- story 045, sub-task 4.1: the guard that outlives the fix ----
+
+// TestCheckPathHasOneProducerPerHeading is the durable half of R1.4, and it
+// exists because the OTHER half stopped working the moment it passed.
+//
+// That other half (3.2) counted what two producers wrote to a terminal. It was
+// retired in 4.1 alongside the legacy check printer it called: with one producer
+// left there is nothing to call twice, so it could no longer fail however badly
+// a future change reintroduced a second one. Counting OUTPUT needs the whole
+// command, and this package's tests do not run the whole command — they compose
+// the producers by hand.
+//
+// So this counts PRODUCERS instead, in the source, which is the thing RC1 says
+// nobody was watching. It was red until 4.1 removed the second emitter of the
+// version-check heading from cmd/bentoo, and it is what goes red again if one
+// comes back — that heading belongs to the report.
+//
+// "Validation Plan" is the deliberate asymmetry: printValidationPrice keeps it
+// (R2.3), so exactly one emitter is correct and zero would be a regression.
+func TestCheckPathHasOneProducerPerHeading(t *testing.T) {
+	for _, want := range []struct {
+		heading string
+		count   int
+		why     string
+	}{
+		{"Version Check Results", 0, "this heading belongs to the report; cmd/bentoo must not emit it (R1.4)"},
+		{"Validation Plan", 1, "printValidationPrice is the ONE permitted producer, kept for the pre-confirmation print (R2.3)"},
+	} {
+		got := countHeadingEmitters(t, want.heading)
+		if got != want.count {
+			t.Errorf("cmd/bentoo has %d producer(s) of %q, want %d — %s",
+				got, want.heading, want.count, want.why)
+		}
+	}
+}
+
+// countHeadingEmitters counts string literals equal to heading in this package's
+// non-test .go files. A literal is what a producer needs, so the literal is what
+// is counted — no call graph, nothing to keep in sync with a refactor.
+// fmt.Sprintf(%q) rather than strconv.Quote: this package's test file does not
+// import strconv, and a fragment is APPENDED to that file, not written with its
+// own import block.
+func countHeadingEmitters(t *testing.T, heading string) int {
+	t.Helper()
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading the package directory: %v", err)
+	}
+
+	total := 0
+	scanned := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		scanned++
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		total += strings.Count(string(src), fmt.Sprintf("%q", heading))
+	}
+
+	// Anti-vacuity: a guard that scanned nothing reports 0 and looks satisfied.
+	if scanned == 0 {
+		t.Fatal("scanned no non-test .go file — the guard would pass vacuously")
+	}
+	return total
+}
+
+// TestOrphanDisableIsAnnounced closes the last R5.4 parity gap, and it is the
+// one that was not about display at all.
+//
+// # A silent write to a hand-maintained file
+//
+// CheckAll auto-disables entries whose ebuild has vanished
+// (internal/autoupdate/checker.go:2020) and warns only when that write FAILS,
+// so a successful one says nothing. displayCheckResults used to be the thing
+// that said it — "N package(s) had no ebuild and were disabled (enabled =
+// false)" — and sub-task 3.2 removed its last caller. Between then and now, a
+// batch check edited packages.toml without telling anyone.
+//
+// The report states the orphan COUNT already ("N package(s) have no ebuild in
+// the overlay.", render/text.go:357). What it cannot state is that the registry
+// was WRITTEN: internal/common/report/render must not know that packages.toml
+// exists, which is the same boundary D5 draws for the --list hint. So the
+// sentence belongs to the caller, exactly as the hint does.
+//
+// # The asymmetry this removes
+//
+// The single-package path never lost it: overlay_autoupdate.go:717 says
+// "disabled in packages.toml" and returns before presentCheckReport, so there
+// is no risk of saying it twice. Only the batch path went quiet.
+func TestOrphanDisableIsAnnounced(t *testing.T) {
+	orphaned := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/gone", Type: "source", Orphaned: true},
+		{Package: "app-misc/alsogone", Type: "source", Orphaned: true},
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.7.1"},
+	}}
+
+	out := captureStdout(t, func() { presentCheckReport(orphaned, noPlanPrinted) })
+
+	// One sentence for the run, not one per package: it reports a single
+	// batched write, which is what DisableOrphans performs.
+	if got := strings.Count(out, "packages.toml"); got != 1 {
+		t.Errorf("the auto-disable notice names packages.toml %d times over a 2-orphan scan, want exactly 1 — a batch check must not edit a hand-maintained file silently (R5.4)\n%s", got, out)
+	}
+
+	clean := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.7.1"},
+	}}
+
+	quiet := captureStdout(t, func() { presentCheckReport(clean, noPlanPrinted) })
+	if strings.Contains(quiet, "packages.toml") {
+		t.Errorf("a run that disabled nothing announced a registry write — the notice must not become unconditional noise (R5.4)\n%s", quiet)
+	}
+}

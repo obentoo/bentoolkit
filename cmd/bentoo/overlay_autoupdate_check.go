@@ -695,8 +695,8 @@ func presentCheckReport(r report.Report, planPrinted bool) {
 	// run with nothing to say, and a run holding results has something to say
 	// however its scan came out.
 	if len(r.Scanned) == 0 && len(r.Plan) == 0 {
-		// Verbatim the sentence displayCheckResults emitted at its own
-		// `len(results) == 0` guard, on the same channel it emitted it on. The
+		// Verbatim the sentence the retired legacy check printer emitted at
+		// its own `len(results) == 0` guard, on the same channel. The
 		// wording is load-bearing in both directions: it is what an operator
 		// already greps for, and it is deliberately NOT the report's own lead
 		// for this case ("No package is configured for autoupdate.",
@@ -726,9 +726,9 @@ func presentCheckReport(r report.Report, planPrinted bool) {
 
 		// S045-R5.2: a run that found something pending names the command
 		// that lists it. This is the last of the three facts that have to
-		// outlive displayCheckResults — R5.1's tally went into the section
-		// (sub-task 2.1) and R5.3's empty-scan sentence into the arm above
-		// (3.3).
+		// outlive the retired legacy check printer — R5.1's tally went into
+		// the section (sub-task 2.1) and R5.3's empty-scan sentence into the
+		// arm above (3.3).
 		//
 		// AFTER the render, deliberately: the render is the answer, and this
 		// is a footnote about what to do next.
@@ -750,6 +750,26 @@ func presentCheckReport(r report.Report, planPrinted bool) {
 		if scanFoundPendingUpdate(r.Scanned) {
 			output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
 		}
+
+		// The registry was WRITTEN, and that is not something the report can
+		// say. CheckAll auto-disables an entry whose ebuild has vanished and
+		// warns only when the write fails, so a successful one would otherwise
+		// mutate a hand-maintained packages.toml in silence — the retired
+		// legacy check printer was what said it, and its last caller went away
+		// in this story (S045-R5.4).
+		//
+		// It belongs here for D5's reason, one step stronger than the hint's:
+		// internal/common/report/render must not name a bentoo subcommand, and
+		// it must certainly not know that packages.toml exists. The report
+		// already states the orphan COUNT; this states the consequence.
+		//
+		// One sentence for the run, because DisableOrphans performs one batched
+		// write. The single-package path never lost this — it says the same
+		// thing at overlay_autoupdate.go and returns before reaching here, so
+		// the two cannot both fire.
+		if orphans := scanDisabledOrphans(r.Scanned); orphans > 0 {
+			output.Warning.Printf("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)\n", orphans)
+		}
 	}
 
 	// Reached on BOTH arms above, and the `else` is what makes that true: the
@@ -766,6 +786,20 @@ func presentCheckReport(r report.Report, planPrinted bool) {
 		// run counted as successful.
 		logger.Warn("%v", err)
 	}
+}
+
+// scanDisabledOrphans counts the packages this run auto-disabled: an entry
+// whose ebuild has vanished from the overlay. CheckAll writes them back in one
+// batch (internal/autoupdate/checker.go, DisableOrphans) and warns only when
+// that write FAILS, so a successful one is otherwise silent.
+func scanDisabledOrphans(scanned []report.PackageResult) int {
+	orphans := 0
+	for _, result := range scanned {
+		if result.Orphaned {
+			orphans++
+		}
+	}
+	return orphans
 }
 
 // scanFoundPendingUpdate reports whether the scan turned up at least one
