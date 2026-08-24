@@ -26,6 +26,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/spf13/cobra"
 )
@@ -720,7 +721,17 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 			osExit(1)
 			return
 		}
-		displayCheckResults([]autoupdate.CheckResult{*result})
+		// S045-R1.2: the one package this run scanned, as the same report the
+		// batch path builds and through the same render — one element, joined
+		// with the zero validation half because nothing validates here. This
+		// path prices nothing, so no plan has been put in front of the operator
+		// and the report states its own.
+		//
+		// D6 keeps the return below: only the batch path may reconcile the
+		// registry, and moving the render past this point must not move the
+		// return with it.
+		const noPlanWasPrinted = false
+		presentCheckReport(checkReport([]autoupdate.CheckResult{*result}, report.Report{}), noPlanWasPrinted)
 		return
 	}
 
@@ -735,11 +746,17 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		fmt.Print("\r                                        \r")
 	}
 
-	// Display the successfully checked packages.
-	displayCheckResults(result.Items)
-
 	// Emit one stderr line per per-package failure. FormatFailures is called
 	// only after CheckAll has fully completed, so the output is deterministic.
+	//
+	// It stays HERE, where it has always been, even though the scan it
+	// qualifies is now drawn at the end of the run (S045-D1): these lines
+	// therefore reach stderr BEFORE the report reaches stdout, where they used
+	// to follow it. That is the lesser change. Moving them down beside the
+	// report would put per-package failures AFTER the interactive registry-fix
+	// prompt below — the prompt whose whole subject is those same failures —
+	// and an operator would be asked to repair packages it had not yet been
+	// told about.
 	if result.HasFailures() {
 		result.FormatFailures(os.Stderr)
 	}
@@ -776,7 +793,19 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// the same reason that one runs last: the reconciliation is the only prompt in
 	// this command that can write to the overlay, and it must be the last thing on
 	// screen rather than scrolled off by a validation report.
-	runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
+	validated, planPrinted := runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
+
+	// S045-R1.1/R1.3, D1: the run's one report, built where both of its halves
+	// are finally in hand — the scan above, and whatever the validation just
+	// contributed — and drawn exactly once.
+	//
+	// It is drawn HERE rather than where the scan finished because a report
+	// rendered there could not carry a result the gates had not produced yet:
+	// everything that can contribute to this report has contributed by this
+	// line. planPrinted travels into render.Options.SkipPlan so the plan the
+	// operator read before the confirmation prompt is not drawn to them a
+	// second time (S045-R2.3).
+	presentCheckReport(checkReport(result.Items, validated), planPrinted)
 
 	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the

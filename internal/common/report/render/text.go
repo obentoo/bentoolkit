@@ -179,6 +179,27 @@ func sections(r report.Report, listEvery, skipPlan bool) []section {
 	}
 
 	blocks = append(blocks, versionCheckSection(r, listEvery))
+
+	// A run that planned nothing has nothing to say about a plan, its results
+	// or its tally, and says so by omitting all three rather than by stating
+	// each one's emptiness in a sentence of its own (R4.1).
+	//
+	// Reaching this at all is new. Presentation used to sit behind the --llm
+	// gate, so every report that rendered had validated something and an empty
+	// plan half was unreachable; a plain --check now renders, and "No pending
+	// update to validate / No package was evaluated / 0 package(s) evaluated: 0
+	// proved, 0 errored, 0 inconclusive, 0 skipped" is twelve lines telling the
+	// operator that the thing they did not ask for did not happen. That is the
+	// volume story 044 removed, arriving back through the door this one opened.
+	//
+	// The trigger is the PLAN, not the results. A run whose every package was
+	// excluded by policy planned them all and evaluated none, and there the
+	// three sections are exactly what the operator needs — the plan names what
+	// was excluded and why. Keying on len(Results) would silence that run too.
+	if len(r.Plan) == 0 {
+		return blocks
+	}
+
 	if !skipPlan {
 		blocks = append(blocks, validationPlanSection(r))
 	}

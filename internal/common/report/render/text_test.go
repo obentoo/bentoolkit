@@ -606,3 +606,67 @@ func TestTierCountIgnoresUnresolved(t *testing.T) {
 		t.Errorf("an unresolved Type was bucketed into a tier column; empty means nobody resolved it\n%s", out)
 	}
 }
+
+// ---- story 045, sub-task 3.2: R4.1, the scan-only report ----
+
+// story045ScanOnlyReport is what runCheck now builds on a run that validated
+// nothing: the scan filled, the plan half empty, and Complete true because a run
+// that planned nothing left nothing unevaluated (R4.2).
+func story045ScanOnlyReport() report.Report {
+	return report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+		{Package: "app-editors/zed", Type: "bin", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4"},
+	}}
+}
+
+// TestScanOnlyReportOmitsTheValidationSections is R4.1, and before this story it
+// could not be reached at all: presentCheckReport sat behind the --llm gate, so
+// every report that rendered had validated something. Now a plain `--check`
+// renders, and what it renders must say only what it knows.
+//
+// "Rather than emitting them empty" is the operative phrase. Each of the three
+// sections states its own emptiness in a sentence — "No pending update to
+// validate", "No package was evaluated", "0 package(s) evaluated: 0 proved…" —
+// which is twelve lines telling the operator that the thing they did not ask for
+// did not happen. That is the volume story 044 removed, arriving back through
+// the door this story opened.
+func TestScanOnlyReportOmitsTheValidationSections(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Plain(&buf, story045ScanOnlyReport(), Options{}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "Version Check Results") {
+		t.Fatalf("the scan section is missing — the report says nothing at all, and the omissions below would prove nothing\n%s", out)
+	}
+	for _, heading := range []string{"Validation Plan", "Validation Results", "Validation Summary"} {
+		if strings.Contains(out, heading) {
+			t.Errorf("a run that validated nothing still stated %q; it must be omitted rather than emitted empty (R4.1)\n%s", heading, out)
+		}
+	}
+}
+
+// TestValidatedReportStillStatesTheValidationSections is the hostile half, and
+// it is what keeps R4.1 from being satisfied by never rendering those sections
+// at all. The same three headings, over a report that DID validate, must all be
+// present — the rule is "omit what this run has nothing to say about", not
+// "drop the validation half".
+func TestValidatedReportStillStatesTheValidationSections(t *testing.T) {
+	r := story045ScanOnlyReport()
+	r.Plan = []report.PlanEntry{{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Depth: "configure"}}
+	r.Results = []report.ValidationRow{{Package: "app-misc/jq", Outcome: "proved"}}
+	r.Tally = report.Tally{Proved: 1}
+
+	var buf bytes.Buffer
+	if err := Plain(&buf, r, Options{}); err != nil {
+		t.Fatalf("Plain: %v", err)
+	}
+	out := buf.String()
+
+	for _, heading := range []string{"Validation Plan", "Validation Results", "Validation Summary"} {
+		if !strings.Contains(out, heading) {
+			t.Errorf("a run that DID validate lost %q — R4.1 omits what a run has nothing to say about, it does not drop the validation half\n%s", heading, out)
+		}
+	}
+}

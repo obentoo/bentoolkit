@@ -27,6 +27,9 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"regexp"
@@ -37,6 +40,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
@@ -724,5 +729,390 @@ func TestOutOfScopeWidthsAreUntouched(t *testing.T) {
 		if !regexp.MustCompile(`%-\d+s`).MatchString(string(body)) {
 			t.Errorf("%s no longer declares a hard-coded width — it is listed Out of Scope and should have been left alone", file)
 		}
+	}
+}
+
+// ---- story 045, sub-tasks 3.1 and 3.2: the structural claims ----
+//
+// These replace behavioural phrasings that were NOT expressible: runCheck and
+// runPendingValidation need a Checker, a config dir and a network, and this
+// package's tests build none — they compose the individual producers by hand
+// (see renderCheckReport at :586). A rule stated where no test can reach it is
+// a rule nobody enforces, which is how RC1 happened in the first place.
+
+// callSites counts calls to name in file, excluding the declaration. A `func`
+// line is a definition, not a call, and counting it turns "moved" into "still
+// here" — the exact vacuity these guards exist to avoid.
+func callSites(t *testing.T, file, name string) int {
+	t.Helper()
+
+	src, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("reading %s: %v", file, err)
+	}
+	n := 0
+	lines := strings.Split(string(src), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "func ") || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		n += strings.Count(line, name+"(")
+	}
+	if len(lines) < 2 {
+		t.Fatalf("%s scanned as %d line(s) — the guard would pass vacuously", file, len(lines))
+	}
+	return n
+}
+
+// TestValidationDoesNotRenderTheReport is D2: the --llm gate keeps "do not
+// validate" and loses "do not draw". After 3.1 nothing downstream of that gate
+// draws, so the render call must not live in this file at all.
+func TestValidationDoesNotRenderTheReport(t *testing.T) {
+	if got := callSites(t, "overlay_autoupdate_check.go", "presentCheckReport"); got != 0 {
+		t.Errorf("overlay_autoupdate_check.go still calls presentCheckReport %d time(s), want 0 — the render belongs to runCheck, not behind the --llm gate (D2, R3.1-R3.3)", got)
+	}
+}
+
+// TestPendingValidationReturnsThePlanHalf is D2 stated as a return value rather
+// than as a comment. The --llm gate keeps meaning "do not validate" and stops
+// meaning "do not draw", and the way it stops meaning it is that the guarded
+// arm now YIELDS something instead of ending the run's presentation.
+//
+// # Why the not-validating arm is the one a test can reach
+//
+// Every other path through runPendingValidation needs a Checker, a config
+// directory and a network, and this package builds none of them — its tests
+// compose the individual producers by hand (see renderCheckReport at :586). The
+// `if !autoupdateLLM` arm returns before any of that, so it is the one arm
+// callable with nothing but a context. That is a narrow claim and it is stated
+// narrowly; the structural half above is what covers the rest.
+//
+// # The zero value is the assertion, not merely the absence of a crash
+//
+// D2 says the guard "stays exactly where it is and yields the zero value". A
+// half-built report from this arm would be worse than none: runCheck merges
+// this half into the report it already holds, so a Plan or a Tally invented
+// here would be merged into a run that never validated anything and reported as
+// if it had.
+func TestPendingValidationReturnsThePlanHalf(t *testing.T) {
+	restore := autoupdateLLM
+	autoupdateLLM = false
+	t.Cleanup(func() { autoupdateLLM = restore })
+
+	got, printed := runPendingValidation(t.Context(), t.TempDir(), t.TempDir(),
+		[]autoupdate.CheckResult{{Package: "app-misc/jq", CurrentVersion: "1.7.1", UpstreamVersion: "1.8.0", HasUpdate: true, Type: "source"}},
+		config.LLMConfig{})
+
+	if printed {
+		t.Error("the gated arm reported the plan as printed, but it never reached printValidationPrice — SkipPlan would then omit a section nobody had shown (R2.3)")
+	}
+	if len(got.Scanned) != 0 || len(got.Plan) != 0 || len(got.Results) != 0 {
+		t.Errorf("the gated arm returned a populated report (Scanned=%d, Plan=%d, Results=%d), want the zero value — it did not validate, so it has nothing to contribute (D2)",
+			len(got.Scanned), len(got.Plan), len(got.Results))
+	}
+	if got.Complete || got.NotEvaluated != 0 || got.DistfilesToFetch != 0 || got.Tally != (report.Tally{}) {
+		t.Errorf("the gated arm returned a non-zero report body (Complete=%v, NotEvaluated=%d, DistfilesToFetch=%d, Tally=%+v), want the zero value (D2)",
+			got.Complete, got.NotEvaluated, got.DistfilesToFetch, got.Tally)
+	}
+	// Scanned is filled by runCheck from the scan it already holds, never here:
+	// a report half that carried the scan would make the merge in 3.2 a question
+	// of which copy wins.
+	if got.Scanned != nil {
+		t.Error("the gated arm returned a non-nil Scanned — the scan half belongs to runCheck (D1)")
+	}
+}
+
+// ---- story 045, sub-task 3.2: one report, rendered once ----
+
+// story045Scanned is the scan half of a run, in both shapes the two producers
+// take: []autoupdate.CheckResult for the legacy printer and []report.PackageResult
+// for the view model. They describe the SAME two packages on purpose — the
+// defect is that both get printed, so a fixture where they disagree would be
+// measuring something else.
+func story045Scanned() ([]autoupdate.CheckResult, []report.PackageResult) {
+	return []autoupdate.CheckResult{
+		{Package: "app-misc/jq", CurrentVersion: "1.7.1", UpstreamVersion: "1.8.0", HasUpdate: true, Type: "source"},
+		{Package: "app-editors/zed", CurrentVersion: "0.199.4", UpstreamVersion: "0.199.4", Type: "bin"},
+	}, []report.PackageResult{
+		{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true, Type: "source"},
+		{Package: "app-editors/zed", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4", Type: "bin"},
+	}
+}
+
+// TestValidationPlanHeadingAppearsOnce is the same assertion for the half story
+// 044's deferred quality gate did NOT name. printValidationPrice emits
+// "Validation Plan" at overlay_autoupdate_check.go:320 before the confirmation,
+// and the report emits its own at render/text.go:327 afterwards.
+func TestValidationPlanHeadingAppearsOnce(t *testing.T) {
+	_, scanned := story045Scanned()
+	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
+	r := report.Report{
+		Scanned:  scanned,
+		Plan:     []report.PlanEntry{{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Depth: "configure"}},
+		Complete: true,
+	}
+
+	out := captureStdout(t, func() {
+		printValidationPrice(plan)
+		presentCheckReport(r, true)
+	})
+
+	if got := strings.Count(out, "Validation Plan"); got != 1 {
+		t.Errorf("the heading %q appears %d times, want exactly 1 — the pre-confirmation print is the ONE permitted producer (R2.3), so the report must omit its own section",
+			"Validation Plan", got)
+	}
+}
+
+// TestCheckOwnsTheRender is the other half, and it is why the pair cannot pass
+// vacuously: moving the call out of one file proves nothing unless it arrived
+// in the other. Both the batch path and the single-package path render from
+// here, so this one claim covers what "renders without --llm" and "a single
+// package renders" were each trying to say.
+func TestCheckOwnsTheRender(t *testing.T) {
+	if got := callSites(t, "overlay_autoupdate.go", "presentCheckReport"); got < 1 {
+		t.Errorf("overlay_autoupdate.go calls presentCheckReport %d time(s), want at least 1 — runCheck owns the render on both entry paths (D1, R1.1, R1.2)", got)
+	}
+}
+
+// TestSinglePackageDoesNotReconcile is D6. Only the batch path may reconcile the
+// registry — overlay_autoupdate.go:793-794 states it — and the single-package
+// path keeps its early return. Green on arrival: it guards a property that is
+// already true and that this story could plausibly break while moving the
+// render past that return.
+func TestSinglePackageDoesNotReconcile(t *testing.T) {
+	if got := callSites(t, "overlay_autoupdate.go", "reconcileRegistryAfterCheck"); got != 1 {
+		t.Errorf("reconcileRegistryAfterCheck has %d call site(s), want exactly 1 — only the batch path reconciles (D6)", got)
+	}
+}
+
+// TestSinglePackageReturnsBeforeTheBatchPath closes a gap in the guard above,
+// and the gap was found by running the mutation .draft/red-evidence.yaml
+// prescribes rather than by reading it.
+//
+// That entry justifies TestSinglePackageDoesNotReconcile like this: "3.2 moves
+// the render past the single-package early return, and a restructure that
+// dropped that return would start reconciling the registry from a one-package
+// run. Mutation after 3.2: remove the early return and confirm this test
+// fails." It does not fail. Deleting the return leaves the CALL SITE COUNT at
+// one, so a test that counts call sites cannot see it — the failure mode is
+// about REACHABILITY, and counting is blind to reachability by construction.
+//
+// Measured on 2026-08-24, both mutations run against the finished 3.2:
+//   - add a second reconcileRegistryAfterCheck call site -> the count guard FAILS (correct)
+//   - delete the single-package `return`              -> the count guard PASSES (the gap)
+//
+// This test covers the second. Falling through from the single-package branch
+// reaches CheckAll, the registry fixer prompt and the reconcile — so a run the
+// operator scoped to one package would scan the whole overlay and offer to
+// publish pins. That is D6's whole subject, and it was the half nothing watched.
+func TestSinglePackageReturnsBeforeTheBatchPath(t *testing.T) {
+	const file = "overlay_autoupdate.go"
+
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", file, err)
+	}
+
+	var branch *ast.IfStmt
+	ast.Inspect(parsed, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "runCheck" {
+			return true
+		}
+		ast.Inspect(fn, func(inner ast.Node) bool {
+			stmt, ok := inner.(*ast.IfStmt)
+			if !ok {
+				return true
+			}
+			// `if len(args) > 0` — the single-package arm.
+			cmp, ok := stmt.Cond.(*ast.BinaryExpr)
+			if !ok || cmp.Op != token.GTR {
+				return true
+			}
+			call, ok := cmp.X.(*ast.CallExpr)
+			if !ok || len(call.Args) != 1 {
+				return true
+			}
+			if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "len" {
+				if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == "args" {
+					branch = stmt
+					return false
+				}
+			}
+			return true
+		})
+		return false
+	})
+
+	// Vacuity guard: a rename of `args`, or a restructure that replaced the
+	// branch with something else, must fail loudly rather than silently stop
+	// measuring anything.
+	if branch == nil {
+		t.Fatalf("could not find `if len(args) > 0` inside runCheck in %s — the single-package arm was renamed or restructured, and this guard now measures nothing (D6)", file)
+	}
+	if len(branch.Body.List) == 0 {
+		t.Fatalf("the single-package arm is empty in %s", file)
+	}
+
+	if _, ok := branch.Body.List[len(branch.Body.List)-1].(*ast.ReturnStmt); !ok {
+		t.Errorf("the single-package arm of runCheck does not end in a return. " +
+			"Falling through reaches CheckAll, the registry fixer prompt and reconcileRegistryAfterCheck, " +
+			"so a run scoped to one package would scan the whole overlay and offer to publish pins (D6, S045-R1.2)")
+	}
+}
+
+// ---- story 045, sub-tasks 3.3 and 3.4: the empty scan, and the hint ----
+
+// noPlanPrinted names the second argument presentCheckReport gained in
+// sub-task 3.2. None of these fixtures ran printValidationPrice, so none of
+// them may ask the report to omit a plan section nobody has seen — a bare
+// `false` at four call sites would say nothing about which of the two it is.
+const noPlanPrinted = false
+
+// TestEmptyScanRendersNoReport is D4 held at the render seam rather than
+// scattered through runCheck. A run that scanned nothing renders nothing at all:
+// the sentence is logger.Info's (suppressible by --quiet, cmd/bentoo/main.go:30)
+// and the report's own "No package is configured for autoupdate." lead
+// (render/text.go:272) must never be reached on that path.
+//
+// Putting the decision here rather than in runCheck is what makes it testable —
+// runCheck needs a checker, a config dir and a network, and this package's tests
+// do not build one.
+func TestEmptyScanRendersNoReport(t *testing.T) {
+	out := captureStdout(t, func() {
+		presentCheckReport(report.Report{Complete: true}, noPlanPrinted)
+	})
+
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("an empty scan rendered %d bytes; it must render nothing so --quiet keeps the one silence it has today (R5.3)\n%s",
+			len(out), out)
+	}
+}
+
+// TestNonEmptyScanStillRenders is the hostile half of the rule above, and it is
+// the half that matters: "render nothing when empty" is satisfied perfectly by
+// an implementation that renders nothing ever. This is the fixture that would
+// make that implementation fail.
+func TestNonEmptyScanStillRenders(t *testing.T) {
+	r := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+	}}
+
+	out := captureStdout(t, func() { presentCheckReport(r, noPlanPrinted) })
+
+	if !strings.Contains(out, "Version Check Results") {
+		t.Errorf("a scan with one package rendered no version check — the empty-scan rule must not swallow real runs (R4.1)\n%s", out)
+	}
+}
+
+// TestEmptyScanUnderQuietIsSilent is the half of D4 that states WHY the empty
+// scan is special, and it is the reason D4 exists at all.
+//
+// # --quiet reaches one of the three channels this command writes on
+//
+// Its whole effect is logger.SetQuiet(true) (cmd/bentoo/main.go:30-32). It never
+// reaches the output package and never reaches os.Stdout. So today a
+// `--check --quiet` over an empty registry prints NOTHING — the sentence is
+// logger.Info's and is suppressed — while a `--check --quiet` with packages
+// prints the whole table anyway. That asymmetry already exists, and D4's rule is
+// to keep it rather than to invent a new one.
+//
+// Routing the empty-scan sentence through the report would have taken the one
+// silence a quiet run has. This asserts it was not taken.
+//
+// # Both halves, because either alone is satisfiable by the wrong code
+//
+// "Silent under quiet" alone is satisfied by a command that renders nothing
+// ever. "Still renders under quiet" alone is satisfied by one that ignores the
+// empty case. Only together do they pin the asymmetry: the silence comes from
+// the scan being empty, never from quiet, and --quiet did not become a report
+// suppressor. The logger's own half is covered where it belongs, by
+// TestQuietModeSuppressesInfoMessages in internal/common/logger.
+func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
+	logger.SetQuiet(true)
+	t.Cleanup(func() { logger.Default().SetLevel(logger.LevelInfo) })
+
+	empty := captureStdout(t, func() {
+		presentCheckReport(report.Report{Complete: true}, noPlanPrinted)
+	})
+	if strings.TrimSpace(empty) != "" {
+		t.Errorf("a quiet run over an empty scan put %d bytes on stdout, which --quiet cannot reach — the one silence a quiet run has today would be gone (R5.3, D4)\n%s",
+			len(empty), empty)
+	}
+
+	scanned := captureStdout(t, func() {
+		presentCheckReport(report.Report{Complete: true, Scanned: []report.PackageResult{
+			{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+		}}, noPlanPrinted)
+	})
+	if !strings.Contains(scanned, "Version Check Results") {
+		t.Errorf("a quiet run over a NON-empty scan rendered nothing — --quiet must not become a report suppressor, and the silence above must come from the empty scan alone (D4)\n%s", scanned)
+	}
+}
+
+// TestEmptyScanWithValidationStillRenders is the third hostile half of D4, and
+// it is the one nobody had written: the empty-scan guard must not swallow a run
+// that VALIDATED something.
+//
+// # The state is reachable, which is why this is a test and not a note
+//
+// CheckAll skips disabled and held entries, and DisableOrphans auto-disables an
+// entry whose ebuild has vanished — so "every registry entry disabled, and a
+// pending.json still on disk from an earlier run" produces exactly this shape:
+// an empty Scanned beside a plan that was built, confirmed and evaluated. Before
+// this story runPendingValidation drew that report itself; keying the silence on
+// Scanned alone would discard it, and what is discarded is potentially hours of
+// gate work the operator waited for and approved.
+//
+// # R5.3's subject is an empty REGISTRY, not an empty Scanned slice
+//
+// "WHEN no package is configured for autoupdate" describes a run with nothing to
+// say. A run holding results has something to say however its scan came out, so
+// the guard is a conjunction: silent only when BOTH halves are empty.
+func TestEmptyScanWithValidationStillRenders(t *testing.T) {
+	r := report.Report{
+		Complete: true,
+		Plan:     []report.PlanEntry{{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Depth: "configure"}},
+		Results:  []report.ValidationRow{{Package: "app-misc/jq", Outcome: "proved"}},
+		Tally:    report.Tally{Proved: 1},
+	}
+
+	out := captureStdout(t, func() { presentCheckReport(r, noPlanPrinted) })
+
+	if !strings.Contains(out, "app-misc/jq") {
+		t.Errorf("a run that evaluated a package rendered nothing because its scan came out empty — the gates ran and their answer was discarded (D4, R5.3)\n%s", out)
+	}
+}
+
+// TestListHintAppearsOnce is R5.2. The hint names a bentoo subcommand, so D5
+// puts it here, in the caller, and NOT in versionCheckSection — a renderer under
+// internal/common must not know one binary's command names. R1.4 permits it
+// because a hint is not a package name, a version, a plan entry or a tally.
+func TestListHintAppearsOnce(t *testing.T) {
+	r := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
+		{Package: "app-misc/yq", Type: "source", CurrentVersion: "4.44.1", CandidateVersion: "4.45.0", HasUpdate: true},
+	}}
+
+	out := captureStdout(t, func() { presentCheckReport(r, noPlanPrinted) })
+
+	// Two pending updates, one hint — not one per package, and not one per section.
+	if got := strings.Count(out, "--list"); got != 1 {
+		t.Errorf("the pending-updates hint appears %d times over a 2-update scan, want exactly 1 (R5.2)\n%s", got, out)
+	}
+}
+
+// TestListHintAbsentWithNoUpdates keeps the hint from becoming unconditional
+// noise: a run that found nothing to update has nothing to list.
+func TestListHintAbsentWithNoUpdates(t *testing.T) {
+	r := report.Report{Complete: true, Scanned: []report.PackageResult{
+		{Package: "app-editors/zed", Type: "bin", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4"},
+	}}
+
+	out := captureStdout(t, func() { presentCheckReport(r, noPlanPrinted) })
+
+	if strings.Contains(out, "--list") {
+		t.Errorf("the hint was printed for a scan with no pending update (R5.2)\n%s", out)
 	}
 }

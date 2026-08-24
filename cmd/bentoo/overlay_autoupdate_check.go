@@ -437,7 +437,27 @@ func confirmValidationRun(plan validationPlan) bool {
 // depth — priced first (R9.3), asked about once (R9.4), tallied at the end
 // (R9.5), and published never (R9.2).
 //
-// # Why it is gated on --llm
+// # It returns the validation half; it does not draw it
+//
+// What comes back is the report buildReport assembles from the plan and the
+// results — the half of the run only this function sees. Scanned is left nil in
+// it deliberately, and that nil is not harmless: a report rendered with it
+// exports `"scanned": null` and draws an empty version-check section. So it is a
+// half that MUST be joined before anything is displayed, and it is joined by
+// runCheck, the one place in the command that holds both the scan that ran and
+// the validation that followed it. Joining there rather than here is what leaves
+// exactly one report per run (S045-R1.1); filling Scanned in on both sides would
+// turn the join into a question of which copy wins.
+//
+// The second value is whether the plan has already been printed — whether the
+// pre-confirmation printValidationPrice below ran. It travels back so the caller
+// can set render.Options.SkipPlan and not show the operator the same plan again
+// under a second heading (S045-R2.3). It is true on every path that got past
+// that print, INCLUDING the ones that then gave up: a declined confirmation saw
+// the plan, and a false here would redraw it for the operator who has just read
+// it and said no.
+//
+// # Why it is gated on --llm, and what that gate no longer decides
 //
 // R9's command is `--check --llm`, and the gate is not a technicality. A gate
 // above `options` unpacks and builds, and even `options` fetches a distfile, so
@@ -447,27 +467,34 @@ func confirmValidationRun(plan validationPlan) bool {
 // validating this run", so it is the flag that turns the gates on here too; the
 // confirmation below still asks before anything builds.
 //
+// The gate decides validation and nothing else. It used to decide the drawing
+// too — not by saying so, but because the only path to the render ran through
+// it, which is what made --ui, --all and --export silent no-ops on a run without
+// --llm (S045-R3.1, S045-R3.2, S045-R3.3). It still means "do not validate", and
+// it says so by yielding the zero report and "nothing printed": there is no half
+// to contribute, so the caller draws the scan it already holds.
+//
 // # It publishes nothing, and the guarantee is structural
 //
 // The one function in this file that could write to the overlay,
 // setVersionsForCheck, is never called — from here or from anywhere. The applier
 // built below runs Validate and never Apply: promotion, the version pin and the
 // `--clean` sweep all live in Apply, which this path does not reach.
-func runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) {
+func runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Report, bool) {
 	if !autoupdateLLM {
-		return
+		return report.Report{}, false
 	}
 
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
 		logger.Warn("could not read the pending list, so nothing was validated: %v", err)
-		return
+		return report.Report{}, false
 	}
 	updates := pending.List()
 	if len(updates) == 0 {
 		// Silence is right for an empty plan: printing "0 packages to evaluate"
 		// after a check that found nothing is a line about nothing.
-		return
+		return report.Report{}, false
 	}
 
 	// The RESOLVED tier from the check that just ran, not a guess from the
@@ -491,7 +518,11 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	printValidationPrice(plan)
 	plan.Printed = true
 	if !confirmValidationRun(plan) {
-		return
+		// Nothing was validated, so there is no half to hand back. The plan is on
+		// screen either way, though, which is what the second value reports: the
+		// operator has just read it and answered no, and a false here would ask
+		// the caller to draw it to them a second time.
+		return report.Report{}, true
 	}
 
 	opts := []autoupdate.ApplierOption{
@@ -508,7 +539,9 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
 		logger.Warn("could not initialize the validator, so nothing was validated: %v", err)
-		return
+		// Printed, for the same reason the declined answer above is: the price
+		// reached the screen before this failed, so the caller must not repeat it.
+		return report.Report{}, true
 	}
 
 	//nolint:contextcheck // ctx is propagated into every spawned child through
@@ -527,15 +560,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		return applier.Validate(entry.Package, ceiling)
 	})
 
-	// The half buildReport is never handed: it is given the plan and its
-	// results and never sees the scan, so a nil Scanned would mean the JSON
-	// export said `"scanned": null` and the version-check section rendered
-	// empty. This is the one place in the command that holds both — the scan
-	// that ran and the validation that followed it — so this is where the two
-	// are joined, after the run and before anything is displayed.
-	finished.Scanned = scannedFacts(checked)
-
-	presentCheckReport(finished)
+	return finished, true
 }
 
 // runValidationCheck evaluates every planned package through `run` and returns
@@ -615,30 +640,163 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 // before any package work (R3.9) — so it falls back to plain, which is the mode
 // that always works, and says so at debug level rather than telling the
 // operator a second time in a second voice.
-func presentCheckReport(r report.Report) {
-	// Width is left at zero: "ask the device" (render.Options). A number typed
-	// here would be a hard-coded field width in the one path R6.3 binds.
-	opts := render.Options{ShowAll: autoupdateAll}
+//
+// # The `--list` hint is printed from here, and that placement IS the decision
+//
+// S045-R5.2's hint names a bentoo subcommand. The section that lists the very
+// updates it is about — render.versionCheckSection — lives in
+// internal/common/report/render, a general-purpose renderer that no binary's
+// command names belong inside: put the sentence there and every future caller
+// of that renderer prints this command's advice. So the section lists what is
+// pending and this function says what to do about it (S045-D5).
+//
+// S045-R1.4 permits it, because a hint is none of the four things that rule
+// reserves for the report: it is not a package name, not a version, not a plan
+// entry and not a tally. R5.1's `Checked N source, M bin` IS a count over the
+// scanned packages, which is exactly why that one went inside the section
+// instead (sub-task 2.1).
+//
+// # planPrinted is the ONE thing the caller knows and this function cannot
+//
+// Whether the operator has already read this plan is a fact about what reached
+// the screen earlier in the run — the pre-confirmation printValidationPrice —
+// and nothing in a report records it. So it is a parameter rather than a field:
+// putting it on the model would make "has this been shown" a property of the
+// run's findings, and the file the same report is exported to would then carry
+// an answer about a terminal it never touched (S045-R2.4).
+//
+// It reaches the SCREEN only. The export below is built by renderExport, which
+// gives Markdown and JSON no Options at all and builds the plain export its own
+// — so a plan skipped here is still stated in full in the file (S045-R2.4).
+//
+// # A run that scanned nothing reaches the file, and not the screen
+//
+// The one report this function does NOT draw is the empty one, and the reason
+// is `--quiet` (S045-R5.3, S045-D4). Its entire effect is
+// logger.SetQuiet(true) (cmd/bentoo/main.go:30-32): it reaches the logger and
+// reaches neither the output package nor os.Stdout. So today a `--check
+// --quiet` over an empty registry prints nothing at all, while one with
+// packages prints the whole table anyway — an asymmetry that already exists,
+// and which drawing the report on the empty scan would remove by making the
+// silent case newly noisy. The sentence stays where it can still be silenced.
+//
+// The EXPORT is unconditional even so, because `--export` has no empty-scan
+// carve-out (S045-R3.3) and a file that records "this run scanned nothing" is
+// the absence carried honestly (S045-R4.3). No file at all would be
+// indistinguishable from a command that never ran.
+func presentCheckReport(r report.Report, planPrinted bool) {
+	// Silent only when the report holds NOTHING, which is a conjunction rather
+	// than the scan alone. CheckAll skips disabled and held entries and
+	// DisableOrphans auto-disables an entry whose ebuild has vanished, so
+	// "every entry disabled, and a pending.json still on disk from an earlier
+	// run" yields an empty Scanned beside a plan that was built, confirmed and
+	// evaluated. Keying on the scan alone would discard that report — hours of
+	// gate work the operator waited for and approved. S045-R5.3's subject is a
+	// run with nothing to say, and a run holding results has something to say
+	// however its scan came out.
+	if len(r.Scanned) == 0 && len(r.Plan) == 0 {
+		// Verbatim the sentence displayCheckResults emitted at its own
+		// `len(results) == 0` guard, on the same channel it emitted it on. The
+		// wording is load-bearing in both directions: it is what an operator
+		// already greps for, and it is deliberately NOT the report's own lead
+		// for this case ("No package is configured for autoupdate.",
+		// render.versionCheckSection), which the paragraph above explains this
+		// path must never reach.
+		logger.Info("No packages configured for autoupdate")
+	} else {
+		// Width is left at zero: "ask the device" (render.Options). A number
+		// typed here would be a hard-coded field width in the one path R6.3
+		// binds.
+		//
+		// SkipPlan omits the report's own plan section on a run whose price
+		// was already printed to ask the confirmation question: the operator
+		// has just read that list, and drawing it again under a second heading
+		// is the duplication S045-R2.3 removes.
+		opts := render.Options{ShowAll: autoupdateAll, SkipPlan: planPrinted}
 
-	mode, err := resolveAutoupdateUIMode(autoupdateUIConfig)
-	if err != nil {
-		logger.Debug("check: the UI mode did not resolve, rendering in plain: %v", err)
-		mode = report.ModePlain
+		mode, err := resolveAutoupdateUIMode(autoupdateUIConfig)
+		if err != nil {
+			logger.Debug("check: the UI mode did not resolve, rendering in plain: %v", err)
+			mode = report.ModePlain
+		}
+
+		if err := renderCheckReportIn(mode, r, opts); err != nil {
+			logger.Warn("the report could not be rendered: %v", err)
+		}
+
+		// S045-R5.2: a run that found something pending names the command
+		// that lists it. This is the last of the three facts that have to
+		// outlive displayCheckResults — R5.1's tally went into the section
+		// (sub-task 2.1) and R5.3's empty-scan sentence into the arm above
+		// (3.3).
+		//
+		// AFTER the render, deliberately: the render is the answer, and this
+		// is a footnote about what to do next.
+		//
+		// Once per run, because the gate asks about the scan as a whole and
+		// not about a row — neither the number of sections nor --all can
+		// multiply it — and never on the empty arm, which does not reach this
+		// line and would find nothing to point at if it did.
+		//
+		// output.Info is the channel the sentence came out on before, and it
+		// is not one --quiet can reach. Keeping it is the parity S045-R5.4
+		// exists for: moving a line to a quieter channel while reporting no
+		// behaviour change is precisely the silent regression that requirement
+		// is there to catch.
+		//
+		// A render that failed above does not withhold it. R5.2 is about what
+		// the run FOUND, not about whether the terminal accepted the table,
+		// and that failure has already been reported on its own line.
+		if scanFoundPendingUpdate(r.Scanned) {
+			output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
+		}
 	}
 
-	if err := renderCheckReportIn(mode, r, opts); err != nil {
-		logger.Warn("the report could not be rendered: %v", err)
-	}
-
+	// Reached on BOTH arms above, and the `else` is what makes that true: the
+	// empty scan skips the render and nothing else. An early return there would
+	// have made `--export` silently conditional on the scan finding something,
+	// which S045-R3.3 does not allow and S045-R4.3 asks for the opposite of.
 	if autoupdateExport == "" {
 		return
 	}
 	if err := writeExport(autoupdateExport, r); err != nil {
-		// Warn, never fatal: the answer is already on screen, and an export
-		// that changed the exit status would make a display flag decide whether
-		// a run counted as successful.
+		// Warn, never fatal: the answer has already been delivered — rendered
+		// above, or stated by the logger on the empty scan — and an export that
+		// changed the exit status would make a display flag decide whether a
+		// run counted as successful.
 		logger.Warn("%v", err)
 	}
+}
+
+// scanFoundPendingUpdate reports whether the scan turned up at least one
+// pending update — the condition S045-R5.2 gates its hint on.
+//
+// # It reads HasUpdate, and never compares the two version strings
+//
+// report.PackageResult.HasUpdate is false whenever the candidate could not be
+// ordered against the current version, and NotComparable is carried separately
+// so a broken parser is never read as "up to date". A `candidate != current`
+// comparison would count exactly those packages as pending: the operator would
+// be sent to a list the package does not appear in, because a version nothing
+// could order was never recorded as an update in the first place.
+//
+// # It answers a boolean rather than a count, and that is S045-R1.4
+//
+// The hint states no number. The count over these same packages is the
+// report's own — the section's lead says "N package(s) checked, M with a
+// pending update" — and a second one produced out here would be a tally
+// printed from outside the report, which R1.4 does not allow.
+//
+// An empty scan therefore answers false by construction, which is what keeps
+// presentCheckReport's empty arm silent (S045-R5.3): a run that looked at
+// nothing found nothing, and there is no branch to get that wrong in.
+func scanFoundPendingUpdate(scanned []report.PackageResult) bool {
+	for _, pkg := range scanned {
+		if pkg.HasUpdate {
+			return true
+		}
+	}
+	return false
 }
 
 // reportDepthEscalation says what happened to a bump the reviewer took past the

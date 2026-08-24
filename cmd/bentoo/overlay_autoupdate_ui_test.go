@@ -234,7 +234,7 @@ func TestUnwritableExportStillRendersToTheTerminal(t *testing.T) {
 	autoupdateExport = filepath.Join(t.TempDir(), "no-such-directory", "report.md")
 	t.Cleanup(func() { autoupdateExport = originalExport })
 
-	out := captureStdout(t, func() { presentCheckReport(exportFixture()) })
+	out := captureStdout(t, func() { presentCheckReport(exportFixture(), false) })
 
 	if !strings.Contains(out, "app-misc/jq") {
 		t.Errorf("the export failed and the terminal received no report (R9.5):\n%s", out)

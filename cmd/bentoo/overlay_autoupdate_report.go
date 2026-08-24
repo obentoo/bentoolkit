@@ -118,6 +118,63 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 	return facts
 }
 
+// checkReport is the ONE report a `--check` run produces: what the scan found,
+// joined with whatever the validation contributed (S045-R1.1, S045-R1.2, D1).
+//
+// Both entry paths of runCheck go through it — the batch scan with the half
+// runPendingValidation handed back, the single package with the zero report,
+// because that path validates nothing — so "one report per run" is a property
+// of this function rather than of two call sites kept in agreement.
+//
+// # The two halves meet here and nowhere else
+//
+// buildReport is never handed the scan (see its "Scanned is left to the caller"
+// note) and runPendingValidation deliberately returns a nil Scanned, so this is
+// the single place both are in hand. Filling it on both sides would turn the
+// join into a question of which copy wins; leaving it nil would export
+// `"scanned": null` and draw an empty version-check section.
+//
+// # A run that planned nothing is COMPLETE
+//
+// The validation half arrives as the zero report on every path that validated
+// nothing — the `--llm` gate, an unreadable or empty pending list, a declined
+// confirmation, an applier that would not build — and the zero report carries
+// Complete false. Rendered as it stands that draws the `Run Interrupted`
+// section, telling the operator that a run which finished was interrupted. An
+// empty plan left nothing unevaluated, which is precisely what Complete means,
+// so it is stated here (S045-R4.2).
+//
+// The condition is read off the REPORT rather than off autoupdateLLM: an
+// operator can decline the confirmation with `--llm` set, and that run
+// validated nothing either. It agrees with the model instead of overriding it
+// — buildReport derives Complete from the plan the same way (reached ==
+// len(plan.Entries)), so a validated run whose plan came out empty is already
+// complete and this changes nothing about it.
+//
+// # It never invents a section
+//
+// Plan, Results and Tally are left exactly as the validation half had them, so
+// a scan-only report CARRIES no plan entry, no result row and a zero tally
+// (S045-R4.1) — and the JSON export carries that absence rather than an
+// invented empty collection (S045-R4.3).
+//
+// What a renderer then does with an empty half is the renderer's decision and
+// not this function's: today each of those three sections states its own
+// emptiness in a single line ("No pending update to validate.") rather than
+// omitting its heading. Nothing here should ever start deciding that — a
+// producer that pruned sections to suit one screen would be the second place
+// the run's contents are decided.
+func checkReport(scanned []autoupdate.CheckResult, validated report.Report) report.Report {
+	joined := validated
+	joined.Scanned = scannedFacts(scanned)
+
+	if len(joined.Plan) == 0 {
+		joined.Complete = true
+	}
+
+	return joined
+}
+
 // planEntryFacts is one planned bump as the model spells it.
 //
 // The two ends of the bump are renamed on the way across — From/Version here
