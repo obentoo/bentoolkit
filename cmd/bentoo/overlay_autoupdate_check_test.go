@@ -1196,8 +1196,8 @@ func countHeadingEmitters(t *testing.T, heading string) int {
 //
 // CheckAll auto-disables entries whose ebuild has vanished
 // (internal/autoupdate/checker.go:2020) and warns only when that write FAILS,
-// so a successful one says nothing. displayCheckResults used to be the thing
-// that said it — "N package(s) had no ebuild and were disabled (enabled =
+// so a successful one says nothing. The retired legacy check printer used to
+// be the thing that said it — "N package(s) had no ebuild and were disabled (enabled =
 // false)" — and sub-task 3.2 removed its last caller. Between then and now, a
 // batch check edited packages.toml without telling anyone.
 //
