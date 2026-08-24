@@ -59,7 +59,7 @@ func Inline(r report.Report, opts Options) error {
 		width = terminalWidth()
 	}
 
-	if err := write(os.Stdout, sections(r, opts.ShowAll), textStyle(width, inlinePaint())); err != nil {
+	if err := write(os.Stdout, sections(r, opts.ShowAll, opts.SkipPlan), textStyle(width, inlinePaint())); err != nil {
 		return fmt.Errorf("rendering the inline report: %w", err)
 	}
 	return nil

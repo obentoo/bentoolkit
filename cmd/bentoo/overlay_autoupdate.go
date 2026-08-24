@@ -26,6 +26,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/spf13/cobra"
 )
@@ -720,7 +721,17 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 			osExit(1)
 			return
 		}
-		displayCheckResults([]autoupdate.CheckResult{*result})
+		// S045-R1.2: the one package this run scanned, as the same report the
+		// batch path builds and through the same render — one element, joined
+		// with the zero validation half because nothing validates here. This
+		// path prices nothing, so no plan has been put in front of the operator
+		// and the report states its own.
+		//
+		// D6 keeps the return below: only the batch path may reconcile the
+		// registry, and moving the render past this point must not move the
+		// return with it.
+		const noPlanWasPrinted = false
+		presentCheckReport(checkReport([]autoupdate.CheckResult{*result}, report.Report{}), noPlanWasPrinted)
 		return
 	}
 
@@ -735,11 +746,17 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		fmt.Print("\r                                        \r")
 	}
 
-	// Display the successfully checked packages.
-	displayCheckResults(result.Items)
-
 	// Emit one stderr line per per-package failure. FormatFailures is called
 	// only after CheckAll has fully completed, so the output is deterministic.
+	//
+	// It stays HERE, where it has always been, even though the scan it
+	// qualifies is now drawn at the end of the run (S045-D1): these lines
+	// therefore reach stderr BEFORE the report reaches stdout, where they used
+	// to follow it. That is the lesser change. Moving them down beside the
+	// report would put per-package failures AFTER the interactive registry-fix
+	// prompt below — the prompt whose whole subject is those same failures —
+	// and an operator would be asked to repair packages it had not yet been
+	// told about.
 	if result.HasFailures() {
 		result.FormatFailures(os.Stderr)
 	}
@@ -776,7 +793,19 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// the same reason that one runs last: the reconciliation is the only prompt in
 	// this command that can write to the overlay, and it must be the last thing on
 	// screen rather than scrolled off by a validation report.
-	runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
+	validated, planPrinted := runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
+
+	// S045-R1.1/R1.3, D1: the run's one report, built where both of its halves
+	// are finally in hand — the scan above, and whatever the validation just
+	// contributed — and drawn exactly once.
+	//
+	// It is drawn HERE rather than where the scan finished because a report
+	// rendered there could not carry a result the gates had not produced yet:
+	// everything that can contribute to this report has contributed by this
+	// line. planPrinted travels into render.Options.SkipPlan so the plan the
+	// operator read before the confirmation prompt is not drawn to them a
+	// second time (S045-R2.3).
+	presentCheckReport(checkReport(result.Items, validated), planPrinted)
 
 	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the
@@ -1095,102 +1124,6 @@ func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
 		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
 	}
 	displayReviveCandidates(candidates)
-}
-
-// displayCheckResults formats and displays check results
-func displayCheckResults(results []autoupdate.CheckResult) {
-	if len(results) == 0 {
-		logger.Info("No packages configured for autoupdate")
-		return
-	}
-
-	var updatesFound int
-	var errorsFound int
-	var warningsFound int
-	var disabledFound int
-	var srcCount int
-	var binCount int
-
-	fmt.Println()
-	output.Header.Println("Version Check Results")
-	fmt.Println()
-
-	for _, r := range results {
-		tag := typeTag(r.Type)
-		switch r.Type {
-		case "bin":
-			binCount++
-		case "source":
-			srcCount++
-		}
-
-		if r.Orphaned {
-			disabledFound++
-			output.Warning.Printf("  %s%s: no ebuild in overlay — disabled in packages.toml\n", tag, r.Package)
-			continue
-		}
-
-		if r.Error != nil {
-			errorsFound++
-			output.Error.Printf("  %s%s: %v\n", tag, r.Package, r.Error)
-			continue
-		}
-
-		if r.NotComparable {
-			warningsFound++
-			output.Warning.Printf("  %s%s: %q not comparable to current %s (check parser config)\n",
-				tag, r.Package, r.UpstreamVersion, r.CurrentVersion)
-			continue
-		}
-
-		if r.HasUpdate {
-			updatesFound++
-			cacheIndicator := ""
-			if r.FromCache {
-				cacheIndicator = output.Sprintf(output.Dim, " (cached)")
-			}
-			output.Success.Printf("  %s%s: %s → %s%s\n",
-				tag, r.Package, r.CurrentVersion, r.UpstreamVersion, cacheIndicator)
-		} else {
-			output.Dim.Printf("  %s%s: %s (up to date)\n", tag, r.Package, r.CurrentVersion)
-		}
-	}
-
-	fmt.Println()
-	if updatesFound > 0 {
-		output.Info.Printf("Found %d update(s) available\n", updatesFound)
-		output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
-	} else if warningsFound == 0 && errorsFound == 0 && disabledFound == 0 {
-		output.Success.Println("All packages are up to date")
-	}
-
-	if disabledFound > 0 {
-		output.Warning.Printf("%d package(s) had no ebuild and were disabled (enabled = false)\n", disabledFound)
-	}
-
-	if warningsFound > 0 {
-		output.Warning.Printf("%d package(s) had non-comparable upstream versions\n", warningsFound)
-	}
-
-	if errorsFound > 0 {
-		output.Warning.Printf("%d package(s) had errors\n", errorsFound)
-	}
-
-	output.Dim.Printf("Checked %d source, %d bin\n", srcCount, binCount)
-}
-
-// typeTag renders a short, dim prefix marking a package's resolved type for the
-// check report ("[bin] " / "[src] "). An unknown/empty type yields no tag so
-// the line layout is unchanged when classification was unavailable.
-func typeTag(t string) string {
-	switch t {
-	case "bin":
-		return output.Sprintf(output.Dim, "[bin] ")
-	case "source":
-		return output.Sprintf(output.Dim, "[src] ")
-	default:
-		return ""
-	}
 }
 
 // runList handles the --list flag

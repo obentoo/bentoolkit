@@ -9,6 +9,7 @@ Version Check Results
   sys-apps/portage                          source  3.0.66   3.0.67     update
 
   2 package(s) are up to date and are not listed; pass --all to list them.
+  Checked 5 source, 1 bin.
 
 Validation Plan
 ───────────────

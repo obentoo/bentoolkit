@@ -33,14 +33,15 @@ const (
 //
 // # It is a screen concern, and only the screen modes take one
 //
-// Both fields below describe a terminal: a line budget, and a list short enough
-// to scroll past. Plain and Inline are the two modes printed to one, so both
-// take it — Inline is a screen mode, so a --all it ignored would be a flag that
-// worked in plain and silently did nothing in the default mode (R2.2). An
-// export has neither question to answer, so Markdown and JSON take no Options
-// at all — an omission that is the requirement rather than an oversight (R9.3).
-// Giving an export path a parameter of this type would be giving it the two
-// questions an export must never ask.
+// Every field below describes a terminal: a line budget, a list short enough to
+// scroll past, and a section this terminal has already shown. Plain, Inline and
+// Fullscreen are the modes printed to one, so all three take it — Inline is a
+// screen mode, so a --all it ignored would be a flag that worked in plain and
+// silently did nothing in the default mode (R2.2). An export has none of those
+// questions to answer, so Markdown and JSON take no Options at all — an
+// omission that is the requirement rather than an oversight (R9.3). Giving an
+// export path a parameter of this type would be giving it questions an export
+// must never ask.
 type Options struct {
 	// Width is the line budget in display cells: no rendered line exceeds it.
 	// Zero means "ask the device", which is terminalWidth's job, so a caller
@@ -53,6 +54,11 @@ type Options struct {
 	// date packages are the bulk of a 269-package overlay and listing them by
 	// default is most of why a check that found four updates prints 348 lines.
 	ShowAll bool
+	// SkipPlan omits the validation-plan section. It exists for exactly one
+	// caller: the on-screen render of a run whose plan was already printed
+	// before the confirmation prompt. An export must never set it — a record
+	// missing the plan answers no question later (R2.4).
+	SkipPlan bool
 }
 
 // Plain renders r as text with no escape sequence in it (R2.1).
@@ -84,7 +90,7 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 		width = terminalWidth()
 	}
 
-	return write(w, sections(r, opts.ShowAll), plainStyle(width))
+	return write(w, sections(r, opts.ShowAll, opts.SkipPlan), plainStyle(width))
 }
 
 // Markdown renders r as a Markdown document: the same report, in the syntax a
@@ -121,7 +127,7 @@ func Plain(w io.Writer, r report.Report, opts Options) error {
 // drops a DUPLICATE rather than information: the sentence is still in the
 // document, whole, on the plan row that first stated it.
 func Markdown(w io.Writer, r report.Report) error {
-	return write(w, sections(r, everyScannedPackage), markdownStyle())
+	return write(w, sections(r, everyScannedPackage, keepThePlan), markdownStyle())
 }
 
 // sections is the whole report as structure: what it says, in order, with every
@@ -143,11 +149,21 @@ func Markdown(w io.Writer, r report.Report) error {
 // whole reason and keeps the model's promise that shortening is a rendering
 // decision rather than a loss of data (R7.4).
 //
-// # One bool, not an Options
+// # Two bools, not an Options
 //
-// listEvery is the only thing building a section ever needed from a caller, and
-// taking it alone is what keeps Options off the export path: there is no Width
-// field here for an export to be handed by accident (R9.3).
+// listEvery and skipPlan are everything building a section ever needed from a
+// caller, and taking them one at a time is what keeps Options off the export
+// path: there is no Width field here for an export to be handed by accident,
+// and no way to hand this function a screen setting without naming it (R9.3).
+//
+// # The plan is the one section a caller may drop
+//
+// skipPlan omits it, and only it — every other section is built exactly as it
+// would have been, so the option removes a block rather than reshaping a report
+// (R2.3). It is dropped HERE rather than in a writer because a section a report
+// does not state is a fact about WHAT it says: the three screen modes inherit
+// the omission from this one line instead of each deciding it, which is what
+// keeps the heading from appearing twice in one of them (R2.2).
 //
 // # A run that stopped early says so before it says anything else
 //
@@ -156,15 +172,39 @@ func Markdown(w io.Writer, r report.Report) error {
 // Complete and NotEvaluated and nothing else, so no renderer is ever told
 // whether a TUI was involved — an interrupted run is reported in identical
 // words whichever mode was on screen when it was interrupted.
-func sections(r report.Report, listEvery bool) []section {
+func sections(r report.Report, listEvery, skipPlan bool) []section {
 	var blocks []section
 	if !r.Complete {
 		blocks = append(blocks, interruptedSection(r))
 	}
 
+	blocks = append(blocks, versionCheckSection(r, listEvery))
+
+	// A run that planned nothing has nothing to say about a plan, its results
+	// or its tally, and says so by omitting all three rather than by stating
+	// each one's emptiness in a sentence of its own (R4.1).
+	//
+	// Reaching this at all is new. Presentation used to sit behind the --llm
+	// gate, so every report that rendered had validated something and an empty
+	// plan half was unreachable; a plain --check now renders, and "No pending
+	// update to validate / No package was evaluated / 0 package(s) evaluated: 0
+	// proved, 0 errored, 0 inconclusive, 0 skipped" is twelve lines telling the
+	// operator that the thing they did not ask for did not happen. That is the
+	// volume story 044 removed, arriving back through the door this one opened.
+	//
+	// The trigger is the PLAN, not the results. A run whose every package was
+	// excluded by policy planned them all and evaluated none, and there the
+	// three sections are exactly what the operator needs — the plan names what
+	// was excluded and why. Keying on len(Results) would silence that run too.
+	if len(r.Plan) == 0 {
+		return blocks
+	}
+
+	if !skipPlan {
+		blocks = append(blocks, validationPlanSection(r))
+	}
+
 	return append(blocks,
-		versionCheckSection(r, listEvery),
-		validationPlanSection(r),
 		validationResultsSection(r),
 		validationSummarySection(r),
 	)
@@ -177,6 +217,17 @@ func sections(r report.Report, listEvery bool) []section {
 // asks what the terminal was told — it lists everything, always (R9.3) — and
 // naming the value keeps the one call site from reading `sections(r, true)`.
 const everyScannedPackage = true
+
+// keepThePlan is the other half of what an export passes sections: state the
+// validation-plan section, whatever the screen was told to do with it (R2.4).
+//
+// It is a constant for everyScannedPackage's reason, and one step further. A
+// report is kept precisely BECAUSE the terminal is gone, so a record missing
+// the plan the terminal had already shown answers no question later — the plan
+// is where a package's reason is stated at all (R7.2), so dropping it from a
+// file would not shorten the record, it would empty it. A named false says
+// that at the call site; a bare false would only say something was off.
+const keepThePlan = false
 
 // section is one titled block of a report: a heading, the sentences that frame
 // it, the rows themselves, and the sentences that qualify them.
@@ -311,6 +362,17 @@ func versionCheckSection(r report.Report, listEvery bool) section {
 			s.notes = append(s.notes, fmt.Sprintf(stated.text, found[stated.when]))
 		}
 	}
+
+	// R5.1: the source/bin tally the check path printed as its closing line,
+	// said INSIDE the section (D5) because it is a count over the very packages
+	// this section is about, taken from the TYPE column already beside every
+	// row. It is appended LAST for the reason the old line was printed last: the
+	// notes above qualify the rows, and this one qualifies the whole scan.
+	//
+	// It is stated whichever way listEvery went, because it is a count and a
+	// count never depends on the listing (R8.3) — the same rule the up-to-date
+	// note above follows, and the reason every golden gains this line.
+	s.notes = append(s.notes, tierNote(tierCounts(r.Scanned)))
 
 	return s
 }
@@ -524,6 +586,78 @@ func scanCounts(scanned []report.PackageResult) map[condition]int {
 		found[conditionOf(result)]++
 	}
 	return found
+}
+
+// tierTally is how a scan's packages divided between the two tiers, and how
+// many landed in neither.
+//
+// unresolved is a THIRD number rather than a remainder folded into one of the
+// other two. PackageResult.Type is documented as meaningful when EMPTY —
+// nobody resolved it — so a package that carries no tier has to be counted
+// somewhere that claims nothing about it (R5.1).
+type tierTally struct {
+	// source and bin are the two spellings the producer emits.
+	source int
+	bin    int
+	// unresolved is everything else: the empty Type of a package whose current
+	// ebuild could not be read, and any spelling this renderer does not know.
+	unresolved int
+}
+
+// tierCounts divides the scanned packages between "source", "bin" and neither.
+//
+// # Exactly two spellings are recognised, and nothing is guessed
+//
+// The two literals are the producer's own (Checker.resolveType answers with one
+// of them, and an operator may set either in packages.toml), and this reproduces
+// the check path's tally switch verbatim so the sentence survives that path's
+// deletion unchanged. Anything else — the empty string, or a typo that reached
+// the registry — is counted as unresolved: defaulting it to "source" would make
+// an unreadable ebuild indistinguishable from a source package, which is the one
+// thing the model's doc comment says may not be assumed.
+//
+// # It is its own pass, like scanCounts
+//
+// A count must not depend on which rows were listed (R8.3), and taking it here
+// rather than inside the row loop is what makes that true by construction
+// instead of by a branch nobody may later move.
+func tierCounts(scanned []report.PackageResult) tierTally {
+	var found tierTally
+	for _, result := range scanned {
+		switch result.Type {
+		case "source":
+			found.source++
+		case "bin":
+			found.bin++
+		default:
+			found.unresolved++
+		}
+	}
+	return found
+}
+
+// tierNote is that tally as the sentence the report states (R5.1): the words
+// the check path this report replaces ended on, "Checked N source, M bin".
+//
+// The wording is separated from the counting for the reason scanState is
+// separated from scanCounts: what the report SAYS about a number and how the
+// number was arrived at are two things, and only one of them changes when the
+// sentence is reworded.
+//
+// # The gap is named, never closed
+//
+// When some package resolved to neither tier the two figures do not add up to
+// the count in the lead, and the sentence says so instead of leaving the reader
+// to subtract. It says it WITHOUT naming a tier, which is the whole point:
+// nobody resolved those packages, so putting them in either column — or quietly
+// defaulting them to source, as the producer's own fallback does — would state
+// a fact the scan never established.
+func tierNote(counted tierTally) string {
+	note := fmt.Sprintf("Checked %d source, %d bin", counted.source, counted.bin)
+	if counted.unresolved > 0 {
+		note += fmt.Sprintf("; %d package(s) resolved to neither tier", counted.unresolved)
+	}
+	return note + "."
 }
 
 // scanState names a package's condition for the STATE column and returns the

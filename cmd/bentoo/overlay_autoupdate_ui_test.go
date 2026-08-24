@@ -234,7 +234,7 @@ func TestUnwritableExportStillRendersToTheTerminal(t *testing.T) {
 	autoupdateExport = filepath.Join(t.TempDir(), "no-such-directory", "report.md")
 	t.Cleanup(func() { autoupdateExport = originalExport })
 
-	out := captureStdout(t, func() { presentCheckReport(exportFixture()) })
+	out := captureStdout(t, func() { presentCheckReport(exportFixture(), false) })
 
 	if !strings.Contains(out, "app-misc/jq") {
 		t.Errorf("the export failed and the terminal received no report (R9.5):\n%s", out)
@@ -244,5 +244,54 @@ func TestUnwritableExportStillRendersToTheTerminal(t *testing.T) {
 	}
 	if _, err := os.Stat(autoupdateExport); err == nil {
 		t.Fatal("the fixture path was writable after all — this case measured nothing")
+	}
+}
+
+// ---- story 045, sub-task 1.2: the export cannot skip, by construction ----
+
+// TestPlainExportDoesNotInheritSkipPlan is R2.4's implementation half, and D3
+// names it as the whole of R2.4's implementation risk: exactly one line.
+//
+// Markdown and JSON take no Options at all, so neither CAN honour a screen
+// setting — that half is structural and TestExportKeepsThePlanTheScreenSkipped
+// asserts it in the render package. The plain export is the exception: it does
+// build a render.Options, and it is the one place a screen setting could leak
+// into a file. A record missing the plan answers no question later, because the
+// plan is where a package's reason is stated at all.
+//
+// # Why the scope is this whole file rather than that one line
+//
+// The screen's Options is built in overlay_autoupdate_check.go
+// (presentCheckReport), not here. This file builds exactly one render.Options
+// and it is the export's, so "this file never names SkipPlan" and "the export
+// never sets SkipPlan" are the same claim — and the first is the one a reader
+// can check without following a call graph.
+//
+// # It is green on arrival, so it carries its own vacuity guard
+//
+// Zero today and it must stay zero, which means the assertion alone proves
+// nothing: it would also pass if renderExport were deleted, renamed, or moved
+// to another file. The first check is what keeps it honest — the literal it
+// guards must still be here for its absence of a field to mean anything.
+func TestPlainExportDoesNotInheritSkipPlan(t *testing.T) {
+	const file = "overlay_autoupdate_ui.go"
+
+	src, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("reading %s: %v", file, err)
+	}
+	text := string(src)
+
+	// Vacuity guard: the thing being guarded must exist.
+	if got := strings.Count(text, "render.Options{"); got != 1 {
+		t.Fatalf("%s builds %d render.Options literal(s), want exactly 1 — the export's. "+
+			"With none, the SkipPlan assertion below passes without measuring anything; "+
+			"with more, this file gained a second Options and the claim needs restating (D3)", file, got)
+	}
+
+	if got := strings.Count(text, "SkipPlan"); got != 0 {
+		t.Errorf("%s names SkipPlan %d time(s), want 0. The only render.Options this file builds "+
+			"is the plain export's, and an export must never skip the plan: a record missing it "+
+			"answers no question later (R2.4, D3)", file, got)
 	}
 }
