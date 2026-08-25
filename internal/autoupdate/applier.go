@@ -1682,19 +1682,46 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 // ebuild whose COMMIT= line is right there. That failure lands AFTER the ebuild
 // has been copied, which is how it left an orphan in the published overlay.
 //
-// The substitution is deliberately narrow (anchored to known variable names +
-// 40-hex-char SHA) so it cannot accidentally corrupt other content. The
-// alternation needs no left-hand boundary: the whole matched assignment is
-// captured in group 1 and written back verbatim, so a match that starts at the
-// COMMIT inside EGIT_COMMIT still reproduces the EGIT_ prefix untouched.
+// The substitution is deliberately narrow (40-hex-char SHA + one of the four
+// names + start of line) so it cannot corrupt other content.
+//
+// The left-hand anchor is load-bearing, and the reasoning that once said it was
+// not is the bug it fixes. That reasoning was: a match starting at the COMMIT
+// inside EGIT_COMMIT is harmless, because group 1 captures the whole assignment
+// and is written back verbatim, so the EGIT_ prefix survives. True — and beside
+// the point. Preserving the PREFIX is not the question; the question is which
+// variables get their VALUE replaced. Without an anchor, every `<ANYTHING>_COMMIT`
+// in the file is one of them.
+//
+// An ebuild that vendors a second component pins that component's revision in
+// exactly that shape, and those revisions have nothing to do with the package's
+// own commit:
+//
+//	app-editors/zed   seven `local *_COMMIT` in src_prepare (async-process,
+//	                  async-task, calloop, livekit, windows-capture, notify,
+//	                  tree-sitter) — the rev= of its git dependencies
+//	media-libs/mesa   VENUS_PROTOCOL_COMMIT — the venus-protocol subproject
+//
+// Overwriting those does not fail loudly: the ebuild still parses, the manifest
+// still generates, and the damage only surfaces at build time on a user's
+// machine. zed shipped broken four times this way (bentoo 05d42b09b, 47b3011e7,
+// 14f85bd9c, 1dca170e7) before the anchor was added.
+//
+// `^[ \t]*` — and not `\b` — because the target is a top-level assignment. A
+// word boundary would still match the `_COMMIT` suffix, and allowing arbitrary
+// leading whitespace is what keeps mesa's tab-indented GIT_COMMIT matching while
+// excluding `local ASYNC_PROCESS_COMMIT=`, where a keyword sits between the
+// margin and the name. This mirrors the checker, which has always read the same
+// assignment with `(?m)^\s*` (checker.go, ebuildCommitRegex, whose own comment
+// already claimed the two shared this anchoring).
 func substituteCommitHash(ebuildPath, newHash string) error {
 	content, err := os.ReadFile(ebuildPath)
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
 	}
 
-	reQuoted := regexp.MustCompile(`((?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID|COMMIT)=")[0-9a-f]{40}(")`)
-	reBare := regexp.MustCompile(`(COMMIT=)[0-9a-f]{40}\b`)
+	reQuoted := regexp.MustCompile(`(?m)^([ \t]*(?:EGIT_COMMIT|GIT_COMMIT|BUILD_ID|COMMIT)=")[0-9a-f]{40}(")`)
+	reBare := regexp.MustCompile(`(?m)^([ \t]*COMMIT=)[0-9a-f]{40}\b`)
 
 	// "Nothing changed" has two very different causes, and conflating them
 	// reports a missing variable that is sitting right there. Decide on presence
