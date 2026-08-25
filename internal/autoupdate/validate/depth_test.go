@@ -228,3 +228,60 @@ func TestParseDepth_EmptyStringIsRefusedRatherThanDefaulted(t *testing.T) {
 		t.Fatalf(`ParseDepth("") = %v with no error; an empty depth must be refused so a mistyped key cannot switch validation off`, got)
 	}
 }
+
+// TestGateForDepth covers the mapping the check path reads: which gate's own
+// pass proves a run reached a given rung.
+//
+// The function has no production caller yet — the check-path verdict that would
+// consume it was left out when this landed, because stories 044/045 settled the
+// classification rule the other way (see the commit that exported it). A test is
+// what keeps the contract its doc comment states from drifting in the meantime,
+// rather than being rediscovered when a caller finally arrives.
+func TestGateForDepth(t *testing.T) {
+	tests := []struct {
+		name  string
+		depth Depth
+		want  string
+		ok    bool
+	}{
+		{"options", DepthOptions, GateOptions, true},
+		{"patches", DepthPatches, GatePatches, true},
+		{"configure", DepthConfigure, GateConfigure, true},
+		{"compile", DepthCompile, GateCompile, true},
+		{"install", DepthInstall, GateInstall, true},
+
+		// The documented refusal: a depth-none bump ran no gate, so there is no
+		// gate whose pass could stand for it. Falling back to a shallower one —
+		// as the applier deliberately does for a different question — would hand
+		// back proof of a rung nobody climbed.
+		{"none has no gate", DepthNone, "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gate, ok := GateForDepth(tc.depth)
+			if ok != tc.ok {
+				t.Fatalf("GateForDepth(%v) ok = %v, want %v", tc.depth, ok, tc.ok)
+			}
+			if gate != tc.want {
+				t.Errorf("GateForDepth(%v) = %q, want %q", tc.depth, gate, tc.want)
+			}
+		})
+	}
+}
+
+// TestGateForDepthAgreesWithGateRungs pins the two directions against each
+// other: whatever gate stands for a rung must map back to that same rung. The
+// mapping is one table read both ways, and this is what keeps it that way.
+func TestGateForDepthAgreesWithGateRungs(t *testing.T) {
+	for gate, rung := range gateRungs {
+		got, ok := GateForDepth(rung)
+		if !ok {
+			t.Errorf("GateForDepth(%v) refused, but %q maps to it", rung, gate)
+			continue
+		}
+		if got != gate {
+			t.Errorf("GateForDepth(%v) = %q, want %q — the two directions disagree", rung, got, gate)
+		}
+	}
+}
