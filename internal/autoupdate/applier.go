@@ -251,6 +251,15 @@ type Applier struct {
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
 	logsDir string
+	// configDir is the bentoo autoupdate config directory — in production
+	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
+	// cache.json in it is where a host-caused build failure records the
+	// precondition it found unmet (S043-R3.1). The record may live NOWHERE else;
+	// the obvious alternative, packages.toml, sits in an overlay that
+	// auto-commits and pushes within minutes, so one workstation's unreadable key
+	// would be published as a claim about everyone's. Empty means "no cache to
+	// write to" and is silently skipped, which only a test can produce.
+	configDir string
 	// confirmFunc is a function to prompt for user confirmation (injectable for testing)
 	confirmFunc func(prompt string) bool
 	// execCommand is a function to create exec.Cmd bound to a context
@@ -681,6 +690,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	applier := &Applier{
 		overlayPath: overlayPath,
 		logsDir:     logsDir,
+		configDir:   configDir,
 		confirmFunc: defaultConfirmFunc,
 		execCommand: exec.CommandContext,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
@@ -1800,12 +1810,11 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 // manifest runs in the staged tree and the fixer edits the staged ebuild, so a fix
 // attempt is itself covered by R3.2 — an agent rewriting SRC_URI must not be doing
 // it inside a repository that commits and pushes itself.
-// The returned path is the staged distdir whose contents the caller's gates must
+// The returned path is the private distdir whose contents the caller's gates must
 // read, and which the caller then removes (S035-D1). When the fixer runs, the
-// authoritative re-check below fetches into a SECOND private directory and the
-// first one's contents are superseded — so the first is removed here, at the
-// moment it stops being the answer, and the path returned is always the one the
-// surviving Manifest was computed against.
+// directory the AGENT downloaded into becomes that path (S043-R2.1): it is handed
+// to the authoritative re-check below and returned from here, so the first
+// distdir is superseded and is removed at the moment it stops being the answer.
 func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	distdir, firstErr := a.runManifestFor(cand, pkg, version)
 	if firstErr == nil {
@@ -1830,8 +1839,9 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	}
 
 	// Writable distdir the agent can pass to `pkgdev manifest --distdir` while it
-	// self-verifies, so its checks never touch the system DISTDIR. Private and
-	// removed on return — that part is the point and does not change.
+	// self-verifies, so its checks never touch the system DISTDIR. Private, and
+	// removed before this apply ends — that part is the point and does not change.
+	// WHO removes it does: see the transfer below.
 	//
 	// The ROOT it is made under does. An empty root means os.TempDir(), which on
 	// the host S030 was measured on is a 31 GB tmpfs, so the agent's own
@@ -1845,7 +1855,24 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		// Can't give the agent a private distdir; don't attempt the fix.
 		return distdir, fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
 	}
-	defer func() { _ = os.RemoveAll(fixDistdir) }()
+
+	// THE TRANSFER (S043-R2.1, D2). From this line the agent's directory is what
+	// this function returns, on every path below including the failing ones, and
+	// the caller's `defer removeStagedDistdir` is what takes it back — the same
+	// single removal that already covers the ordinary path (S035-D1, R2.2). It
+	// used to be a `defer os.RemoveAll(fixDistdir)` here, which deleted the only
+	// copy of the candidate's archive on this host before any gate had looked at
+	// it: measured 2026-08-22 on media-libs/mesa, where 134 MB the repair had
+	// fetched were discarded unread and the option gate then reported SKIPPED
+	// against /var/cache/distfiles. The lifetime is unchanged; only the owner is.
+	//
+	// And the FIRST distdir is superseded right here rather than at the re-check,
+	// because from this point nothing reads it: the agent fetches into fixDistdir,
+	// the re-check is computed against fixDistdir, and the gates read what this
+	// returns. Removing it now keeps a superseded copy of a 6 MB archive off the
+	// scratch filesystem for the agent's whole run, not merely for the QA scan.
+	removeStagedDistdir(distdir)
+	distdir = fixDistdir
 
 	logger.Info("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version)
 	a.reporter.TaskStage(pkg, "llm-fix")
@@ -1866,14 +1893,27 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
 	// self-report.
 	//
-	// It fetches into a SECOND private distdir, and from here on that one is the
-	// answer: it is the directory the surviving Manifest was computed against, so
-	// it is the one the gates must read. The first is removed the moment it stops
-	// being that — not deferred, because a defer would keep a superseded copy of
-	// a 6 MB archive alive for the whole of the QA scan below.
+	// It runs IN the directory the agent downloaded into, so what it verifies and
+	// what the gates below then read are the same bytes (S043-R2.1). It used to
+	// fetch into a second, empty private distdir, and the claim that it fetched
+	// was false exactly when the fix had SUCCEEDED: the agent leaves a COMPLETE
+	// Manifest behind, pkgdev finds nothing to do, downloads nothing and exits 0.
+	// So the second directory stayed empty, the gates fell back to the shared
+	// DISTDIR, and on a host that had never fetched the release they read an empty
+	// room — which is the defect this replaces.
+	//
+	// KNOWN LIMIT, stated rather than solved (D2). `--force` (added by
+	// runStagedManifestIn for a supplied directory) re-digests the bytes THE AGENT
+	// BROUGHT. That makes the surviving Manifest bentoo's own rather than the
+	// agent's self-report, which is what "authoritative" means here — but it is
+	// not independent verification of the content against upstream. Re-downloading
+	// everything into an empty distdir would be, and it was rejected on cost:
+	// ~133 MB per media-libs/mesa bump, and mesa bumps daily.
+	//
+	// The path returned is whatever the re-check ran against, on its failure paths
+	// too — the caller must be able to take the directory back however this ends.
 	a.reporter.TaskStage(pkg, "re-check")
-	recheckDistdir, secondErr := a.runManifestFor(cand, pkg, version)
-	removeStagedDistdir(distdir)
+	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
 		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
@@ -2138,10 +2178,36 @@ func (a *Applier) runManifest(pkg, version string) error {
 // the shared one all along. A caller that receives a non-empty path owns it and
 // must remove it (S035-D1); removeStagedDistdir is that removal.
 func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) (string, error) {
+	// An empty supplied distdir means "whatever this path would have created for
+	// itself", which is the entire difference between the two entry points.
+	return a.runManifestForIn("", cand, pkg, version)
+}
+
+// runManifestForIn is runManifestFor against a distdir the caller already holds.
+//
+// The one caller that supplies one is the authoritative re-check after an LLM
+// fix, which hands over the directory the agent downloaded into so that the
+// Manifest that survives is computed from the bytes the gates will read
+// (S043-R2.1, D2). runStagedManifestIn carries what changes with a supplied
+// directory: the seeding step is skipped and `--force` joins the pkgdev argv,
+// because pkgdev does not re-manifest a package whose Manifest is already
+// complete (S043-R2.2, R2.3).
+//
+// The published branch takes the supplied path no further than its own return
+// value: `pkgdev manifest` there writes into the directory the whole machine
+// shares, exactly as it always has — that path never had a private distdir, and
+// giving it one here would move a pre-flight and three shared-directory
+// protections that story 030's gate is keyed on. What it DOES do is carry the
+// supplied path back out, so the fix distdir reaches the caller's gates and the
+// caller's removal on this path too.
+//
+// Both branches therefore keep runManifestFor's contract: what comes back is the
+// directory the caller owns and must remove, and "" only where there is none.
+func (a *Applier) runManifestForIn(suppliedDistdir string, cand candidatePaths, pkg, version string) (string, error) {
 	if cand.staged {
-		return a.sweeper().runStagedManifest(cand.pkgDir, pkg, version)
+		return a.sweeper().runStagedManifestIn(suppliedDistdir, cand.pkgDir, pkg, version)
 	}
-	return "", a.runManifest(pkg, version)
+	return suppliedDistdir, a.runManifest(pkg, version)
 }
 
 // removeStagedDistdir takes back what runManifestFor's staged branch created.
@@ -2564,6 +2630,16 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 	verdict := buildFaultVerdict(ev)
 	if verdict == nil {
 		return nil
+	}
+
+	// S043-R3.1. The verdict says the machine is at fault; this asks the same
+	// transcript WHAT the machine was missing and writes it against the package,
+	// so the next run has something to decline on instead of rebuilding into the
+	// identical failure. It cannot fail this call: the apply is already failing
+	// for the build's own reason, and a transcript that names no path records
+	// nothing — the package is retried, exactly as it is today.
+	if errors.Is(verdict, ErrBuildEnvironment) {
+		a.recordUnmetPrecondition(pkg, ev.transcript)
 	}
 
 	// Reported here, not returned quietly: the apply's own error reaches the

@@ -47,9 +47,43 @@ type CacheEntry struct {
 	Source string `json:"source"`
 }
 
+// PreconditionRecord is what a build gate learned about THIS HOST while failing:
+// a path the build needed and could not have. It is a fact about the machine, not
+// about the package's upstream, and it is what lets a second run decline a gate
+// that can only fail the same way again (S043-R3.1).
+//
+// It lives here — in cache.json, under ~/.config/bentoo — and it may live nowhere
+// else. The obvious alternative, the package's own registry entry, is in
+// packages.toml, and that file sits in an overlay that auto-commits and pushes
+// within minutes: a note about one workstation's unreadable key would be
+// published to every consumer of the overlay as though it were a property of the
+// package.
+type PreconditionRecord struct {
+	// Path is the absolute path the failed build named and could not read. It is
+	// never relative and never "/" — extractUnmetPrecondition refuses both,
+	// because an answer that resolves differently depending on who asks is worse
+	// than no answer at all.
+	Path string `json:"path"`
+	// RecordedAt is when the failure was observed. It is deliberately NOT an
+	// expiry. The version TTL measures how stale an upstream answer is, which is
+	// no evidence whatsoever about whether a key file has appeared on disk; a
+	// record that timed out on a clock would simply restore the wasteful retry
+	// loop it exists to stop. What ends a record is the path becoming readable.
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
 // cacheFile represents the JSON structure stored on disk
 type cacheFile struct {
 	Entries map[string]CacheEntry `json:"entries"`
+	// Preconditions is a SECOND top-level map rather than a field on CacheEntry,
+	// and the separation is load-bearing three times over: an entry expires on
+	// the version TTL and a precondition must not (isExpired never sees this
+	// map); a package with a precondition usually has no cached version at all,
+	// so a shared struct would force Get/GetEntry to hand out half-populated
+	// entries; and `omitempty` keeps a cache that has never recorded one byte for
+	// byte what every release before this wrote. A cache.json written before this
+	// change simply decodes the key as absent — nil — which load leaves alone.
+	Preconditions map[string]PreconditionRecord `json:"preconditions,omitempty"`
 }
 
 // Cache manages version query caching with TTL-based expiration.
@@ -57,6 +91,12 @@ type cacheFile struct {
 type Cache struct {
 	// Entries holds all cached version entries, keyed by package name
 	Entries map[string]CacheEntry `json:"entries"`
+	// Preconditions holds the host preconditions a build gate found unmet, keyed
+	// by package exactly as Entries is. Every Cache carries it, including the
+	// checker's, so that any writer round-trips the map instead of dropping it:
+	// a save from an object that did not know the field would erase every record
+	// on disk.
+	Preconditions map[string]PreconditionRecord `json:"preconditions,omitempty"`
 	// TTL is the time-to-live for cache entries
 	TTL time.Duration
 	// path is the file path where cache is persisted
@@ -97,10 +137,11 @@ func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 	cachePath := filepath.Join(configDir, "cache.json")
 
 	cache := &Cache{
-		Entries: make(map[string]CacheEntry),
-		TTL:     DefaultCacheTTL,
-		path:    cachePath,
-		nowFunc: time.Now,
+		Entries:       make(map[string]CacheEntry),
+		Preconditions: make(map[string]PreconditionRecord),
+		TTL:           DefaultCacheTTL,
+		path:          cachePath,
+		nowFunc:       time.Now,
 	}
 
 	// Apply options
@@ -115,6 +156,7 @@ func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 			// Log corruption but continue with empty cache
 			// The corrupted file will be overwritten on next Save
 			cache.Entries = make(map[string]CacheEntry)
+			cache.Preconditions = make(map[string]PreconditionRecord)
 		}
 	}
 
@@ -135,6 +177,13 @@ func (c *Cache) load() error {
 
 	if cf.Entries != nil {
 		c.Entries = cf.Entries
+	}
+
+	// Absent in every cache.json written before S043 — and absent again the
+	// moment the last record is cleared — so nil means "nothing recorded" and
+	// leaves the freshly made map in place.
+	if cf.Preconditions != nil {
+		c.Preconditions = cf.Preconditions
 	}
 
 	return nil
@@ -191,6 +240,51 @@ func (c *Cache) Set(pkg, version, source string) error {
 	return c.saveUnsafe()
 }
 
+// SetPrecondition records the host precondition a build gate found unmet for
+// pkg, replacing any earlier record for the same package, and persists the cache.
+//
+// The path is expected to have come from extractUnmetPrecondition, which is where
+// the "is this answer usable" judgement lives; this method is the storage and
+// nothing more. It does not touch the package's version entry, so a package with
+// a precondition and no cached version stays a cache MISS for version lookups —
+// which is correct: nothing here is evidence about upstream.
+func (c *Cache) SetPrecondition(pkg, path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.Preconditions == nil {
+		c.Preconditions = make(map[string]PreconditionRecord)
+	}
+	c.Preconditions[pkg] = PreconditionRecord{
+		Path:       path,
+		RecordedAt: c.nowFunc(),
+	}
+
+	return c.saveUnsafe()
+}
+
+// Precondition returns the recorded unmet precondition for pkg.
+// Unlike Get, it applies no TTL — see PreconditionRecord.RecordedAt for why a
+// clock is the wrong thing to expire this on.
+func (c *Cache) Precondition(pkg string) (PreconditionRecord, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	rec, exists := c.Preconditions[pkg]
+	return rec, exists
+}
+
+// DeletePrecondition drops the recorded precondition for pkg and persists the
+// cache. Deleting a package that has no record is not an error: the caller's
+// intent — "this package must not be held back" — is already satisfied.
+func (c *Cache) DeletePrecondition(pkg string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.Preconditions, pkg)
+	return c.saveUnsafe()
+}
+
 // Save persists the cache to disk.
 // This is thread-safe and can be called concurrently.
 func (c *Cache) Save() error {
@@ -203,7 +297,8 @@ func (c *Cache) Save() error {
 // Caller must hold the write lock.
 func (c *Cache) saveUnsafe() error {
 	cf := cacheFile{
-		Entries: c.Entries,
+		Entries:       c.Entries,
+		Preconditions: c.Preconditions,
 	}
 
 	data, err := json.MarshalIndent(cf, "", "  ")
@@ -245,11 +340,16 @@ func (c *Cache) Delete(pkg string) error {
 
 // Clear removes all entries from the cache.
 // It automatically saves the cache to disk after clearing.
+//
+// Recorded preconditions go with them, deliberately: clearing the cache is what
+// an operator does to unstick a run, and a "clear" that left a package held back
+// by a diagnosis they cannot see would be the one state nothing can get out of.
 func (c *Cache) Clear() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.Entries = make(map[string]CacheEntry)
+	c.Preconditions = make(map[string]PreconditionRecord)
 	return c.saveUnsafe()
 }
 
@@ -273,6 +373,10 @@ func (c *Cache) GetEntry(pkg string) (CacheEntry, bool) {
 
 // Cleanup removes all expired entries from the cache.
 // It automatically saves the cache to disk after cleanup.
+//
+// Preconditions are not swept here and must not be: the TTL is about how stale an
+// upstream version answer is, and expiring a host diagnosis on that clock would
+// hand the package back to the same failing build an hour later.
 func (c *Cache) Cleanup() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

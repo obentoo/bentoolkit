@@ -825,12 +825,22 @@ func (c *Checker) getCurrentVersion(pkg string) (string, error) {
 	return best.Version, nil
 }
 
-// DisableOrphans marks each package as disabled (enabled = false) both in the
+// DisableOrphans marks each package as disabled (enabled = false) and, where the
+// record states no origin yet, records the checker as the origin of that disable
+// (disabled_by = "auto") — an entry that already names a human origin keeps it,
+// or this function would erase the intent it exists to respect — both in the
 // overlay's packages.toml and in the in-memory config, so a package whose ebuild
-// was removed from the overlay stops being processed on subsequent runs. The
-// file edit is a single atomic, comment-preserving write for the whole batch.
-// A nil or empty slice is a no-op. The in-memory config is only updated after
-// the file write succeeds, so a failed write leaves both views consistent.
+// was removed from the overlay stops being processed on subsequent runs — and so
+// the reconciliation in CheckAll can tell this disable from one a human wrote
+// and is free to clear it when the ebuild comes back. The file edit is a single
+// atomic, comment-preserving write for the whole batch. A nil or empty slice is
+// a no-op. The in-memory config is only updated after the file write succeeds,
+// so a failed write leaves both views consistent.
+//
+// Both keys are mirrored in memory, not just enabled: within a single run the
+// reconciliation READS the in-memory origin, so writing the pair to the file and
+// only half of it to memory would make the checker's own disable look like a
+// legacy human one on the very next scan.
 func (c *Checker) DisableOrphans(pkgs []string) error {
 	if len(pkgs) == 0 {
 		return nil
@@ -842,6 +852,12 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 	for _, pkg := range pkgs {
 		if cfg, ok := c.config.Packages[pkg]; ok {
 			cfg.Enabled = &disabled
+			// Matching the writer: DisablePackagesInConfig stamps the automatic
+			// origin only where the record states none, so an entry that already
+			// names a human origin keeps it and stays out of the reconciliation.
+			if cfg.DisabledBy == "" {
+				cfg.DisabledBy = disabledByAuto
+			}
 			c.config.Packages[pkg] = cfg
 		}
 	}
@@ -853,16 +869,22 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 // that was auto-disabled when its ebuild vanished is reconciled back to enabled
 // once that ebuild is present in the overlay again, because the overlay — not
 // packages.toml — is the source of truth for whether a package exists. The file
-// edit is a comment-preserving DELETION of the existing `enabled = false`
-// assignment: enabled is the default, spelled by the key's absence, so writing
-// `enabled = true` would state nothing new and would leave a redundant-enabled
-// finding for --lint --fix to undo (EnablePackagesInConfig likewise inserts
-// nothing for a section that lacks the key). A nil or empty slice is a no-op.
-// The in-memory config is updated only after the file write succeeds, so a
-// failed write leaves both views consistent.
+// edit is a comment-preserving DELETION of both keys of the disable — the
+// `enabled = false` assignment and the `disabled_by` origin beside it: enabled
+// is the default, spelled by the key's absence, so writing `enabled = true`
+// would state nothing new and would leave a redundant-enabled finding for
+// --lint --fix to undo (EnablePackagesInConfig likewise inserts nothing for a
+// section that lacks the key), and an origin left behind on an enabled record
+// would claim a state the record is no longer in. A nil or empty slice is a
+// no-op. The in-memory config is updated only after the file write succeeds, so
+// a failed write leaves both views consistent — including the origin, which the
+// reconciliation READS on the next entry of the same run, so a stale in-memory
+// copy would be misread as a human's decision.
 //
 // Callers must exclude held packages (hold = true): a hold is an explicit
-// maintainer decision that the overlay reconciliation must never flip.
+// maintainer decision that the overlay reconciliation must never flip. Callers
+// must likewise pass only packages reconcilesAutomatically accepts; this
+// function performs the revive it is asked for and does not second-guess it.
 func (c *Checker) ReviveDisabled(pkgs []string) error {
 	if len(pkgs) == 0 {
 		return nil
@@ -874,11 +896,73 @@ func (c *Checker) ReviveDisabled(pkgs []string) error {
 	for _, pkg := range pkgs {
 		if cfg, ok := c.config.Packages[pkg]; ok {
 			cfg.Enabled = &enabled
+			cfg.DisabledBy = "" // the origin of a disable that no longer exists is nothing
 			c.config.Packages[pkg] = cfg
 		}
 	}
 	return nil
 }
+
+// reconcilesAutomatically reports whether the overlay reconciliation may clear
+// this entry's disable. It is true for exactly one shape: disabled, not held,
+// and stamped with the origin the checker writes for its own bookkeeping
+// (disabled_by = "auto").
+//
+// The direction is the safety property. An origin this predicate does not
+// recognise — including the ABSENT origin every record predating the field
+// carries — reads as a human decision and survives untouched, so the fail-safe
+// holds with no migration behind it. The opposite reading is the defect: a scan
+// cleared a deliberate pin and bumped the package, and www-client/orion-bin's
+// slot dependency stayed broken for ten days (story 043, R1.2/R1.3).
+//
+// Hold is asked here rather than left to the caller so one predicate states the
+// whole rule, and a held entry answers false even when it carries the automatic
+// origin: hold is never auto-flipped, whatever the origin says.
+//
+// It deliberately does NOT ask whether the ebuild is back in the overlay. That
+// question needs the overlay itself, and leaving it to CheckAll — where
+// getCurrentVersion is reachable — keeps this a pure function of the record, so
+// the policy can be read and tested without a fixture on disk.
+func reconcilesAutomatically(pkg PackageConfig) bool {
+	return !pkg.IsEnabled() && !pkg.IsHeld() && pkg.DisabledBy == disabledByAuto
+}
+
+// frozenDisableNotice builds the single line naming every entry the
+// reconciliation left disabled although its ebuild is present, because the
+// record states no origin (R1.4). It is a pure builder — the convention
+// validate/build.go's passReason and notReachedReason already follow — so the
+// wording is asserted directly rather than through the logger.
+//
+// It names the missing KEY as well as the entries, because "left disabled" on
+// its own reads as a fault in the package: the entry is repairable, and
+// stamping it with the automatic origin is the repair. Without that sentence
+// the fail-safe would introduce a silent regression of its own — every record
+// disabled before the field existed quietly stops reconciling.
+//
+// An empty set yields an empty string, so a run with nothing to report says
+// nothing instead of printing an empty list.
+func frozenDisableNotice(pkgs []string) string {
+	if len(pkgs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("left %d package(s) disabled: %s — the reconciliation clears only a disable it recorded itself, "+
+		"and these state no origin, so each reads as a deliberate decision; add disabled_by = %q to any entry the "+
+		"checker should be free to re-enable when its ebuild returns",
+		len(pkgs), strings.Join(pkgs, ", "), disabledByAuto)
+}
+
+// reportFrozenDisables delivers the R1.4 notice built above. It is a var for
+// the same reason fixSandboxRoot (applier.go:35) is one: the destination is
+// unreachable from a test. logger.Logger.output is unexported and has no
+// setter, so a test cannot capture the run's stderr, and without a seam here
+// only the message BUILDER is pinned — never the wiring that calls it.
+//
+// That gap was measured, not guessed. Deleting the call site during the
+// sub-task's mutation proof turned NOTHING red: frozenDisableNotice kept its
+// wording test and CheckAll kept its behaviour test, and R1.4 — the requirement
+// that a frozen entry is NAMED — quietly stopped being covered by either. The
+// seam is what makes "the run actually reported it" an assertion.
+var reportFrozenDisables = func(notice string) { logger.Info("%s", notice) }
 
 // ReviveCandidate describes a disabled (orphaned) packages.toml entry whose
 // upstream release is strictly newer than the highest version ::gentoo still
@@ -1894,21 +1978,43 @@ func (c *Checker) fetchContentUncached(rawURL string, headers map[string]string,
 // has joined (wg.Wait), so callers may invoke its methods (ExitCode,
 // FormatFailures) directly.
 func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
-	// Reconcile status with the overlay BEFORE filtering: the overlay — not
-	// packages.toml — is the source of truth for whether a package exists. A
-	// package auto-disabled (enabled = false) when its ebuild vanished must not
-	// stay disabled forever once that ebuild is re-added; here it is re-enabled so
-	// the status follows the file rather than the other way around. A held package
-	// (hold = true) is left untouched: that is a deliberate maintainer decision,
-	// not stale bookkeeping. The in-memory rewrite makes the filter below pick the
-	// revived packages up in this same run.
-	var revived []string
+	// Reconcile status with the overlay BEFORE filtering, for the entries the
+	// checker disabled ITSELF: for those, the overlay — not packages.toml — is
+	// the source of truth for whether the package exists, so once the ebuild is
+	// re-added the bookkeeping is cleared here and the filter below picks the
+	// entry up in this same run.
+	//
+	// `enabled = false` is NOT, on its own, bookkeeping the overlay may override.
+	// It is a two-valued key carrying three states, and reading every false as
+	// stale is what let a scan clear a pin a human had written and bump the
+	// package: dev-libs/icu-compat and media-libs/libjxl-compat lost their
+	// disable that way and broke www-client/orion-bin's slot dependency for ten
+	// days. What separates the two is the RECORDED ORIGIN, not the key — a
+	// disable a human wrote means what hold means, leave it alone — so
+	// reconcilesAutomatically clears only a disable stamped as the checker's own
+	// (R1.2, R1.3). Hold keeps its own meaning unchanged: never auto-flipped,
+	// origin or no origin.
+	//
+	// Absent means deliberate, which is the fail-safe direction but also freezes
+	// every entry disabled before the origin field existed. Those are collected
+	// and named once below (R1.4) rather than left silent, since a legacy entry
+	// that ought to reconcile is a repair someone must make by hand.
+	var revived, frozen []string
 	for name, pkg := range c.config.Packages {
 		if pkg.IsEnabled() || pkg.IsHeld() {
 			continue
 		}
-		if _, err := c.getCurrentVersion(name); err == nil {
+		if _, err := c.getCurrentVersion(name); err != nil {
+			continue // still absent from the overlay: a true orphan, disabled for the reason it states
+		}
+		switch {
+		case reconcilesAutomatically(pkg):
 			revived = append(revived, name) // ebuild present again → reconcile to enabled
+		case pkg.DisabledBy == "":
+			// Ebuild present, disable unexplained: left alone, and reported.
+			// An entry naming a non-automatic origin is left alone SILENTLY —
+			// its record already says who decided, so there is nothing to repair.
+			frozen = append(frozen, name)
 		}
 	}
 	if len(revived) > 0 {
@@ -1920,6 +2026,15 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 				logger.Info("re-enabled %q: its ebuild is present in the overlay again", p)
 			}
 		}
+	}
+	// One line for the whole run, deliberately unlike the per-package revive
+	// lines above: a revive is an action taken on one entry, while this is a
+	// standing condition of the registry that a maintainer fixes in one pass —
+	// and on a registry with ~90 such entries, one line per entry would bury the
+	// scan's actual output.
+	if len(frozen) > 0 {
+		sort.Strings(frozen)
+		reportFrozenDisables(frozenDisableNotice(frozen))
 	}
 
 	// Narrow the package set up front so excluded packages incur no network

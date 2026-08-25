@@ -74,6 +74,27 @@ type PackageConfig struct {
 	// (e.g. an orphaned entry whose ebuild was removed from the overlay).
 	// A pointer distinguishes "absent" (enabled) from an explicit false.
 	Enabled *bool `toml:"enabled,omitempty"`
+	// DisabledBy records WHO disabled this entry. "auto" means the checker set
+	// enabled = false because the ebuild vanished from the overlay, and the
+	// reconciliation in CheckAll may clear it when the ebuild returns. Any other
+	// value — including absent — means a human decided, and no scan revokes it.
+	//
+	// It exists because `enabled` alone is a two-valued field asked to carry three
+	// states: enabled, disabled-because-the-ebuild-is-absent, and
+	// disabled-because-a-maintainer-said-so. The reconciliation could not tell the
+	// last two apart, so it re-enabled a deliberate pin and bumped it, breaking a
+	// slot dependency for ten days (story 043, R1).
+	//
+	// ABSENT MEANS DELIBERATE, and that direction is the whole safety property:
+	// "auto" is the ONLY value reconciliation may clear, so an entry nobody
+	// stamped — every record in the registry predating this field — reads as a
+	// human decision and survives untouched. The fail-safe reading therefore needs
+	// no migration to hold; the opposite default would have left the bug armed on
+	// every record until each one was rewritten.
+	//
+	// It is meaningful only beside enabled = false — the origin of a disable that
+	// did not happen is nothing — and omitempty keeps it out of the file otherwise.
+	DisabledBy string `toml:"disabled_by,omitempty"`
 	// Hold, when true, deliberately excludes the package from autoupdate even
 	// though its ebuild IS present in the overlay. It expresses an explicit
 	// maintainer decision ("present, but do not auto-bump"), distinct from the
@@ -660,22 +681,40 @@ func tomlTableName(line string) (string, bool) {
 	return inner, true
 }
 
-// DisablePackagesInConfig sets `enabled = false` for each named package in the
-// overlay's packages.toml, editing the raw text so comments, ordering, and
-// formatting survive — unlike a full re-encode (toml.Encoder), which would drop
-// every comment in the hand-maintained file. For each package it locates the
+// DisablePackagesInConfig writes the DISABLED PAIR — `enabled = false` and
+// `disabled_by = "auto"` — for each named package in the overlay's
+// packages.toml, editing the raw text so comments, ordering, and formatting
+// survive — unlike a full re-encode (toml.Encoder), which would drop every
+// comment in the hand-maintained file. For each package it locates the
 // [section] whose table name equals the package and either rewrites an existing
 // `enabled = ...` assignment or inserts `enabled = false` immediately after the
-// header. Packages whose section is absent are skipped silently. The write is
-// atomic (temp file + rename) and preserves the original file mode; an empty
-// package list, or a run that changes nothing, leaves the file untouched.
+// header. The origin is written beside it: in place when the record already
+// carries a `disabled_by` assignment — one line, never a second copy — and
+// directly below `enabled` otherwise, which is where CanonicalFieldOrder wants
+// it.
+//
+// The origin is half of the statement rather than a decoration. Every caller of
+// this function disables for one reason, the ebuild having vanished from the
+// overlay, and `enabled = false` alone cannot say so: on disk it is
+// indistinguishable from a maintainer's deliberate pin. Recording WHO wrote the
+// disable is what later lets the overlay reconciliation revive this one and
+// leave that one alone (story 043, R1.1) — a disable written without it reads
+// as a human decision and is never reconciled, so the two keys are produced
+// together or the record is only half of what it claims.
+//
+// Packages whose section is absent are skipped silently. The write is atomic
+// (temp file + rename) and preserves the original file mode; an empty package
+// list, or a run that changes nothing, leaves the file untouched. A failed
+// write is returned to the caller rather than swallowed: a registry edit that
+// did not land must not pass for one that did.
 func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, false, true)
 }
 
 // EnablePackagesInConfig re-enables each named package in the overlay's
-// packages.toml by DELETING its `enabled` assignment, editing the raw text so
-// comments, ordering, and formatting survive — the sibling of
+// packages.toml by DELETING BOTH keys of the disabled pair — its `enabled`
+// assignment and its `disabled_by` origin — editing the raw text so comments,
+// ordering, and formatting survive. It is the sibling of
 // DisablePackagesInConfig used to revive an orphaned entry whose ebuild has
 // reappeared (or whose upstream has overtaken ::gentoo).
 //
@@ -687,10 +726,24 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 // repair would rewrite each other's work on every cycle. One revive of the KDE
 // 6.7.3 → 6.7.4 batch put 71 such lines into the registry, each one a finding.
 //
-// Packages whose section is absent, or which carry no `enabled` key at all, are
-// left untouched — there is nothing to remove. The write is atomic (temp file +
+// The origin goes with it because it describes a state the entry has just left:
+// `disabled_by = "auto"` sitting on an enabled record is a claim about a
+// disable that no longer exists. Deleting only `enabled` would strand exactly
+// that — a line the linter reports and a later reader takes at face value
+// (story 043, R1.2).
+//
+// Each key is removed on its own evidence, because THAT line is present, never
+// because a neighbouring one was: the pair does not always travel together.
+// Every entry disabled before the origin field existed carries `enabled` and
+// nothing else, so the incomplete shape is the one the revive path meets most
+// often, and a deletion written positionally — "the line after enabled" — would
+// eat whatever legitimately follows.
+//
+// Packages whose section is absent, or which carry neither key, are left
+// untouched — there is nothing to remove. The write is atomic (temp file +
 // rename) and preserves the original file mode; an empty package list, or a run
-// that changes nothing, leaves the file untouched.
+// that changes nothing, leaves the file untouched. A failed write is returned
+// to the caller rather than swallowed.
 func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, true, false)
 }
@@ -698,6 +751,21 @@ func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
 // enabledAssignRegex matches an `enabled = ...` assignment line, capturing the
 // indentation so a rewrite preserves it.
 var enabledAssignRegex = regexp.MustCompile(`^(\s*)enabled\s*=`)
+
+// disabledByAssignRegex matches a `disabled_by = ...` assignment line,
+// capturing the indentation so a rewrite preserves it. As in enabledAssignRegex
+// above, the `=` must follow the key after nothing but spaces, so no other key
+// can match.
+var disabledByAssignRegex = regexp.MustCompile(`^(\s*)disabled_by\s*=`)
+
+// disabledByAuto is the single value of PackageConfig.DisabledBy that the
+// overlay reconciliation may clear: the checker wrote the disable because the
+// ebuild had vanished. The writer here and every reader of the field share this
+// constant so the two cannot drift, because the drift would be silent — an
+// origin the reader does not recognise reads as a human decision and is simply
+// left alone, so a typo would strand entries as permanently unrevivable without
+// producing a single error (story 043, R1.1/R1.2).
+const disabledByAuto = "auto"
 
 // versionAssignRegex matches a `version = ...` assignment line, capturing the
 // indentation so a rewrite preserves it. The `=` must follow `version` after
@@ -721,9 +789,30 @@ var versionAssignRegex = regexp.MustCompile(`^(\s*)version\s*=`)
 // reads it: the redundant-enabled rule reports every such line and --lint --fix
 // deletes it, so each revive would undo the previous repair and vice versa.
 //
+// `disabled_by` obeys that SAME asymmetry, one key over, which is why it is
+// handled here rather than in a second editor beside this one. The origin of a
+// disable is meaningful only while the disable exists, so it is written down
+// alongside `enabled = false` and deleted alongside it — and its absence, like
+// the absence of `enabled`, is itself the meaningful reading: no origin means a
+// human decided, the state no scan revokes (see PackageConfig.DisabledBy). Both
+// keys therefore ride the one direction flag this function already takes, and
+// the body walk, the inComments mask and the insertion point stay in a single
+// copy instead of two that must be kept in step.
+//
+// The pair is written in canonical order — `enabled` then `disabled_by`, the
+// order CanonicalFieldOrder declares and the linter checks as a subsequence —
+// and the origin is emitted only when the record does not already carry one, so
+// a record disabled twice ends with one origin line and not two.
+//
+// Deletion is driven by each key being PRESENT, never by its position relative
+// to the other: the ~90 records disabled before the origin field existed carry
+// `enabled` alone, so "the line after enabled" is the url far more often than it
+// is the origin.
+//
 // The write is atomic (temp file + rename) and preserves the original file
 // mode; an empty package list, or a run that changes nothing, leaves the file
-// untouched.
+// untouched; a write that fails is returned unchanged to the caller, since a
+// registry left half-written must not be reported as written.
 func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent bool) error {
 	if len(pkgs) == 0 {
 		return nil
@@ -734,29 +823,71 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 		targets[p] = true
 	}
 
-	assign := fmt.Sprintf("enabled = %t", value)
+	enabledAssign := fmt.Sprintf("enabled = %t", value)
+	originAssign := fmt.Sprintf("disabled_by = %q", disabledByAuto)
 
 	return editPackagesConfigSections(overlayPath, targets, func(_ string, body []string, inComments []bool) ([]string, bool) {
-		out := make([]string, 0, len(body)+1)
+		// Whether the record already states an origin decides whether a disable
+		// introduces one at all: an existing origin is left untouched wherever it
+		// stands, and only a record carrying none gets `disabled_by = "auto"`
+		// below `enabled`. It has to be known before the walk reaches the
+		// `enabled` line, because the origin may sit after it — a record edited
+		// by hand is under no obligation to be in canonical order.
+		hasOrigin := false
+		for j, line := range body {
+			if !inComments[j] && disabledByAssignRegex.MatchString(line) {
+				hasOrigin = true
+				break
+			}
+		}
+
+		out := make([]string, 0, len(body)+2)
 		changed := false
-		found := false
+		foundEnabled := false
 		for j, line := range body {
 			if !inComments[j] {
 				if m := enabledAssignRegex.FindStringSubmatch(line); m != nil {
-					found = true
+					foundEnabled = true
 					changed = true
 					// Enabling drops the line; disabling rewrites it in place,
-					// keeping the original indentation.
+					// keeping the original indentation, and states the origin
+					// right below it when the record carries none yet.
 					if !value {
-						out = append(out, m[1]+assign)
+						out = append(out, m[1]+enabledAssign)
+						if !hasOrigin {
+							out = append(out, m[1]+originAssign)
+						}
 					}
+					continue
+				}
+				if disabledByAssignRegex.MatchString(line) {
+					// The same asymmetry, in its safe direction: enabling DELETES
+					// the origin, disabling leaves it exactly as it stands.
+					//
+					// Restating it as "auto" here would be the writer inventing
+					// the answer the reader is about to trust: a record that
+					// already names who disabled it is stating an intent, and
+					// stamping the automatic origin over it hands the entry back
+					// to the very reconciliation the origin exists to keep it
+					// away from (R1.2/R1.3). A record with NO origin is stamped
+					// at the `enabled` line above, which is the only site that
+					// may introduce one.
+					if value {
+						changed = true
+						continue
+					}
+					out = append(out, line)
 					continue
 				}
 			}
 			out = append(out, line)
 		}
-		if !found && insertIfAbsent {
-			out = append(append(make([]string, 0, len(body)+1), assign), out...)
+		if !foundEnabled && insertIfAbsent {
+			head := []string{enabledAssign}
+			if !hasOrigin {
+				head = append(head, originAssign)
+			}
+			out = append(append(make([]string, 0, len(body)+len(head)), head...), out...)
 			changed = true
 		}
 		return out, changed

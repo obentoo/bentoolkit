@@ -53,6 +53,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listed and nothing else; a parser fails the build if the flag is referenced
   anywhere that could narrow what the run acts on.
 
+- **`--mark-auto-disabled` — the one-shot migration that unfreezes the legacy
+  disables.** The fail-safe below reads an absent origin as a human decision, so
+  the ~90 entries the checker disabled before `disabled_by` existed would have
+  stopped reconciling for good. The migration stamps the automatic origin onto
+  the entries whose disable really was bookkeeping, and onto nothing else: an
+  entry that is held, already stamped, still enabled, or named in `--except` is
+  left alone, and a second run is a no-op that leaves the file byte-identical.
+
+  It decides from the PARSED registry, never from a text scan
+  (`internal/autoupdate/disable_origin_migration.go`) — the registry's own header
+  records what grep does to this question, 98 hits unanchored against 92 real
+  records, and the gap is doc bodies quoting the keys they describe. The write
+  still goes through the comment-preserving section editor, so the prose that
+  made the question hard survives it.
+
+  `--except` names the pins that must NOT be stamped, and an entry naming no
+  record ABORTS the run rather than being ignored: a typo there protects nothing
+  and would otherwise pass in silence. The full plan — what will be stamped, and
+  every group that will not — is printed BEFORE the confirmation, and the write
+  is gated exactly as `--lint --fix` is, because this overlay auto-commits and
+  pushes and an unattended write is a published one
+  (`cmd/bentoo/overlay_autoupdate_markauto.go`, with the flags registered and
+  the mode dispatched in `cmd/bentoo/overlay_autoupdate.go`, whose `--yes` and
+  `Examples:` prose were widened to name the migration).
+
 ### Changed
 - **`overlay sync` is now `overlay pull`, and it pulls the branch you are on.**
   The old command ran `git merge origin/HEAD`: it integrated the *remote's
@@ -160,6 +185,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tier instead of folding them into a column: an ebuild that could not be read
   established nothing about how the package builds, and counting it as source
   would state a fact the scan never found.
+
+- **`GateForDepth` — the depth↔gate mapping, exported for the check path.**
+  `gateRungs` maps a gate to the rung its pass proves; read the other way it
+  answers which gate stands for a given rung. Exporting it keeps that relation
+  in one table instead of a fourth spelling of it. It returns the deepest gate
+  at or below the depth asked for — harmless while `gateRungs` covers every
+  selectable depth, an over-report the moment one is added without its gate —
+  and it refuses outright for a depth no gate proves, rather than falling back
+  as the applier deliberately does for its own, different question.
+
+  It has no production caller yet. The check-path verdict that would consume
+  it (S043-R4) was left out: stories 044 and 045 settled that question the
+  other way, and `report.Classify` now requires every deciding gate to pass,
+  routing the half-measured case to the `inconclusive` column they added for
+  it. Re-applying R4 here would reverse a decision taken with its own
+  rationale, so only the shared mapping lands.
+
+- **A re-disable no longer erases the origin it is supposed to read.**
+  `disabled_by` exists so a scan can tell its own bookkeeping from a decision a
+  human wrote. Both writers then stamped `"auto"` over whatever the record
+  already carried: `setPackagesEnabled` rewrote an existing `disabled_by` line
+  in place, and `DisableOrphans` mirrored that unconditionally into the
+  in-memory config. An entry stating a human origin came back out of the writer
+  stating the automatic one, which is exactly what `reconcilesAutomatically`
+  clears — the revocation this release removes, reached through the field that
+  removes it.
+
+  The reach is narrow but real. `CheckAll` cannot get there: it filters
+  `!IsEnabled() || IsHeld()` before checking, so a pin never enters the orphan
+  path. `CheckPackage` consults neither, so
+  `bentoo overlay autoupdate <a pinned package whose ebuild has been removed>`
+  does. Now a stated origin is left exactly where it stands, and only a record
+  carrying none is stamped — the `enabled` line remains the single site that may
+  introduce one, so an auto-disable still records itself and R1.3's fail-safe
+  does not freeze it (`internal/autoupdate/config.go`,
+  `internal/autoupdate/checker.go`).
+
+  Comment-only alongside it: `internal/autoupdate/validate/run.go` records that
+  `GateForDepth` returns the deepest gate at or below the depth asked for rather
+  than one pinned to it — harmless while `gateRungs` covers every selectable
+  depth, an over-report the moment one is added without its gate — and carries
+  the follow-up that the depth↔gate mapping is spelt by three tables read by two
+  near-identically named functions.
+- **A build that cannot succeed on this host is diagnosed once, not once per
+  run.** Two packages produced thirteen identical build logs over two days:
+  `net-wireless/mt7927-dkms` wanting `/etc/kernel/keys/module-signing.key`
+  (`700 root:root`) and `sys-firmware/edk2` wanting
+  `/var/lib/sbctl/keys/db/db.key` (`400 root:root`). The build gate drops to the
+  `portage` uid, so neither is readable and neither will be without a change on
+  the host. `ErrBuildEnvironment` already classified both correctly and the
+  report already said the ebuild was not at fault — nothing consumed that
+  conclusion, so each run rediscovered it by running the build again.
+
+  A build gate failure that classifies as an environment fault now records the
+  precondition the child named, against the package in `cache.json`
+  (`internal/autoupdate/applier_gates_environment.go`,
+  `internal/autoupdate/cache.go`). Never in `packages.toml`: that file lives in
+  an overlay that auto-commits and pushes. `runBuildGates`
+  (`internal/autoupdate/applier_gates.go`) gains a second pre-check ahead of the
+  dependency probe — a recorded, still-unmet precondition declines the gate
+  through the existing `hostDeclinedGates` seam, so the package is reported as
+  skipped for an environment reason, names the path, and is not counted as an
+  error.
+
+  Two properties are deliberate. The precondition is evaluated **as the build
+  user would see it** — mode bits and the parent's traversability, not `os.Stat`
+  — because a `stat` from the calling user answers a different question and
+  would record something permanently unmet. And the extraction **fails open**:
+  a message it does not understand records nothing and the package is retried,
+  which is today's behaviour. Recording a placeholder would suppress a package
+  forever on the strength of a parse that failed, which is strictly worse than a
+  wasteful retry. A relative path, a bare word, `/`, and a compile-phase failure
+  are all refused for the same reason.
+
+  When the precondition becomes satisfied the record is cleared and the gate
+  runs again — no expiry period and no flag. On a host with no `portage` group
+  at all, including CI, the check cannot score group bits and answers "met", so
+  the mechanism stands down rather than freezing packages on evidence it does
+  not have.
+- **A repaired bump's gates now read the distfiles the repair fetched.** After
+  the LLM fixer succeeded, the archive it had downloaded was deleted before any
+  gate looked at it, and the gate then reported SKIPPED against a directory that
+  did not hold the file. The two groups of packages in one run differed by
+  exactly whether the fixer had run: those it skipped named the run's own
+  `/var/tmp/bentoo-staged-distfiles-…`, those it repaired named
+  `/var/cache/distfiles`.
+
+  Every part behaved as written; the composition did not. The fixer holds
+  `Bash(pkgdev *)` and runs `pkgdev manifest` itself, so after a successful
+  repair the Manifest is COMPLETE — and `pkgdev manifest` without `--force` does
+  not re-manifest a complete package. The authoritative re-check therefore
+  downloaded nothing into its fresh directory, `staticGateDistdir` found that
+  directory empty and fell back to the host `DISTDIR`, and on a host that had
+  never fetched the release the gate read an empty room. For `dev-libs/icu-compat`
+  the archive appeared in `/var/cache/distfiles` 23 seconds AFTER the gate that
+  needed it had already declined; for `media-libs/mesa`, 134 MB were fetched and
+  discarded, and would have been fetched again the next day.
+
+  The change is ownership, not lifetime. `runStagedManifestIn`
+  (`internal/autoupdate/sweep_staged.go`) can now run against a caller-supplied
+  distdir — seeding skipped, since the directory is already the answer, and
+  `--force` added so a complete Manifest is recomputed by bentoo rather than
+  accepted from the agent. `runManifestWithFix`
+  (`internal/autoupdate/applier.go`) hands it the directory the agent downloaded
+  into instead of deleting it, and returns that path to the caller whose removal
+  already covers every exit — so the run still removes what it fetched, on the
+  failure paths too.
+
+  Two things deliberately unchanged: a repair that fetched NOTHING still falls
+  back exactly as before, because an empty private directory means "nothing was
+  fetched" and not "nothing is there"; and `--force` re-digests the bytes the
+  agent brought, which makes the Manifest bentoo's own but is not independent
+  verification against upstream. Both are stated in the code rather than left to
+  be rediscovered.
+- **A disable a maintainer wrote is no longer revoked by the next scan.**
+  `enabled = false` was read as bookkeeping the overlay may always override, and
+  the reconciliation in `CheckAll` re-enabled every disabled entry whose ebuild
+  was present. Two entries had used that key to express intent —
+  `dev-libs/icu-compat` and `media-libs/libjxl-compat`, each with a `comments`
+  block explaining itself in prose no code reads. An automatic commit deleted
+  their `enabled = false`, bumped both, and left `www-client/orion-bin` with an
+  unsatisfiable slot dependency for ten days. The comments survived and are now
+  false.
+
+  The cause was not a wrong branch: a two-valued key was carrying three states —
+  enabled, disabled-because-the-ebuild-vanished, and disabled-because-I-said-so.
+  The registry gains `disabled_by` to separate the last two
+  (`internal/autoupdate/config.go`), the linter learns the key and its canonical
+  position beside `enabled` (`internal/autoupdate/lint.go`), and the
+  reconciliation clears only a disable stamped as the checker's own
+  (`internal/autoupdate/checker.go`).
+
+  **Absent means deliberate**, which is the direction that needs no migration to
+  be safe: every record predating the field now reads as a human decision and
+  survives untouched. Entries frozen that way are NAMED once per run rather than
+  left silent, so a legacy entry that ought to reconcile is a visible repair
+  rather than a package that quietly stopped updating. `hold = true` keeps its
+  own meaning exactly: never auto-flipped, origin or no origin.
+
+  The two registry writers now keep the pair consistent — a disable writes both
+  keys, a revive deletes both — because an origin left behind on an enabled
+  record claims a state the record is no longer in, and the linter reports it.
 
 ### Deprecated
 - **`--no-tui` — use `--ui=plain`.** Its behaviour has not changed: it is still
