@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-08-25
+
 ### Fixed
 - **A bump whose selected depth passed is no longer reported as not
   validated.** `dev-libs/icu-compat` ran the `configure` gate — the depth the
