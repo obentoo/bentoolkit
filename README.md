@@ -309,13 +309,29 @@ Display the overlay's commit history:
 bentoo overlay log
 ```
 
-#### Sync Overlay
+#### Pull Upstream Changes
 
-Sync the overlay with its upstream remote:
+Fetch the configured remote and integrate the current branch's upstream:
 
 ```bash
-bentoo overlay sync
+bentoo overlay pull
 ```
+
+The integration is fast-forward only by default: if the overlay has diverged
+from its upstream, the pull refuses rather than writing a merge commit. Pick a
+strategy explicitly when it has:
+
+```bash
+bentoo overlay pull --rebase   # replay local commits on top of the upstream
+bentoo overlay pull --merge    # accept a merge commit
+bentoo overlay pull --dry-run  # report what would be integrated, change nothing
+```
+
+The upstream comes from the branch that is checked out, not from the remote's
+default branch, so pulling on a work branch never drags `master` into it. A
+branch with no upstream is an error, not a silent fallback.
+
+`bentoo overlay sync` remains as an alias for this command.
 
 #### Compare with Upstream
 
@@ -1342,10 +1358,10 @@ bentoolkit/
 │   ├── overlay_log.go          # overlay log command
 │   ├── overlay_manifest.go     # overlay manifest command
 │   ├── overlay_prune.go        # overlay prune command
+│   ├── overlay_pull.go         # overlay pull command (alias: sync)
 │   ├── overlay_push.go         # overlay push command
 │   ├── overlay_rename.go       # overlay rename command
-│   ├── overlay_status.go       # overlay status command
-│   └── overlay_sync.go         # overlay sync command
+│   └── overlay_status.go       # overlay status command
 ├── internal/
 │   ├── autoupdate/             # Autoupdate subsystem
 │   │   ├── llm.go              # LLM provider interface and Claude client

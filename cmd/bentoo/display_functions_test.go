@@ -402,7 +402,7 @@ func TestOverlayAutoupdateSubcommandRegistered(t *testing.T) {
 // TestAllOverlaySubcommandsRegistered tests all expected overlay subcommands exist.
 func TestAllOverlaySubcommandsRegistered(t *testing.T) {
 	expected := []string{
-		"add", "status", "commit", "push", "compare", "sync",
+		"add", "status", "commit", "push", "compare", "pull",
 		"diff", "init", "log", "rename", "analyze", "autoupdate",
 	}
 	for _, name := range expected {
@@ -421,13 +421,13 @@ func TestAllOverlaySubcommandsRegistered(t *testing.T) {
 	}
 }
 
-// TestSyncCommandDescription tests sync command has description.
-func TestSyncCommandDescription(t *testing.T) {
-	if syncCmd.Use == "" {
-		t.Error("sync command should have a Use field")
+// TestPullCommandDescription tests pull command has description.
+func TestPullCommandDescription(t *testing.T) {
+	if pullCmd.Use == "" {
+		t.Error("pull command should have a Use field")
 	}
-	if syncCmd.Short == "" {
-		t.Error("sync command should have a Short description")
+	if pullCmd.Short == "" {
+		t.Error("pull command should have a Short description")
 	}
 }
 

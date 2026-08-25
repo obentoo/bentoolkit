@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -203,13 +204,13 @@ func TestRunLogOneline(t *testing.T) {
 	withExitIntercept(func() { runLog(logCmd, nil) })
 }
 
-// ---- runSync ----
+// ---- runPull ----
 
-// TestRunSync tests runSync on a valid overlay (fails at git level, not config).
-func TestRunSync(t *testing.T) {
+// TestRunSync tests runPull on a valid overlay (fails at git level, not config).
+func TestRunPull(t *testing.T) {
 	_, cleanup := setupTestHome(t)
 	defer cleanup()
-	withExitIntercept(func() { runSync(syncCmd, nil) })
+	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
 // ---- runCompare ----
@@ -727,10 +728,10 @@ func runGitCmd(dir string, args ...string) error {
 	return cmd.Run()
 }
 
-// ---- runSync additional paths ----
+// ---- runPull additional paths ----
 
-// TestRunSyncWithGitRepo tests runSync with an initialized git repo.
-func TestRunSyncWithGitRepo(t *testing.T) {
+// TestRunPullWithGitRepo tests runPull with an initialized git repo.
+func TestRunPullWithGitRepo(t *testing.T) {
 	overlayDir, cleanup := setupTestHome(t)
 	defer cleanup()
 
@@ -740,7 +741,7 @@ func TestRunSyncWithGitRepo(t *testing.T) {
 	_ = runGitCmd(overlayDir, "config", "user.email", "test@test.com")
 	_ = runGitCmd(overlayDir, "config", "user.name", "Test")
 
-	withExitIntercept(func() { runSync(syncCmd, nil) })
+	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
 // ---- runCompare additional paths ----
@@ -1268,18 +1269,18 @@ func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
 	withExitIntercept(func() { runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"}) })
 }
 
-// ---- runSync with conflict result ----
+// ---- runPull with fetch failure ----
 
-// TestRunSyncConflictResult tests runSync when sync returns a conflict result.
+// TestRunPullFetchFailure tests runPull when sync returns a conflict result.
 // We use a git repo with a remote that fails fetch — gets to the error path.
-func TestRunSyncConflictResult(t *testing.T) {
+func TestRunPullFetchFailure(t *testing.T) {
 	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
 	defer cleanup()
 
-	// Add a remote that doesn't exist — fetch will fail, runSync exits(1)
+	// Add a remote that doesn't exist — fetch will fail, runPull exits(1)
 	_ = runGitCmd(overlayDir, "remote", "add", "origin", "https://invalid.example.com/repo.git")
 
-	withExitIntercept(func() { runSync(syncCmd, nil) })
+	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
 // ---- runPush success path with git repo ----
@@ -1365,7 +1366,7 @@ func TestRunLogOnelineWithGitRepo(t *testing.T) {
 	withExitIntercept(func() { runLog(logCmd, nil) })
 }
 
-// ---- runSync success and conflict paths via real git ----
+// ---- runPull success and divergence paths via real git ----
 
 // setupGitRepoWithRemote creates a local git repo with a bare remote that has commits.
 // Returns the overlay dir, remote dir, and cleanup func.
@@ -1389,7 +1390,9 @@ func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string, cleanup
 		t.Skip("git init --bare not available: " + err.Error())
 	}
 
-	// Init overlay repo
+	// Init overlay repo. The push below uses -u so the branch gets an
+	// upstream, as a real clone would: overlay pull integrates the current
+	// branch's upstream and refuses without one.
 	if err := os.MkdirAll(overlayDir, 0755); err != nil {
 		t.Skip("cannot create overlay dir")
 	}
@@ -1405,7 +1408,7 @@ func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string, cleanup
 	_ = os.WriteFile(testFile, []byte("initial"), 0644)
 	_ = runGitCmd(overlayDir, "add", ".")
 	_ = runGitCmd(overlayDir, "commit", "-m", "initial")
-	_ = runGitCmd(overlayDir, "push", "origin", "HEAD:master")
+	_ = runGitCmd(overlayDir, "push", "-u", "origin", "HEAD:master")
 
 	// Write config
 	configDir := filepath.Join(tmpHome, ".config", "bentoo")
@@ -1424,17 +1427,17 @@ func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string, cleanup
 	}
 }
 
-// TestRunSyncSuccessPath tests runSync when already up-to-date (fetch+merge succeeds).
-func TestRunSyncSuccessPath(t *testing.T) {
+// TestRunPullSuccessPath tests runPull when already up-to-date (fetch+merge succeeds).
+func TestRunPullSuccessPath(t *testing.T) {
 	_, _, cleanup := setupGitRepoWithRemote(t)
 	defer cleanup()
 
 	// Already up-to-date — fetch succeeds, merge is a no-op → result.Success == true
-	withExitIntercept(func() { runSync(syncCmd, nil) })
+	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
-// TestRunSyncWithNewRemoteCommits tests runSync when remote has new commits.
-func TestRunSyncWithNewRemoteCommits(t *testing.T) {
+// TestRunPullWithNewRemoteCommits tests runPull when remote has new commits.
+func TestRunPullWithNewRemoteCommits(t *testing.T) {
 	overlayDir, remoteDir, cleanup := setupGitRepoWithRemote(t)
 	defer cleanup()
 
@@ -1452,7 +1455,7 @@ func TestRunSyncWithNewRemoteCommits(t *testing.T) {
 	_ = runGitCmd(cloneDir, "push", "origin", "HEAD:master")
 
 	// Now sync overlay — should fetch and merge the new commit
-	withExitIntercept(func() { runSync(syncCmd, nil) })
+	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
 // ---- runAdd success path with git repo ----
@@ -1559,11 +1562,11 @@ func TestRunListSuccessPath(t *testing.T) {
 	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
 }
 
-// ---- runSync conflict path ----
+// ---- runPull divergence path ----
 
-// TestRunSyncConflictPath tests runSync when sync returns a conflict (Success == false).
+// TestRunPullDivergedRefusesFastForward tests runPull when sync returns a conflict (Success == false).
 // We create a scenario where local and remote have diverged with conflicting changes.
-func TestRunSyncConflictPath(t *testing.T) {
+func TestRunPullDivergedRefusesFastForward(t *testing.T) {
 	tmpHome := t.TempDir()
 	overlayDir := filepath.Join(tmpHome, "overlay")
 	remoteDir := filepath.Join(tmpHome, "remote.git")
@@ -1589,7 +1592,7 @@ func TestRunSyncConflictPath(t *testing.T) {
 	_ = os.WriteFile(sharedFile, []byte("line1\n"), 0644)
 	_ = runGitCmd(overlayDir, "add", ".")
 	_ = runGitCmd(overlayDir, "commit", "-m", "initial")
-	_ = runGitCmd(overlayDir, "push", "origin", "HEAD:master")
+	_ = runGitCmd(overlayDir, "push", "-u", "origin", "HEAD:master")
 
 	// Clone to make a conflicting commit on remote
 	cloneDir := filepath.Join(tmpHome, "clone")
@@ -1623,12 +1626,34 @@ func TestRunSyncConflictPath(t *testing.T) {
 		os.Setenv("XDG_CONFIG_HOME", oldXDG)
 	}()
 
-	// runSync: fetch succeeds, merge fails with conflict → result.Success == false
-	code := withExitIntercept(func() { runSync(syncCmd, nil) })
-	// Should exit 1 due to sync failure
+	// Local and remote have diverged. The default mode is fast-forward only,
+	// so the pull must refuse and exit 1 — where the previous command wrote a
+	// merge commit over the divergence.
+	code := withExitIntercept(func() { runPull(pullCmd, nil) })
 	if code != 1 {
-		t.Logf("runSync conflict path: exit code %d (may vary by git version)", code)
+		t.Errorf("diverged pull exited %d, want 1 (fast-forward should be refused)", code)
 	}
+
+	// The refusal must leave the branch where it was: still one local commit
+	// ahead, with no merge commit written.
+	if merges := gitOutput(t, overlayDir, "rev-list", "--count", "--merges", "HEAD"); merges != "0" {
+		t.Errorf("pull wrote %s merge commit(s) despite refusing", merges)
+	}
+	if subject := gitOutput(t, overlayDir, "log", "-1", "--format=%s"); subject != "local change" {
+		t.Errorf("HEAD is %q, want the local commit untouched", subject)
+	}
+}
+
+// gitOutput runs a git command in dir and returns its trimmed stdout.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v", args, dir, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ---- runCompare with GitHub provider (rate limit path) ----

@@ -54,6 +54,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anywhere that could narrow what the run acts on.
 
 ### Changed
+- **`overlay sync` is now `overlay pull`, and it pulls the branch you are on.**
+  The old command ran `git merge origin/HEAD`: it integrated the *remote's
+  default branch* regardless of what was checked out. On a work branch it
+  fast-forwarded that branch to `master`, or wrote a merge commit joining
+  `master` into it, and reported `Sync completed successfully.` either way —
+  `git pull` refuses outright in that situation. The pull now resolves the
+  upstream of the checked-out branch, and a branch with no upstream is an
+  error naming the branch instead of a silent fallback. Integration is
+  fast-forward only by default, so a diverged overlay is surfaced rather than
+  merged over; `--rebase` and `--merge` ask for the other strategies, and
+  `--dry-run` reports without writing. `sync` remains as an alias.
+- **The pull says what it did.** `Sync completed successfully.` was printed
+  whether two commits arrived or none, and `SyncResult.CommitsPulled` was
+  declared but never assigned — the count existed as a field and nothing more.
+  The result now carries the real number, the branch and the upstream, and an
+  up-to-date pull reads differently from one that integrated commits.
+- **Uncommitted work is refused by the toolkit, not by raw git output.** A
+  pull that would overwrite local changes failed with `git command failed`
+  followed by git's own text. It now stops with an error naming the branch and
+  the upstream, before the integration runs — and only when there is something
+  to integrate, so work in progress is not flagged on an already-current
+  overlay. Untracked files never block, matching what git itself refuses on.
 - **Column widths are measured, not typed.** A column is as wide as its widest
   value in *this* run, measured in display cells — so a multi-byte character is
   not counted as several columns and an escape sequence is not counted at all.

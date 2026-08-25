@@ -671,3 +671,282 @@ func TestValidateAndAddPath_DotDotPath(t *testing.T) {
 		t.Errorf(".. path resolving inside overlay should not return ErrInvalidPath")
 	}
 }
+
+// TestGitRunnerCurrentBranch covers both the named-branch case and the
+// detached HEAD that has no branch to pull into.
+func TestGitRunnerCurrentBranch(t *testing.T) {
+	runner, dir := initTestRepo(t)
+
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	if err := runner.Add("test.txt"); err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
+	if err := runner.Commit("initial commit", "", ""); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	t.Run("returns the checked-out branch", func(t *testing.T) {
+		branch, err := runner.CurrentBranch()
+		if err != nil {
+			t.Fatalf("CurrentBranch() error = %v", err)
+		}
+		if branch == "" || branch == "HEAD" {
+			t.Errorf("CurrentBranch() = %q, want a branch name", branch)
+		}
+	})
+
+	t.Run("detached HEAD is an error", func(t *testing.T) {
+		head, _, err := runner.runCommand("rev-parse", "HEAD")
+		if err != nil {
+			t.Fatalf("failed to read HEAD: %v", err)
+		}
+		if _, _, err := runner.runCommand("checkout", strings.TrimSpace(head)); err != nil {
+			t.Skipf("cannot detach HEAD: %v", err)
+		}
+
+		if _, err := runner.CurrentBranch(); !errors.Is(err, ErrDetachedHead) {
+			t.Errorf("CurrentBranch() error = %v, want ErrDetachedHead", err)
+		}
+	})
+}
+
+// TestGitRunnerUpstream checks that a branch without an upstream reports
+// ErrNoUpstream rather than git's raw text, and that a configured one is read.
+func TestGitRunnerUpstream(t *testing.T) {
+	runner, dir := initTestRepo(t)
+
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	if err := runner.Add("test.txt"); err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
+	if err := runner.Commit("initial commit", "", ""); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	t.Run("no upstream configured", func(t *testing.T) {
+		if _, err := runner.Upstream(); !errors.Is(err, ErrNoUpstream) {
+			t.Errorf("Upstream() error = %v, want ErrNoUpstream", err)
+		}
+	})
+
+	t.Run("reads a configured upstream", func(t *testing.T) {
+		remoteDir := t.TempDir()
+		bare := NewGitRunner(remoteDir)
+		if _, _, err := bare.runCommand("init", "--bare"); err != nil {
+			t.Skipf("cannot init bare repo: %v", err)
+		}
+		if _, _, err := runner.runCommand("remote", "add", "origin", remoteDir); err != nil {
+			t.Fatalf("failed to add remote: %v", err)
+		}
+		if _, _, err := runner.runCommand("push", "-u", "origin", "HEAD:master"); err != nil {
+			t.Skipf("cannot push to bare repo: %v", err)
+		}
+
+		upstream, err := runner.Upstream()
+		if err != nil {
+			t.Fatalf("Upstream() error = %v", err)
+		}
+		if upstream != "origin/master" {
+			t.Errorf("Upstream() = %q, want origin/master", upstream)
+		}
+	})
+}
+
+// TestGitRunnerCountRange checks the commit arithmetic the pull reports.
+func TestGitRunnerCountRange(t *testing.T) {
+	runner, dir := initTestRepo(t)
+
+	commit := func(name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0644); err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+		if err := runner.Add(name); err != nil {
+			t.Fatalf("failed to add %s: %v", name, err)
+		}
+		if err := runner.Commit("add "+name, "", ""); err != nil {
+			t.Fatalf("failed to commit %s: %v", name, err)
+		}
+	}
+
+	commit("one.txt")
+	base, _, err := runner.runCommand("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("failed to read HEAD: %v", err)
+	}
+	baseRef := strings.TrimSpace(base)
+
+	commit("two.txt")
+	commit("three.txt")
+
+	t.Run("counts commits ahead", func(t *testing.T) {
+		n, err := runner.CountRange(baseRef, "HEAD")
+		if err != nil {
+			t.Fatalf("CountRange() error = %v", err)
+		}
+		if n != 2 {
+			t.Errorf("CountRange() = %d, want 2", n)
+		}
+	})
+
+	t.Run("identical refs count zero", func(t *testing.T) {
+		n, err := runner.CountRange("HEAD", "HEAD")
+		if err != nil {
+			t.Fatalf("CountRange() error = %v", err)
+		}
+		if n != 0 {
+			t.Errorf("CountRange() = %d, want 0", n)
+		}
+	})
+
+	t.Run("unknown ref is an error", func(t *testing.T) {
+		if _, err := runner.CountRange("HEAD", "no-such-ref"); err == nil {
+			t.Error("CountRange() should fail on an unknown ref")
+		}
+	})
+}
+
+// TestGitRunnerMergeFFOnly proves the fast-forward-only merge advances on a
+// linear history and refuses once the branches diverge.
+func TestGitRunnerMergeFFOnly(t *testing.T) {
+	runner, dir := initTestRepo(t)
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", name, err)
+		}
+	}
+
+	write("base.txt", "base")
+	if err := runner.Add("base.txt"); err != nil {
+		t.Fatalf("failed to add: %v", err)
+	}
+	if err := runner.Commit("base", "", ""); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	mainBranch, err := runner.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch() error = %v", err)
+	}
+
+	// A branch strictly ahead of main: the merge can fast-forward.
+	if _, _, err := runner.runCommand("checkout", "-b", "ahead"); err != nil {
+		t.Skipf("cannot create branch: %v", err)
+	}
+	write("ahead.txt", "ahead")
+	if err := runner.Add("ahead.txt"); err != nil {
+		t.Fatalf("failed to add: %v", err)
+	}
+	if err := runner.Commit("ahead", "", ""); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+	if _, _, err := runner.runCommand("checkout", mainBranch); err != nil {
+		t.Fatalf("failed to check out %s: %v", mainBranch, err)
+	}
+
+	t.Run("fast-forwards a linear history", func(t *testing.T) {
+		if err := runner.MergeFFOnly("ahead"); err != nil {
+			t.Fatalf("MergeFFOnly() error = %v", err)
+		}
+		merges, _, err := runner.runCommand("rev-list", "--count", "--merges", "HEAD")
+		if err != nil {
+			t.Fatalf("failed to count merges: %v", err)
+		}
+		if strings.TrimSpace(merges) != "0" {
+			t.Errorf("fast-forward wrote %s merge commit(s)", strings.TrimSpace(merges))
+		}
+	})
+
+	t.Run("refuses diverged history", func(t *testing.T) {
+		if _, _, err := runner.runCommand("checkout", "-b", "diverged", "HEAD~1"); err != nil {
+			t.Skipf("cannot create branch: %v", err)
+		}
+		write("diverged.txt", "diverged")
+		if err := runner.Add("diverged.txt"); err != nil {
+			t.Fatalf("failed to add: %v", err)
+		}
+		if err := runner.Commit("diverged", "", ""); err != nil {
+			t.Fatalf("failed to commit: %v", err)
+		}
+
+		err := runner.MergeFFOnly(mainBranch)
+		if err == nil {
+			t.Fatal("MergeFFOnly() should refuse to merge diverged history")
+		}
+		if !strings.Contains(err.Error(), "fast-forward") {
+			t.Errorf("error should explain the refusal, got: %v", err)
+		}
+	})
+}
+
+// TestGitRunnerRebase proves the rebase replays local commits and keeps the
+// history linear.
+func TestGitRunnerRebase(t *testing.T) {
+	runner, dir := initTestRepo(t)
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", name, err)
+		}
+	}
+	commit := func(name string) {
+		t.Helper()
+		if err := runner.Add("."); err != nil {
+			t.Fatalf("failed to add: %v", err)
+		}
+		if err := runner.Commit(name, "", ""); err != nil {
+			t.Fatalf("failed to commit %s: %v", name, err)
+		}
+	}
+
+	write("base.txt", "base")
+	commit("base")
+
+	mainBranch, err := runner.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch() error = %v", err)
+	}
+
+	// upstream advances on one path...
+	if _, _, err := runner.runCommand("checkout", "-b", "upstream"); err != nil {
+		t.Skipf("cannot create branch: %v", err)
+	}
+	write("upstream.txt", "upstream")
+	commit("upstream work")
+
+	// ...while a local branch advances on another.
+	if _, _, err := runner.runCommand("checkout", "-b", "local", mainBranch); err != nil {
+		t.Skipf("cannot create branch: %v", err)
+	}
+	write("local.txt", "local")
+	commit("local work")
+
+	if err := runner.Rebase("upstream"); err != nil {
+		t.Fatalf("Rebase() error = %v", err)
+	}
+
+	merges, _, err := runner.runCommand("rev-list", "--count", "--merges", "HEAD")
+	if err != nil {
+		t.Fatalf("failed to count merges: %v", err)
+	}
+	if strings.TrimSpace(merges) != "0" {
+		t.Errorf("rebase wrote %s merge commit(s), want a linear history", strings.TrimSpace(merges))
+	}
+
+	subject, _, err := runner.runCommand("log", "-1", "--format=%s")
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+	if strings.TrimSpace(subject) != "local work" {
+		t.Errorf("HEAD is %q, want the local commit replayed on top", strings.TrimSpace(subject))
+	}
+}
