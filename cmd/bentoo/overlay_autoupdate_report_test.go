@@ -311,3 +311,102 @@ func TestPolicyAndLimitationDoNotSwap(t *testing.T) {
 		}
 	}
 }
+
+// TestDecidingGateFactsMarksTheSelectedDepthGate is the adapter half of
+// S043-R4: internal/common/report cannot import validate, so the depth->gate
+// mapping is resolved here and crosses as a bool.
+func TestDecidingGateFactsMarksTheSelectedDepthGate(t *testing.T) {
+	gates := []validate.GateResult{
+		{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped},
+		{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+		{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+	}
+
+	facts := decidingGateFacts(gates, "configure")
+	if len(facts) != 3 {
+		t.Fatalf("got %d facts, want 3", len(facts))
+	}
+
+	// GateForDepth(configure) is the configure gate: the last one here.
+	marked := 0
+	for i, f := range facts {
+		if f.ProvesSelectedDepth {
+			marked++
+			if i != 2 {
+				t.Errorf("marked fact %d, want the configure gate (2)", i)
+			}
+		}
+	}
+	if marked != 1 {
+		t.Errorf("marked %d facts, want exactly 1", marked)
+	}
+}
+
+// TestDecidingGateFactsMarksNothingWithoutAGate: a depth that does not parse,
+// and one no gate stands for, must mark nothing rather than guess. A guessed
+// mark would hand back proof of a rung nobody climbed.
+func TestDecidingGateFactsMarksNothingWithoutAGate(t *testing.T) {
+	gates := []validate.GateResult{
+		{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
+		{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+	}
+
+	for _, depth := range []string{"", "none", "not-a-depth", "manifest"} {
+		t.Run("depth="+depth, func(t *testing.T) {
+			for _, f := range decidingGateFacts(gates, depth) {
+				if f.ProvesSelectedDepth {
+					t.Errorf("depth %q marked a gate; want none", depth)
+				}
+			}
+		})
+	}
+}
+
+// TestValidationRowGradesAgainstTheSelectedDepth pins WHICH depth the grade is
+// taken from. reportedDepth prefers what the runner REACHED — the right number
+// to print, the wrong one to grade against. A run asked for `compile` that
+// settled at `patches` must not be graded on the shallower rung it settled for.
+func TestValidationRowGradesAgainstTheSelectedDepth(t *testing.T) {
+	entry := validationPlanEntry{
+		Package: "app-misc/hello", From: "1.0", Version: "1.1",
+		Depth: "compile", Reason: "policy asked for compile",
+	}
+	result := validate.EbuildResult{
+		// The runner reached only patches, and one gate declined.
+		Depth: "patches",
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+		},
+	}
+
+	row := validationRowFacts(entry, result)
+	if row.Outcome == report.Proved {
+		t.Errorf("graded against the REACHED depth (patches) instead of the SELECTED one (compile): got %v", row.Outcome)
+	}
+	if row.Outcome != report.Inconclusive {
+		t.Errorf("Outcome = %v, want %v", row.Outcome, report.Inconclusive)
+	}
+}
+
+// TestValidationRowProvesTheSelectedDepth is the same seam from the other side:
+// the depth the policy asked for WAS measured and passed, so the half-measured
+// package is proved rather than reported as not validated.
+func TestValidationRowProvesTheSelectedDepth(t *testing.T) {
+	entry := validationPlanEntry{
+		Package: "dev-libs/icu-compat", From: "78.2", Version: "78.3",
+		Depth: "configure", Reason: "patch bump earns configure",
+	}
+	result := validate.EbuildResult{
+		Depth: "configure",
+		Gates: []validate.GateResult{
+			{Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped},
+			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
+			{Gate: validate.GateConfigure, Outcome: validate.OutcomePass},
+		},
+	}
+
+	if row := validationRowFacts(entry, result); row.Outcome != report.Proved {
+		t.Errorf("Outcome = %v, want %v — configure was asked for, measured and passed", row.Outcome, report.Proved)
+	}
+}
