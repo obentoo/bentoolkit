@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-08-25
+
 ### Fixed
 - **A bump whose selected depth passed is no longer reported as not
   validated.** `dev-libs/icu-compat` ran the `configure` gate — the depth the
@@ -3916,7 +3918,21 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/obentoo/bentoolkit/compare/v0.28.0...v0.28.1
+[0.28.0]: https://github.com/obentoo/bentoolkit/compare/v0.27.0...v0.28.0
+[0.27.0]: https://github.com/obentoo/bentoolkit/compare/v0.26.1...v0.27.0
+[0.26.1]: https://github.com/obentoo/bentoolkit/compare/v0.26.0...v0.26.1
+[0.26.0]: https://github.com/obentoo/bentoolkit/compare/v0.25.0...v0.26.0
+[0.25.0]: https://github.com/obentoo/bentoolkit/compare/v0.24.0...v0.25.0
+[0.24.0]: https://github.com/obentoo/bentoolkit/compare/v0.23.0...v0.24.0
+[0.23.0]: https://github.com/obentoo/bentoolkit/compare/v0.22.0...v0.23.0
+[0.22.0]: https://github.com/obentoo/bentoolkit/compare/v0.21.0...v0.22.0
+[0.21.0]: https://github.com/obentoo/bentoolkit/compare/v0.20.0...v0.21.0
+[0.20.0]: https://github.com/obentoo/bentoolkit/compare/v0.19.0...v0.20.0
+[0.19.0]: https://github.com/obentoo/bentoolkit/compare/v0.18.1...v0.19.0
+[0.18.1]: https://github.com/obentoo/bentoolkit/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/obentoo/bentoolkit/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/obentoo/bentoolkit/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/obentoo/bentoolkit/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/obentoo/bentoolkit/compare/v0.15.3...v0.16.0
@@ -3927,11 +3943,17 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 [0.14.0]: https://github.com/obentoo/bentoolkit/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/obentoo/bentoolkit/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/obentoo/bentoolkit/compare/v0.12.0...v0.13.0
-[0.12.0]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...v0.12.0
+[0.12.0]: https://github.com/obentoo/bentoolkit/compare/v0.11.1...v0.12.0
+[0.11.1]: https://github.com/obentoo/bentoolkit/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/obentoo/bentoolkit/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/obentoo/bentoolkit/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/obentoo/bentoolkit/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/obentoo/bentoolkit/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/obentoo/bentoolkit/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/obentoo/bentoolkit/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/obentoo/bentoolkit/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/obentoo/bentoolkit/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/obentoo/bentoolkit/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/obentoo/bentoolkit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/obentoo/bentoolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/obentoo/bentoolkit/compare/v0.3.21...v0.4.0
@@ -3939,6 +3961,23 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 [0.3.20]: https://github.com/obentoo/bentoolkit/compare/v0.3.19...v0.3.20
 [0.3.19]: https://github.com/obentoo/bentoolkit/compare/v0.3.18...v0.3.19
 [0.3.18]: https://github.com/obentoo/bentoolkit/compare/v0.3.17...v0.3.18
+[0.3.17]: https://github.com/obentoo/bentoolkit/compare/v0.3.16...v0.3.17
+[0.3.16]: https://github.com/obentoo/bentoolkit/compare/v0.3.15...v0.3.16
+[0.3.15]: https://github.com/obentoo/bentoolkit/compare/v0.3.14...v0.3.15
+[0.3.14]: https://github.com/obentoo/bentoolkit/compare/v0.3.13...v0.3.14
+[0.3.13]: https://github.com/obentoo/bentoolkit/compare/v0.3.12...v0.3.13
+[0.3.12]: https://github.com/obentoo/bentoolkit/compare/v0.3.11...v0.3.12
+[0.3.11]: https://github.com/obentoo/bentoolkit/compare/v0.3.10...v0.3.11
+[0.3.10]: https://github.com/obentoo/bentoolkit/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/obentoo/bentoolkit/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/obentoo/bentoolkit/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/obentoo/bentoolkit/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/obentoo/bentoolkit/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/obentoo/bentoolkit/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/obentoo/bentoolkit/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/obentoo/bentoolkit/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/obentoo/bentoolkit/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/obentoo/bentoolkit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/obentoo/bentoolkit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/obentoo/bentoolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/obentoo/bentoolkit/compare/v0.2.0...v0.2.1
