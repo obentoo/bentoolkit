@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-24
+
 ### Security
 - **The dependency bumps in this release close two `golang.org/x/mod`
   advisories.** v0.38.0 carries CVE-2026-56864 and CVE-2026-56865: a malicious
