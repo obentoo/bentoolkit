@@ -213,7 +213,16 @@ func planEntryFacts(entry validationPlanEntry) report.PlanEntry {
 // which is the second derivation R1.3 forbids and which would disagree with the
 // model the day either side changes.
 func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult) report.ValidationRow {
-	outcome := report.Classify(entry.Skipped, decidingGateFacts(result.Gates))
+	// entry.Depth, not reportedDepth: the question is whether the depth the
+	// POLICY selected was measured. reportedDepth prefers what the runner
+	// REACHED, which is the right number to print and the wrong one to grade
+	// against — a run that reached less than was asked for must not be graded
+	// on the shallower rung it settled for.
+	selectedDepth := entry.Depth
+	if selectedDepth == "" {
+		selectedDepth = result.Depth
+	}
+	outcome := report.Classify(entry.Skipped, decidingGateFacts(result.Gates, selectedDepth))
 	reason := rowReason(outcome, result, entry)
 
 	return report.ValidationRow{
@@ -258,8 +267,23 @@ func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult)
 // reworded; a rewording that moved a package from one column to another is
 // exactly what R5.4 forbids. skipReason still reads those sentences, but only
 // to produce the human line — never to decide a column.
-func decidingGateFacts(gates []validate.GateResult) []report.GateFact {
+func decidingGateFacts(gates []validate.GateResult, selectedDepth string) []report.GateFact {
 	facts := make([]report.GateFact, 0, len(gates))
+
+	// The depth->gate mapping is resolved HERE and travels as a bool, because
+	// internal/common/report must not import internal/autoupdate (D2). This is
+	// the same crossing Cause makes as a plain string.
+	//
+	// A depth that does not parse, or one no gate stands for, marks nothing:
+	// selectedGate stays empty and no fact matches it, so the result falls
+	// through to Inconclusive instead of guessing a gate whose pass would read
+	// as proof of a rung nobody climbed.
+	selectedGate := ""
+	if depth, err := validate.ParseDepth(selectedDepth); err == nil {
+		if gate, ok := validate.GateForDepth(depth); ok {
+			selectedGate = gate
+		}
+	}
 
 	for _, gate := range gates {
 		if gate.Gate == validate.GateQA {
@@ -267,10 +291,11 @@ func decidingGateFacts(gates []validate.GateResult) []report.GateFact {
 		}
 
 		facts = append(facts, report.GateFact{
-			Deciding: gate.Outcome != validate.OutcomeSkipped,
-			Passed:   gate.Outcome == validate.OutcomePass,
-			Failed:   gate.Outcome == validate.OutcomeFailed,
-			Cause:    string(gate.Declined),
+			Deciding:            gate.Outcome != validate.OutcomeSkipped,
+			Passed:              gate.Outcome == validate.OutcomePass,
+			Failed:              gate.Outcome == validate.OutcomeFailed,
+			Cause:               string(gate.Declined),
+			ProvesSelectedDepth: selectedGate != "" && gate.Gate == selectedGate,
 		})
 	}
 

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A bump whose selected depth passed is no longer reported as not
+  validated.** `dev-libs/icu-compat` ran the `configure` gate — the depth the
+  policy asked for — passed it, and passed `patches` too. The summary printed
+  `not validated (no distfile named by the Manifest is present …)`: the operator
+  was told about a missing distfile and never told the package had configured.
+  `report.Classify` proved a package only when EVERY gate passed, so one gate
+  declining collapsed the whole result.
+
+  It now has a second Proved condition, read strictly AFTER the two that
+  outrank it: an excluded package is still Skipped, and a failing gate still
+  Errors. Only the half-measured case reaches the new line, where a pass on the
+  gate that stands for the SELECTED depth proves the bump at that depth. The
+  depth is taken from the plan, not from what the runner reached — a run asked
+  for `compile` that settled at `patches` must not be graded on the rung it
+  settled for.
+
+  Measured over this host's 137 staged records: 30 packages move from
+  `inconclusive` to `proved`, and nothing else moves. The gates declining in
+  those 30 were `review`, which stands for no rung at all, and `options`, always
+  BELOW the depth that passed — not one had a gate deeper than the selected
+  depth declining, so no result claims a rung the run did not climb. The ladder
+  being ordered is what makes this sound: a bump that configured necessarily got
+  through patches.
+
+  The depth-to-gate mapping is resolved in the adapter and crosses as a bool
+  (`GateFact.ProvesSelectedDepth`), because a package under `internal/common`
+  must not import `internal/autoupdate` — the same crossing `Cause` already
+  makes as a plain string. This is what `validate.GateForDepth`, exported in
+  0.28.0 with no caller, was waiting for.
+
 ## [0.28.0] - 2026-08-24
 
 ### Security

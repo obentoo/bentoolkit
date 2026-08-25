@@ -36,15 +36,29 @@ type GateFact struct {
 	// Classify does NOT branch on it. It travels so the output can NAME the
 	// cause (R5.6), and so the rule has it in hand on the day it tightens.
 	Cause string
+	// ProvesSelectedDepth marks the ONE gate whose pass answers the depth the
+	// policy selected for this bump. At most one fact in a slice carries it.
+	//
+	// It is a primitive fact for the same reason Cause is a plain string: the
+	// depth->gate mapping lives in internal/autoupdate/validate (GateForDepth),
+	// which a package under internal/common must not import (D2). The adapter
+	// resolves it and marks the fact; this package only reads the mark.
+	//
+	// Nothing carries it when the plan's depth cannot be parsed, or when no
+	// gate stands for that depth — depth none, today. Both cases fall through
+	// to Inconclusive rather than guessing a gate.
+	ProvesSelectedDepth bool
 }
 
 // Classify decides which of the tally's four columns one planned package lands
 // in (R5.2, R5.3, R5.4, R5.6). It is D2's four-line rule, in order:
 //
-//	policy said no      →  Skipped        (read FIRST, before any gate)
-//	gates all declined  →  Inconclusive
-//	no cause recorded   →  Inconclusive   (D3 — see below, and do not "fix" it)
-//	otherwise           →  Proved / Errored, exactly as today (R5.7)
+//	policy said no        →  Skipped        (read FIRST, before any gate)
+//	any deciding failed   →  Errored
+//	every gate passed     →  Proved
+//	selected depth passed →  Proved         (S043-R4, read only after the above)
+//	gates all declined    →  Inconclusive
+//	no cause recorded     →  Inconclusive   (D3 — see below, and do not "fix" it)
 //
 // Every input is a typed fact. Nothing here matches text in a human-readable
 // reason string, which is R5.4 stated as code: a reworded reason must never
@@ -93,12 +107,17 @@ type GateFact struct {
 // participating in the verdict, nothing established anything, so the empty gate
 // list and the all-declined list both fall through to Inconclusive.
 //
-// The Proved condition mirrors validate.EbuildResult.WorstOutcome exactly —
-// every gate in the list passed, and there was at least one — which is what
-// keeps R5.7: no package becomes proved or errored that was not proved or
-// errored before. A run where one gate passed and another declined is therefore
-// Inconclusive, because WorstOutcome answers SKIPPED for it today; that case is
-// half-measured, and half-measured is not proved.
+// The first Proved condition mirrors validate.EbuildResult.WorstOutcome exactly
+// — every gate in the list passed, and there was at least one.
+//
+// The SECOND Proved condition is S043-R4 and is newer: a package whose selected
+// depth was measured and passed is proved AT THAT DEPTH, even with another gate
+// declining. WorstOutcome answers SKIPPED for that case, so this is the one
+// place the rule deliberately says more than WorstOutcome did — it is read only
+// after policy and failure, and only for a gate the caller marked as standing
+// for the selected depth. R5.7's guarantee is unchanged where it matters: a
+// failure still returns Errored above, and no package WorstOutcome called
+// errored becomes proved here.
 //
 // PRECONDITION FOR THE CALLER: pass only the gates that DECIDE. WorstOutcome
 // drops the pkgcheck gate before counting (D8) and the adapter must drop it
@@ -112,7 +131,7 @@ func Classify(policySkipped bool, gates []GateFact) Outcome {
 		return Skipped
 	}
 
-	passing := 0
+	passing, selectedDepthProved := 0, false
 	for _, gate := range gates {
 		if !gate.Deciding {
 			// The gate declined. It said nothing about this bump, so it
@@ -125,6 +144,9 @@ func Classify(policySkipped bool, gates []GateFact) Outcome {
 		}
 		if gate.Passed {
 			passing++
+			if gate.ProvesSelectedDepth {
+				selectedDepthProved = true
+			}
 		}
 		// A deciding gate that neither passed nor failed answered nothing.
 		// It counts as no pass and the result falls through below: silence
@@ -132,11 +154,35 @@ func Classify(policySkipped bool, gates []GateFact) Outcome {
 	}
 
 	// EVERY gate passed, and there was one: WorstOutcome's own condition, so
-	// no package becomes proved that was not proved before (R5.7). One gate
-	// declining is enough to make the result half-measured, and half-measured
-	// falls through to Inconclusive.
+	// no package becomes proved that was not proved before (R5.7).
 	if passing > 0 && passing == len(gates) {
 		return Proved
 	}
+
+	// THE GATE THE POLICY ASKED FOR PASSED, and none failed (S043-R4).
+	//
+	// This is read after the two lines above and never before them, and the
+	// order is the rule: a package the operator excluded stays Skipped, and a
+	// failure still outranks any pass. Only the half-measured case reaches
+	// here — the one that used to fall to Inconclusive wholesale.
+	//
+	// Why a declining gate no longer collapses this result. The ladder is
+	// ordered, so a deeper gate's pass IMPLIES the rungs below it: a bump that
+	// configured necessarily got through patches. Measured over this host's 137
+	// staged records, the gates declining in the affected packages were `review`
+	// — which stands for no rung at all — and `options`, always BELOW the depth
+	// that passed. Not one case had a gate deeper than the selected depth
+	// declining, so nothing here reports a rung the run did not climb.
+	//
+	// R5.7 is not weakened by this, it is met at a different point: no package
+	// becomes proved that WorstOutcome called errored, because a failure
+	// returned above. What changes is a package WorstOutcome called SKIPPED
+	// whose selected depth was in fact measured and passed — the over-report
+	// this rule removes, in the direction of saying LESS about what was not
+	// measured and MORE about what was.
+	if selectedDepthProved {
+		return Proved
+	}
+
 	return Inconclusive
 }

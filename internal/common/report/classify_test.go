@@ -146,3 +146,86 @@ func TestClassifyNeverProvesWithoutADecidingGate(t *testing.T) {
 		}
 	}
 }
+
+// provingGate is the gate that stands for the depth the policy selected.
+func provingGate() GateFact {
+	return GateFact{Deciding: true, Passed: true, ProvesSelectedDepth: true}
+}
+
+// TestClassifySelectedDepthProves covers S043-R4: a half-measured package whose
+// SELECTED depth was measured and passed is proved at that depth, rather than
+// falling to Inconclusive because some other gate declined.
+//
+// The case this removes, from a real run: `dev-libs/icu-compat` passed the
+// `configure` gate — the depth the policy asked for — and passed `patches` too,
+// and the summary printed `not validated (no distfile named by the Manifest is
+// present …)`. The operator was told about a missing distfile and never told the
+// package had configured.
+func TestClassifySelectedDepthProves(t *testing.T) {
+	cases := []struct {
+		name          string
+		policySkipped bool
+		gates         []GateFact
+		want          Outcome
+	}{
+		{
+			name:  "selected depth passed, another gate declined",
+			gates: []GateFact{declinedGate("candidate"), passingGate(), provingGate()},
+			want:  Proved,
+		},
+		{
+			name:  "selected depth passed and it is the only gate that did",
+			gates: []GateFact{declinedGate("host"), declinedGate("candidate"), provingGate()},
+			want:  Proved,
+		},
+
+		// The ordering guards. Each of these would have been broken by the
+		// original R4, which decided before consulting policy.
+		{
+			name:          "POLICY OUTRANKS IT: excluded package stays skipped",
+			policySkipped: true,
+			gates:         []GateFact{declinedGate("candidate"), provingGate()},
+			want:          Skipped,
+		},
+		{
+			name:  "FAILURE OUTRANKS IT: a failing gate still errors",
+			gates: []GateFact{provingGate(), failingGate()},
+			want:  Errored,
+		},
+
+		// No mark: the depth did not parse, or no gate stands for it.
+		{
+			name:  "nothing marked, and a gate declined",
+			gates: []GateFact{declinedGate("candidate"), passingGate()},
+			want:  Inconclusive,
+		},
+		{
+			name:  "the marked gate did not pass",
+			gates: []GateFact{declinedGate("candidate"), {Deciding: true, ProvesSelectedDepth: true}},
+			want:  Inconclusive,
+		},
+		{
+			name:  "the marked gate declined",
+			gates: []GateFact{passingGate(), {Deciding: false, ProvesSelectedDepth: true}},
+			want:  Inconclusive,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Classify(tc.policySkipped, tc.gates); got != tc.want {
+				t.Errorf("Classify() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClassifyEveryGatePassedStillProvesWithoutTheMark keeps the older Proved
+// condition reachable on its own. A run where every gate passed is proved
+// whether or not anything was marked — the mark widens the rule, it does not
+// become a precondition of it.
+func TestClassifyEveryGatePassedStillProvesWithoutTheMark(t *testing.T) {
+	if got := Classify(false, []GateFact{passingGate(), passingGate()}); got != Proved {
+		t.Errorf("Classify() = %v, want %v", got, Proved)
+	}
+}
