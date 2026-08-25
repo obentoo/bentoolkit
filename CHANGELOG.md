@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **The dependency bumps in this release close two `golang.org/x/mod`
+  advisories.** v0.38.0 carries CVE-2026-56864 and CVE-2026-56865: a malicious
+  GOSUMDB or GOPROXY able to serve forged module content. Neither reached the
+  shipped binary — `x/mod` enters this module only through the
+  `tool golang.org/x/vuln/cmd/govulncheck` directive, and `go list -deps ./...`
+  compiles none of its packages. What they did reach is the toolchain that
+  verifies our own downloads, which is reason enough to move: `x/vuln` v1.6.0 ->
+  v1.7.0, pulling `x/mod` v0.40.0.
+
+  Carried along by that upgrade: `x/net` v0.57.0 -> v0.58.0, `x/text` v0.40.0 ->
+  v0.41.0, `x/tools` v0.48.0 -> v0.49.0, and `x/telemetry` to its 2026-08-11
+  snapshot. Direct: `charmbracelet/x/ansi` v0.11.7 -> v0.11.8 and
+  `xo/terminfo` to v1.0.0.
+
+  The bumps themselves arrived as dependency PRs (#127-#130) and were labelled
+  `no-changelog`, which is the right call for a routine bump and the wrong one
+  for these: the versions are in the module graph either way, but WHY they moved
+  was recorded nowhere. This entry is that record. Everything published inside
+  the last seven days was deliberately left where it was — a release too fresh to
+  have been looked at is the one a compromised publisher counts on.
+
 ### Added
 - **One report, three ways to read it — `overlay autoupdate --check` gains a view
   model, three renderers and two exports.** The check printed 348 lines to
