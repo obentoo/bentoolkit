@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **`playwright-go` now enters under the module path it actually publishes,
+  `github.com/mxschmitt/playwright-go`, at v0.6201.1.** The pin on v0.6000.0
+  was read as an upstream defect and was not one. Upstream transferred the
+  repository out of the playwright-community org back to mxschmitt in June
+  2026 (their PR #619, "chore: migrate from playwright-community org to
+  mxschmitt"), and every release since declares the new path. `go get` under
+  the old name fails at module resolution:
+
+      module declares its path as: github.com/mxschmitt/playwright-go
+              but was required as: github.com/playwright-community/playwright-go
+
+  That is a module move, not a broken publish, and the fix is to follow it.
+  Three releases had accumulated behind the pin — v0.6100.0 (2026-06-26),
+  v0.6201.0 (08-12) and v0.6201.1 (08-17) — and the ignore entry meant to
+  hold the line named only v0.6100.0, so the other two were never blocked,
+  merely unresolvable.
+
+  The import moves in `script_evaluator_playwright.go` and its test; both sit
+  behind the `playwright` build tag, so nothing in the default binary is
+  touched. The move drops `go-jose/v3` from the module graph entirely.
+  `go.mongodb.org/mongo-driver`, deprecated in favour of its v2, still arrives
+  through `deckarep/golang-set/v2` and is unaffected by this move.
+
 - **Two dependency bumps, neither carrying an advisory.**
   `chromedp/cdproto` to its 2026-08-04 snapshot and `mattn/go-runewidth`
   v0.0.27 -> v0.0.28. They were the only updates outside the 7-day release
@@ -21,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly and the marker had gone stale. Nothing linked into the binary
   changes, and Dependabot watched it either way, because this repo sets
   `dependency-type: "all"` for exactly that reason.
+
+### Removed
+- **The `playwright-go` ignore entry in `dependabot.yml`.** It existed to hold
+  the pin described above, and the pin is gone. Updates to the module now
+  arrive on the same footing as every other dependency.
 
 ## [0.28.1] - 2026-08-25
 

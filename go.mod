@@ -19,7 +19,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/leanovate/gopter v0.2.11
 	github.com/muesli/termenv v0.16.0
-	github.com/playwright-community/playwright-go v0.6000.0
+	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -39,7 +39,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
-	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
