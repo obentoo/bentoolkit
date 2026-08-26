@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Two dependency bumps, neither carrying an advisory.**
+  `chromedp/cdproto` to its 2026-08-04 snapshot and `mattn/go-runewidth`
+  v0.0.27 -> v0.0.28. They were the only updates outside the 7-day release
+  quarantine when the chain was audited; the four others available
+  (`charmbracelet/x/exp/{teatest,golden}`, `x/telemetry`,
+  `go-json-experiment/json`) were published inside that window and are left
+  for Dependabot to pick up once they age out.
+
+  `go mod tidy` also moved `charmbracelet/x/term` out of the indirect block.
+  It was never indirect — `internal/common/report/render/width.go` imports it
+  directly and the marker had gone stale. Nothing linked into the binary
+  changes, and Dependabot watched it either way, because this repo sets
+  `dependency-type: "all"` for exactly that reason.
+
 ## [0.28.1] - 2026-08-25
 
 ### Fixed
