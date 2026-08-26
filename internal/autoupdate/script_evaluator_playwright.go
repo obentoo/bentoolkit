@@ -52,7 +52,10 @@ func (e *playwrightEvaluator) Evaluate(ctx context.Context, url, script string, 
 	if err != nil {
 		return "", fmt.Errorf("could not open page: %w", err)
 	}
-	defer page.Close()
+	// Close returns an error the caller cannot act on — Evaluate's result is
+	// already computed by the time the tab is torn down — but discarding it has
+	// to be deliberate rather than implicit.
+	defer func() { _ = page.Close() }()
 
 	if e.opTimeout > 0 {
 		page.SetDefaultTimeout(float64(e.opTimeout.Milliseconds()))

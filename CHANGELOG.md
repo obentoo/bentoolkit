@@ -50,6 +50,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pin described above, and the pin is gone. Updates to the module now
   arrive on the same footing as every other dependency.
 
+### Fixed
+- **CI lints the two tagged script evaluators, which it never did before.**
+  `golangci-lint run ./...` skips a file behind a tag it was not given, exactly
+  as `go build` does — the same blind spot the tagged build and govulncheck
+  steps were added for, left open in the one job whose purpose is finding this
+  class of problem. `go vet -tags` in the build job is no substitute: it
+  implements neither errcheck nor contextcheck. The job now lints once per tag
+  (default, `chromedp`, `playwright`), mirroring how govulncheck already runs.
+
+  It had been hiding a real finding: `defer page.Close()` in
+  `script_evaluator_playwright.go` discarded an error return. The discard is
+  explicit now — nothing can be done with that error, because Evaluate's result
+  is computed before the tab is torn down, but that is a decision worth stating
+  rather than leaving implicit.
+
+  The `chromedp` side reported contextcheck on `chromedp.Run(tabCtx, ...)`.
+  That one is a false positive and is suppressed with its reason. A tab context
+  cannot descend from the caller's `ctx` — it has to descend from the browser
+  context, or chromedp has no browser to attach it to — and the caller's ctx
+  already reaches it through the `context.AfterFunc` bridge that cancels the
+  tab when ctx ends. The linter does not model that bridge.
+
 ## [0.28.1] - 2026-08-25
 
 ### Fixed
