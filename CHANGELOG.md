@@ -45,6 +45,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes, and Dependabot watched it either way, because this repo sets
   `dependency-type: "all"` for exactly that reason.
 
+- **`charmbracelet/x/exp/teatest` and `.../golden` move to their 2026-08-23
+  snapshot, and the TUI golden file is regenerated for it.** `teatest` itself
+  has no code change across the two versions — `golden` does, and it is the one
+  that matters. The old release ran every byte through
+  `bytes.ReplaceAll(in, "\r\n", "\n")` before writing or comparing a golden
+  file, on every platform. The new one only normalises line breaks when
+  `runtime.GOOS == "windows"`.
+
+  So the carriage returns were always in what bubbletea rendered; `golden` was
+  quietly deleting them on Linux and now records what the program actually
+  emits. That is the whole diff in `testdata/TestModelGoldenFrame.golden` —
+  three lines gain a trailing `\r` and nothing else changes, which also makes
+  the file self-consistent, since its last line already carried one.
+
+  Doing this by hand is the only route available. Dependabot has been failing
+  on exactly these two since at least 2026-07-20 — nine of the last ten
+  `go_modules` runs — and the failure is quiet: it processes every other
+  dependency, opens their PRs, and only the job's exit status records that two
+  were dropped. Neither module has ever carried a semver tag, so
+  `@v/list` answers empty for `x/exp/teatest`, empty again for `x/exp`, and
+  Dependabot climbs to `github.com/charmbracelet/x`, whose sole tag `v0.1.0`
+  dates from 2023 and contains a `go.work`, a LICENSE and a README:
+
+      go: module github.com/charmbracelet/x@v0.1.0 found, but does not
+          contain package github.com/charmbracelet/x/exp/teatest
+
+  Nothing in this repository can fix that resolution, and the two modules are
+  test-only — teatest drives the TUI test, golden arrives through it.
+
 ### Removed
 - **The `playwright-go` ignore entry in `dependabot.yml`.** It existed to hold
   the pin described above, and the pin is gone. Updates to the module now
