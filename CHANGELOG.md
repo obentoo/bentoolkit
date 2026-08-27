@@ -46,12 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dependency-type: "all"` for exactly that reason.
 
 - **`charmbracelet/x/exp/teatest` and `.../golden` move to their 2026-08-23
-  snapshot, and the TUI golden file is regenerated for it.** teatest now emits
-  a carriage return at the end of every line it renders, where it previously
-  emitted none. That is the whole diff in
-  `testdata/TestModelGoldenFrame.golden` — three lines gain a trailing `\r`
-  and nothing else changes, which also makes the file self-consistent, since
-  its last line already carried one.
+  snapshot, and the TUI golden file is regenerated for it.** `teatest` itself
+  has no code change across the two versions — `golden` does, and it is the one
+  that matters. The old release ran every byte through
+  `bytes.ReplaceAll(in, "\r\n", "\n")` before writing or comparing a golden
+  file, on every platform. The new one only normalises line breaks when
+  `runtime.GOOS == "windows"`.
+
+  So the carriage returns were always in what bubbletea rendered; `golden` was
+  quietly deleting them on Linux and now records what the program actually
+  emits. That is the whole diff in `testdata/TestModelGoldenFrame.golden` —
+  three lines gain a trailing `\r` and nothing else changes, which also makes
+  the file self-consistent, since its last line already carried one.
 
   Doing this by hand is the only route available. Dependabot has been failing
   on exactly these two since at least 2026-07-20 — nine of the last ten
