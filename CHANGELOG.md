@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-08-27
+
 ### Changed
 - **`playwright-go` now enters under the module path it actually publishes,
   `github.com/mxschmitt/playwright-go`, at v0.6201.1.** The pin on v0.6000.0
@@ -4059,7 +4061,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.28.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.28.2...HEAD
+[0.28.2]: https://github.com/obentoo/bentoolkit/compare/v0.28.1...v0.28.2
 [0.28.1]: https://github.com/obentoo/bentoolkit/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/obentoo/bentoolkit/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/obentoo/bentoolkit/compare/v0.26.1...v0.27.0
