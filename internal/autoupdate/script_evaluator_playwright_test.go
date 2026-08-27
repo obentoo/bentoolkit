@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 )
 
 // newIntegrationEvaluator provisions Chromium (a no-op when it is already

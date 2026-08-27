@@ -909,6 +909,13 @@ func TestRun_SuppliedManifestIsMaterializedInsideTheStagedTree(t *testing.T) {
 // staged path — rather than run against a tree whose Manifest silently never
 // arrived.
 func TestRun_AManifestWriteFailureIsAReportedSkipNamingTheStagedPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skipping: running as root (euid 0), where the seal is applied but does not bite — " +
+			"mode 0555 denies nothing to uid 0. The Manifest write would succeed, the run would " +
+			"report no skip, and the failure would be about privilege rather than about R2.5. " +
+			"CI runs unprivileged.")
+	}
+
 	overlay, distdir := seamDepthFixture(t)
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
 

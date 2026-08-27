@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`playwright-go` now enters under the module path it actually publishes,
+  `github.com/mxschmitt/playwright-go`, at v0.6201.1.** The pin on v0.6000.0
+  was read as an upstream defect and was not one. Upstream transferred the
+  repository out of the playwright-community org back to mxschmitt in June
+  2026 (their PR #619, "chore: migrate from playwright-community org to
+  mxschmitt"), and every release since declares the new path. `go get` under
+  the old name fails at module resolution:
+
+      module declares its path as: github.com/mxschmitt/playwright-go
+              but was required as: github.com/playwright-community/playwright-go
+
+  That is a module move, not a broken publish, and the fix is to follow it.
+  Three releases had accumulated behind the pin — v0.6100.0 (2026-06-26),
+  v0.6201.0 (08-12) and v0.6201.1 (08-17) — and the ignore entry meant to
+  hold the line named only v0.6100.0, so the other two were never blocked,
+  merely unresolvable.
+
+  The import moves in `script_evaluator_playwright.go` and its test; both sit
+  behind the `playwright` build tag, so nothing in the default binary is
+  touched. The move drops `go-jose/v3` from the module graph entirely.
+  `go.mongodb.org/mongo-driver`, deprecated in favour of its v2, still arrives
+  through `deckarep/golang-set/v2` and is unaffected by this move.
+
+- **Two dependency bumps, neither carrying an advisory.**
+  `chromedp/cdproto` to its 2026-08-04 snapshot and `mattn/go-runewidth`
+  v0.0.27 -> v0.0.28. They were the only updates outside the 7-day release
+  quarantine when the chain was audited; the four others available
+  (`charmbracelet/x/exp/{teatest,golden}`, `x/telemetry`,
+  `go-json-experiment/json`) were published inside that window and are left
+  for Dependabot to pick up once they age out.
+
+  `go mod tidy` also moved `charmbracelet/x/term` out of the indirect block.
+  It was never indirect — `internal/common/report/render/width.go` imports it
+  directly and the marker had gone stale. Nothing linked into the binary
+  changes, and Dependabot watched it either way, because this repo sets
+  `dependency-type: "all"` for exactly that reason.
+
+### Removed
+- **The `playwright-go` ignore entry in `dependabot.yml`.** It existed to hold
+  the pin described above, and the pin is gone. Updates to the module now
+  arrive on the same footing as every other dependency.
+
+### Fixed
+- **CI lints the two tagged script evaluators, which it never did before.**
+  `golangci-lint run ./...` skips a file behind a tag it was not given, exactly
+  as `go build` does — the same blind spot the tagged build and govulncheck
+  steps were added for, left open in the one job whose purpose is finding this
+  class of problem. `go vet -tags` in the build job is no substitute: it
+  implements neither errcheck nor contextcheck. The job now lints once per tag
+  (default, `chromedp`, `playwright`), mirroring how govulncheck already runs.
+
+  It had been hiding a real finding: `defer page.Close()` in
+  `script_evaluator_playwright.go` discarded an error return. The discard is
+  explicit now — nothing can be done with that error, because Evaluate's result
+  is computed before the tab is torn down, but that is a decision worth stating
+  rather than leaving implicit.
+
+  The `chromedp` side reported contextcheck on `chromedp.Run(tabCtx, ...)`.
+  That one is a false positive and is suppressed with its reason. A tab context
+  cannot descend from the caller's `ctx` — it has to descend from the browser
+  context, or chromedp has no browser to attach it to — and the caller's ctx
+  already reaches it through the `context.AfterFunc` bridge that cancels the
+  tab when ctx ends. The linter does not model that bridge.
+
 ## [0.28.1] - 2026-08-25
 
 ### Fixed

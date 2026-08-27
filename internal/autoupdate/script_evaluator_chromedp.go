@@ -98,7 +98,11 @@ func (e *chromedpEvaluator) Evaluate(ctx context.Context, url, script string, he
 			}),
 	)
 
-	if err := chromedp.Run(tabCtx, actions...); err != nil {
+	// contextcheck flags tabCtx as not derived from ctx. It cannot be: a tab has
+	// to descend from the browser context or chromedp has no browser to attach
+	// it to. The caller's ctx reaches it through the AfterFunc bridge above,
+	// which cancels this tab when ctx ends — the linter does not model that.
+	if err := chromedp.Run(tabCtx, actions...); err != nil { //nolint:contextcheck // bridged via context.AfterFunc above
 		return "", fmt.Errorf("chromedp evaluation of %q failed: %w", url, err)
 	}
 	return res, nil
