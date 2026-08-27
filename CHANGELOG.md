@@ -80,6 +80,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arrive on the same footing as every other dependency.
 
 ### Fixed
+- **Dependabot stops failing every week on two dependencies it cannot
+  resolve.** `charmbracelet/x/exp/teatest` and `.../golden` are now ignored,
+  with the reason written where the next person will look for it. The job has
+  been red since at least 2026-07-20 — nine of ten `go_modules` runs — without
+  anyone noticing, because it processes every other dependency and opens their
+  PRs; only the exit status recorded that two were dropped.
+
+  Neither module has ever carried a semver tag, so `@v/list` answers empty and
+  Dependabot walks up the import path until something answers: past
+  `x/exp/teatest`, past `x/exp`, up to `github.com/charmbracelet/x`, whose sole
+  tag is `v0.1.0` from 2023 and whose contents are a `go.work`, a LICENSE and a
+  README. Asked for a package that cannot be in there, it gives up with
+  `dependency_file_not_resolvable`.
+
+  Ignored outright rather than by version, because `v0.1.0` sorts above every
+  `v0.0.0-` pseudo-version, so Dependabot sees an upgrade on offer however
+  current the pin already is — updating them by hand, as this release did, does
+  not quiet it. Both are test-only and stay updatable by hand; the entries come
+  out once upstream tags the `exp/` modules properly.
+
 - **A transient module-proxy error no longer fails CI.** Installing the tools
   each job needs — golangci-lint, gitleaks — meant resolving their whole
   dependency trees through `proxy.golang.org` and `sum.golang.org` on every

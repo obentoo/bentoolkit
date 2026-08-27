@@ -24,6 +24,35 @@ updates:
       golang-x:
         patterns:
           - "golang.org/x/*"
+    ignore:
+      # Dependabot cannot resolve either of these, and has failed on them every
+      # week since at least 2026-07-20 — quietly, because it processes every
+      # other dependency and opens their PRs, so only the job's exit status
+      # records that two were dropped.
+      #
+      # Neither module has ever carried a semver tag; both are consumed as
+      # pseudo-versions. `@v/list` therefore answers empty and Dependabot walks
+      # up the import path looking for one that is not:
+      #
+      #   github.com/charmbracelet/x/exp/teatest  -> empty
+      #   github.com/charmbracelet/x/exp          -> empty
+      #   github.com/charmbracelet/x              -> v0.1.0
+      #
+      # It stops at the parent, whose only tag is v0.1.0 from 2023 and whose
+      # contents are a go.work, a LICENSE and a README. Asked for a package
+      # that cannot be there, it reports dependency_file_not_resolvable.
+      #
+      # Ignoring outright rather than naming a version, because v0.1.0 sorts
+      # ABOVE every pseudo-version (semver.Compare says so), so Dependabot sees
+      # an upgrade on offer no matter how current the pin already is. Updating
+      # them by hand — as 2026-08-27 did — does not quiet it either.
+      #
+      # Both are test-only: teatest drives the TUI test, golden arrives through
+      # it, neither is linked into the binary. Bump them by hand and remember
+      # to regenerate testdata/TestModelGoldenFrame.golden. Drop these entries
+      # once upstream publishes real semver tags for the exp/ modules.
+      - dependency-name: "github.com/charmbracelet/x/exp/teatest"
+      - dependency-name: "github.com/charmbracelet/x/exp/golden"
     labels:
       - "dependencies"
       - "go"
