@@ -8,30 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **`charmbracelet/x/exp/teatest` and `.../golden` move to their 2026-08-23
-  snapshot, and the TUI golden file is regenerated for it.** teatest now emits
-  a carriage return at the end of every line it renders, where it previously
-  emitted none. That is the whole diff in
-  `testdata/TestModelGoldenFrame.golden` — three lines gain a trailing `\r`
-  and nothing else changes, which also makes the file self-consistent, since
-  its last line already carried one.
-
-  Doing this by hand is the only route available. Dependabot has been failing
-  on exactly these two since at least 2026-07-20 — nine of the last ten
-  `go_modules` runs — and the failure is quiet: it processes every other
-  dependency, opens their PRs, and only the job's exit status records that two
-  were dropped. Neither module has ever carried a semver tag, so
-  `@v/list` answers empty for `x/exp/teatest`, empty again for `x/exp`, and
-  Dependabot climbs to `github.com/charmbracelet/x`, whose sole tag `v0.1.0`
-  dates from 2023 and contains a `go.work`, a LICENSE and a README:
-
-      go: module github.com/charmbracelet/x@v0.1.0 found, but does not
-          contain package github.com/charmbracelet/x/exp/teatest
-
-  Nothing in this repository can fix that resolution, and the two modules are
-  test-only — teatest drives the TUI test, golden arrives through it.
-
-### Changed
 - **`playwright-go` now enters under the module path it actually publishes,
   `github.com/mxschmitt/playwright-go`, at v0.6201.1.** The pin on v0.6000.0
   was read as an upstream defect and was not one. Upstream transferred the
@@ -69,12 +45,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes, and Dependabot watched it either way, because this repo sets
   `dependency-type: "all"` for exactly that reason.
 
+- **`charmbracelet/x/exp/teatest` and `.../golden` move to their 2026-08-23
+  snapshot, and the TUI golden file is regenerated for it.** teatest now emits
+  a carriage return at the end of every line it renders, where it previously
+  emitted none. That is the whole diff in
+  `testdata/TestModelGoldenFrame.golden` — three lines gain a trailing `\r`
+  and nothing else changes, which also makes the file self-consistent, since
+  its last line already carried one.
+
+  Doing this by hand is the only route available. Dependabot has been failing
+  on exactly these two since at least 2026-07-20 — nine of the last ten
+  `go_modules` runs — and the failure is quiet: it processes every other
+  dependency, opens their PRs, and only the job's exit status records that two
+  were dropped. Neither module has ever carried a semver tag, so
+  `@v/list` answers empty for `x/exp/teatest`, empty again for `x/exp`, and
+  Dependabot climbs to `github.com/charmbracelet/x`, whose sole tag `v0.1.0`
+  dates from 2023 and contains a `go.work`, a LICENSE and a README:
+
+      go: module github.com/charmbracelet/x@v0.1.0 found, but does not
+          contain package github.com/charmbracelet/x/exp/teatest
+
+  Nothing in this repository can fix that resolution, and the two modules are
+  test-only — teatest drives the TUI test, golden arrives through it.
+
 ### Removed
 - **The `playwright-go` ignore entry in `dependabot.yml`.** It existed to hold
   the pin described above, and the pin is gone. Updates to the module now
   arrive on the same footing as every other dependency.
 
 ### Fixed
+- **A transient module-proxy error no longer fails CI.** Installing the tools
+  each job needs — golangci-lint, gitleaks — meant resolving their whole
+  dependency trees through `proxy.golang.org` and `sum.golang.org` on every
+  run. That broke three times on 2026-08-27: twice in Lint, once in Secret
+  Scan, the last of those turning `main` red. All three were the same
+  `stream error; INTERNAL_ERROR` and all three cleared on a rerun.
+
+  The two tools get different treatment, because only one of them can take the
+  easy fix. **gitleaks** now arrives as the prebuilt release asset, pinned by
+  the SHA256 of the exact file rather than by version — a tag can be moved and
+  an asset replaced, a digest cannot, so this keeps the guarantee the checksum
+  database was providing without the network path that kept failing. Its
+  `setup-go` step goes away with it: nothing in that job runs Go any more.
+
+  **golangci-lint must stay built from source**, and the attempt to change that
+  is recorded in the workflow so it is not retried. It refuses to run when the
+  Go it was built with is older than the Go the module targets, and the
+  published v2.1.6 binary is built with go1.24.2 against a `go 1.26` module:
+
+      can't load config: the Go language version (go1.24) used to build
+      golangci-lint is lower than the targeted Go version (1.26)
+
+  Building from source rebuilds it with the runner's Go, which matches by
+  construction. Since the network dependency is unavoidable there, the install
+  retries three times with a widening delay instead — every failure so far has
+  been transient, and a genuine one still fails the job after the third try.
+
 - **CI lints the two tagged script evaluators, which it never did before.**
   `golangci-lint run ./...` skips a file behind a tag it was not given, exactly
   as `go build` does — the same blind spot the tagged build and govulncheck
