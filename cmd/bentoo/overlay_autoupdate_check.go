@@ -531,6 +531,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
+	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, applierValidateOptions(configDir)...)
 	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)

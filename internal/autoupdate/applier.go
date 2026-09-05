@@ -268,6 +268,24 @@ type ApplyResult struct {
 type Applier struct {
 	// overlayPath is the path to the overlay directory
 	overlayPath string
+	// gentooPath is the ::gentoo tree the bump re-reads before it renames an
+	// ebuild forward. Empty disables the check entirely; WithApplierGentooPath
+	// sets it, and cmd/ defaults it to /var/db/repos/gentoo.
+	//
+	// WHY THIS FIELD EXISTS. A bump copies OUR ebuild to the new version and
+	// never looks at ::gentoo. Every fix the distribution made to that revision
+	// in the meantime is dropped in silence, because nothing in the process
+	// reads the other tree. A 2026-09-04 audit traced 40 findings across the
+	// overlay to exactly this, with named commits (fe40ab830 webkit, 2600d0981
+	// nodejs, 736e2d100 libqmi); the very next day's run reproduced it live on
+	// media-libs/mesa and net-misc/modemmanager, carrying a stale RUST_MIN_VER
+	// and a lowered gobject-introspection floor into fresh ebuilds.
+	//
+	// The check WARNS and never merges. Merging would need to know which side
+	// is right, which is a judgement the applier has no basis to make; a
+	// warning at the moment of the rename puts it in front of the one person
+	// who does, while the bump is still in their hands.
+	gentooPath string
 	// pending manages pending updates
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
@@ -422,6 +440,15 @@ func WithApplierPendingList(pending *PendingList) ApplierOption {
 }
 
 // WithLogsDir sets a custom logs directory for the applier
+// WithApplierGentooPath sets the ::gentoo tree consulted before an ebuild is
+// renamed forward. An empty path disables the comparison, which is what tests
+// that do not care about it get by default: a missing tree must not fail a bump.
+func WithApplierGentooPath(dir string) ApplierOption {
+	return func(a *Applier) {
+		a.gentooPath = dir
+	}
+}
+
 func WithLogsDir(dir string) ApplierOption {
 	return func(a *Applier) {
 		a.logsDir = dir
@@ -1311,6 +1338,11 @@ func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, updat
 		return candidatePaths{}, nil, fmt.Errorf("failed to copy ebuild: %w", err)
 	}
 
+	// The rename just happened. This is the moment the ::gentoo copy stops
+	// being consulted, so it is the moment to say so. Advisory only: it never
+	// returns an error and never blocks the bump.
+	a.warnIfGentooDiverges(pkg, currentVersion)
+
 	cand, err := publishedCandidate(a.overlayPath, pkg, newVersion)
 	if err != nil {
 		return candidatePaths{}, nil, err
@@ -1642,6 +1674,57 @@ func wouldRemoveSuffix(versions []string) string {
 		return ""
 	}
 	return fmt.Sprintf(" (would have removed: %s)", strings.Join(versions, ", "))
+}
+
+// warnIfGentooDiverges reports that a bump just carried our own ebuild forward
+// without re-reading ::gentoo's copy of the version it came from.
+//
+// WHAT IT COMPARES, AND WHY THAT AND NOT MORE. Only the version being left
+// behind, and only when ::gentoo ships exactly that version. At the same PV the
+// two files are describing the same upstream release, so a difference is a real
+// decision by one side or the other and is worth a human's attention. At
+// different PVs almost everything differs by construction, and a warning that
+// fires on every bump is a warning nobody reads.
+//
+// That deliberately misses cases. A fix ::gentoo made to a version we never
+// carried does not show up here. Catching those is the parity sweep's job
+// (scripts/gentoo-parity.sh in the overlay), which compares whole trees offline;
+// this is the cheap check that runs at the one moment the information is
+// actionable.
+//
+// It NEVER fails the bump: no error return, no gate. An advisory that can break
+// a run gets disabled, and then it advises nobody.
+func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
+	if a.gentooPath == "" {
+		return
+	}
+
+	category, pkgName, ok := splitPkgAtom(pkg)
+	if !ok {
+		return
+	}
+
+	name := fmt.Sprintf("%s-%s.ebuild", pkgName, oldVersion)
+	ours := filepath.Join(a.overlayPath, category, pkgName, name)
+	theirs := filepath.Join(a.gentooPath, category, pkgName, name)
+
+	theirBytes, err := os.ReadFile(theirs) //nolint:gosec // both paths are repo-relative package dirs
+	if err != nil {
+		// ::gentoo does not ship this PV, or does not ship this package at
+		// all. Not a finding: most of the overlay is ahead by design.
+		return
+	}
+	ourBytes, err := os.ReadFile(ours) //nolint:gosec // same
+	if err != nil {
+		return
+	}
+	if bytes.Equal(ourBytes, theirBytes) {
+		return
+	}
+
+	a.reporter.TaskStage(pkg, fmt.Sprintf(
+		"::gentoo also ships %s and its copy differs — the bump carried OUR %s forward without re-reading it; diff %s %s",
+		oldVersion, oldVersion, theirs, ours))
 }
 
 // copyEbuild copies the source ebuild to a new file with the updated version.
