@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-09-11
+
+### Security
+
+- **The two `charmbracelet/x/exp` modules were bumped by hand, inside the
+  release quarantine, as a deliberate override.** `teatest` and `golden` sit in
+  the Dependabot `ignore` list — upstream publishes no semver tag, so the
+  resolver walks up to `charmbracelet/x` v0.1.0 and answers
+  `dependency_file_not_resolvable`. That exclusion also drops them out of the
+  7-day `cooldown`, which is a Dependabot feature and nothing else: the two
+  dependencies nobody automates are the two whose quarantine nothing enforces.
+  The `v0.0.0-20260906004030-3986e9119cf9` snapshot was published
+  `2026-09-06T00:40:30Z` and would have aged out `2026-09-13T00:40:30Z`; it was
+  taken on 2026-09-11, roughly 25 hours early. Read the publish time with
+  `go list -m -json <module>@<version> | jq -r .Time` — the date inside the
+  pseudo-version looks older than the quarantine clock actually is.
+
+  Both are test-only — `teatest` drives the TUI test, `golden` arrives through
+  it, neither is linked into the binary — so the exposure is the test host, not
+  anything that ships. Neither golden file needed regenerating:
+  `TestModelGoldenFrame.golden` and `TestFullscreenSectionsGoldenFrame.golden`
+  are byte-identical after the bump, which makes the standing note to regenerate
+  them a check rather than a certainty.
+
+- **The chain carries no advisory.** govulncheck is clean under the pinned
+  `go1.26.8` and not merely under the newer local toolchain — the two are
+  different questions, because govulncheck judges the stdlib of whichever
+  toolchain runs it. osv-scanner 2.5.1 (the exact pin the workflow uses),
+  gitleaks over 431 commits and zizmor are clean too; `go mod verify` passes and
+  `go mod tidy -diff` is empty. The other pending updates — `cascadia` v1.3.5
+  (quarantine cleared 2026-09-11), the 2026-09-08 `x/` releases (2026-09-15),
+  `go-runewidth` v0.0.30 and `mongo-driver` v1.17.10 (2026-09-17) — are left for
+  Dependabot.
+
+- **The Monday of 2026-09-14 does not test the `golang-x` fix shipped in
+  0.30.1, and its silence should not be read as a relapse.** The candidate `x/`
+  releases were published 2026-09-08, so the cooldown clears them only on
+  09-15, and no intermediate version exists for Dependabot to fall back to —
+  each pinned version is the immediately preceding release. The first run that
+  can confirm or refute the diagnosis is 2026-09-21.
+
 ## [0.30.1] - 2026-09-09
 
 ### Security
@@ -5034,7 +5075,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.30.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.30.2...HEAD
+[0.30.2]: https://github.com/obentoo/bentoolkit/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/obentoo/bentoolkit/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/obentoo/bentoolkit/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/obentoo/bentoolkit/compare/v0.29.0...v0.29.1
