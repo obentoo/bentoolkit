@@ -952,7 +952,7 @@ func frozenDisableNotice(pkgs []string) string {
 }
 
 // reportFrozenDisables delivers the R1.4 notice built above. It is a var for
-// the same reason fixSandboxRoot (applier.go:35) is one: the destination is
+// the same reason `var fixSandboxRoot` in applier.go is one: the destination is
 // unreachable from a test. logger.Logger.output is unexported and has no
 // setter, so a test cannot capture the run's stderr, and without a seam here
 // only the message BUILDER is pinned — never the wiring that calls it.
@@ -989,6 +989,17 @@ type ReviveCandidate struct {
 // true orphan): an enabled entry is handled by the regular check flow, and a
 // disabled entry whose ebuild is still present is not revivable from a ::gentoo
 // base (that would seed an older version over the newer one already shipped).
+//
+// "Present" has a third shape, and it is skipped just as silently: an entry
+// whose ":slot" or `series` filter matches NOTHING (ErrSlotNotFound /
+// ErrSeriesNotFound). The package directory is there, holding the ebuilds of
+// another line, so the entry is not an orphan — and it is not a fault either,
+// because a disabled line-filtered entry matching nothing is its expected state
+// (a release line upstream has not opened yet, or one whose package upstream
+// dropped). A genuine config mistake is caught where it acts: on the enabled
+// path, where CheckAll surfaces the same sentinel and Reconcile records it as
+// NoEbuild.
+//
 // Every network call is best-effort:
 // a package whose upstream fetch fails, or that ::gentoo does not carry at all
 // (provider.ErrNotFound), is silently skipped rather than aborting the whole
@@ -1031,8 +1042,24 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 		// wrong. Only ErrNoEbuildFound — the package actually removed — qualifies.
 		// Checking the overlay first also skips the upstream/gentoo lookups for
 		// packages that are still present.
+		//
+		// The lookup has THREE outcomes, not two. Besides "present" and
+		// ErrNoEbuildFound, a ":slot" or `series` filter that matches nothing
+		// yields ErrSlotNotFound/ErrSeriesNotFound: the package DIRECTORY is
+		// there, carrying the ebuilds of another line. Such an entry is neither
+		// revivable — seeding a ::gentoo base beside a sibling line that is
+		// already newer is the very mistake the "present" skip prevents — nor a
+		// failure worth a soft note, so it is skipped in silence like the other
+		// two. See the doc comment above for where a real config error is caught
+		// instead. The skip must stay HERE, ahead of fetchUpstreamVersion: that
+		// function applies the same `series` to the upstream value and fails with
+		// ErrNoVersionFound, so letting the flow continue would only retitle the
+		// note from "overlay lookup failed" to "upstream fetch failed" — and cost
+		// one request per scan to say it.
 		if _, err := c.getCurrentVersion(pkg); err == nil {
 			continue // ebuild still present: disabled but not orphaned, skip silently
+		} else if errors.Is(err, ErrSlotNotFound) || errors.Is(err, ErrSeriesNotFound) {
+			continue // the entry's filter selects no line: not an orphan, not a failure
 		} else if !errors.Is(err, ErrNoEbuildFound) {
 			notes = append(notes, fmt.Sprintf("%s: overlay lookup failed: %v", pkg, err))
 			continue

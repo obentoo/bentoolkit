@@ -199,3 +199,90 @@ func TestFindRevivableOrphans_NotInGentoo(t *testing.T) {
 		t.Fatalf("expected 0 candidates, got %d: %+v", len(got), got)
 	}
 }
+
+// TestFindRevivableOrphans_SeriesNoMatchSkipped guards the field finding behind
+// app-office/libreoffice@testing: a disabled entry whose `series` matches no
+// ebuild in the overlay is NOT an orphan (the package directory is there,
+// holding another release line) and must be skipped in silence — no candidate,
+// and crucially no soft error, which is what the scan used to emit.
+//
+// The URL points at a port nothing listens on: should the skip ever regress to
+// AFTER the upstream fetch, the note comes back as "upstream fetch failed" and
+// this test fails instead of silently passing.
+func TestFindRevivableOrphans_SeriesNoMatchSkipped(t *testing.T) {
+	pkg := "media-plugins/fakeplug"
+
+	overlayDir := t.TempDir()
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(t.TempDir()),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			pkg: {
+				Parser:  "json",
+				Path:    "version",
+				URL:     "http://127.0.0.1:1/", // must never be reached
+				Enabled: boolPtr(false),
+				// Odd minors only: the 1.28.7 below belongs to the even line.
+				Series: `^[0-9]+\.[0-9]*[13579]\.`,
+			},
+		}}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	// The directory exists and is not empty: it carries the sibling line.
+	createTestEbuild(t, overlayDir, pkg, "1.28.7")
+	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.28.7"}}}
+
+	got, err := checker.FindRevivableOrphans(prov)
+	if err != nil {
+		t.Fatalf("a series matching nothing must not be a soft error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 candidates (filtered line, not an orphan), got %d: %+v", len(got), got)
+	}
+}
+
+// TestFindRevivableOrphans_SlotNoMatchSkipped is the ":slot" half of the same
+// rule: the key pins slot 26, the only ebuild present declares SLOT="24". The
+// package is present, the entry's filter is what selects nothing, so the scan
+// skips it silently rather than reporting a soft error.
+func TestFindRevivableOrphans_SlotNoMatchSkipped(t *testing.T) {
+	const (
+		atom = "net-libs/fakenode"
+		key  = atom + ":26"
+	)
+
+	overlayDir := t.TempDir()
+	checker, err := NewChecker(overlayDir,
+		WithConfigDir(t.TempDir()),
+		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			key: {
+				Parser:  "json",
+				Path:    "version",
+				URL:     "http://127.0.0.1:1/", // must never be reached
+				Enabled: boolPtr(false),
+			},
+		}}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	createTestEbuildContent(t, overlayDir, atom, "24.9.0", `EAPI=8
+DESCRIPTION="Test package"
+SLOT="24"
+KEYWORDS="~amd64"
+`)
+	prov := &fakeProvider{versions: map[string][]string{atom: {"24.9.0"}}}
+
+	got, err := checker.FindRevivableOrphans(prov)
+	if err != nil {
+		t.Fatalf("a slot matching nothing must not be a soft error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 candidates (filtered slot, not an orphan), got %d: %+v", len(got), got)
+	}
+}
