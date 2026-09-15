@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A `--revivable` scan no longer ends in soft errors over entries that are
+  exactly where they should be.** Every run closed with "revive scan completed
+  with soft errors" naming three packages: `app-office/libreoffice` and
+  `app-office/libreoffice-l10n` on the `testing` line upstream has not published
+  yet, and `media-plugins/gst-plugins-mpeg2dec` on the odd line whose plugin
+  upstream dropped in 1.29. All three records were correct; the scan was reading
+  them wrong.
+
+  The lookup has four outcomes and the scan handled two. Besides "ebuild
+  present" and `ErrNoEbuildFound`, a `":slot"` or `series` filter that matches
+  nothing yields `ErrSlotNotFound`/`ErrSeriesNotFound` — the package DIRECTORY
+  is there, holding the ebuilds of another release line. Those landed in the
+  catch-all meant for an unreadable directory.
+
+  Such an entry is now skipped in silence, like the other two, because it is
+  neither an orphan nor a fault. Reviving it would be the mistake the existing
+  "present" skip exists to prevent: mpeg2dec on the odd line would have
+  qualified — upstream 1.29.2 is above the 1.28.x ::gentoo carries — and the
+  revive would have seeded an ebuild for a plugin that does not exist at that
+  version, next to a sibling line that is already newer.
+
+  Nothing stops being reported. A filter that genuinely is wrong is caught on
+  the enabled path, where `CheckAll` surfaces the same sentinel and the
+  reconciliation records it as `NoEbuild`; the revive scan only ever sees
+  disabled entries, where a filter matching nothing is the decision already
+  written in `disabled_by`. The skip also lands before the upstream fetch, so a
+  scan spends three fewer requests saying nothing.
+
 ## [0.30.2] - 2026-09-11
 
 ### Security
