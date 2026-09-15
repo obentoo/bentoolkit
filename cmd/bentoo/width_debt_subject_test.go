@@ -499,7 +499,14 @@ func TestSubjectListConverseCanFail(t *testing.T) {
 	// this test exists to have. internal/autoupdate/ is outside every part of
 	// this story's subject: its internal/ work is common/report, overlay and
 	// snapshot.
-	const probe = "internal/autoupdate/checker.go"
+	//
+	// RE-POINTED AGAIN, 2026-09-15: checker.go itself entered the diff when the
+	// revive scan's filtered-entry fix landed, and the probe announced its own
+	// fixture had gone benign — the capability above, working. doc.go replaces
+	// it: a package doc with no behaviour to change, so nothing routes an edit
+	// through it, and it is as far outside this story's subject as checker.go
+	// was.
+	const probe = "internal/autoupdate/doc.go"
 
 	if _, err := os.Stat(filepath.Join(repoRoot, probe)); err != nil {
 		t.Skipf("converse probe skipped: %s is not present (%v)", probe, err)
