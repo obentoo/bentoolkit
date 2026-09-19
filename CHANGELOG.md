@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-19
+
 ### Added
 - **`bentoo distfile fetch <category/package>` — the gated download, for the
   person installing the package.** The authenticated fetch has existed since
@@ -5220,7 +5222,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/obentoo/bentoolkit/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/obentoo/bentoolkit/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/obentoo/bentoolkit/compare/v0.30.0...v0.30.1
