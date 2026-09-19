@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-
-	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // This file holds the three things a gated download needs once the vendor stops
@@ -97,7 +95,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	}
 	req.Header.Set("User-Agent", authFetchUserAgent)
 
-	client := &http.Client{Timeout: authFetchTimeout}
+	client := &http.Client{Timeout: s.timeout}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -133,10 +131,10 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 //
 // The caller owns the returned response and must close it. The first reply is
 // closed by the caller's own defer, which still holds.
-func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Response, secret string) (*http.Response, error) {
+func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Response, creds authFetchCredentials) (*http.Response, error) {
 	raw, err := io.ReadAll(io.LimitReader(first.Body, urlBodyLimit))
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, secrets.Scrub(err.Error(), secret))
+		return nil, fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
 	}
 
 	target, err := parseDownloadURL(string(raw), first.Header.Get("Content-Type"))
@@ -156,7 +154,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	// Redirects are FOLLOWED here, unlike on the form leg: this is already a GET
 	// with no body, so nothing can be dropped, and a CDN edge redirecting to a
 	// region is ordinary.
-	client := &http.Client{Timeout: authFetchTimeout}
+	client := &http.Client{Timeout: s.timeout}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {

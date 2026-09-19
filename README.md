@@ -802,6 +802,35 @@ var, never the value.
 | `fetch_serial_field` | no — **but only together with** `fetch_serial_env` | Form field the serial is submitted in |
 | `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted) |
 | `fetch_id_pattern` | no — **but only together with** `fetch_id_url` | Regex over that body with **1 capture group**, the id. `{version}` is substituted **quoted**, so `21.1` matches `21.1` and not `2101` |
+| `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims |
+| `fetch_timeout` | no — defaults to 300 | Seconds for the whole download |
+
+##### When the form asks for a person, not a credential
+
+A vendor may gate the download behind a *registration* form: name, e-mail,
+telephone, address. None of that can go in `fetch_form` — `packages.toml` lives
+in the overlay, and the overlay is public. `fetch_form_env` states the field
+names and, for each, the **name of the variable** holding the value:
+
+```toml
+fetch_form_env = "firstname=BMD_FIRSTNAME&lastname=BMD_LASTNAME&email=BMD_EMAIL&phone=BMD_PHONE&street=BMD_STREET&city=BMD_CITY&state=BMD_STATE&zip=BMD_ZIP"
+```
+
+Each value is resolved at fetch time through the same chain as the serial —
+environment variable, then `~/.config/bentoo/secrets`, then `/etc/bentoo/secrets`
+— so every operator sends their own details and the record carries none. All of
+them are resolved **before** the first request goes out, so a missing variable
+is reported naming both the variable and the field it belongs to, rather than
+halfway through a submission the vendor has already recorded.
+
+Resolved values are removed from any error text the download produces, the
+serial always and the rest once they are at least four characters long: a
+two-character value identifies nobody on its own, and substituting it would
+blank out fragments of the very message you need.
+
+The combination with `fetch_method = "get"` is **refused**, not discouraged: a
+GET puts every field in the query string, where the vendor's access log, every
+proxy in between and your own shell history all keep it.
 
 ##### When the reply is a URL and not the file
 

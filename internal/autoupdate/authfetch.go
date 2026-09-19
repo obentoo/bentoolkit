@@ -68,6 +68,8 @@ const (
 	metaFetchMinBytes    = "fetch_min_bytes"    // smallest believable size for the finished file
 	metaFetchIDURL       = "fetch_id_url"       // JSON/text endpoint naming the per-release download id
 	metaFetchIDPattern   = "fetch_id_pattern"   // regex over that body, 1 capture group = the id
+	metaFetchFormEnv     = "fetch_form_env"     // form fields whose VALUES come from the secrets chain
+	metaFetchTimeout     = "fetch_timeout"      // seconds for the whole download
 )
 
 // The two encodings fetch_body selects, and the two things fetch_response says
@@ -109,6 +111,8 @@ var metaFetchKeys = []string{
 	metaFetchMinBytes,
 	metaFetchIDURL,
 	metaFetchIDPattern,
+	metaFetchFormEnv,
+	metaFetchTimeout,
 }
 
 // Validation errors for the meta.fetch_* sub-schema. They are checked at config
@@ -219,6 +223,12 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 	return nil
 }
 
+// distfileMode is what a finished distfile is left as. Portage's own downloads
+// land group- and world-readable in DISTDIR, and anything stricter cannot be
+// read by the unprivileged uid that merges them; nothing here is a secret, so
+// there is nothing to withhold.
+const distfileMode = 0o644
+
 // authFetchUserAgent is sent on every leg. It is one constant because the
 // lookup, the form and the CDN download are one operation to the vendor, and a
 // leg that identified itself differently would be the one that gets refused.
@@ -247,6 +257,11 @@ type authFetchSpec struct {
 	// identifier. Both are set or neither is; see parseAuthFetchSpec.
 	idURL     string // where the id is published ({version} substituted)
 	idPattern string // regex over that body, 1 capture group ({version} substituted, quoted)
+
+	// formEnv maps a form field to the NAME of the variable holding its value.
+	// The values themselves are resolved at fetch time and never live here.
+	formEnv url.Values
+	timeout time.Duration // whole-download budget; authFetchTimeout when unset
 }
 
 // parseAuthFetchSpec extracts an authFetchSpec from a package's meta map.
@@ -314,6 +329,12 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 		return nil, false, err
 	}
 	if err := spec.parseIDLookup(meta); err != nil {
+		return nil, false, err
+	}
+	if err := spec.parseFormEnv(meta); err != nil {
+		return nil, false, err
+	}
+	if err := spec.parseTimeout(meta); err != nil {
 		return nil, false, err
 	}
 
@@ -439,6 +460,89 @@ func (s *authFetchSpec) parseIDLookup(meta map[string]string) error {
 	return nil
 }
 
+// parseFormEnv reads the fields whose values must NOT be written down.
+//
+// # Why this exists
+//
+// A vendor may gate a download behind a registration form rather than behind a
+// credential, and such a form asks for a person: name, e-mail, telephone,
+// address. fetch_form cannot carry those — it lives in packages.toml, which
+// lives in the overlay, which is public — and yet without them the record
+// describes a request that cannot be sent.
+//
+// So fetch_form_env states the field NAMES and, for each, the name of the
+// variable holding its value. It is the serial pair generalised: the same
+// "field here, variable there" shape, resolved through the same chain (env var,
+// then the user secrets file, then the system one), so each operator sends
+// their own details and the overlay records none of them.
+func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
+	raw := strings.TrimSpace(meta[metaFetchFormEnv])
+	if raw == "" {
+		return nil
+	}
+	fields, err := url.ParseQuery(raw)
+	if err != nil {
+		return fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchFormEnv, err)
+	}
+
+	// A GET puts every field in the query string, where it is written to the
+	// vendor's access log, to every proxy in between, and to this machine's own
+	// shell history if anyone reproduces the call. That is an acceptable place
+	// for "platform=linux" and not for somebody's telephone number, so the
+	// combination is refused rather than merely discouraged.
+	if s.method == "get" {
+		return fmt.Errorf("%w: %s cannot be used with %s=%q — the values would ride in the query string, where they are logged by every hop",
+			ErrAuthFetchFailed, metaFetchFormEnv, metaFetchMethod, s.method)
+	}
+
+	for field, names := range fields {
+		switch {
+		case len(names) > 1:
+			return fmt.Errorf("%w: %s names %d variables for the field %q; one field takes one value",
+				ErrAuthFetchFailed, metaFetchFormEnv, len(names), field)
+		case strings.TrimSpace(names[0]) == "":
+			return fmt.Errorf("%w: %s gives the field %q an empty variable name", ErrAuthFetchFailed, metaFetchFormEnv, field)
+		case s.form.Has(field):
+			// Two sources for one field is not a precedence question worth
+			// answering: whichever won, the operator would be reading the
+			// other one in the record.
+			return fmt.Errorf("%w: the field %q is set by both %s and %s — it must come from exactly one",
+				ErrAuthFetchFailed, field, metaFetchForm, metaFetchFormEnv)
+		case field == s.serialField:
+			return fmt.Errorf("%w: the field %q is already the serial field (%s); do not repeat it in %s",
+				ErrAuthFetchFailed, field, metaFetchSerialField, metaFetchFormEnv)
+		}
+		fields.Set(field, strings.TrimSpace(names[0]))
+	}
+	s.formEnv = fields
+	return nil
+}
+
+// parseTimeout reads the whole-download budget.
+//
+// The 5-minute default was sized for a distfile of tens of megabytes. It is not
+// a ceiling a 4 GiB archive can meet on an ordinary connection — 3.81 GiB needs
+// better than 13 MB/s sustained to finish inside it — so a record that knows it
+// downloads something that large can say so.
+func (s *authFetchSpec) parseTimeout(meta map[string]string) error {
+	s.timeout = authFetchTimeout
+
+	raw := strings.TrimSpace(meta[metaFetchTimeout])
+	if raw == "" {
+		return nil
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		return fmt.Errorf("%w: invalid %s=%q: not a whole number of seconds", ErrAuthFetchFailed, metaFetchTimeout, raw)
+	}
+	if secs <= 0 {
+		return fmt.Errorf("%w: invalid %s=%d: a budget must be positive (omit the key for the %s default)",
+			ErrAuthFetchFailed, metaFetchTimeout, secs, authFetchTimeout)
+	}
+	s.timeout = time.Duration(secs) * time.Second
+	return nil
+}
+
 // usesIDLookup reports whether the endpoint's id is resolved at fetch time. It
 // tests the URL alone because parseIDLookup has already refused every spec
 // where the keys and the placeholder do not agree.
@@ -479,6 +583,71 @@ func resolveSecret(envName string) (string, error) {
 	return v, nil
 }
 
+// minScrubLength is the shortest resolved value worth substituting out of a
+// diagnostic.
+//
+// Scrubbing works by replacing a value wherever it appears, so a two-character
+// one — a state abbreviation, an initial — would blank out unrelated fragments
+// of the very URL or message somebody needs in order to act. Anything that
+// short is also not distinctive enough to identify a person on its own, which
+// is what the scrubbing is for. The serial is exempt from the question: a
+// credential is redacted whatever its length.
+const minScrubLength = 4
+
+// authFetchCredentials holds everything one download resolved out of the
+// secrets chain: the serial, when the record configures one, and the identity
+// fields fetch_form_env names.
+//
+// It exists so the values travel together with the rule about how they may
+// appear in text. Before it, one secret was threaded through four functions as
+// a bare string and each of them called Scrub itself; adding a second kind of
+// value would have meant remembering all four.
+type authFetchCredentials struct {
+	serial string     // "" when the record configures none
+	fields url.Values // resolved fetch_form_env values, by field name
+	redact []string   // every value above that is long enough to substitute
+}
+
+// scrub removes every resolved value from a message.
+func (c authFetchCredentials) scrub(msg string) string {
+	for _, v := range c.redact {
+		msg = secrets.Scrub(msg, v)
+	}
+	return msg
+}
+
+// resolveCredentials looks up the serial and every fetch_form_env value.
+//
+// It resolves ALL of them before the first byte goes out, so a record missing
+// one variable fails naming it rather than halfway through a submission the
+// vendor has already recorded.
+func (s *authFetchSpec) resolveCredentials() (authFetchCredentials, error) {
+	creds := authFetchCredentials{fields: url.Values{}}
+
+	if s.usesSerial() {
+		v, err := resolveSecret(s.serialEnv)
+		if err != nil {
+			return authFetchCredentials{}, err
+		}
+		creds.serial = v
+		// Unconditionally, unlike the fields below: a credential is redacted
+		// whatever its length.
+		creds.redact = append(creds.redact, v)
+	}
+
+	for field, names := range s.formEnv {
+		v, err := resolveSecret(names[0])
+		if err != nil {
+			return authFetchCredentials{}, fmt.Errorf("%w (%s names it for the %q field)", err, metaFetchFormEnv, field)
+		}
+		creds.fields.Set(field, v)
+		if len(v) >= minScrubLength {
+			creds.redact = append(creds.redact, v)
+		}
+	}
+	return creds, nil
+}
+
 // fetchDistfile resolves the serial, submits the form, and writes the finished
 // file into destDir under the resolved filename (which must match the basename
 // of the ebuild's SRC_URI so pkgdev digests it). It returns the written path.
@@ -500,16 +669,9 @@ func resolveSecret(envName string) (string, error) {
 // message that could echo it (notably transport errors on the GET path, where
 // the serial rides in the query string).
 func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir string) (string, error) {
-	// Left empty for a download that carries no credential. Every consumer
-	// below tolerates that: secrets.Scrub returns its input unchanged for an
-	// empty secret, and buildRequest omits the field entirely.
-	var secret string
-	if s.usesSerial() {
-		resolved, err := resolveSecret(s.serialEnv)
-		if err != nil {
-			return "", err
-		}
-		secret = resolved
+	creds, err := s.resolveCredentials()
+	if err != nil {
+		return "", err
 	}
 
 	filename := s.resolvedFilename(version)
@@ -529,19 +691,19 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 		endpoint = strings.ReplaceAll(endpoint, idPlaceholder, id)
 	}
 
-	req, err := s.buildRequest(ctx, endpoint, secret)
+	req, err := s.buildRequest(ctx, endpoint, creds)
 	if err != nil {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: authFetchTimeout, CheckRedirect: refuseMethodDowngrade}
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: refuseMethodDowngrade}
 	// Close the keep-alive connection once we are done: this is a one-shot
 	// download, so a pooled idle connection would otherwise outlive the call
 	// (and trip goroutine-leak detection in tests).
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, secrets.Scrub(err.Error(), secret))
+		return "", fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -553,7 +715,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 	// live response whose body is the download, and which this function owns
 	// from here on — hence the second deferred close.
 	if s.response == fetchResponseURL {
-		next, err := s.followDownloadURL(ctx, resp, secret)
+		next, err := s.followDownloadURL(ctx, resp, creds)
 		if err != nil {
 			return "", err
 		}
@@ -565,7 +727,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 		return "", err
 	}
 
-	written, err := writeBody(destDir, destPath, resp.Body, secret, s.minBytes)
+	written, err := writeBody(destDir, destPath, resp.Body, creds, s.minBytes)
 	if err != nil {
 		return "", err
 	}
@@ -578,7 +740,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 // The endpoint is a parameter rather than s.url because it may have had its
 // {id} resolved moments earlier; passing it in keeps the place that substitutes
 // and the place that requests from disagreeing.
-func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint, secret string) (*http.Request, error) {
+func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds authFetchCredentials) (*http.Request, error) {
 	body := url.Values{}
 	for k, vs := range s.form {
 		for _, v := range vs {
@@ -589,7 +751,13 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint, secret strin
 	// field unconditionally would post a pair under the empty name ("=") — one
 	// the endpoint never asked for, carrying a value that was never resolved.
 	if s.usesSerial() {
-		body.Set(s.serialField, secret)
+		body.Set(s.serialField, creds.serial)
+	}
+	// The fields whose values came from the secrets chain. parseFormEnv has
+	// already refused every collision, so none of these overwrites a field the
+	// record spells out.
+	for field, vs := range creds.fields {
+		body.Set(field, vs[0])
 	}
 
 	var (
@@ -623,7 +791,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint, secret strin
 		return nil, fmt.Errorf("%w: unsupported method %q", ErrAuthFetchFailed, s.method)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: building request: %v", ErrAuthFetchFailed, secrets.Scrub(err.Error(), secret))
+		return nil, fmt.Errorf("%w: building request: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
 	}
 	// Some vendor endpoints reject empty/bot User-Agents.
 	req.Header.Set("User-Agent", authFetchUserAgent)
@@ -669,7 +837,7 @@ func jsonForm(fields url.Values) ([]byte, error) {
 // renames it into place. A body shorter than minBytes — zero always, plus
 // whatever fetch_min_bytes states — is rejected. The temp file is removed on any
 // failure so a partial download never lands in the distdir.
-func writeBody(destDir, destPath string, body io.Reader, secret string, minBytes int64) (string, error) {
+func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredentials, minBytes int64) (string, error) {
 	tmp, err := os.CreateTemp(destDir, ".authfetch-*")
 	if err != nil {
 		return "", fmt.Errorf("%w: creating temp file: %v", ErrAuthFetchFailed, err)
@@ -682,7 +850,7 @@ func writeBody(destDir, destPath string, body io.Reader, secret string, minBytes
 	switch {
 	case copyErr != nil:
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, secrets.Scrub(copyErr.Error(), secret))
+		return "", fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, creds.scrub(copyErr.Error()))
 	case closeErr != nil:
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: closing temp file: %v", ErrAuthFetchFailed, closeErr)
@@ -696,6 +864,23 @@ func writeBody(destDir, destPath string, body io.Reader, secret string, minBytes
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: downloaded %d bytes, below the %s of %d — the response is not the file it claims to be",
 			ErrAuthFetchFailed, n, metaFetchMinBytes, minBytes)
+	}
+
+	// os.CreateTemp makes the file 0600, and the rename preserves it. That was
+	// invisible while the only caller was the sweep, which downloads into a
+	// private distdir it owns — but this also writes into the HOST's DISTDIR
+	// now, and the process that reads a distfile at merge time is not the one
+	// that fetched it: under FEATURES="userfetch userpriv", which running
+	// `ebuild` as root switches on, Portage reads as uid `portage`. A 0600
+	// distfile is unreadable to it, and the merge fails on a file that is
+	// present, complete and digest-correct. See portage_access.go for the same
+	// lesson learned on the staged tree.
+	//
+	// The mode is set on the TEMP file, before the rename, so the name a
+	// concurrent reader can see never exists with the wrong bits.
+	if err := os.Chmod(tmpName, distfileMode); err != nil {
+		_ = os.Remove(tmpName)
+		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
 	}
 
 	if err := os.Rename(tmpName, destPath); err != nil {

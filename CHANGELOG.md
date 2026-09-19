@@ -70,6 +70,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the address to point `fetch_url` at. `307`/`308` preserve the body and
   are still followed.
 
+- **`fetch_form_env` keeps a registration form's personal fields out of the
+  overlay.** A vendor that gates a download behind a *registration* form asks
+  for a name, an e-mail, a telephone and an address, and `packages.toml` is
+  committed to a public repository. The new key states the field names and, for
+  each, the NAME of the variable holding the value, resolved at fetch time
+  through the same chain as the serial. It is that pair generalised, and every
+  value is resolved before the first request goes out, so a missing variable is
+  named together with the field it belongs to.
+
+  Resolved values are scrubbed from error text — the serial always, the rest
+  once they are four characters or longer, because substituting a
+  two-character value would blank out fragments of the message somebody needs
+  and identifies nobody on its own. Combining the key with
+  `fetch_method = "get"` is refused: a GET puts every field in the query
+  string, where the vendor's log, every proxy and the operator's own shell
+  history keep it.
+
+- **`fetch_timeout` for records that download something large.** The budget
+  covers the whole download and was a fixed five minutes, sized for a distfile
+  of tens of megabytes. A 3.81 GiB archive needs better than 13 MB/s sustained
+  to finish inside that, so a record that knows what it fetches can say so. The
+  default is unchanged.
+
+### Fixed
+- **A fetched distfile is no longer written 0600.** `os.CreateTemp` makes the
+  temporary file private and the atomic rename preserved it, which was
+  invisible while the only caller was the sweep writing into a private distdir
+  it owns. `bentoo distfile fetch` writes into the HOST's `DISTDIR`, and the
+  process that reads a distfile at merge time is not the one that fetched it:
+  under `FEATURES="userfetch userpriv"` Portage reads as uid `portage`, which
+  cannot open a 0600 file. The merge then failed on a file that was present,
+  complete and digest-correct. The mode is set on the temp file before the
+  rename, so the final name never exists with the wrong bits.
+
 ### Changed
 - **A `[meta]` authenticated fetch no longer has to carry a serial — but may not
   carry half of one.** `fetch_serial_env` and `fetch_serial_field` were both

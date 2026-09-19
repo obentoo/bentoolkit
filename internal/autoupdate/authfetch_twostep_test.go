@@ -489,3 +489,32 @@ func TestREADMEExampleIsAConfigThisParserAccepts(t *testing.T) {
 		t.Errorf("the example no longer demonstrates the final-response guards: %+v", spec)
 	}
 }
+
+// TestWrittenDistfileIsReadableByTheMergingUser pins the mode.
+//
+// os.CreateTemp makes 0600 and the rename preserves it, which was invisible
+// while the only caller was the sweep writing into a private distdir it owns.
+// `bentoo distfile fetch` writes into the HOST's DISTDIR, where the process
+// that reads the file at merge time is uid `portage` under FEATURES="userfetch
+// userpriv" — and a 0600 distfile is unreadable to it. The merge then fails on
+// a file that is present, complete and digest-correct, which is as misleading
+// as a failure gets.
+func TestWrittenDistfileIsReadableByTheMergingUser(t *testing.T) {
+	srv := newTwoStepServer(t)
+	spec, _, err := parseAuthFetchSpec(twoStepMeta(srv))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, err := spec.fetchDistfile(context.Background(), "21.1", t.TempDir())
+	if err != nil {
+		t.Fatalf("fetchDistfile: %v", err)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != distfileMode {
+		t.Errorf("distfile mode = %#o, want %#o — uid portage must be able to read it", mode, distfileMode)
+	}
+}
