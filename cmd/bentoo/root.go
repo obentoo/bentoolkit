@@ -126,6 +126,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&autoupdateAll, "all", false, "List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines")
 	root.PersistentFlags().StringVar(&autoupdateExport, "export", "", "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had")
 
+	root.AddCommand(newDistfileCmd())
 	root.AddCommand(newOverlayCmd())
 	root.AddCommand(newSnapshotCmd())
 	root.AddCommand(newVersionCmd())
@@ -195,6 +196,7 @@ func subCommand(parent *cobra.Command, name string) *cobra.Command {
 // Go orders these by dependency, not by line: rootCmd is built first, then the
 // four below it, then their children.
 var (
+	distfileCmd   = subCommand(rootCmd, "distfile")
 	overlayCmd    = subCommand(rootCmd, "overlay")
 	snapshotCmd   = subCommand(rootCmd, "snapshot")
 	versionCmd    = subCommand(rootCmd, "version")
@@ -213,6 +215,8 @@ var (
 	pushCmd       = subCommand(overlayCmd, "push")
 	renameCmd     = subCommand(overlayCmd, "rename")
 	statusCmd     = subCommand(overlayCmd, "status")
+
+	distfileFetchCmd = subCommand(distfileCmd, "fetch")
 
 	snapshotApplyCmd    = subCommand(snapshotCmd, "apply")
 	snapshotHookCmd     = subCommand(snapshotCmd, "hook")

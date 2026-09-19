@@ -87,6 +87,25 @@ func TestREADME_DocumentsFilesystem(t *testing.T) {
 	)
 }
 
+// The README is the only place the gated-distfile flow is written down for
+// somebody who is not reading the source: what the command is called, where it
+// writes, and the one schema rule that is easy to get wrong (the serial keys go
+// in pairs). An ebuild's pkg_nofetch points here, so a rename that leaves this
+// section behind sends the user to instructions for a command that moved.
+func TestREADME_DocumentsGatedDistfileFetch(t *testing.T) {
+	readme := readRepoDoc(t, "README.md")
+	requireContains(t, "README.md", readme,
+		"#### Fetch a gated distfile",
+		"bentoo distfile fetch",
+		"--version",
+		"--distdir",
+		"portageq distdir",
+		"`fetch_serial_env`",
+		"`fetch_serial_field`",
+		"one half alone is an error",
+	)
+}
+
 func TestCHANGELOG_HasV020(t *testing.T) {
 	changelog := readRepoDoc(t, "CHANGELOG.md")
 	requireContains(t, "CHANGELOG.md", changelog,

@@ -177,13 +177,14 @@ type PackageConfig struct {
 	// a download endpoint). The version checker ignores it.
 	//
 	// The APPLIER does not: keys prefixed fetch_ are a typed sub-schema it reads
-	// to download a serial-gated distfile before the manifest step (see
-	// parseAuthFetchSpec and metaFetchKeys in authfetch.go). The six it reads are
-	// fetch_url — the trigger, no fetch_url means no authenticated fetch —
-	// fetch_method, fetch_serial_env, fetch_serial_field, fetch_form and
-	// fetch_filename. That namespace is therefore validated: a misspelled key is
-	// reported by ValidatePackageConfig rather than silently disabling the
-	// download. Any other key is annotation nothing reads.
+	// to download a gated distfile before the manifest step (see
+	// parseAuthFetchSpec and metaFetchKeys in authfetch.go), which is the list
+	// that enumerates them — this comment names the trigger and defers the rest
+	// to it, having already gone stale once by trying to hold the set itself.
+	// fetch_url is that trigger: no fetch_url means no authenticated fetch. The
+	// namespace is validated, so a misspelled key is reported by
+	// ValidatePackageConfig rather than silently disabling the download. Any
+	// other key is annotation nothing reads.
 	//
 	// Never store secrets here; reference an env var instead (e.g.
 	// fetch_serial_env = "FILEZILLA_PRO_KEY").
