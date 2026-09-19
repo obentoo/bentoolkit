@@ -147,7 +147,7 @@ BENTOO_SMTP_PASSWORD=your-smtp-password
 | GitHub API token | `GITHUB_TOKEN`, then `GH_TOKEN` |
 | Per-repository token | `BENTOO_REPO_<NAME>_TOKEN` — `<NAME>` is the repository's config key uppercased, every character outside `[A-Z0-9]` replaced by `_` (e.g. `my-overlay` → `BENTOO_REPO_MY_OVERLAY_TOKEN`) |
 | LLM API key | the value of `llm.api_key_env` (e.g. `ANTHROPIC_API_KEY`), itself resolved through this chain |
-| Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `FILEZILLA_PRO_KEY`) |
+| Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `FILEZILLA_PRO_KEY`); absent for a record that configures no serial |
 | ntfy auth token | `BENTOO_NTFY_TOKEN` |
 | SMTP password | `BENTOO_SMTP_PASSWORD` — enables PLAIN auth together with `[notify.email.smtp] user`; unresolvable means the mail is sent unauthenticated |
 
@@ -617,6 +617,50 @@ bentoo overlay analyze app-misc/hello --hint "version is in the releases page JS
 
 The analysis output can be pasted into `packages.toml` as a starting schema for `autoupdate`.
 
+### Distfile Commands
+
+#### Fetch a gated distfile
+
+Some vendors do not let a mirror carry their archive: the download is behind a
+registration form, or behind a POST that cannot be replayed from a URL. Portage
+cannot follow such a `SRC_URI`, so `emerge` stops and runs the ebuild's
+`pkg_nofetch`, which tells you to fetch the file by hand.
+
+When the overlay's `packages.toml` records how that download is performed (the
+`meta.fetch_*` keys below), one command performs it for you:
+
+```bash
+# Fetch the distfile for the version the overlay currently carries
+bentoo distfile fetch app-misc/example
+
+# Fetch the one a specific ebuild needs
+bentoo distfile fetch app-misc/example --version 3.70.5
+
+# Two records for one atom (release lines, slots): name the record, not the atom
+bentoo distfile fetch app-office/libreoffice@testing
+```
+
+- **Where it lands.** The host's own `DISTDIR`, as reported by
+  `portageq distdir` — never a path assumed by bentoo — so `emerge` finds the
+  file without being told. `--distdir` overrides it. The directory must be
+  writable by you: on most systems `DISTDIR` is group-writable by the `portage`
+  group, and the run stops with the directory named when it is not.
+- **Under what name.** Exactly the name the record's `fetch_filename` resolves
+  to, which is the basename the ebuild's `SRC_URI` expects — the point of the
+  command is that the file passes the Manifest check.
+- **Which version.** The highest ebuild the overlay carries for that record
+  (honouring its `series`/slot filter), unless `--version` names another. Pass
+  the version `emerge` asked for whenever you are installing anything but the
+  newest ebuild.
+- **The serial, when there is one.** Read at runtime from the environment
+  variable the record names, through the [secrets](#secrets) chain. It is never
+  written to the overlay, the logs, or the command's output — the variable's
+  NAME is printed, its value never is.
+
+It is the same download `bentoo overlay autoupdate` performs before it
+regenerates a Manifest — same request, same guards, same file name — so what
+this writes is what the Manifest was computed against.
+
 ### Autoupdate System
 
 The autoupdate system automates version tracking by fetching upstream sources and comparing them against the overlay's current versions.
@@ -739,11 +783,103 @@ There is no `binary` key. It was retired: nothing ever read it, and `type`
 classifies. `--lint --fix` migrates a record still carrying it.
 
 `meta` is **not** documentation-only, whatever an older comment may have said.
-The applier reads six typed keys out of it for authenticated downloads —
-`fetch_url`, `fetch_method`, `fetch_serial_env`, `fetch_serial_field`,
-`fetch_form`, `fetch_filename` — and `--lint` validates them, because a typo in
-`fetch_serial_env` used to disable the download without a word. The rule about
-secrets stands: reference an env var, never the value.
+The applier reads a typed `fetch_*` sub-schema out of it for gated downloads,
+and `--lint` validates it, because a typo in `fetch_serial_env` used to disable
+the download without a word. The rule about secrets stands: reference an env
+var, never the value.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `fetch_url` | **yes** — it is the trigger | The form action / endpoint. Without it the whole block is inert, which is why `--lint` refuses a `fetch_*` key beside a missing or blank one. May carry `{id}` (see the id lookup below) |
+| `fetch_filename` | **yes** | Destination name, `{version}` substituted. Must equal the basename the ebuild's `SRC_URI` expects, or the Manifest will not match |
+| `fetch_method` | no — defaults to `post` | `post` or `get` |
+| `fetch_body` | no — defaults to `form` | `form` (urlencoded) or `json`. In `json` the values of `fetch_form` become a JSON object: exactly the literals `true` and `false` become booleans, **everything else stays a string** (so a postcode is not silently turned into a number) |
+| `fetch_form` | no | The other fields, always written urlencoded (`platform=linux&submit=Go`) whichever encoding is sent. A repeated key is refused under `fetch_body = "json"`, since a JSON object holds each key once |
+| `fetch_response` | no — defaults to `file` | `file` (the reply IS the distfile) or `url` (the reply is the address to download from) |
+| `fetch_content_type` | no | Content type the **finished** file must carry, e.g. `application/zip` |
+| `fetch_min_bytes` | no | Smallest believable size for the finished file. Checked on the bytes actually written, so a truncated transfer fails too |
+| `fetch_serial_env` | no — **but only together with** `fetch_serial_field` | Name of the env var holding the serial |
+| `fetch_serial_field` | no — **but only together with** `fetch_serial_env` | Form field the serial is submitted in |
+| `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted) |
+| `fetch_id_pattern` | no — **but only together with** `fetch_id_url` | Regex over that body with **1 capture group**, the id. `{version}` is substituted **quoted**, so `21.1` matches `21.1` and not `2101` |
+| `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims |
+| `fetch_timeout` | no — defaults to 300 | Seconds for the whole download |
+
+##### When the form asks for a person, not a credential
+
+A vendor may gate the download behind a *registration* form: name, e-mail,
+telephone, address. None of that can go in `fetch_form` — `packages.toml` lives
+in the overlay, and the overlay is public. `fetch_form_env` states the field
+names and, for each, the **name of the variable** holding the value:
+
+```toml
+fetch_form_env = "firstname=BMD_FIRSTNAME&lastname=BMD_LASTNAME&email=BMD_EMAIL&phone=BMD_PHONE&street=BMD_STREET&city=BMD_CITY&state=BMD_STATE&zip=BMD_ZIP"
+```
+
+Each value is resolved at fetch time through the same chain as the serial —
+environment variable, then `~/.config/bentoo/secrets`, then `/etc/bentoo/secrets`
+— so every operator sends their own details and the record carries none. All of
+them are resolved **before** the first request goes out, so a missing variable
+is reported naming both the variable and the field it belongs to, rather than
+halfway through a submission the vendor has already recorded.
+
+Resolved values are removed from any error text the download produces, the
+serial always and the rest once they are at least four characters long: a
+two-character value identifies nobody on its own, and substituting it would
+blank out fragments of the very message you need.
+
+The combination with `fetch_method = "get"` is **refused**, not discouraged: a
+GET puts every field in the query string, where the vendor's access log, every
+proxy in between and your own shell history all keep it.
+
+##### When the reply is a URL and not the file
+
+Some endpoints answer the form with a short `text/plain` body holding a signed
+CDN address, not with the archive. Written to disk as-is that becomes a
+few-hundred-byte "`.zip`" that `pkgdev` digests without complaint — **a green
+Manifest for a file that is a sentence**. `fetch_response = "url"` is what turns
+that reply into a second request for the real file.
+
+Independently of the setting, the finished response is guarded: a textual
+content type (`text/*`, `application/json`, `application/xml`) is never a
+distfile and is refused, naming `fetch_response` as the fix. Signed URLs are
+short-lived — three hours on the endpoint this was built against — so the two
+legs always run back to back; a refusal from the CDN says so rather than
+blaming the serial.
+
+##### When the endpoint id changes every release
+
+A vendor that mints a fresh download id per release makes a hardcoded
+`fetch_url` correct until the next bump, and then quietly serves the *previous*
+version's installer under the new version's name. `fetch_id_url` +
+`fetch_id_pattern` resolve the id at fetch time and substitute it into `{id}`:
+
+```toml
+# One line: TOML inline tables do not wrap, and `--lint` reads this record model.
+meta = { fetch_url = "https://vendor.example/api/register/us/download/{id}", fetch_body = "json", fetch_response = "url", fetch_content_type = "application/zip", fetch_min_bytes = "1000000000", fetch_filename = "Example_{version}_Linux.zip", fetch_form = "product=Example&platform=Linux&policy=true", fetch_id_url = "https://vendor.example/api/support/us/downloads.json", fetch_id_pattern = '"Linux":\[\{"downloadId":"([^"]+)","downloadTitle":"Example {version}"' }
+```
+
+Read it in order: look the id up in the catalogue, `POST` the form as JSON to the
+endpoint that id names, treat the reply as the URL of the real file, and refuse
+anything that comes back which is not a zip of at least a gigabyte.
+
+A redirect is also refused on the form leg, and deliberately: a `301`/`302`/`303`
+makes every HTTP client reissue the `POST` as a `GET` **and drop the body**, so
+the vendor sees a request carrying none of the form. The old error blamed the
+serial for that, which was wrong in both fact and remedy; `307`/`308` preserve
+the body and are followed normally.
+
+The serial pair is optional because not every gated download is gated by a
+*credential*: a vendor may hand the file to whoever submits the form. Declaring
+**one half alone is an error**, and deliberately so — it describes a request
+that cannot be built (an env var with no field to carry it, or a field with no
+value to put in it), and letting it pass would submit the form without the
+credential it was configured to carry. A gated endpoint answers that with its
+login page, which is a 200-response body, not an error.
+
+A record carrying these keys is also what makes
+[`bentoo distfile fetch`](#fetch-a-gated-distfile) work for the *user* of the
+package, not just for the maintainer's sweep.
 
 ##### Rules that are not obvious from the field list
 

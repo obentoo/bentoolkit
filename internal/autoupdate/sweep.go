@@ -767,8 +767,15 @@ func (s *sweeper) prefetchAuthDistfile(pkg, version, distdir string) error {
 		return nil
 	}
 
-	logger.Info("authenticated fetch: downloading %s distfile for %s (serial via $%s)",
-		pkg, version, spec.serialEnv)
+	// The provenance is built rather than formatted in, because a spec with no
+	// serial would otherwise log "serial via $" — a sentence stating that a
+	// credential came from an env var nobody named.
+	provenance := "no serial configured"
+	if spec.usesSerial() {
+		provenance = "serial via $" + spec.serialEnv
+	}
+	logger.Info("authenticated fetch: downloading %s distfile for %s (%s)",
+		pkg, version, provenance)
 
 	dest, err := spec.fetchDistfile(s.ctx, version, distdir)
 	if err != nil {

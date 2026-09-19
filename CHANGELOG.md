@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-19
+
+### Added
+- **`bentoo distfile fetch <category/package>` — the gated download, for the
+  person installing the package.** The authenticated fetch has existed since
+  0.28, but only inside the sweep: `prefetchAuthDistfile` runs minutes before
+  `pkgdev manifest` and nothing else could reach it. A user whose `emerge`
+  stopped on a distfile no mirror may carry was therefore left with the manual
+  route the ebuild's `pkg_nofetch` prints — open the vendor page, log in, save
+  the file under exactly the right name, move it into `DISTDIR` — every step of
+  which can land a file the Manifest then rejects.
+
+  The new command performs the download the overlay already records, writing it
+  into the host's own `DISTDIR` (asked of `portageq distdir`, never assumed)
+  under exactly the name `fetch_filename` resolves to. It runs the same request,
+  the same guards and the same writer as the sweep, so what a user fetches is
+  what the Manifest was computed against. `--version` selects the version an
+  older ebuild needs; `--distdir` overrides the destination. An atom matching
+  two records (release lines, slots) is refused and both keys are named, rather
+  than resolved to whichever one the map yielded first.
+
+  `internal/autoupdate` gained one exported door for it — `FetchAuthDistfile`,
+  with `ErrPackageNotInRegistry`, `ErrAmbiguousPackageKey` and `ErrNoAuthFetch`
+  — deliberately not the spec type: the `[meta]` sub-schema is this package's
+  own business and has changed twice, while "fetch the distfile this record
+  describes" is the stable question a command can be built on.
+
+- **A gated download can now be a two-step one, and the config says which.**
+  Four `[meta]` keys describe what a vendor endpoint actually does:
+  `fetch_body = "json"` sends the form as a JSON object instead of urlencoded
+  (exactly the literals `true`/`false` become booleans; everything else stays a
+  string, so a postcode is not silently turned into a number);
+  `fetch_response = "url"` says the reply NAMES the file rather than being it,
+  and the download is fetched from the address it returns; `fetch_content_type`
+  and `fetch_min_bytes` state what the finished file must be.
+
+  This is not speculative. Measured against Blackmagic's DaVinci Resolve
+  endpoint on 2026-09-19, the reply to the registration form is **492 bytes of
+  `text/plain`** holding a CloudFront URL whose signature expires in three
+  hours; the file itself is 3.81 GiB of `application/zip` behind it. The old
+  guard rejected only `text/html`, and the old writer rejected only zero bytes
+  — so that 492-byte sentence would have been written as
+  `DaVinci_Resolve_21.1_Linux.zip` and digested into a green Manifest. The
+  guard is now stated as "a distfile is not text", which covers `text/plain`,
+  JSON and XML, and names `fetch_response` as the fix.
+
+- **An endpoint whose id changes every release is resolved at fetch time.**
+  `fetch_id_url` + `fetch_id_pattern` (a regex with one capture group) look the
+  per-release download id up in whatever catalogue the vendor publishes and
+  substitute it into `{id}` in `fetch_url`. Baking that id into the record is
+  correct exactly until the next bump, after which it serves the PREVIOUS
+  version's installer under the new version's file name.
+
+  `{version}` is substituted into the pattern **quoted** (`regexp.QuoteMeta`),
+  because an unquoted `21.1` is a regex that matches `2101` just as happily,
+  and a catalogue holding both answers with whichever comes first.
+
+- **A redirect on the form leg is refused, and the error no longer lies.**
+  A `301`/`302`/`303` makes every HTTP client reissue the `POST` as a `GET` and
+  DROP the body, so the vendor receives a request carrying none of the form and
+  answers with its login page. The failure used to be reported as a rejected
+  serial — wrong in both fact and remedy. It is now reported as what it is,
+  naming the address to point `fetch_url` at. `307`/`308` preserve the body and
+  are still followed.
+
+- **`fetch_form_env` keeps a registration form's personal fields out of the
+  overlay.** A vendor that gates a download behind a *registration* form asks
+  for a name, an e-mail, a telephone and an address, and `packages.toml` is
+  committed to a public repository. The new key states the field names and, for
+  each, the NAME of the variable holding the value, resolved at fetch time
+  through the same chain as the serial. It is that pair generalised, and every
+  value is resolved before the first request goes out, so a missing variable is
+  named together with the field it belongs to.
+
+  Resolved values are scrubbed from error text — the serial always, the rest
+  once they are four characters or longer, because substituting a
+  two-character value would blank out fragments of the message somebody needs
+  and identifies nobody on its own. Combining the key with
+  `fetch_method = "get"` is refused: a GET puts every field in the query
+  string, where the vendor's log, every proxy and the operator's own shell
+  history keep it.
+
+- **`fetch_timeout` for records that download something large.** The budget
+  covers the whole download and was a fixed five minutes, sized for a distfile
+  of tens of megabytes. A 3.81 GiB archive needs better than 13 MB/s sustained
+  to finish inside that, so a record that knows what it fetches can say so. The
+  default is unchanged.
+
+### Fixed
+- **A fetched distfile is no longer written 0600.** `os.CreateTemp` makes the
+  temporary file private and the atomic rename preserved it, which was
+  invisible while the only caller was the sweep writing into a private distdir
+  it owns. `bentoo distfile fetch` writes into the HOST's `DISTDIR`, and the
+  process that reads a distfile at merge time is not the one that fetched it:
+  under `FEATURES="userfetch userpriv"` Portage reads as uid `portage`, which
+  cannot open a 0600 file. The merge then failed on a file that was present,
+  complete and digest-correct. The mode is set on the temp file before the
+  rename, so the final name never exists with the wrong bits.
+
+### Changed
+- **A `[meta]` authenticated fetch no longer has to carry a serial — but may not
+  carry half of one.** `fetch_serial_env` and `fetch_serial_field` were both
+  unconditionally required, which kept the authenticated path out of reach of
+  every download gated by a form alone rather than by a credential. They are now
+  optional AS A PAIR: neither is fine, one without the other is an error naming
+  the missing half.
+
+  The pair rule is not pedantry. A half-declared serial describes a request that
+  cannot be built — an env var with no field to carry it, or a field with no
+  value to put in it — and accepting it would submit the form WITHOUT the
+  credential it was configured to carry. A gated endpoint answers that with its
+  login page: a 200 response with a body, which reaches the writer rather than
+  the error path. The existing HTML guard catches the common shape of that, but
+  the guard is the second line of defence; refusing the impossible config is the
+  first.
+
 ## [0.30.3] - 2026-09-15
 
 ### Fixed
@@ -5106,7 +5222,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/obentoo/bentoolkit/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/obentoo/bentoolkit/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/obentoo/bentoolkit/compare/v0.30.0...v0.30.1
