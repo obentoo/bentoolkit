@@ -16,6 +16,26 @@ updates:
     # limit and the cooldown below.
     allow:
       - dependency-type: "all"
+    # Watched in name only: github.com/chromedp/cdproto. It is a DIRECT
+    # requirement and is linked into the binary (internal/autoupdate imports
+    # cdproto/network), yet Dependabot has never opened a single PR for it --
+    # `gh pr list --state all --search cdproto` is empty across the whole repo
+    # history. Measured 2026-09-22, it sat five weeks behind (pinned
+    # 2026-08-04, latest 2026-09-12) and was bumped by hand.
+    #
+    # The mechanism is NOT confirmed. The module carries no semver tag at all
+    # (proxy.golang.org/github.com/chromedp/cdproto/@v/list answers empty), so
+    # it looks like the same trap as the charmbracelet/x/exp pair below -- but
+    # that was inferred from the absence of a PR, not read from an update-job
+    # log, and those logs are UI-only (Insights -> Dependency graph ->
+    # Dependabot). Ruled out by measurement: the 7-day cooldown (the candidate
+    # was 10 days old) and open-pull-requests-limit (5 of 10 in use).
+    #
+    # Deliberately NOT listed under `ignore:`. Ignoring it would CAUSE the
+    # silence rather than record it, and would throw away any chance Dependabot
+    # starts resolving it. Until the job log is read, treat cdproto as a third
+    # manual-bump dependency alongside the two ignored below -- which means the
+    # 7-day quarantine is on you: check the pseudo-version's own date first.
     # Release quarantine: ignore versions newer than 7 days, dodging
     # the window when most hijacked/yanked packages are caught.
     cooldown:
