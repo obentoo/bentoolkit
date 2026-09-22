@@ -17,8 +17,10 @@ updates:
     allow:
       - dependency-type: "all"
     # Watched in name only: github.com/chromedp/cdproto. It is a DIRECT
-    # requirement and is linked into the binary (internal/autoupdate imports
-    # cdproto/network), yet Dependabot has never opened a single PR for it --
+    # requirement and is compiled -- though only into the chromedp-tagged build,
+    # where `go list -deps -tags chromedp ./cmd/bentoo` links 58 of its packages;
+    # the default build `make build` produces links none of them. Yet Dependabot
+    # has never opened a single PR for it --
     # `gh pr list --state all --search cdproto` is empty across the whole repo
     # history. Measured 2026-09-22, it sat five weeks behind (pinned
     # 2026-08-04, latest 2026-09-12) and was bumped by hand.
