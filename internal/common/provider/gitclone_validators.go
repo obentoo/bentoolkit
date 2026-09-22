@@ -25,7 +25,13 @@ const forbiddenBranchRunes = "~^:?*[\\"
 
 // rtlOverride is the Unicode "Right-to-Left Override" code point (U+202E).
 // It can be used to visually disguise a branch name, so it is rejected.
-const rtlOverride = '‮'
+//
+// Written as the \u escape, never as the character itself: the literal would
+// put an invisible bidirectional control into this file, which is the very
+// Trojan Source trick this constant exists to defeat -- and it would reorder
+// the rendering of any reviewer's diff. gitclone_test.go already spells it
+// "\u202e"; this keeps the two halves consistent.
+const rtlOverride = '\u202e'
 
 // ValidateRepoURL parses raw with net/url and rejects any repository URL whose
 // scheme is outside the allowed set {http, https, git, ssh} or whose host is
