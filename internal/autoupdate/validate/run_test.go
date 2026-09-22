@@ -230,6 +230,11 @@ func TestValidatePackage_ReachesNoNetwork(t *testing.T) {
 	}
 
 	fset := token.NewFileSet()
+	//nolint:staticcheck // SA1019: ParseDir is deprecated BECAUSE it ignores
+	// build tags when grouping files into packages -- which is exactly what this
+	// assertion needs. go/packages would apply the current build constraints and
+	// silently skip any file behind a tag, making the source-level claim below
+	// vacuous for precisely the files least likely to be read by hand.
 	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
 		return !strings.HasSuffix(fi.Name(), "_test.go")
 	}, parser.ImportsOnly)

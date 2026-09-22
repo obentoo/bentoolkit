@@ -179,6 +179,9 @@ func buildReport(plan validationPlan, results []validate.EbuildResult) report.Ru
 	}
 
 	for i := range reached {
+		//nolint:gosec // G602: both indexes are bounded by construction. reached is
+		// min(len(results), planned) and planned is len(plan.Entries), so i < reached
+		// implies i is in range for BOTH slices. gosec cannot see through min().
 		row := validationRowFacts(plan.Entries[i], results[i])
 		out.Results = append(out.Results, row)
 		countInExactlyOneColumn(&out.Tally, row.Outcome)

@@ -26,8 +26,9 @@ jobs:
 
       # Built from source on purpose, and it has to stay that way: golangci-lint
       # refuses to run when the Go it was built with is older than the Go the
-      # module targets. The published v2.1.6 binary is built with go1.24.2, and
-      # go.mod says 1.26, so it exits 3 before linting a line:
+      # module targets, and a published binary is built with whatever Go its
+      # release was cut with. Measured on v2.1.6 -- built with go1.24.2 against
+      # a go.mod targeting 1.26 -- it exits 3 before linting a line:
       #
       #   can't load config: the Go language version (go1.24) used to build
       #   golangci-lint is lower than the targeted Go version (1.26)
@@ -42,10 +43,16 @@ jobs:
       # alone — twice here, once in Secret Scan, the last turning main red.
       # Every one of those cleared on a rerun, so retry the install rather than
       # let a transient stream error fail the job.
+      # Pin moved v2.1.6 -> v2.13.2 to close #170. The old pin was twelve minors
+      # behind, which made a local run with a current binary report findings this
+      # job could not see -- and the pin lives inside this `run:` script, so no
+      # Dependabot ecosystem watches it. Bumping it is never just a version bump:
+      # it turns every check added in between into a CI failure that has to be
+      # cleared first. Whoever moves it next should expect that.
       - name: Install golangci-lint from source
         run: |
           for attempt in 1 2 3; do
-            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6; then
+            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2; then
               exit 0
             fi
             echo "::warning::go install failed (attempt ${attempt}/3), retrying"
