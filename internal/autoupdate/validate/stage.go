@@ -11,7 +11,8 @@ import (
 )
 
 // stagedDirMode is the mode every directory of a staged tree carries. It is the
-// mode the applier already uses for its logs/ directory (applier.go:471) and it
+// mode the applier already uses for its logs/ directory -- `NewApplier` in
+// applier.go creates it with `os.MkdirAll(applier.logsDir, 0o750)` -- and it
 // is chosen here for the same reason: a staged tree holds a candidate nobody has
 // reviewed yet and, once a fixer runs against it, whatever that fixer wrote.
 // Neither belongs in a world-readable directory.
@@ -181,8 +182,9 @@ type StageRequest struct {
 // the retained tree and rebuilds it, returning the same path. Retention is one
 // tree per package-version and the path is what expresses it, so a second
 // attempt must not accumulate a second directory. This is also why the applier's
-// copyEbuild is not reused for the candidate: it refuses an existing destination
-// with ErrEbuildExists (applier.go:953), the exact opposite of the rule here,
+// copyEbuild is not reused for the candidate: `(*Applier).copyEbuild` in
+// applier.go refuses an existing destination with ErrEbuildExists, the exact
+// opposite of the rule here,
 // and would hard-fail on the second staging of the same bump.
 //
 // WHAT STAGING DELIBERATELY DOES NOT COPY. The published package directory's

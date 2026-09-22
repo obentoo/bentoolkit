@@ -7,6 +7,144 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-09-22
+
+A maintenance release: dependency updates, one piece of source hygiene, and the
+CI lint pin caught up. Nothing a user drives changed — see the rendering note
+below for why that is a measurement rather than a hope.
+
+### Security
+
+- **A literal U+202E RIGHT-TO-LEFT OVERRIDE lived in the source, as the value of
+  the constant that exists to reject it.**
+  `internal/common/provider/gitclone_validators.go` defined
+  `const rtlOverride = '<the character itself>'`. It is invisible, so review
+  never showed it, and it reorders the rendering of any diff that touches the
+  line — the [Trojan Source](https://trojansource.codes/) trick the constant
+  defends against. Now spelled `'\u202e'`: identical rune, no behaviour change,
+  and `gitclone_test.go` had always used the escape form, so the two halves of
+  the same defence now agree.
+
+  **This was never a vulnerability.** The validator has always rejected U+202E
+  at `gitclone_validators.go:174` and tests cover it. What shipped was an
+  invisible control character in a file humans are expected to read. A repo-wide
+  sweep for U+202A–202E, U+2066–2069, U+200E, U+200F and U+061C across every
+  `*.go` now comes back empty.
+
+  No CI check could have caught it at the time: gosec's G116 arrived after the
+  v2.1.6 the lint job pinned. That gap is closed in this release, so a
+  recurrence would now fail CI.
+
+- **Three modules were bumped inside the release quarantine, as a deliberate
+  override.** `charmbracelet/x/exp/teatest` and `.../golden` at 63 hours old,
+  `golang.org/x/telemetry` at 23 — against the 7-day `cooldown` in
+  `.github/dependabot.yml`. Ages read from the proxy's own timestamps, not from
+  the date inside the pseudo-version, which looks older than the quarantine
+  clock actually is.
+
+  The quarantine's value is that someone else finds the hijack first, so waiving
+  it means reading the upstream diffs yourself. `charmbracelet/x`
+  `3986e9119cf9..53e2afe73ae5` is two commits touching **one** file,
+  `powernap/pkg/config/lsps.json`, with nothing under `exp/` at all — making the
+  teatest/golden bump a no-op, byte-identical content under a new
+  pseudo-version. `golang/telemetry` `4bcc4b2ee518..bdcd072333a6` is three files
+  of regenerated config by `gobot@golang.org` plus a pkgsite counter.
+
+  None of the three reaches the shipped binary: `x/telemetry` arrives only
+  through `golang.org/x/vuln/cmd/govulncheck` (the `tool` directive), and
+  teatest and golden are test-only. Precedent for the override and for cutting
+  it as a patch is 0.30.2.
+
+- **A direct dependency had never been proposed by Dependabot, and only the
+  absence of a PR recorded it.** `github.com/chromedp/cdproto` sat five weeks
+  behind — pinned 2026-08-04 against a 2026-09-12 upstream — with
+  `gh pr list --state all --search cdproto` empty across the entire repo
+  history. It carries no semver tag (`@v/list` answers empty), which looks like
+  the same resolver trap already documented for the `charmbracelet/x/exp` pair,
+  but that is inferred from the missing PR rather than read from an update-job
+  log, and those logs are UI-only. The cooldown (the candidate was 10 days old)
+  and `open-pull-requests-limit` (5 of 10 in use) were both ruled out by
+  measurement.
+
+  Bumped by hand and documented in `.github/dependabot.yml`, deliberately **not**
+  added to `ignore:` — ignoring it would cause the silence rather than record it.
+  It is compiled only into the chromedp-tagged build, where
+  `go list -deps -tags chromedp ./cmd/bentoo` links 58 of its packages; the
+  default build that `make build` produces links none.
+
+- **The chain carries no advisory.** govulncheck is clean under the pinned
+  `go1.26.8` rather than merely under the newer local toolchain — different
+  questions, because govulncheck judges the stdlib of whichever toolchain runs
+  it. osv-scanner at v2.6.0 (the exact pin the workflow now uses), trivy,
+  gitleaks over 450 commits and zizmor are clean too; `go mod verify` passes and
+  `go mod tidy -diff` is empty. GitHub reports no open Dependabot or code
+  scanning alert.
+
+### Fixed
+
+- **Two comments in `internal/autoupdate/validate/stage.go` pointed at the wrong
+  code, and had for some time.** They anchored to `applier.go:471` for the mode
+  the applier gives its `logs/` directory and to `applier.go:953` for
+  `copyEbuild` refusing an existing destination. Neither line held that code any
+  more: 471 is `WithApplierContext` and 953 is a `ValidationSourceStaged`
+  assignment. Both now name identifiers instead — `NewApplier`'s
+  `os.MkdirAll(applier.logsDir, 0o750)` and `(*Applier).copyEbuild` — which
+  survive every edit above them.
+
+  Worth knowing how this surfaced, because the mechanism will repeat.
+  `TestAnchorCitationsResolve` sweeps only the files the current story touched,
+  derived from `git diff <storyBaseCommit>..HEAD`. `stage.go` entered that set
+  only when the lint work above edited it, which pulled two long-standing
+  anchors into scope. The guard also **skips itself** when the story base commit
+  does not resolve — which is the case on CI's checkout — so it is a local-only
+  gate, and a green CI never said anything about it either way.
+
+### Changed
+
+- **The CI lint pin moved from golangci-lint v2.1.6 to v2.13.2 — twelve minors —
+  and ten findings had to be cleared before it could.** The old pin made a local
+  run with a current binary report findings the job could not see, and it lives
+  inside a `run:` script, where neither Dependabot ecosystem reads it, so nothing
+  would ever have said it was stale. Moving such a pin is never a version bump:
+  every check added in between becomes a CI failure first.
+
+  Four were mechanical (`QF1012` → `fmt.Fprintf`, `reflect.Ptr` →
+  `reflect.Pointer`). One was a false positive — `min()` already bounds both
+  indexes, which gosec cannot see. Two were a deprecation that does not apply:
+  `go/parser.ParseDir` is deprecated *because* it ignores build tags, which is
+  exactly what a source-level assertion over every non-test file needs.
+
+  Three were `G122` symlink-TOCTOU warnings on `filepath.WalkDir` callbacks,
+  silenced on a stated threat model rather than waved away: all three already
+  handle symlinks deliberately, and what remains is the residual race, winnable
+  only by someone who can already write into the host's Portage repo or its
+  fetched DISTDIR. The comment records that `os.Root` **is** a viable migration
+  if that stops holding — each root is walked separately and `os.Root` carries
+  `Lchown`, `Chmod`, `Lstat`, `Readlink` and `Symlink` as of Go 1.26 — so it is
+  a decision to revisit, not a dead end.
+
+  One detail worth carrying forward: `QF1012` had **seven** sites, not the three
+  reported. `max-same-issues` defaults to 3, so a finding count is not a work
+  estimate.
+
+- **Rendering is provably unchanged, despite two of the bumps landing in
+  rendering libraries.** `mattn/go-runewidth` v0.0.30 rewrote `Wrap` to measure
+  grapheme clusters instead of runes, and `xo/terminfo` v1.2.0 carries parser and
+  escaping fixes for older ncurses; both are linked into the default build. Every
+  `*.golden` file in the repository is byte-identical to v0.31.0, so for
+  everything the golden tests cover, output did not move.
+
+- **Dependency updates.** `golang.org/x` group (`net` v0.59.0, `text` v0.42.0,
+  `tools` v0.50.0, `vuln` v1.8.0, plus `telemetry`) — the first group PR since
+  the `go` directive fix shipped in 0.30.1, which confirms that diagnosis on the
+  first Monday that could test it. Also `mongo-driver` v1.17.10,
+  `go-runewidth` v0.0.30, `xo/terminfo` v1.2.0 (which drops `golang.org/x/exp`
+  from the module graph) and the `osv-scanner-action` at v2.6.0.
+
+- **The `dependencies`, `go` and `ci` labels now exist.** `dependabot.yml` had
+  declared them for some time; GitHub drops labels that do not exist, silently,
+  so every Dependabot PR had arrived unlabelled.
+
 ## [0.31.0] - 2026-09-19
 
 ### Added
@@ -5222,7 +5360,8 @@ Validated with `go test -race ./...`, `golangci-lint run`,
 - Initial release after versioning restructure. Prior history archived;
   project restarts at 0.1.0 following SemVer from this milestone forward.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/obentoo/bentoolkit/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/obentoo/bentoolkit/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/obentoo/bentoolkit/compare/v0.30.1...v0.30.2
