@@ -113,6 +113,20 @@ func grantPortageAccess(root string, writable bool) error {
 		if err != nil {
 			return fmt.Errorf("walking %s to open it to the %s group: %w", root, portageGroupName, err)
 		}
+		// Threat model, stated once for the three G122 sites in this tool. What gosec
+		// flags is not a missing symlink check -- both are deliberate below -- but the
+		// residual race: a path component swapped between WalkDir's lstat and the
+		// syscall here. The trees walked are the host's own Portage repo
+		// (cand.repoRoot) and its fetched DISTDIR (cand.fetchedDistdir). Winning that
+		// race needs write access to one of them already, which is a strictly larger
+		// compromise than anything the race would buy.
+		//
+		// os.Root IS a viable migration if that ever stops holding: each root is
+		// walked separately, and os.Root carries Lchown, Chmod, Lstat, Readlink and
+		// Symlink as of Go 1.26. The reason not to take it is the threat model above,
+		// not a missing API -- so this is a decision to revisit, not a dead end.
+		//nolint:gosec // G122: Lchown acts on the link itself and never follows it,
+		// so the only exposure is the directory-component race described above.
 		if err := os.Lchown(path, -1, gid); err != nil {
 			return fmt.Errorf("giving %s to the %s group: %w", path, portageGroupName, err)
 		}
@@ -128,6 +142,9 @@ func grantPortageAccess(root string, writable bool) error {
 		if want == mode {
 			return nil
 		}
+		//nolint:gosec // G122: symlinks already returned above, so Chmod -- which does
+		// follow them -- is only ever reached for a non-link entry. Same residual
+		// directory-component race, same threat model as the Lchown above.
 		if err := os.Chmod(path, want); err != nil {
 			return fmt.Errorf("opening %s to the %s group: %w", path, portageGroupName, err)
 		}

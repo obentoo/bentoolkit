@@ -506,6 +506,9 @@ func carryRepoDir(src, dst string) error {
 			if err != nil {
 				return fmt.Errorf("reading the link %s: %w", path, err)
 			}
+			//nolint:gosec // G122: Readlink does not follow the link, and the write goes
+			// to target -- inside the staged destination this function owns -- not to the
+			// walked path. Same threat model as internal/autoupdate/portage_access.go.
 			if err := os.Symlink(link, target); err != nil {
 				return fmt.Errorf("recreating the link %s -> %s at %s: %w", path, link, target, err)
 			}

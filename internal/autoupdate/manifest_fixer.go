@@ -569,7 +569,7 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 	switch {
 	case outcome == claudeCutShort:
 		// AD4/S009-R1.3: cancellation or deadline takes precedence over exit framing.
-		sb.WriteString(fmt.Sprintf("claude fixer aborted: %v", ctxErr))
+		fmt.Fprintf(&sb, "claude fixer aborted: %v", ctxErr)
 	case outcome == claudeCouldNotStart:
 		// S040-R5.6: the process never ran, so there is no exit code to print.
 		// Rendering the raw error where a number was promised produced the
@@ -578,27 +578,27 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		// cause text stays visible; only the framing changes. It sits above the
 		// contradiction case because a command that never started cannot have
 		// reported anything: an envelope here would be stale bytes.
-		sb.WriteString(fmt.Sprintf("claude fixer could not start: %v", runErr))
+		fmt.Fprintf(&sb, "claude fixer could not start: %v", runErr)
 	case outcome == claudeExitedNonZero && jsonErr == nil && !env.IsError && env.Subtype == "success":
 		// AD3/S009-R1.2: non-zero exit but a self-reported success envelope.
-		sb.WriteString(fmt.Sprintf("claude fixer exited %s but reported success (subtype=%s)",
-			exitCodeString(runErr), env.Subtype))
+		fmt.Fprintf(&sb, "claude fixer exited %s but reported success (subtype=%s)",
+			exitCodeString(runErr), env.Subtype)
 	case outcome == claudeExitedNonZero:
 		// S009-R1.1: generic non-zero exit (envelope may or may not have parsed).
-		sb.WriteString(fmt.Sprintf("claude fixer failed: exit %s", exitCodeString(runErr)))
+		fmt.Fprintf(&sb, "claude fixer failed: exit %s", exitCodeString(runErr))
 		if jsonErr == nil && env.Subtype != "" {
-			sb.WriteString(fmt.Sprintf(" (subtype=%s)", env.Subtype))
+			fmt.Fprintf(&sb, " (subtype=%s)", env.Subtype)
 		}
 	case env.IsError:
 		// S009-R1.5: explicit error envelope on a zero exit.
-		sb.WriteString(fmt.Sprintf("claude fixer reported error (subtype=%s)", env.Subtype))
+		fmt.Fprintf(&sb, "claude fixer reported error (subtype=%s)", env.Subtype)
 	default:
 		// S009-R1.4: zero exit but stdout did not parse as JSON.
 		sb.WriteString("claude fixer emitted non-JSON output")
 	}
 
 	if jsonErr != nil {
-		sb.WriteString(fmt.Sprintf(": parse error: %v", jsonErr))
+		fmt.Fprintf(&sb, ": parse error: %v", jsonErr)
 	}
 	if len(env.Errors) > 0 {
 		sb.WriteString("; errors: ")
