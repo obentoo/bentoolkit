@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `1.2/../../../x` became part of the target path and moved the ebuild out of
   its package directory. It is now refused before the configuration is read, and
   the value is named.
+- **A `~name` distdir or distfiles-cache path is refused, not misread.**
+  `~alice/distfiles` was expanded to `$HOME/alice/distfiles`, a directory under
+  the *current* user's home. Only `~` and `~/…` are expanded now. A distdir in
+  the `~name` form fails and names the path; a cache path in that form skips
+  prepopulation, as a missing cache already does.
 - **A bump whose auxiliary value could not be resolved is held, not shipped
   stale.** When a package declares `aux_pattern` or `commit_sha_path` and that
   value cannot be fetched or captured, the check used to queue the bump anyway,
