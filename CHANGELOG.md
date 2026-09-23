@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`overlay rename` no longer overwrites one ebuild with another.** The rename
+  strips the revision, so `foo-1.0.ebuild` and `foo-1.0-r1.ebuild` both mapped
+  to `foo-1.1.ebuild`. Both were moved, the second on top of the first, and the
+  run reported `Renamed 2 ebuild(s)`. The newer revision was silently lost, with
+  or without `--force`. A shared target is now shown in the preview with every
+  source, and the rename exits 1 before prompting and before moving anything,
+  including under `--dry-run`. `--force` does not override this.
+- **`overlay rename` refuses a new version that is not a version.** A value such
+  as `1.2/../../../x` became part of the target path and moved the ebuild out of
+  its package directory. It is now refused before the configuration is read, and
+  the value is named.
 - **A bump whose auxiliary value could not be resolved is held, not shipped
   stale.** When a package declares `aux_pattern` or `commit_sha_path` and that
   value cannot be fetched or captured, the check used to queue the bump anyway,
