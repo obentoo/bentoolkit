@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Autoupdate no longer writes a malformed upstream value into an ebuild.** An
+  `aux_pattern` capture and an upstream commit hash used to reach the bash
+  source of the new ebuild unchecked. A captured `x"; touch /tmp/pwned; "`
+  closed the quoted assignment and left a shell command for `emerge` to run.
+  `Applier.Apply` now refuses an aux value outside `[A-Za-z0-9._+-]{1,128}` and
+  a commit hash that is not 40 lowercase hex, before anything is staged. The
+  package is marked failed with the value named, its directory is left
+  byte-identical, and an `--apply all` batch carries on with the others.
+- **An accepted value is written literally.** The replacement template expanded
+  `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
+  value's `$` is now escaped before substitution.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the
