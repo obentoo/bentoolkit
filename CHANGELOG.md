@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
   value's `$` is now escaped before substitution.
 
+### Fixed
+
+- **A bump whose auxiliary value could not be resolved is held, not shipped
+  stale.** When a package declares `aux_pattern` or `commit_sha_path` and that
+  value cannot be fetched or captured, the check used to queue the bump anyway,
+  and the new ebuild shipped the previous release's `MY_BUILD` or `BUILD_ID`.
+  The check now records the cause and leaves the pending list alone. The value
+  is fetched again on the next check, so the bump goes through on its own once
+  upstream serves it.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the
