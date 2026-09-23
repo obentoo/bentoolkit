@@ -278,7 +278,7 @@ func TestCompareVersions_EdgeCases(t *testing.T) {
 		{"patch suffix", "1.0_p1", "1.0", 1},
 		{"rc1 vs rc2", "1.0_rc1", "1.0_rc2", -1},
 		{"beta with revision", "1.0_beta2-r1", "1.0_beta2", 1},
-		{"different lengths", "1.0.0", "1.0", 0},
+		{"different lengths", "1.0.0", "1.0", 1}, // PMS orders 1.0.0 above 1.0: more components is greater
 		{"complex comparison", "1.0_beta2-r3", "1.0_rc1", -1},
 	}
 
