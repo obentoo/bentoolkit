@@ -84,7 +84,8 @@ var (
 )
 
 // auxValueRe and commitHashRe are the shapes an upstream-supplied value must
-// have before Applier.Apply writes it into an ebuild. `$` without `(?m)` only
+// have before any writer puts it into an ebuild — checkUpstreamValues applies
+// them in Applier.Apply, Applier.Validate and applySubstitutions. `$` without `(?m)` only
 // matches at the end of the text, so a trailing newline is refused.
 var (
 	auxValueRe   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
@@ -1802,7 +1803,8 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 // the sibling of substituteCommitHash but without the 40-hex-SHA lock, so it can
 // carry any value captured from a regex/html upstream page. The match is bounded
 // by the surrounding double quotes; the value is inserted literally and is not
-// checked here — Applier.Apply refuses one that could close those quotes.
+// checked here — applySubstitutions, its only caller, refuses one that could
+// close those quotes.
 func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	if varName == "" {
 		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
@@ -1862,7 +1864,8 @@ func checkUpstreamValues(pkg string, update *PendingUpdate) error {
 // quote); only the value's own `$` is doubled. Without it an upstream value
 // such as `a${1}b` would expand to the capture group instead of being written.
 // substituteCommitHash and substituteAuxVar do not validate the value —
-// Applier.Apply refuses a malformed one before either is reached.
+// applySubstitutions, their only caller, refuses a malformed one before either
+// is reached.
 func literalReplacement(value string) string {
 	return strings.ReplaceAll(value, "$", "$$")
 }
