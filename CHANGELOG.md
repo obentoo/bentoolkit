@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Autoupdate no longer writes a malformed upstream value into an ebuild.** An
+  `aux_pattern` capture and an upstream commit hash used to reach the bash
+  source of the new ebuild unchecked. A captured `x"; touch /tmp/pwned; "`
+  closed the quoted assignment and left a shell command for `emerge` to run.
+  Now an aux value outside `[A-Za-z0-9._+-]{1,128}` and a commit hash that is
+  not 40 lowercase hex are refused before anything is staged:
+  - Under `--apply`, the package is marked failed with the value named, its
+    directory is left byte-identical, and an `--apply all` batch carries on
+    with the others.
+  - Under `--check`, the package is reported skipped with the value named, and
+    no gate runs on it. The check stages the same ebuild and runs `pkgdev
+    manifest` and the configure step on it, so it was a second way in.
+  - The function every ebuild writer calls refuses the value as well, so a
+    writer added later is covered without having to remember the check.
+- **An accepted value is written literally.** The replacement template expanded
+  `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
+  value's `$` is now escaped before substitution.
+
+### Fixed
+
+- **`overlay rename` no longer overwrites one ebuild with another.** The rename
+  strips the revision, so `foo-1.0.ebuild` and `foo-1.0-r1.ebuild` both mapped
+  to `foo-1.1.ebuild`. Both were moved, the second on top of the first, and the
+  run reported `Renamed 2 ebuild(s)`. The newer revision was silently lost, with
+  or without `--force`. A shared target is now shown in the preview with every
+  source, and the rename exits 1 before prompting and before moving anything,
+  including under `--dry-run`. `--force` does not override this.
+- **`overlay rename` refuses a new version that is not a version.** A value such
+  as `1.2/../../../x` became part of the target path and moved the ebuild out of
+  its package directory. It is now refused before the configuration is read, and
+  the value is named.
+- **A `~name` distdir or distfiles-cache path is refused, not misread.**
+  `~alice/distfiles` was expanded to `$HOME/alice/distfiles`, a directory under
+  the *current* user's home. Only `~` and `~/…` are expanded now. A distdir in
+  the `~name` form fails and names the path; a cache path in that form skips
+  prepopulation, as a missing cache already does.
+- **A bump whose auxiliary value could not be resolved is held, not shipped
+  stale.** When a package declares `aux_pattern` or `commit_sha_path` and that
+  value cannot be fetched or captured, the check used to queue the bump anyway,
+  and the new ebuild shipped the previous release's `MY_BUILD` or `BUILD_ID`.
+  The check now records the cause and leaves the pending list alone. The value
+  is fetched again on the next check, so the bump goes through on its own once
+  upstream serves it.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the

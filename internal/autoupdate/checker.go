@@ -47,6 +47,11 @@ var (
 	// ebuild's own base is what let six Khronos packages drift up to seven
 	// releases behind while still reporting "up to date".
 	ErrBaseVersionUnresolved = errors.New("declared base version source resolved nothing")
+	// ErrAuxUnresolved is recorded (wrapped, on CheckResult.Error) when a package
+	// declares aux_pattern or commit_sha_path and that value could not be
+	// resolved. The bump is held rather than queued: applying it would ship the
+	// previous release's value under the new version.
+	ErrAuxUnresolved = errors.New("auxiliary value unresolved")
 )
 
 // CheckResult represents the result of checking a single package for updates.
@@ -759,7 +764,9 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if result.HasUpdate {
 				sha := c.resolveAuxSHA(&pkgConfig, result)
 				aux := c.resolveAuxValue(&pkgConfig, result)
-				if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
+				if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
+					result.Error = errors.Join(result.Error, held)
+				} else if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -792,7 +799,11 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	if result.HasUpdate {
 		sha := c.resolveAuxSHA(&pkgConfig, result)
 		aux := c.resolveAuxValue(&pkgConfig, result)
-		if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
+		if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
+			// Joined, not overwritten: result.Error may already hold the cache
+			// write error, in which case the helper did not record its own cause.
+			result.Error = errors.Join(result.Error, held)
+		} else if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -1199,11 +1210,28 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxV
 	return c.pending.Add(update)
 }
 
+// heldBump returns an error wrapping ErrAuxUnresolved when pkg declares
+// commit_sha_path or aux_pattern and the matching value came back empty, and
+// nil otherwise. CheckPackage then leaves the pending list alone: a held bump
+// is not a failed check, and an entry queued by an earlier successful check
+// stays as it was. The value is fetched again on the next check, cache hit
+// included, so the bump resolves itself once upstream serves it.
+func heldBump(pkg string, cfg *PackageConfig, sha, aux string) error {
+	if cfg.CommitSHAPath != "" && sha == "" {
+		return fmt.Errorf("%w for %s: commit_sha_path %q resolved nothing, bump held until it resolves", ErrAuxUnresolved, pkg, cfg.CommitSHAPath)
+	}
+	if cfg.AuxPattern != "" && aux == "" {
+		return fmt.Errorf("%w for %s: aux_pattern resolved nothing, bump held until it resolves", ErrAuxUnresolved, pkg)
+	}
+	return nil
+}
+
 // resolveAuxSHA fetches the auxiliary commit SHA for a version-tracked package
 // that declares commit_sha_path (e.g. cursor's BUILD_ID, which is part of the
 // download URL and changes with every release). It returns "" when no SHA path
-// is configured. A fetch/parse failure is recorded on result.Error but does not
-// abort the update: the apply simply skips the SHA substitution.
+// is configured. A fetch/parse failure is recorded on result.Error and returns
+// "", which makes CheckPackage hold the bump (see heldBump) instead of queueing
+// it with the previous release's SHA.
 //
 // Commit-tracked packages (track="commit") resolve their SHA via fetchCommitInfo
 // instead and never reach this path.
@@ -1233,8 +1261,9 @@ func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string 
 // nomachine's MY_P build number). It returns "" when no aux_pattern is
 // configured. Unlike resolveAuxSHA it is parser-agnostic: the aux_pattern regex
 // is applied directly to the fetched body, so regex/html sources work. A
-// fetch/parse failure is recorded on result.Error but does not abort the
-// update; the apply simply skips the substitution.
+// fetch/parse failure is recorded on result.Error and returns "", which makes
+// CheckPackage hold the bump (see heldBump) instead of queueing it with the
+// previous release's value.
 func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) string {
 	if cfg.AuxPattern == "" {
 		return ""
