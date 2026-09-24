@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session). `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches are not on the
   list, so those setups lose the agents until a later change adds them.
 
+- **One builder now writes every `claude` agent's permission arguments.** Each
+  rule is its own argv element; `Read` and `Edit` are scoped to the agent's own
+  directory as `Read(//<dir>/**)` and `Edit(//<dir>/**)` (writes are scoped
+  through `Edit`, the only rule the CLI consults for them); the secrets files
+  are denied by path; WebFetch is granted only as `WebFetch(domain:<host>)` for
+  hosts that are lowercase DNS names — a host from `packages.toml` or `pkgdev`
+  output that is not one is dropped with a warning, so it cannot widen or forge
+  a rule. Every agent runs with `--permission-mode dontAsk`, no user, project or
+  local settings, no MCP servers or account connectors, and inline settings that
+  block reads outside its working directories and refuse `bypassPermissions`.
+  A directory outside `[A-Za-z0-9._+@/-]` (for example an overlay path with a
+  space) now stops the fixer before it spawns, with an error naming the path.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the
