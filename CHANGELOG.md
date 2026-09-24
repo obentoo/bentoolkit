@@ -47,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory created for each call and removed afterwards, instead of in
   bentoo's working directory, which a read-only tool could otherwise read.
 
+### Changed
+
+- **A tool the agent was refused is now named in the failure.** When a fixer
+  or the bump reviewer fails, the error ends with `refused tools:` and the
+  refused tools — `WebFetch(<host>)` for a fetch, the bare name otherwise —
+  and never the refused call's input. When a manifest or registry fix
+  "succeeds" but its re-check fails, the "still failed" / "still failing after
+  fix" message adds `(agent was refused: …)`. Nothing retries with wider
+  permissions, and no setting widens an agent's tools, hosts or paths.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the

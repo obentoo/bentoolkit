@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -334,13 +335,64 @@ func (c *ClaudeCodeClient) GetModel() string {
 
 // claudeCodeEnvelope is the JSON envelope emitted by `claude --output-format json`.
 // Only the fields the provider consumes are modeled.
+//
+// PermissionDenials lists every tool call the CLI refused, on a failed AND on a
+// successful run. Its shape was observed on claude 2.1.281 (2026-09-23):
+// `"permission_denials":[{"tool_name":"Read","tool_use_id":"toolu_…",
+// "tool_input":{"file_path":"…"}}]`, with `{"command":…}` as a Bash call's
+// input and `{"url":…,"prompt":…}` as a WebFetch call's (S051-R5.1).
 type claudeCodeEnvelope struct {
-	Type         string   `json:"type"`
-	Subtype      string   `json:"subtype"`
-	IsError      bool     `json:"is_error"`
-	Result       string   `json:"result"`
-	Errors       []string `json:"errors"`
-	TotalCostUSD float64  `json:"total_cost_usd"`
+	Type              string                   `json:"type"`
+	Subtype           string                   `json:"subtype"`
+	IsError           bool                     `json:"is_error"`
+	Result            string                   `json:"result"`
+	Errors            []string                 `json:"errors"`
+	TotalCostUSD      float64                  `json:"total_cost_usd"`
+	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+}
+
+// claudePermissionDenial is one refused tool call in the envelope.
+// ToolInput is kept raw on purpose: it is read for a WebFetch host and nothing
+// else, because the full input can echo page content or a secrets path.
+type claudePermissionDenial struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// refusedToolLabels names each refused tool once, in the order the CLI refused
+// them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
+// — so two refusals of one tool to different hosts stay distinguishable
+// (S051-R5.1). The host is taken from the call's url only when it is a
+// lowercase DNS name; anything else leaves the bare tool name. No other part of
+// the input is ever read, so a label can never carry a URL path or query, a
+// fetch prompt or a shell command.
+func refusedToolLabels(denials []claudePermissionDenial) []string {
+	var labels []string
+	seen := make(map[string]struct{}, len(denials))
+	for _, d := range denials {
+		if d.ToolName == "" {
+			continue
+		}
+		label := d.ToolName
+		if d.ToolName == "WebFetch" {
+			var in struct {
+				URL string `json:"url"`
+			}
+			if json.Unmarshal(d.ToolInput, &in) == nil {
+				if u, err := url.Parse(in.URL); err == nil {
+					if host := strings.ToLower(u.Hostname()); dnsHost.MatchString(host) {
+						label += "(" + host + ")"
+					}
+				}
+			}
+		}
+		if _, dup := seen[label]; dup {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	return labels
 }
 
 // buildArgs assembles the CLI argument vector (S003-R1.2, S003-R1.3, S003-R1.5, S003-R7, S003-R7.2).

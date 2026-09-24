@@ -131,6 +131,12 @@ type ManifestFixResult struct {
 	// that omits it implies a precision it does not have (S030-R4.2). Derived
 	// from isModelAlias — the single rule shared with the registry fixer.
 	ModelIsAlias bool
+	// DeniedTools names the tools the CLI refused during a run that nonetheless
+	// ended successfully — `WebFetch(host)` or a bare tool name, never the
+	// refused call's input (S051-R5.1). A caller whose re-check then fails
+	// quotes them, because a refusal is the likeliest reason the fix fell short
+	// (S051-R5.2).
+	DeniedTools []string
 }
 
 // pinnedModelPrefix is the prefix every pinned Claude model identifier carries
@@ -628,6 +634,14 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		sb.WriteString("; errors: ")
 		sb.WriteString(strings.Join(env.Errors, "; "))
 	}
+	// The tools the CLI refused, by name — never by input (S051-R5.1). A refusal
+	// is the likeliest reason a scoped agent stopped short, and nothing retries
+	// with more: the operator widens nothing either, because no setting exists
+	// that could (S051-R5.3).
+	if labels := refusedToolLabels(env.PermissionDenials); len(labels) > 0 {
+		sb.WriteString("; refused tools: ")
+		sb.WriteString(strings.Join(labels, ", "))
+	}
 	if r := strings.TrimSpace(env.Result); r != "" {
 		sb.WriteString("\nresult: ")
 		sb.WriteString(truncateDiagnostic(r))
@@ -714,5 +728,6 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 		CostUSD:      env.TotalCostUSD,
 		Model:        f.model,
 		ModelIsAlias: isModelAlias(f.model),
+		DeniedTools:  refusedToolLabels(env.PermissionDenials),
 	}, nil
 }

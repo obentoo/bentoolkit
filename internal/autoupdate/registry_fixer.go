@@ -106,6 +106,12 @@ type RegistryFixResult struct {
 	// than a pinned identifier (S030-R4.2). Derived from isModelAlias — the same
 	// single rule the manifest fixer uses, never a second copy.
 	ModelIsAlias bool
+	// DeniedTools names the tools the CLI refused during a run that nonetheless
+	// ended successfully — `WebFetch(host)` or a bare tool name, never the
+	// refused call's input (S051-R5.1). A caller whose re-check then fails
+	// quotes them, because a refusal is the likeliest reason the fix fell short
+	// (S051-R5.2).
+	DeniedTools []string
 }
 
 // RegistryFixer is the optional capability an LLM provider may implement to repair
@@ -404,5 +410,6 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 		CostUSD:      env.TotalCostUSD,
 		Model:        f.model,
 		ModelIsAlias: isModelAlias(f.model),
+		DeniedTools:  refusedToolLabels(env.PermissionDenials),
 	}, nil
 }

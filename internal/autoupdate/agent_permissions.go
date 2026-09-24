@@ -248,3 +248,14 @@ func upstreamURLsOf(cfg PackageConfig) []string {
 	}
 	return urls
 }
+
+// RefusedToolsNote renders the tools an agent was refused as the suffix a
+// "still failed" message carries — ` (agent was refused: WebFetch(host), Bash)` —
+// or "" when none were, so a message about a fix that simply did not work names
+// no tool (S051-R5.2).
+func RefusedToolsNote(denied []string) string {
+	if len(denied) == 0 {
+		return ""
+	}
+	return " (agent was refused: " + strings.Join(denied, ", ") + ")"
+}
