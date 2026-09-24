@@ -1,7 +1,6 @@
 package autoupdate
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -37,18 +36,17 @@ var dnsHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z
 // where most upstream tarballs and release listings live (S051-R3.3).
 var agentFixedHosts = []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"}
 
-// agentPinnedSettings are the inline --settings every agent runs under
-// (S051-R4.2). blockReadsOutsideWorkingDirectories is what actually removes
-// `cat`: Claude Code runs its built-in read-only Bash commands (cat, ls, head,
-// grep, find, ...) without approval in every permission mode, so dropping a
-// `Bash(cat *)` allow rule alone would leave cat working.
+// agentPinnedSettings is the inline --settings document every agent runs
+// under (S051-R4.2). blockReadsOutsideWorkingDirectories is what actually
+// removes `cat`: Claude Code runs its built-in read-only Bash commands (cat, ls,
+// head, grep, find, ...) without approval in every permission mode, so dropping
+// a `Bash(cat *)` allow rule alone would leave cat working.
 // disableBypassPermissionsMode refuses a later switch to bypassPermissions.
-var agentPinnedSettings = map[string]any{
-	"permissions": map[string]any{
-		"blockReadsOutsideWorkingDirectories": true,
-		"disableBypassPermissionsMode":        "disable",
-	},
-}
+//
+// It is a fixed literal, not a document assembled from values: nothing is
+// spliced into it, so there is nothing to escape, and the tests parse it as
+// JSON and pin both settings.
+const agentPinnedSettings = `{"permissions":{"blockReadsOutsideWorkingDirectories":true,"disableBypassPermissionsMode":"disable"}}`
 
 // agentPermissions describes what one `claude` agent may do.
 type agentPermissions struct {
@@ -139,17 +137,20 @@ func agentPermissionArgs(p agentPermissions) ([]string, error) {
 		}
 	}
 
+	return agentArgv(names, allow, holdsEdit), nil
+}
+
+// agentArgv renders the argv block from tool names and allow rules that are
+// already safe, adding the secrets deny rules and the pinned flags. It cannot
+// fail, which is what lets the text client — no tools, no directory, nothing to
+// validate — build its argv without an error path (S051-R2.1).
+func agentArgv(names, allow []string, holdsEdit bool) []string {
 	var deny []string
 	for _, path := range secrets.Paths() {
 		deny = append(deny, "Read(/"+path+")")
 		if holdsEdit {
 			deny = append(deny, "Edit(/"+path+")")
 		}
-	}
-
-	settings, err := json.Marshal(agentPinnedSettings)
-	if err != nil {
-		return nil, fmt.Errorf("agent permissions for %s: encode settings: %w", p.agent, err)
 	}
 
 	args := []string{"--tools", strings.Join(names, ",")}
@@ -162,9 +163,9 @@ func agentPermissionArgs(p agentPermissions) ([]string, error) {
 	return append(args,
 		"--permission-mode", "dontAsk",
 		"--setting-sources", "",
-		"--settings", string(settings),
+		"--settings", agentPinnedSettings,
 		"--strict-mcp-config",
-	), nil
+	)
 }
 
 // checkAgentDir enforces S051-R2.8 on an agent's own directory.
@@ -233,4 +234,17 @@ func upstreamHosts(pkg string, urls ...string) []string {
 	}
 	sort.Strings(hosts)
 	return hosts
+}
+
+// upstreamURLsOf returns cfg's registry URL and FallbackURL, skipping the empty
+// ones (S051-R3.4, S051-R3.5). The zero PackageConfig — no config for the
+// package — yields none.
+func upstreamURLsOf(cfg PackageConfig) []string {
+	var urls []string
+	for _, u := range []string{cfg.URL, cfg.FallbackURL} {
+		if u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }

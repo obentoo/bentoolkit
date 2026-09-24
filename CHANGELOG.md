@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A directory outside `[A-Za-z0-9._+@/-]` (for example an overlay path with a
   space) now stops the fixer before it spawns, with an error naming the path.
 
+- **Every agent now runs under those scoped permissions.** The manifest fixer
+  keeps `Read`, `Edit`, `Write`, `Bash(pkgdev *)` and WebFetch — its WebFetch
+  reaches the hosts of the package's `url`/`fallback_url` and the http(s) URLs
+  `pkgdev` printed, plus GitHub; `Bash(wget *)`, `Bash(cat *)` and
+  `Bash(ls *)` are gone. The registry fixer keeps `Read`, `Edit`, `Write` and
+  WebFetch to its entry's own hosts; `Bash(curl *)` is gone. The build fixer's
+  `Read`/`Edit` reach only the staged package directory. The text client (no
+  tools at all) and the bump reviewer (`Read` only) now run in a private 0700
+  directory created for each call and removed afterwards, instead of in
+  bentoo's working directory, which a read-only tool could otherwise read.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the

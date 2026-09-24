@@ -42,25 +42,27 @@ const DefaultManifestFixTimeout = 10 * time.Minute
 const manifestFixMaxTurns = 30
 
 // manifestFixWaitDelay bounds how long cmd.Wait blocks draining I/O after the
-// context is cancelled or the process exits. The agent spawns children (pkgdev,
-// wget) that may hold the stdout pipe open past a kill of `claude`; without this
-// bound Wait could hang until those children exit on their own.
+// context is cancelled or the process exits. The agent spawns children (pkgdev)
+// that may hold the stdout pipe open past a kill of `claude`; without this bound
+// Wait could hang until those children exit on their own.
 const manifestFixWaitDelay = 10 * time.Second
 
-// manifestFixAllowedTools is the scoped tool allowlist handed to the agent. Edit/
-// Read/Write let it rewrite the ebuild (under --add-dir); the Bash() patterns are
-// narrowed to the commands a manifest repair legitimately needs, so the agent can
-// self-verify and inspect the tree without an open shell. Anything outside this
-// set is denied by the CLI without an interactive prompt, which keeps the run
-// non-interactive WITHOUT resorting to --dangerously-skip-permissions.
+// manifestFixAllowedTools is the tool set handed to the agent. Read/Edit/Write
+// let it rewrite the ebuild; `func agentPermissionArgs` scopes all three to the
+// package directory. Bash is granted for pkgdev alone, so the agent can
+// self-verify the manifest without an open shell, and WebFetch — scoped there to
+// the package's upstream hosts — is how it confirms a real asset name
+// (S051-R2.2, S051-R3.1, S051-R3.2). There is no curl, wget, cat or ls: the
+// agent reaches the network only through WebFetch's host rules. Anything
+// outside this set is refused by the CLI without an interactive prompt
+// (dontAsk), which keeps the run non-interactive WITHOUT resorting to
+// --dangerously-skip-permissions.
 var manifestFixAllowedTools = []string{
 	"Read",
 	"Edit",
 	"Write",
 	"Bash(pkgdev *)",
-	"Bash(wget *)",
-	"Bash(ls *)",
-	"Bash(cat *)",
+	"WebFetch",
 }
 
 // bentooEbuildGuidance is appended to the agent's system prompt via
@@ -103,6 +105,11 @@ type ManifestFixRequest struct {
 	// `pkgdev manifest --distdir` when self-verifying, so it never touches the
 	// system DISTDIR.
 	DistDir string
+	// UpstreamURLs are the package's registry URL and FallbackURL, when the
+	// caller holds a config for it. Their hosts, with the hosts of the http(s)
+	// URLs in ManifestError, are the only ones the agent's WebFetch reaches
+	// (S051-R3.5).
+	UpstreamURLs []string
 }
 
 // ManifestFixResult reports the outcome of an agentic fix attempt. Summary is a
@@ -304,24 +311,40 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 // buildFixArgs assembles the agentic CLI argument vector. The instruction is the
 // value of -p; the per-package facts (paths, error) travel inside the instruction
 // because they are bentoo-generated text, not untrusted page content. The agent is
-// scoped to pkgDir via --add-dir and constrained to manifestFixAllowedTools.
-func (f *ClaudeCodeFixer) buildFixArgs(instruction, pkgDir string) []string {
+// scoped to req.PkgDir via --add-dir and the permission block of
+// `func agentPermissionArgs`: manifestFixAllowedTools with Read/Edit confined to
+// that directory, and WebFetch to the package's upstream hosts plus GitHub
+// (S051-R2.3, S051-R3.3, S051-R3.5). A PkgDir the rules cannot carry safely is
+// an error, and nothing is spawned (S051-R2.8).
+func (f *ClaudeCodeFixer) buildFixArgs(instruction string, req ManifestFixRequest) ([]string, error) {
+	hosts := upstreamHosts(req.Package, append(append([]string(nil), req.UpstreamURLs...), upstreamURLsIn(req.ManifestError)...)...)
+	perms, err := agentPermissionArgs(agentPermissions{
+		agent: "manifest fixer",
+		dir:   req.PkgDir,
+		tools: manifestFixAllowedTools,
+		hosts: hosts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("manifest fixer for %s: %w", req.Package, err)
+	}
 	args := []string{
 		"-p", instruction,
 		"--output-format", "json",
-		"--add-dir", pkgDir,
-		"--allowedTools", strings.Join(manifestFixAllowedTools, " "),
+		"--add-dir", req.PkgDir,
+	}
+	args = append(args, perms...)
+	args = append(args,
 		"--append-system-prompt", bentooEbuildGuidance,
 		"--max-turns", strconv.Itoa(manifestFixMaxTurns),
 		"--model", f.model,
-	}
+	)
 	if f.bareMode {
 		args = append(args, "--bare")
 	}
 	if f.maxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(f.maxBudgetUSD, 'f', -1, 64))
 	}
-	return args
+	return args, nil
 }
 
 // manifestErrorBudget bounds how much of the raw `pkgdev manifest` failure output
@@ -406,7 +429,8 @@ func buildManifestFixInstruction(req ManifestFixRequest) string {
 	sb.WriteString("(e.g. a '-stable' suffix, a renamed release asset, or a moved download host).\n")
 	sb.WriteString("- Do NOT change PN or the version (PV) in the ebuild filename.\n")
 	sb.WriteString("- Do NOT invent download URLs. Determine the correct one from the upstream release page/assets ")
-	sb.WriteString("(you may fetch upstream release listings to confirm the real asset name).\n")
+	sb.WriteString("(you may fetch upstream release listings with WebFetch to confirm the real asset name; ")
+	sb.WriteString("it reaches the package's upstream hosts and GitHub only).\n")
 	sb.WriteString("- Prefer minimal edits (SRC_URI and any helper variables that feed it, e.g. MY_PV/MY_P), ")
 	sb.WriteString("but you may edit other parts of the ebuild if the upstream change requires it.\n")
 	sb.WriteString("- If the `/bentoo` skill is available in this session, you may use it for ebuild edits and QA; ")
@@ -635,15 +659,18 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	defer cancel()
 
 	instruction := buildManifestFixInstruction(req)
-	args := f.buildFixArgs(instruction, req.PkgDir)
+	args, err := f.buildFixArgs(instruction, req)
+	if err != nil {
+		return ManifestFixResult{}, err
+	}
 
 	cmd := f.execCommand(runCtx, "claude", args...)
 	// cwd = the package directory so the agent's relative paths and pkgdev runs
 	// resolve against the package it is repairing.
 	cmd.Dir = req.PkgDir
 
-	// Bound post-cancellation cleanup. The agent spawns its own children (pkgdev,
-	// wget) that can outlive a SIGKILL of `claude` while still holding the stdout
+	// Bound post-cancellation cleanup. The agent spawns its own children (pkgdev)
+	// that can outlive a SIGKILL of `claude` while still holding the stdout
 	// pipe open, which would block cmd.Wait() far past the timeout. WaitDelay makes
 	// the runtime force-close the inherited pipes (and kill the process if still
 	// running) a bounded time after the context is cancelled or the process exits,

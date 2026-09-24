@@ -351,6 +351,12 @@ type claudeCodeEnvelope struct {
 // tool-free round-trip (S003-R1.3, S003-R1.5). --bare is added in bare mode; --json-schema
 // is added only for a structured request with a non-empty schema; --max-budget-usd
 // is added when a positive cap is configured.
+//
+// --allowedTools "" only removes pre-approval: read-only tools need none inside
+// the working directory. So the client also holds no tool at all (`--tools ""`)
+// and runs under the pinned permission flags every agent gets — dontAsk, no
+// settings sources, no MCP servers, the secrets deny rules (S051-R2.1, S051-R3.7,
+// `func agentArgv`).
 func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema string) []string {
 	args := []string{
 		"-p", instruction,
@@ -359,6 +365,7 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 		"--allowedTools", "",
 		"--model", c.model,
 	}
+	args = append(args, agentArgv(nil, nil, false)...)
 	if c.bareMode {
 		args = append(args, "--bare")
 	}
@@ -396,7 +403,23 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
 	defer cancel()
 
+	// The child runs in a private 0700 directory made for this one invocation
+	// and removed afterwards, never in bentoo's own cwd, which a read-only tool
+	// could otherwise read (S051-R2.1). A directory that cannot be made stops the
+	// call before anything is spawned; one that cannot be removed is a warning,
+	// because the answer is already in hand (S051-R2.9).
+	dir, err := os.MkdirTemp("", "bentoo-claude-")
+	if err != nil {
+		return "", fmt.Errorf("%w: claude CLI: create private working directory: %w", ErrLLMRequestFailed, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			warnLogf("claude CLI: remove private working directory %s: %v", dir, err)
+		}
+	}()
+
 	cmd := c.execCommand(ctx, "claude", c.buildArgs(instruction, schema != "", schema)...)
+	cmd.Dir = dir
 
 	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
 	cmd.Stdin = bytes.NewReader(content)

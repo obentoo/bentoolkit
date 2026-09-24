@@ -1902,6 +1902,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
+		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
