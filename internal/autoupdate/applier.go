@@ -1402,7 +1402,17 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 // is what lets the staged candidate be the one edited: an edit applied to the
 // published tree here would be an unvalidated write into the overlay, and a staged
 // tree validated without the substitution would prove the wrong file.
+//
+// It is also the one function every writer of a candidate calls — Apply through
+// prepareInOverlay and prepareInStagingTree, Validate through the latter — so the
+// upstream-value allow-list is enforced here as the backstop, before either value
+// is written: a malformed pair leaves the file byte-identical. Apply and Validate
+// still refuse earlier, before anything is staged; a writer added later inherits
+// this check without having to remember it.
 func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpdate) error {
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		return err
+	}
 	// Snapshot packages tracked by commit (track="commit"): point SRC_URI's
 	// commit-hash variable at the correct tarball.
 	if update.CommitHash != "" {

@@ -54,6 +54,14 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 		return checkSkipped(pkg, update.NewVersion, fmt.Sprintf(
 			"%q is not a version an ebuild filename can carry (from %q), so no gate could be run for %s", newVersion, update.NewVersion, pkg))
 	}
+	// The same allow-list Apply enforces, and for the same reason: Validate is a
+	// second writer of the candidate ebuild, and every gate below it (manifest,
+	// patches, configure) sources that file as bash. Refused before anything is
+	// staged, and reported SKIPPED like the version gate above — failing the
+	// package is Apply's job, not the check's.
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		return checkSkipped(pkg, newVersion, fmt.Sprintf("%v, so no gate was run for %s", err, pkg))
+	}
 	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
 
 	currentVersion, err := a.resolveCurrentVersion(pkg)

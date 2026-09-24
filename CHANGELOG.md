@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `aux_pattern` capture and an upstream commit hash used to reach the bash
   source of the new ebuild unchecked. A captured `x"; touch /tmp/pwned; "`
   closed the quoted assignment and left a shell command for `emerge` to run.
-  `Applier.Apply` now refuses an aux value outside `[A-Za-z0-9._+-]{1,128}` and
-  a commit hash that is not 40 lowercase hex, before anything is staged. The
-  package is marked failed with the value named, its directory is left
-  byte-identical, and an `--apply all` batch carries on with the others.
+  Now an aux value outside `[A-Za-z0-9._+-]{1,128}` and a commit hash that is
+  not 40 lowercase hex are refused before anything is staged:
+  - Under `--apply`, the package is marked failed with the value named, its
+    directory is left byte-identical, and an `--apply all` batch carries on
+    with the others.
+  - Under `--check`, the package is reported skipped with the value named, and
+    no gate runs on it. The check stages the same ebuild and runs `pkgdev
+    manifest` and the configure step on it, so it was a second way in.
+  - The function every ebuild writer calls refuses the value as well, so a
+    writer added later is covered without having to remember the check.
 - **An accepted value is written literally.** The replacement template expanded
   `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
   value's `$` is now escaped before substitution.
