@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Every `claude` agent bentoo spawns now receives an allow-listed environment,
+  not bentoo's whole one.** The text client, the manifest, registry and build
+  fixers and the bump reviewer used to inherit every variable bentoo had —
+  `GITHUB_TOKEN`, the ntfy token, the SMTP password, every `BENTOO_*` value — in
+  a process that reads untrusted upstream pages. The child now gets only `PATH`,
+  `HOME`, `TMPDIR`, `LANG`, `TERM`, `CLAUDE_CONFIG_DIR`, the CA and proxy
+  variables, and the `LC_*` and `XDG_*` families; the manifest fixer also gets
+  `PORTAGE_*` and exactly one `DISTDIR`, the one the applier computed. In bare
+  mode the resolved API key is the only `ANTHROPIC_API_KEY` entry, so a key the
+  caller's shell exports can no longer sit beside it as a duplicate (this is
+  also why `TestChildEnv_InjectsResolvedKey` failed inside a Claude Code
+  session). `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches are not on the
+  list, so those setups lose the agents until a later change adds them.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the

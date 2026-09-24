@@ -114,7 +114,7 @@ const bumpReviewMaxTurns = 4
 // quarter of the kernel limit is already generous, and it leaves the prose
 // around it room to triple.
 //
-// The diff is embedded through truncateMiddle (manifest_fixer.go:349), which
+// The diff is embedded through `func truncateMiddle` (manifest_fixer.go), which
 // keeps both ends and elides the middle; that function is reused, never
 // reimplemented.
 const bumpReviewDiffBudget = 32 * 1024
@@ -382,7 +382,7 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(r.bareMode, r.apiKeyEnv, r.apiKey)
+	cmd.Env = childEnv(r.bareMode, r.apiKeyEnv, r.apiKey, agentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

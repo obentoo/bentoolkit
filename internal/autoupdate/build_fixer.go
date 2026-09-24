@@ -55,7 +55,7 @@ import (
 // CREATE files is not needed to change one that exists, and an unused capability
 // is only a liability.
 //
-// This is strictly narrower than manifestFixAllowedTools (manifest_fixer.go:53),
+// This is strictly narrower than `var manifestFixAllowedTools` (manifest_fixer.go),
 // which holds `Write` and `Bash(pkgdev *)` — defensible there, because running
 // `pkgdev manifest` is that fixer's whole job, and the tree it edits is already
 // the overlay. Here the staged tree is the last boundary between a bad agent edit
@@ -83,7 +83,7 @@ var buildFixAllowedTools = []string{
 //
 // The actionable part of a build log lives at its two ends — the first error says
 // what broke, the last lines name the phase that failed — so the log is embedded
-// through truncateMiddle (manifest_fixer.go:349), which keeps both ends and
+// through `func truncateMiddle` (manifest_fixer.go), which keeps both ends and
 // elides the noisy middle. That function is reused, never reimplemented.
 const buildLogBudget = 64 * 1024
 
@@ -530,7 +530,7 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey)
+	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

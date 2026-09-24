@@ -650,10 +650,12 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// so FixManifest always returns within timeout + manifestFixWaitDelay.
 	cmd.WaitDelay = manifestFixWaitDelay
 
-	// Resolve the child environment from the auth mode: bare injects the API key
-	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
-	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey)
+	// The child environment is the agent allow-list (childEnv), plus what pkgdev
+	// needs and no other agent gets: the parent's PORTAGE_* and exactly one
+	// DISTDIR, the writable one this request computed (S051-R1.3). Bare injects
+	// the API key solely via env (never argv/logs); non-bare carries none, so the
+	// CLI uses its logged-in session.
+	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{portage: true, distDir: req.DistDir})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
