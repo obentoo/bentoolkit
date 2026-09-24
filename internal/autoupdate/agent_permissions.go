@@ -40,7 +40,7 @@ var agentFixedHosts = []string{"github.com", "codeload.github.com", "objects.git
 // under (S051-R4.2). blockReadsOutsideWorkingDirectories is what actually
 // removes `cat`: Claude Code runs its built-in read-only Bash commands (cat, ls,
 // head, grep, find, ...) without approval in every permission mode, so dropping
-// a `Bash(cat *)` allow rule alone would leave cat working.
+// the allow rule that named cat would, alone, leave cat working.
 // disableBypassPermissionsMode refuses a later switch to bypassPermissions.
 //
 // It is a fixed literal, not a document assembled from values: nothing is
