@@ -362,10 +362,10 @@ type claudePermissionDenial struct {
 // refusedToolLabels names each refused tool once, in the order the CLI refused
 // them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
 // — so two refusals of one tool to different hosts stay distinguishable
-// (S051-R5.1). The host is taken from the call's url only when it is a
-// lowercase DNS name; anything else leaves the bare tool name. No other part of
-// the input is ever read, so a label can never carry a URL path or query, a
-// fetch prompt or a shell command.
+// (S051-R5.1). The host is taken from the call's url only when it passes the
+// same `func checkWebFetchHost` a rule does; anything else leaves the bare tool
+// name. No other part of the input is ever read, so a label can never carry a
+// URL path or query, a fetch prompt or a shell command.
 func refusedToolLabels(denials []claudePermissionDenial) []string {
 	var labels []string
 	seen := make(map[string]struct{}, len(denials))
@@ -380,7 +380,7 @@ func refusedToolLabels(denials []claudePermissionDenial) []string {
 			}
 			if json.Unmarshal(d.ToolInput, &in) == nil {
 				if u, err := url.Parse(in.URL); err == nil {
-					if host := strings.ToLower(u.Hostname()); dnsHost.MatchString(host) {
+					if host := strings.ToLower(u.Hostname()); checkWebFetchHost(host) == nil {
 						label += "(" + host + ")"
 					}
 				}

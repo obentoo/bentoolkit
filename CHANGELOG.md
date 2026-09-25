@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A directory outside `[A-Za-z0-9._+@/-]` (for example an overlay path with a
   space) now stops the fixer before it spawns, with an error naming the path.
 
+- **An IPv4 literal never becomes a WebFetch host.** A host whose last label is
+  a number — `127.0.0.1`, `10.0.0.1`, `169.254.169.254`, and the spellings a
+  WHATWG URL parser also reads as an address, such as `127.1` and
+  `127.0.0.0x1` — is dropped with a warning, like any other host that is not a
+  DNS name. The manifest fixer takes hosts from the URLs `pkgdev` prints, which
+  upstream controls, so without this a crafted URL could point an agent at
+  loopback, the internal network or a cloud metadata endpoint.
+
 - **Every agent now runs under those scoped permissions.** The manifest fixer
   keeps `Read`, `Edit`, `Write`, `Bash(pkgdev *)` and WebFetch — its WebFetch
   reaches the hosts of the package's `url`/`fallback_url` and the http(s) URLs

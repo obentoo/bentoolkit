@@ -20,6 +20,11 @@ var errUnsafeAgentDir = errors.New("not an absolute path made only of [A-Za-z0-9
 // lowercase DNS name (S051-R3.6).
 var errUnsafeHost = errors.New("not a lowercase DNS name")
 
+// errIPLiteralHost is the S051-R3.9 refusal. It wraps errUnsafeHost, because an
+// IPv4 literal is a host no rule may carry, and says why in its own words: the
+// value passed the DNS shape and was refused for what a fetcher would read it as.
+var errIPLiteralHost = fmt.Errorf("an IPv4 literal, which would reach loopback, the internal network or a metadata endpoint: %w", errUnsafeHost)
+
 // agentDirChars is the whole alphabet an agent directory may use. A space or a
 // comma would be re-split by the CLI into a second rule, a parenthesis would end
 // the rule early, and a glob character would widen it (S051-R2.8).
@@ -181,10 +186,46 @@ func checkAgentDir(dir string) error {
 // or trims: normalising is upstreamHosts' job, and a rule builder that repaired
 // its input would be the place a hostile value got repaired into a valid one.
 func webFetchDomainRule(host string) (string, error) {
-	if !dnsHost.MatchString(host) {
-		return "", fmt.Errorf("WebFetch host %q: %w", host, errUnsafeHost)
+	if err := checkWebFetchHost(host); err != nil {
+		return "", fmt.Errorf("WebFetch host %q: %w", host, err)
 	}
 	return "WebFetch(domain:" + host + ")", nil
+}
+
+// checkWebFetchHost is the one test every WebFetch host passes, wherever it is
+// read: a lowercase DNS name (S051-R3.6) that is not an IPv4 literal
+// (S051-R3.9). It returns errUnsafeHost or errIPLiteralHost, or nil.
+func checkWebFetchHost(host string) error {
+	if !dnsHost.MatchString(host) {
+		return errUnsafeHost
+	}
+	if isIPv4Literal(host) {
+		return errIPLiteralHost
+	}
+	return nil
+}
+
+// isIPv4Literal reports whether host's last label is a NUMBER in the WHATWG URL
+// parser's "ends in a number" sense: all ASCII digits, or "0x"/"0X" followed
+// only by hex digits (S051-R3.9). A host like that is parsed as an IPv4 address
+// by a WHATWG-based fetcher — 127.1 and 127.0.0.0x1 both reach 127.0.0.1 — while
+// no real top-level domain is a number, so no DNS name is lost; dl.0xide, whose
+// last label is not hex, stays a name.
+func isIPv4Literal(host string) bool {
+	last := host[strings.LastIndexByte(host, '.')+1:]
+	if last == "" {
+		return false
+	}
+	digits, alphabet := last, "0123456789"
+	if len(last) >= 2 && last[0] == '0' && (last[1] == 'x' || last[1] == 'X') {
+		digits, alphabet = last[2:], "0123456789abcdefABCDEF"
+	}
+	for i := 0; i < len(digits); i++ {
+		if !strings.ContainsRune(alphabet, rune(digits[i])) {
+			return false
+		}
+	}
+	return true
 }
 
 // upstreamURLPattern finds http(s) URLs in free text such as pkgdev's error
@@ -202,7 +243,7 @@ func upstreamURLsIn(text string) []string {
 // de-duplicated and sorted so the argv is stable (S051-R3.3).
 //
 // A URL that does not parse, uses another scheme, or whose host is not a
-// lowercase DNS name after lowercasing is left out with one warning naming pkg
+// lowercase DNS name after lowercasing, or is an IPv4 literal (S051-R3.9), is left out with one warning naming pkg
 // and the rejected value quoted with %q (S051-R3.6). A trailing dot is not
 // trimmed: `example.com.` is rejected like any other non-DNS spelling, so the
 // host a rule names is always the one the operator can read in packages.toml.
@@ -222,8 +263,8 @@ func upstreamHosts(pkg string, urls ...string) []string {
 			continue
 		}
 		host := strings.ToLower(u.Hostname())
-		if !dnsHost.MatchString(host) {
-			warnLogf("agent hosts for %s: rejected host %q: %v", pkg, host, errUnsafeHost)
+		if err := checkWebFetchHost(host); err != nil {
+			warnLogf("agent hosts for %s: rejected host %q: %v", pkg, host, err)
 			continue
 		}
 		set[host] = struct{}{}

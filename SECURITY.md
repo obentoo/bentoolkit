@@ -142,8 +142,11 @@ refused call's input) instead of being retried with more.
   printed — plus `github.com`, `codeload.github.com` and
   `objects.githubusercontent.com`. A host that is not a lowercase DNS name is
   dropped with a warning, so a value in `packages.toml` or in `pkgdev` output
-  cannot widen a rule or forge a second one. No agent holds `curl`, `wget`,
-  `cat` or `ls`.
+  cannot widen a rule or forge a second one. So is an IPv4 literal — any host
+  whose last label is a number (`127.0.0.1`, `169.254.169.254`, `127.1`,
+  `127.0.0.0x1`) — so a URL printed by upstream cannot point an agent at
+  loopback, the internal network or a cloud metadata endpoint. No agent holds
+  `curl`, `wget`, `cat` or `ls`.
 - **Pinned settings.** Every agent runs with `--permission-mode dontAsk` (a
   call that is not pre-approved is refused, never prompted), loads no user,
   project or local settings — so neither `~/.claude/settings.json` nor an

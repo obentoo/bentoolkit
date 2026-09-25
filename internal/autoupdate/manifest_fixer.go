@@ -4,9 +4,9 @@
 // sandboxed ClaudeCodeClient (claude_code.go). Where that client runs the local
 // `claude` CLI tool-free (--allowedTools "") and feeds it page content on stdin,
 // the fixer drives the CLI as a working agent: it is scoped to a single package
-// directory (--add-dir), allowed to read/edit the ebuild and run a narrow set of
-// shell commands (pkgdev/wget/ls/cat), and asked to repair a SRC_URI/manifest
-// breakage in place. The agent's edits ARE the side effect; the function returns
+// directory (--add-dir), allowed to read/edit the ebuild, to run `pkgdev` as its
+// only shell command and to probe upstream with WebFetch on named hosts, and
+// asked to repair a SRC_URI/manifest breakage in place. The agent's edits ARE the side effect; the function returns
 // only a short human-readable summary.
 //
 // The authoritative success check is NOT the agent's self-report: after the fixer
