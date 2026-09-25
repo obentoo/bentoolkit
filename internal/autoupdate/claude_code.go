@@ -362,10 +362,14 @@ type claudePermissionDenial struct {
 // refusedToolLabels names each refused tool once, in the order the CLI refused
 // them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
 // — so two refusals of one tool to different hosts stay distinguishable
-// (S051-R5.1). The host is taken from the call's url only when it passes the
-// same `func checkWebFetchHost` a rule does; anything else leaves the bare tool
-// name. No other part of the input is ever read, so a label can never carry a
-// URL path or query, a fetch prompt or a shell command.
+// (S051-R5.1). The host is taken from the call's url only when it has the SHAPE
+// of a lowercase DNS name (dnsHost); anything else leaves the bare tool name, so
+// no injected text can ride into a label. The shape check is deliberately
+// weaker than `func checkWebFetchHost`: a label is text shown to the operator,
+// a rule is a grant, and an IPv4 literal is safe text but not a safe grant — a
+// refused fetch to 169.254.169.254 is exactly the host the operator needs to
+// see (S051-R5.4). No other part of the input is ever read, so a label can
+// never carry a URL path or query, a fetch prompt or a shell command.
 func refusedToolLabels(denials []claudePermissionDenial) []string {
 	var labels []string
 	seen := make(map[string]struct{}, len(denials))
@@ -380,7 +384,7 @@ func refusedToolLabels(denials []claudePermissionDenial) []string {
 			}
 			if json.Unmarshal(d.ToolInput, &in) == nil {
 				if u, err := url.Parse(in.URL); err == nil {
-					if host := strings.ToLower(u.Hostname()); checkWebFetchHost(host) == nil {
+					if host := strings.ToLower(u.Hostname()); dnsHost.MatchString(host) {
 						label += "(" + host + ")"
 					}
 				}

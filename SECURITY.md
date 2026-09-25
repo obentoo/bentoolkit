@@ -144,9 +144,11 @@ refused call's input) instead of being retried with more.
   dropped with a warning, so a value in `packages.toml` or in `pkgdev` output
   cannot widen a rule or forge a second one. So is an IPv4 literal — any host
   whose last label is a number (`127.0.0.1`, `169.254.169.254`, `127.1`,
-  `127.0.0.0x1`) — so a URL printed by upstream cannot point an agent at
-  loopback, the internal network or a cloud metadata endpoint. No agent holds
-  `curl`, `wget`, `cat` or `ls`.
+  `127.0.0.0x1`). The check reads how a host is **spelled**, not where it
+  **resolves**: a DNS name that points at loopback, a private network or a
+  metadata endpoint (for example `169.254.169.254.nip.io`) is still granted if
+  it appears in a URL upstream printed. No agent holds `curl`, `wget`, `cat` or
+  `ls`.
 - **Pinned settings.** Every agent runs with `--permission-mode dontAsk` (a
   call that is not pre-approved is refused, never prompted), loads no user,
   project or local settings — so neither `~/.claude/settings.json` nor an
@@ -158,4 +160,9 @@ refused call's input) instead of being retried with more.
   programs those tools run. `pkgdev`, which the manifest fixer may run, reads
   files and fetches distfiles by itself, outside these rules. bentoo applies no
   OS-level sandbox to the agent; run it under one (a dedicated user, firejail,
-  a container) if that residual risk matters for your host.
+  a container) if that residual risk matters for your host. The same control is
+  the only one that closes the DNS-alias case above: a name such as
+  `169.254.169.254.nip.io` passes the host rule, and resolving it when the rule
+  is built would not help, because the name can resolve differently by the time
+  the agent fetches. Egress rules for the user the agent runs as (refusing
+  loopback, RFC 1918 and link-local destinations) are what stop it.

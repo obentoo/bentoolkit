@@ -41,8 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WHATWG URL parser also reads as an address, such as `127.1` and
   `127.0.0.0x1` — is dropped with a warning, like any other host that is not a
   DNS name. The manifest fixer takes hosts from the URLs `pkgdev` prints, which
-  upstream controls, so without this a crafted URL could point an agent at
-  loopback, the internal network or a cloud metadata endpoint.
+  upstream controls, and a literal there would grant a fetch straight to
+  loopback, the internal network or a cloud metadata endpoint. This judges the
+  host's spelling, not its resolution: a DNS name that resolves to such an
+  address (for example `169.254.169.254.nip.io`) is still granted, and only
+  egress rules for the agent's user close that — see `SECURITY.md`.
 
 - **Every agent now runs under those scoped permissions.** The manifest fixer
   keeps `Read`, `Edit`, `Write`, `Bash(pkgdev *)` and WebFetch — its WebFetch
