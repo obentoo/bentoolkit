@@ -63,9 +63,9 @@ func (a *archiveShipper) Name() string {
 // object was never uploaded (which would make the next `-p` reference a missing
 // base). When recording itself fails AFTER a successful upload, the error is
 // surfaced rather than swallowed: the operator must see that parent bookkeeping
-// broke even though the bytes are up. The already-uploaded object is acceptable —
-// per design §6, a partial/duplicate remote object is left for rclone to overwrite
-// on the next run.
+// broke even though the bytes are up. That complete object stays under its key.
+// A failed pipe is different: the object it may have left is truncated, so Send
+// deletes it (053 R5.5).
 func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, error) {
 	if snap.Path == "" || snap.ID == "" {
 		return ShipReport{}, fmt.Errorf("ship %q subvolume %q: %w", a.Name(), snap.Subvolume, ErrSnapshotUnidentified)
@@ -101,8 +101,8 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 
 	// Record THIS snapshot as the new lineage head — only now that the ship
 	// succeeded (R3.2/G3). Surface a record failure: the upload is up but the
-	// bookkeeping broke, and the operator must know (the partial object is left for
-	// rclone to overwrite next run, design §6).
+	// bookkeeping broke, and the operator must know (the complete object stays
+	// under its key).
 	if err := a.parents.Record(snap.Subvolume, a.Name(), snap); err != nil {
 		return ShipReport{}, err
 	}
@@ -655,6 +655,23 @@ func runPipe(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error
 		return nil, fmt.Errorf("runner %T cannot stream the archive pipe", run)
 	}
 	return p.Pipe(ctx, stages)
+}
+
+// runStagesBuffered runs stages one after another through run, feeding each
+// stage's whole stdout to the next as stdin, and returns the last stage's
+// stdout. A stage starts only after every earlier one succeeded, which is what
+// restoreArchive needs and what the streaming runPipe cannot give; the cost is
+// that each stage's output is held in memory.
+func runStagesBuffered(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
+	var prev []byte
+	for _, st := range stages {
+		out, err := run.Run(ctx, st.name, st.args, prev)
+		if err != nil {
+			return nil, fmt.Errorf("archive pipe stage %q: %w", st.name, err)
+		}
+		prev = out
+	}
+	return prev, nil
 }
 
 // newArchiveShipper assembles an archiveShipper from cfg, the subprocess seam, and

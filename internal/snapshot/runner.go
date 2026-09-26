@@ -31,7 +31,8 @@ func runnerEnv() []string {
 }
 
 // Runner is the subprocess seam shared by the engine and shipper drivers. Every
-// external command goes through Run, which binds the process to ctx via
+// external command goes through Run, or through the optional piper seam for a
+// streamed multi-stage pipe (053 R5.1); both bind each process to ctx via
 // exec.CommandContext so a cancelled parent kills the child (R8.1). stdin is
 // piped on the process's standard input, never placed in argv.
 type Runner interface {

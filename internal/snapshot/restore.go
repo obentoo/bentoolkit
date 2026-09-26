@@ -304,15 +304,21 @@ func validateChain(chain []chainLink) error {
 // NO `btrfs receive` runs (G3) — nothing is applied against a missing base. On a
 // valid chain, each link is applied in order through the existing runPipe helper
 // with stages `rclone cat <remote>/<object> | <decompress> | btrfs receive
-// <target>`. All subprocesses go through opts.Run (R7.2), and runPipe streams
-// them through its piper seam, as on the ship side (053 R5.1).
+// <target>`. All subprocesses go through opts.Run (R7.2).
+//
+// Each link runs through runStagesBuffered, not the streaming runPipe the ship
+// side uses: `btrfs receive` must start only once the download and the
+// decompression have both succeeded. Streamed, a failed download or a truncated
+// object reaches receive as a partial stream, which leaves a partial, writable
+// subvolume at the target, and the retry then fails because it already exists.
+// The price is that a link is held in memory, as it always was here.
 func restoreArchive(ctx context.Context, id, target string, opts RestoreOptions) error {
 	if err := validateChain(opts.Chain); err != nil {
 		return err // refuse BEFORE any btrfs receive (R5.2/G3)
 	}
 	for _, link := range opts.Chain {
 		stages := restorePipeStages(opts.Remote, link.Object, opts.Compress, target)
-		if _, err := runPipe(ctx, opts.Run, stages); err != nil {
+		if _, err := runStagesBuffered(ctx, opts.Run, stages); err != nil {
 			return fmt.Errorf("restore archive link %q: %w", link.ID, err)
 		}
 	}

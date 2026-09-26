@@ -382,7 +382,7 @@ var smtpTimeout = notifyHTTPTimeout
 func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) (err error) {
 	for _, line := range append([]string{from}, to...) {
 		if strings.ContainsAny(line, "\r\n") {
-			return fmt.Errorf("smtp address to %s: %w", addr, errors.New("an address must not contain CR or LF"))
+			return fmt.Errorf("smtp address %q to %s: %w", line, addr, errors.New("an address must not contain CR or LF"))
 		}
 	}
 	host, _, err := net.SplitHostPort(addr)

@@ -9,7 +9,8 @@ import (
 )
 
 // s053LatestRow renders one btrbk 0.32.7 `--format=raw list latest` row: every
-// column is key='value', and a ' inside a value is written '\” (quoteshell).
+// column is key='value', and quoteshell writes a ' inside a value by closing the
+// quote, emitting an escaped \' and reopening it.
 func s053LatestRow(typ, subvolume string) string {
 	return "type='" + typ + "' source_url='/mnt/pool/home' source_host='' source_path='/mnt/pool/home'" +
 		" snapshot_path='/mnt/pool/_btrbk_snap' snapshot_name='home' snapshot_subvolume='" + subvolume +
