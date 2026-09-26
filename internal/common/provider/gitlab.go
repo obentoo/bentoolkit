@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -82,7 +83,20 @@ func parseGitLabURL(rawURL string) (baseURL, projectPath string, err error) {
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", err
+		// url.Error repeats the raw URL, userinfo included; keep only its cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return "", "", fmt.Errorf("%w: parsing GitLab repository URL: %w", ErrInvalidRepoURL, err)
+	}
+	// The PRIVATE-TOKEN is sent to this base URL, so anything but https would
+	// carry it in cleartext (S052-R6.1). The check lives here, at construction,
+	// not at request time: tests point BaseURL at a plain-http httptest server
+	// after construction, and that must keep working (S052-R9.6).
+	if parsed.Scheme != "https" {
+		return "", "", fmt.Errorf("%w: GitLab repository URL %s uses %q; https is required so the PRIVATE-TOKEN is never sent in cleartext",
+			ErrInvalidRepoURL, parsed.Redacted(), parsed.Scheme)
 	}
 
 	baseURL = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
