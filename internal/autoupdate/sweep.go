@@ -14,6 +14,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -542,7 +543,7 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// quarantine and the record/cleanup pair have a window between looking and
 	// acting. The claim is all-or-nothing and is held for the whole pkgdev
 	// invocation (S030-R2.4).
-	lock, err := distfiles.LockFetch(distdir, expected)
+	lock, err := distfiles.LockFetch(s.ctx, distdir, expected)
 	if err != nil {
 		return fmt.Errorf("%w: claiming the distfiles for %s in %s: %w", ErrManifestFailed, pkg, distdir, err)
 	}
@@ -613,13 +614,25 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// Bound the manifest invocation: derive a child context from the parent
 	// context with a finite deadline so a stalled distfile fetch cannot hang the
 	// caller forever. Cancelling either the parent (SIGINT) or this child
-	// (timeout) kills the spawned process via exec.CommandContext.
+	// (timeout) stops pkgdev and every process it started (group mode, below),
+	// so the step returns within manifestTimeout plus procgroup.GracePeriod
+	// (S054-R2.3).
 	ctx, cancel := context.WithTimeout(s.ctx, manifestTimeout)
 	defer cancel()
 
 	// Run pkgdev manifest from the package directory.
 	cmd := s.execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgDir
+	// Group mode (S054-R2.1). pkgdev's fetchers inherit the output pipe below,
+	// and exec.CommandContext alone stops pkgdev and nothing under it, so a
+	// cancelled run used to last as long as the slowest download. Group gives
+	// pkgdev a process group of its own, sends the whole group SIGTERM when ctx
+	// is done and SIGKILL to whatever is left GracePeriod later, and stops Wait
+	// waiting on the pipe by then. It owns cmd.Cancel, cmd.WaitDelay and the
+	// group fields of cmd.SysProcAttr, so nothing here sets them. cmd.Stdin
+	// stays nil, which os/exec reads as /dev/null: a child outside the
+	// terminal's foreground group that read the terminal would stop on SIGTTIN.
+	procgroup.Group(cmd)
 
 	// Stream the long manifest run (distfile download + digest) live as TaskLine
 	// events (S010-R1.1; the StreamCapture handles in-place "\r" updates, S010-R1.2). The
@@ -632,7 +645,9 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
 	cmd.Stdout = sc
 	cmd.Stderr = sc
-	runErr := cmd.Run()
+	// Result: a pkgdev that exited 0 while a helper it left behind still held
+	// the pipe past the WaitDelay is a success, not exec.ErrWaitDelay (S054-R1.5).
+	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
 	if runErr != nil {
 		// Before the error goes anywhere: take away whatever this run created

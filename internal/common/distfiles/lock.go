@@ -1,6 +1,7 @@
 package distfiles
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,18 +73,19 @@ const (
 // on a slow one. Giving up is the specified outcome (D4) and the cheap one — the
 // package is reported as failed and the next run finds the distfile already
 // fetched and verified, which is R2.1's reuse. Waiting is the expensive one: the
-// sweep runs under a semaphore (internal/autoupdate/sweep.go:620), so a waiter
-// is holding a worker slot the whole time it waits.
+// sweep runs under a semaphore, so a waiter is holding a worker slot the whole
+// time it waits (autoupdate/sweep.go, `func ExecuteOverlaySweep`).
 //
 // Tests shorten it, the way they shorten portageqTimeout, so the timeout branch
 // can be exercised without a slow test.
 var lockWait = 2 * time.Minute
 
-// lockPoll is how long a contended attempt sleeps before trying again. There is
+// lockPoll is how long a contended attempt waits before trying again. There is
 // nothing to wake a waiter up — the holder is a different process, and the
 // release it is waiting for is an unlink — so polling is the mechanism, and the
 // interval trades responsiveness against how often a whole sweep's worth of
-// waiters touch the same directory.
+// waiters touch the same directory. The one exception is the caller's context:
+// a cancel ends the wait at once, not at the next poll (see acquireLock).
 var lockPoll = 25 * time.Millisecond
 
 // FetchLock is the exclusive claim one manifest step holds over the distfile
@@ -167,12 +169,26 @@ type heldLock struct {
 // would be taken somewhere nobody asked about and would separate nobody from
 // anybody.
 //
+// ctx ends the wait as lockWait does, whichever comes first (S054-R2.4). A
+// cancelled run will not fetch under the locks it is waiting for, and a waiter
+// holds a sweep worker slot for as long as it waits. A ctx that is already done
+// is refused before a single lock file is created (S054-R2.5); one that ends
+// while a name is contended ends the wait at once, and the locks this call had
+// already taken are released exactly as on any other error. Both errors wrap
+// ctx.Err() and not ErrDistfileLocked: being cancelled is not contention.
+//
 // A caller that gets an error MUST NOT go on to fetch. That is the whole point:
 // a fetch racing another fetch onto the same path is what R2.4 forbids, and
 // "report the package as failed" is the specified answer (D4).
-func LockFetch(distdir string, names []string) (*FetchLock, error) {
+func LockFetch(ctx context.Context, distdir string, names []string) (*FetchLock, error) {
 	if distdir == "" {
 		return nil, errors.New("cannot lock distfiles: no distdir was resolved")
+	}
+	// Checked before any lock file exists, so a run cancelled before its
+	// manifest step began leaves nothing behind in a directory it shares with
+	// the host's package manager (S054-R2.5).
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("claiming distfiles in %s: %w", distdir, err)
 	}
 
 	wanted := make([]string, 0, len(names))
@@ -193,7 +209,7 @@ func LockFetch(distdir string, names []string) (*FetchLock, error) {
 	lock := &FetchLock{distdir: distdir}
 	deadline := time.Now().Add(lockWait)
 	for _, name := range wanted {
-		held, err := acquireLock(distdir, name, deadline)
+		held, err := acquireLock(ctx, distdir, name, deadline)
 		if err != nil {
 			lock.Release()
 			return nil, err
@@ -226,7 +242,10 @@ func (l *FetchLock) Release() {
 	l.held = nil
 }
 
-// acquireLock takes one distfile's lock, waiting until deadline.
+// acquireLock takes one distfile's lock, waiting until deadline or until ctx is
+// done, whichever comes first. The pause between two attempts selects on
+// ctx.Done(), so a cancel ends the wait at once rather than at the next poll,
+// with an error that wraps ctx.Err() and names the distfile (S054-R2.4).
 //
 // # The rule, and why there are two mechanisms
 //
@@ -256,7 +275,7 @@ func (l *FetchLock) Release() {
 // O_EXCL and its flock, where its file is briefly reapable; the creator closes
 // it by re-confirming the path still names its own file before it declares
 // itself the holder, and starting over if it does not.
-func acquireLock(distdir, name string, deadline time.Time) (*heldLock, error) {
+func acquireLock(ctx context.Context, distdir, name string, deadline time.Time) (*heldLock, error) {
 	path := filepath.Join(distdir, lockFilePrefix+name+lockFileSuffix)
 
 	for {
@@ -296,7 +315,11 @@ func acquireLock(distdir, name string, deadline time.Time) (*heldLock, error) {
 			return nil, fmt.Errorf("%w: %q in %s is held by %s, and it did not become free within %s",
 				ErrDistfileLocked, name, distdir, describeHolder(path), lockWait)
 		}
-		time.Sleep(min(remaining, lockPoll))
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for the lock on distfile %q in %s: %w", name, distdir, ctx.Err())
+		case <-time.After(min(remaining, lockPoll)):
+		}
 	}
 }
 
@@ -438,7 +461,8 @@ func pathNamesFile(path string, file *os.File) (bool, error) {
 // two goroutines in one process that opened the file separately contend exactly
 // as two processes do. POSIX record locks belong to the process, and would hand
 // the second goroutine of a sweep a lock the first one already holds — the
-// concurrency R2.4 names first (sweep.go:620) is the one they would not see.
+// concurrency R2.4 names first is the one they would not see: the workers of
+// one sweep (autoupdate/sweep.go, `func ExecuteOverlaySweep`).
 //
 // The descriptor is reached through SyscallConn rather than Fd so the file
 // cannot be closed or garbage-collected underneath the call.
