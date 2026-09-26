@@ -52,6 +52,9 @@ func (r *resticShipper) Name() string {
 // VALUE itself lives only inside the file and is never read here, never placed in
 // argv/stdin, and never logged (R6.1, R6.2).
 func (r *resticShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, error) {
+	if snap.Path == "" || snap.ID == "" {
+		return ShipReport{}, fmt.Errorf("ship %q subvolume %q: %w", r.Name(), snap.Subvolume, ErrSnapshotUnidentified)
+	}
 	err := r.runWithMount(ctx, snap, func(path string) error {
 		args := []string{"backup", path, "--tag", "bentoo," + snap.Subvolume}
 		if r.compression != "" {

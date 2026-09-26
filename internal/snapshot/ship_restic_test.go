@@ -185,7 +185,7 @@ func TestResticShipper_Send_NoCompression(t *testing.T) {
 	mr := &MockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", mount: fm, run: mr}
 
-	if _, err := r.Send(t.Context(), Snapshot{Subvolume: "root", Path: "/s/root"}); err != nil {
+	if _, err := r.Send(t.Context(), Snapshot{ID: "root.1", Subvolume: "root", Path: "/s/root"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if slices.Contains(mr.Calls[0].Args, "--compression") {
@@ -207,7 +207,7 @@ func TestResticShipper_Send_ForgetPrune(t *testing.T) {
 		run:          mr,
 	}
 
-	if _, err := r.Send(t.Context(), Snapshot{Subvolume: "home", Path: "/s/home"}); err != nil {
+	if _, err := r.Send(t.Context(), Snapshot{ID: "home.1", Subvolume: "home", Path: "/s/home"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if len(mr.Calls) != 2 {
@@ -241,7 +241,7 @@ func TestResticShipper_Send_NoRetentionNoForget(t *testing.T) {
 	mr := &MockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", mount: fm, run: mr}
 
-	if _, err := r.Send(t.Context(), Snapshot{Subvolume: "home", Path: "/s/home"}); err != nil {
+	if _, err := r.Send(t.Context(), Snapshot{ID: "home.1", Subvolume: "home", Path: "/s/home"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if len(mr.Calls) != 1 {
@@ -261,7 +261,7 @@ func TestResticShipper_Send_CleansUpMount(t *testing.T) {
 	mr := &MockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", retention: Retention{Daily: 1}, mount: fm, run: mr}
 
-	if _, err := r.Send(t.Context(), Snapshot{Subvolume: "home", Path: "/s/home"}); err != nil {
+	if _, err := r.Send(t.Context(), Snapshot{ID: "home.1", Subvolume: "home", Path: "/s/home"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if fm.cleaned == nil || !*fm.cleaned {

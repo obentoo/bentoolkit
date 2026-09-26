@@ -71,8 +71,10 @@ func TestBtrbkEngine_CreateInvokesRun(t *testing.T) {
 	if snap.Subvolume != "/home" {
 		t.Errorf("snapshot subvolume = %q", snap.Subvolume)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("len(Calls) = %d, want 1", len(mock.Calls))
+	// 053 R1.2: `run` is followed by one `list latest` call that resolves the
+	// snapshot's Path; the `run` argv itself is unchanged.
+	if len(mock.Calls) != 2 {
+		t.Fatalf("len(Calls) = %d, want 2", len(mock.Calls))
 	}
 	c := mock.Calls[0]
 	wantArgs := []string{"-c", "/tmp/test-btrbk.conf", "run", "/home"}

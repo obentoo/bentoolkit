@@ -67,6 +67,9 @@ func (a *archiveShipper) Name() string {
 // per design §6, a partial/duplicate remote object is left for rclone to overwrite
 // on the next run.
 func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, error) {
+	if snap.Path == "" || snap.ID == "" {
+		return ShipReport{}, fmt.Errorf("ship %q subvolume %q: %w", a.Name(), snap.Subvolume, ErrSnapshotUnidentified)
+	}
 	var parentPath string
 	if a.mode != "full" {
 		parent, ok, err := a.parents.Last(snap.Subvolume, a.Name())
