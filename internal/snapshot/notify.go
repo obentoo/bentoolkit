@@ -433,7 +433,7 @@ func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string,
 	}
 
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
 			return fmt.Errorf("smtp starttls to %s: %w", addr, err)
 		}
 	}
