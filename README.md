@@ -1084,7 +1084,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
 | `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
-| `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
+| `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables, and each credential is sent only to the hosts it is bound to (a mismatch fails that package's check) — see [Headers and environment variables](#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](#timeouts). |
 | `type` | `"bin"` for a binary package (manifest-only testing), `"source"` for a source-built one. Only to **override** the auto-detection, which already reads the ebuild (`RESTRICT="bindist"`, a `-bin` suffix, a binary `SRC_URI`). Replaces the retired `binary` key; `--lint --fix` migrates a record still carrying it. |
 | `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
@@ -1307,13 +1307,43 @@ hatch):
 1. The header **name** (matched case-insensitively) is one of:
    `Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`.
 2. The environment **variable** is either prefixed with `BENTOO_` **or** is one
-   of: `GITHUB_TOKEN`, `GITLAB_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+   of: `GITHUB_TOKEN`, `GITLAB_TOKEN`.
+   `OPENAI_API_KEY` is no longer expandable in a header (it used to be),
+   and `ANTHROPIC_API_KEY` is no longer expandable either — see the
+   migration note below.
 
 This prevents a malicious or mistaken `packages.toml` from exfiltrating
 arbitrary process secrets (e.g. a cloud credential) through a non-auth header
 or an arbitrary variable name. A `${VAR}` that does not satisfy both rules is
 **passed through literally** (the header value keeps the raw `${VAR}` text) and
 a `Warn` is logged.
+
+#### Where each credential may go
+
+`packages.toml` lives in the overlay repository, so a record is written by
+whoever contributed it — and an allowed variable must not be sendable to a host
+of that contributor's choosing. Each one is therefore **bound** to the hosts it
+belongs to:
+
+| Variable | May be sent to |
+|----------|----------------|
+| `GITHUB_TOKEN` | `https` only, and only `api.github.com`, `github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com` |
+| `GITLAB_TOKEN` | `https` only, and only `gitlab.com` (a self-hosted GitLab uses a `BENTOO_*` variable) |
+| `BENTOO_*` | the host of the package's own `url` or `base_url` (plain `http` allowed — it is your server) |
+
+Hosts are compared exactly, ignoring case and port: a subdomain or a look-alike
+is a different host. A record that pairs a variable with any other host is
+**refused**: that package's check fails, before any request is sent, with a
+message naming the header, the variable and the host — and the rest of the
+batch runs normally. The refusal is decided from the variable's *name*, so it
+happens whether or not the variable is set on the machine running the check.
+A refused package does not try its `fallback_url` or the LLM stage.
+
+**Redirects.** When an upstream redirects to another host, the credential
+headers (`Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`) are
+dropped for the rest of the redirect chain and the redirect is followed. A
+redirect from `https` to plain `http` is refused when the request carried one
+of them, so a token is never sent in cleartext.
 
 > **Env-only by design.** This `${VAR}` expansion reads the **process
 > environment only** (`os.Getenv`); it deliberately does **not** consult the
@@ -1327,10 +1357,21 @@ parser = "json"
 path = "tag_name"
 
 [app-misc/hello.headers]
-# Expanded: allow-listed header + BENTOO_-prefixed variable.
+# Expanded: allow-listed header + BENTOO_-prefixed variable, sent to the
+# package's own host (api.example.com).
 Authorization = "Bearer ${BENTOO_MY_TOKEN}"
-# Expanded: allow-listed header + allow-listed variable.
-X-Api-Key = "${GITHUB_TOKEN}"
+X-Api-Key = "${BENTOO_HELLO_KEY}"
+```
+
+```toml
+[app-misc/world]
+url = "https://api.github.com/repos/example/world/releases/latest"
+parser = "json"
+path = "tag_name"
+
+[app-misc/world.headers]
+# Expanded: GITHUB_TOKEN is bound to the GitHub hosts, and this is one of them.
+Authorization = "Bearer ${GITHUB_TOKEN}"
 ```
 
 **Migration (BREAKING):** before this release any `${VAR}` in any header was
@@ -1344,6 +1385,11 @@ literally with a `Warn`. Rename the variable to add the `BENTOO_` prefix:
 ```
 
 and export it under the new name (`export BENTOO_MY_TOKEN=...`).
+
+**Migration (BREAKING, credential binding):**
+- `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are no longer expandable in a header — a reference to either is now passed through literally with a `Warn`. Rename it to a `BENTOO_*` variable (e.g. `${BENTOO_OPENAI_API_KEY}`), which then goes only to the package's own host.
+- A record that sent `${GITHUB_TOKEN}` or `${GITLAB_TOKEN}` to a host outside its binding is now refused: move that credential to a `BENTOO_*` variable as well.
+- A GitLab repository configured with an `http://` URL is now rejected; use `https://`.
 
 ### HTTP/2
 
