@@ -11,6 +11,7 @@ package snapshot
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -354,6 +355,11 @@ func LoadFrom(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// ErrShipEngineMismatch is returned by Validate when a ship type cannot work
+// with the configured engine: ssh shipping is btrbk's own transfer, so snapper
+// cannot perform it (053 R3.1).
+var ErrShipEngineMismatch = errors.New("ship type not supported by engine")
+
 // Validate checks the config before any side effect (R1.3, R1.4, AD4). It fails
 // hard with ErrInvalidDriver on an unknown engine.driver, ship.type, or
 // schedule.backend; warns-but-continues on non-fatal issues (empty subvolumes);
@@ -384,6 +390,17 @@ func (c *Config) Validate() error {
 		// "" = no scheduling; "systemd" = supported
 	default:
 		return fmt.Errorf("%w: schedule.backend %q", ErrInvalidDriver, c.Schedule.Backend)
+	}
+
+	// snapper never receives the ssh targets (only btrbk folds them into its
+	// conf), so an ssh ship under snapper would report success while sending
+	// nothing. Refused here, ahead of binary detection (053 R3.1, R3.2).
+	if c.Engine.Driver == "snapper" {
+		for i, sh := range c.Ship {
+			if sh.Type == "ssh" {
+				return fmt.Errorf("%w: ship[%d] %q: type \"ssh\" needs engine.driver = \"btrbk\" (btrbk performs the transfer); with snapper use type \"archive\" or \"restic\"", ErrShipEngineMismatch, i, sh.Name)
+			}
+		}
 	}
 
 	// Non-fatal: an empty subvolume list means nothing is snapshotted, but it is
