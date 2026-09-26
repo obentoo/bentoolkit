@@ -450,7 +450,14 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 			var buf bytes.Buffer
 			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
-			cmd.Stdin = os.Stdin
+			// Only a Stdin the caller left nil gets the terminal. The privileged
+			// compile leaves it nil so sudo/doas can prompt; the build gates'
+			// `ebuild` sets an empty one, because it runs in its own process
+			// group and reading the terminal from there stops it on SIGTTIN
+			// (S054-R3.2).
+			if cmd.Stdin == nil {
+				cmd.Stdin = os.Stdin
+			}
 			err := tui.RunAttached(prog, cmd)
 			return buf.Bytes(), err
 		}),

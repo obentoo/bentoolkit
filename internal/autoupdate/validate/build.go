@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 )
 
 // BuildRequest is one candidate's build-gate run: which staged tree to build,
@@ -381,12 +382,29 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String())
 	cmd.Dir = stagedRoot
 
+	// S054-R3.1. The build runs in its OWN process group, so a cancelled
+	// context stops all of it — make, gcc and every helper that inherited the
+	// output pipe — and not `ebuild` alone, whose orphans held that pipe open and
+	// kept this call blocked until the last of them finished. procgroup.Group sets
+	// cmd.Cancel, which os/exec accepts only on a command exec.CommandContext
+	// built: the shape commandFactory's signature already promises.
+	//
+	// S054-R3.2. Leaving the terminal's foreground group has a price: a child that
+	// reads the terminal from a background group is stopped by SIGTTIN, and a
+	// build stopped that way never ends. So its standard input is EMPTY and
+	// `ebuild` reads EOF at once. It is an empty reader rather than nil because
+	// the attached-run convention (tui.RunAttached, and the CLI's runner around
+	// it) hands a nil Stdin the terminal and keeps one the caller set.
+	procgroup.Group(cmd)
+	cmd.Stdin = strings.NewReader("")
+
 	// R6.3. Set HERE rather than left to the runner, because a nil cmd.Env means
 	// "inherit os.Environ() wholesale" — the allow-list has to be installed on the
 	// command itself or it is not installed at all. It also survives a runner that
 	// rebinds the child's streams, which is what the TUI's RunAttached does
-	// (overlay_autoupdate.go): that override touches Stdout, Stderr and Stdin and
-	// never Env, so what is set here is what the child gets.
+	// (overlay_autoupdate.go): that override touches Stdout and Stderr, Stdin only
+	// when it was left nil, and never Env, so what is set here is what the child
+	// gets.
 	cmd.Env = allowedBuildEnv(os.Environ())
 
 	// R3.1, and it is applied to the INSTALL PHASE ONLY — that narrowness IS
@@ -420,12 +438,19 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	}
 
 	output, runErr := deps.attachedRunner()(cmd)
+	// Group mode sets WaitDelay, so a build that exited 0 while a helper it left
+	// behind still held the output pipe comes back as exec.ErrWaitDelay. That is
+	// a success, and procgroup.Result says so (S054-R1.5); every other error
+	// stays.
+	runErr = procgroup.Result(cmd, runErr)
 
 	// An interrupted run is not a verdict on the ebuild — and it is not a SKIP
 	// either. IT IS AN ERROR, and the distinction is the whole of this comment.
 	//
-	// The child is spawned through CommandContext, so a cancelled context KILLS
-	// it: runErr becomes `signal: killed`, and derive's attribution rule — the
+	// The child is spawned through CommandContext in group mode, so a cancelled
+	// context STOPS it — SIGTERM to its whole group, SIGKILL to whatever is left
+	// after procgroup.GracePeriod: runErr becomes `signal: terminated` or
+	// `signal: killed`, and derive's attribution rule — the
 	// phase started and the run failed, therefore this is where the bump died —
 	// reports FAILED with error-severity findings. The operator pressed Ctrl-C
 	// and was told their ebuild is broken.
