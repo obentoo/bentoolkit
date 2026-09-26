@@ -2,7 +2,11 @@
 package autoupdate
 
 import (
+	"errors"
+	"fmt"
 	"net/textproto"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -35,11 +39,13 @@ var allowedExpansionHeaders = map[string]struct{}{
 // allowedHeaderEnvAllowList is the set of environment variable names that may be
 // expanded inside an allow-listed header value even though they do not carry the
 // allowedHeaderEnvPrefix.
+//
+// OPENAI_API_KEY and ANTHROPIC_API_KEY are deliberately absent (S052-R3): they
+// are the maintainer's LLM keys, and no upstream a package record names has a
+// reason to receive them. A record that needs such a key renames it to BENTOO_*.
 var allowedHeaderEnvAllowList = map[string]struct{}{
-	"GITHUB_TOKEN":      {},
-	"GITLAB_TOKEN":      {},
-	"OPENAI_API_KEY":    {},
-	"ANTHROPIC_API_KEY": {},
+	"GITHUB_TOKEN": {},
+	"GITLAB_TOKEN": {},
 }
 
 // allowedHeaderEnvPrefix is the prefix that opts an environment variable into
@@ -87,4 +93,172 @@ func isAllowedEnvVar(name string) bool {
 	}
 	_, ok := allowedHeaderEnvAllowList[name]
 	return ok
+}
+
+// Credential host binding (S052-R1).
+//
+// The allow-list above decides WHETHER a variable may be expanded; it says
+// nothing about WHERE the result goes. packages.toml lives in the overlay
+// repository, so without a binding one contributor record pairing
+// url = "https://evil.example" with X-Api-Key = "${GITHUB_TOKEN}" would ship the
+// maintainer's token to that host. Every allow-listed variable is therefore
+// bound to a set of hosts, and a request to any other host is refused before
+// it is built into a network call:
+//
+//   - GITHUB_TOKEN: https only, and exactly the hosts in githubCredentialHosts.
+//   - GITLAB_TOKEN: https only, and exactly gitlab.com. A self-hosted GitLab
+//     uses a BENTOO_* variable instead.
+//   - BENTOO_*: the package's own hosts (its url and base_url, see
+//     credentialScope), by hostname only — a user's own server may be plain
+//     http, so the scheme is not checked.
+//
+// Hostnames are compared with url.URL.Hostname(), case-insensitively and
+// exactly: no subdomain match, port ignored (S052-R1.7). The decision is made
+// from the variable's NAME, never from its value, so a record is refused
+// whether or not the variable is set on the machine running it (S052-R1.6).
+
+// githubCredentialHosts is the set of hostnames GITHUB_TOKEN may be sent to.
+var githubCredentialHosts = []string{
+	"api.github.com",
+	"github.com",
+	"codeload.github.com",
+	"objects.githubusercontent.com",
+	"raw.githubusercontent.com",
+}
+
+// gitlabCredentialHost is the one hostname GITLAB_TOKEN may be sent to.
+const gitlabCredentialHost = "gitlab.com"
+
+// credentialScope carries the hostnames a BENTOO_* credential may be sent to:
+// the hosts of the package's own url and base_url, or, for a caller with no
+// package (GetWithHeadersContext), the request's own host (S052-R1.5).
+type credentialScope struct {
+	ownHosts []string
+}
+
+// requestOwnScope is the scope of a request made without a package: the
+// request URL's own hostname is the package host (S052-R1.5). An unparseable
+// URL yields an empty scope, so a BENTOO_* reference to it is refused.
+func requestOwnScope(rawURL string) credentialScope {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return credentialScope{}
+	}
+	return credentialScope{ownHosts: []string{u.Hostname()}}
+}
+
+// packageCredentialScope is the scope of a package record: the hostnames of
+// its url and base_url (S052-R1.4). An empty or unparseable field contributes
+// no host, so a record whose url cannot be read has no own host and any
+// BENTOO_* reference in it is refused. fallback_url is deliberately not a
+// scope host: a BENTOO_* credential stays with the record's primary source.
+func packageCredentialScope(cfg *PackageConfig) credentialScope {
+	var scope credentialScope
+	if cfg == nil {
+		return scope
+	}
+	for _, raw := range []string{cfg.URL, cfg.BaseURL} {
+		if raw == "" {
+			continue
+		}
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			scope.ownHosts = append(scope.ownHosts, u.Hostname())
+		}
+	}
+	return scope
+}
+
+// credentialRef is one ${VAR} reference to an allow-listed variable inside an
+// expansion-eligible header.
+type credentialRef struct {
+	header   string // canonical header name
+	variable string
+}
+
+// credentialRefs lists, in a deterministic order, every reference in headers
+// that SubstituteEnvVars would be allowed to expand. A reference in a header
+// outside the header allow-list is passed through literally by
+// SubstituteEnvVars, carries no credential, and is not listed (S052-R1.8).
+func credentialRefs(headers map[string]string) []credentialRef {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var refs []credentialRef
+	for _, name := range names {
+		if !isAllowedHeaderName(name) {
+			continue
+		}
+		canonical := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name))
+		for _, m := range envVarPattern.FindAllStringSubmatch(headers[name], -1) {
+			if isAllowedEnvVar(m[1]) {
+				refs = append(refs, credentialRef{header: canonical, variable: m[1]})
+			}
+		}
+	}
+	return refs
+}
+
+// checkCredentialBinding returns an error wrapping ErrCredentialHostMismatch
+// when a header in headers references an allow-listed variable that is not
+// bound to rawURL's host. It is a pure check: it reads no environment variable
+// and performs no I/O, and its error never carries a variable's value.
+func checkCredentialBinding(rawURL string, headers map[string]string, scope credentialScope) error {
+	refs := credentialRefs(headers)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// url.Error repeats the whole URL, query included; keep only its cause
+		// so a credential carried in the query cannot reach the message.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("%w: header %s references ${%s}, but the request URL cannot be parsed to check its host: %w",
+			ErrCredentialHostMismatch, refs[0].header, refs[0].variable, err)
+	}
+
+	host := u.Hostname()
+	for _, ref := range refs {
+		bound, allowed := credentialBinding(ref.variable, u.Scheme, host, scope)
+		if !allowed {
+			return fmt.Errorf("%w: header %s references ${%s}, which is bound to %s; refusing to send it to %s",
+				ErrCredentialHostMismatch, ref.header, ref.variable, bound, u.Host)
+		}
+	}
+	return nil
+}
+
+// credentialBinding reports where variable may be sent, as text for the
+// refusal, and whether a request with the given scheme and hostname is one of
+// those places. variable must already satisfy isAllowedEnvVar.
+func credentialBinding(variable, scheme, host string, scope credentialScope) (string, bool) {
+	switch variable {
+	case "GITHUB_TOKEN":
+		return "https://" + strings.Join(githubCredentialHosts, ", https://"),
+			scheme == "https" && hostIn(host, githubCredentialHosts)
+	case "GITLAB_TOKEN":
+		return "https://" + gitlabCredentialHost,
+			scheme == "https" && strings.EqualFold(host, gitlabCredentialHost)
+	default:
+		if len(scope.ownHosts) == 0 {
+			return "the package's own url or base_url host (none could be read)", false
+		}
+		return "the package's own host (" + strings.Join(scope.ownHosts, ", ") + ")",
+			hostIn(host, scope.ownHosts)
+	}
+}
+
+// hostIn reports whether host equals one of hosts, case-insensitively. An
+// empty host matches nothing.
+func hostIn(host string, hosts []string) bool {
+	if host == "" {
+		return false
+	}
+	return slices.ContainsFunc(hosts, func(h string) bool { return strings.EqualFold(h, host) })
 }

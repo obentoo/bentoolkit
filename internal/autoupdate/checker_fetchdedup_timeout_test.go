@@ -85,7 +85,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, leaderErr = checker.fetchContent(server.URL, nil, leaderBudget)
+		_, leaderErr = checker.fetchContent(server.URL, nil, credentialScope{}, leaderBudget)
 	}()
 
 	select {
@@ -97,7 +97,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		followerBody, followerErr = checker.fetchContent(server.URL, nil, followerBudget)
+		followerBody, followerErr = checker.fetchContent(server.URL, nil, credentialScope{}, followerBudget)
 	}()
 
 	// Prove the follower genuinely JOINED the in-flight fetch. Without this the

@@ -29,6 +29,10 @@ var (
 	// ErrResponseTooLarge is returned when an HTTP response body exceeds the
 	// MaxBodyBytes cap.
 	ErrResponseTooLarge = errors.New("response body too large")
+	// ErrCredentialHostMismatch is returned, before any network I/O, when a
+	// header references a credential variable that is bound to hosts other
+	// than the one the request goes to (S052-R1.2).
+	ErrCredentialHostMismatch = errors.New("credential header bound to another host")
 )
 
 // envVarPattern matches ${VAR_NAME} syntax for environment variable substitution
@@ -579,14 +583,28 @@ func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]stri
 // ErrResponseTooLarge. The cap holds even when a caller sent a Range header: a
 // Range is only a request, and a server that ignores it and streams the full
 // body is bounded here rather than at the caller's read (S019-R1.1, S019-R1.2).
+//
+// A header that references a credential variable bound to another host is
+// refused before any network I/O with an error wrapping
+// ErrCredentialHostMismatch. With no package to consult, the request URL's own
+// host is taken as the package host for BENTOO_* variables (S052-R1.5).
 func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url string, headers map[string]string) (*http.Response, error) {
+	return c.getWithHeadersScopedContext(ctx, url, headers, requestOwnScope(url))
+}
+
+// getWithHeadersScopedContext is GetWithHeadersContext with the package's
+// credential scope supplied by the caller (the checker passes the hosts of the
+// package's url and base_url, S052-R1.4).
+func (c *RetryableHTTPClient) getWithHeadersScopedContext(ctx context.Context, url string, headers map[string]string, scope credentialScope) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Apply headers to request
-	c.applyHeaders(req, url, headers)
+	// Apply headers to request; a credential bound elsewhere stops it here.
+	if err := c.applyHeaders(req, url, headers, scope); err != nil {
+		return nil, err
+	}
 
 	resp, err := c.DoWithContext(ctx, req)
 	if err != nil {
@@ -609,7 +627,18 @@ func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url str
 // Any header whose name contains a CR or LF byte is rejected and skipped as a
 // defence against header/CRLF injection. The canonical header name is passed to
 // SubstituteEnvVars so that ${VAR} expansion is gated by the header allow-list.
-func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, customHeaders map[string]string) {
+//
+// Before anything is applied, the default and custom headers are checked
+// against scope with checkCredentialBinding — both are expanded by setHeader,
+// so both are bound; its error is returned unchanged and req is left untouched
+// (S052-R1.2).
+func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, customHeaders map[string]string, scope credentialScope) error {
+	for _, headers := range []map[string]string{c.defaultHeaders, customHeaders} {
+		if err := checkCredentialBinding(url, headers, scope); err != nil {
+			return err
+		}
+	}
+
 	// Apply default headers first
 	for key, value := range c.defaultHeaders {
 		c.setHeader(req, key, value)
@@ -624,6 +653,7 @@ func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, custom
 	for key, value := range customHeaders {
 		c.setHeader(req, key, value)
 	}
+	return nil
 }
 
 // setHeader sets a single header on req after rejecting names that contain CR
@@ -690,8 +720,10 @@ func SubstituteEnvVars(value, headerName string) string {
 	})
 }
 
-// isGitHubAPIURL checks if a URL is a GitHub API URL.
+// isGitHubAPIURL reports whether url is a GitHub API URL the automatic token
+// may be attached to. Only https qualifies: a token sent over plain http
+// travels in cleartext to anyone on the path, and api.github.com serves https
+// only, so the http form can only ever be a downgrade (S052-R5.1).
 func isGitHubAPIURL(url string) bool {
-	return strings.HasPrefix(url, "https://api.github.com/") ||
-		strings.HasPrefix(url, "http://api.github.com/")
+	return strings.HasPrefix(url, "https://api.github.com/")
 }

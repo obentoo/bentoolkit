@@ -894,7 +894,10 @@ func TestGitHubTokenIntegration(t *testing.T) {
 
 			// Create a request and manually apply headers to test the format
 			req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/test/test", nil)
-			client.applyHeaders(req, "https://api.github.com/repos/test/test", nil)
+			if err := client.applyHeaders(req, "https://api.github.com/repos/test/test", nil, credentialScope{}); err != nil {
+				t.Logf("applyHeaders: %v", err)
+				return false
+			}
 
 			authHeader := req.Header.Get("Authorization")
 			expectedAuth := "Bearer " + token
@@ -1411,7 +1414,8 @@ func TestAllowedExpansionHeaders_HasExpectedSet(t *testing.T) {
 
 // TestAllowedEnvVars_HasExpectedSet enumerates the env-var allow-list and prefix.
 func TestAllowedEnvVars_HasExpectedSet(t *testing.T) {
-	want := []string{"GITHUB_TOKEN", "GITLAB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
+	// S052-R3.2: the LLM keys were removed from the allow-list.
+	want := []string{"GITHUB_TOKEN", "GITLAB_TOKEN"}
 
 	if len(allowedHeaderEnvAllowList) != len(want) {
 		t.Fatalf("allowedHeaderEnvAllowList has %d entries, want %d: %v",
@@ -1484,8 +1488,8 @@ func TestIsAllowedEnvVar(t *testing.T) {
 		{"prefix with suffix", "BENTOO_PRIVATE_TOKEN", true},
 		{"allow-list github", "GITHUB_TOKEN", true},
 		{"allow-list gitlab", "GITLAB_TOKEN", true},
-		{"allow-list openai", "OPENAI_API_KEY", true},
-		{"allow-list anthropic", "ANTHROPIC_API_KEY", true},
+		{"denied openai (S052-R3.1)", "OPENAI_API_KEY", false},
+		{"denied anthropic (S052-R3.1)", "ANTHROPIC_API_KEY", false},
 		{"denied arbitrary", "ANTHROPIC_API_KEY_EVIL", false},
 		{"denied path", "PATH", false},
 		{"denied home", "HOME", false},
@@ -1549,8 +1553,8 @@ func TestSubstituteEnvVars_DeniedEnvVarWarn(t *testing.T) {
 	lc := captureWarnLogs(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
 
-	// EVIL_VAR is not allow-listed; ANTHROPIC_API_KEY is, but we reference the
-	// non-allow-listed one to confirm the denial path.
+	// Neither EVIL_VAR nor (since S052-R3.1) ANTHROPIC_API_KEY is allow-listed;
+	// the set secret proves the denial path never reads the environment.
 	result := SubstituteEnvVars("${EVIL_VAR}", "Authorization")
 
 	if result != "${EVIL_VAR}" {
@@ -1614,9 +1618,11 @@ func TestApplyHeaders_RejectsCRLFHeader(t *testing.T) {
 	}
 
 	client := NewRetryableHTTPClient()
-	client.applyHeaders(req, "https://example.com/", map[string]string{
+	if err := client.applyHeaders(req, "https://example.com/", map[string]string{
 		"X-Evil\r\nInjected": "value",
-	})
+	}, credentialScope{}); err != nil {
+		t.Fatalf("applyHeaders: %v", err)
+	}
 
 	// The malicious header name must not have been set in any form.
 	if got := req.Header.Get("X-Evil"); got != "" {
