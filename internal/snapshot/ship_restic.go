@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -156,18 +157,19 @@ func (r *resticShipper) retentionFlags() []string {
 
 // runWithMount mounts snap read-only, invokes fn with the mount path, and
 // ALWAYS cleans up the mount afterward — including when fn returns an error
-// (R7.3). The cleanup error never masks fn's error.
-func (r *resticShipper) runWithMount(ctx context.Context, snap Snapshot, fn func(path string) error) error {
+// (R7.3). When both fail, the two errors are joined, so neither masks the
+// other and errors.Is matches both (053 R4.6).
+func (r *resticShipper) runWithMount(ctx context.Context, snap Snapshot, fn func(path string) error) (err error) {
 	path, cleanup, err := r.mount.Mount(ctx, snap)
 	if err != nil {
 		return err
 	}
 	// Deferred so the unmount runs on every exit path — normal return, fn error,
-	// or panic. fn's error is the return value; a cleanup failure is reported only
-	// when fn itself succeeded, so it can never mask the more important fn error.
+	// or panic. errors.Join drops nil operands, so a clean run returns fn's error
+	// (or nil) unchanged.
 	defer func() {
-		if cerr := cleanup(); cerr != nil && err == nil {
-			err = cerr
+		if cerr := cleanup(); cerr != nil {
+			err = errors.Join(err, cerr)
 		}
 	}()
 
@@ -175,10 +177,14 @@ func (r *resticShipper) runWithMount(ctx context.Context, snap Snapshot, fn func
 	return err
 }
 
+// umountTimeout bounds the transient mount's unmount (053 R4.1). It is a var
+// only so tests can shrink it; it is not configurable.
+var umountTimeout = 30 * time.Second
+
 // transientMounter is the production mounter (R7): it mounts a read-only btrfs
 // snapshot at a fresh temp dir and returns a cleanup that unmounts it and removes
-// the dir. It is exercised by live tests only — unit tests use a fakeMounter — so
-// it is kept deliberately simple.
+// the dir. Its own unit tests script mount/umount through a MockRunner; the
+// shipper's tests use a fakeMounter.
 type transientMounter struct {
 	run Runner
 }
@@ -197,20 +203,31 @@ func (m *transientMounter) Mount(ctx context.Context, snap Snapshot) (string, fu
 		return "", nil, fmt.Errorf("create mount dir: %w", err)
 	}
 
-	// cleanup is best-effort and idempotent-safe: a failed/absent umount must not
-	// stop us from removing the temp dir, and double-invocation is harmless.
+	// cleanup unmounts on a context that outlives a cancelled Send, bounded by
+	// umountTimeout, and removes the directory only once the unmount succeeded
+	// and only if it is empty: a directory that may still be a mounted snapshot
+	// is never walked (053 R4.1-R4.3).
 	cleanup := func() error {
-		_, _ = m.run.Run(ctx, "umount", []string{dir}, nil)
-		return os.RemoveAll(dir)
+		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), umountTimeout)
+		defer cancel()
+		if _, err := m.run.Run(uctx, "umount", []string{dir}, nil); err != nil {
+			return fmt.Errorf("unmount %s (left mounted; remove it by hand after unmounting): %w", dir, err)
+		}
+		if err := os.Remove(dir); err != nil {
+			return fmt.Errorf("remove mount dir %s: %w", dir, err)
+		}
+		return nil
 	}
 
 	if _, err := m.run.Run(ctx, "mount", []string{"--bind", snap.Path, dir}, nil); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("bind-mount snapshot: %w", err)
+		bindErr := fmt.Errorf("bind-mount snapshot: %w", err)
+		if rerr := os.Remove(dir); rerr != nil {
+			return "", nil, errors.Join(bindErr, fmt.Errorf("remove mount dir %s: %w", dir, rerr))
+		}
+		return "", nil, bindErr
 	}
 	if _, err := m.run.Run(ctx, "mount", []string{"-o", "remount,ro,bind", dir}, nil); err != nil {
-		_ = cleanup()
-		return "", nil, fmt.Errorf("remount read-only: %w", err)
+		return "", nil, errors.Join(fmt.Errorf("remount read-only: %w", err), cleanup())
 	}
 
 	return dir, cleanup, nil
