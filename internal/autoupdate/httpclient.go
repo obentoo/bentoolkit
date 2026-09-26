@@ -122,13 +122,18 @@ func NewRetryableHTTPClient() *RetryableHTTPClient {
 // The circuit breaker is enabled by default.
 func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 	return &RetryableHTTPClient{
+		// Both clients follow redirects under the credential-safe policy, so a
+		// redirect never carries a credential header to another host or to
+		// plain http (S052-R4.6).
 		client: &http.Client{
-			Timeout:   config.Timeout,
-			Transport: httputil.BuildTransport(),
+			Timeout:       config.Timeout,
+			Transport:     httputil.BuildTransport(),
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		h1Client: &http.Client{
-			Timeout:   config.Timeout,
-			Transport: httputil.BuildTransportHTTP1(),
+			Timeout:       config.Timeout,
+			Transport:     httputil.BuildTransportHTTP1(),
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		config:    config,
 		breaker:   newDefaultBreaker(),
@@ -252,6 +257,12 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 		if err != nil {
 			// Propagate circuit-breaker open errors immediately (no retries)
 			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+				return nil, err
+			}
+			// A refused https -> http redirect is the redirect policy's verdict
+			// on the request, not a transient failure: retrying would only
+			// re-send the credential to the original host (S052-R4.4).
+			if errors.Is(err, httputil.ErrInsecureRedirect) {
 				return nil, err
 			}
 			lastErr = err

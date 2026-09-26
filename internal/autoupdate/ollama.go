@@ -91,6 +91,8 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 		httpClient: &http.Client{
 			Timeout:   120 * time.Second, // Longer timeout for local inference
 			Transport: httputil.BuildTransport(),
+			// Same redirect policy as every other client (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		baseURL:      baseURL,
 		maxBodyBytes: httputil.MaxBodyBytes,

@@ -122,6 +122,9 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 		httpClient: &http.Client{
 			Timeout:   DefaultHTTPTimeout,
 			Transport: httputil.BuildTransport(),
+			// Authorization must not follow a redirect off-host or to http
+			// (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		apiKey:       apiKey,
 		baseURL:      baseURL,

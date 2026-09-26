@@ -243,6 +243,8 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 		httpClient: &http.Client{
 			Timeout:   DefaultRequestTimeout,
 			Transport: httputil.BuildTransport(),
+			// x-api-key must not follow a redirect off-host (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		apiKey:       apiKey,
 		maxBodyBytes: httputil.MaxBodyBytes,
