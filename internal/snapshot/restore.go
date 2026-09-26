@@ -304,13 +304,8 @@ func validateChain(chain []chainLink) error {
 // NO `btrfs receive` runs (G3) — nothing is applied against a missing base. On a
 // valid chain, each link is applied in order through the existing runPipe helper
 // with stages `rclone cat <remote>/<object> | <decompress> | btrfs receive
-// <target>`. All subprocesses go through opts.Run (R7.2).
-//
-// NOTE (R-archive-memory): runPipe buffers each stage's full output in memory (the
-// 004 Runner returns []byte), so a multi-GB stream is a real memory cost here just
-// as on the ship side; a true streaming pipe is future work gated behind live
-// tests and does not change the mock-tested correctness (argv wiring, ordered
-// receive, refuse-before-receive).
+// <target>`. All subprocesses go through opts.Run (R7.2), and runPipe streams
+// them through its piper seam, as on the ship side (053 R5.1).
 func restoreArchive(ctx context.Context, id, target string, opts RestoreOptions) error {
 	if err := validateChain(opts.Chain); err != nil {
 		return err // refuse BEFORE any btrfs receive (R5.2/G3)

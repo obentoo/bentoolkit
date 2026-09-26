@@ -85,6 +85,17 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 
 	stages := archivePipeStages(snap, parentPath, a.remote, a.compress)
 	if _, err := runPipe(ctx, a.run, stages); err != nil {
+		// A streamed pipe can let rclone rcat finish a truncated upload after
+		// btrfs send dies, so the object under this snapshot's key is removed,
+		// best-effort (053 R5.5). The pipe error stays the returned error.
+		// The deletion outlives a cancelled Send, bounded by
+		// archiveDeleteTimeout so an unreachable remote cannot hold the error.
+		dest := archiveDest(a.remote, snap)
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveDeleteTimeout)
+		defer cancel()
+		if _, derr := a.run.Run(dctx, "rclone", []string{"deletefile", dest}, nil); derr != nil {
+			warnLogf("snapshot: ship %q: removing possibly truncated %s failed: %v", a.Name(), dest, derr)
+		}
 		return ShipReport{}, err
 	}
 
@@ -153,7 +164,7 @@ func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pip
 
 	prog, compArgs := compressorStage(compress)
 
-	dest := remote + "/" + archiveObjectName(snap)
+	dest := archiveDest(remote, snap)
 
 	return []pipeStage{
 		{name: "btrfs", args: send},
@@ -161,6 +172,16 @@ func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pip
 		{name: "rclone", args: []string{"rcat", dest}},
 	}
 }
+
+// archiveDest is the rclone destination of snap's archive object: the rcat
+// target of archivePipeStages and the object a failed ship deletes.
+func archiveDest(remote string, snap Snapshot) string {
+	return remote + "/" + archiveObjectName(snap)
+}
+
+// archiveDeleteTimeout bounds the best-effort `rclone deletefile` that follows
+// a failed archive pipe (053 R5.5). It is a var only so tests can shrink it.
+var archiveDeleteTimeout = 30 * time.Second
 
 // compressorStage resolves the compressor program and its stdin→stdout argv. An
 // empty or "zstd" compress selects `zstd -c`; any other value is treated as a
@@ -621,27 +642,19 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 	return errors.Join(errs...)
 }
 
-// runPipe runs stages sequentially through run, feeding each stage's stdout as the
-// next stage's stdin, and returns the final stage's stdout. Any stage error fails
-// the whole pipe immediately (R2.3); because every stage shares the single ctx,
-// cancelling it kills the pipe (the Runner binds each child to ctx, R7.2).
+// runPipe runs stages as one streaming pipe through run's piper seam and returns
+// the final stage's stdout (053 R5.1). Any stage error fails the whole pipe
+// (R2.3), and cancelling ctx kills every stage (R7.2).
 //
-// NOTE (R-archive-memory): this buffers each stage's FULL output in memory because
-// the 004 Runner returns []byte. For a multi-GB `btrfs send` stream that is a real
-// memory cost. A true streaming pipe (io.Pipe between exec.Cmds) is FUTURE WORK
-// gated behind *_live_test.go; it does not change the mock-tested correctness here
-// (argv wiring, stage-failure-fails-ship, ctx-cancel), which this buffered form
-// already satisfies.
+// A Runner without the seam is refused rather than driven stage by stage: the
+// buffered chain it would need holds each stage's whole output in memory, about
+// twice a multi-GB `btrfs send` stream at peak (053 R5.7).
 func runPipe(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
-	var prevOut []byte
-	for _, stage := range stages {
-		out, err := run.Run(ctx, stage.name, stage.args, prevOut)
-		if err != nil {
-			return nil, fmt.Errorf("archive pipe stage %q: %w", stage.name, err)
-		}
-		prevOut = out
+	p, ok := run.(piper)
+	if !ok {
+		return nil, fmt.Errorf("runner %T cannot stream the archive pipe", run)
 	}
-	return prevOut, nil
+	return p.Pipe(ctx, stages)
 }
 
 // newArchiveShipper assembles an archiveShipper from cfg, the subprocess seam, and
