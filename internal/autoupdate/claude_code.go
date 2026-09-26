@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -91,8 +92,9 @@ type ClaudeCodeClient struct {
 	// DefaultClaudeCodeTimeout.
 	timeout time.Duration
 	// ctx is the parent context for spawned CLI processes. Defaults to
-	// context.Background(); a cancelled parent (or the per-call timeout) kills
-	// the child via exec.CommandContext (S003-R7.1).
+	// context.Background(); a cancelled parent (or the per-call timeout) stops
+	// the child and every process it started, through procgroup.Group
+	// (S003-R7.1, story 054 R4.1).
 	ctx context.Context
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
 	// exec.CommandContext and is injectable for testing.
@@ -112,6 +114,10 @@ type ClaudeCodeOption func(*ClaudeCodeClient)
 // WithClaudeCodeExecCommand overrides the context-aware exec.Command factory used
 // to spawn the `claude` CLI. The function mirrors exec.CommandContext so injected
 // commands also observe context cancellation. Intended for tests (scripted seam).
+//
+// The command it returns must come from exec.CommandContext with the ctx it was
+// given: run configures it with procgroup.Group, which sets cmd.Cancel, and
+// os/exec refuses to start a command that has a Cancel but no context.
 func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ClaudeCodeOption {
 	return func(c *ClaudeCodeClient) {
 		c.execCommand = fn
@@ -119,9 +125,14 @@ func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...
 }
 
 // WithClaudeCodeContext sets the parent context threaded into every spawned CLI
-// process, so cancelling it (e.g. on SIGINT or a deadline) kills the in-flight
-// `claude` process. A nil context is ignored, leaving the default
-// context.Background().
+// process, so cancelling it (e.g. on SIGINT or a deadline) stops the in-flight
+// `claude` process and everything it started. A nil context is ignored, leaving
+// the default context.Background().
+//
+// Since story 054 the child runs in its own process group, so a Ctrl+C typed at
+// the terminal no longer reaches it directly: this context is the only way an
+// interrupt does. A caller that can be interrupted should pass the context its
+// signal handler cancels.
 func WithClaudeCodeContext(ctx context.Context) ClaudeCodeOption {
 	return func(c *ClaudeCodeClient) {
 		if ctx != nil {
@@ -340,9 +351,10 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 //
 // Page content is piped on stdin (AD8); the instruction travels in -p. The call
 // is bound to a child context derived from c.ctx with c.timeout, so a cancelled
-// parent or an elapsed timeout kills the child (S003-R7.1). In bare mode the API key
-// is injected ONLY through the child environment (never argv/logs — S003-R2.1, S003-R2.4).
-// stdout and stderr are captured separately.
+// parent or an elapsed timeout stops the child and its descendants, and run
+// returns within procgroup.GracePeriod of it (S003-R7.1, story 054 R4.1). In
+// bare mode the API key is injected ONLY through the child environment (never
+// argv/logs — S003-R2.1, S003-R2.4). stdout and stderr are captured separately.
 //
 // A FAILED invocation is classified before any exit-code framing, in the
 // precedence the package keeps in one place (S048-R1.1, S048-R1.2, S048-R1.3):
@@ -362,6 +374,21 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 
 	cmd := c.execCommand(ctx, "claude", c.buildArgs(instruction, schema != "", schema)...)
 
+	// GROUP MODE (story 054, R4.1). exec.CommandContext alone stops only the
+	// direct child, and a helper the CLI started inherits the stdout pipe: Wait
+	// does not return while that helper runs, so a budget of seconds lasted as
+	// long as the helper did. The child now leads its own process group. When
+	// ctx is done the whole group gets SIGTERM, whatever is left of it gets
+	// SIGKILL procgroup.GracePeriod later, and Wait returns within that grace
+	// even if a descendant left the group and still holds the pipe.
+	//
+	// Group owns cmd.Cancel and cmd.WaitDelay; run sets neither. It also takes
+	// the child out of the terminal's foreground group, which is safe here for
+	// the reason procgroup names: stdin is the piped content below, never the
+	// terminal, so the child cannot stop on SIGTTIN. The cost is that a Ctrl+C
+	// typed at the terminal reaches the child only through c.ctx.
+	procgroup.Group(cmd)
+
 	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
 	cmd.Stdin = bytes.NewReader(content)
 
@@ -375,14 +402,22 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	cmd.Stderr = &stderr
 
 	startedAt := time.Now()
-	runErr := cmd.Run()
+	// procgroup.Result turns exec.ErrWaitDelay after a ZERO exit into success:
+	// WaitDelay's timer also starts on a normal exit, and a helper still holding
+	// the pipe then would fail a CLI that answered (story 054, R1.5). Every other
+	// error passes through unchanged, so each ending is classified as it was
+	// before.
+	runErr := procgroup.Result(cmd, cmd.Run())
 
 	// The context is read HERE, before anything frames this failure, because the
-	// exit status of a child our own deadline SIGKILLed is only what the kernel
-	// left behind: "signal: killed" names neither the deadline nor the budget,
-	// and a message built from it sends whoever reads it looking for a broken
-	// CLI. Reading the context afterwards would print that noise first and reach
-	// the cause too late to say it (S048-R1.1).
+	// exit status of a child our own deadline stopped is only what the kernel
+	// left behind: "signal: terminated" — or "signal: killed" once the grace ran
+	// out — names neither the deadline nor the budget, and a message built from
+	// it sends whoever reads it looking for a broken CLI. Reading the context
+	// afterwards would print that noise first and reach the cause too late to
+	// say it (S048-R1.1). It is also why group mode cannot turn a deadline into
+	// a non-zero exit: whatever signal ended the group, ctx.Err() outranks it in
+	// classifyClaudeFailure (story 054, R4.2).
 	ctxErr := ctx.Err()
 
 	// The elapsed time is taken at the same boundary and for a related reason:
@@ -455,8 +490,13 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 				// raise the number that elapsed and not the one that did not.
 				// `func formatBumpReviewSkipTimeout` is the precedent this
 				// follows.
-				return "", fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered",
-					ErrLLMRequestFailed, c.timeout)
+				//
+				// ctxErr is wrapped too, so the deadline stays a deadline to
+				// errors.Is(err, context.DeadlineExceeded) and not only to a
+				// reader of this sentence — including when the group it
+				// stopped died of a signal (story 054, R4.2).
+				return "", fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered: %w",
+					ErrLLMRequestFailed, c.timeout, ctxErr)
 			}
 			// Ended by anything other than this client's own budget: the cause
 			// travels verbatim and no number is claimed. One sentence, written
