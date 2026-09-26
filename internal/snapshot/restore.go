@@ -302,8 +302,8 @@ func validateChain(chain []chainLink) error {
 // restoreArchive validates the delta chain and then replays it into target
 // (R5.2). The chain is validated FIRST: a broken chain returns ErrBrokenChain and
 // NO `btrfs receive` runs (G3) — nothing is applied against a missing base. On a
-// valid chain, each link is applied in order through the existing runPipe helper
-// with stages `rclone cat <remote>/<object> | <decompress> | btrfs receive
+// valid chain, each link is applied in order, one stage after another, with
+// stages `rclone cat <remote>/<object>`, `<decompress>` and `btrfs receive
 // <target>`. All subprocesses go through opts.Run (R7.2).
 //
 // Each link runs through runStagesBuffered, not the streaming runPipe the ship
