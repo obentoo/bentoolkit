@@ -662,10 +662,15 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 			osExit(1)
 			return
 		}
-		// Released on return, including after SIGINT/SIGTERM cancelled the
-		// mode's context. An osExit inside a mode skips it; the flock dies with
-		// the process, and the next run reaps the file.
-		defer lock.Release()
+		// Released on return and on every osExit inside a mode, including after
+		// SIGINT/SIGTERM cancelled the mode's context (S056-R4.7): os.Exit skips
+		// deferred calls, so the release is also registered with exitProcess.
+		// Release is idempotent, and the defer covers a test's stubbed osExit.
+		unregister := registerExitCleanup(lock.Release)
+		defer func() {
+			unregister()
+			lock.Release()
+		}()
 		sweepStaleTemps(overlayPath, configDir)
 	}
 

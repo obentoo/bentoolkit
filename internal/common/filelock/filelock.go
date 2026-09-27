@@ -13,6 +13,7 @@ package filelock
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -138,7 +139,7 @@ func claim(file *os.File, path, purpose string) (*Lock, error) {
 // reapIfAbandoned removes the lock file at path when no live process holds its
 // flock and the path still names the file that was checked.
 func reapIfAbandoned(path string) error {
-	file, err := os.Open(path)
+	file, err := openLockReadOnly(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -161,6 +162,31 @@ func reapIfAbandoned(path string) error {
 		return err
 	}
 	return nil
+}
+
+// openLockReadOnly opens an existing lock file for reading without following a
+// symlink and without blocking, and refuses anything that is not a regular
+// file. Another user sharing the directory can plant an entry at the lock name:
+// a symlink must not redirect the open to its target, and a FIFO or directory
+// must neither hang the open nor be reaped as if it were a stale lock.
+func openLockReadOnly(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%s is a symlink; refusing to treat it as a lock: %w", path, err)
+		}
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close() // the Stat error is the one reported
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close() // nothing was read; the refusal is the one reported
+		return nil, fmt.Errorf("%s is not a regular file (%s); refusing to treat it as a lock", path, info.Mode().Type())
+	}
+	return file, nil
 }
 
 // pathNamesFile reports whether path (not followed if it is a symlink) is the
@@ -213,13 +239,24 @@ func describeHolder(path string) string {
 	return "a process that did not identify itself in " + filepath.Base(path)
 }
 
-// holderPID reads the pid= line of a lock file.
+// holderReadBound caps how much of a lock file holderPID reads: the payload is
+// a few short lines, and a planted file must not make the read unbounded.
+const holderReadBound = 4096
+
+// holderPID reads the pid= line of a lock file, looking only at the first
+// holderReadBound bytes. A line the bound cuts off, with no newline inside
+// them, is ignored, so a truncated pid= line never names the wrong process.
 func holderPID(path string) (int, bool) {
-	data, err := os.ReadFile(path)
+	file, err := openLockReadOnly(path)
 	if err != nil {
 		return 0, false
 	}
-	for line := range strings.SplitSeq(string(data), "\n") {
+	defer func() { _ = file.Close() }() // read-only; nothing to lose on close
+	data, err := io.ReadAll(io.LimitReader(file, holderReadBound))
+	if err != nil {
+		return 0, false
+	}
+	for line := range strings.SplitSeq(completeLines(string(data)), "\n") {
 		raw, found := strings.CutPrefix(strings.TrimSpace(line), "pid=")
 		if !found {
 			continue
@@ -231,4 +268,10 @@ func holderPID(path string) (int, bool) {
 		return pid, true
 	}
 	return 0, false
+}
+
+// completeLines returns s up to and including its last newline: every line
+// that ended inside s, without the unterminated tail.
+func completeLines(s string) string {
+	return s[:strings.LastIndexByte(s, '\n')+1]
 }

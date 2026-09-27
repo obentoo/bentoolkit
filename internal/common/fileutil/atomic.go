@@ -53,21 +53,61 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) (err error) {
 //
 // The link, unlike a check followed by a create, is one step: an entry created
 // between a caller's existence check and the publish is never overwritten.
-func PublishNewFile(path string, data []byte, mode os.FileMode) (err error) {
+//
+// Any other error means nothing was published: when a step after the link
+// fails — removing the temporary name or syncing the directory — the entry at
+// path is removed again, but only while path still names the file this call
+// linked, so an entry someone else put there in the meantime is left alone.
+func PublishNewFile(path string, data []byte, mode os.FileMode) error {
 	tmpName, err := writeTemp(path, data, mode)
 	if err != nil {
 		return err
 	}
-	// The temporary name is removed on every path: after a successful link the
-	// published name holds the file, and before it the file must not stay.
-	defer func() {
-		err = errors.Join(err, removeTemp(tmpName, path))
-	}()
+	linked, err := os.Lstat(tmpName)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("inspecting %s before publishing it as %s: %w", tmpName, path, err),
+			removeTemp(tmpName, path))
+	}
 
 	if err := os.Link(tmpName, path); err != nil {
-		return fmt.Errorf("publishing %s without overwriting: %w", path, err)
+		return errors.Join(
+			fmt.Errorf("publishing %s without overwriting: %w", path, err),
+			removeTemp(tmpName, path))
 	}
-	return syncDir(filepath.Dir(path))
+
+	// From here the file is published; a failure must take it back.
+	postErr := removeTemp(tmpName, path)
+	if postErr == nil {
+		postErr = syncDirFunc(filepath.Dir(path))
+	}
+	if postErr == nil {
+		return nil
+	}
+	return errors.Join(fmt.Errorf("publishing %s: %w", path, postErr), unpublish(path, linked))
+}
+
+// syncDirFunc is the directory sync PublishNewFile runs after the link. It is
+// a package variable so tests can make that last step fail.
+var syncDirFunc = syncDir
+
+// unpublish removes path when it still names the file described by linked.
+// Identity is device and inode, read without following a symlink.
+func unpublish(path string, linked os.FileInfo) error {
+	onDisk, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("inspecting %s to take back a failed publish: %w", path, err)
+	}
+	if !os.SameFile(onDisk, linked) {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("removing %s after a failed publish: %w", path, err)
+	}
+	return nil
 }
 
 // writeTemp writes data to a new temporary file beside path and returns its
