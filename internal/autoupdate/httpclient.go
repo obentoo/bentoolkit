@@ -27,8 +27,9 @@ var (
 	// ErrRequestTimeout is returned when a request times out
 	ErrRequestTimeout = errors.New("request timeout")
 	// ErrResponseTooLarge is returned when an HTTP response body exceeds the
-	// MaxBodyBytes cap.
-	ErrResponseTooLarge = errors.New("response body too large")
+	// MaxBodyBytes cap. It is httputil's sentinel, assigned rather than copied,
+	// so errors.Is matches it on the provider paths too.
+	ErrResponseTooLarge = httputil.ErrResponseTooLarge
 )
 
 // envVarPattern matches ${VAR_NAME} syntax for environment variable substitution
@@ -417,16 +418,10 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 // body to a domain error. When the read tripped an http.MaxBytesReader cap the
 // standard library yields an *http.MaxBytesError; this is translated into an
 // error wrapping ErrResponseTooLarge (S001-R11.3). Any other non-nil error is
-// returned unchanged, and a nil error yields nil.
+// returned unchanged, and a nil error yields nil. It delegates to
+// httputil.ClassifyBodyReadError, which owns the shared sentinel.
 func classifyBodyReadError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var maxBytesErr *http.MaxBytesError
-	if errors.As(err, &maxBytesErr) {
-		return fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
-	}
-	return err
+	return httputil.ClassifyBodyReadError(err)
 }
 
 // readBodyForStatus validates an HTTP response status against the accepted set
