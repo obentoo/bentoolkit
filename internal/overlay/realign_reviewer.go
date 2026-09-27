@@ -375,6 +375,9 @@ func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov pr
 	var unreadablePair, callFailed, silentAnswer realignWarnOnce
 
 	asked, unanswered := 0, 0
+	// unansweredBy splits unanswered by the review cause that applies, in the
+	// same words the divergence review uses (see `type ReviewFailure`).
+	unansweredBy := map[ReviewFailure]int{}
 	for n, i := range pending {
 		// Indexed rather than ranged over a copy: this pass exists to write one
 		// field back onto the report the caller is holding.
@@ -395,6 +398,7 @@ func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov pr
 		if !ok {
 			asked++
 			unanswered++
+			unansweredBy[ReviewEbuildUnreadable]++
 			unreadablePair.say(fmt.Sprintf(
 				"overlay: the two ebuilds behind %s could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again", atom))
 			continue
@@ -420,12 +424,14 @@ func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov pr
 		note, err := rev.ReviewRealignment(ctx, req)
 		if err != nil {
 			unanswered++
+			unansweredBy[classifyReviewError(err)]++
 			callFailed.say(fmt.Sprintf(
 				"overlay: the realignment review of %s failed (%v); it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again", atom, err))
 			continue
 		}
 		if !realignNoteSpeaks(note) {
 			unanswered++
+			unansweredBy[ReviewUnusableReply]++
 			silentAnswer.say(fmt.Sprintf(
 				"overlay: the realignment review of %s came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again", atom))
 			continue
@@ -439,6 +445,12 @@ func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov pr
 	}
 
 	report.RealignAsked, report.RealignNoVerdict = asked, unanswered
+	// Written on every pass, like the two counts, so it always describes the
+	// pass that just ran and sums to RealignNoVerdict; nil when none.
+	report.RealignNoVerdictBy = nil
+	if len(unansweredBy) > 0 {
+		report.RealignNoVerdictBy = unansweredBy
+	}
 
 	// And the verdicts reach the caller as FINDINGS, not only as a field on each
 	// result (S046-R5.1). Until this call they exist as RealignVerdict strings a

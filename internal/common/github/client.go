@@ -25,6 +25,9 @@ var (
 	ErrNotFound = errors.New("package not found in repository")
 	// ErrAPIError indicates a general GitHub API error
 	ErrAPIError = errors.New("GitHub API error")
+	// ErrUnauthorized indicates GitHub rejected the token (HTTP 401). An
+	// error carrying it also matches ErrAPIError.
+	ErrUnauthorized = errors.New("GitHub authentication rejected")
 )
 
 // Client handles communication with the GitHub API
@@ -158,6 +161,12 @@ func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string)
 	// Handle not found
 	if resp.StatusCode == 404 {
 		return nil, ErrNotFound
+	}
+
+	// Handle rejected credentials: still an API error, and also an auth one
+	if resp.StatusCode == http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		return nil, fmt.Errorf("%w: %w: status %d: %s", ErrAPIError, ErrUnauthorized, resp.StatusCode, string(body))
 	}
 
 	// Handle other errors

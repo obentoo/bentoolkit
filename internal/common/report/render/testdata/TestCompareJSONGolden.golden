@@ -20,7 +20,9 @@
         "reason": "differs, and no entry declares why",
         "further_findings": [
           "KEYWORDS differs from ::gentoo — ours drops ~arm64"
-        ]
+        ],
+        "cause": "timed out",
+        "error": "the divergence review failed: LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered"
       },
       {
         "package": "kde-plasma/breeze-gtk",
@@ -30,7 +32,9 @@
         "reading": "not comparable",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "net-libs/nodejs",
@@ -40,7 +44,9 @@
         "reading": "read",
         "diff": "identical",
         "reason": "identical to the ::gentoo copy, line for line",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "sys-apps/fwupd",
@@ -50,7 +56,9 @@
         "reading": "not requested",
         "diff": "+8/-29",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       }
     ],
     "needs_rebase": [
@@ -62,7 +70,9 @@
         "reading": "read",
         "diff": "+3/-1",
         "reason": "ours: adds files/kwin-wayland-crash.patch on top of a version ::gentoo has moved past",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "x11-base/xwayland",
@@ -72,7 +82,9 @@
         "reading": "failed",
         "diff": "+11/-4",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "could not start",
+        "error": "the divergence review failed: LLM API request failed: claude CLI could not start: exec: \"claude\": executable file not found in $PATH"
       }
     ],
     "keep": [
@@ -84,7 +96,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "media-plugins/gst-plugins-good",
@@ -94,7 +108,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "media-libs/gst-libav",
@@ -104,7 +120,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "media-plugins/gst-plugins-ugly",
@@ -116,7 +134,9 @@
         "reason": "patched: applies files/gst-ugly-x264.patch, which ::gentoo does not ship",
         "further_findings": [
           "inherit differs from ::gentoo — ours adds gstreamer-meson"
-        ]
+        ],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "dev-lang/rust",
@@ -126,7 +146,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "dev-lang/rust-bin",
@@ -136,7 +158,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "app-admin/ansible",
@@ -146,7 +170,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       }
     ],
     "keep_groups": [
@@ -195,7 +221,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       },
       {
         "package": "virtual/dist-kernel",
@@ -205,7 +233,9 @@
         "reading": "not requested",
         "diff": "not compared",
         "reason": "",
-        "further_findings": []
+        "further_findings": [],
+        "cause": "",
+        "error": ""
       }
     ],
     "verdicts": {
@@ -219,6 +249,16 @@
       "3 of the 15 packages compared were found to have no ::gentoo counterpart — those are the overlay's own work rather than a divergence from anyone's, and no realignment is proposed for them.",
       "Classification: 9 of the 12 differences examined across 7 packages are version moves, 2 are ours, 1 could not be classified.",
       "Some packages are recommended for removal. Run `bentoo overlay prune` to act on them."
+    ],
+    "reading_failures": [
+      {
+        "cause": "timed out",
+        "count": 1
+      },
+      {
+        "cause": "could not start",
+        "count": 1
+      }
     ]
   }
 }

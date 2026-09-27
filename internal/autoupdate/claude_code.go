@@ -52,6 +52,42 @@ const (
 // another provider.
 var ErrClaudeCodeUnavailable = errors.New("claude CLI not available on PATH")
 
+// The outcome sentinels say WHICH way a `claude` invocation failed, so a caller
+// can branch with errors.Is instead of reading the sentence. Every failure run
+// returns matches ErrLLMRequestFailed and exactly one of these; its Error() is
+// the sentence it always was (see `type claudeOutcomeError`).
+var (
+	// ErrClaudeTimedOut: this client's own budget elapsed before the CLI answered.
+	ErrClaudeTimedOut = errors.New("claude CLI timed out")
+	// ErrClaudeStopped: the parent context ended the run (cancelled, or out of
+	// a budget of its own).
+	ErrClaudeStopped = errors.New("claude CLI stopped")
+	// ErrClaudeCouldNotStart: the process never started.
+	ErrClaudeCouldNotStart = errors.New("claude CLI could not start")
+	// ErrClaudeExitedNonZero: the process ran and exited with a failure status.
+	ErrClaudeExitedNonZero = errors.New("claude CLI exited non-zero")
+	// ErrClaudeUnusableOutput: the process exited zero but its output was not
+	// JSON, or was an error envelope.
+	ErrClaudeUnusableOutput = errors.New("claude CLI output unusable")
+)
+
+// claudeOutcomeError attaches an outcome sentinel to a failure without
+// rewording it: Error() is the wrapped error's text, byte for byte, and
+// errors.Is reaches both the wrapped chain (ErrLLMRequestFailed) and the outcome.
+type claudeOutcomeError struct {
+	err     error
+	outcome error
+}
+
+func (e *claudeOutcomeError) Error() string { return e.err.Error() }
+
+func (e *claudeOutcomeError) Unwrap() []error { return []error{e.err, e.outcome} }
+
+// withClaudeOutcome wraps err so it also matches outcome.
+func withClaudeOutcome(err, outcome error) error {
+	return &claudeOutcomeError{err: err, outcome: outcome}
+}
+
 // lookPath is the seam used to detect the `claude` binary. It defaults to
 // exec.LookPath and is overridable in tests so construction is deterministic
 // regardless of the host PATH.
@@ -606,12 +642,12 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 				// `func formatBumpReviewSkipTimeout` is the precedent this
 				// follows.
 				//
-				// ctxErr is wrapped too, so the deadline stays a deadline to
-				// errors.Is(err, context.DeadlineExceeded) and not only to a
-				// reader of this sentence — including when the group it
-				// stopped died of a signal (story 054, R4.2).
-				return "", fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered: %w",
-					ErrLLMRequestFailed, c.timeout, ctxErr)
+				// ctxErr rides on the outcome side, so the deadline stays a
+				// deadline to errors.Is(err, context.DeadlineExceeded) — including
+				// when the group it stopped died of a signal (story 054, R4.2) —
+				// while the sentence stays byte-identical (story 057, R6.6).
+				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered",
+					ErrLLMRequestFailed, c.timeout), errors.Join(ErrClaudeTimedOut, ctxErr))
 			}
 			// Ended by anything other than this client's own budget: the cause
 			// travels verbatim and no number is claimed. One sentence, written
@@ -620,14 +656,14 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 			if endedBy == nil {
 				endedBy = ctxErr
 			}
-			return "", fmt.Errorf("%w: claude CLI was stopped before it answered: %v", ErrLLMRequestFailed, endedBy)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI was stopped before it answered: %v", ErrLLMRequestFailed, endedBy), ErrClaudeStopped)
 		case claudeCouldNotStart:
 			// S048-R1.2, S040-R5.6: the process never reached its first
 			// instruction, so there is no exit status to frame it with and none
 			// may be implied. The remedy is on the host — a missing binary, an
 			// unreachable working directory — and it is the opposite of the
 			// deadline's, which is why the two sentences must not be one.
-			return "", fmt.Errorf("%w: claude CLI could not start: %v", ErrLLMRequestFailed, runErr)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI could not start: %v", ErrLLMRequestFailed, runErr), ErrClaudeCouldNotStart)
 		}
 
 		// claudeExitedNonZero: the process ran and exited with a status. This is
@@ -636,25 +672,25 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 		// (S048-R4.2). Prefer the structured errors/subtype from the envelope
 		// when available; fall back to stderr.
 		if jsonErr == nil && (len(env.Errors) > 0 || env.Subtype != "") {
-			return "", fmt.Errorf("%w: claude CLI failed (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; "))
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; ")), ErrClaudeExitedNonZero)
 		}
 		if stderrStr != "" {
-			return "", fmt.Errorf("%w: claude CLI failed: %v: %s", ErrLLMRequestFailed, runErr, stderrStr)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %v: %s", ErrLLMRequestFailed, runErr, stderrStr), ErrClaudeExitedNonZero)
 		}
-		return "", fmt.Errorf("%w: claude CLI failed: %v", ErrLLMRequestFailed, runErr)
+		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %v", ErrLLMRequestFailed, runErr), ErrClaudeExitedNonZero)
 	}
 
 	if jsonErr != nil {
 		// Exited zero but stdout was not valid JSON.
 		if stderrStr != "" {
-			return "", fmt.Errorf("%w: claude CLI emitted non-JSON output: %v: %s", ErrLLMRequestFailed, jsonErr, stderrStr)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %v: %s", ErrLLMRequestFailed, jsonErr, stderrStr), ErrClaudeUnusableOutput)
 		}
-		return "", fmt.Errorf("%w: claude CLI emitted non-JSON output: %v", ErrLLMRequestFailed, jsonErr)
+		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %v", ErrLLMRequestFailed, jsonErr), ErrClaudeUnusableOutput)
 	}
 
 	if env.IsError {
 		// Structured error envelope (process may still have exited zero).
-		return "", fmt.Errorf("%w: claude CLI reported error (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; "))
+		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI reported error (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; ")), ErrClaudeUnusableOutput)
 	}
 
 	return env.Result, nil

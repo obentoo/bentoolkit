@@ -127,6 +127,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rebase pass the branch after `--end-of-options`, so such a name is taken as a
   file or a revision.
 
+### Added
+
+- **`--format json` for `overlay compare` gains three keys.** Every package now
+  has `cause` and `error`. Both are always present, both are `""` on a row that
+  did not fail, and `error` holds the full text on one line. The run gains
+  `reading_failures`, a list of `{"cause", "count"}` over the same comparisons
+  `unread` counts. These keys are only added: `schema` stays `2`, and no
+  existing key is renamed or removed.
+
 ### Fixed
 
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
@@ -272,6 +281,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The distdir writability probe no longer follows a symlink** planted at its
   probe name; it reports the distdir as not writable instead of truncating the
   link's target.
+
+- **`overlay compare` now says why an upstream lookup failed.** A package whose
+  lookup failed used to read `error` and "the comparison failed, so nothing is
+  known about how the two versions relate", whether GitHub rate-limited the
+  run, rejected the token or the network dropped. The row's reason now names a
+  cause and carries the error text:
+  `the upstream lookup failed (rate-limited): API rate limit exceeded: …`. The
+  causes are `rate-limited`, `auth`, `network`, `not found upstream` and
+  `other`. The status word is still `error`, and no verdict or count changes.
+  Before the text is recorded, the token the run resolved is replaced with
+  `***`.
+- **A failed AI review now says why.** A row whose review failed is marked
+  `[reading failed: <cause>]` instead of the bare `[reading failed]`. The cause
+  is one of `timed out`, `could not start`, `exited non-zero`,
+  `empty or unusable reply`, `cancelled`, `ebuild unreadable` or `other`. The
+  note about unread comparisons now ends with the counts per cause, for example
+  "3 timed out, 1 could not start". So does the realignment summary, for example
+  "(2 timed out, 1 empty or unusable reply)". A row whose review failed with no
+  recorded cause still shows the bare marker. `reading` keeps its four values,
+  and every `claude` failure sentence stays word for word the same.
+- **A GitHub or GitLab HTTP 401 can now be told apart from other API errors.**
+  It still matches the generic API error, as before, so nothing that already
+  handled it changes. It now also matches a new "authentication rejected"
+  error, and that is what `overlay compare` reports as `auth`.
+  Known limit: GitHub answers a permission problem with 403, and every 403 is
+  still read as a rate limit, so a permission 403 reads `rate-limited`. The
+  error text next to it shows an empty reset time.
+- **`overlay diff` recognises git's "differences found" exit status even when it
+  arrives wrapped.** It is now read with `errors.As` instead of a type
+  assertion. Nothing visible changes today, since the error reaches the check
+  unwrapped.
 
 ### Changed
 

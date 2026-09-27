@@ -157,11 +157,17 @@ func comparePopulatedRun() report.Run {
 			InBoth:    15,
 			OnlyLocal: 5,
 			Unread:    12,
+			// The two failed readings below, by cause (S057-R4.5). The
+			// compareUnreadRun fixture keeps a failed row with NO cause, so the
+			// bare marker stays pinned too.
+			ReadingFailures: []report.CauseCount{{Cause: "timed out", Count: 1}, {Cause: "could not start", Count: 1}},
 			Redundant: []report.ComparePkg{
 				{
 					Package: "dev-lang/go", Local: "1.27.0", Remote: "1.27.0", Status: "up-to-date",
 					Reading: "failed", Diff: "+24/-0",
 					Reason: "differs, and no entry declares why",
+					Cause:  "timed out",
+					Error:  "the divergence review failed: LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered",
 					// A second block with a further finding, so the goldens
 					// show that each lands under the table holding its own row
 					// rather than all of them under one.
@@ -190,6 +196,7 @@ func comparePopulatedRun() report.Run {
 				{
 					Package: "x11-base/xwayland", Local: "24.1.6", Remote: "24.1.8", Status: "outdated",
 					Reading: "failed", Diff: "+11/-4",
+					Cause: "could not start", Error: "the divergence review failed: LLM API request failed: claude CLI could not start: exec: \"claude\": executable file not found in $PATH",
 				},
 			},
 			Keep:       keep,

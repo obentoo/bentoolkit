@@ -366,6 +366,12 @@ func runCompare(cmd *cobra.Command, args []string) {
 			fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
 		},
 	}
+	// A failure's text is recorded on the result and exported, and a transport
+	// error can echo the request, so the token this run resolved is scrubbed
+	// from it before anything reads it (S057-R4.7).
+	if resolvedToken != "" {
+		opts.Redact = []string{resolvedToken}
+	}
 
 	report, err := overlay.CompareWithProvider(scanResult.Packages, prov, opts)
 	if err != nil {

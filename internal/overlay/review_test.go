@@ -564,10 +564,18 @@ func cloneReport(report *CompareReport) *CompareReport {
 // is anything the report decides — a Verdict, a count and a table are the same
 // whether a reading happened, failed or was never possible. Leaving Reading in
 // would make this compare an annotated run against an un-annotated one and call
-// the difference a changed Verdict.
+// the difference a changed Verdict. Story 057 added two more for the same
+// reason: ReviewFailure, and the FailureText of a failed review.
 func withoutReviews(report *CompareReport) *CompareReport {
 	clone := cloneReport(report)
 	for i := range clone.Results {
+		// A failed review also records its cause and text (story 057, R2.8):
+		// those are commentary too. FailureText is cleared only where the review
+		// failed, so a lookup failure's text is still compared.
+		if clone.Results[i].Reading == ReadingFailed {
+			clone.Results[i].FailureText = ""
+		}
+		clone.Results[i].ReviewFailure = ReviewFailureNone
 		clone.Results[i].Review = ReviewNote{}
 		clone.Results[i].Reading = ReadingNotRequested
 	}

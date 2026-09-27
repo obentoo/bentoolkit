@@ -7,7 +7,7 @@
 │   12 comparison(s) were never read: a review nobody requested, a review that was attempted and   │
 │   failed, or a version pair the content check refused. A row whose review failed is marked       │
 │   [reading failed] — the difference is real, the explanation is missing, and no row below was    │
-│   quietly downgraded to hide it.                                                                 │
+│   quietly downgraded to hide it. The failed reviews, by cause: 1 timed out, 1 could not start.   │
 │                                                                                                  │
 │ Redundant — ::gentoo ships the version, and nothing cleared the content check                    │
 │ ─────────────────────────────────────────────────────────────────────────────                    │
@@ -18,7 +18,7 @@
 │                                                                                                  │
 │   PACKAGE                BENTOO  GENTOO    STATE       DIFF                                      │
 │   dev-lang/go            1.27.0  1.27.0    up-to-date  +24/-0                                    │
-│     differs, and no entry declares why [reading failed]                                          │
+│     differs, and no entry declares why [reading failed: timed out]                               │
 │   kde-plasma/breeze-gtk  6.7.4   6.7.4-r1  outdated    not compared                              │
 │   net-libs/nodejs        26.8.1  26.8.1    up-to-date  identical                                 │
 │     identical to the ::gentoo copy, line for line                                                │
@@ -39,7 +39,7 @@
 │   kde-plasma/kwin    6.7.4   6.7.4-r2  outdated  +3/-1                                           │
 │     ours: adds files/kwin-wayland-crash.patch on top of a version ::gentoo has moved past        │
 │   x11-base/xwayland  24.1.6  24.1.8    outdated  +11/-4                                          │
-│     [reading failed]                                                                             │
+│     [reading failed: could not start]                                                            │
 │                                                                                                  │
 │ Keep — the overlay copy is ahead                                                                 │
 │ ────────────────────────────────                                                                 │
