@@ -44,9 +44,10 @@ var (
 // fails the request at once instead of holding a check for minutes.
 const MaxRetryAfter = 60 * time.Second
 
-// maxRetryAfterSeconds is the largest delta-seconds value that converts to a
-// time.Duration without overflowing int64.
-const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+// maxDurationSeconds is the largest delta-seconds value that converts to a
+// time.Duration without overflowing int64 (about 292 years). It is an
+// arithmetic bound, not a policy: MaxRetryAfter is the limit that applies.
+const maxDurationSeconds = math.MaxInt64 / int64(time.Second)
 
 // retryableStatusError records a retryable HTTP status and the response's
 // Retry-After header. It is built where the response is drained — inside the
@@ -61,25 +62,29 @@ func (e *retryableStatusError) Error() string {
 	return fmt.Sprintf("server error: status %d", e.status)
 }
 
-// parseRetryAfter reads a Retry-After value as of now. Delta-seconds must be a
-// non-negative integer; otherwise the value must be an HTTP-date
-// (http.ParseTime), and a date already past means no wait. ok is false for an
-// absent or unparseable value.
+// parseRetryAfter reads a Retry-After value as of now. Delta-seconds is one or
+// more ASCII digits (RFC 9110: delay-seconds = 1*DIGIT), so a sign, a fraction
+// or trailing text makes the value unparseable rather than a number; anything
+// that is not delta-seconds must be an HTTP-date (http.ParseTime), and a date
+// already past means no wait. ok is false for an absent or unparseable value.
 //
 // A delta too large for a time.Duration saturates to the longest Duration
 // instead of wrapping, so retryDelay sees it as over MaxRetryAfter and fails
-// the request at once. That includes a delta too large even for an int, which
-// strconv.Atoi reports as ErrRange together with the largest value.
+// the request at once. strconv.Atoi reports such a delta as ErrRange together
+// with the largest value; that reading is trusted only because the string was
+// checked to be all digits first — Atoi also reports ErrRange for a string
+// whose leading digits overflow before a non-digit.
 func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
 	h = strings.TrimSpace(h)
 	if h == "" {
 		return 0, false
 	}
-	if secs, err := strconv.Atoi(h); err == nil || errors.Is(err, strconv.ErrRange) {
-		if secs < 0 {
+	if isASCIIDigits(h) {
+		secs, err := strconv.Atoi(h)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
 			return 0, false
 		}
-		if int64(secs) > maxRetryAfterSeconds {
+		if int64(secs) > maxDurationSeconds {
 			return time.Duration(math.MaxInt64), true
 		}
 		return time.Duration(secs) * time.Second, true
@@ -92,6 +97,19 @@ func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
 		return d, true
 	}
 	return 0, true
+}
+
+// isASCIIDigits reports whether s is one or more of the characters 0-9.
+func isASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // envVarPattern matches ${VAR_NAME} syntax for environment variable substitution

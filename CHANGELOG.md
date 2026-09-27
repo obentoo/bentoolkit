@@ -17,8 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ctrl-C no longer waits out retries and lookups.** A retry wait now ends as
   soon as the check is cancelled or its deadline passes, and the error says
   "cancelled" or "deadline exceeded". `overlay compare`, `--list-revivable` and
-  revive stop their in-flight GitHub, GitLab and git-clone lookups instead of
-  running into their 30 s timeouts.
+  revive stop their in-flight GitHub and GitLab lookups instead of running into
+  their 30 s timeouts. A git-clone lookup no longer starts once the command is
+  cancelled, and a clone already in flight stops with it (it was, and still
+  is, bounded at 2 minutes); updating an existing clone is not yet
+  cancellable.
 - **Retries are spread out and honour `Retry-After`.** The 1 s / 2 s / 4 s
   backoff is now the ceiling of a random wait, so many packages retrying one
   host no longer retry in lockstep. A 429 or 503 carrying `Retry-After` waits
@@ -38,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built on the shared transport, including the GitHub and GitLab providers,
   which used to connect directly.
 - **A server that accepts a connection but sends no response headers within
-  30 s** now ends the attempt as a timeout, which is retried. A larger
+  30 s** now ends the attempt as a timeout; the autoupdate client retries it
+  like any other timeout. A larger
   `http_timeout` raises this wait with it, and the Ollama client waits up to
   its full 120 s for a non-streaming reply.
 
