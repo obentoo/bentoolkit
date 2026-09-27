@@ -166,6 +166,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is fetched again on the next check, so the bump goes through on its own once
   upstream serves it.
 
+- **Versions are now ordered by PMS §3.3, so distinct versions no longer compare
+  equal.** The comparison dropped the trailing letter, ranked only the first
+  suffix and padded numeric components with zeros: `1.1.1w` and `1.1.1v`,
+  `1.0_rc1_p1` and `1.0_rc1`, `1.0.0` and `1.0` all read as one version, and
+  `1.01` read as `1.1`. Every number is now compared at any length, so large
+  date stamps no longer collapse either.
+
+  `overlay compare`, baseline selection and autoupdate may therefore report a
+  different newest version for such pairs — a package once shown as up to date
+  can now show as outdated. A string that fails the version grammar now orders
+  below every real version instead of being read as a near-zero one.
+
 ### Changed
 
 - **A tool the agent was refused is now named in the failure.** When a fixer

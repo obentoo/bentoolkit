@@ -1177,8 +1177,9 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 // hasUpdate is true only when upstream is strictly newer than current.
 // comparable is false when either side is not a well-formed version that can be
 // ordered; in that case hasUpdate is always false and the caller MUST treat the
-// result as a warning rather than "up to date" (parseVersion would otherwise
-// coerce junk to 0.0.0 and silently report no update — see ebuild.IsValidVersion).
+// result as a warning rather than "up to date" (ebuild.CompareVersions would
+// otherwise order junk below every real version and silently report no update —
+// see ebuild.IsValidVersion).
 func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparable bool) {
 	u := stripVersionPrefix(strings.TrimSpace(upstream))
 	cur := stripVersionPrefix(strings.TrimSpace(current))
