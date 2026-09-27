@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -153,6 +154,7 @@ func AnnotateReviews(report *CompareReport, reviewer DivergenceReviewer, prov pr
 			// back", which a cancellation is.
 			for _, j := range pending[n:] {
 				report.Results[j].Reading = ReadingFailed
+				report.Results[j].ReviewFailure = ReviewCancelled
 			}
 			return
 		}
@@ -168,6 +170,7 @@ func AnnotateReviews(report *CompareReport, reviewer DivergenceReviewer, prov pr
 			// row still says VerifiedDiffers. A reading was requested here and did
 			// not happen, which is what ReadingFailed means.
 			r.Reading = ReadingFailed
+			r.ReviewFailure = ReviewEbuildUnreadable
 			continue
 		}
 
@@ -191,9 +194,19 @@ func AnnotateReviews(report *CompareReport, reviewer DivergenceReviewer, prov pr
 		// (R5.3 unanswered) — leaves the operator exactly where an error does, and
 		// R5.5's four failures are one answer to them; two branches here would be
 		// two spellings of one state, and the pair could then drift.
+		//
+		// The STATE stays one (story 047, requirement 5.5). WHY it failed is a
+		// separate field, ReviewFailure, set beside it, so the operator is told
+		// the cause without the state being split into several.
 		note, err := reviewer.ReviewDivergence(ctx, req)
 		if err != nil || !reviewNoteSpeaks(note) {
 			r.Reading = ReadingFailed
+			if err != nil {
+				r.ReviewFailure = classifyReviewError(err)
+				r.FailureText = redactFailure(err.Error(), opts.Redact)
+			} else {
+				r.ReviewFailure = ReviewUnusableReply
+			}
 			continue
 		}
 
@@ -280,6 +293,12 @@ func reviewNoteSpeaks(note ReviewNote) bool {
 //
 // A nil DivergenceReviewer is not an error anywhere. It is how `--no-review`
 // (R5.6) and an absent `claude` CLI (R5.5) reach one no-op path instead of two.
+//
+// An implementation that knows WHY a review failed says so by wrapping one of
+// ErrReviewTimedOut, ErrReviewCouldNotStart, ErrReviewExitedNonZero or
+// ErrReviewUnusableReply, or context.Canceled for a run that was stopped, in
+// the error it returns; anything else is recorded as ReviewOther. The sentinels
+// are this package's own so it never has to import the client that fails.
 type DivergenceReviewer interface {
 	ReviewDivergence(ctx context.Context, req ReviewRequest) (ReviewNote, error)
 }
@@ -429,4 +448,90 @@ func (o *ReviewOrigin) UnmarshalText(text []byte) error {
 		return fmt.Errorf("unknown review origin %q", text)
 	}
 	return nil
+}
+
+// The review-outcome sentinels a DivergenceReviewer (or RealignReviewer) wraps
+// to say why it failed. They are declared here, not in the package that runs
+// the model, so this package reads no client's errors
+// (TestOverlayImportsNoAutoupdate); cmd/ translates the client's outcome into
+// these.
+var (
+	// ErrReviewTimedOut: the reviewer's own budget elapsed.
+	ErrReviewTimedOut = errors.New("review timed out")
+	// ErrReviewCouldNotStart: the reviewer's process never started.
+	ErrReviewCouldNotStart = errors.New("review could not start")
+	// ErrReviewExitedNonZero: the reviewer's process exited with a failure status.
+	ErrReviewExitedNonZero = errors.New("review exited non-zero")
+	// ErrReviewUnusableReply: the reviewer answered with nothing usable.
+	ErrReviewUnusableReply = errors.New("review reply unusable")
+)
+
+// ReviewFailure is why a review did not come back. It sits BESIDE
+// Reading == ReadingFailed and never splits that state (story 047,
+// requirement 5.5). Its zero value, ReviewFailureNone, is every result whose
+// review did not fail.
+type ReviewFailure int
+
+const (
+	// ReviewFailureNone: no review failed.
+	ReviewFailureNone ReviewFailure = iota
+	// ReviewTimedOut: ErrReviewTimedOut.
+	ReviewTimedOut
+	// ReviewCouldNotStart: ErrReviewCouldNotStart.
+	ReviewCouldNotStart
+	// ReviewExitedNonZero: ErrReviewExitedNonZero.
+	ReviewExitedNonZero
+	// ReviewUnusableReply: ErrReviewUnusableReply, or a note that says nothing.
+	ReviewUnusableReply
+	// ReviewCancelled: the run was cancelled (context.Canceled, or the pass's
+	// context was done before the review was asked).
+	ReviewCancelled
+	// ReviewEbuildUnreadable: the two ebuilds could not be re-read.
+	ReviewEbuildUnreadable
+	// ReviewOther: an error none of the above matches.
+	ReviewOther
+)
+
+// String spells the cause in the report's vocabulary; the zero value spells
+// nothing.
+func (f ReviewFailure) String() string {
+	switch f {
+	case ReviewTimedOut:
+		return "timed out"
+	case ReviewCouldNotStart:
+		return "could not start"
+	case ReviewExitedNonZero:
+		return "exited non-zero"
+	case ReviewUnusableReply:
+		return "empty or unusable reply"
+	case ReviewCancelled:
+		return "cancelled"
+	case ReviewEbuildUnreadable:
+		return "ebuild unreadable"
+	case ReviewOther:
+		return "other"
+	}
+	return ""
+}
+
+// classifyReviewError maps a reviewer's error to its ReviewFailure. It reads
+// sentinels only, never the text: a sentence that says "ran out of time"
+// without ErrReviewTimedOut is ReviewOther, and so is a bare
+// context.DeadlineExceeded, because a deadline is not a cancellation. The four
+// review sentinels are checked before context.Canceled, so an error carrying
+// both reads as the sentinel's cause.
+func classifyReviewError(err error) ReviewFailure {
+	switch {
+	case errors.Is(err, ErrReviewTimedOut):
+		return ReviewTimedOut
+	case errors.Is(err, ErrReviewCouldNotStart):
+		return ReviewCouldNotStart
+	case errors.Is(err, ErrReviewExitedNonZero):
+		return ReviewExitedNonZero
+	case errors.Is(err, ErrReviewUnusableReply):
+		return ReviewUnusableReply
+	case errors.Is(err, context.Canceled):
+		return ReviewCancelled
+	}
+	return ReviewOther
 }

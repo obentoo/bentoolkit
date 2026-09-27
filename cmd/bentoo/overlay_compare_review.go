@@ -225,7 +225,7 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 		// once, by autoupdate's own classifier, and every caller inherits that
 		// one answer. Re-wording or re-classifying it here would be a second
 		// answer free to drift from the first (S048-R1.3).
-		return overlay.ReviewNote{}, fmt.Errorf("the divergence review failed: %w", err)
+		return overlay.ReviewNote{}, fmt.Errorf("the divergence review failed: %w", withReviewOutcome(err))
 	}
 
 	// Decoded straight into the consumer's own type. ReviewNote carries the three
@@ -238,7 +238,7 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 	if err := json.Unmarshal([]byte(unfenceJSON(reply)), &note); err != nil {
 		// The reply is NOT included in the error. It is model-written text of
 		// unbounded length and the caller prints this on a terminal line.
-		return overlay.ReviewNote{}, fmt.Errorf("the model's reply is not the JSON the review asked for: %w", err)
+		return overlay.ReviewNote{}, fmt.Errorf("the model's reply is not the JSON the review asked for: %w", joinOutcome(err, overlay.ErrReviewUnusableReply))
 	}
 
 	// Returned VERBATIM, including a summary carrying newlines. Flattening
@@ -248,6 +248,53 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 	// than unnecessary.
 	return note, nil
 }
+
+// reviewOutcome translates the autoupdate outcome riding on a `claude` failure
+// into the sentinel internal/overlay reads, which cannot import autoupdate
+// (TestOverlayImportsNoAutoupdate). A stopped run becomes context.Canceled, so
+// the review cause reads `cancelled`. It returns nil when err carries no
+// outcome.
+func reviewOutcome(err error) error {
+	switch {
+	case errors.Is(err, autoupdate.ErrClaudeTimedOut):
+		return overlay.ErrReviewTimedOut
+	case errors.Is(err, autoupdate.ErrClaudeCouldNotStart):
+		return overlay.ErrReviewCouldNotStart
+	case errors.Is(err, autoupdate.ErrClaudeExitedNonZero):
+		return overlay.ErrReviewExitedNonZero
+	case errors.Is(err, autoupdate.ErrClaudeUnusableOutput):
+		return overlay.ErrReviewUnusableReply
+	case errors.Is(err, autoupdate.ErrClaudeStopped):
+		return context.Canceled
+	}
+	return nil
+}
+
+// withReviewOutcome attaches reviewOutcome(err) to err when there is one, and
+// returns err unchanged otherwise.
+func withReviewOutcome(err error) error {
+	if outcome := reviewOutcome(err); outcome != nil {
+		return joinOutcome(err, outcome)
+	}
+	return err
+}
+
+// joinOutcome makes err also match outcome without changing its text: the
+// wrapper sentences are pinned (TestDivergenceReviewWrapperDoesNotBlameTheEbuilds),
+// so the sentinel is attached through Unwrap and never spelled.
+func joinOutcome(err, outcome error) error {
+	return &outcomeError{err: err, outcome: outcome}
+}
+
+// outcomeError is the error joinOutcome returns.
+type outcomeError struct {
+	err     error
+	outcome error
+}
+
+func (e *outcomeError) Error() string { return e.err.Error() }
+
+func (e *outcomeError) Unwrap() []error { return []error{e.err, e.outcome} }
 
 // divergenceReviewSchema is the shape the CLI is constrained to via
 // --json-schema. It describes exactly what ReviewNote holds and nothing else:

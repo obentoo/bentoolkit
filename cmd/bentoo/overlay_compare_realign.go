@@ -409,7 +409,7 @@ func (r *claudeRealignReviewer) ReviewRealignment(ctx context.Context, req overl
 		// classified cause through unaltered, leaving the difference between a
 		// budget that elapsed, a process that never started and a non-zero exit
 		// to the one classifier that decides it (S048-R1.4, S048-R1.3).
-		return overlay.RealignNote{}, fmt.Errorf("the realignment review failed: %w", err)
+		return overlay.RealignNote{}, fmt.Errorf("the realignment review failed: %w", withReviewOutcome(err))
 	}
 
 	// Decoded straight into the consumer's own type: RealignNote carries the three
@@ -419,7 +419,7 @@ func (r *claudeRealignReviewer) ReviewRealignment(ctx context.Context, req overl
 	if err := json.Unmarshal([]byte(unfenceJSON(reply)), &note); err != nil {
 		// The reply is NOT included in the error. It is model-written text of
 		// unbounded length and the caller prints this on a terminal line.
-		return overlay.RealignNote{}, fmt.Errorf("the model's reply is not the JSON the realignment review asked for: %w", err)
+		return overlay.RealignNote{}, fmt.Errorf("the model's reply is not the JSON the realignment review asked for: %w", joinOutcome(err, overlay.ErrReviewUnusableReply))
 	}
 	return note, nil
 }

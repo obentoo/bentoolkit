@@ -114,6 +114,10 @@ type CompareResult struct {
 	// Status == StatusError and is LookupCauseNone otherwise: a lookup that
 	// succeeded has no cause to report.
 	LookupCause LookupCause
+	// ReviewFailure is why the review of this result did not come back. It is
+	// meaningful only when Reading == ReadingFailed and is ReviewFailureNone
+	// otherwise; Reading keeps its four values. Filled by AnnotateReviews.
+	ReviewFailure ReviewFailure
 	// FailureText is the full Error() text of whatever failed on this row —
 	// the upstream lookup when Status == StatusError, the review when Reading
 	// == ReadingFailed — after every CompareOptions.Redact value has been
@@ -556,6 +560,12 @@ type CompareReport struct {
 	// render nothing at 0 (R7.2).
 	RealignAsked     int
 	RealignNoVerdict int
+	// RealignNoVerdictBy splits RealignNoVerdict by why each divergence came
+	// back with no verdict, in the divergence review's words (ReviewFailure).
+	// Its values sum to RealignNoVerdict. It is nil when nothing went
+	// unanswered, and like the two counts above it is written only by
+	// AnnotateRealignVerdicts.
+	RealignNoVerdictBy map[ReviewFailure]int
 
 	// Interrupted reports that the run stopped dispatching before it reached the
 	// end of the package list it was handed: the context fired mid-scan, so some
