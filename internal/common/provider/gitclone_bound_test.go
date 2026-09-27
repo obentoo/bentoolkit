@@ -155,7 +155,7 @@ func TestCloneRepoBoundNamesTheClone(t *testing.T) {
 	prov := &GitCloneProvider{LocalPath: dest, RepoURL: "https://example.invalid/r.git", Branch: "master"}
 
 	start := time.Now()
-	err := prov.cloneRepo()
+	err := prov.cloneRepo(context.Background())
 	took := time.Since(start)
 
 	if !errors.Is(err, ErrCloneFailed) || !errors.Is(err, context.DeadlineExceeded) {
@@ -247,7 +247,7 @@ func TestGitArgvSeparatesNamesFromOptions(t *testing.T) {
 		t.Fatalf("updateRepo: %v", err)
 	}
 	clone := &GitCloneProvider{LocalPath: dest, RepoURL: "-u", Branch: "-x"}
-	if err := clone.cloneRepo(); err != nil {
+	if err := clone.cloneRepo(context.Background()); err != nil {
 		t.Fatalf("cloneRepo: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestGitChildrenNeverPrompt(t *testing.T) {
 	if err := prov.updateRepo(context.Background()); err != nil {
 		t.Fatalf("updateRepo: %v", err)
 	}
-	if err := prov.cloneRepo(); err != nil {
+	if err := prov.cloneRepo(context.Background()); err != nil {
 		t.Fatalf("cloneRepo: %v", err)
 	}
 

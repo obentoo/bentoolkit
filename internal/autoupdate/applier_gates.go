@@ -782,7 +782,7 @@ func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byt
 				into.err = fmt.Errorf("the build was interrupted, so it says nothing about this ebuild: %w", ctxErr)
 				return output, err
 			}
-			into.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+			into.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 		}
 		return output, err
 	}

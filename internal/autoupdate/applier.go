@@ -75,6 +75,24 @@ var (
 	// applier never authored — see copyEbuild's guard for why this is fatal
 	// rather than a silent overwrite.
 	ErrEbuildExists = errors.New("destination ebuild already exists")
+	// ErrInvalidAuxValue is returned (wrapped) when a pending update's AuxValue
+	// is outside auxValueRe. The value was scraped from an upstream page and is
+	// written into the bash source of the new ebuild, so anything that could
+	// close the quoted assignment or reach the shell is refused, not repaired.
+	ErrInvalidAuxValue = errors.New("invalid aux value for ebuild")
+	// ErrInvalidCommitHash is returned (wrapped) when a pending update's
+	// CommitHash is not 40 lowercase hex — the only form substituteCommitHash
+	// can find again on the next bump.
+	ErrInvalidCommitHash = errors.New("invalid commit hash for ebuild")
+)
+
+// auxValueRe and commitHashRe are the shapes an upstream-supplied value must
+// have before any writer puts it into an ebuild — checkUpstreamValues applies
+// them in Applier.Apply, Applier.Validate and applySubstitutions. `$` without `(?m)` only
+// matches at the end of the text, so a trailing newline is refused.
+var (
+	auxValueRe   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
+	commitHashRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 // ApplyResult represents the result of applying an update.
@@ -820,6 +838,17 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		}
 		return result, result.Error
 	}
+	// The aux value and the commit hash come from upstream, untrimmed and
+	// unrepaired here: the checker already trimmed them, so inner or trailing
+	// whitespace is refused. Gated before anything is staged or copied, so a
+	// refused package leaves its directory byte-identical.
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		result.Error = err
+		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+		}
+		return result, result.Error
+	}
 	// Attach the slot's pinned revision, when the entry declares one. Upstream
 	// yields a bare PV; for a slot discriminated by its revision suffix that PV
 	// names the WRONG slot's ebuild, so the whole apply — copy destination,
@@ -1018,7 +1047,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// only copy of the candidate's archive in existence locally.
 	cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
-		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, manifestErr))
+		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 
 	// The static gates — the Meson option gate and the advisory QA scan (story
@@ -1377,7 +1406,17 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 // is what lets the staged candidate be the one edited: an edit applied to the
 // published tree here would be an unvalidated write into the overlay, and a staged
 // tree validated without the substitution would prove the wrong file.
+//
+// It is also the one function every writer of a candidate calls — Apply through
+// prepareInOverlay and prepareInStagingTree, Validate through the latter — so the
+// upstream-value allow-list is enforced here as the backstop, before either value
+// is written: a malformed pair leaves the file byte-identical. Apply and Validate
+// still refuse earlier, before anything is staged; a writer added later inherits
+// this check without having to remember it.
 func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpdate) error {
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		return err
+	}
 	// Snapshot packages tracked by commit (track="commit"): point SRC_URI's
 	// commit-hash variable at the correct tarball.
 	if update.CommitHash != "" {
@@ -1747,8 +1786,9 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/BUILD_ID/COMMIT) found in %s", ebuildPath)
 	}
 
-	updated := reQuoted.ReplaceAllString(string(content), "${1}"+newHash+"${2}")
-	updated = reBare.ReplaceAllString(updated, "${1}"+newHash)
+	literal := literalReplacement(newHash)
+	updated := reQuoted.ReplaceAllString(string(content), "${1}"+literal+"${2}")
+	updated = reBare.ReplaceAllString(updated, "${1}"+literal)
 
 	if updated == string(content) {
 		return nil
@@ -1764,9 +1804,10 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 // substituteAuxVar replaces the quoted assignment of a free-text auxiliary
 // variable in an ebuild (e.g. MY_BUILD="esr-bb23" → MY_BUILD="esr-bb24"). It is
 // the sibling of substituteCommitHash but without the 40-hex-SHA lock, so it can
-// carry any value captured from a regex/html upstream page. The value is bounded
-// by the surrounding double quotes, so the substitution cannot bleed past the
-// assignment.
+// carry any value captured from a regex/html upstream page. The match is bounded
+// by the surrounding double quotes; the value is inserted literally and is not
+// checked here — applySubstitutions, its only caller, refuses one that could
+// close those quotes.
 func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	if varName == "" {
 		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
@@ -1795,7 +1836,7 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 		return fmt.Errorf("aux var %q not found in %s", varName, ebuildPath)
 	}
 
-	updated := re.ReplaceAllString(string(content), "${1}"+newValue+"${2}")
+	updated := re.ReplaceAllString(string(content), "${1}"+literalReplacement(newValue)+"${2}")
 	if updated == string(content) {
 		return nil
 	}
@@ -1805,6 +1846,31 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	}
 
 	return nil
+}
+
+// checkUpstreamValues refuses a non-empty AuxValue outside auxValueRe or a
+// non-empty CommitHash outside commitHashRe. The value is quoted with %q so a
+// control byte or terminal escape cannot reach a log or notification raw.
+func checkUpstreamValues(pkg string, update *PendingUpdate) error {
+	if update.AuxValue != "" && !auxValueRe.MatchString(update.AuxValue) {
+		return fmt.Errorf("%w for %s: %q", ErrInvalidAuxValue, pkg, update.AuxValue)
+	}
+	if update.CommitHash != "" && !commitHashRe.MatchString(update.CommitHash) {
+		return fmt.Errorf("%w for %s: %q", ErrInvalidCommitHash, pkg, update.CommitHash)
+	}
+	return nil
+}
+
+// literalReplacement escapes a value for use inside a regexp replacement
+// template, so that ReplaceAllString inserts its bytes unchanged. The template
+// around it still expands `${1}`/`${2}` (the `NAME="` prefix and the closing
+// quote); only the value's own `$` is doubled. Without it an upstream value
+// such as `a${1}b` would expand to the capture group instead of being written.
+// substituteCommitHash and substituteAuxVar do not validate the value —
+// applySubstitutions, their only caller, refuses a malformed one before either
+// is reached.
+func literalReplacement(value string) string {
+	return strings.ReplaceAll(value, "$", "$$")
 }
 
 // runManifestWithFix runs the manifest step and, when it fails and an LLM fixer is
@@ -1905,6 +1971,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
+		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
@@ -1936,7 +2003,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
+		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools))
 	}
 
 	result.Fixed = true
@@ -2479,7 +2546,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 		// this is the host, and no fixer will be invoked to edit an ebuild that
 		// was never the problem.
 		return buildAttempt{
-			err:             fmt.Errorf("%w: %v", ErrCompileFailed, err),
+			err:             fmt.Errorf("%w: %w", ErrCompileFailed, err),
 			resolvedDistdir: distdir,
 			enforcedDistdir: enforced,
 		}
@@ -2549,7 +2616,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 			}
 			return attempt
 		}
-		attempt.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+		attempt.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 	}
 	return attempt
 }

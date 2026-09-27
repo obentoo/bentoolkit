@@ -330,10 +330,10 @@ func ourPreviousVersionMove(overlayPath, category, pkg, ourVersion string) *Vers
 
 	// Our own ebuild is taken from the listing by STRING equality, exactly as
 	// pickBaseline takes a baseline at our version: the question is which file
-	// carries our version, not which versions order equally. ebuild.CompareVersions
-	// reads 1.0 and 1.0.0 as one version and those are two different ebuilds —
-	// ending the move at the wrong one would offer a diff nobody's report
-	// describes.
+	// carries our version, not which versions order equally. Two ebuild files are
+	// identified by their version text, and PMS equality (1.0 and 1.0-r0, 1.010
+	// and 1.01) is not file identity — ending the move at the wrong one would
+	// offer a diff nobody's report describes.
 	ours, ok := carriedAt(carried, ourVersion)
 	if !ok {
 		// Our version is not in the overlay's own listing for this package, though
@@ -414,11 +414,11 @@ func carriedAt(carried []carriedEbuild, version string) (carriedEbuild, bool) {
 // opinion assembled here, and never versionDistance, which measures a magnitude
 // and cannot say which of two versions is later.
 //
-// A candidate that orders EQUAL to the pivot is on neither side and is skipped.
-// That is what keeps 1.0.0 from being offered as the version above 1.0: the two
-// are different ebuilds, but the difference between them is not a version move,
-// and a pair built from them would subtract one file's text from the other's
-// under a name nothing supports.
+// A candidate that orders EQUAL to the pivot (1.0-r0 beside 1.0) is on neither
+// side and is skipped: the two are different ebuilds, but the difference between
+// them is not a version move, and a pair built from them would subtract one
+// file's text from the other's under a name nothing supports. 1.0.0 is not such
+// a candidate — it is a real version above 1.0 and is offered as its neighbour.
 func adjacentVersion(carried []carriedEbuild, pivot string, direction int) (carriedEbuild, bool) {
 	var nearest carriedEbuild
 	found := false

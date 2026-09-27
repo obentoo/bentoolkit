@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -82,11 +83,12 @@ import (
 //     (D8); a fetch would put this package's no-network property back in
 //     question for the sake of information the instruction already carries.
 //
-// The invocation also passes no --add-dir, so `Read` resolves only inside the
-// CLI's own default scope. That is deliberate rather than an oversight: the
-// reviewer's input is already in its instruction, so there is nothing outside it
-// to scope — and since the one grant cannot modify anything, an unscoped read is
-// not the class of hazard an unscoped write would be.
+// The invocation also passes no --add-dir. It runs in a private 0700 directory
+// made for that one review and removed afterwards, and `Read` is granted only
+// inside it (`Read(//<dir>/**)`), with the secrets files denied besides
+// (S051-R2.3, S051-R2.4). The reviewer's input is already in its instruction, so
+// the directory is empty: the scope exists so that an injected "read ~/.config"
+// reaches nothing, not so the reviewer can find something there.
 //
 // Anything outside this set is denied by the CLI without an interactive prompt,
 // which keeps the run non-interactive WITHOUT --dangerously-skip-permissions.
@@ -114,7 +116,7 @@ const bumpReviewMaxTurns = 4
 // quarter of the kernel limit is already generous, and it leaves the prose
 // around it room to triple.
 //
-// The diff is embedded through truncateMiddle (manifest_fixer.go:349), which
+// The diff is embedded through `func truncateMiddle` (manifest_fixer.go), which
 // keeps both ends and elides the middle; that function is reused, never
 // reimplemented.
 const bumpReviewDiffBudget = 32 * 1024
@@ -369,9 +371,30 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 		return bumpReviewSkipped(skip), nil
 	}
 
-	args := r.buildArgs(bumpReviewInstruction(req, diff))
+	// The agent runs in a private 0700 directory made for this one review and
+	// removed after the child exits, never in bentoo's own cwd (S051-R2.4). The
+	// reviewer is advisory, so a directory that cannot be made is a named skip
+	// like every other provider failure, not an error (R7.6, S051-R2.9); one
+	// that cannot be removed is a warning, because the review is already in hand.
+	dir, err := os.MkdirTemp("", "bentoo-bump-review-")
+	if err != nil {
+		return bumpReviewSkipped(formatBumpReviewSkipProvider(
+			fmt.Errorf("bump review for %s: create private working directory: %w", req.Package, err))), nil
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			warnLogf("bump review for %s: remove private working directory %s: %v", req.Package, dir, err)
+		}
+	}()
+
+	args, err := r.buildArgs(bumpReviewInstruction(req, diff), dir)
+	if err != nil {
+		return bumpReviewSkipped(formatBumpReviewSkipProvider(
+			fmt.Errorf("bump review for %s: %w", req.Package, err))), nil
+	}
 
 	cmd := r.execCommand(runCtx, "claude", args...)
+	cmd.Dir = dir
 
 	// Bound post-cancellation cleanup: WaitDelay makes the runtime force-close
 	// the inherited pipes a bounded time after the context is cancelled or the
@@ -382,7 +405,7 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(r.bareMode, r.apiKeyEnv, r.apiKey)
+	cmd.Env = childEnv(r.bareMode, r.apiKeyEnv, r.apiKey, agentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -420,31 +443,43 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 // are bentoo-generated or bentoo-computed text passed as ONE argument, never as
 // separate flags an injected newline could forge.
 //
-// There is no --add-dir and no cwd override: --add-dir grants an agent a
-// directory to work in, and this one has nothing to work on — its input is
-// already in the instruction (see bumpReviewAllowedTools).
+// There is no --add-dir: --add-dir grants an agent a directory to work in, and
+// this one has nothing to work on — its input is already in the instruction.
+// dir, its private cwd, is the only place its Read reaches, through the
+// permission block of `func agentPermissionArgs` (see bumpReviewAllowedTools).
+// That block names no Edit, Write, Bash or WebFetch token for a Read-only agent.
 //
 // There is no --json-schema either. The answer's shape is asked for in the
 // instruction and parsed tolerantly (parseBumpReview), because an answer this
 // small is cheap to re-read and an unparseable one is already handled as a named
 // skip — whereas a flag combination that the agentic mode may reject would turn
 // every review into a provider failure.
-func (r *ClaudeCodeBumpReviewer) buildArgs(instruction string) []string {
+func (r *ClaudeCodeBumpReviewer) buildArgs(instruction, dir string) ([]string, error) {
+	perms, err := agentPermissionArgs(agentPermissions{
+		agent: "bump reviewer",
+		dir:   dir,
+		tools: bumpReviewAllowedTools,
+	})
+	if err != nil {
+		return nil, err
+	}
 	args := []string{
 		"-p", instruction,
 		"--output-format", "json",
-		"--allowedTools", strings.Join(bumpReviewAllowedTools, " "),
+	}
+	args = append(args, perms...)
+	args = append(args,
 		"--append-system-prompt", bumpReviewGuidance,
 		"--max-turns", strconv.Itoa(bumpReviewMaxTurns),
 		"--model", r.model,
-	}
+	)
 	if r.bareMode {
 		args = append(args, "--bare")
 	}
 	if r.maxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(r.maxBudgetUSD, 'f', -1, 64))
 	}
-	return args
+	return args, nil
 }
 
 // bumpReviewSkipped builds the SKIPPED report for one named cause.

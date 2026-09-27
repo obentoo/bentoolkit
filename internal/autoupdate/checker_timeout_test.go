@@ -117,7 +117,7 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 		WithOpTimeout(5*time.Second),
 	)
 
-	content, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+	content, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 	if err != nil {
 		t.Fatalf("expected the retry to recover from the first timeout, got error: %v", err)
 	}

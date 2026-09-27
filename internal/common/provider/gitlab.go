@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,6 +53,9 @@ func NewGitLabProvider(repoInfo *RepositoryInfo) (*GitLabProvider, error) {
 		HTTPClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: httputil.BuildTransport(),
+			// A redirect to another host or to plain http must not carry the
+			// token (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
 	}
@@ -79,7 +84,27 @@ func parseGitLabURL(rawURL string) (baseURL, projectPath string, err error) {
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", err
+		// url.Error repeats the raw URL, userinfo included; keep only its cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return "", "", fmt.Errorf("%w: parsing GitLab repository URL: %w", ErrInvalidRepoURL, err)
+	}
+	// The PRIVATE-TOKEN is sent to this base URL, so anything but https would
+	// carry it in cleartext (S052-R6.1). The check lives here, at construction,
+	// not at request time: tests point BaseURL at a plain-http httptest server
+	// after construction, and that must keep working (S052-R9.6).
+	//
+	// The URL in the error is rebuilt from scheme, host and path only, because
+	// the error is logged. url.URL.Redacted masks the password alone, so a
+	// token given as the username (http://TOKEN@host/g/p) would survive it,
+	// and so would one in the opaque form (http:TOKEN@host/g/p, where User is
+	// nil) or in a ?private_token= query (S052-R6.1).
+	if parsed.Scheme != "https" {
+		shown := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
+		return "", "", fmt.Errorf("%w: GitLab repository URL %s uses %q; https is required so the PRIVATE-TOKEN is never sent in cleartext",
+			ErrInvalidRepoURL, shown, parsed.Scheme)
 	}
 
 	baseURL = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
@@ -105,7 +130,7 @@ func (p *GitLabProvider) Close() error {
 }
 
 // GetPackageVersions fetches all ebuild versions for a package from GitLab
-func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *GitLabProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// Check cache first
 	if p.CacheDir != "" {
 		if versions, ok := p.loadFromCache(category, pkg); ok {
@@ -114,7 +139,7 @@ func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, err
 	}
 
 	// Fetch from API
-	versions, err := p.fetchPackageVersions(category, pkg)
+	versions, err := p.fetchPackageVersions(ctx, category, pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +153,14 @@ func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, err
 }
 
 // fetchPackageVersions fetches versions from GitLab API
-func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, error) {
+func (p *GitLabProvider) fetchPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// GitLab Repository Tree API
 	// GET /api/v4/projects/:id/repository/tree?path=category/package
 	path := url.QueryEscape(fmt.Sprintf("%s/%s", category, pkg))
 	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/repository/tree?path=%s&per_page=100",
 		p.BaseURL, p.ProjectID, path)
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +174,11 @@ func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, e
 
 	resp, err := p.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GitLab lookup %s/%s: %w", category, pkg, err)
 	}
+	// Cap every read of this body: an oversized or hostile response fails
+	// with httputil.ErrResponseTooLarge instead of exhausting memory.
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	// Handle rate limiting
@@ -165,14 +193,19 @@ func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, e
 
 	// Handle other errors
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		// The quoted error body is best-effort, except that an oversized one
+		// is reported as such rather than quoted.
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr = httputil.ClassifyBodyReadError(readErr); errors.Is(readErr, httputil.ErrResponseTooLarge) {
+			return nil, fmt.Errorf("reading GitLab error response for %s/%s: %w", category, pkg, readErr)
+		}
 		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading GitLab response for %s/%s: %w", category, pkg, httputil.ClassifyBodyReadError(err))
 	}
 
 	var entries []GitLabTreeEntry

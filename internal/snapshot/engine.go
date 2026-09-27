@@ -17,6 +17,11 @@ var ErrInvalidDriver = errors.New("invalid snapshot driver")
 // the captured stderr (design §6).
 var ErrEngineFailed = errors.New("snapshot engine command failed")
 
+// ErrSnapshotUnidentified is returned by the ships that address a snapshot by
+// its Path and ID (archive, restic) when the engine could not resolve them
+// (053 R2.1, R2.2). The snapshot exists; the ship cannot find it.
+var ErrSnapshotUnidentified = errors.New("snapshot has no path or id")
+
 // Snapshot describes a single point-in-time btrfs snapshot. ParentID is empty for
 // a full snapshot and set to the parent's ID for an incremental one.
 type Snapshot struct {

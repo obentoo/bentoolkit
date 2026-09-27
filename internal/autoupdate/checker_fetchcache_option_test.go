@@ -46,7 +46,7 @@ func TestWithFetchCache(t *testing.T) {
 		}
 
 		for i := 0; i < 3; i++ {
-			if _, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read %d returned an unexpected error: %v", i, err)
 			}
 		}
@@ -73,7 +73,7 @@ func TestWithFetchCache(t *testing.T) {
 		}
 
 		for i := 0; i < 3; i++ {
-			if _, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read %d returned an unexpected error: %v", i, err)
 			}
 		}
@@ -111,7 +111,7 @@ func TestWithFetchCache(t *testing.T) {
 		checker := newRateLimitTestChecker(t, serverA.URL, WithRateLimiter(unlimitedRateLimiter()))
 
 		for _, u := range []string{serverA.URL, serverA.URL, serverB.URL} {
-			if _, err := checker.fetchContent(u, nil, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(u, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read of %s returned an unexpected error: %v", u, err)
 			}
 		}
@@ -144,12 +144,12 @@ func TestWithFetchCache(t *testing.T) {
 		server := newCountingServer(t, &requests)
 
 		first := newRateLimitTestChecker(t, server.URL, WithRateLimiter(unlimitedRateLimiter()))
-		if _, err := first.fetchContent(server.URL, nil, first.operationTimeout(nil)); err != nil {
+		if _, err := first.fetchContent(server.URL, nil, credentialScope{}, first.operationTimeout(nil)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		second := newRateLimitTestChecker(t, server.URL, WithRateLimiter(unlimitedRateLimiter()))
-		if _, err := second.fetchContent(server.URL, nil, second.operationTimeout(nil)); err != nil {
+		if _, err := second.fetchContent(server.URL, nil, credentialScope{}, second.operationTimeout(nil)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 

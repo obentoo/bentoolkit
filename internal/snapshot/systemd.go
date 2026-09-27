@@ -86,18 +86,52 @@ func newSystemdScheduler(configPath string, run Runner) *systemdScheduler {
 	}
 }
 
-// renderServiceUnit renders the .service unit text.
-func renderServiceUnit(execPath, configPath string) string {
+// systemdExecArg renders one ExecStart argument so systemd reads it back as the
+// same single literal word (053 R7.2-R7.4). A control character is refused:
+// systemd.service(5) allows none on a command line, and a newline would start a
+// new directive. `%` and `$` are doubled so neither a specifier
+// (systemd.unit(5)) nor a variable expansion (systemd.service(5) "Command
+// lines") applies. An argument that is empty, is a lone `;`, or contains
+// whitespace, `"`, `'` or `\` is double-quoted, with `\` and `"` escaped
+// (systemd.syntax(7) "Quoting"). Anything else is written as is, so ordinary
+// paths render unchanged.
+func systemdExecArg(s string) (string, error) {
+	if hasControl(s) {
+		return "", fmt.Errorf("ExecStart argument %q contains a control character", s)
+	}
+	s = strings.ReplaceAll(s, "%", "%%")
+	s = strings.ReplaceAll(s, "$", "$$")
+	if s != "" && s != ";" && !strings.ContainsAny(s, " \t\n\v\f\r\"'\\") {
+		return s, nil
+	}
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`, nil
+}
+
+// renderServiceUnit renders the .service unit text, quoting execPath and
+// configPath for ExecStart (see systemdExecArg).
+func renderServiceUnit(execPath, configPath string) (string, error) {
+	execArg, err := systemdExecArg(execPath)
+	if err != nil {
+		return "", fmt.Errorf("exec path: %w", err)
+	}
+	configArg, err := systemdExecArg(configPath)
+	if err != nil {
+		return "", fmt.Errorf("config path: %w", err)
+	}
 	var b strings.Builder
-	_ = serviceTemplate.Execute(&b, map[string]string{
-		"ExecPath":   execPath,
-		"ConfigPath": configPath,
-	})
-	return b.String()
+	if err := serviceTemplate.Execute(&b, map[string]string{
+		"ExecPath":   execArg,
+		"ConfigPath": configArg,
+	}); err != nil {
+		return "", fmt.Errorf("execute template: %w", err)
+	}
+	return b.String(), nil
 }
 
 // renderTimerUnit renders the .timer unit text from the schedule config.
-func renderTimerUnit(cfg ScheduleConfig) string {
+func renderTimerUnit(cfg ScheduleConfig) (string, error) {
 	onCalendar := cfg.OnCalendar
 	if onCalendar == "" {
 		onCalendar = "daily"
@@ -114,21 +148,34 @@ func renderTimerUnit(cfg ScheduleConfig) string {
 		RandomizedDelay: cfg.RandomizedDelay,
 	}
 	var b strings.Builder
-	_ = timerTemplate.Execute(&b, data)
-	return b.String()
+	if err := timerTemplate.Execute(&b, data); err != nil {
+		return "", fmt.Errorf("execute template: %w", err)
+	}
+	return b.String(), nil
 }
 
 // Apply renders and installs the units, then reloads systemd and enables the
 // timer (R4.1, R4.2). Writes are atomic and overwrite in place, so re-applying
-// reconciles without duplicates (R4.3).
+// reconciles without duplicates (R4.3). Both units are rendered before either
+// is written, so a render failure writes no unit and runs no systemctl
+// (053 R7.4, R7.5).
 func (s *systemdScheduler) Apply(ctx context.Context, cfg ScheduleConfig) error {
 	servicePath := filepath.Join(s.unitDir, serviceUnitName)
 	timerPath := filepath.Join(s.unitDir, timerUnitName)
 
-	if err := atomicWrite(servicePath, []byte(renderServiceUnit(s.execPath, s.configPath)), 0o644); err != nil {
+	service, err := renderServiceUnit(s.execPath, s.configPath)
+	if err != nil {
+		return fmt.Errorf("render %s: %w", serviceUnitName, err)
+	}
+	timer, err := renderTimerUnit(cfg)
+	if err != nil {
+		return fmt.Errorf("render %s: %w", timerUnitName, err)
+	}
+
+	if err := atomicWrite(servicePath, []byte(service), 0o644); err != nil {
 		return fmt.Errorf("write service unit: %w", err)
 	}
-	if err := atomicWrite(timerPath, []byte(renderTimerUnit(cfg)), 0o644); err != nil {
+	if err := atomicWrite(timerPath, []byte(timer), 0o644); err != nil {
 		return fmt.Errorf("write timer unit: %w", err)
 	}
 

@@ -803,8 +803,8 @@ func TestCheckPackageNoUpdate(t *testing.T) {
 
 // TestCheckPackageNotComparable verifies that an upstream value that is not a
 // well-formed version (e.g. an upstream tag like "INKSCAPE_1_4_4") is surfaced
-// as NotComparable instead of being silently coerced to a near-zero version and
-// reported as "up to date" — which would mask a real update.
+// as NotComparable instead of being silently ordered below the current version
+// and reported as "up to date" — which would mask a real update.
 func TestCheckPackageNotComparable(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")

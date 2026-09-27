@@ -137,7 +137,7 @@ func TestCloneRepoBoundIsFiveMinutes(t *testing.T) {
 		return exec.CommandContext(ctx, "false")
 	})
 	prov := &GitCloneProvider{LocalPath: filepath.Join(t.TempDir(), "repo"), RepoURL: "https://example.invalid/r.git", Branch: "master"}
-	_ = prov.cloneRepo()
+	_ = prov.cloneRepo(context.Background())
 	if budget <= 5*time.Minute-10*time.Second || budget > 5*time.Minute {
 		t.Errorf("clone ran with a %v budget, want 5m0s (R5.10; -1 = no deadline)", budget)
 	}

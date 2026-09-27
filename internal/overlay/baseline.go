@@ -599,11 +599,11 @@ func pickBaseline(carried []carriedEbuild, ours string) carriedEbuild {
 		//
 		// String equality, not ebuild.CompareVersions: the question is whether
 		// ::gentoo carries the same ebuild version, not whether two strings
-		// order equally. That comparison pads missing components with zeros and
-		// reads 1.0 and 1.0.0 as equal, and those are two different ebuilds —
-		// reporting the second as ours would print Distance 0, "measured
-		// against the same version", over a comparison that is nothing of the
-		// kind.
+		// order equally. Two ebuild files are identified by their version text,
+		// and PMS equality (1.0 and 1.0-r0, 1.010 and 1.01) is not file
+		// identity — reporting the second as ours would print Distance 0,
+		// "measured against the same version", over a comparison that is
+		// nothing of the kind.
 		if candidate.version == ours {
 			return candidate
 		}

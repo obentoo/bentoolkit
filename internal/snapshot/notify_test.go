@@ -477,7 +477,7 @@ func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
 	var gotAuth smtp.Auth
 	orig := smtpSendMail
 	t.Cleanup(func() { smtpSendMail = orig })
-	smtpSendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+	smtpSendMail = func(_ context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error {
 		gotAddr, gotAuth, gotFrom, gotTo, gotMsg = addr, a, from, to, msg
 		return nil
 	}
@@ -538,7 +538,7 @@ func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
 
 	orig := smtpSendMail
 	t.Cleanup(func() { smtpSendMail = orig })
-	smtpSendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+	smtpSendMail = func(_ context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error {
 		return errors.New("535 authentication failed")
 	}
 
