@@ -673,7 +673,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if errors.Is(err, ErrBaseVersionUnresolved) {
 				result.Error = err
 			} else {
-				result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+				result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 			}
 			return result, result.Error
 		}
@@ -768,7 +768,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	// Fetch upstream version
 	upstreamVersion, err := c.fetchUpstreamVersion(pkg, &pkgConfig)
 	if err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+		result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 		return result, result.Error
 	}
 	result.UpstreamVersion = upstreamVersion

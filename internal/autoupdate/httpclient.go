@@ -401,8 +401,8 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		// Check context cancellation before each attempt
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return nil, ctxStopError(req.URL.Host, "request", err)
 		}
 
 		// Wait before a retry (not before the first attempt); a cancelled or
@@ -428,10 +428,16 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 				return nil, err
 			}
+			// An attempt that failed because the operation's own context
+			// ended is not an upstream failure: report the cancellation or
+			// deadline, never "max retries exceeded".
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxStopError(req.URL.Host, "request", ctxErr)
+			}
 			lastErr = err
 			// Check if it's a timeout error
 			if isTimeoutError(err) {
-				lastErr = fmt.Errorf("%w: %v", ErrRequestTimeout, err)
+				lastErr = fmt.Errorf("%w: %w", ErrRequestTimeout, err)
 			}
 			continue
 		}

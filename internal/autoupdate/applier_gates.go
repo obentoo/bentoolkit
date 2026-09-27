@@ -767,7 +767,7 @@ func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byt
 		output, err := a.runAttached(cmd)
 		into.transcript = string(output)
 		if err != nil {
-			into.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+			into.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 		}
 		return output, err
 	}
