@@ -63,6 +63,12 @@ import (
 // exists to remove.
 var ErrDistdirNotWritable = errors.New("distdir is not writable")
 
+// ErrUnsupportedHomeForm is returned (wrapped) for a path whose first element is
+// "~" followed by a user name, such as "~alice/distfiles". Only "~" and "~/..."
+// are expanded; reading "~alice" as "$HOME/alice" would silently point at a
+// directory under the CURRENT user's home, so the form is refused instead.
+var ErrUnsupportedHomeForm = errors.New("unsupported home directory form")
+
 // DefaultCache is the documented system path this package falls back to, and
 // it plays two roles:
 //
@@ -448,19 +454,33 @@ func portageqPath(arg ...string) string {
 // be a bug waiting for the day they disagree, and the error strings stay here
 // so both callers keep wording a failure the same way.
 func expandPath(userDir string) (string, error) {
-	expanded := userDir
-	if strings.HasPrefix(expanded, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to expand %q: %w", userDir, err)
-		}
-		expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
+	expanded, err := expandHome(userDir)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve distdir %q: %w", userDir, err)
 	}
 	return abs, nil
+}
+
+// expandHome expands a leading "~" or "~/" to the current user's home and
+// returns any other path unchanged. A "~name" form is refused with
+// ErrUnsupportedHomeForm rather than read as "~/name". It is the one home
+// expansion expandPath and ResolveCache share.
+func expandHome(p string) (string, error) {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to expand %q: %w", p, err)
+		}
+		return filepath.Join(home, strings.TrimPrefix(p, "~")), nil
+	}
+	if strings.HasPrefix(p, "~") {
+		return "", fmt.Errorf("%w: %q (only \"~\" and \"~/...\" are expanded)", ErrUnsupportedHomeForm, p)
+	}
+	return p, nil
 }
 
 // expandAndCreate is the one implementation both entry points share: it expands
@@ -492,16 +512,15 @@ func expandAndCreate(userDir string) (string, bool, error) {
 // ResolveCache validates the configured cache directory once per run.
 // Returns the absolute path when the directory exists and is a real directory
 // distinct from distdir, or "" when prepopulation should be skipped (cache
-// disabled, missing, unreadable, or pointing at the same path as distdir).
+// disabled, missing, unreadable, a "~name" path, a home that cannot be
+// resolved, or pointing at the same path as distdir).
 func ResolveCache(userDir, distdir string) string {
 	if userDir == "" {
 		return ""
 	}
-	expanded := userDir
-	if strings.HasPrefix(expanded, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
-		}
+	expanded, err := expandHome(userDir)
+	if err != nil {
+		return ""
 	}
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
