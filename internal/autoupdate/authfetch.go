@@ -696,7 +696,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 		return "", err
 	}
 
-	client := &http.Client{Timeout: s.timeout, CheckRedirect: refuseMethodDowngrade}
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: refuseFormRedirect}
 	// Close the keep-alive connection once we are done: this is a one-shot
 	// download, so a pooled idle connection would otherwise outlive the call
 	// (and trip goroutine-leak detection in tests).

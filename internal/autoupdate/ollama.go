@@ -99,6 +99,8 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 		httpClient: &http.Client{
 			Timeout:   ollamaClientTimeout,
 			Transport: transport,
+			// Same redirect policy as every other client (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		baseURL:      baseURL,
 		maxBodyBytes: httputil.MaxBodyBytes,

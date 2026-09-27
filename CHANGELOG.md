@@ -57,6 +57,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools at all) and the bump reviewer (`Read` only) now run in a private 0700
   directory created for each call and removed afterwards, instead of in
   bentoo's working directory, which a read-only tool could otherwise read.
+- **BREAKING: a header credential now goes only to the hosts it belongs to.**
+  `packages.toml` lives in the overlay repository, so any contributor could
+  write a record pairing `url = "https://evil.example"` with
+  `X-Api-Key = "${GITHUB_TOKEN}"`, and `bentoo overlay autoupdate --check`
+  would send the maintainer's token there. Each expandable variable is now
+  bound: `GITHUB_TOKEN` to the GitHub hosts over https, `GITLAB_TOKEN` to
+  `https://gitlab.com`, `BENTOO_*` to the host of the package's own `url` or
+  `base_url`. A record that breaks its binding fails its own check, before any
+  request is sent, with a message naming the header, the variable and the
+  host; the rest of the batch runs, and the refused package does not fall back
+  to `fallback_url` or the LLM stage. **Migration:** move a credential that must
+  reach another host into a `BENTOO_*` variable.
+- **BREAKING: `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are no longer expanded in
+  a header.** No upstream a package names has a reason to receive the
+  maintainer's LLM keys. A reference is now passed through literally with a
+  `Warn`. **Migration:** rename the variable to `BENTOO_*`
+  (e.g. `${BENTOO_OPENAI_API_KEY}`).
+- **A redirect no longer carries a credential to another host or to plain
+  http.** Go forwards custom headers such as `X-Api-Key` and `Private-Token`
+  to whatever host a redirect names; every client that can carry a credential
+  now drops those headers once a redirect chain leaves the original host, and
+  refuses an https-to-http redirect instead of sending the token in
+  cleartext. An authenticated fetch whose form is redirected (307/308) to
+  another host is refused rather than re-posting the serial there.
+- **BREAKING: a GitLab repository must use https, and the automatic GitHub
+  token is sent over https only.** An `http://` GitLab repository URL sent
+  `PRIVATE-TOKEN` in cleartext; it is now rejected with a message saying https
+  is required. A request to `http://api.github.com/` no longer receives the
+  token.
+- **BREAKING: bentoolkit's own secrets are never expanded in a header.**
+  A `BENTOO_*` variable goes to the host of the record's own `url`, and the
+  record's author picks that url, so a `packages.toml` PR naming
+  `${BENTOO_NTFY_TOKEN}`, `${BENTOO_SMTP_PASSWORD}` or a
+  `${BENTOO_REPO_<NAME>_TOKEN}` could have received the maintainer's
+  notification, mail or repository token. Those references now stay literal
+  with a `Warn`. **Migration:** give a header credential its own `BENTOO_*`
+  name. A GitLab URL rejected for not using https is also shown without its
+  userinfo or query, so a token written into it no longer reaches the log.
 
 ### Fixed
 

@@ -30,7 +30,7 @@ func TestFetchContent_AcceptsPartialContent(t *testing.T) {
 	checker := newContextTestChecker(t, server.URL)
 
 	headers := map[string]string{"Range": "bytes=0-2097151"}
-	content, err := checker.fetchContent(server.URL, headers, checker.operationTimeout(nil))
+	content, err := checker.fetchContent(server.URL, headers, credentialScope{}, checker.operationTimeout(nil))
 	if err != nil {
 		t.Fatalf("fetchContent rejected a 206 response: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 
 			checker := newContextTestChecker(t, server.URL)
 
-			_, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+			_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 			if err == nil {
 				t.Fatalf("fetchContent accepted status %d, want an error", status)
 			}
@@ -177,7 +177,7 @@ func TestFetchContent_RangeGated206(t *testing.T) {
 
 			checker := newContextTestChecker(t, server.URL, WithHTTPClient(client))
 
-			content, err := checker.fetchContent(server.URL, tt.headers, checker.operationTimeout(nil))
+			content, err := checker.fetchContent(server.URL, tt.headers, credentialScope{}, checker.operationTimeout(nil))
 
 			if !tt.wantErr {
 				if err != nil {
@@ -402,7 +402,7 @@ func TestFetchContent_ObservedRangeGate(t *testing.T) {
 
 			checker := newContextTestChecker(t, target, WithHTTPClient(client))
 
-			content, err := checker.fetchContent(target, tt.headers, checker.operationTimeout(nil))
+			content, err := checker.fetchContent(target, tt.headers, credentialScope{}, checker.operationTimeout(nil))
 
 			if observed.count() == 0 {
 				t.Fatalf("the 206 server was never reached; the case proves nothing about the gate")

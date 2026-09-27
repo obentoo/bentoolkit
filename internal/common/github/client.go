@@ -60,6 +60,9 @@ func NewClient() *Client {
 		UserAgent:  "bentoolkit/1.0",
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
+			// A redirect to another host or to plain http must not carry the
+			// token (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
 	}

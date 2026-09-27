@@ -53,6 +53,9 @@ func NewGitLabProvider(repoInfo *RepositoryInfo) (*GitLabProvider, error) {
 		HTTPClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: httputil.BuildTransport(),
+			// A redirect to another host or to plain http must not carry the
+			// token (S052-R4.6).
+			CheckRedirect: httputil.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
 	}
@@ -81,7 +84,27 @@ func parseGitLabURL(rawURL string) (baseURL, projectPath string, err error) {
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", err
+		// url.Error repeats the raw URL, userinfo included; keep only its cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return "", "", fmt.Errorf("%w: parsing GitLab repository URL: %w", ErrInvalidRepoURL, err)
+	}
+	// The PRIVATE-TOKEN is sent to this base URL, so anything but https would
+	// carry it in cleartext (S052-R6.1). The check lives here, at construction,
+	// not at request time: tests point BaseURL at a plain-http httptest server
+	// after construction, and that must keep working (S052-R9.6).
+	//
+	// The URL in the error is rebuilt from scheme, host and path only, because
+	// the error is logged. url.URL.Redacted masks the password alone, so a
+	// token given as the username (http://TOKEN@host/g/p) would survive it,
+	// and so would one in the opaque form (http:TOKEN@host/g/p, where User is
+	// nil) or in a ?private_token= query (S052-R6.1).
+	if parsed.Scheme != "https" {
+		shown := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
+		return "", "", fmt.Errorf("%w: GitLab repository URL %s uses %q; https is required so the PRIVATE-TOKEN is never sent in cleartext",
+			ErrInvalidRepoURL, shown, parsed.Scheme)
 	}
 
 	baseURL = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
