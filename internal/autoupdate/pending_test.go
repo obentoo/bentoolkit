@@ -676,16 +676,18 @@ func TestPendingListAtomicWrite(t *testing.T) {
 		t.Fatalf("Failed to add: %v", err)
 	}
 
-	// Verify no temp file remains
+	// The temporary file now has a random name, so "no pending.json.tmp" would
+	// pass whatever was left behind; the directory must hold pending.json alone.
 	files, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to read dir: %v", err)
 	}
-
-	for _, f := range files {
-		if f.Name() == "pending.json.tmp" {
-			t.Error("Temp file should not remain after successful write")
+	if len(files) != 1 || files[0].Name() != "pending.json" {
+		names := make([]string, 0, len(files))
+		for _, f := range files {
+			names = append(names, f.Name())
 		}
+		t.Errorf("%s holds %q after a successful write, want exactly [pending.json]", tmpDir, names)
 	}
 }
 
@@ -798,7 +800,8 @@ func TestPendingListAddInvalidStatus(t *testing.T) {
 // TestPendingWrite_FinalModeIs0600 verifies that the pending file persisted by
 // PendingList.Add ends up with owner-only (0600) permissions end-to-end. The
 // save path writes a temp file then renames it, so the final mode depends on
-// the post-rename SafeChmod call repairing any umask-widened bits.
+// the mode fileutil.WriteFileAtomic sets on the temporary file before the
+// rename, whatever the umask.
 func TestPendingWrite_FinalModeIs0600(t *testing.T) {
 	tmpDir := t.TempDir()
 

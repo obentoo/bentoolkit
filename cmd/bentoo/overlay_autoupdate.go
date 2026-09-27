@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/filelock"
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -650,6 +653,34 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		logger.Debug("the ambient UI mode did not resolve before the package work: %v", err)
 	}
 
+	// One run per overlay (S056-R4.1): every mode that writes the overlay or
+	// the registry holds <overlay>/.autoupdate.bentoo-lock until it returns, so
+	// a cron run and a manual run never edit packages.toml and the ebuilds at
+	// once. It is taken here, after the config resolved and before the mode
+	// runs, so the registry-fix loop inside --check runs under it too.
+	if autoupdateNeedsOverlayLock() {
+		lock, err := acquireOverlayLock(overlayPath)
+		if err != nil {
+			if errors.Is(err, filelock.ErrLocked) {
+				logger.Error("another bentoo run holds the overlay: %v", err)
+			} else {
+				logger.Error("cannot take the overlay lock: %v", err)
+			}
+			osExit(1)
+			return
+		}
+		// Released on return and on every osExit inside a mode, including after
+		// SIGINT/SIGTERM cancelled the mode's context (S056-R4.7): os.Exit skips
+		// deferred calls, so the release is also registered with exitProcess.
+		// Release is idempotent, and the defer covers a test's stubbed osExit.
+		unregister := registerExitCleanup(lock.Release)
+		defer func() {
+			unregister()
+			lock.Release()
+		}()
+		sweepStaleTemps(overlayPath, configDir)
+	}
+
 	// Handle different modes
 	switch {
 	case autoupdateLint:
@@ -854,12 +885,12 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// treated as absent — never box a nil pointer (AD9). When the gate is false
 	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
 	// code below are exactly as before this story (R7.x / R10.1).
-	fixer, ferr := newConfiguredRegistryFixer(llmCfg)
+	fixer, ferr := checkRegistryFixerFn(llmCfg)
 	if ferr != nil {
 		logger.Warn("LLM registry fixer unavailable; --check will not offer registry repair: %v", ferr)
 		fixer = nil
 	}
-	if fixer != nil && stdinIsTerminal() {
+	if fixer != nil && checkInteractiveFn() {
 		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
 			logger.Warn("registry-fix prompt ended with an error: %v", perr)
 		}
@@ -917,6 +948,63 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	osExit(result.ExitCode())
+}
+
+// checkRegistryFixerFn and checkInteractiveFn are the seams through which
+// runCheck builds the LLM registry fixer and asks whether stdin is interactive —
+// the same shape as pruneInteractiveFn. Without them the registry-fix loop, and
+// the overlay lock it must run under (S056-R4.6), could only be reached from a
+// terminal with a configured claude CLI.
+var (
+	checkRegistryFixerFn = newConfiguredRegistryFixer
+	checkInteractiveFn   = stdinIsTerminal
+)
+
+// autoupdateNeedsOverlayLock reports whether the selected mode writes the
+// overlay or its registry and so must hold the overlay lock. It mirrors the
+// dispatch in runAutoupdate: --list, --lint without --fix and the help default
+// only read and take no lock; every other mode takes it.
+func autoupdateNeedsOverlayLock() bool {
+	switch {
+	case autoupdateLint:
+		return autoupdateFix
+	case autoupdateMarkAutoDisabledFlag, autoupdateCheck:
+		return true
+	case autoupdateList:
+		return false
+	case autoupdateApply != "", autoupdateReviveList, autoupdateRevive != "", autoupdateClean:
+		return true
+	default:
+		return false
+	}
+}
+
+// acquireOverlayLock takes the overlay's exclusive lock, waiting up to
+// filelock.Wait for a live holder and reaping one left by a dead run. A
+// timeout wraps filelock.ErrLocked and names the lock path and holder's PID.
+func acquireOverlayLock(overlayPath string) (*filelock.Lock, error) {
+	return filelock.Acquire(filepath.Join(overlayPath, ".autoupdate.bentoo-lock"), "bentoo overlay autoupdate")
+}
+
+// sweepStaleTemps removes the temporary files killed runs left under the
+// overlay (skipping .git) and directly in the autoupdate config dir, one Warn
+// line per removed path (S056-R6.1). It runs with the overlay lock held, and
+// only files whose writer's PID is dead are removed, so no live writer loses
+// its file. A sweep failure is logged and the run proceeds: debris is a
+// nuisance, not a reason to refuse the run.
+func sweepStaleTemps(overlayPath, configDir string) {
+	for _, target := range []struct {
+		root      string
+		recursive bool
+	}{{overlayPath, true}, {configDir, false}} {
+		removed, err := fileutil.RemoveStaleTemps(target.root, target.recursive)
+		for _, path := range removed {
+			logger.Warn("removed a temporary file left by a killed run: %s", path)
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			logger.Warn("sweeping temporary files left by killed runs under %s: %v", target.root, err)
+		}
+	}
 }
 
 // stdinIsTerminal reports whether standard input is an interactive terminal (a

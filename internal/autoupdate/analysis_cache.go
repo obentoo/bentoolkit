@@ -55,6 +55,9 @@ type AnalysisCache struct {
 	mu sync.RWMutex
 	// nowFunc allows injecting time for testing
 	nowFunc func() time.Time
+	// baseEntries is the per-key JSON of Entries as last loaded or saved; a
+	// save merges against it (see mergeState).
+	baseEntries map[string]json.RawMessage
 }
 
 // AnalysisCacheOption is a functional option for configuring AnalysisCache
@@ -107,8 +110,38 @@ func NewAnalysisCache(configDir string, opts ...AnalysisCacheOption) (*AnalysisC
 			cache.Entries = make(map[string]AnalysisCacheEntry)
 		}
 	}
+	if err := cache.adoptBaseline(); err != nil {
+		return nil, err
+	}
 
 	return cache, nil
+}
+
+// adoptBaseline records Entries as what this instance last loaded or saved.
+func (c *AnalysisCache) adoptBaseline() error {
+	base, err := snapshotState(c.Entries)
+	if err != nil {
+		return fmt.Errorf("recording the analysis cache baseline for %s: %w", c.path, err)
+	}
+	c.baseEntries = base
+	return nil
+}
+
+// readAnalysisCacheFileForMerge reads the analysis cache file as another
+// process may have left it; a missing or corrupted file reads as empty.
+func readAnalysisCacheFileForMerge(path string) (analysisCacheFile, error) {
+	var cf analysisCacheFile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cf, nil
+		}
+		return cf, fmt.Errorf("re-reading %s before saving: %w", path, err)
+	}
+	if json.Unmarshal(data, &cf) != nil {
+		return analysisCacheFile{}, nil
+	}
+	return cf, nil
 }
 
 // load reads the analysis cache from disk
@@ -210,35 +243,32 @@ func (c *AnalysisCache) Save() error {
 // saveUnsafe persists the analysis cache to disk without locking.
 // Caller must hold the write lock.
 func (c *AnalysisCache) saveUnsafe() error {
-	cf := analysisCacheFile{
-		Entries: c.Entries,
-	}
+	return withStateLock(c.path, func() error {
+		disk, err := readAnalysisCacheFileForMerge(c.path)
+		if err != nil {
+			return err
+		}
+		entries, err := mergeState(c.Entries, c.baseEntries, disk.Entries)
+		if err != nil {
+			return fmt.Errorf("merging %s: %w", c.path, err)
+		}
 
-	data, err := json.MarshalIndent(cf, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal analysis cache: %w", err)
-	}
+		data, err := json.MarshalIndent(analysisCacheFile{Entries: entries}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal analysis cache: %w", err)
+		}
 
-	// Write to temp file first, then rename for atomicity. Cache files use
-	// 0600 (owner-only) because they may hold sensitive upstream metadata.
-	tmpPath := c.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
-		return fmt.Errorf("failed to write analysis cache file: %w", err)
-	}
+		// Written atomically: a crash or a concurrent reader sees the previous
+		// file or the new one, never a partial one. 0600 (owner-only) because the
+		// file may hold sensitive upstream metadata; the helper sets it before the
+		// rename, whatever the umask.
+		if err := fileutil.WriteFileAtomic(c.path, data, fileutil.CacheFileMode); err != nil {
+			return fmt.Errorf("failed to write analysis cache file %s: %w", c.path, err)
+		}
 
-	if err := os.Rename(tmpPath, c.path); err != nil {
-		// Clean up temp file on rename failure
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to rename analysis cache file: %w", err)
-	}
-
-	// os.Rename keeps the temp file's mode, which umask may have widened.
-	// Re-apply the restrictive mode; tolerate filesystems without chmod.
-	if err := fileutil.SafeChmod(c.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
-		return fmt.Errorf("failed to set analysis cache file permissions: %w", err)
-	}
-
-	return nil
+		c.Entries = entries
+		return c.adoptBaseline()
+	})
 }
 
 // Delete removes a package from the analysis cache.

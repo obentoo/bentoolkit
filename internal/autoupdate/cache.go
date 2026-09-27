@@ -11,19 +11,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
-
-// warnLogger adapts the package-level logger.Warn function to the
-// fileutil.Logger interface, which expects a value with a Warn method.
-// It is shared by the cache/pending/analysis-cache write-sites so that
-// fileutil.SafeChmod can emit warnings through the standard logger.
-type warnLogger struct{}
-
-// Warn forwards to the package-level logger.Warn.
-func (warnLogger) Warn(format string, args ...interface{}) {
-	logger.Warn(format, args...)
-}
 
 // Error variables for cache errors
 var (
@@ -105,6 +93,10 @@ type Cache struct {
 	mu sync.RWMutex
 	// nowFunc allows injecting time for testing
 	nowFunc func() time.Time
+	// baseEntries and basePreconditions are the per-key JSON of the maps as
+	// last loaded or saved; a save merges against them (see mergeState).
+	baseEntries       map[string]json.RawMessage
+	basePreconditions map[string]json.RawMessage
 }
 
 // CacheOption is a functional option for configuring Cache
@@ -159,8 +151,44 @@ func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 			cache.Preconditions = make(map[string]PreconditionRecord)
 		}
 	}
+	if err := cache.adoptBaseline(); err != nil {
+		return nil, err
+	}
 
 	return cache, nil
+}
+
+// adoptBaseline records the current maps as what this instance last loaded or
+// saved.
+func (c *Cache) adoptBaseline() error {
+	entries, err := snapshotState(c.Entries)
+	if err != nil {
+		return fmt.Errorf("recording the cache baseline for %s: %w", c.path, err)
+	}
+	preconditions, err := snapshotState(c.Preconditions)
+	if err != nil {
+		return fmt.Errorf("recording the cache baseline for %s: %w", c.path, err)
+	}
+	c.baseEntries, c.basePreconditions = entries, preconditions
+	return nil
+}
+
+// readCacheFileForMerge reads the cache file as another process may have left
+// it. A missing or corrupted file reads as empty, exactly as NewCache treats
+// it; any other read error is returned naming the path.
+func readCacheFileForMerge(path string) (cacheFile, error) {
+	var cf cacheFile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cf, nil
+		}
+		return cf, fmt.Errorf("re-reading %s before saving: %w", path, err)
+	}
+	if json.Unmarshal(data, &cf) != nil {
+		return cacheFile{}, nil
+	}
+	return cf, nil
 }
 
 // load reads the cache from disk
@@ -296,36 +324,36 @@ func (c *Cache) Save() error {
 // saveUnsafe persists the cache to disk without locking.
 // Caller must hold the write lock.
 func (c *Cache) saveUnsafe() error {
-	cf := cacheFile{
-		Entries:       c.Entries,
-		Preconditions: c.Preconditions,
-	}
+	return withStateLock(c.path, func() error {
+		disk, err := readCacheFileForMerge(c.path)
+		if err != nil {
+			return err
+		}
+		entries, err := mergeState(c.Entries, c.baseEntries, disk.Entries)
+		if err != nil {
+			return fmt.Errorf("merging %s: %w", c.path, err)
+		}
+		preconditions, err := mergeState(c.Preconditions, c.basePreconditions, disk.Preconditions)
+		if err != nil {
+			return fmt.Errorf("merging %s: %w", c.path, err)
+		}
 
-	data, err := json.MarshalIndent(cf, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal cache: %w", err)
-	}
+		data, err := json.MarshalIndent(cacheFile{Entries: entries, Preconditions: preconditions}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal cache: %w", err)
+		}
 
-	// Write to temp file first, then rename for atomicity. Cache files use
-	// 0600 (owner-only) because they may hold sensitive upstream metadata.
-	tmpPath := c.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
-		return fmt.Errorf("failed to write cache file: %w", err)
-	}
+		// Written atomically: a crash or a concurrent reader sees the previous
+		// file or the new one, never a partial one. 0600 (owner-only) because the
+		// file may hold sensitive upstream metadata; the helper sets it before the
+		// rename, whatever the umask.
+		if err := fileutil.WriteFileAtomic(c.path, data, fileutil.CacheFileMode); err != nil {
+			return fmt.Errorf("failed to write cache file %s: %w", c.path, err)
+		}
 
-	if err := os.Rename(tmpPath, c.path); err != nil {
-		// Clean up temp file on rename failure
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to rename cache file: %w", err)
-	}
-
-	// os.Rename keeps the temp file's mode, which umask may have widened.
-	// Re-apply the restrictive mode; tolerate filesystems without chmod.
-	if err := fileutil.SafeChmod(c.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
-		return fmt.Errorf("failed to set cache file permissions: %w", err)
-	}
-
-	return nil
+		c.Entries, c.Preconditions = entries, preconditions
+		return c.adoptBaseline()
+	})
 }
 
 // Delete removes a package from the cache.

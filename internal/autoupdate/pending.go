@@ -93,6 +93,9 @@ type PendingList struct {
 	mu sync.RWMutex
 	// nowFunc allows injecting time for testing
 	nowFunc func() time.Time
+	// baseUpdates is the per-key JSON of Updates as last loaded or saved; a
+	// save merges against it (see mergeState).
+	baseUpdates map[string]json.RawMessage
 }
 
 // PendingListOption is a functional option for configuring PendingList
@@ -137,8 +140,38 @@ func NewPendingList(configDir string, opts ...PendingListOption) (*PendingList, 
 			pending.Updates = make(map[string]PendingUpdate)
 		}
 	}
+	if err := pending.adoptBaseline(); err != nil {
+		return nil, err
+	}
 
 	return pending, nil
+}
+
+// adoptBaseline records Updates as what this instance last loaded or saved.
+func (p *PendingList) adoptBaseline() error {
+	base, err := snapshotState(p.Updates)
+	if err != nil {
+		return fmt.Errorf("recording the pending baseline for %s: %w", p.path, err)
+	}
+	p.baseUpdates = base
+	return nil
+}
+
+// readPendingFileForMerge reads the pending file as another process may have
+// left it; a missing or corrupted file reads as empty.
+func readPendingFileForMerge(path string) (pendingFile, error) {
+	var pf pendingFile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return pf, nil
+		}
+		return pf, fmt.Errorf("re-reading %s before saving: %w", path, err)
+	}
+	if json.Unmarshal(data, &pf) != nil {
+		return pendingFile{}, nil
+	}
+	return pf, nil
 }
 
 // load reads the pending list from disk
@@ -260,35 +293,32 @@ func (p *PendingList) Save() error {
 // saveUnsafe persists the pending list to disk without locking.
 // Caller must hold the write lock.
 func (p *PendingList) saveUnsafe() error {
-	pf := pendingFile{
-		Updates: p.Updates,
-	}
+	return withStateLock(p.path, func() error {
+		disk, err := readPendingFileForMerge(p.path)
+		if err != nil {
+			return err
+		}
+		updates, err := mergeState(p.Updates, p.baseUpdates, disk.Updates)
+		if err != nil {
+			return fmt.Errorf("merging %s: %w", p.path, err)
+		}
 
-	data, err := json.MarshalIndent(pf, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal pending list: %w", err)
-	}
+		data, err := json.MarshalIndent(pendingFile{Updates: updates}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal pending list: %w", err)
+		}
 
-	// Write to temp file first, then rename for atomicity. Pending files use
-	// 0600 (owner-only) because they may hold sensitive upstream metadata.
-	tmpPath := p.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, fileutil.CacheFileMode); err != nil {
-		return fmt.Errorf("failed to write pending file: %w", err)
-	}
+		// Written atomically: a crash or a concurrent reader sees the previous
+		// file or the new one, never a partial one. 0600 (owner-only) because the
+		// file may hold sensitive upstream metadata; the helper sets it before the
+		// rename, whatever the umask.
+		if err := fileutil.WriteFileAtomic(p.path, data, fileutil.CacheFileMode); err != nil {
+			return fmt.Errorf("failed to write pending file %s: %w", p.path, err)
+		}
 
-	if err := os.Rename(tmpPath, p.path); err != nil {
-		// Clean up temp file on rename failure
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to rename pending file: %w", err)
-	}
-
-	// os.Rename keeps the temp file's mode, which umask may have widened.
-	// Re-apply the restrictive mode; tolerate filesystems without chmod.
-	if err := fileutil.SafeChmod(p.path, fileutil.CacheFileMode, warnLogger{}); err != nil {
-		return fmt.Errorf("failed to set pending file permissions: %w", err)
-	}
-
-	return nil
+		p.Updates = updates
+		return p.adoptBaseline()
+	})
 }
 
 // Delete removes a package from the pending list.

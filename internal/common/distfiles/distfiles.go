@@ -45,6 +45,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -331,6 +332,13 @@ const probePayload = "bentoo distdir writability probe\n"
 // directory is not writable. Overwriting a file that can only be our own name
 // is both safe and self-healing.
 //
+// The open does carry O_NOFOLLOW. Without it, a symlink planted at the name the
+// next probe will use made the O_TRUNC truncate whatever it pointed at; now the
+// open fails with ELOOP, which is reported as ErrDistdirNotWritable naming dir,
+// and the link — and its target — are left exactly as they were. The deferred
+// removal is registered only after a successful open, so it never unlinks a name
+// that was not this call's file.
+//
 // An empty dir is refused rather than probed: filepath.Join would resolve the
 // probe against the working directory, which is not the directory anyone asked
 // about, and writing there would answer the wrong question.
@@ -342,7 +350,7 @@ func Probe(dir string) error {
 	name := fmt.Sprintf(".bentoo-distdir-probe-%d-%d", os.Getpid(), probeSeq.Add(1))
 	path := filepath.Join(dir, name)
 
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrDistdirNotWritable, dir, err)
 	}

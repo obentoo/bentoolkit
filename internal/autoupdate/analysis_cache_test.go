@@ -532,7 +532,8 @@ func TestAnalysisCacheCorruptedFile(t *testing.T) {
 // TestAnalysisCacheWrite_FinalModeIs0600 verifies that the analysis cache file
 // persisted by AnalysisCache.Set ends up with owner-only (0600) permissions
 // end-to-end. The save path writes a temp file then renames it, so the final
-// mode depends on the post-rename SafeChmod call repairing umask-widened bits.
+// mode depends on the mode fileutil.WriteFileAtomic sets on the temporary file
+// before the rename, whatever the umask.
 func TestAnalysisCacheWrite_FinalModeIs0600(t *testing.T) {
 	tmpDir := t.TempDir()
 
