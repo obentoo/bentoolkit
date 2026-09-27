@@ -48,21 +48,21 @@ func newCappedClient(baseURL string) *Client {
 func TestGitHubClientBodyCapped(t *testing.T) {
 	t.Run("success body over the cap", func(t *testing.T) {
 		c := newCappedClient(hugeBodyServer(t, http.StatusOK, overCap).URL)
-		_, err := c.GetPackageVersions("app-misc", "foo")
+		_, err := c.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("error body over the cap", func(t *testing.T) {
 		c := newCappedClient(hugeBodyServer(t, http.StatusInternalServerError, overCap).URL)
-		_, err := c.GetPackageVersions("app-misc", "foo")
+		_, err := c.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %.200v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("success body exactly at the cap", func(t *testing.T) {
 		c := newCappedClient(hugeBodyServer(t, http.StatusOK, httputil.MaxBodyBytes).URL)
-		if _, err := c.GetPackageVersions("app-misc", "foo"); err != nil {
+		if _, err := c.GetPackageVersions(t.Context(), "app-misc", "foo"); err != nil {
 			t.Errorf("a %d-byte body (exactly the cap) failed: %.200v", httputil.MaxBodyBytes, err)
 		}
 	})

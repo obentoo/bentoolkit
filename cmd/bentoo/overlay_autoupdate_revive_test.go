@@ -25,7 +25,7 @@ type fakeReviveProvider struct {
 	localErr error
 }
 
-func (f *fakeReviveProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (f *fakeReviveProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	if vs, ok := f.versions[category+"/"+pkg]; ok {
 		return vs, nil
 	}

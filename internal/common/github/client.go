@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,7 +98,7 @@ func (c *Client) SetCacheDir(dir string) error {
 }
 
 // GetPackageVersions fetches all ebuild versions for a package from GitHub
-func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
+func (c *Client) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// Check cache first
 	if c.CacheDir != "" {
 		if versions, ok := c.loadFromCache(category, pkg); ok {
@@ -106,7 +107,7 @@ func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
 	}
 
 	// Fetch from API
-	versions, err := c.fetchPackageVersions(category, pkg)
+	versions, err := c.fetchPackageVersions(ctx, category, pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -120,10 +121,10 @@ func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
 }
 
 // fetchPackageVersions fetches versions from GitHub API
-func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
+func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	url := fmt.Sprintf("%s/repos/%s/contents/%s/%s", c.BaseURL, c.Repository, category, pkg)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GitHub lookup %s/%s: %w", category, pkg, err)
 	}
 	// Cap every read of this body: an oversized or hostile response fails
 	// with httputil.ErrResponseTooLarge instead of exhausting memory.

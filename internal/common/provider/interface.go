@@ -1,6 +1,9 @@
 package provider
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var (
 	// ErrNotFound indicates the requested resource was not found
@@ -22,8 +25,9 @@ var (
 
 // Provider is the interface for fetching package versions from a repository
 type Provider interface {
-	// GetPackageVersions returns all ebuild versions for a package
-	GetPackageVersions(category, pkg string) ([]string, error)
+	// GetPackageVersions returns all ebuild versions for a package. ctx ends
+	// the lookup: an HTTP implementation sends its request with it.
+	GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error)
 
 	// GetName returns a human-readable name for this provider
 	GetName() string

@@ -138,7 +138,7 @@ type reviewDirProvider struct {
 	versions map[string][]string
 }
 
-func (p *reviewDirProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *reviewDirProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	v, ok := p.versions[category+"/"+pkg]
 	if !ok {
 		return nil, provider.ErrNotFound

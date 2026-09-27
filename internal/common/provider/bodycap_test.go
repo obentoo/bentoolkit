@@ -64,27 +64,27 @@ func newCappedGitLabProvider(t *testing.T, baseURL string) *GitLabProvider {
 func TestGitHubProviderBodyCapped(t *testing.T) {
 	t.Run("success body over the cap", func(t *testing.T) {
 		p := newCappedGitHubProvider(t, hugeBodyServer(t, http.StatusOK, overCap).URL)
-		_, err := p.GetPackageVersions("app-misc", "foo")
+		_, err := p.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("error body over the cap", func(t *testing.T) {
 		p := newCappedGitHubProvider(t, hugeBodyServer(t, http.StatusInternalServerError, overCap).URL)
-		_, err := p.GetPackageVersions("app-misc", "foo")
+		_, err := p.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %.200v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("success body exactly at the cap", func(t *testing.T) {
 		p := newCappedGitHubProvider(t, hugeBodyServer(t, http.StatusOK, httputil.MaxBodyBytes).URL)
-		if _, err := p.GetPackageVersions("app-misc", "foo"); err != nil {
+		if _, err := p.GetPackageVersions(t.Context(), "app-misc", "foo"); err != nil {
 			t.Errorf("a %d-byte body (exactly the cap) failed: %.200v", httputil.MaxBodyBytes, err)
 		}
 	})
 	t.Run("error body exactly at the cap", func(t *testing.T) {
 		p := newCappedGitHubProvider(t, hugeBodyServer(t, http.StatusInternalServerError, httputil.MaxBodyBytes).URL)
-		_, err := p.GetPackageVersions("app-misc", "foo")
+		_, err := p.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, ErrAPIError) || errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %.200v, want ErrAPIError and not ErrResponseTooLarge", err)
 		}
@@ -106,21 +106,21 @@ func TestGitHubProviderRateLimitBodyCapped(t *testing.T) {
 func TestGitLabProviderBodyCapped(t *testing.T) {
 	t.Run("success body over the cap", func(t *testing.T) {
 		p := newCappedGitLabProvider(t, hugeBodyServer(t, http.StatusOK, overCap).URL)
-		_, err := p.GetPackageVersions("app-misc", "foo")
+		_, err := p.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("error body over the cap", func(t *testing.T) {
 		p := newCappedGitLabProvider(t, hugeBodyServer(t, http.StatusBadGateway, overCap).URL)
-		_, err := p.GetPackageVersions("app-misc", "foo")
+		_, err := p.GetPackageVersions(t.Context(), "app-misc", "foo")
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("err = %.200v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("success body exactly at the cap", func(t *testing.T) {
 		p := newCappedGitLabProvider(t, hugeBodyServer(t, http.StatusOK, httputil.MaxBodyBytes).URL)
-		if _, err := p.GetPackageVersions("app-misc", "foo"); err != nil {
+		if _, err := p.GetPackageVersions(t.Context(), "app-misc", "foo"); err != nil {
 			t.Errorf("a %d-byte body (exactly the cap) failed: %.200v", httputil.MaxBodyBytes, err)
 		}
 	})

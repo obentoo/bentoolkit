@@ -1071,7 +1071,7 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 
 		// Highest version ::gentoo currently carries. A package ::gentoo does not
 		// have is simply not revivable from a gentoo base, so skip it silently.
-		versions, err := prov.GetPackageVersions(category, pkgName)
+		versions, err := prov.GetPackageVersions(c.ctx, category, pkgName)
 		if err != nil {
 			if errors.Is(err, provider.ErrNotFound) {
 				continue

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,7 +107,7 @@ func (p *GitLabProvider) Close() error {
 }
 
 // GetPackageVersions fetches all ebuild versions for a package from GitLab
-func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *GitLabProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// Check cache first
 	if p.CacheDir != "" {
 		if versions, ok := p.loadFromCache(category, pkg); ok {
@@ -115,7 +116,7 @@ func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, err
 	}
 
 	// Fetch from API
-	versions, err := p.fetchPackageVersions(category, pkg)
+	versions, err := p.fetchPackageVersions(ctx, category, pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -129,14 +130,14 @@ func (p *GitLabProvider) GetPackageVersions(category, pkg string) ([]string, err
 }
 
 // fetchPackageVersions fetches versions from GitLab API
-func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, error) {
+func (p *GitLabProvider) fetchPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// GitLab Repository Tree API
 	// GET /api/v4/projects/:id/repository/tree?path=category/package
 	path := url.QueryEscape(fmt.Sprintf("%s/%s", category, pkg))
 	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/repository/tree?path=%s&per_page=100",
 		p.BaseURL, p.ProjectID, path)
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +151,7 @@ func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, e
 
 	resp, err := p.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GitLab lookup %s/%s: %w", category, pkg, err)
 	}
 	// Cap every read of this body: an oversized or hostile response fails
 	// with httputil.ErrResponseTooLarge instead of exhausting memory.
