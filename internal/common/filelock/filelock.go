@@ -99,9 +99,6 @@ func (l *Lock) Release() {
 	l.file = nil
 }
 
-// Path is the lock file's path.
-func (l *Lock) Path() string { return l.path }
-
 // claim finishes an acquisition of a file this call just created: flock first,
 // payload second, identity check last, so a reap at any point since the create
 // is noticed. It returns nil (and no error) when the file stopped being ours.

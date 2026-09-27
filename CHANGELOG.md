@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory is synced after the rename. A killed run leaves the previous file
   intact; its dot-prefixed temporary is removed by the next
   `bentoo overlay autoupdate` run that writes the overlay (every mode but
-  `--list` and `--lint` without `--fix`).
+  `--list` and `--lint` without `--fix`). The file's mode is now set before the
+  rename, so on a filesystem that refuses `chmod` (some network, FUSE or
+  read-only mounts) saving these files fails with an error naming the file,
+  where the cache, pending and analysis-cache saves used to warn and go on.
 - **Copying or promoting an ebuild never overwrites one.** The new ebuild is
   published through a hard link that fails if anything already sits at its name,
   including a file created after the existence check or a dangling symlink, so
@@ -28,8 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every other entry keeps what is on disk.
 - **One `bentoo overlay autoupdate` run per overlay.** Every mode that writes the
   overlay or its registry holds `<overlay>/.autoupdate.bentoo-lock`; a second run
-  waits up to 2 minutes and then exits 1 naming the lock and the holder's PID. A
-  lock left by a killed run is reclaimed at once. `--list` and `--lint` without
+  waits up to 2 minutes and then exits 1 naming the lock and the holder's PID.
+  The lock file is removed on every exit, whatever the exit code; a lock left by
+  a killed run is reclaimed at once. A symlink, FIFO or directory planted at a
+  lock's name is refused instead of followed. `--list` and `--lint` without
   `--fix` take no lock.
 - **The registry keeps its mode.** `overlay analyze` and the registry fixer's
   restore no longer turn a `0644` `packages.toml` into `0600` under a restrictive

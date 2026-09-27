@@ -10,7 +10,7 @@ package fileutil
 // as "nothing was published by me").
 //
 // The failure is injected through the package's unexported directory-sync
-// seam, syncDirFunc (the chmodFunc precedent in mode.go). Tests in this
+// seam, the package variable syncDirFunc. Tests in this
 // package never run in parallel, which is what makes swapping it safe.
 //
 // Hostile halves first. The rule is an identity rule ("path still names the
