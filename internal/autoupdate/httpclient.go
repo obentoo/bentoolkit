@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
@@ -82,8 +83,17 @@ func DefaultRetryConfig() RetryConfig {
 type RetryableHTTPClient struct {
 	client *http.Client
 	config RetryConfig
-	// breaker is the circuit breaker (nil when disabled)
-	breaker *gobreaker.CircuitBreaker
+	// breakersEnabled turns the per-host circuit breakers on (the default).
+	breakersEnabled bool
+	// breakerMu guards breakers: CheckAll workers share one client.
+	breakerMu sync.Mutex
+	// breakers holds one circuit breaker per upstream host:port (URL.Host), so
+	// a failing upstream refuses only its own requests. Hosts per run are
+	// bounded by the package registry, so the map is never evicted.
+	breakers map[string]*gobreaker.CircuitBreaker
+	// newBreaker builds the breaker for a host on first use (a test seam;
+	// defaults to newDefaultBreaker).
+	newBreaker func(name string) *gobreaker.CircuitBreaker
 	// delayFunc allows overriding the delay function for testing
 	delayFunc func(time.Duration)
 	// recordedDelays stores delays for testing purposes
@@ -96,10 +106,11 @@ type RetryableHTTPClient struct {
 	h1Client *http.Client
 }
 
-// newDefaultBreaker creates a circuit breaker with the default settings.
-func newDefaultBreaker() *gobreaker.CircuitBreaker {
+// newDefaultBreaker creates a circuit breaker with the default settings, named
+// after the upstream host:port it guards.
+func newDefaultBreaker(name string) *gobreaker.CircuitBreaker {
 	return gobreaker.NewCircuitBreaker(gobreaker.Settings{
-		Name:        "http-client",
+		Name:        name,
 		MaxRequests: DefaultBreakerMaxRequests,
 		Interval:    DefaultBreakerInterval,
 		Timeout:     DefaultBreakerTimeout,
@@ -127,9 +138,11 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 			Timeout:   config.Timeout,
 			Transport: httputil.BuildTransportHTTP1(),
 		},
-		config:    config,
-		breaker:   newDefaultBreaker(),
-		delayFunc: time.Sleep,
+		config:          config,
+		breakersEnabled: true,
+		breakers:        make(map[string]*gobreaker.CircuitBreaker),
+		newBreaker:      newDefaultBreaker,
+		delayFunc:       time.Sleep,
 		defaultHeaders: map[string]string{
 			"User-Agent": defaultUserAgent(),
 		},
@@ -143,15 +156,41 @@ func defaultUserAgent() string {
 	return "bentoolkit/" + version.Short()
 }
 
-// WithCircuitBreaker enables or disables the circuit breaker on this client.
-// Pass false to disable circuit breaker behavior entirely.
+// WithCircuitBreaker enables or disables the per-host circuit breakers on this
+// client. Either way every breaker built so far is dropped, so enabling starts
+// each host from a closed breaker. Pass false to disable circuit breaker
+// behavior entirely.
 func (c *RetryableHTTPClient) WithCircuitBreaker(enabled bool) *RetryableHTTPClient {
-	if enabled {
-		c.breaker = newDefaultBreaker()
-	} else {
-		c.breaker = nil
-	}
+	c.breakerMu.Lock()
+	defer c.breakerMu.Unlock()
+	c.breakersEnabled = enabled
+	c.breakers = make(map[string]*gobreaker.CircuitBreaker)
 	return c
+}
+
+// breakerFor returns the circuit breaker guarding host (a URL.Host, port
+// included), creating it on first use, or nil when breakers are disabled. The
+// key keeps the port because upstreams that share a hostname — every httptest
+// server on 127.0.0.1 among them — are different upstreams.
+func (c *RetryableHTTPClient) breakerFor(host string) *gobreaker.CircuitBreaker {
+	c.breakerMu.Lock()
+	defer c.breakerMu.Unlock()
+	if !c.breakersEnabled {
+		return nil
+	}
+	if cb, ok := c.breakers[host]; ok {
+		return cb
+	}
+	build := c.newBreaker
+	if build == nil {
+		build = newDefaultBreaker
+	}
+	if c.breakers == nil {
+		c.breakers = make(map[string]*gobreaker.CircuitBreaker)
+	}
+	cb := build(host)
+	c.breakers[host] = cb
+	return cb
 }
 
 // SetHTTPClient sets a custom underlying HTTP client (useful for testing).
@@ -346,13 +385,16 @@ func (c *RetryableHTTPClient) retryOverHTTP1(ctx context.Context, req *http.Requ
 	return h1Resp
 }
 
-// executeRequest performs a single HTTP attempt, optionally through the circuit breaker.
+// executeRequest performs a single HTTP attempt, optionally through the
+// circuit breaker of the request's own host:port.
 func (c *RetryableHTTPClient) executeRequest(req *http.Request) (*http.Response, error) {
-	if c.breaker == nil {
+	host := req.URL.Host
+	breaker := c.breakerFor(host)
+	if breaker == nil {
 		return c.client.Do(req)
 	}
 
-	result, err := c.breaker.Execute(func() (interface{}, error) {
+	result, err := breaker.Execute(func() (interface{}, error) {
 		resp, err := c.client.Do(req)
 		if err != nil {
 			return nil, err
@@ -370,11 +412,11 @@ func (c *RetryableHTTPClient) executeRequest(req *http.Request) (*http.Response,
 
 	if err != nil {
 		if errors.Is(err, gobreaker.ErrOpenState) {
-			return nil, fmt.Errorf("circuit breaker open (upstream failing, next probe in %v): %w",
-				DefaultBreakerTimeout, err)
+			return nil, fmt.Errorf("circuit breaker open for %s (upstream failing, next probe in %v): %w",
+				host, DefaultBreakerTimeout, err)
 		}
 		if errors.Is(err, gobreaker.ErrTooManyRequests) {
-			return nil, fmt.Errorf("circuit breaker open (too many requests in half-open state): %w", err)
+			return nil, fmt.Errorf("circuit breaker open for %s (too many requests in half-open state): %w", host, err)
 		}
 		return nil, err
 	}
