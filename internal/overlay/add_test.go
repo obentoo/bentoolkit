@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -33,7 +34,7 @@ func setupTestOverlay(t *testing.T) (string, *config.Config, func()) {
 
 	// Initialize git repo using exec.Command
 	runner := git.NewGitRunner(tmpDir)
-	_, err = runner.Status()
+	_, err = runner.Status(context.Background())
 	if err != nil {
 		// Need to init - use exec.Command
 		initCmd := exec.Command("git", "init")
@@ -71,7 +72,7 @@ func TestAddFilesWithDefaultPath(t *testing.T) {
 	}
 
 	// Add with no arguments
-	result, err := AddFiles(cfg)
+	result, err := AddFiles(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("AddFiles() returned error: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestAddFilesWithSpecificPaths(t *testing.T) {
 	}
 
 	// Add specific files
-	result, err := AddFiles(cfg, "file1.txt", "file2.txt")
+	result, err := AddFiles(context.Background(), cfg, "file1.txt", "file2.txt")
 	if err != nil {
 		t.Fatalf("AddFiles() returned error: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestAddFilesWithNonExistentFile(t *testing.T) {
 	defer cleanup()
 
 	// Try to add non-existent file
-	result, err := AddFiles(cfg, "nonexistent.txt")
+	result, err := AddFiles(context.Background(), cfg, "nonexistent.txt")
 	if err != nil {
 		t.Fatalf("AddFiles() returned unexpected error: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestAddFilesWithMixedPaths(t *testing.T) {
 	}
 
 	// Add both valid and invalid paths
-	result, err := AddFiles(cfg, "valid.txt", "invalid.txt")
+	result, err := AddFiles(context.Background(), cfg, "valid.txt", "invalid.txt")
 	if err != nil {
 		t.Fatalf("AddFiles() returned unexpected error: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 			},
 		}
 
-		_, err := AddFiles(cfg, "file.txt")
+		_, err := AddFiles(context.Background(), cfg, "file.txt")
 		if err != config.ErrOverlayPathNotSet {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotSet, got %v", err)
 		}
@@ -245,7 +246,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 			},
 		}
 
-		_, err := AddFiles(cfg, "file.txt")
+		_, err := AddFiles(context.Background(), cfg, "file.txt")
 		if err != config.ErrOverlayPathNotFound {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotFound, got %v", err)
 		}
@@ -259,7 +260,7 @@ func TestAddFilesWithPathOutsideOverlay(t *testing.T) {
 	defer cleanup()
 
 	// Try to add a path outside the overlay using ".."
-	result, err := AddFiles(cfg, "../outside.txt")
+	result, err := AddFiles(context.Background(), cfg, "../outside.txt")
 	if err != nil {
 		t.Fatalf("AddFiles() returned unexpected error: %v", err)
 	}

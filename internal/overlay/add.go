@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -17,7 +18,7 @@ type AddResult struct {
 // If no paths are provided, it defaults to adding all changes (equivalent to "git add .").
 // When paths are provided, only those specific paths are staged.
 // Returns a structured result with added files and any errors encountered.
-func AddFiles(cfg *config.Config, paths ...string) (*AddResult, error) {
+func AddFiles(ctx context.Context, cfg *config.Config, paths ...string) (*AddResult, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
@@ -32,7 +33,7 @@ func AddFiles(cfg *config.Config, paths ...string) (*AddResult, error) {
 	// Only default to "." when NO paths are provided
 	// This is the no-args case - add all changes
 	if len(paths) == 0 {
-		err := runner.Add(".")
+		err := runner.Add(ctx, ".")
 		if err != nil {
 			result.Errors = append(result.Errors, err)
 		} else {
@@ -43,8 +44,14 @@ func AddFiles(cfg *config.Config, paths ...string) (*AddResult, error) {
 
 	// Add each provided path individually
 	// Paths are passed directly without modification
-	for _, path := range paths {
-		err := runner.Add(path)
+	for i, path := range paths {
+		// A cancel stops the loop where it is: the rest is reported once as not
+		// added, instead of failing path by path against a dead context.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("adding %s: %d path(s) not added: %w", path, len(paths)-i, ctxErr))
+			break
+		}
+		err := runner.Add(ctx, path)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("failed to add %s: %w", path, err))
 		} else {

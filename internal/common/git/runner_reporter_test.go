@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -58,10 +59,12 @@ func hasLinePrefix(s []string, prefix string) bool {
 // R6.2: a fast mutating op (commit) emits only stage/done events — no tail.
 func TestGitRunnerCommitEmitsStageDone(t *testing.T) {
 	rec := &recReporter{}
-	seam := func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "true")
+	}
 	g := NewGitRunner(t.TempDir(), WithGitReporter(rec, "repo1"), WithGitExecCommand(seam))
 
-	if err := g.Commit("msg", "user", "user@example.com"); err != nil {
+	if err := g.Commit(context.Background(), "msg", "user", "user@example.com"); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	ev := rec.snap()
@@ -79,12 +82,12 @@ func TestGitRunnerCommitEmitsStageDone(t *testing.T) {
 // R6.2/R1.1: a streaming download (fetch) emits a live tail plus stage/done.
 func TestGitRunnerFetchStreamsTail(t *testing.T) {
 	rec := &recReporter{}
-	seam := func(name string, arg ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf 'recv-A\\nrecv-B\\n'")
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "printf 'recv-A\\nrecv-B\\n'")
 	}
 	g := NewGitRunner(t.TempDir(), WithGitReporter(rec, "repo1"), WithGitExecCommand(seam))
 
-	if err := g.Fetch("origin"); err != nil {
+	if err := g.Fetch(context.Background(), "origin"); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
 	ev := rec.snap()
@@ -100,12 +103,12 @@ func TestGitRunnerFetchStreamsTail(t *testing.T) {
 // reports done:false.
 func TestGitRunnerErrorPreservesOutput(t *testing.T) {
 	rec := &recReporter{}
-	seam := func(name string, arg ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "printf 'FETCH-ERR-OUT-3D9\\n' 1>&2; exit 1")
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "printf 'FETCH-ERR-OUT-3D9\\n' 1>&2; exit 1")
 	}
 	g := NewGitRunner(t.TempDir(), WithGitReporter(rec, "repo1"), WithGitExecCommand(seam))
 
-	err := g.Fetch("origin")
+	err := g.Fetch(context.Background(), "origin")
 	if err == nil {
 		t.Fatal("expected a fetch error")
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 )
 
 // This file is the validation pipeline Apply runs between the manifest step and
@@ -765,8 +766,22 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byte, error) {
 	return func(cmd *exec.Cmd) ([]byte, error) {
 		output, err := a.runAttached(cmd)
+		// The build runs in procgroup's group mode, whose WaitDelay also runs
+		// after a NORMAL exit: a build that exited 0 while a helper it left behind
+		// still held the output pipe comes back as exec.ErrWaitDelay. RunBuildGates
+		// reads that as the success it is (S054-R1.5); recorded raw here, it would
+		// send a passing build into repairBuildGatesAndRerun as a failure.
+		err = procgroup.Result(cmd, err)
 		into.transcript = string(output)
 		if err != nil {
+			// S054-R3.5, as compileOnce applies it: a build its context stopped
+			// says nothing about the ebuild, so it is never labelled a compile
+			// failure. RunBuildGates returns the interrupt as its own error before
+			// anything reads this attempt; the label stays honest regardless.
+			if ctxErr := a.ctx.Err(); ctxErr != nil {
+				into.err = fmt.Errorf("the build was interrupted, so it says nothing about this ebuild: %w", ctxErr)
+				return output, err
+			}
 			into.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 		}
 		return output, err

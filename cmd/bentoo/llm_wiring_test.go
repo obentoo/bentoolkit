@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -150,7 +151,7 @@ func TestNewConfiguredLLMProvider(t *testing.T) {
 				t.Setenv(claudeKeyEnv, "")
 			}
 
-			p, err := newConfiguredLLMProvider(tt.cfg)
+			p, err := newConfiguredLLMProvider(context.Background(), tt.cfg)
 
 			if tt.wantErr {
 				if err == nil {

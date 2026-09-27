@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -21,6 +23,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -2389,6 +2392,14 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 		return "", nil
 	}
 
+	// S054-R3.5. A compile its context stopped is not a failure to repair: it
+	// says nothing about the ebuild, and the fixer is an LLM invocation the
+	// operator has just asked this run to stop. compileOnce has already kept the
+	// partial transcript (R3.6), so returning here throws no evidence away.
+	if a.ctx.Err() != nil {
+		return first.logPath, first.err
+	}
+
 	return a.repairBuildAndRerun(cand, pkg, version, privTool, first, result)
 }
 
@@ -2407,9 +2418,12 @@ type buildAttempt struct {
 	// transcript is the child's captured output — the evidence the attribution
 	// gate reasons from and the log the fixer is given.
 	transcript string
-	// logPath is the retained compile log, empty unless the attempt failed.
+	// logPath is the retained compile log, empty unless the attempt failed or
+	// was interrupted.
 	logPath string
-	// err is the failure, already wrapped in ErrCompileFailed, or nil.
+	// err is the failure, already wrapped in ErrCompileFailed, or nil. A build
+	// its context stopped is not a failure: err then wraps ctx.Err() and never
+	// ErrCompileFailed (S054-R3.5).
 	err error
 	// resolvedDistdir is the directory this attempt resolved for the build's
 	// archives, and enforcedDistdir the one the privilege tool actually carried
@@ -2539,9 +2553,9 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	}
 
 	// sudo [DISTDIR=<dir>] ebuild <path> clean compile, bound to the applier's
-	// parent context so a SIGINT or deadline kills the spawned process. The
-	// assignment PRECEDES the command, because sudo reads the first non-assignment
-	// argument as the program to run.
+	// parent context so a SIGINT or deadline stops the spawned process (see
+	// procgroup.Foreground below for how). The assignment PRECEDES the command,
+	// because sudo reads the first non-assignment argument as the program to run.
 	//
 	// Built into a slice of its OWN rather than appended onto the one
 	// privilegedDistdirArgs returned: appending to a caller's slice writes into
@@ -2553,6 +2567,19 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
 	cmd := a.execCommand(a.ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
+	// S054-R3.3/R3.4. Foreground and not Group: sudo and doas ask for the
+	// password on the terminal, and a child moved into a process group of its
+	// own is a BACKGROUND group there, stopped by SIGTTIN at its first read — a
+	// compile hung on a prompt nobody can answer. In the caller's group a cancel
+	// reaches the privilege tool as SIGTERM, which sudo relays to the root
+	// `ebuild`; os/exec's SIGKILL comes procgroup.GracePeriod later, and only
+	// then, because SIGKILL is the one signal sudo cannot relay. doas relays
+	// nothing: it execs the root `ebuild` in place, so the child IS root and
+	// both signals are refused (EPERM, kept by keepStopRefusal); Wait then
+	// returns only when that build ends by itself. A terminal Ctrl+C still
+	// reaches it, since tty signals skip the permission check.
+	procgroup.Foreground(cmd)
+	stopRefused := keepStopRefusal(cmd)
 
 	// cmd.Env is deliberately left nil here (S040-R2.4), which is a MEASURED
 	// decision and not an omission. validate/build.go installs an allow-list on
@@ -2566,12 +2593,112 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	// run needed the child to have travels as an argument instead.
 
 	output, err := a.runAttached(cmd)
+	// Foreground's WaitDelay also runs after a NORMAL exit: a compile that exited
+	// 0 while a helper it left behind still held the output pipe comes back as
+	// exec.ErrWaitDelay, and that is a success (S054-R1.5).
+	err = procgroup.Result(cmd, err)
 	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
 	if err != nil {
 		attempt.logPath = a.saveCompileLog(pkg, version, output)
+		// S054-R3.5. Checked on the context and not on err: a compile stopped by
+		// SIGTERM reports `signal: terminated`, which wraps nothing. The log above
+		// is written first and on purpose — an interrupted compile's partial
+		// transcript is evidence too (R3.6).
+		if ctxErr := a.ctx.Err(); ctxErr != nil {
+			pid, refused := stopRefused()
+			attempt.err = interruptedCompileError(pkg, version, privTool, ctxErr, pid, refused)
+			if refused == nil && killedAfterGrace(cmd) {
+				// The SIGTERM was delivered but not obeyed within the grace period,
+				// so os/exec killed the tool; a SIGKILL is the one signal sudo
+				// cannot relay, so the root build is not known to have stopped.
+				attempt.err = fmt.Errorf("%w; %s (process %d) was still running %s after the stop and had to be killed, which it cannot pass on, so the privileged build may still be running",
+					attempt.err, privTool, cmd.Process.Pid, procgroup.GracePeriod)
+			}
+			return attempt
+		}
 		attempt.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 	}
 	return attempt
+}
+
+// killedAfterGrace reports whether the finished cmd was ended by SIGKILL, which
+// for a Foreground child whose context is done means os/exec's kill after
+// procgroup.GracePeriod: the stop was delivered and not obeyed in time.
+func killedAfterGrace(cmd *exec.Cmd) bool {
+	if cmd.ProcessState == nil {
+		return false
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
+}
+
+// interruptedCompileError is what a privileged compile its context stopped
+// returns (S054-R3.5): it wraps ctxErr, says "interrupted", and wraps no
+// ErrCompileFailed, because an interrupt is no verdict on the ebuild.
+//
+// refused is the stop the privilege tool could not be sent — EPERM, from a tool
+// that now runs as root — and pid the process it was refused for (see
+// keepStopRefusal). The build is then not known to have stopped, and the error
+// says so and names the process, so the operator knows what to look for
+// (S054-R3.7).
+func interruptedCompileError(pkg, version, privTool string, ctxErr error, pid int, refused error) error {
+	interrupted := fmt.Errorf("the compile of %s-%s was interrupted, so it says nothing about this ebuild: %w", pkg, version, ctxErr)
+	if refused == nil {
+		return interrupted
+	}
+	return fmt.Errorf("%w; %s (process %d) could not be asked to stop, so the privileged build may still be running: %w",
+		interrupted, privTool, pid, refused)
+}
+
+// keepStopRefusal wraps cmd.Cancel, as procgroup.Foreground configured it, so
+// that a stop the child could not be sent is kept. The returned function reads
+// it once Wait (or Run) has returned: the pid the stop was refused for and the
+// refusal, or a nil error when every stop was delivered (S054-R3.7).
+//
+// # Why Wait's error cannot carry it
+//
+// Foreground's Cancel does return the refusal, wrapped and naming the pid, but
+// os/exec hands that error to Wait's caller only when the child then exits 0.
+// Once WaitDelay expires os/exec calls Process.Kill, and a Kill refused as well
+// REPLACES it with its own error; and against a child nothing can signal, Wait
+// returns only when that child exits by itself, with whatever status it chose.
+// The one moment the refusal is certain to exist is when Cancel returns it, so
+// that is where it is kept.
+//
+// os/exec calls Cancel before it hands the context's outcome to Wait, so a
+// Cancel that ran has returned before Wait does; the mutex covers a runner that
+// starts the command and reads the refusal without waiting for it.
+//
+// A child that had already exited (os.ErrProcessDone) is not a refusal: there
+// was nothing left to stop. A command with no Cancel is left without one,
+// because os/exec refuses to start a command that has a Cancel and was not
+// created by exec.CommandContext.
+func keepStopRefusal(cmd *exec.Cmd) func() (pid int, refused error) {
+	var (
+		mu      sync.Mutex
+		stopPID int
+		stopErr error
+	)
+	read := func() (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return stopPID, stopErr
+	}
+	cancel := cmd.Cancel
+	if cancel == nil {
+		return read
+	}
+	cmd.Cancel = func() error {
+		err := cancel()
+		if err != nil && !errors.Is(err, os.ErrProcessDone) {
+			mu.Lock()
+			// Process is non-nil: os/exec calls Cancel only after a successful Start.
+			stopPID, stopErr = cmd.Process.Pid, err
+			mu.Unlock()
+		}
+		return err
+	}
+	return read
 }
 
 // repairBuildAndRerun is what happens after the build gate has failed once: the
@@ -2681,6 +2808,12 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	// The re-run is the verdict (R8.2), so its distdir facts are the ones the
 	// gate must report: this build is the one the PASS would be about.
 	recordCompileDistdir(result, second)
+	// S054-R3.5 holds for the re-run as well: a re-run its context stopped is no
+	// verdict on the edit, so it is returned as the interrupt it is — never as the
+	// first failure "still" standing, which would wrap ErrCompileFailed.
+	if second.err != nil && a.ctx.Err() != nil {
+		return second.logPath, second.err
+	}
 	if second.err != nil {
 		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
 			first.err, compileGatePhase, second.err)

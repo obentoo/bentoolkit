@@ -58,7 +58,7 @@ func TestManifestFailureKeepsCause(t *testing.T) {
 func TestRecordingRunnerKeepsCause(t *testing.T) {
 	// runAttached is the Applier's injected process runner; a plain
 	// CombinedOutput stands in for the attached-terminal one.
-	a := &Applier{runAttached: func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() }}
+	a := &Applier{ctx: context.Background(), runAttached: func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() }}
 	var attempt buildAttempt
 	run := a.recordingRunner(&attempt)
 

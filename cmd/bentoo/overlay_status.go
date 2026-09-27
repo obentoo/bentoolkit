@@ -18,13 +18,16 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	ctx, stop := signalContext(cmd.Context())
+	defer stop()
+
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
 	}
 
-	statuses, err := overlay.Status(ctx.Config)
+	statuses, err := overlay.Status(ctx, appCtx.Config)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)

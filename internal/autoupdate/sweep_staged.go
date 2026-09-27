@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -41,14 +42,16 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) (string, 
 // runManifest wraps `pkgdev manifest` in four helpers — LockFetch, Quarantine,
 // PrepopulateFromCache and RecordFetchScope — and all four are keyed on the
 // PACKAGE DIRECTORY'S Manifest against a distdir the whole machine shares
-// (sweep.go:538-591). Pointing that pair at a staged tree crosses the two:
+// (autoupdate/sweep.go, `func runManifest`). Pointing that pair at a staged
+// tree crosses the two:
 //
 //	Quarantine's contract is "a distfile present under a name the current
 //	Manifest does not list cannot be verified, so move it aside". A staged tree's
 //	Manifest does not YET name the new version's distfile — that is what this run
 //	is about to compute — so the names Quarantine would find unverifiable in the
 //	host's DISTDIR are the HOST'S REAL DISTFILES. And a quarantine failure is
-//	fatal by contract (sweep.go:563), so the run would also stop on it.
+//	fatal by contract (autoupdate/sweep.go, `func runManifest`), so the run
+//	would also stop on it.
 //
 // That is how a validation run — a gate whose entire promise is that it changes
 // nothing — would come to rearrange /var/cache/distfiles.
@@ -78,14 +81,15 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) (string, 
 // configured --distfiles-cache, and the host's own DISTDIR through
 // distfiles.Locate — which exists precisely for a read-only caller, since it
 // neither creates the directory nor probes it by writing into it
-// (distfiles.go:192-224). So a distfile already on the machine is reused by
-// symlink instead of downloaded a second time, and the direction of every byte
-// is: out of the shared directories, into the private one.
+// (distfiles.go, `func Locate`). So a distfile already on the machine is reused
+// by symlink instead of downloaded a second time, and the direction of every
+// byte is: out of the shared directories, into the private one.
 //
 // The private distdir is created under fixSandboxRoot() rather than os.TempDir()
-// for the reason runManifestWithFix already does it (applier.go:1112) — on the
-// host S030 was measured on /tmp is a 31 GB tmpfs, so a distfile downloaded into
-// a default temporary directory lands in RAM.
+// for the reason runManifestWithFix already does it
+// (applier.go, `func runManifestWithFix`) — on the host S030 was measured on
+// /tmp is a 31 GB tmpfs, so a distfile downloaded into a default temporary
+// directory lands in RAM.
 //
 // # A distdir the caller already holds (S043-D2)
 //
@@ -215,7 +219,8 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 
 	// Bound the invocation exactly as the apply path does: a stalled distfile
 	// fetch must not hang a gate forever, and cancelling either the parent
-	// (SIGINT) or this child (timeout) kills the spawned process.
+	// (SIGINT) or this child (timeout) stops pkgdev and every process it
+	// started, within procgroup.GracePeriod (S054-R2.2, S054-R2.3).
 	ctx, cancel := context.WithTimeout(s.ctx, manifestTimeout)
 	defer cancel()
 
@@ -235,6 +240,10 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 	// here would manifest the published one — the opposite of what staging is for.
 	cmd := s.execCommand(ctx, "pkgdev", args...)
 	cmd.Dir = stagedPkgDir
+	// Group mode, for the reason runManifest gives: pkgdev's fetchers hold the
+	// output pipe, so stopping pkgdev alone would leave the gate waiting on them.
+	// Group owns cmd.Cancel and cmd.WaitDelay; cmd.Stdin stays nil (/dev/null).
+	procgroup.Group(cmd)
 
 	// Streamed live as TaskLine events under the package's own task id, and
 	// captured into the error, so a red gate says what pkgdev said. One
@@ -243,7 +252,8 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
 	cmd.Stdout = sc
 	cmd.Stderr = sc
-	runErr := cmd.Run()
+	// A lingering helper after a 0 exit is a success, not exec.ErrWaitDelay.
+	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
 	if runErr != nil {
 		// ErrManifestFailed first, because the promotion decision classifies on

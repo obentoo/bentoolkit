@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"go/parser"
@@ -823,7 +824,7 @@ func TestDistfileNameReductionsAgreeAcrossPackages(t *testing.T) {
 
 			// The other side, observed rather than called.
 			dir := t.TempDir()
-			lock, err := distfiles.LockFetch(dir, []string{raw})
+			lock, err := distfiles.LockFetch(context.Background(), dir, []string{raw})
 			if err != nil {
 				t.Fatalf("LockFetch(%q) error = %v; a name that does not reduce is skipped, never an error", raw, err)
 			}

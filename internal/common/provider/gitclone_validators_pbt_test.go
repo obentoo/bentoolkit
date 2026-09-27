@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 	"unicode/utf8"
@@ -16,7 +17,7 @@ import (
 func gitChecksRefFormat(b string) bool {
 	// b is only ever a value that ValidateBranch already accepted, so it has
 	// no leading "-" and cannot be misinterpreted by git as an option flag.
-	cmd := exec.Command("git", "check-ref-format", "--branch", b)
+	cmd := exec.CommandContext(context.Background(), "git", "check-ref-format", "--branch", b)
 	return cmd.Run() == nil
 }
 

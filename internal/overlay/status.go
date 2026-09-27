@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -154,20 +155,20 @@ func GroupStatusEntries(entries []git.StatusEntry) []PackageStatus {
 }
 
 // Status retrieves and groups the current git status for the overlay
-func Status(cfg *config.Config) ([]PackageStatus, error) {
+func Status(ctx context.Context, cfg *config.Config) ([]PackageStatus, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return StatusWithExecutor(runner)
+	return StatusWithExecutor(ctx, runner)
 }
 
 // StatusWithExecutor retrieves and groups the current git status using the provided GitExecutor.
 // This function is useful for testing with mock implementations.
-func StatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
-	entries, err := executor.Status()
+func StatusWithExecutor(ctx context.Context, executor git.GitExecutor) ([]PackageStatus, error) {
+	entries, err := executor.Status(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -178,20 +179,20 @@ func StatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
 // StagedStatus retrieves and groups only the changes staged in the index,
 // i.e. exactly what a commit would include. Unlike Status, it ignores files
 // that are merely modified in the worktree but not staged.
-func StagedStatus(cfg *config.Config) ([]PackageStatus, error) {
+func StagedStatus(ctx context.Context, cfg *config.Config) ([]PackageStatus, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return StagedStatusWithExecutor(runner)
+	return StagedStatusWithExecutor(ctx, runner)
 }
 
 // StagedStatusWithExecutor retrieves and groups the staged git status using the
 // provided GitExecutor. This function is useful for testing with mocks.
-func StagedStatusWithExecutor(executor git.GitExecutor) ([]PackageStatus, error) {
-	entries, err := executor.StagedStatus()
+func StagedStatusWithExecutor(ctx context.Context, executor git.GitExecutor) ([]PackageStatus, error) {
+	entries, err := executor.StagedStatus(ctx)
 	if err != nil {
 		return nil, err
 	}
