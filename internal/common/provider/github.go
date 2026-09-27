@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -138,6 +139,9 @@ func (p *GitHubProvider) fetchPackageVersions(category, pkg string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
+	// Cap every read of this body: an oversized or hostile response fails
+	// with httputil.ErrResponseTooLarge instead of exhausting memory.
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	// Handle rate limiting
@@ -153,14 +157,19 @@ func (p *GitHubProvider) fetchPackageVersions(category, pkg string) ([]string, e
 
 	// Handle other errors
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		// The quoted error body is best-effort, except that an oversized one
+		// is reported as such rather than quoted.
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr = httputil.ClassifyBodyReadError(readErr); errors.Is(readErr, httputil.ErrResponseTooLarge) {
+			return nil, fmt.Errorf("reading GitHub error response for %s/%s: %w", category, pkg, readErr)
+		}
 		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading GitHub response for %s/%s: %w", category, pkg, httputil.ClassifyBodyReadError(err))
 	}
 
 	var entries []ContentEntry
@@ -275,11 +284,12 @@ func (p *GitHubProvider) GetRateLimitInfo() (remaining int, resetTime time.Time,
 	if err != nil {
 		return 0, time.Time{}, err
 	}
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, fmt.Errorf("reading GitHub rate_limit response: %w", httputil.ClassifyBodyReadError(err))
 	}
 
 	var result struct {
