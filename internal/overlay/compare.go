@@ -3,7 +3,9 @@ package overlay
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
 // DefaultCompareConcurrency is the number of packages CompareWithProvider
@@ -106,6 +109,17 @@ type CompareResult struct {
 	// result that pass never reached already carries, so a run with no review
 	// is correct without anything being set.
 	Reading Reading
+
+	// LookupCause is why the upstream lookup failed. It is meaningful only when
+	// Status == StatusError and is LookupCauseNone otherwise: a lookup that
+	// succeeded has no cause to report.
+	LookupCause LookupCause
+	// FailureText is the full Error() text of whatever failed on this row —
+	// the upstream lookup when Status == StatusError, the review when Reading
+	// == ReadingFailed — after every CompareOptions.Redact value has been
+	// scrubbed from it. It is empty on a row with no failure. It is kept whole
+	// here; only a renderer's table cell may cut it.
+	FailureText string
 
 	// The fields below carry the BASELINE REVIEW: what our ebuild was measured
 	// against, and what that measurement found. They are filled by one pass,
@@ -434,6 +448,10 @@ type CompareOptions struct {
 	// from. PackageInfo carries only Category/Package/Versions/LatestVersion, so
 	// a check that must open the local ebuild gets its overlay-side root here.
 	OverlayPath string
+	// Redact lists values removed from any recorded failure text with
+	// secrets.Scrub, so a token echoed inside an error reaches no report. nil
+	// redacts nothing; an empty entry is ignored.
+	Redact []string
 }
 
 // CompareReport contains the full comparison report
@@ -576,6 +594,76 @@ type CompareReport struct {
 	Interrupted bool
 }
 
+// LookupCause is why an upstream lookup failed: a closed vocabulary, so an
+// operator can tell "wait for the rate limit" from "fix the token" from "check
+// the network" without reading the error text.
+type LookupCause int
+
+const (
+	// LookupCauseNone is the zero value: no lookup failed.
+	LookupCauseNone LookupCause = iota
+	// LookupRateLimited: the host refused for rate limiting (provider.ErrRateLimit).
+	LookupRateLimited
+	// LookupAuth: the host rejected the credentials (provider.ErrUnauthorized).
+	LookupAuth
+	// LookupNetwork: the request never got an HTTP answer (a net.Error).
+	LookupNetwork
+	// LookupNotFound: the package is absent upstream (provider.ErrNotFound).
+	// comparePackageVersions turns that into StatusNotInRemote first, so it is
+	// reachable only through classifyLookupError itself.
+	LookupNotFound
+	// LookupOther: any failure none of the above matches.
+	LookupOther
+)
+
+// String returns the cause's word; see lookupCauseWord.
+func (c LookupCause) String() string { return lookupCauseWord(c) }
+
+// lookupCauseWord spells a LookupCause in the report's vocabulary. The zero
+// value spells nothing.
+func lookupCauseWord(c LookupCause) string {
+	switch c {
+	case LookupRateLimited:
+		return "rate-limited"
+	case LookupAuth:
+		return "auth"
+	case LookupNetwork:
+		return "network"
+	case LookupNotFound:
+		return "not found upstream"
+	case LookupOther:
+		return "other"
+	}
+	return ""
+}
+
+// classifyLookupError maps a failed GetPackageVersions to its LookupCause. It
+// reads sentinels and types only, never the text: an error that merely reads
+// like a rate limit is "other". A 401 matches ErrAPIError too, which is why
+// only the specific sentinels are tested and ErrAPIError falls to "other".
+func classifyLookupError(err error) LookupCause {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, provider.ErrRateLimit):
+		return LookupRateLimited
+	case errors.Is(err, provider.ErrUnauthorized):
+		return LookupAuth
+	case errors.As(err, &netErr):
+		return LookupNetwork
+	case errors.Is(err, provider.ErrNotFound):
+		return LookupNotFound
+	}
+	return LookupOther
+}
+
+// redactFailure scrubs every value in values out of s with secrets.Scrub.
+func redactFailure(s string, values []string) string {
+	for _, v := range values {
+		s = secrets.Scrub(s, v)
+	}
+	return s
+}
+
 // githubProviderAdapter adapts a *github.Client to the provider.Provider interface,
 // allowing Compare() to delegate to CompareWithProvider().
 type githubProviderAdapter struct {
@@ -583,14 +671,38 @@ type githubProviderAdapter struct {
 }
 
 // GetPackageVersions returns all ebuild versions for a package via the GitHub client.
-// Maps github.ErrNotFound to provider.ErrNotFound for interface compatibility.
+// Maps github.ErrNotFound to provider.ErrNotFound for interface compatibility,
+// and every other github sentinel to its provider counterpart without changing
+// the client's text (see `type translatedErr`).
 func (a *githubProviderAdapter) GetPackageVersions(category, pkg string) ([]string, error) {
 	versions, err := a.client.GetPackageVersions(category, pkg)
-	if err == github.ErrNotFound {
+	switch {
+	case err == nil:
+		return versions, nil
+	case errors.Is(err, github.ErrNotFound):
 		return nil, provider.ErrNotFound
+	case errors.Is(err, github.ErrRateLimit):
+		return nil, translatedErr{err: err, sentinel: provider.ErrRateLimit}
+	// A 401 matches both ErrUnauthorized and ErrAPIError, so it is tested first.
+	case errors.Is(err, github.ErrUnauthorized):
+		return nil, translatedErr{err: err, sentinel: errors.Join(provider.ErrUnauthorized, provider.ErrAPIError)}
+	case errors.Is(err, github.ErrAPIError):
+		return nil, translatedErr{err: err, sentinel: provider.ErrAPIError}
 	}
 	return versions, err
 }
+
+// translatedErr makes a github client error also match a provider sentinel
+// while keeping Error() byte-identical to the client's text. Wrapping with
+// fmt.Errorf("%w: %w", ...) would prepend the provider sentinel's own sentence.
+type translatedErr struct {
+	err      error
+	sentinel error
+}
+
+func (e translatedErr) Error() string { return e.err.Error() }
+
+func (e translatedErr) Unwrap() []error { return []error{e.err, e.sentinel} }
 
 // GetName returns the provider name.
 func (a *githubProviderAdapter) GetName() string { return "github" }
@@ -817,6 +929,9 @@ func sortCompareResults(results []CompareResult) {
 // convention.
 func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
 	result := comparePackageVersions(pkg, prov)
+	// comparePackageVersions has no opts, so the text it recorded is scrubbed
+	// here, before anything else can read it.
+	result.FailureText = redactFailure(result.FailureText, opts.Redact)
 
 	// Content verification runs HERE, on a result that so far carries only the
 	// version comparison, and it is deliberately placed above the annotation
@@ -867,11 +982,13 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 	// Fetch remote versions
 	remoteVersions, err := prov.GetPackageVersions(pkg.Category, pkg.Package)
 	if err != nil {
-		if err == provider.ErrNotFound {
+		if errors.Is(err, provider.ErrNotFound) {
 			result.Status = StatusNotInRemote
 			return result
 		}
 		result.Status = StatusError
+		result.LookupCause = classifyLookupError(err)
+		result.FailureText = err.Error()
 		return result
 	}
 
@@ -1411,7 +1528,16 @@ func comparedDetail(r CompareResult) string {
 	case StatusNotInRemote:
 		return fmt.Sprintf("::gentoo carries no version of this package; the overlay carries %s", r.LocalVersion)
 	case StatusError:
-		return "the comparison failed, so nothing is known about how the two versions relate"
+		// A result built without a cause (by hand, or by a caller that predates
+		// LookupCause) keeps the sentence it always had.
+		if r.LookupCause == LookupCauseNone {
+			return "the comparison failed, so nothing is known about how the two versions relate"
+		}
+		text := oneLine(r.FailureText)
+		if text == "" {
+			return fmt.Sprintf("the upstream lookup failed (%s)", lookupCauseWord(r.LookupCause))
+		}
+		return fmt.Sprintf("the upstream lookup failed (%s): %s", lookupCauseWord(r.LookupCause), text)
 	default:
 		// Unreachable while CompareStatus has its five values. A sixth added later
 		// says that it is unaccounted for rather than claiming one of the five.

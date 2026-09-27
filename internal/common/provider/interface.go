@@ -9,6 +9,10 @@ var (
 	ErrRateLimit = errors.New("API rate limit exceeded")
 	// ErrAPIError indicates a general API error
 	ErrAPIError = errors.New("API error")
+	// ErrUnauthorized indicates the host rejected the credentials (HTTP 401).
+	// An error carrying it also matches ErrAPIError, so callers that only
+	// know about ErrAPIError keep treating a 401 as one.
+	ErrUnauthorized = errors.New("authentication rejected")
 	// ErrCloneFailed indicates git clone operation failed
 	ErrCloneFailed = errors.New("git clone failed")
 	// ErrInvalidRepoURL indicates the repository URL has a scheme outside the

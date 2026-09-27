@@ -163,6 +163,12 @@ func (p *GitLabProvider) fetchPackageVersions(category, pkg string) ([]string, e
 		return nil, ErrNotFound
 	}
 
+	// Handle rejected credentials: still an API error, and also an auth one
+	if resp.StatusCode == http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		return nil, fmt.Errorf("%w: %w: status %d: %s", ErrAPIError, ErrUnauthorized, resp.StatusCode, string(body))
+	}
+
 	// Handle other errors
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
