@@ -62,6 +62,9 @@ const (
 	DefaultOllamaEndpoint = "http://localhost:11434"
 	// DefaultOllamaModel is the default Ollama model.
 	DefaultOllamaModel = "llama3"
+	// ollamaClientTimeout bounds one local inference. It is also the header
+	// wait, because a non-streaming inference answers only when it is done.
+	ollamaClientTimeout = 120 * time.Second
 )
 
 // ErrOllamaConnectionFailed is returned when connection to Ollama server fails
@@ -82,6 +85,11 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 		baseURL = DefaultOllamaEndpoint
 	}
 
+	// A non-streaming local inference sends no response headers until it has
+	// finished, so the transport's default header wait would cut it short.
+	transport := httputil.BuildTransport()
+	transport.ResponseHeaderTimeout = ollamaClientTimeout
+
 	return &OllamaClient{
 		config: LLMConfig{
 			Provider: "ollama",
@@ -89,8 +97,8 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 			BaseURL:  baseURL,
 		},
 		httpClient: &http.Client{
-			Timeout:   120 * time.Second, // Longer timeout for local inference
-			Transport: httputil.BuildTransport(),
+			Timeout:   ollamaClientTimeout,
+			Transport: transport,
 		},
 		baseURL:      baseURL,
 		maxBodyBytes: httputil.MaxBodyBytes,

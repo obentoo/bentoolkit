@@ -151,10 +151,15 @@ func (p *GitCloneProvider) Close() error {
 	return nil
 }
 
-// GetPackageVersions returns all ebuild versions for a package
-func (p *GitCloneProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+// GetPackageVersions returns all ebuild versions for a package. A ctx that is
+// already done returns its error before the repository is touched.
+func (p *GitCloneProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("git-clone lookup %s/%s: %w", category, pkg, err)
+	}
+
 	// Ensure repo is cloned/updated
-	if err := p.ensureRepo(); err != nil {
+	if err := p.ensureRepo(ctx); err != nil {
 		return nil, err
 	}
 
@@ -167,8 +172,9 @@ func (p *GitCloneProvider) GetPackageVersions(category, pkg string) ([]string, e
 // repository, ensuring the repo is present/up-to-date first. It returns
 // ErrNotFound if the package directory does not exist.
 func (p *GitCloneProvider) LocalPackagePath(category, pkg string) (string, error) {
-	// Ensure repo is cloned/updated
-	if err := p.ensureRepo(); err != nil {
+	// Ensure repo is cloned/updated. PackageDirProvider carries no context, so
+	// none reaches the clone from here.
+	if err := p.ensureRepo(context.Background()); err != nil { // SAFE: LocalPackagePath has no ctx parameter; the clone stays bounded by DefaultGitCloneTimeout
 		return "", err
 	}
 
@@ -183,8 +189,9 @@ func (p *GitCloneProvider) LocalPackagePath(category, pkg string) (string, error
 	return pkgPath, nil
 }
 
-// ensureRepo ensures the repository is cloned and up-to-date
-func (p *GitCloneProvider) ensureRepo() error {
+// ensureRepo ensures the repository is cloned and up-to-date. ctx is the
+// parent of the clone's own timeout, so a cancelled lookup stops a clone too.
+func (p *GitCloneProvider) ensureRepo(ctx context.Context) error {
 	// Local in-place tree: nothing to clone or update. The directory was
 	// validated to exist in NewLocalProvider and may be a non-git rsync tree.
 	if p.local {
@@ -200,7 +207,7 @@ func (p *GitCloneProvider) ensureRepo() error {
 	}
 
 	// Clone the repository
-	return p.cloneRepo()
+	return p.cloneRepo(ctx)
 }
 
 // repoExists checks if the local repository exists
@@ -223,8 +230,8 @@ func (p *GitCloneProvider) needsUpdate() bool {
 	return time.Since(info.ModTime()) > p.UpdateInterval
 }
 
-// cloneRepo clones the repository
-func (p *GitCloneProvider) cloneRepo() error {
+// cloneRepo clones the repository, bounded by DefaultGitCloneTimeout under ctx.
+func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(p.LocalPath)
 	if err := os.MkdirAll(parentDir, 0o750); err != nil {
@@ -232,9 +239,9 @@ func (p *GitCloneProvider) cloneRepo() error {
 	}
 
 	// Bound the clone with a timeout so a hung or slow remote cannot block
-	// indefinitely. T9 will thread a caller-supplied parent context here;
-	// until then context.Background() is the parent.
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultGitCloneTimeout) // SAFE: pre-T9, parent context will be threaded by T9 (R3)
+	// indefinitely; the caller's context is the parent, so cancelling the
+	// lookup also stops the clone.
+	ctx, cancel := context.WithTimeout(ctx, DefaultGitCloneTimeout)
 	defer cancel()
 
 	// Clone with depth 1 for faster clone (we only need latest files).
@@ -353,7 +360,7 @@ func (p *GitCloneProvider) ForceUpdate() error {
 		return nil
 	}
 	if !p.repoExists() {
-		return p.cloneRepo()
+		return p.cloneRepo(context.Background()) // SAFE: ForceUpdate has no ctx parameter; the clone stays bounded by DefaultGitCloneTimeout
 	}
 	return p.updateRepo()
 }
