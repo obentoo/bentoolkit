@@ -1991,7 +1991,7 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 		if c := ebuild.CompareVersions(kept[i], kept[j]); c != 0 {
 			return c < 0
 		}
-		// Two versions the comparison calls equal ("1.0" and "1.0.0") are still
+		// Two versions the comparison calls equal ("1.0" and "1.0-r0") are still
 		// two files; order them by text so the report is total and stable.
 		return kept[i] < kept[j]
 	})
@@ -2291,7 +2291,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	}
 
 	// Highest ::gentoo version is the base ebuild we copy in.
-	versions, err := prov.GetPackageVersions(category, pkgName)
+	versions, err := prov.GetPackageVersions(ctx, category, pkgName)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
 	}
