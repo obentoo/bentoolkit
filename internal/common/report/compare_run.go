@@ -341,6 +341,12 @@ type CompareRun struct {
 	// adapter fills it either way, and no omitempty drops it — a run with
 	// nothing to say still has to say so (S047-D8).
 	Notes []string `json:"notes"`
+	// ReadingFailures splits the failed readings among Unread by why each
+	// review failed: one {cause, count} per cause, over the same population
+	// Unread counts (S057-R4.5). The cause is a word the adapter spells, as it
+	// spells Reading. No omitempty: a run with no failed review publishes an
+	// empty list, which is the good case.
+	ReadingFailures []CauseCount `json:"reading_failures"`
 }
 
 // ComparePkg is what the run established about one package: which package, the
@@ -476,6 +482,23 @@ type ComparePkg struct {
 	// package with a single finding is the common case, and the common case is
 	// the one that would lose its empty list (S047-D8).
 	FurtherFindings []string `json:"further_findings"`
+	// Cause is why this row failed, in the adapter's closed vocabulary: the
+	// upstream lookup's cause on a row whose Status is "error", the review's
+	// cause on a row whose Reading is "failed", "" on a row with no failure
+	// (S057-R4.4). No omitempty, for the reason Error gives.
+	Cause string `json:"cause"`
+	// Error is the full text of that failure, folded to one line and scrubbed
+	// of the run's credentials by the producer, and "" on a row with no
+	// failure. It follows ManifestResult.Error (model.go): kept whole here,
+	// never shortened; only a table cell may cut it (S057-R4.6).
+	Error string `json:"error"`
+}
+
+// CauseCount is one entry of CompareRun.ReadingFailures: how many failed
+// readings share one cause.
+type CauseCount struct {
+	Cause string `json:"cause"`
+	Count int    `json:"count"`
 }
 
 // KeepGroup is a set of packages that share one version pair.
@@ -1004,6 +1027,45 @@ const (
 // there.
 const compareReadingFailedMark = "[reading failed]"
 
+// compareReviewCauseOrder is the review-cause vocabulary in its stated order
+// (S057-R4.3). The scope note orders ReadingFailures by count, highest first,
+// and breaks ties by this order, so the note reads the same whatever order the
+// producer listed the entries in. A cause missing from it sorts last.
+var compareReviewCauseOrder = []string{
+	"timed out", "could not start", "exited non-zero", "empty or unusable reply",
+	"cancelled", "ebuild unreadable", "other",
+}
+
+// compareFailureCounts renders ReadingFailures as "<n> <cause>" joined by ", ",
+// highest count first and ties in compareReviewCauseOrder (S057-R4.3).
+func compareFailureCounts(failures []CauseCount) string {
+	rank := func(cause string) int {
+		for i, c := range compareReviewCauseOrder {
+			if c == cause {
+				return i
+			}
+		}
+		return len(compareReviewCauseOrder)
+	}
+	sorted := make([]CauseCount, 0, len(failures))
+	for _, f := range failures {
+		if f.Count > 0 {
+			sorted = append(sorted, f)
+		}
+	}
+	slices.SortStableFunc(sorted, func(a, b CauseCount) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+		return rank(a.Cause) - rank(b.Cause)
+	})
+	parts := make([]string, 0, len(sorted))
+	for _, f := range sorted {
+		parts = append(parts, fmt.Sprintf("%d %s", f.Count, f.Cause))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // Sections is the compare run as structure: what it says, in order, with every
 // value at full length and not one decision about how it will look. It is also
 // what makes CompareRun satisfy the Payload interface, for the first time
@@ -1136,6 +1198,9 @@ func compareScopeSection(r CompareRun) Section {
 		s.Notes = []string{fmt.Sprintf(
 			"%d comparison(s) %s never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it.",
 			r.Unread, compareAgrees(r.Unread, "was", "were"), compareReadingFailedMark)}
+		if counts := compareFailureCounts(r.ReadingFailures); counts != "" {
+			s.Notes[0] += " The failed reviews, by cause: " + counts + "."
+		}
 	}
 
 	return s
@@ -1786,10 +1851,16 @@ func compareDetail(p ComparePkg) string {
 	if p.Reading != readingFailed {
 		return reason
 	}
-	if reason == "" {
-		return compareReadingFailedMark
+	// The marker names the review's cause when one was recorded (S057-R4.2),
+	// and stays the bare marker the scope note explains when none was.
+	mark := compareReadingFailedMark
+	if p.Cause != "" {
+		mark = "[reading failed: " + p.Cause + "]"
 	}
-	return reason + " " + compareReadingFailedMark
+	if reason == "" {
+		return mark
+	}
+	return reason + " " + mark
 }
 
 // compareRepository is the compared repository as the report names it in

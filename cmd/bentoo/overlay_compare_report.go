@@ -29,6 +29,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -205,8 +206,14 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 	// the opposite of what the counts do: a sentence about a package is read
 	// beside that package's row, and a row `--only-redundant` removed has none.
 	reasons, extra := comparePackageFindings(rep.Findings)
+	lookupReasons := compareLookupReasons(rep.Findings, rep.Results)
 	for _, result := range rep.Results {
 		pkg := comparePkgFacts(result, reasons, extra)
+		if pkg.Reason == "" {
+			// A failed lookup has no finding of its own, so its reason is the
+			// comparison's sentence, which names the cause (S057-R4.1).
+			pkg.Reason = compareOneLine(lookupReasons[pkg.Package])
+		}
 		switch result.Verdict {
 		case overlay.VerdictRedundant:
 			payload.Redundant = append(payload.Redundant, pkg)
@@ -233,11 +240,19 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 	// maintained over every package. One of the two shrinking under
 	// `--only-patched` while the others did not would put two populations in one
 	// section under one heading (S047-R5.2).
+	//
+	// ReadingFailures splits the failed readings among them by cause, in the
+	// same walk, so the two are one population by construction (S057-R4.5).
+	failures := map[string]int{}
 	for _, result := range whole {
 		if result.Reading != overlay.ReadingDone {
 			payload.Unread++
 		}
+		if result.Reading == overlay.ReadingFailed {
+			failures[compareCauseWord(result)]++
+		}
 	}
+	payload.ReadingFailures = compareCauseCounts(failures)
 
 	// The call sub-task 2.3 left owing. GroupKeep is a package-level function
 	// rather than a method that fills this field, so the assignment is written
@@ -405,7 +420,110 @@ func comparePkgFacts(result overlay.CompareResult, reasons map[string]string, ex
 		Reason:  compareOneLine(reasons[atom]),
 
 		FurtherFindings: further,
+
+		Cause: compareCauseWord(result),
+		Error: compareOneLine(result.FailureText),
 	}
+}
+
+// compareLookupReasons returns, for every result whose upstream lookup failed,
+// the comparison's own sentence about it. `func comparePackageFindings` skips
+// FindingCompared, because on every other row that sentence only restates the
+// version columns; on a failed lookup it is the only thing that says why
+// (S057-R4.1), so it is kept here and for those rows alone.
+func compareLookupReasons(findings []overlay.Finding, results []overlay.CompareResult) map[string]string {
+	failed := make(map[string]bool)
+	for _, result := range results {
+		if result.Status == overlay.StatusError {
+			failed[result.Category+"/"+result.Package] = true
+		}
+	}
+	reasons := make(map[string]string, len(failed))
+	for _, finding := range findings {
+		if finding.Kind == overlay.FindingCompared && failed[finding.Atom] {
+			reasons[finding.Atom] = finding.Detail
+		}
+	}
+	return reasons
+}
+
+// compareCauseOrder is the review-cause vocabulary in its stated order, which
+// breaks ties when the causes are counted (S057-R4.3). It is spelled here, as
+// `func compareReadingWord` spells the reading words, and the report package
+// holds the same list for the same reason.
+var compareCauseOrder = []string{
+	"timed out", "could not start", "exited non-zero", "empty or unusable reply",
+	"cancelled", "ebuild unreadable", "other",
+}
+
+// compareCauseWord is the report's word for why this row failed (S057-R4.4):
+// the lookup's cause on a row whose lookup failed, the review's cause on a row
+// whose reading failed, and "" on a row with no failure. A failed reading with
+// no recorded cause — a result built by hand — also reads "".
+func compareCauseWord(result overlay.CompareResult) string {
+	if result.Status == overlay.StatusError {
+		switch result.LookupCause {
+		case overlay.LookupRateLimited:
+			return "rate-limited"
+		case overlay.LookupAuth:
+			return "auth"
+		case overlay.LookupNetwork:
+			return "network"
+		case overlay.LookupNotFound:
+			return "not found upstream"
+		case overlay.LookupOther:
+			return "other"
+		}
+		return ""
+	}
+	if result.Reading != overlay.ReadingFailed {
+		return ""
+	}
+	switch result.ReviewFailure {
+	case overlay.ReviewTimedOut:
+		return "timed out"
+	case overlay.ReviewCouldNotStart:
+		return "could not start"
+	case overlay.ReviewExitedNonZero:
+		return "exited non-zero"
+	case overlay.ReviewUnusableReply:
+		return "empty or unusable reply"
+	case overlay.ReviewCancelled:
+		return "cancelled"
+	case overlay.ReviewEbuildUnreadable:
+		return "ebuild unreadable"
+	case overlay.ReviewOther:
+		return "other"
+	}
+	return ""
+}
+
+// compareCauseCounts turns a cause tally into report entries, highest count
+// first and ties in compareCauseOrder. A cause outside the vocabulary sorts
+// last. The result is never nil: a run with no failed review publishes [].
+func compareCauseCounts(tally map[string]int) []report.CauseCount {
+	rank := func(cause string) int {
+		if i := slices.Index(compareCauseOrder, cause); i >= 0 {
+			return i
+		}
+		return len(compareCauseOrder)
+	}
+	out := make([]report.CauseCount, 0, len(tally))
+	for cause, count := range tally {
+		if count > 0 {
+			out = append(out, report.CauseCount{Cause: cause, Count: count})
+		}
+	}
+	slices.SortFunc(out, func(a, b report.CauseCount) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+		if d := rank(a.Cause) - rank(b.Cause); d != 0 {
+			return d
+		}
+		return strings.Compare(a.Cause, b.Cause)
+	})
+	return out
 }
 
 // compareReadingWord is the report's word for whether anybody read this
@@ -1043,10 +1161,23 @@ func compareRealignNote(rep *overlay.CompareReport, realignRan, judged, noReview
 	if rep == nil || rep.RealignNoVerdict <= 0 {
 		return ""
 	}
+	// The per-cause counts follow the count they split (S057-R3.2).
+	byCause := ""
+	if len(rep.RealignNoVerdictBy) > 0 {
+		tally := make(map[string]int, len(rep.RealignNoVerdictBy))
+		for failure, n := range rep.RealignNoVerdictBy {
+			tally[compareCauseWord(overlay.CompareResult{Reading: overlay.ReadingFailed, ReviewFailure: failure})] += n
+		}
+		parts := make([]string, 0, len(tally))
+		for _, c := range compareCauseCounts(tally) {
+			parts = append(parts, fmt.Sprintf("%d %s", c.Count, c.Cause))
+		}
+		byCause = " (" + strings.Join(parts, ", ") + ")"
+	}
 	return fmt.Sprintf(
-		"Realignment verdicts: %d of the %d divergences put to the model came back with no verdict — they were not judged, and an unjudged divergence is not a justified one. "+
+		"Realignment verdicts: %d of the %d divergences put to the model came back with no verdict%s — they were not judged, and an unjudged divergence is not a justified one. "+
 			"What they state was established by reading files and stands without a model.",
-		rep.RealignNoVerdict, rep.RealignAsked)
+		rep.RealignNoVerdict, rep.RealignAsked, byCause)
 }
 
 // comparePruneAdvice is how an operator acts on the removal recommendation
