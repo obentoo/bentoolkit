@@ -81,13 +81,27 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
+	// Wire the signals signalContext listens for into a context and hand it to
+	// the analyzer (its HTTP and LLM calls) and to the LLM provider. The `claude`
+	// CLI runs in its own process group, so a Ctrl+C at the terminal no longer
+	// reaches it: without this context an interrupt killed bentoo and left
+	// `claude` running (story 054, R4.3). stop is deferred for the paths that
+	// return; the ones that end in osExit skip it, which is harmless — the
+	// process, and with it the handler, is gone — and under a test's exit
+	// intercept the unwinding panic still runs it.
+	runCtx, stop := signalContext(cmd.Context())
+	defer stop()
+
 	// Build analyzer options, conditionally injecting an LLM provider. When a
 	// provider is configured but cannot be constructed (e.g. the `claude` CLI is
 	// absent or not authenticated), we log a Warn and fall back to the heuristic
 	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
-	analyzerOpts := []autoupdate.AnalyzerOption{autoupdate.WithAnalyzerConfigDir(configDir)}
+	analyzerOpts := []autoupdate.AnalyzerOption{
+		autoupdate.WithAnalyzerConfigDir(configDir),
+		autoupdate.WithAnalyzerContext(runCtx),
+	}
 	llmCfg := ctx.Config.Autoupdate.LLM
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(runCtx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		analyzerOpts = append(analyzerOpts, autoupdate.WithAnalyzerLLMClient(p))

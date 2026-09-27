@@ -743,7 +743,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
 	// (R5.3) and we avoid a double-warn with the failure line just below.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -2043,7 +2043,7 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpT
 	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
 	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
 	// "unused llm_prompt" Warn when a provider was requested.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
