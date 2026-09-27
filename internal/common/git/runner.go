@@ -236,12 +236,20 @@ func ParseStatusOutput(output string) []StatusEntry {
 	return entries
 }
 
+// bentooScratchExclude is a pathspec that keeps bentoo's scratch files out of
+// every `git add` this package runs: the temporary files of an atomic write
+// (".<name>.bentoo-<pid>-<random>"), the realign and promote temporaries, and
+// the lock files (".autoupdate.bentoo-lock", ".state.bentoo-lock"). A killed
+// run can leave one of them in the overlay, and staging it would commit and
+// publish it.
+const bentooScratchExclude = ":(exclude,glob)**/.*.bentoo-*"
+
 // Add stages files for commit with path validation
 func (g *GitRunner) Add(paths ...string) error {
 	return g.staged("add", func() error {
 		if len(paths) == 0 {
 			// Default to adding all changes
-			_, _, err := g.runCommand("add", ".")
+			_, _, err := g.runCommand("add", "--", ".", bentooScratchExclude)
 			return err
 		}
 
@@ -322,7 +330,7 @@ func (g *GitRunner) validateAndAddPath(path string) error {
 	}
 
 	// Add the file to staging
-	_, _, err = g.runCommand("add", path)
+	_, _, err = g.runCommand("add", "--", path, bentooScratchExclude)
 	return err
 }
 
