@@ -662,9 +662,9 @@ func TestLintFixWritePreservesFileMode(t *testing.T) {
 			if string(data) != res.Repaired {
 				t.Fatal("the file on disk is not the repaired text")
 			}
-			if _, err := os.Stat(configPath + ".tmp"); !os.IsNotExist(err) {
-				t.Error("the temp file was left behind beside the registry")
-			}
+			// The temporary name is random, so "no packages.toml.tmp" would pass
+			// whatever was left behind; the directory must hold the registry alone.
+			assertOnlyRegistry(t, configPath)
 		})
 	}
 }
@@ -689,8 +689,23 @@ func TestLintFixWriteIsAtomic(t *testing.T) {
 	if err := res.Write(); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := os.Stat(configPath + ".tmp"); !os.IsNotExist(err) {
-		t.Error("a no-op write created a temp file")
+	assertOnlyRegistry(t, configPath)
+}
+
+// assertOnlyRegistry fails t unless packages.toml is the only entry in its
+// directory: a write left no temporary file, whatever name it was given.
+func assertOnlyRegistry(t *testing.T, configPath string) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(configPath))
+	if err != nil {
+		t.Fatalf("reading %s: %v", filepath.Dir(configPath), err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(configPath) {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("%s holds %q after the write, want exactly [%s]", filepath.Dir(configPath), names, filepath.Base(configPath))
 	}
 }
 

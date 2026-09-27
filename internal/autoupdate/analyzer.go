@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/antchfx/xpath"
 
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
@@ -769,50 +770,35 @@ func (a *Analyzer) savePackagesConfig() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Write to temp file first for atomic operation
-	tmpPath := configPath + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	fail := func(err error) error {
-		f.Close()          //nolint:errcheck
-		os.Remove(tmpPath) //nolint:errcheck
-		return err
-	}
-
 	pkgs := make([]string, 0, len(a.config.Packages))
 	for pkg := range a.config.Packages {
 		pkgs = append(pkgs, pkg)
 	}
 	sort.Strings(pkgs)
 
+	var buf strings.Builder
 	for i, pkg := range pkgs {
 		if i > 0 {
-			if _, err := io.WriteString(f, "\n"); err != nil {
-				return fail(fmt.Errorf("failed to write config: %w", err))
-			}
+			buf.WriteString("\n")
 		}
 		cfg := a.config.Packages[pkg]
-		if _, err := io.WriteString(f, RenderRecord(pkg, &cfg)); err != nil {
-			return fail(fmt.Errorf("failed to write record for %s: %w", pkg, err))
-		}
+		buf.WriteString(RenderRecord(pkg, &cfg))
 	}
 
-	// Checked rather than deferred: a write that only fails on flush would
-	// otherwise be renamed over the registry as if it had succeeded.
-	if err := f.Close(); err != nil {
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to close temp file: %w", err)
+	// The registry keeps the mode it already has; a new one is created 0644,
+	// readable by the rest of the box whatever the umask.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(configPath); err == nil {
+		mode = info.Mode().Perm()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to stat %s: %w", configPath, err)
 	}
 
-	// Rename to final path (atomic on most filesystems)
-	if err := os.Rename(tmpPath, configPath); err != nil {
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to rename config file: %w", err)
+	// Written atomically (see writePackagesConfigAtomically): a crash never
+	// leaves a truncated registry to be committed and published.
+	if err := fileutil.WriteFileAtomic(configPath, []byte(buf.String()), mode); err != nil {
+		return fmt.Errorf("failed to write %s: %w", configPath, err)
 	}
-
 	return nil
 }
 
