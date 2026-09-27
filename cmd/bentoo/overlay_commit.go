@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/git"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -37,13 +38,13 @@ Use -y to skip the confirmation prompt and commit automatically.`,
 }
 
 func runCommit(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
 	}
 
-	cfg := ctx.Config
+	cfg := appCtx.Config
 
 	// Get git user info
 	user, email, err := cfg.GetGitUser()
@@ -57,7 +58,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 
 	// If custom message provided, use it directly
 	if commitMessage != "" {
-		if err := overlay.Commit(cfg, commitMessage); err != nil {
+		if err := commitOverlay(cmd, cfg, commitMessage); err != nil {
 			logger.Error("%v", err)
 			osExit(1)
 		}
@@ -65,10 +66,14 @@ func runCommit(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	overlayPath := ctx.OverlayPath
+	overlayPath := appCtx.OverlayPath
 
 	runner := git.NewGitRunner(overlayPath)
-	entries, err := runner.Status()
+	// Scoped to this one git call, for the reason commitOverlay gives: the
+	// confirmation prompt below must stay killable by Ctrl-C.
+	statusCtx, stopStatus := signalContext(cmd.Context())
+	entries, err := runner.Status(statusCtx)
+	stopStatus()
 	if err != nil {
 		logger.Error("getting status: %v", err)
 		osExit(1)
@@ -111,7 +116,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 
 	// Skip confirmation if -y flag is set
 	if commitYes {
-		if err := overlay.Commit(cfg, generatedMessage); err != nil {
+		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
 			logger.Error("%v", err)
 			osExit(1)
 		}
@@ -133,7 +138,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 	switch input {
 	case "y", "yes", "":
 		// Proceed with generated message
-		if err := overlay.Commit(cfg, generatedMessage); err != nil {
+		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
 			logger.Error("%v", err)
 			osExit(1)
 		}
@@ -152,7 +157,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 			logger.Warn("Commit cancelled (empty message).")
 			osExit(1)
 		}
-		if err := overlay.Commit(cfg, customMessage); err != nil {
+		if err := commitOverlay(cmd, cfg, customMessage); err != nil {
 			logger.Error("%v", err)
 			osExit(1)
 		}
@@ -166,4 +171,17 @@ func runCommit(cmd *cobra.Command, args []string) {
 		logger.Error("Invalid option. Commit cancelled.")
 		osExit(1)
 	}
+}
+
+// commitOverlay runs overlay.Commit under a context that SIGINT and SIGTERM
+// cancel (S054-R5.8).
+//
+// The context lives only as long as the git call, not as long as runCommit.
+// While signalContext is registered, a Ctrl-C cancels its context instead of
+// ending the process, so one held across the confirmation prompt would leave
+// that prompt unkillable: the read on stdin would simply keep waiting.
+func commitOverlay(cmd *cobra.Command, cfg *config.Config, message string) error {
+	ctx, stop := signalContext(cmd.Context())
+	defer stop()
+	return overlay.Commit(ctx, cfg, message)
 }

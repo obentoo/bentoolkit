@@ -4,6 +4,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -198,7 +199,7 @@ func TestIntegrationCommit(t *testing.T) {
 		repo.runGit("add", ".")
 
 		// Get staged changes and generate message
-		changes, err := GetStagedChanges(cfg)
+		changes, err := GetStagedChanges(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("GetStagedChanges() error = %v", err)
 		}
@@ -209,7 +210,7 @@ func TestIntegrationCommit(t *testing.T) {
 		}
 
 		// Commit the changes
-		err = Commit(cfg, message)
+		err = Commit(context.Background(), cfg, message)
 		if err != nil {
 			t.Fatalf("Commit() error = %v", err)
 		}
@@ -234,7 +235,7 @@ func TestIntegrationCommit(t *testing.T) {
 		repo.runGit("add", ".")
 
 		// Commit
-		err := Commit(cfg, "add(app-misc/test-1.0)")
+		err := Commit(context.Background(), cfg, "add(app-misc/test-1.0)")
 		if err != nil {
 			t.Fatalf("Commit() error = %v", err)
 		}
@@ -264,7 +265,7 @@ func TestIntegrationCommit(t *testing.T) {
 		repo.runGit("add", ".")
 
 		// Get changes and generate message
-		changes, err := GetStagedChanges(cfg)
+		changes, err := GetStagedChanges(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("GetStagedChanges() error = %v", err)
 		}
@@ -284,7 +285,7 @@ func TestIntegrationCommit(t *testing.T) {
 		message := GenerateMessage(changes)
 
 		// Commit
-		err = Commit(cfg, message)
+		err = Commit(context.Background(), cfg, message)
 		if err != nil {
 			t.Fatalf("Commit() error = %v", err)
 		}
@@ -303,7 +304,7 @@ func TestIntegrationCommit(t *testing.T) {
 		cfg := repo.newConfig()
 
 		// Try to commit without staging anything
-		err := Commit(cfg, "test message")
+		err := Commit(context.Background(), cfg, "test message")
 		if err == nil {
 			t.Error("Commit() should fail when nothing is staged")
 		}
@@ -330,7 +331,7 @@ func TestIntegrationPush(t *testing.T) {
 		repo.runGit("commit", "-m", "add(app-misc/newpkg-1.0)")
 
 		// Push the changes
-		result, err := Push(cfg)
+		result, err := Push(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("Push() error = %v", err)
 		}
@@ -355,7 +356,7 @@ func TestIntegrationPush(t *testing.T) {
 		// outputting "Everything up-to-date" to stderr.
 		// The current implementation doesn't detect this case
 		// (it only detects up-to-date when git returns an error).
-		result, err := Push(cfg)
+		result, err := Push(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("Push() error = %v", err)
 		}
@@ -384,7 +385,7 @@ func TestIntegrationPush(t *testing.T) {
 		repo.runGit("commit", "-m", "add(app-misc/pkg2-1.0)")
 
 		// Push both commits
-		result, err := Push(cfg)
+		result, err := Push(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("Push() error = %v", err)
 		}
@@ -416,7 +417,7 @@ func TestIntegrationPush(t *testing.T) {
 		repo.runGit("commit", "-m", "test commit")
 
 		// Push should fail (no remote)
-		_, err := Push(cfg)
+		_, err := Push(context.Background(), cfg)
 		if err == nil {
 			t.Error("Push() should fail when no remote is configured")
 		}
@@ -442,7 +443,7 @@ func TestIntegrationPushDryRun(t *testing.T) {
 		repo.runGit("commit", "-m", "add(app-misc/dryrun-1.0)")
 
 		// Dry run should not fail
-		_, err := PushDryRun(cfg)
+		_, err := PushDryRun(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("PushDryRun() error = %v", err)
 		}
@@ -464,7 +465,7 @@ func TestIntegrationPushDryRun(t *testing.T) {
 		cfg := repo.newConfig()
 
 		// No changes to push
-		output, err := PushDryRun(cfg)
+		output, err := PushDryRun(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("PushDryRun() error = %v", err)
 		}
@@ -596,7 +597,7 @@ func TestIntegrationPull(t *testing.T) {
 
 		// Pull main repo
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, false)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -639,7 +640,7 @@ func TestIntegrationPull(t *testing.T) {
 
 		// Pull main repo
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, false)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -672,7 +673,7 @@ func TestIntegrationPull(t *testing.T) {
 
 		// No upstream changes, just pull
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, false)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -709,7 +710,7 @@ func TestIntegrationPull(t *testing.T) {
 		mainRepo.runGit("commit", "-m", "add(app-misc/local-pkg-1.0)")
 
 		runner := mainRepo.newGitRunner()
-		_, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		_, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, false)
 		if err == nil {
 			t.Fatal("PullWithRunner() should refuse to fast-forward diverged history")
 		}
@@ -739,7 +740,7 @@ func TestIntegrationPull(t *testing.T) {
 
 		// Explicitly asking for a merge should succeed (no conflicts)
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullMerge, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullMerge, false)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -775,7 +776,7 @@ func TestIntegrationPull(t *testing.T) {
 		mainRepo.runGit("commit", "-m", "add(app-misc/local-pkg-1.0)")
 
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullRebase, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullRebase, false)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -815,7 +816,7 @@ func TestIntegrationPull(t *testing.T) {
 
 		// An explicit merge should detect the conflict
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullMerge, false)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullMerge, false)
 
 		// The pull should not return an error, but report conflicts
 		if err != nil {
@@ -848,7 +849,7 @@ func TestIntegrationPull(t *testing.T) {
 		mainRepo.writeFile("profiles/repo_name", "work in progress")
 
 		runner := mainRepo.newGitRunner()
-		_, err := PullWithRunner(runner, "origin", PullFFOnly, false)
+		_, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, false)
 		if !errors.Is(err, ErrDirtyWorktree) {
 			t.Errorf("PullWithRunner() error = %v, want ErrDirtyWorktree", err)
 		}
@@ -876,7 +877,7 @@ func TestIntegrationPull(t *testing.T) {
 		before := strings.TrimSpace(mainRepo.runGit("rev-parse", "HEAD"))
 
 		runner := mainRepo.newGitRunner()
-		result, err := PullWithRunner(runner, "origin", PullFFOnly, true)
+		result, err := PullWithRunner(context.Background(), runner, "origin", PullFFOnly, true)
 		if err != nil {
 			t.Fatalf("PullWithRunner() error = %v", err)
 		}
@@ -901,7 +902,7 @@ func TestIntegrationPull(t *testing.T) {
 		defer mainRepo.cleanup()
 
 		runner := mainRepo.newGitRunner()
-		_, err := PullWithRunner(runner, "", PullFFOnly, false)
+		_, err := PullWithRunner(context.Background(), runner, "", PullFFOnly, false)
 
 		if err == nil {
 			t.Error("PullWithRunner() should fail with empty remote")

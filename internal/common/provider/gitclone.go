@@ -9,16 +9,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
-// DefaultGitCloneTimeout is the default timeout applied to a git clone
-// operation before it is cancelled.
-const DefaultGitCloneTimeout = 2 * time.Minute
+// DefaultGitCloneTimeout bounds each git run the provider makes against its
+// remote: a clone, and an update's pull, fetch and reset taken together. When
+// it elapses, git and every process it started are stopped, and the error
+// wraps context.DeadlineExceeded and reads "git <op> timed out after 5m0s"
+// (S054-R5.3, S054-R5.5, S054-R5.9, S054-R5.10).
+const DefaultGitCloneTimeout = 5 * time.Minute
 
-// execCommand is an indirection over exec.CommandContext so the git clone
-// invocation can be replaced in tests (e.g. the timeout test). Production code
-// always uses exec.CommandContext.
+// gitTimeout is the bound cloneRepo and updateRepo apply. It is
+// DefaultGitCloneTimeout, except inside this package's own tests, which shorten
+// it to watch the bound expire. A caller's short deadline cannot show that:
+// then the caller's deadline expired, not the bound.
+var gitTimeout = DefaultGitCloneTimeout
+
+// execCommand is an indirection over exec.CommandContext so the git
+// invocations can be replaced in tests (e.g. the timeout tests). Production
+// code always uses exec.CommandContext. A replacement must build its command
+// with exec.CommandContext on the context it receives: gitCommand sets the
+// command's Cancel (procgroup.Group), and os/exec refuses to start a command
+// that has a Cancel but no context.
 var execCommand = exec.CommandContext
 
 // GitCloneProvider fetches package versions by cloning a git repository
@@ -194,7 +207,7 @@ func (p *GitCloneProvider) ensureRepo() error {
 	if p.repoExists() {
 		// Check if we need to update
 		if p.needsUpdate() {
-			return p.updateRepo()
+			return p.updateRepo(context.Background()) // SAFE: no caller context reaches ensureRepo yet; story 055 (B7) threads the real one through GetPackageVersions. updateRepo still bounds the run by DefaultGitCloneTimeout
 		}
 		return nil
 	}
@@ -232,9 +245,10 @@ func (p *GitCloneProvider) cloneRepo() error {
 	}
 
 	// Bound the clone with a timeout so a hung or slow remote cannot block
-	// indefinitely. T9 will thread a caller-supplied parent context here;
-	// until then context.Background() is the parent.
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultGitCloneTimeout) // SAFE: pre-T9, parent context will be threaded by T9 (R3)
+	// indefinitely; git runs in group mode (gitCommand), so the bound stops its
+	// transport too (S054-R5.10).
+	parent := context.Background() // SAFE: no caller context reaches cloneRepo yet; story 055 (B7) threads the real one. The clone is still bounded by DefaultGitCloneTimeout
+	ctx, cancel := context.WithTimeout(parent, gitTimeout)
 	defer cancel()
 
 	// Clone with depth 1 for faster clone (we only need latest files).
@@ -242,7 +256,9 @@ func (p *GitCloneProvider) cloneRepo() error {
 	// interpret the positional URL/path as an option, even if it begins
 	// with "-" (defense-in-depth against flag-injection; AD-9). The
 	// documented syntax is: git clone [<options>] [--] <repo> [<dir>].
-	cmd := execCommand(ctx, "git", "clone",
+	// p.Branch needs no separator: it is the value of --branch, which git
+	// takes as given and never parses as an option.
+	cmd := gitCommand(ctx, "clone",
 		"--depth", "1",
 		"--single-branch",
 		"--branch", p.Branch,
@@ -266,14 +282,15 @@ func (p *GitCloneProvider) cloneRepo() error {
 	cmd.Stdout = sc
 	cmd.Stderr = sc
 
-	err := cmd.Run()
+	err := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
 
 	rep.TaskDone(p.taskID, err == nil, "", "")
 
 	if err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("%w: %v: %s", ErrCloneFailed, ctx.Err(), sc.Captured())
+		// Captured() is already bounded to its last tui.MaxCapturedBytes.
+		if stop := interrupted(parent, ctx, "clone"); stop != nil {
+			return fmt.Errorf("%w: cloning into %s: %w: %s", ErrCloneFailed, p.LocalPath, stop, sc.Captured())
 		}
 		return fmt.Errorf("%w: %s: %s", ErrCloneFailed, err.Error(), sc.Captured())
 	}
@@ -281,30 +298,105 @@ func (p *GitCloneProvider) cloneRepo() error {
 	return nil
 }
 
-// updateRepo updates the repository.
+// updateRepo brings the clone at p.LocalPath up to date: git pull --ff-only,
+// and when the pull fails, git fetch plus git reset --hard to the fetched
+// branch.
 //
-// G204 (gosec) is suppressed on the three exec sites below: the command name
-// is always the fixed literal "git"; p.LocalPath is a process-controlled cache
-// path (filepath.Join of ~/.cache with a "/"-sanitized repo name set in
-// NewGitCloneProvider, never user input); and p.Branch was validated by
-// ValidateBranch in NewGitCloneProvider, so it cannot inject a git flag even
-// when concatenated into "origin/"+p.Branch.
-func (p *GitCloneProvider) updateRepo() error {
-	cmd := exec.Command("git", "-C", p.LocalPath, "pull", "--ff-only") //nolint:gosec // G204: fixed "git" command; LocalPath is a controlled cache path
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// If pull fails, try a fetch + reset
-		fetchCmd := exec.Command("git", "-C", p.LocalPath, "fetch", "origin", p.Branch) //nolint:gosec // G204: fixed "git" command; LocalPath controlled, Branch validated by ValidateBranch
-		if fetchErr := fetchCmd.Run(); fetchErr != nil {
-			return fmt.Errorf("failed to update repository: %s: %s", err.Error(), string(output))
-		}
+// The three commands share ONE context, bounded by DefaultGitCloneTimeout on
+// top of ctx, so together they take at most that long, and each runs in group
+// mode (gitCommand), so a cancel or the bound stops git together with its
+// transport (S054-R5.9). When ctx is done or the bound elapses, updateRepo
+// returns at once with an error naming the git operation that was running and
+// wrapping the context's error; it never starts the next command.
+//
+// p.Branch reaches git after --end-of-options, so git reads it as a ref even
+// if it begins with "-" (git 2.24 and later), on top of the ValidateBranch
+// check in NewGitCloneProvider. p.LocalPath is the value of -C, which git
+// never parses as an option; it is a cache path the provider derives itself.
+func (p *GitCloneProvider) updateRepo(ctx context.Context) error {
+	runCtx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
 
-		resetCmd := exec.Command("git", "-C", p.LocalPath, "reset", "--hard", "origin/"+p.Branch) //nolint:gosec // G204: fixed "git" command; LocalPath controlled, Branch validated by ValidateBranch
-		if resetErr := resetCmd.Run(); resetErr != nil {
-			return fmt.Errorf("failed to reset repository: %v", resetErr)
+	// stopped returns the error for op when a context ended it, or nil.
+	stopped := func(op string) error {
+		if stop := interrupted(ctx, runCtx, op); stop != nil {
+			return fmt.Errorf("failed to update repository %s: %w", p.LocalPath, stop)
 		}
+		return nil
 	}
 
+	pull := gitCommand(runCtx, "-C", p.LocalPath, "pull", "--ff-only")
+	output, err := pull.CombinedOutput()
+	if err = procgroup.Result(pull, err); err == nil {
+		return nil
+	}
+	if stop := stopped("pull"); stop != nil {
+		return stop
+	}
+
+	// The pull failed on its own: try a fetch + reset.
+	fetch := gitCommand(runCtx, "-C", p.LocalPath, "fetch", "--end-of-options", "origin", p.Branch)
+	if fetchErr := procgroup.Result(fetch, fetch.Run()); fetchErr != nil {
+		if stop := stopped("fetch"); stop != nil {
+			return stop
+		}
+		return fmt.Errorf("failed to update repository %s: git pull: %w; git fetch: %w: %s",
+			p.LocalPath, err, fetchErr, tui.Tail(string(output)))
+	}
+
+	reset := gitCommand(runCtx, "-C", p.LocalPath, "reset", "--hard", "--end-of-options", "origin/"+p.Branch)
+	if resetErr := procgroup.Result(reset, reset.Run()); resetErr != nil {
+		if stop := stopped("reset"); stop != nil {
+			return stop
+		}
+		return fmt.Errorf("failed to update repository %s: git reset --hard origin/%s: %w", p.LocalPath, p.Branch, resetErr)
+	}
+
+	return nil
+}
+
+// gitCommand builds, through the execCommand seam, a git child with args that
+// runs unattended under ctx. The provider's git runs under the autoupdate
+// workers and the compare flow, where nobody answers a prompt, so:
+//
+//   - the child leads its own process group (procgroup.Group): when ctx is
+//     done, git and every process it started (the transport, ssh, a
+//     credential helper) get SIGTERM, and SIGKILL procgroup.GracePeriod later
+//     (S054-R5.9);
+//   - GIT_TERMINAL_PROMPT=0 makes git fail at once where it would otherwise
+//     ask for credentials on the terminal. A child outside the terminal's
+//     foreground group that reads the terminal is stopped by SIGTTIN, so a
+//     prompt would hold the run until the bound. The value overrides the
+//     inherited environment, since os/exec uses the last of duplicate keys.
+//
+// ssh reads a passphrase or a host-key answer from the terminal itself, which
+// GIT_TERMINAL_PROMPT does not govern; such a prompt is ended by the bound.
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := execCommand(ctx, "git", args...)
+	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
+	procgroup.Group(cmd)
+	return cmd
+}
+
+// interrupted returns the error for git operation op when a context ended it,
+// or nil when neither context is done. parent is the caller's context; run is
+// the one bounded by gitTimeout that git ran under.
+//
+// The contexts decide, not git's error: git stopped by the signal reports only
+// "signal: terminated", whatever caused it. A done parent means the caller
+// stopped the run, or the caller's own deadline did, which is not this bound,
+// so the parent's error is wrapped as it is. A done run context under a live
+// parent hit the bound (S054-R5.5). run is read first: contexts never come
+// back to life, so a parent that is live after that read was live before it,
+// and a cancel landing between the two reads is the parent's.
+func interrupted(parent, run context.Context, op string) error {
+	runDone := run.Err() != nil
+	if err := parent.Err(); err != nil {
+		return fmt.Errorf("git %s: %w", op, err)
+	}
+	if runDone {
+		return fmt.Errorf("git %s timed out after %s: %w", op, gitTimeout, run.Err())
+	}
 	return nil
 }
 
@@ -355,7 +447,7 @@ func (p *GitCloneProvider) ForceUpdate() error {
 	if !p.repoExists() {
 		return p.cloneRepo()
 	}
-	return p.updateRepo()
+	return p.updateRepo(context.Background()) // SAFE: no caller context reaches ForceUpdate yet; story 055 (B7) threads the real one. updateRepo still bounds the run by DefaultGitCloneTimeout
 }
 
 // RemoveCache removes the cached repository. It is a no-op for a local in-place

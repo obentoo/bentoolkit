@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -263,7 +264,7 @@ func TestFormatStatusOutput(t *testing.T) {
 func TestStatusWithMockGitRunner(t *testing.T) {
 	t.Run("successful status with multiple entries", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{
 				{Status: "A", FilePath: "app-misc/hello/hello-1.0.ebuild"},
 				{Status: "M", FilePath: "app-misc/hello/Manifest"},
@@ -271,7 +272,7 @@ func TestStatusWithMockGitRunner(t *testing.T) {
 			}, nil
 		}
 
-		statuses, err := StatusWithExecutor(mock)
+		statuses, err := StatusWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Errorf("StatusWithExecutor() error = %v, want nil", err)
 		}
@@ -297,11 +298,11 @@ func TestStatusWithMockGitRunner(t *testing.T) {
 
 	t.Run("empty status", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{}, nil
 		}
 
-		statuses, err := StatusWithExecutor(mock)
+		statuses, err := StatusWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Errorf("StatusWithExecutor() error = %v, want nil", err)
 		}
@@ -313,11 +314,11 @@ func TestStatusWithMockGitRunner(t *testing.T) {
 
 	t.Run("status with error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return nil, errors.New("git status failed: not a git repository")
 		}
 
-		_, err := StatusWithExecutor(mock)
+		_, err := StatusWithExecutor(context.Background(), mock)
 		if err == nil {
 			t.Error("StatusWithExecutor() error = nil, want error")
 		}
@@ -334,7 +335,7 @@ func TestStagedStatusWithMockGitRunner(t *testing.T) {
 	t.Run("uses StagedStatus, not full Status", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
 		// Status (whole worktree) would return three packages...
-		mock.StatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{
 				{Status: "A", FilePath: "app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild"},
 				{Status: "M", FilePath: "app-office/openoffice-bin/openoffice-bin-4.1.16.ebuild"},
@@ -342,13 +343,13 @@ func TestStagedStatusWithMockGitRunner(t *testing.T) {
 			}, nil
 		}
 		// ...but only one is actually staged in the index.
-		mock.StagedStatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StagedStatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{
 				{Status: "A", FilePath: "app-dicts/myspell-hu/myspell-hu-26.2.4.1.ebuild"},
 			}, nil
 		}
 
-		statuses, err := StagedStatusWithExecutor(mock)
+		statuses, err := StagedStatusWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Fatalf("StagedStatusWithExecutor() error = %v, want nil", err)
 		}
@@ -363,11 +364,11 @@ func TestStagedStatusWithMockGitRunner(t *testing.T) {
 
 	t.Run("propagates error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.StagedStatusFunc = func() ([]git.StatusEntry, error) {
+		mock.StagedStatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 			return nil, errors.New("git status failed: not a git repository")
 		}
 
-		if _, err := StagedStatusWithExecutor(mock); err == nil {
+		if _, err := StagedStatusWithExecutor(context.Background(), mock); err == nil {
 			t.Error("StagedStatusWithExecutor() error = nil, want error")
 		}
 	})
@@ -445,11 +446,11 @@ func TestStatusGroupingWithMock(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := git.NewMockGitRunner("/test/overlay")
-			mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 				return tc.entries, nil
 			}
 
-			statuses, err := StatusWithExecutor(mock)
+			statuses, err := StatusWithExecutor(context.Background(), mock)
 			if err != nil {
 				t.Errorf("StatusWithExecutor() error = %v", err)
 			}
@@ -482,13 +483,13 @@ func TestStatusLabelMappingWithMock(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.gitStatus, func(t *testing.T) {
 			mock := git.NewMockGitRunner("/test/overlay")
-			mock.StatusFunc = func() ([]git.StatusEntry, error) {
+			mock.StatusFunc = func(_ context.Context) ([]git.StatusEntry, error) {
 				return []git.StatusEntry{
 					{Status: tc.gitStatus, FilePath: "app-misc/hello/hello-1.0.ebuild"},
 				}, nil
 			}
 
-			statuses, err := StatusWithExecutor(mock)
+			statuses, err := StatusWithExecutor(context.Background(), mock)
 			if err != nil {
 				t.Errorf("StatusWithExecutor() error = %v", err)
 			}
