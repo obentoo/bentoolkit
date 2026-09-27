@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Known limit: GitHub answers a permission problem with 403, and every 403 is
   still read as a rate limit, so a permission 403 reads `rate-limited`. The
   error text next to it shows an empty reset time.
+- **`overlay diff` recognises git's "differences found" exit status even when it
+  arrives wrapped.** It is now read with `errors.As` instead of a type
+  assertion. Nothing visible changes today, since the error reaches the check
+  unwrapped.
 
 ### Added
 

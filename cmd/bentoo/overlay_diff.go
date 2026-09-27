@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 
@@ -23,6 +24,14 @@ By default shows unstaged changes. Use --staged to show staged changes.`,
 	}
 	cmd.Flags().BoolVarP(&diffStaged, "staged", "s", false, "Show staged changes")
 	return cmd
+}
+
+// gitDiffFoundDifferences reports whether err is git diff's exit status 1,
+// which means "there are differences" rather than a failure. errors.As, not a
+// type assertion, so a wrapped *exec.ExitError is still recognised.
+func gitDiffFoundDifferences(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 func runDiff(cmd *cobra.Command, args []string) {
@@ -52,7 +61,7 @@ func runDiff(cmd *cobra.Command, args []string) {
 
 	if err := gitCmd.Run(); err != nil {
 		// git diff returns exit code 1 if there are differences, which is not an error
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if gitDiffFoundDifferences(err) {
 			return
 		}
 		logger.Error("running git diff: %v", err)
