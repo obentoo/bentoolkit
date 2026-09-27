@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A crash no longer leaves a truncated ebuild, registry or state file.**
+  `cache.json`, `pending.json`, `analysis_cache.json`, `packages.toml` and the
+  commit-hash and aux-variable substitutions in an ebuild are now written to a
+  synced temporary file beside the target and renamed into place, and the
+  directory is synced after the rename. A killed run leaves the previous file
+  intact; its dot-prefixed temporary is removed by the next
+  `bentoo overlay autoupdate` run that writes the overlay (every mode but
+  `--list` and `--lint` without `--fix`).
+- **Copying or promoting an ebuild never overwrites one.** The new ebuild is
+  published through a hard link that fails if anything already sits at its name,
+  including a file created after the existence check or a dangling symlink, so
+  the existing file is left untouched and no partial ebuild is left behind. A
+  copied ebuild keeps the source ebuild's mode instead of one chosen by the umask.
+- **Two runs no longer erase each other's cache and pending entries.** Each save
+  of the three state files holds a lock in the config directory, re-reads the
+  file and merges it key by key: an entry this run added, changed or deleted wins,
+  and every other entry keeps what is on disk.
+- **One `bentoo overlay autoupdate` run per overlay.** Every mode that writes the
+  overlay or its registry holds `<overlay>/.autoupdate.bentoo-lock`; a second run
+  waits up to 2 minutes and then exits 1 naming the lock and the holder's PID. A
+  lock left by a killed run is reclaimed at once. `--list` and `--lint` without
+  `--fix` take no lock.
+- **The registry keeps its mode.** `overlay analyze` and the registry fixer's
+  restore no longer turn a `0644` `packages.toml` into `0600` under a restrictive
+  umask; a new registry is created `0644`.
+- **`bentoo overlay add` never stages bentoo's scratch files**, so a leftover
+  temporary or lock file cannot be committed.
+- **The distdir writability probe no longer follows a symlink** planted at its
+  probe name; it reports the distdir as not writable instead of truncating the
+  link's target.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the
