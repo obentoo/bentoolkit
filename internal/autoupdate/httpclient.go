@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/textproto"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,11 +29,57 @@ var (
 	ErrMaxRetriesExceeded = errors.New("max retries exceeded")
 	// ErrRequestTimeout is returned when a request times out
 	ErrRequestTimeout = errors.New("request timeout")
+	// ErrRetryAfterTooLong is returned, without waiting, when an upstream's
+	// Retry-After asks for more than MaxRetryAfter or for more than the time
+	// left before the context deadline.
+	ErrRetryAfterTooLong = errors.New("retry-after too long")
 	// ErrResponseTooLarge is returned when an HTTP response body exceeds the
 	// MaxBodyBytes cap. It is httputil's sentinel, assigned rather than copied,
 	// so errors.Is matches it on the provider paths too.
 	ErrResponseTooLarge = httputil.ErrResponseTooLarge
 )
+
+// MaxRetryAfter is the longest Retry-After the client waits out. A longer one
+// fails the request at once instead of holding a check for minutes.
+const MaxRetryAfter = 60 * time.Second
+
+// retryableStatusError records a retryable HTTP status and the response's
+// Retry-After header. It is built where the response is drained — inside the
+// circuit breaker's callback when the breaker is on — because the header is
+// gone once the body is closed and the response dropped.
+type retryableStatusError struct {
+	status     int
+	retryAfter string
+}
+
+func (e *retryableStatusError) Error() string {
+	return fmt.Sprintf("server error: status %d", e.status)
+}
+
+// parseRetryAfter reads a Retry-After value as of now. Delta-seconds must be a
+// non-negative integer; otherwise the value must be an HTTP-date
+// (http.ParseTime), and a date already past means no wait. ok is false for an
+// absent or unparseable value.
+func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(h); err == nil {
+		if secs < 0 {
+			return 0, false
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	at, err := http.ParseTime(h)
+	if err != nil {
+		return 0, false
+	}
+	if d := at.Sub(now); d > 0 {
+		return d, true
+	}
+	return 0, true
+}
 
 // envVarPattern matches ${VAR_NAME} syntax for environment variable substitution
 var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
@@ -94,8 +142,12 @@ type RetryableHTTPClient struct {
 	// newBreaker builds the breaker for a host on first use (a test seam;
 	// defaults to newDefaultBreaker).
 	newBreaker func(name string) *gobreaker.CircuitBreaker
-	// delayFunc allows overriding the delay function for testing
+	// delayFunc replaces the retry wait when set (a test seam; see
+	// SetDelayFunc). Nil means wait on a timer that stops on cancellation.
 	delayFunc func(time.Duration)
+	// jitter draws the wait before a retry from [0, ceiling]. Nil means
+	// defaultJitter; tests replace it to make waits exact.
+	jitter func(ceiling time.Duration) time.Duration
 	// recordedDelays stores delays for testing purposes
 	recordedDelays []time.Duration
 	// defaultHeaders are headers applied to all requests
@@ -142,7 +194,7 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 		breakersEnabled: true,
 		breakers:        make(map[string]*gobreaker.CircuitBreaker),
 		newBreaker:      newDefaultBreaker,
-		delayFunc:       time.Sleep,
+		jitter:          defaultJitter,
 		defaultHeaders: map[string]string{
 			"User-Agent": defaultUserAgent(),
 		},
@@ -218,23 +270,103 @@ func (c *RetryableHTTPClient) SetHTTP1FallbackClient(client *http.Client) {
 // value, the retry loop can actually run its attempts instead of the first slow
 // request consuming the whole operation budget. A non-positive duration is
 // ignored so callers can pass an unresolved value safely.
+//
+// The header wait of each *http.Transport is raised to d when d exceeds
+// httputil.DefaultResponseHeaderTimeout, and never lowered, so a user's larger
+// http_timeout is not silently capped by the transport default. Other
+// RoundTrippers, and the shared http.DefaultTransport, are left alone.
 func (c *RetryableHTTPClient) SetRequestTimeout(d time.Duration) {
 	if d <= 0 {
 		return
 	}
 	c.config.Timeout = d
-	if c.client != nil {
-		c.client.Timeout = d
-	}
-	if c.h1Client != nil {
-		c.h1Client.Timeout = d
+	for _, hc := range []*http.Client{c.client, c.h1Client} {
+		if hc == nil {
+			continue
+		}
+		hc.Timeout = d
+		// http.DefaultTransport is process-wide; mutating it would reach
+		// every other client in the program.
+		if tr, ok := hc.Transport.(*http.Transport); ok && hc.Transport != http.DefaultTransport {
+			tr.ResponseHeaderTimeout = max(httputil.DefaultResponseHeaderTimeout, d)
+		}
 	}
 }
 
 // SetDelayFunc sets a custom delay function (useful for testing).
-// The function receives the delay duration that would normally be slept.
+// The function receives the delay duration that would normally be waited, and
+// runs in place of the wait; the context is checked once it returns.
 func (c *RetryableHTTPClient) SetDelayFunc(fn func(time.Duration)) {
 	c.delayFunc = fn
+}
+
+// SetJitterFunc replaces the source that draws each retry wait from
+// [0, ceiling] (useful for testing). Passing nil restores defaultJitter.
+func (c *RetryableHTTPClient) SetJitterFunc(fn func(ceiling time.Duration) time.Duration) {
+	c.jitter = fn
+}
+
+// wait blocks for d before a retry, and returns early with the context's error
+// as soon as ctx is done, so a cancelled operation never sleeps out its
+// backoff. A non-positive d does not wait. When a delay function was set with
+// SetDelayFunc it runs instead of the timer, and the context is checked after.
+func (c *RetryableHTTPClient) wait(ctx context.Context, d time.Duration) error {
+	if c.delayFunc != nil {
+		c.delayFunc(d)
+		return ctx.Err()
+	}
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// retryDelay chooses the wait before retry attempt. A 429 or 503 whose
+// Retry-After parses is obeyed exactly — unless it asks for more than
+// MaxRetryAfter, or for more than the time left before ctx's deadline, in which
+// case the request fails at once with ErrRetryAfterTooLong naming host and the
+// wait. Any other failure, and an absent or unparseable header, gets the
+// jittered backoff.
+func (c *RetryableHTTPClient) retryDelay(ctx context.Context, host string, attempt int, lastErr error) (time.Duration, error) {
+	var rse *retryableStatusError
+	if errors.As(lastErr, &rse) &&
+		(rse.status == http.StatusTooManyRequests || rse.status == http.StatusServiceUnavailable) {
+		if d, ok := parseRetryAfter(rse.retryAfter, time.Now()); ok {
+			if d > MaxRetryAfter {
+				return 0, fmt.Errorf("%w: %s asked to retry after %s, over the %s limit",
+					ErrRetryAfterTooLong, host, d, MaxRetryAfter)
+			}
+			if deadline, has := ctx.Deadline(); has {
+				if left := time.Until(deadline); d > left {
+					return 0, fmt.Errorf("%w: %s asked to retry after %s, over the %s left before the deadline",
+						ErrRetryAfterTooLong, host, d, left.Round(time.Millisecond))
+				}
+			}
+			return d, nil
+		}
+	}
+	return c.calculateDelay(attempt), nil
+}
+
+// ctxStopError reports that the request to host stopped during phase because
+// its context ended. The wording says "cancelled" or "deadline exceeded", and
+// err stays reachable through errors.Is.
+func ctxStopError(host, phase string, err error) error {
+	how := "stopped"
+	switch {
+	case errors.Is(err, context.Canceled):
+		how = "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		how = "deadline exceeded"
+	}
+	return fmt.Errorf("request to %s %s during %s: %w", host, how, phase, err)
 }
 
 // GetRecordedDelays returns the delays that were recorded during requests.
@@ -273,11 +405,17 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 			return nil, ctx.Err()
 		}
 
-		// Apply delay before retry (not on first attempt)
+		// Wait before a retry (not before the first attempt); a cancelled or
+		// expired context ends the wait, and the operation, at once.
 		if attempt > 0 {
-			delay := c.calculateDelay(attempt)
+			delay, err := c.retryDelay(ctx, req.URL.Host, attempt, lastErr)
+			if err != nil {
+				return nil, err
+			}
 			c.recordDelay(delay)
-			c.delayFunc(delay)
+			if err := c.wait(ctx, delay); err != nil {
+				return nil, ctxStopError(req.URL.Host, "retry wait", err)
+			}
 		}
 
 		// Clone the request for retry (body needs to be re-readable)
@@ -305,7 +443,7 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 				io.Copy(io.Discard, resp.Body) //nolint:errcheck // discarding response body, error is irrelevant
 				resp.Body.Close()
 			}
-			lastErr = fmt.Errorf("server error: status %d", resp.StatusCode)
+			lastErr = &retryableStatusError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 			lastResp = resp
 			continue
 		}
@@ -325,7 +463,7 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 
 	// All retries exhausted
 	if lastErr != nil {
-		return lastResp, fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
+		return lastResp, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 	}
 	return lastResp, ErrMaxRetriesExceeded
 }
@@ -405,7 +543,7 @@ func (c *RetryableHTTPClient) executeRequest(req *http.Request) (*http.Response,
 				io.Copy(io.Discard, resp.Body) //nolint:errcheck
 				resp.Body.Close()
 			}
-			return nil, fmt.Errorf("server error: status %d", resp.StatusCode)
+			return nil, &retryableStatusError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 		}
 		return resp, nil
 	})
@@ -503,20 +641,43 @@ func readBodyForStatus(resp *http.Response, accepted ...int) ([]byte, error) {
 // Uses exponential backoff: delay = baseDelay * 2^(attempt-1)
 // Attempt 1: 1s, Attempt 2: 2s, Attempt 3: 4s
 func (c *RetryableHTTPClient) calculateDelay(attempt int) time.Duration {
+	jitter := c.jitter
+	if jitter == nil {
+		jitter = defaultJitter
+	}
+	return jitter(c.backoffCeiling(attempt))
+}
+
+// backoffCeiling is the longest wait before retry attempt for this client's
+// config; see backoffCeilingFor.
+func (c *RetryableHTTPClient) backoffCeiling(attempt int) time.Duration {
+	return backoffCeilingFor(c.config, attempt)
+}
+
+// backoffCeilingFor is the single source of the exponential backoff cap:
+// BaseDelay×2^(attempt-1), capped at MaxDelay (1s, 2s, 4s, 4s… by default),
+// and 0 for attempt <= 0. The retry wait draws below it and deriveOpTimeout
+// sums it, so the operation budget always covers the longest possible waits.
+func backoffCeilingFor(rc RetryConfig, attempt int) time.Duration {
 	if attempt <= 0 {
 		return 0
 	}
-
-	// Calculate exponential delay: baseDelay * 2^(attempt-1)
 	multiplier := 1 << (attempt - 1) // 2^(attempt-1): 1, 2, 4, ...
-	delay := c.config.BaseDelay * time.Duration(multiplier)
-
-	// Cap at max delay
-	if delay > c.config.MaxDelay {
-		delay = c.config.MaxDelay
+	delay := rc.BaseDelay * time.Duration(multiplier)
+	if delay > rc.MaxDelay {
+		delay = rc.MaxDelay
 	}
-
 	return delay
+}
+
+// defaultJitter draws a wait uniformly from [0, ceiling] (full jitter), so
+// many packages retrying one host spread out instead of retrying in lockstep.
+// A non-positive ceiling yields 0 (rand.N panics on a non-positive bound).
+func defaultJitter(ceiling time.Duration) time.Duration {
+	if ceiling <= 0 {
+		return 0
+	}
+	return rand.N(ceiling + 1) //nolint:gosec // G404: retry jitter, not a secret
 }
 
 // shouldRetry determines if a request should be retried based on status code.

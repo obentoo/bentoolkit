@@ -65,6 +65,8 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetDelayFunc(func(d time.Duration) {
 				recordedDelays = append(recordedDelays, d)
 			})
+			// Identity jitter: the property pins the backoff ceilings.
+			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
 			resp, err := client.Get(server.URL)
@@ -156,6 +158,8 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetDelayFunc(func(d time.Duration) {
 				recordedDelays = append(recordedDelays, d)
 			})
+			// Identity jitter: the property pins the backoff ceilings.
+			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
 			resp, err := client.Get(server.URL)
@@ -476,6 +480,8 @@ func TestRetryableHTTPClientContextCancellation(t *testing.T) {
 // TestCalculateDelay tests the delay calculation
 func TestCalculateDelay(t *testing.T) {
 	client := NewRetryableHTTPClient()
+	// Identity jitter: this table pins the backoff ceilings, not the draw.
+	client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 	testCases := []struct {
 		attempt  int
