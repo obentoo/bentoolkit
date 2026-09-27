@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- retry jitter (defaultJitter), not a secret
 	"net/http"
 	"net/textproto"
@@ -43,6 +44,10 @@ var (
 // fails the request at once instead of holding a check for minutes.
 const MaxRetryAfter = 60 * time.Second
 
+// maxRetryAfterSeconds is the largest delta-seconds value that converts to a
+// time.Duration without overflowing int64.
+const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+
 // retryableStatusError records a retryable HTTP status and the response's
 // Retry-After header. It is built where the response is drained — inside the
 // circuit breaker's callback when the breaker is on — because the header is
@@ -60,14 +65,22 @@ func (e *retryableStatusError) Error() string {
 // non-negative integer; otherwise the value must be an HTTP-date
 // (http.ParseTime), and a date already past means no wait. ok is false for an
 // absent or unparseable value.
+//
+// A delta too large for a time.Duration saturates to the longest Duration
+// instead of wrapping, so retryDelay sees it as over MaxRetryAfter and fails
+// the request at once. That includes a delta too large even for an int, which
+// strconv.Atoi reports as ErrRange together with the largest value.
 func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
 	h = strings.TrimSpace(h)
 	if h == "" {
 		return 0, false
 	}
-	if secs, err := strconv.Atoi(h); err == nil {
+	if secs, err := strconv.Atoi(h); err == nil || errors.Is(err, strconv.ErrRange) {
 		if secs < 0 {
 			return 0, false
+		}
+		if int64(secs) > maxRetryAfterSeconds {
+			return time.Duration(math.MaxInt64), true
 		}
 		return time.Duration(secs) * time.Second, true
 	}
@@ -643,9 +656,10 @@ func readBodyForStatus(resp *http.Response, accepted ...int) ([]byte, error) {
 	return content, nil
 }
 
-// calculateDelay calculates the delay for a given retry attempt.
-// Uses exponential backoff: delay = baseDelay * 2^(attempt-1)
-// Attempt 1: 1s, Attempt 2: 2s, Attempt 3: 4s
+// calculateDelay draws the wait before a retry attempt: a uniform draw from
+// [0, backoffCeiling(attempt)] (full jitter), where the ceiling is the
+// exponential backoff baseDelay*2^(attempt-1) capped at MaxDelay — at most 1s,
+// 2s and 4s for attempts 1, 2 and 3 by default.
 func (c *RetryableHTTPClient) calculateDelay(attempt int) time.Duration {
 	jitter := c.jitter
 	if jitter == nil {
