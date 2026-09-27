@@ -94,9 +94,16 @@ func parseGitLabURL(rawURL string) (baseURL, projectPath string, err error) {
 	// carry it in cleartext (S052-R6.1). The check lives here, at construction,
 	// not at request time: tests point BaseURL at a plain-http httptest server
 	// after construction, and that must keep working (S052-R9.6).
+	//
+	// The URL in the error is rebuilt from scheme, host and path only, because
+	// the error is logged. url.URL.Redacted masks the password alone, so a
+	// token given as the username (http://TOKEN@host/g/p) would survive it,
+	// and so would one in the opaque form (http:TOKEN@host/g/p, where User is
+	// nil) or in a ?private_token= query (S052-R6.1).
 	if parsed.Scheme != "https" {
+		shown := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
 		return "", "", fmt.Errorf("%w: GitLab repository URL %s uses %q; https is required so the PRIVATE-TOKEN is never sent in cleartext",
-			ErrInvalidRepoURL, parsed.Redacted(), parsed.Scheme)
+			ErrInvalidRepoURL, shown, parsed.Scheme)
 	}
 
 	baseURL = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)

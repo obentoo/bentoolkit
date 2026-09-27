@@ -20,7 +20,8 @@ import (
 //
 //  1. the header name must be one of a small fixed set of auth headers, and
 //  2. the referenced environment variable must be explicitly allow-listed
-//     (either a known token name or carry the BENTOO_ prefix).
+//     (either a known token name or carry the BENTOO_ prefix), except
+//     bentoolkit's own secrets, which are never expandable (S052-R1.9).
 //
 // There is intentionally NO escape hatch: a user that needs another variable
 // expanded must rename it to BENTOO_*. The constants below are package-private
@@ -86,13 +87,41 @@ func isAllowedHeaderName(name string) bool {
 
 // isAllowedEnvVar reports whether the given environment variable name may be
 // expanded inside an allow-listed header value. It is true when the name
-// carries the allowedHeaderEnvPrefix or is an explicit allow-list entry.
+// carries the allowedHeaderEnvPrefix or is an explicit allow-list entry, and
+// false for every name isReservedBentooSecret reserves.
 func isAllowedEnvVar(name string) bool {
+	if isReservedBentooSecret(name) {
+		return false
+	}
 	if strings.HasPrefix(name, allowedHeaderEnvPrefix) {
 		return true
 	}
 	_, ok := allowedHeaderEnvAllowList[name]
 	return ok
+}
+
+// repoVarNamePrefix and repoVarNameSuffix frame the per-repository
+// token name BENTOO_REPO_<NAME>_TOKEN (internal/common/config.repoTokenEnvName,
+// cmd/bentoo.repoTokenName).
+const (
+	repoVarNamePrefix = "BENTOO_REPO_"
+	repoVarNameSuffix = "_TOKEN"
+)
+
+// isReservedBentooSecret reports whether name is one of bentoolkit's own
+// secrets: the ntfy token and SMTP password (internal/snapshot/notify.go) or a
+// per-repository token. They carry the BENTOO_ prefix, yet must never be
+// expanded into a header (S052-R1.9): R1.4 binds a BENTOO_* variable to the
+// host of the record's own url, and the record's author picks that url, so a
+// packages.toml PR could otherwise send them to a host of its choosing.
+func isReservedBentooSecret(name string) bool {
+	switch name {
+	case "BENTOO_NTFY_TOKEN", "BENTOO_SMTP_PASSWORD":
+		return true
+	}
+	return len(name) > len(repoVarNamePrefix)+len(repoVarNameSuffix) &&
+		strings.HasPrefix(name, repoVarNamePrefix) &&
+		strings.HasSuffix(name, repoVarNameSuffix)
 }
 
 // Credential host binding (S052-R1).

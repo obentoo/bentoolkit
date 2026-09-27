@@ -1321,15 +1321,25 @@ a `Warn` is logged.
 #### Where each credential may go
 
 `packages.toml` lives in the overlay repository, so a record is written by
-whoever contributed it — and an allowed variable must not be sendable to a host
-of that contributor's choosing. Each one is therefore **bound** to the hosts it
-belongs to:
+whoever contributed it. Each expandable variable is therefore **bound** to the
+hosts it belongs to:
 
 | Variable | May be sent to |
 |----------|----------------|
 | `GITHUB_TOKEN` | `https` only, and only `api.github.com`, `github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com` |
 | `GITLAB_TOKEN` | `https` only, and only `gitlab.com` (a self-hosted GitLab uses a `BENTOO_*` variable) |
-| `BENTOO_*` | the host of the package's own `url` or `base_url` (plain `http` allowed — it is your server) |
+| `BENTOO_*` | the host of the package's own `url` or `base_url` (plain `http` allowed) |
+
+The GitHub and GitLab tokens are pinned to their vendors' hosts, but a
+`BENTOO_*` variable follows the record: it goes to whatever host the record's
+own `url` or `base_url` names, and whoever wrote the record chose that url.
+When you review a `packages.toml` change that references a `BENTOO_*`
+variable, check that the record's url is a host you trust with it.
+
+bentoolkit's own secrets are never expanded, whatever host the record names:
+`BENTOO_REPO_<NAME>_TOKEN`, `BENTOO_NTFY_TOKEN` and `BENTOO_SMTP_PASSWORD`
+stay literal in a header and log a `Warn`. Give a header credential its own
+`BENTOO_*` name instead.
 
 Hosts are compared exactly, ignoring case and port: a subdomain or a look-alike
 is a different host. A record that pairs a variable with any other host is

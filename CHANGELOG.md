@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PRIVATE-TOKEN` in cleartext; it is now rejected with a message saying https
   is required. A request to `http://api.github.com/` no longer receives the
   token.
+- **BREAKING: bentoolkit's own secrets are never expanded in a header.**
+  A `BENTOO_*` variable goes to the host of the record's own `url`, and the
+  record's author picks that url, so a `packages.toml` PR naming
+  `${BENTOO_NTFY_TOKEN}`, `${BENTOO_SMTP_PASSWORD}` or a
+  `${BENTOO_REPO_<NAME>_TOKEN}` could have received the maintainer's
+  notification, mail or repository token. Those references now stay literal
+  with a `Warn`. **Migration:** give a header credential its own `BENTOO_*`
+  name. A GitLab URL rejected for not using https is also shown without its
+  userinfo or query, so a token written into it no longer reaches the log.
 
 ## [0.31.1] - 2026-09-22
 
