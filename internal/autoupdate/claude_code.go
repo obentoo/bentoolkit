@@ -642,12 +642,12 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 				// `func formatBumpReviewSkipTimeout` is the precedent this
 				// follows.
 				//
-				// ctxErr is wrapped too, so the deadline stays a deadline to
-				// errors.Is(err, context.DeadlineExceeded) and not only to a
-				// reader of this sentence — including when the group it
-				// stopped died of a signal (story 054, R4.2).
-				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered: %w",
-					ErrLLMRequestFailed, c.timeout, ctxErr), ErrClaudeTimedOut)
+				// ctxErr rides on the outcome side, so the deadline stays a
+				// deadline to errors.Is(err, context.DeadlineExceeded) — including
+				// when the group it stopped died of a signal (story 054, R4.2) —
+				// while the sentence stays byte-identical (story 057, R6.6).
+				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered",
+					ErrLLMRequestFailed, c.timeout), errors.Join(ErrClaudeTimedOut, ctxErr))
 			}
 			// Ended by anything other than this client's own budget: the cause
 			// travels verbatim and no number is claimed. One sentence, written
