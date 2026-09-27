@@ -1612,9 +1612,8 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
 
-	// Reject same-version copy: srcPath and dstPath would coincide, and
-	// os.Create truncates the destination before io.Copy reads, silently
-	// zeroing the source ebuild.
+	// Reject same-version copy: srcPath and dstPath would coincide, so the
+	// source would be the destination the copy refuses to overwrite.
 	if oldVersion == newVersion {
 		return fmt.Errorf("source and destination versions are equal: %s", newVersion)
 	}
@@ -1629,10 +1628,10 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
 	}
 
-	// Refuse to write over an ebuild that already exists. os.Create truncates,
-	// so without this the copy silently destroys a file the applier never wrote
-	// — and Apply's deferred orphan-rollback would then os.Remove it outright on
-	// any later failure, turning truncation into deletion.
+	// Refuse to write over an ebuild that already exists. Overwriting it would
+	// silently destroy a file the applier never wrote — and Apply's deferred
+	// orphan-rollback would then os.Remove it outright on any later failure,
+	// turning the overwrite into deletion.
 	//
 	// The oldVersion == newVersion check above only covers the case where source
 	// and destination are the same file. A distinct destination can still exist
@@ -1649,28 +1648,27 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("failed to stat destination ebuild %s: %w", dstPath, err)
 	}
 
-	// Open source file
-	src, err := os.Open(srcPath)
+	body, err := os.ReadFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to open source ebuild: %w", err)
+		return fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
-	defer src.Close() //nolint:errcheck
-
-	// Create destination file
-	dst, err := os.Create(dstPath)
+	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination ebuild: %w", err)
-	}
-	defer dst.Close() //nolint:errcheck
-
-	// Copy content
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("failed to copy ebuild content: %w", err)
+		return fmt.Errorf("failed to stat source ebuild %s: %w", srcPath, err)
 	}
 
-	// Sync to ensure data is written
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("failed to sync destination ebuild: %w", err)
+	// The check above is the fast, precise refusal; the publish itself is what
+	// makes it safe. fileutil.PublishNewFile writes a synced temporary file and
+	// hard-links it to dstPath, which fails if ANY entry — one created after the
+	// check, or a dangling symlink the Stat could not see — already sits there,
+	// and it never leaves a partial ebuild behind. The new ebuild carries the
+	// source ebuild's mode rather than one the umask chose.
+	if err := fileutil.PublishNewFile(dstPath, body, srcInfo.Mode().Perm()); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %s (refusing to overwrite; %s-%s would be written over it)",
+				ErrEbuildExists, dstPath, pkgName, oldVersion)
+		}
+		return fmt.Errorf("failed to publish destination ebuild %s: %w", dstPath, err)
 	}
 
 	return nil
@@ -1751,7 +1749,7 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 		return nil
 	}
 
-	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+	if err := replaceEbuildKeepingMode(ebuildPath, updated); err != nil {
 		return fmt.Errorf("failed to write ebuild after hash substitution: %w", err)
 	}
 
@@ -1797,10 +1795,25 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 		return nil
 	}
 
-	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+	if err := replaceEbuildKeepingMode(ebuildPath, updated); err != nil {
 		return fmt.Errorf("failed to write ebuild after aux var substitution: %w", err)
 	}
 
+	return nil
+}
+
+// replaceEbuildKeepingMode replaces the ebuild at ebuildPath with content,
+// keeping the mode it has. The replacement is atomic (fileutil.WriteFileAtomic):
+// a crash leaves the previous ebuild under its name, never a truncated one that
+// the overlay would commit and publish. The error names ebuildPath.
+func replaceEbuildKeepingMode(ebuildPath, content string) error {
+	info, err := os.Stat(ebuildPath)
+	if err != nil {
+		return fmt.Errorf("reading the mode of %s: %w", ebuildPath, err)
+	}
+	if err := fileutil.WriteFileAtomic(ebuildPath, []byte(content), info.Mode().Perm()); err != nil {
+		return fmt.Errorf("replacing %s: %w", ebuildPath, err)
+	}
 	return nil
 }
 
