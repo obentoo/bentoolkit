@@ -209,10 +209,15 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 	lookupReasons := compareLookupReasons(rep.Findings, rep.Results)
 	for _, result := range rep.Results {
 		pkg := comparePkgFacts(result, reasons, extra)
-		if pkg.Reason == "" {
-			// A failed lookup has no finding of its own, so its reason is the
-			// comparison's sentence, which names the cause (S057-R4.1).
-			pkg.Reason = compareOneLine(lookupReasons[pkg.Package])
+		if lookup, failed := lookupReasons[pkg.Package]; failed {
+			// A failed lookup's reason is the comparison's sentence, which names
+			// the cause (S057-R4.1) — ahead of any other finding the row carries,
+			// such as a registry declaration. That finding is not dropped: it
+			// leads the row's further findings instead.
+			if pkg.Reason != "" {
+				pkg.FurtherFindings = append([]string{pkg.Reason}, pkg.FurtherFindings...)
+			}
+			pkg.Reason = compareOneLine(lookup)
 		}
 		switch result.Verdict {
 		case overlay.VerdictRedundant:

@@ -224,7 +224,9 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 		// elapsed, a process that never started, a non-zero exit — is decided
 		// once, by autoupdate's own classifier, and every caller inherits that
 		// one answer. Re-wording or re-classifying it here would be a second
-		// answer free to drift from the first (S048-R1.3).
+		// answer free to drift from the first (S048-R1.3). The text travels as
+		// it came; `func withReviewOutcome` only attaches that same answer as
+		// the overlay sentinel internal/overlay can read (S057-R2.10).
 		return overlay.ReviewNote{}, fmt.Errorf("the divergence review failed: %w", withReviewOutcome(err))
 	}
 
