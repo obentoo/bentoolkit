@@ -3,7 +3,9 @@ package snapshot
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -349,11 +351,124 @@ var _ Notifier = multiNotifier{}
 
 // --- 008 T1.1 email driver ---
 
-// smtpSendMail is the injectable SMTP transport seam. It defaults to stdlib
-// smtp.SendMail and is overridable in tests so the email driver runs without a
+// smtpSendMail is the injectable SMTP transport seam. It defaults to
+// sendMailBounded and is overridable in tests so the email driver runs without a
 // real SMTP server (008 R1.1, A1) — the net/smtp analogue of the execCommand
 // seam in runner.go.
-var smtpSendMail = smtp.SendMail
+var smtpSendMail = sendMailBounded
+
+// smtpTimeout bounds one whole SMTP session, dial included: one deadline is
+// set before the dial and kept for the session (053 R8.1). It equals
+// notifyHTTPTimeout so every notifier transport shares one bound. It is a var
+// only so tests can shrink it; it is not configurable.
+var smtpTimeout = notifyHTTPTimeout
+
+// sendMailBounded sends msg the way smtp.SendMail does — greeting, EHLO,
+// STARTTLS when advertised (verifying the certificate against the host), AUTH
+// when a is set, MAIL, RCPT, DATA, QUIT — but on a connection that cannot
+// outlive smtpTimeout or ctx (053 R8.1, R8.2, R8.4). smtp.SendMail has
+// neither bound, so a server that accepts and never replies held the run
+// forever.
+//
+// Every error names the step and addr and wraps the cause; neither a nor msg
+// is ever part of one (008 R1.3). As in SendMail, a CR or LF in an address is
+// refused before dialing, so no credential is sent for a message that cannot
+// go out.
+//
+// One divergence is forced by net/smtp's API: SendMail skips AUTH when EHLO was
+// refused and HELO accepted, while the public Client cannot tell that case from
+// an EHLO without AUTH. With credentials set, both fail here rather than send
+// unauthenticated.
+func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) (err error) {
+	for _, line := range append([]string{from}, to...) {
+		if strings.ContainsAny(line, "\r\n") {
+			return fmt.Errorf("smtp address %q to %s: %w", line, addr, errors.New("an address must not contain CR or LF"))
+		}
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("smtp address %s: %w", addr, err)
+	}
+	deadline := time.Now().Add(smtpTimeout)
+	dialer := net.Dialer{Deadline: deadline}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial to %s: %w", addr, err)
+	}
+
+	// Cancelling ctx closes the connection, which fails whatever read or write
+	// is in flight. closeConn is how the session ends otherwise: the client's
+	// Close once one exists, and nothing after a successful QUIT, which has
+	// already closed the connection.
+	aborted := make(chan error, 1)
+	stop := context.AfterFunc(ctx, func() { aborted <- conn.Close() })
+	closeConn := conn.Close
+	defer func() {
+		if !stop() {
+			// The AfterFunc ran: the connection is closed, and a failure is the
+			// cancellation's doing.
+			if cerr := <-aborted; err != nil {
+				err = errors.Join(err, fmt.Errorf("smtp to %s: %w", addr, ctx.Err()), cerr)
+			}
+			return
+		}
+		if closeConn != nil {
+			// A failed AUTH has already quit and closed the connection.
+			if cerr := closeConn(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
+				err = errors.Join(err, fmt.Errorf("smtp close to %s: %w", addr, cerr))
+			}
+		}
+	}()
+
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("smtp deadline to %s: %w", addr, err)
+	}
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return fmt.Errorf("smtp greeting to %s: %w", addr, err)
+	}
+	closeConn = c.Close
+	if err := c.Hello("localhost"); err != nil {
+		return fmt.Errorf("smtp hello to %s: %w", addr, err)
+	}
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("smtp starttls to %s: %w", addr, err)
+		}
+	}
+	if a != nil {
+		if ok, _ := c.Extension("AUTH"); !ok {
+			return fmt.Errorf("smtp auth to %s: %w", addr, errors.New("server doesn't support AUTH"))
+		}
+		if err := c.Auth(a); err != nil {
+			return fmt.Errorf("smtp auth to %s: %w", addr, err)
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return fmt.Errorf("smtp mail to %s: %w", addr, err)
+	}
+	for _, rcpt := range to {
+		if err := c.Rcpt(rcpt); err != nil {
+			return fmt.Errorf("smtp rcpt to %s: %w", addr, err)
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data to %s: %w", addr, err)
+	}
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("smtp data write to %s: %w", addr, err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp data close to %s: %w", addr, err)
+	}
+	if err := c.Quit(); err != nil {
+		return fmt.Errorf("smtp quit to %s: %w", addr, err)
+	}
+	closeConn = nil
+	return nil
+}
 
 // emailNotifier sends the run summary by email (008 R1). With SMTP.Host unset the
 // message is piped to the local sendmail binary through the Runner seam; a
@@ -410,7 +525,7 @@ func resolveSMTPPassword(host string) string {
 func (n emailNotifier) Notify(ctx context.Context, res RunResult) error {
 	msg := n.message(res)
 	if n.cfg.SMTP.Host != "" {
-		return n.sendSMTP(msg)
+		return n.sendSMTP(ctx, msg)
 	}
 	return n.sendSendmail(ctx, msg)
 }
@@ -458,14 +573,14 @@ func (n emailNotifier) sendSendmail(ctx context.Context, msg []byte) error {
 // re-warn on every notification when the secrets file is unreadable. The
 // credentials live only in the smtp.Auth value and are never interpolated into an
 // error or log line (008 R1.3).
-func (n emailNotifier) sendSMTP(msg []byte) error {
+func (n emailNotifier) sendSMTP(ctx context.Context, msg []byte) error {
 	var auth smtp.Auth
 	if n.cfg.SMTP.User != "" && n.smtpPassword != "" {
 		auth = smtp.PlainAuth("", n.cfg.SMTP.User, n.smtpPassword, n.cfg.SMTP.Host)
 	}
 
 	addr := net.JoinHostPort(n.cfg.SMTP.Host, strconv.Itoa(n.cfg.SMTP.Port))
-	if err := smtpSendMail(addr, auth, n.cfg.From, n.cfg.To, msg); err != nil {
+	if err := smtpSendMail(ctx, addr, auth, n.cfg.From, n.cfg.To, msg); err != nil {
 		// The password lives only in the auth value; never let it reach an
 		// error string (008 R1.3).
 		return fmt.Errorf("email notify: %w", err)

@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestPushWithInvalidConfig(t *testing.T) {
 			},
 		}
 
-		_, err := Push(cfg)
+		_, err := Push(context.Background(), cfg)
 		if err != config.ErrOverlayPathNotSet {
 			t.Errorf("Push() should return ErrOverlayPathNotSet, got %v", err)
 		}
@@ -31,7 +32,7 @@ func TestPushWithInvalidConfig(t *testing.T) {
 			},
 		}
 
-		_, err := Push(cfg)
+		_, err := Push(context.Background(), cfg)
 		if err != config.ErrOverlayPathNotFound {
 			t.Errorf("Push() should return ErrOverlayPathNotFound, got %v", err)
 		}
@@ -87,12 +88,12 @@ func TestPushWithMockGitRunner(t *testing.T) {
 		pushCalled := false
 
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			pushCalled = true
 			return nil
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Errorf("PushWithExecutor() error = %v, want nil", err)
 		}
@@ -112,11 +113,11 @@ func TestPushWithMockGitRunner(t *testing.T) {
 
 	t.Run("push with up-to-date error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			return errors.New("Everything up-to-date")
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Errorf("PushWithExecutor() error = %v, want nil", err)
 		}
@@ -132,11 +133,11 @@ func TestPushWithMockGitRunner(t *testing.T) {
 
 	t.Run("push with 'up to date' variant", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			return errors.New("remote: up to date")
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err != nil {
 			t.Errorf("PushWithExecutor() error = %v, want nil", err)
 		}
@@ -148,11 +149,11 @@ func TestPushWithMockGitRunner(t *testing.T) {
 
 	t.Run("push with real error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			return errors.New("fatal: remote origin not found")
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err == nil {
 			t.Error("PushWithExecutor() error = nil, want error")
 		}
@@ -168,11 +169,11 @@ func TestPushWithMockGitRunner(t *testing.T) {
 
 	t.Run("push with authentication error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			return errors.New("fatal: Authentication failed for 'https://github.com/user/repo.git'")
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err == nil {
 			t.Error("PushWithExecutor() error = nil, want error")
 		}
@@ -184,11 +185,11 @@ func TestPushWithMockGitRunner(t *testing.T) {
 
 	t.Run("push with network error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.PushFunc = func() error {
+		mock.PushFunc = func(_ context.Context) error {
 			return errors.New("fatal: unable to access 'https://github.com/user/repo.git': Could not resolve host: github.com")
 		}
 
-		result, err := PushWithExecutor(mock)
+		result, err := PushWithExecutor(context.Background(), mock)
 		if err == nil {
 			t.Error("PushWithExecutor() error = nil, want error")
 		}
@@ -243,11 +244,11 @@ func TestPushErrorHandling(t *testing.T) {
 	for _, tc := range errorCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := git.NewMockGitRunner("/test/overlay")
-			mock.PushFunc = func() error {
+			mock.PushFunc = func(_ context.Context) error {
 				return errors.New(tc.errorMsg)
 			}
 
-			result, err := PushWithExecutor(mock)
+			result, err := PushWithExecutor(context.Background(), mock)
 
 			if tc.expectError {
 				if err == nil {

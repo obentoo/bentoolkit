@@ -690,8 +690,13 @@ var storyCreatedFilesOutsideThePackage = []string{
 	"../../../cmd/bentoo/root.go",
 	"../../../cmd/bentoo/snapshot_report.go",
 	"../../../internal/overlay/finding.go",
-	"../../../internal/overlay/manifest_cancel_other.go",
-	"../../../internal/overlay/manifest_cancel_unix.go",
+	// internal/overlay/manifest_cancel_other.go and manifest_cancel_unix.go,
+	// the other two files story 046 created there, left this list when story
+	// 054 deleted them (its sub-task 1.2): their one function moved unchanged
+	// into internal/common/procgroup as KillGroupNow, outside this sweep. The
+	// list still answers the git command above, since a deleted file is not in
+	// HEAD. The Unix file's bare citations left the ceiling with it; see the
+	// story 054 re-pin on unattributedCitationDebt.
 }
 
 // eachCitationInPackage reads every citation this package writes and hands each
@@ -915,7 +920,18 @@ func citationIsUnattributed(citation string) bool {
 // publishes is now taken over a larger subject, and the sub-task that widened
 // it repaid every citation it was in a position to attribute. It still may not
 // rise. A rise from here is a new bare citation, not a new file.
-const unattributedCitationDebt = 410
+//
+// # RE-PINNED BY STORY 054, SUB-TASK 1.2: 410 -> 407, over 41 files
+//
+// The number fell and nothing in this package was repaid. It fell because the
+// SUBJECT shrank: story 054 deleted internal/overlay/manifest_cancel_unix.go,
+// moving its one function into internal/common/procgroup, and the 3 bare
+// requirement citations the file carried left the sweep with it. They were not
+// dropped: in their new home each is written with its story prefix. Measured
+// 2026-09-26 on the tree without the file: 410 - 3 = 407. The pin follows the
+// measurement down because a ceiling left 3 above it would let 3 new bare
+// citations in without a failure.
+const unattributedCitationDebt = 407
 
 // unattributedDecisionDebt is the same ceiling for the other numbering: 101
 // bare design-decision citations over 29 of the 40 files the debt sweep reads,

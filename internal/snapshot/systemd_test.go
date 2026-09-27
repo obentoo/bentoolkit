@@ -10,19 +10,30 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 func TestRenderServiceUnit_Golden(t *testing.T) {
-	got := renderServiceUnit("bentoo", "/etc/bentoo/snapshot.toml")
+	got, err := renderServiceUnit("bentoo", "/etc/bentoo/snapshot.toml")
+	if err != nil {
+		t.Fatalf("renderServiceUnit: %v", err)
+	}
 	assertGolden(t, "service.golden", got)
 }
 
 func TestRenderTimerUnit_PersistentSet_Golden(t *testing.T) {
 	cfg := ScheduleConfig{OnCalendar: "daily", Persistent: boolPtr(true), RandomizedDelay: "5m"}
-	assertGolden(t, "timer_persistent.golden", renderTimerUnit(cfg))
+	got, err := renderTimerUnit(cfg)
+	if err != nil {
+		t.Fatalf("renderTimerUnit: %v", err)
+	}
+	assertGolden(t, "timer_persistent.golden", got)
 }
 
 func TestRenderTimerUnit_PersistentNil_Golden(t *testing.T) {
 	// Persistent unset → the line is omitted; no RandomizedDelaySec either.
 	cfg := ScheduleConfig{OnCalendar: "hourly"}
-	assertGolden(t, "timer_minimal.golden", renderTimerUnit(cfg))
+	got, err := renderTimerUnit(cfg)
+	if err != nil {
+		t.Fatalf("renderTimerUnit: %v", err)
+	}
+	assertGolden(t, "timer_minimal.golden", got)
 }
 
 func TestSystemdApply_WritesUnitsAndOrdersSystemctl(t *testing.T) {

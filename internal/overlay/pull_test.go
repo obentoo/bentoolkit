@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -14,8 +15,8 @@ import (
 // behindBy returns a CountRangeFunc reporting the upstream as n commits ahead,
 // so a pull has something to integrate. Without it the mock reports 0 and every
 // pull short-circuits as up-to-date.
-func behindBy(n int) func(from, to string) (int, error) {
-	return func(from, to string) (int, error) { return n, nil }
+func behindBy(n int) func(_ context.Context, from, to string) (int, error) {
+	return func(_ context.Context, from, to string) (int, error) { return n, nil }
 }
 
 // TestPullWithoutConflictsSucceeds tests Property 3: pull without conflicts succeeds
@@ -33,16 +34,16 @@ func TestPullWithoutConflictsSucceeds(t *testing.T) {
 		func(remote string) bool {
 			// Create mock that simulates successful fetch and merge (no conflicts)
 			mock := &git.MockGitRunner{
-				FetchFunc: func(r string) error {
+				FetchFunc: func(_ context.Context, r string) error {
 					return nil // Fetch succeeds
 				},
 				CountRangeFunc: behindBy(2),
-				MergeFFOnlyFunc: func(branch string) error {
+				MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 					return nil // Fast-forward succeeds without conflicts
 				},
 			}
 
-			result, err := PullWithRunner(mock, remote, PullFFOnly, false)
+			result, err := PullWithRunner(context.Background(), mock, remote, PullFFOnly, false)
 
 			// Property: No error should be returned
 			if err != nil {
@@ -107,16 +108,16 @@ func TestPullWithConflictsReportsThem(t *testing.T) {
 
 			// Create mock that simulates merge with conflicts
 			mock := &git.MockGitRunner{
-				FetchFunc: func(r string) error {
+				FetchFunc: func(_ context.Context, r string) error {
 					return nil // Fetch succeeds
 				},
 				CountRangeFunc: behindBy(1),
-				MergeFunc: func(branch string) error {
+				MergeFunc: func(_ context.Context, branch string) error {
 					return conflictErr // Merge fails with conflicts
 				},
 			}
 
-			result, err := PullWithRunner(mock, "origin", PullMerge, false)
+			result, err := PullWithRunner(context.Background(), mock, "origin", PullMerge, false)
 
 			// Property: No error should be returned (conflicts are reported in result)
 			if err != nil {
@@ -165,12 +166,12 @@ func TestPullFetchError(t *testing.T) {
 	fetchErr := errors.New("network error: could not reach remote")
 
 	mock := &git.MockGitRunner{
-		FetchFunc: func(r string) error {
+		FetchFunc: func(_ context.Context, r string) error {
 			return fetchErr
 		},
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err == nil {
 		t.Error("Expected error when fetch fails")
 	}
@@ -184,7 +185,7 @@ func TestPullFetchError(t *testing.T) {
 func TestPullNoRemote(t *testing.T) {
 	mock := &git.MockGitRunner{}
 
-	_, err := PullWithRunner(mock, "", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "", PullFFOnly, false)
 	if err == nil {
 		t.Error("Expected error when remote is empty")
 	}
@@ -199,16 +200,16 @@ func TestPullMergeNonConflictError(t *testing.T) {
 	mergeErr := errors.New("fatal: not a git repository")
 
 	mock := &git.MockGitRunner{
-		FetchFunc: func(r string) error {
+		FetchFunc: func(_ context.Context, r string) error {
 			return nil
 		},
 		CountRangeFunc: behindBy(1),
-		MergeFFOnlyFunc: func(branch string) error {
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			return mergeErr
 		},
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err == nil {
 		t.Error("Expected error when merge fails with non-conflict error")
 	}
@@ -225,17 +226,17 @@ func TestPullTargetsTheCheckedOutBranchUpstream(t *testing.T) {
 	var merged string
 
 	mock := &git.MockGitRunner{
-		CurrentBranchFunc: func() (string, error) { return "wip", nil },
-		UpstreamFunc:      func() (string, error) { return "origin/wip", nil },
-		FetchFunc:         func(r string) error { return nil },
+		CurrentBranchFunc: func(_ context.Context) (string, error) { return "wip", nil },
+		UpstreamFunc:      func(_ context.Context) (string, error) { return "origin/wip", nil },
+		FetchFunc:         func(_ context.Context, r string) error { return nil },
 		CountRangeFunc:    behindBy(3),
-		MergeFFOnlyFunc: func(branch string) error {
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			merged = branch
 			return nil
 		},
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
@@ -256,15 +257,15 @@ func TestPullWithoutUpstreamRefuses(t *testing.T) {
 	integrated := false
 
 	mock := &git.MockGitRunner{
-		CurrentBranchFunc: func() (string, error) { return "wip", nil },
-		UpstreamFunc:      func() (string, error) { return "", git.ErrNoUpstream },
-		MergeFFOnlyFunc: func(branch string) error {
+		CurrentBranchFunc: func(_ context.Context) (string, error) { return "wip", nil },
+		UpstreamFunc:      func(_ context.Context) (string, error) { return "", git.ErrNoUpstream },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			integrated = true
 			return nil
 		},
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err == nil {
 		t.Fatal("Expected an error when the branch has no upstream")
 	}
@@ -282,10 +283,10 @@ func TestPullWithoutUpstreamRefuses(t *testing.T) {
 // TestPullDetachedHeadRefuses covers the other branchless state.
 func TestPullDetachedHeadRefuses(t *testing.T) {
 	mock := &git.MockGitRunner{
-		CurrentBranchFunc: func() (string, error) { return "", git.ErrDetachedHead },
+		CurrentBranchFunc: func(_ context.Context) (string, error) { return "", git.ErrDetachedHead },
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if !errors.Is(err, git.ErrDetachedHead) {
 		t.Errorf("Expected ErrDetachedHead, got: %v", err)
 	}
@@ -298,15 +299,15 @@ func TestPullUpToDateReportsDistinctly(t *testing.T) {
 	integrated := false
 
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(0),
-		MergeFFOnlyFunc: func(branch string) error {
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			integrated = true
 			return nil
 		},
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
@@ -328,12 +329,12 @@ func TestPullUpToDateReportsDistinctly(t *testing.T) {
 // rather than staying at the zero value, as the old SyncResult field did.
 func TestPullReportsCommitCount(t *testing.T) {
 	mock := &git.MockGitRunner{
-		FetchFunc:       func(r string) error { return nil },
+		FetchFunc:       func(_ context.Context, r string) error { return nil },
 		CountRangeFunc:  behindBy(7),
-		MergeFFOnlyFunc: func(branch string) error { return nil },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error { return nil },
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
@@ -352,18 +353,18 @@ func TestPullCountsAfterFetch(t *testing.T) {
 	countedAfterFetch := false
 
 	mock := &git.MockGitRunner{
-		FetchFunc: func(r string) error {
+		FetchFunc: func(_ context.Context, r string) error {
 			fetched = true
 			return nil
 		},
-		CountRangeFunc: func(from, to string) (int, error) {
+		CountRangeFunc: func(_ context.Context, from, to string) (int, error) {
 			countedAfterFetch = fetched
 			return 1, nil
 		},
-		MergeFFOnlyFunc: func(branch string) error { return nil },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error { return nil },
 	}
 
-	if _, err := PullWithRunner(mock, "origin", PullFFOnly, false); err != nil {
+	if _, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false); err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
 	if !countedAfterFetch {
@@ -377,18 +378,18 @@ func TestPullDirtyWorktreeRefuses(t *testing.T) {
 	integrated := false
 
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(1),
-		StatusFunc: func() ([]git.StatusEntry, error) {
+		StatusFunc: func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{{Status: "M", FilePath: "app-misc/hello/hello-1.ebuild"}}, nil
 		},
-		MergeFFOnlyFunc: func(branch string) error {
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			integrated = true
 			return nil
 		},
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if !errors.Is(err, ErrDirtyWorktree) {
 		t.Errorf("Expected ErrDirtyWorktree, got: %v", err)
 	}
@@ -401,15 +402,15 @@ func TestPullDirtyWorktreeRefuses(t *testing.T) {
 // the way, so an overlay carrying untracked files still pulls.
 func TestPullUntrackedFilesDoNotBlock(t *testing.T) {
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(1),
-		StatusFunc: func() ([]git.StatusEntry, error) {
+		StatusFunc: func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{{Status: "??", FilePath: "scratch.txt"}}, nil
 		},
-		MergeFFOnlyFunc: func(branch string) error { return nil },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error { return nil },
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
@@ -422,14 +423,14 @@ func TestPullUntrackedFilesDoNotBlock(t *testing.T) {
 // nothing for local work to collide with, so the pull must not complain.
 func TestPullUpToDateIgnoresDirtyWorktree(t *testing.T) {
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(0),
-		StatusFunc: func() ([]git.StatusEntry, error) {
+		StatusFunc: func(_ context.Context) ([]git.StatusEntry, error) {
 			return []git.StatusEntry{{Status: "M", FilePath: "work-in-progress.ebuild"}}, nil
 		},
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err != nil {
 		t.Fatalf("Expected no error with nothing to integrate, got: %v", err)
 	}
@@ -443,17 +444,17 @@ func TestPullDryRunDoesNotIntegrate(t *testing.T) {
 	integrated := false
 
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(4),
-		MergeFFOnlyFunc: func(branch string) error {
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error {
 			integrated = true
 			return nil
 		},
-		MergeFunc:  func(branch string) error { integrated = true; return nil },
-		RebaseFunc: func(branch string) error { integrated = true; return nil },
+		MergeFunc:  func(_ context.Context, branch string) error { integrated = true; return nil },
+		RebaseFunc: func(_ context.Context, branch string) error { integrated = true; return nil },
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullFFOnly, true)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, true)
 	if err != nil {
 		t.Fatalf("PullWithRunner() error = %v", err)
 	}
@@ -485,14 +486,14 @@ func TestPullModeSelectsIntegration(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var called string
 			mock := &git.MockGitRunner{
-				FetchFunc:       func(r string) error { return nil },
+				FetchFunc:       func(_ context.Context, r string) error { return nil },
 				CountRangeFunc:  behindBy(1),
-				MergeFFOnlyFunc: func(branch string) error { called = "ff-only"; return nil },
-				MergeFunc:       func(branch string) error { called = "merge"; return nil },
-				RebaseFunc:      func(branch string) error { called = "rebase"; return nil },
+				MergeFFOnlyFunc: func(_ context.Context, branch string) error { called = "ff-only"; return nil },
+				MergeFunc:       func(_ context.Context, branch string) error { called = "merge"; return nil },
+				RebaseFunc:      func(_ context.Context, branch string) error { called = "rebase"; return nil },
 			}
 
-			if _, err := PullWithRunner(mock, "origin", tc.mode, false); err != nil {
+			if _, err := PullWithRunner(context.Background(), mock, "origin", tc.mode, false); err != nil {
 				t.Fatalf("PullWithRunner() error = %v", err)
 			}
 			if called != tc.want {
@@ -510,12 +511,12 @@ func TestPullRebaseConflictReported(t *testing.T) {
 		"CONFLICT (content): Merge conflict in app-misc/hello/hello-1.ebuild")
 
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(2),
-		RebaseFunc:     func(branch string) error { return rebaseErr },
+		RebaseFunc:     func(_ context.Context, branch string) error { return rebaseErr },
 	}
 
-	result, err := PullWithRunner(mock, "origin", PullRebase, false)
+	result, err := PullWithRunner(context.Background(), mock, "origin", PullRebase, false)
 	if err != nil {
 		t.Fatalf("Expected the conflict in the result, not as an error: %v", err)
 	}
@@ -534,12 +535,12 @@ func TestPullFFOnlyRefusesDivergence(t *testing.T) {
 	divergeErr := errors.New("fatal: Not possible to fast-forward, aborting.")
 
 	mock := &git.MockGitRunner{
-		FetchFunc:       func(r string) error { return nil },
+		FetchFunc:       func(_ context.Context, r string) error { return nil },
 		CountRangeFunc:  behindBy(2),
-		MergeFFOnlyFunc: func(branch string) error { return divergeErr },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error { return divergeErr },
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if err == nil {
 		t.Fatal("Expected the fast-forward refusal to reach the caller")
 	}
@@ -561,16 +562,16 @@ func TestPullUntrackedOverwriteIsTranslated(t *testing.T) {
 		"Aborting")
 
 	mock := &git.MockGitRunner{
-		FetchFunc:      func(r string) error { return nil },
+		FetchFunc:      func(_ context.Context, r string) error { return nil },
 		CountRangeFunc: behindBy(1),
-		StatusFunc: func() ([]git.StatusEntry, error) {
+		StatusFunc: func(_ context.Context) ([]git.StatusEntry, error) {
 			// Untracked only: the preventive check does not stop this pull.
 			return []git.StatusEntry{{Status: "??", FilePath: "profiles/categories"}}, nil
 		},
-		MergeFFOnlyFunc: func(branch string) error { return gitRefusal },
+		MergeFFOnlyFunc: func(_ context.Context, branch string) error { return gitRefusal },
 	}
 
-	_, err := PullWithRunner(mock, "origin", PullFFOnly, false)
+	_, err := PullWithRunner(context.Background(), mock, "origin", PullFFOnly, false)
 	if !errors.Is(err, ErrDirtyWorktree) {
 		t.Fatalf("Expected ErrDirtyWorktree, got: %v", err)
 	}

@@ -161,6 +161,11 @@ type Analyzer struct {
 	// llmTimeout bounds a single LLM analysis operation. Defaults to
 	// DefaultLLMTimeout.
 	llmTimeout time.Duration
+	// analyzeFn is the per-package analysis AnalyzeAll runs in each worker.
+	// NewAnalyzer binds it to Analyze; it is a seam for in-package tests only,
+	// which replace it to hold, count or panic inside a worker (story 054,
+	// S054-R6.1 to S054-R6.4). No option sets it.
+	analyzeFn func(pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)
 }
 
 // AnalyzerOption is a functional option for configuring Analyzer.
@@ -264,6 +269,9 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 		opTimeout:   DefaultOpTimeout,
 		llmTimeout:  DefaultLLMTimeout,
 	}
+	// Bound after the literal: the method value needs the pointer the literal
+	// creates.
+	analyzer.analyzeFn = analyzer.Analyze
 
 	// Apply options first to allow overriding configDir
 	for _, opt := range opts {
@@ -619,9 +627,25 @@ func detectJSONPath(content []byte) string {
 // a per-package failure is recorded in Failures keyed by the package name and
 // the batch continues with the remaining packages. A failure to enumerate the
 // packages is surfaced as a single synthetic Failures entry, which yields a
-// total-failure exit code. The returned BatchResult is fully populated only
-// after every worker goroutine has joined (wg.Wait), so callers may safely
-// invoke its methods (ExitCode, FormatFailures) on the returned value.
+// total-failure exit code.
+//
+// The pool follows CheckAll's model (story 054):
+//   - a slot is taken BEFORE a worker goroutine starts, so at most 3 analyses
+//     run at once and a package still waiting for its turn holds no goroutine
+//     (S054-R6.1);
+//   - once the analyzer's context (WithAnalyzerContext) is done, no package
+//     that has not yet taken a slot is started: each is recorded in Failures
+//     with an error wrapping the context's error, and the analyses already
+//     running are left to finish (S054-R6.2);
+//   - a panic in one package's analysis is recovered and recorded as that
+//     package's failure, its text carrying "panic: <value>", so it neither
+//     stops the other packages nor crashes the process (S054-R6.3);
+//   - Items are sorted by Package, so their order does not depend on which
+//     analysis finished first (S054-R6.4).
+//
+// Every write to the shared BatchResult is mutex-guarded, and it is returned
+// only after every worker goroutine has joined (wg.Wait), so callers may
+// safely invoke its methods (ExitCode, FormatFailures) on the returned value.
 func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 	batch := BatchResult[AnalyzeResult]{
 		Items:    []AnalyzeResult{},
@@ -647,23 +671,69 @@ func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	recordFailure := func(pkg string, err error) {
+		mu.Lock()
+		batch.Failures[pkg] = err
+		mu.Unlock()
+	}
+
+	// acquireSlot waits for a free slot and returns nil holding it, or returns
+	// the context's error holding none. The context is read before the wait
+	// and again once a slot is held: a select whose cases are both ready picks
+	// one at random, so the select alone would start a package after a cancel
+	// whenever a slot happened to be free. The second read gives such a slot
+	// back; the first skips the wait altogether once the context is done.
+	acquireSlot := func() error {
+		if err := a.ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		case sem <- struct{}{}:
+		}
+		if err := a.ctx.Err(); err != nil {
+			<-sem
+			return err
+		}
+		return nil
+	}
+
 	for _, pkg := range packagesToAnalyze {
+		// The slot is taken here, before the goroutine exists.
+		if err := acquireSlot(); err != nil {
+			recordFailure(pkg, fmt.Errorf("analysis of %s not started: %w", pkg, err))
+			continue
+		}
+
 		wg.Add(1)
 		go func(pkg string) {
 			defer wg.Done()
-
-			// Acquire semaphore
-			sem <- struct{}{}
 			defer func() { <-sem }()
+			// A panic in one package's analysis must not crash the process
+			// or lose the rest of the batch: it becomes that package's
+			// failure, wrapping the panic value when that is an error.
+			defer func() {
+				if r := recover(); r != nil {
+					cause, ok := r.(error)
+					if !ok {
+						cause = fmt.Errorf("%v", r)
+					}
+					recordFailure(pkg, fmt.Errorf("analysis of %s: panic: %w", pkg, cause))
+				}
+			}()
 
-			result, err := a.Analyze(pkg, opts)
-
-			mu.Lock()
+			result, err := a.analyzeFn(pkg, opts)
 			if err != nil {
-				batch.Failures[pkg] = err
-			} else {
-				batch.Items = append(batch.Items, *result)
+				recordFailure(pkg, err)
+				return
 			}
+
+			// Dereferenced before mu is locked, so that a nil result panics
+			// outside the lock and the recover above can still record it.
+			item := *result
+			mu.Lock()
+			batch.Items = append(batch.Items, item)
 			mu.Unlock()
 		}(pkg)
 	}
@@ -671,6 +741,11 @@ func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 	// Join every worker before returning so the BatchResult is fully
 	// populated and its methods are safe to call.
 	wg.Wait()
+
+	// Deterministic final ordering, independent of completion order.
+	sort.Slice(batch.Items, func(i, j int) bool {
+		return batch.Items[i].Package < batch.Items[j].Package
+	})
 
 	return batch
 }

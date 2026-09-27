@@ -1,6 +1,7 @@
 package distfiles
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -70,7 +71,7 @@ func runLockHelperChild(distdir string) int {
 		}
 	}
 
-	lock, err := LockFetch(distdir, names)
+	lock, err := LockFetch(context.Background(), distdir, names)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lock helper: LockFetch(%q, %v): %v\n", distdir, names, err)
 		return 1
@@ -251,7 +252,7 @@ func TestLockIsExclusiveForTheSameDistfile(t *testing.T) {
 		// Short, because the expected outcome here is the timeout.
 		shortLockWait(t, 200*time.Millisecond, 5*time.Millisecond)
 
-		lock, err := LockFetch(distdir, []string{name})
+		lock, err := LockFetch(context.Background(), distdir, []string{name})
 		if err == nil {
 			lock.Release()
 			t.Fatalf("LockFetch succeeded while pid %d holds %q: two runs would now fetch onto the same path, which is exactly what R2.4 forbids", holder.pid, name)
@@ -266,7 +267,7 @@ func TestLockIsExclusiveForTheSameDistfile(t *testing.T) {
 		// The canary. Without this the test would also pass if LockFetch were
 		// simply broken and always failed.
 		holder.release()
-		second, err := LockFetch(distdir, []string{name})
+		second, err := LockFetch(context.Background(), distdir, []string{name})
 		if err != nil {
 			t.Fatalf("LockFetch failed even after the holder released (%v); the failure above was not the lock", err)
 		}
@@ -307,7 +308,7 @@ func TestLockIsExclusiveForTheSameDistfile(t *testing.T) {
 				defer wg.Done()
 				for r := range rounds {
 					idx := (worker + r) % pool
-					lock, err := LockFetch(distdir, []string{names[idx]})
+					lock, err := LockFetch(context.Background(), distdir, []string{names[idx]})
 					if err != nil {
 						failures.Add(1)
 						firstErr.CompareAndSwap(nil, err)
@@ -366,7 +367,7 @@ func TestLockAllowsDifferentDistfilesConcurrently(t *testing.T) {
 		holder := startLockHelper(t, distdir, held)
 		shortLockWait(t, 200*time.Millisecond, 5*time.Millisecond)
 
-		lock, err := LockFetch(distdir, []string{wanted})
+		lock, err := LockFetch(context.Background(), distdir, []string{wanted})
 		if err != nil {
 			t.Fatalf("LockFetch(%q) failed while pid %d holds a DIFFERENT distfile (%q): %v — the lock is guarding the directory, not the file", wanted, holder.pid, held, err)
 		}
@@ -383,7 +384,7 @@ func TestLockAllowsDifferentDistfilesConcurrently(t *testing.T) {
 		shortLockWait(t, 200*time.Millisecond, 5*time.Millisecond)
 
 		wanted := []string{"ours-b-1.0.tar.xz", "ours-a-1.0.tar.xz", "ours-c-1.0.tar.xz"}
-		lock, err := LockFetch(distdir, wanted)
+		lock, err := LockFetch(context.Background(), distdir, wanted)
 		if err != nil {
 			t.Fatalf("LockFetch(%v) failed while pid %d holds only %q: %v", wanted, holder.pid, "theirs-1.0.tar.xz", err)
 		}
@@ -421,7 +422,7 @@ func TestLockAllowsDifferentDistfilesConcurrently(t *testing.T) {
 				defer wg.Done()
 				names := orders[worker%len(orders)]
 				for range rounds {
-					lock, err := LockFetch(distdir, names)
+					lock, err := LockFetch(context.Background(), distdir, names)
 					if err != nil {
 						failures.Add(1)
 						firstErr.CompareAndSwap(nil, err)
@@ -463,7 +464,7 @@ func TestLockReleaseAllowsReacquisition(t *testing.T) {
 		seedFile(t, distdir, "unrelated-9.9.tar.xz", "not ours", 0o644)
 		before := snapshotTree(t, distdir)
 
-		first, err := LockFetch(distdir, []string{name})
+		first, err := LockFetch(context.Background(), distdir, []string{name})
 		if err != nil {
 			t.Fatalf("LockFetch: %v", err)
 		}
@@ -478,7 +479,7 @@ func TestLockReleaseAllowsReacquisition(t *testing.T) {
 		assertSameTree(t, withoutDirSizes(before), withoutDirSizes(snapshotTree(t, distdir)),
 			distdir, "taking and releasing a lock must not touch anything else in a directory this tool does not own")
 
-		second, err := LockFetch(distdir, []string{name})
+		second, err := LockFetch(context.Background(), distdir, []string{name})
 		if err != nil {
 			t.Fatalf("LockFetch after Release: %v — a released lock is still blocking", err)
 		}
@@ -487,7 +488,7 @@ func TestLockReleaseAllowsReacquisition(t *testing.T) {
 
 	t.Run("Release is safe twice and on a claim that was never taken", func(t *testing.T) {
 		distdir := t.TempDir()
-		lock, err := LockFetch(distdir, []string{"twice-1.0.tar.xz"})
+		lock, err := LockFetch(context.Background(), distdir, []string{"twice-1.0.tar.xz"})
 		if err != nil {
 			t.Fatalf("LockFetch: %v", err)
 		}
@@ -497,7 +498,7 @@ func TestLockReleaseAllowsReacquisition(t *testing.T) {
 		var never *FetchLock
 		never.Release() // the shape `defer lock.Release()` produces on the error path
 
-		empty, err := LockFetch(distdir, nil)
+		empty, err := LockFetch(context.Background(), distdir, nil)
 		if err != nil {
 			t.Fatalf("LockFetch with no names: %v", err)
 		}
@@ -522,7 +523,7 @@ func TestLockReleaseAllowsReacquisition(t *testing.T) {
 		shortLockWait(t, 500*time.Millisecond, 5*time.Millisecond)
 
 		start := time.Now()
-		lock, err := LockFetch(distdir, []string{name})
+		lock, err := LockFetch(context.Background(), distdir, []string{name})
 		if err != nil {
 			t.Fatalf("LockFetch could not take a lock whose holder (pid %d) was SIGKILLed: %v — every later run is now blocked on a file nobody owns", holder.pid, err)
 		}
@@ -568,7 +569,7 @@ func TestLockWaitTimesOutAndReportsHolderPID(t *testing.T) {
 	shortLockWait(t, wait, 10*time.Millisecond)
 
 	start := time.Now()
-	lock, err := LockFetch(distdir, []string{name})
+	lock, err := LockFetch(context.Background(), distdir, []string{name})
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -603,7 +604,7 @@ func TestLockWaitTimesOutAndReportsHolderPID(t *testing.T) {
 
 	// Canary: the failure above was contention, not a broken LockFetch.
 	holder.release()
-	after, err := LockFetch(distdir, []string{name})
+	after, err := LockFetch(context.Background(), distdir, []string{name})
 	if err != nil {
 		t.Fatalf("LockFetch failed after the holder released: %v", err)
 	}
@@ -636,7 +637,7 @@ func TestLockRefusesNamesThatAreNotFilenames(t *testing.T) {
 		// The positive control comes first: if a good name did not produce a
 		// lock file either, the assertion below would hold for the wrong
 		// reason.
-		good, err := LockFetch(distdir, []string{"real-1.0.tar.xz"})
+		good, err := LockFetch(context.Background(), distdir, []string{"real-1.0.tar.xz"})
 		if err != nil {
 			t.Fatalf("LockFetch on an ordinary name: %v", err)
 		}
@@ -658,7 +659,7 @@ func TestLockRefusesNamesThatAreNotFilenames(t *testing.T) {
 		// test passed anyway.
 		var claims []*FetchLock
 		for _, name := range refused {
-			lock, err := LockFetch(distdir, []string{name})
+			lock, err := LockFetch(context.Background(), distdir, []string{name})
 			if err != nil {
 				t.Fatalf("LockFetch(%q) = %v; an unusable name is skipped, not a failure", name, err)
 			}
@@ -691,7 +692,7 @@ func TestLockRefusesNamesThatAreNotFilenames(t *testing.T) {
 		}
 		beforeParent := snapshotTree(t, parent)
 
-		lock, err := LockFetch(distdir, []string{"../../etc/passwd"})
+		lock, err := LockFetch(context.Background(), distdir, []string{"../../etc/passwd"})
 		if err != nil {
 			t.Fatalf("LockFetch on a traversing name: %v", err)
 		}
@@ -717,7 +718,7 @@ func TestLockRefusesNamesThatAreNotFilenames(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			lock, err := LockFetch(distdir, []string{"dup-1.0.tar.xz", "dup-1.0.tar.xz", "sub/dir/dup-1.0.tar.xz"})
+			lock, err := LockFetch(context.Background(), distdir, []string{"dup-1.0.tar.xz", "dup-1.0.tar.xz", "sub/dir/dup-1.0.tar.xz"})
 			if lock != nil {
 				lock.Release()
 			}
@@ -738,7 +739,7 @@ func TestLockRefusesNamesThatAreNotFilenames(t *testing.T) {
 		// filepath.Join("", name) resolves against the WORKING directory, so a
 		// lock taken there would separate nobody from anybody — and would drop
 		// a file into the source tree.
-		lock, err := LockFetch("", []string{"anything-1.0.tar.xz"})
+		lock, err := LockFetch(context.Background(), "", []string{"anything-1.0.tar.xz"})
 		if err == nil {
 			lock.Release()
 			t.Fatalf("LockFetch with no distdir succeeded")

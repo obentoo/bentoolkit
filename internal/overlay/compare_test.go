@@ -317,7 +317,7 @@ type fakeProvider struct {
 	callCount   atomic.Int64
 }
 
-func (f *fakeProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (f *fakeProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	f.callCount.Add(1)
 	cur := f.inFlight.Add(1)
 	defer f.inFlight.Add(-1)

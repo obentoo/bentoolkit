@@ -38,7 +38,7 @@ type fakePruneGentoo struct {
 	versions map[string][]string // keyed by "category/pkg"
 }
 
-func (p *fakePruneGentoo) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *fakePruneGentoo) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	v, ok := p.versions[category+"/"+pkg]
 	if !ok {
 		return nil, provider.ErrNotFound
@@ -61,7 +61,7 @@ type fakePruneAPIOnly struct {
 	versions map[string][]string
 }
 
-func (p *fakePruneAPIOnly) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *fakePruneAPIOnly) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	v, ok := p.versions[category+"/"+pkg]
 	if !ok {
 		return nil, provider.ErrNotFound

@@ -453,7 +453,14 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 			var buf bytes.Buffer
 			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
-			cmd.Stdin = os.Stdin
+			// Only a Stdin the caller left nil gets the terminal. The privileged
+			// compile leaves it nil so sudo/doas can prompt; the build gates'
+			// `ebuild` sets an empty one, because it runs in its own process
+			// group and reading the terminal from there stops it on SIGTTIN
+			// (S054-R3.2).
+			if cmd.Stdin == nil {
+				cmd.Stdin = os.Stdin
+			}
 			err := tui.RunAttached(prog, cmd)
 			return buf.Bytes(), err
 		}),
@@ -767,7 +774,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
 	// (R5.3) and we avoid a double-warn with the failure line just below.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -2079,7 +2086,7 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 		if c := ebuild.CompareVersions(kept[i], kept[j]); c != 0 {
 			return c < 0
 		}
-		// Two versions the comparison calls equal ("1.0" and "1.0.0") are still
+		// Two versions the comparison calls equal ("1.0" and "1.0-r0") are still
 		// two files; order them by text so the report is total and stable.
 		return kept[i] < kept[j]
 	})
@@ -2124,7 +2131,7 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpT
 	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
 	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
 	// "unused llm_prompt" Warn when a provider was requested.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -2379,7 +2386,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	}
 
 	// Highest ::gentoo version is the base ebuild we copy in.
-	versions, err := prov.GetPackageVersions(category, pkgName)
+	versions, err := prov.GetPackageVersions(ctx, category, pkgName)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
 	}

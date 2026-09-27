@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -36,10 +37,10 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 			for i := 0; i < statusCount; i++ {
 				expectedEntries[i] = StatusEntry{Status: "A", FilePath: "test.txt"}
 			}
-			mock.StatusFunc = func() ([]StatusEntry, error) {
+			mock.StatusFunc = func(context.Context) ([]StatusEntry, error) {
 				return expectedEntries, nil
 			}
-			entries, err := mock.Status()
+			entries, err := mock.Status(context.Background())
 			return err == nil && len(entries) == statusCount
 		},
 		gen.AnyString(),
@@ -51,11 +52,11 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 		func(workDir string, paths []string) bool {
 			mock := NewMockGitRunner(workDir)
 			var receivedPaths []string
-			mock.AddFunc = func(p ...string) error {
+			mock.AddFunc = func(_ context.Context, p ...string) error {
 				receivedPaths = p
 				return nil
 			}
-			err := mock.Add(paths...)
+			err := mock.Add(context.Background(), paths...)
 			if err != nil {
 				return false
 			}
@@ -78,11 +79,11 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 		func(workDir, message, user, email string) bool {
 			mock := NewMockGitRunner(workDir)
 			var receivedMsg, receivedUser, receivedEmail string
-			mock.CommitFunc = func(m, u, e string) error {
+			mock.CommitFunc = func(_ context.Context, m, u, e string) error {
 				receivedMsg, receivedUser, receivedEmail = m, u, e
 				return nil
 			}
-			err := mock.Commit(message, user, email)
+			err := mock.Commit(context.Background(), message, user, email)
 			return err == nil && receivedMsg == message && receivedUser == user && receivedEmail == email
 		},
 		gen.AnyString(),
@@ -96,10 +97,10 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 		func(workDir, errMsg string) bool {
 			mock := NewMockGitRunner(workDir)
 			expectedErr := errors.New(errMsg)
-			mock.StatusFunc = func() ([]StatusEntry, error) {
+			mock.StatusFunc = func(context.Context) ([]StatusEntry, error) {
 				return nil, expectedErr
 			}
-			_, err := mock.Status()
+			_, err := mock.Status(context.Background())
 			return errors.Is(err, expectedErr)
 		},
 		gen.AnyString(),
@@ -111,11 +112,11 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 		func(workDir, remote string) bool {
 			mock := NewMockGitRunner(workDir)
 			var receivedRemote string
-			mock.FetchFunc = func(r string) error {
+			mock.FetchFunc = func(_ context.Context, r string) error {
 				receivedRemote = r
 				return nil
 			}
-			err := mock.Fetch(remote)
+			err := mock.Fetch(context.Background(), remote)
 			return err == nil && receivedRemote == remote
 		},
 		gen.AnyString(),
@@ -127,11 +128,11 @@ func TestMockGitRunnerImplementsInterface(t *testing.T) {
 		func(workDir, branch string) bool {
 			mock := NewMockGitRunner(workDir)
 			var receivedBranch string
-			mock.MergeFunc = func(b string) error {
+			mock.MergeFunc = func(_ context.Context, b string) error {
 				receivedBranch = b
 				return nil
 			}
-			err := mock.Merge(branch)
+			err := mock.Merge(context.Background(), branch)
 			return err == nil && receivedBranch == branch
 		},
 		gen.AnyString(),
@@ -146,7 +147,7 @@ func TestMockGitRunnerDefaultBehavior(t *testing.T) {
 	mock := NewMockGitRunner("/test/dir")
 
 	t.Run("Status returns nil without error", func(t *testing.T) {
-		entries, err := mock.Status()
+		entries, err := mock.Status(context.Background())
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -156,28 +157,28 @@ func TestMockGitRunnerDefaultBehavior(t *testing.T) {
 	})
 
 	t.Run("Add returns nil without error", func(t *testing.T) {
-		err := mock.Add("test.txt")
+		err := mock.Add(context.Background(), "test.txt")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 	})
 
 	t.Run("Commit returns nil without error", func(t *testing.T) {
-		err := mock.Commit("msg", "user", "email")
+		err := mock.Commit(context.Background(), "msg", "user", "email")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 	})
 
 	t.Run("Push returns nil without error", func(t *testing.T) {
-		err := mock.Push()
+		err := mock.Push(context.Background())
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 	})
 
 	t.Run("PushDryRun returns empty string without error", func(t *testing.T) {
-		result, err := mock.PushDryRun()
+		result, err := mock.PushDryRun(context.Background())
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -187,14 +188,14 @@ func TestMockGitRunnerDefaultBehavior(t *testing.T) {
 	})
 
 	t.Run("Fetch returns nil without error", func(t *testing.T) {
-		err := mock.Fetch("origin")
+		err := mock.Fetch(context.Background(), "origin")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 	})
 
 	t.Run("Merge returns nil without error", func(t *testing.T) {
-		err := mock.Merge("main")
+		err := mock.Merge(context.Background(), "main")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}

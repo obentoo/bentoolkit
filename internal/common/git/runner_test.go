@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -198,7 +199,7 @@ func TestAddPathValidation(t *testing.T) {
 
 	// Initialize a git repo in the temp dir
 	runner := NewGitRunner(tmpDir)
-	_, _, err = runner.runCommand("init")
+	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
@@ -210,28 +211,28 @@ func TestAddPathValidation(t *testing.T) {
 	}
 
 	t.Run("add existing file succeeds", func(t *testing.T) {
-		err := runner.Add("test.txt")
+		err := runner.Add(context.Background(), "test.txt")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 	})
 
 	t.Run("add non-existent file returns file not found error", func(t *testing.T) {
-		err := runner.Add("nonexistent.txt")
+		err := runner.Add(context.Background(), "nonexistent.txt")
 		if err != ErrFileNotFound {
 			t.Errorf("expected ErrFileNotFound, got %v", err)
 		}
 	})
 
 	t.Run("add path outside overlay returns error", func(t *testing.T) {
-		err := runner.Add("../outside.txt")
+		err := runner.Add(context.Background(), "../outside.txt")
 		if err != ErrPathOutsideOverlay {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
 	})
 
 	t.Run("add with absolute path outside overlay returns error", func(t *testing.T) {
-		err := runner.Add("/etc/passwd")
+		err := runner.Add(context.Background(), "/etc/passwd")
 		if err != ErrPathOutsideOverlay {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
@@ -244,7 +245,7 @@ func TestAddPathValidation(t *testing.T) {
 			t.Fatalf("failed to create another file: %v", err)
 		}
 
-		err := runner.Add()
+		err := runner.Add(context.Background())
 		if err != nil {
 			t.Errorf("expected no error for Add(), got %v", err)
 		}
@@ -262,26 +263,26 @@ func TestGitRunnerCommit(t *testing.T) {
 	runner := NewGitRunner(tmpDir)
 
 	// Initialize git repo
-	_, _, err = runner.runCommand("init")
+	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
 	// Configure git user for the test repo
-	_, _, _ = runner.runCommand("config", "user.email", "test@example.com")
-	_, _, _ = runner.runCommand("config", "user.name", "Test User")
+	_, _, _ = runner.runCommand(context.Background(), localTimeout, "config", "user.email", "test@example.com")
+	_, _, _ = runner.runCommand(context.Background(), localTimeout, "config", "user.name", "Test User")
 
 	// Create and stage a file
 	testFile := filepath.Join(tmpDir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	if err := runner.Add("test.txt"); err != nil {
+	if err := runner.Add(context.Background(), "test.txt"); err != nil {
 		t.Fatalf("failed to add file: %v", err)
 	}
 
 	t.Run("commit with message succeeds", func(t *testing.T) {
-		err := runner.Commit("test commit", "", "")
+		err := runner.Commit(context.Background(), "test commit", "", "")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -293,11 +294,11 @@ func TestGitRunnerCommit(t *testing.T) {
 		if err := os.WriteFile(file2, []byte("test2"), 0644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		if err := runner.Add("test2.txt"); err != nil {
+		if err := runner.Add(context.Background(), "test2.txt"); err != nil {
 			t.Fatalf("failed to add file: %v", err)
 		}
 
-		err := runner.Commit("commit with author", "Custom User", "custom@example.com")
+		err := runner.Commit(context.Background(), "commit with author", "Custom User", "custom@example.com")
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -315,13 +316,13 @@ func TestGitRunnerStatus(t *testing.T) {
 	runner := NewGitRunner(tmpDir)
 
 	// Initialize git repo
-	_, _, err = runner.runCommand("init")
+	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
 	t.Run("empty repo has no status entries", func(t *testing.T) {
-		entries, err := runner.Status()
+		entries, err := runner.Status(context.Background())
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -336,7 +337,7 @@ func TestGitRunnerStatus(t *testing.T) {
 			t.Fatalf("failed to create test file: %v", err)
 		}
 
-		entries, err := runner.Status()
+		entries, err := runner.Status(context.Background())
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -355,12 +356,12 @@ func initTestRepo(t *testing.T) (*GitRunner, string) {
 	t.Helper()
 	dir := t.TempDir()
 	runner := NewGitRunner(dir)
-	_, _, err := runner.runCommand("init")
+	_, _, err := runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
-	_, _, _ = runner.runCommand("config", "user.email", "test@test.com")
-	_, _, _ = runner.runCommand("config", "user.name", "Test")
+	_, _, _ = runner.runCommand(context.Background(), localTimeout, "config", "user.email", "test@test.com")
+	_, _, _ = runner.runCommand(context.Background(), localTimeout, "config", "user.name", "Test")
 	return runner, dir
 }
 
@@ -373,10 +374,10 @@ func TestGitRunnerPushDryRun(t *testing.T) {
 		if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		if err := runner.Add("test.txt"); err != nil {
+		if err := runner.Add(context.Background(), "test.txt"); err != nil {
 			t.Fatalf("failed to add file: %v", err)
 		}
-		if err := runner.Commit("initial commit", "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "initial commit", "", ""); err != nil {
 			t.Fatalf("failed to commit: %v", err)
 		}
 
@@ -384,7 +385,7 @@ func TestGitRunnerPushDryRun(t *testing.T) {
 		// We'll test the logic by checking that when stdout is empty, we get the default message
 		// Since we can't easily mock this without a remote, we'll rely on the unit test
 		// of ParseStatusOutput and the code inspection
-		result, err := runner.PushDryRun()
+		result, err := runner.PushDryRun(context.Background())
 		// Without a remote configured, this will error, but that's expected
 		// The important part is testing the empty string case in the actual code
 		if err == nil && result == "Nothing to push (up-to-date with remote)" {
@@ -412,7 +413,7 @@ func TestGitRunnerFetch(t *testing.T) {
 	t.Run("fetch on valid repository", func(t *testing.T) {
 		// Fetch without a remote will fail, but we're testing that the method exists
 		// and properly calls git fetch
-		err := runner.Fetch("origin")
+		err := runner.Fetch(context.Background(), "origin")
 		// Expected to fail without a remote configured
 		if err == nil {
 			t.Error("expected error without remote, got nil")
@@ -433,15 +434,15 @@ func TestGitRunnerMerge(t *testing.T) {
 		if err := os.WriteFile(testFile, []byte("main content"), 0644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		if err := runner.Add("conflict.txt"); err != nil {
+		if err := runner.Add(context.Background(), "conflict.txt"); err != nil {
 			t.Fatalf("failed to add file: %v", err)
 		}
-		if err := runner.Commit("main commit", "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "main commit", "", ""); err != nil {
 			t.Fatalf("failed to commit: %v", err)
 		}
 
 		// Get the current branch name
-		stdout, _, err := runner.runCommand("branch", "--show-current")
+		stdout, _, err := runner.runCommand(context.Background(), localTimeout, "branch", "--show-current")
 		if err != nil {
 			t.Fatalf("failed to get current branch: %v", err)
 		}
@@ -452,37 +453,37 @@ func TestGitRunnerMerge(t *testing.T) {
 		}
 
 		// Create a branch with conflicting content
-		_, _, err = runner.runCommand("checkout", "-b", "feature")
+		_, _, err = runner.runCommand(context.Background(), localTimeout, "checkout", "-b", "feature")
 		if err != nil {
 			t.Fatalf("failed to create branch: %v", err)
 		}
 		if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
 			t.Fatalf("failed to modify file: %v", err)
 		}
-		if err := runner.Add("conflict.txt"); err != nil {
+		if err := runner.Add(context.Background(), "conflict.txt"); err != nil {
 			t.Fatalf("failed to add file: %v", err)
 		}
-		if err := runner.Commit("feature commit", "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "feature commit", "", ""); err != nil {
 			t.Fatalf("failed to commit: %v", err)
 		}
 
 		// Switch back to main branch and create divergent change
-		_, _, err = runner.runCommand("checkout", mainBranch)
+		_, _, err = runner.runCommand(context.Background(), localTimeout, "checkout", mainBranch)
 		if err != nil {
 			t.Fatalf("failed to checkout %s: %v", mainBranch, err)
 		}
 		if err := os.WriteFile(testFile, []byte("main divergent content"), 0644); err != nil {
 			t.Fatalf("failed to modify file: %v", err)
 		}
-		if err := runner.Add("conflict.txt"); err != nil {
+		if err := runner.Add(context.Background(), "conflict.txt"); err != nil {
 			t.Fatalf("failed to add file: %v", err)
 		}
-		if err := runner.Commit("main divergent commit", "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "main divergent commit", "", ""); err != nil {
 			t.Fatalf("failed to commit: %v", err)
 		}
 
 		// Attempt to merge feature branch - should conflict
-		err = runner.Merge("feature")
+		err = runner.Merge(context.Background(), "feature")
 		if err == nil {
 			t.Error("expected merge conflict error, got nil")
 			return
@@ -585,7 +586,7 @@ func TestValidateAndAddPath_SymlinkOutside(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	err := runner.validateAndAddPath("evil-link")
+	err := runner.validateAndAddPath(context.Background(), "evil-link")
 	if !errors.Is(err, ErrPathOutsideOverlay) {
 		t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 	}
@@ -607,7 +608,7 @@ func TestValidateAndAddPath_SymlinkInside(t *testing.T) {
 	}
 
 	// git add should succeed (or fail with git command error, not path error)
-	err := runner.validateAndAddPath("good-link")
+	err := runner.validateAndAddPath(context.Background(), "good-link")
 	if errors.Is(err, ErrPathOutsideOverlay) {
 		t.Errorf("valid symlink inside overlay should not return ErrPathOutsideOverlay, got %v", err)
 	}
@@ -625,7 +626,7 @@ func TestValidateAndAddPath_BrokenSymlink(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	err := runner.validateAndAddPath("broken-link")
+	err := runner.validateAndAddPath(context.Background(), "broken-link")
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Errorf("expected ErrInvalidPath for broken symlink, got %v", err)
 	}
@@ -637,7 +638,7 @@ func TestValidateAndAddPath_RegularFile(t *testing.T) {
 	// regular file already created by initGitOverlay
 	_ = dir
 	// git add may fail (not staged properly in bare init), but path validation should pass
-	err := runner.validateAndAddPath("real-file.txt")
+	err := runner.validateAndAddPath(context.Background(), "real-file.txt")
 	if errors.Is(err, ErrPathOutsideOverlay) {
 		t.Errorf("regular file inside overlay should not return ErrPathOutsideOverlay")
 	}
@@ -663,7 +664,7 @@ func TestValidateAndAddPath_DotDotPath(t *testing.T) {
 	}
 
 	// Path with .. that resolves inside overlay: sub/../real-file.txt
-	err := runner.validateAndAddPath("sub/../real-file.txt")
+	err := runner.validateAndAddPath(context.Background(), "sub/../real-file.txt")
 	if errors.Is(err, ErrPathOutsideOverlay) {
 		t.Errorf(".. path resolving inside overlay should not return ErrPathOutsideOverlay")
 	}
@@ -681,15 +682,15 @@ func TestGitRunnerCurrentBranch(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	if err := runner.Add("test.txt"); err != nil {
+	if err := runner.Add(context.Background(), "test.txt"); err != nil {
 		t.Fatalf("failed to add file: %v", err)
 	}
-	if err := runner.Commit("initial commit", "", ""); err != nil {
+	if err := runner.Commit(context.Background(), "initial commit", "", ""); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
 
 	t.Run("returns the checked-out branch", func(t *testing.T) {
-		branch, err := runner.CurrentBranch()
+		branch, err := runner.CurrentBranch(context.Background())
 		if err != nil {
 			t.Fatalf("CurrentBranch() error = %v", err)
 		}
@@ -699,15 +700,15 @@ func TestGitRunnerCurrentBranch(t *testing.T) {
 	})
 
 	t.Run("detached HEAD is an error", func(t *testing.T) {
-		head, _, err := runner.runCommand("rev-parse", "HEAD")
+		head, _, err := runner.runCommand(context.Background(), localTimeout, "rev-parse", "HEAD")
 		if err != nil {
 			t.Fatalf("failed to read HEAD: %v", err)
 		}
-		if _, _, err := runner.runCommand("checkout", strings.TrimSpace(head)); err != nil {
+		if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", strings.TrimSpace(head)); err != nil {
 			t.Skipf("cannot detach HEAD: %v", err)
 		}
 
-		if _, err := runner.CurrentBranch(); !errors.Is(err, ErrDetachedHead) {
+		if _, err := runner.CurrentBranch(context.Background()); !errors.Is(err, ErrDetachedHead) {
 			t.Errorf("CurrentBranch() error = %v, want ErrDetachedHead", err)
 		}
 	})
@@ -722,15 +723,15 @@ func TestGitRunnerUpstream(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	if err := runner.Add("test.txt"); err != nil {
+	if err := runner.Add(context.Background(), "test.txt"); err != nil {
 		t.Fatalf("failed to add file: %v", err)
 	}
-	if err := runner.Commit("initial commit", "", ""); err != nil {
+	if err := runner.Commit(context.Background(), "initial commit", "", ""); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
 
 	t.Run("no upstream configured", func(t *testing.T) {
-		if _, err := runner.Upstream(); !errors.Is(err, ErrNoUpstream) {
+		if _, err := runner.Upstream(context.Background()); !errors.Is(err, ErrNoUpstream) {
 			t.Errorf("Upstream() error = %v, want ErrNoUpstream", err)
 		}
 	})
@@ -738,17 +739,17 @@ func TestGitRunnerUpstream(t *testing.T) {
 	t.Run("reads a configured upstream", func(t *testing.T) {
 		remoteDir := t.TempDir()
 		bare := NewGitRunner(remoteDir)
-		if _, _, err := bare.runCommand("init", "--bare"); err != nil {
+		if _, _, err := bare.runCommand(context.Background(), localTimeout, "init", "--bare"); err != nil {
 			t.Skipf("cannot init bare repo: %v", err)
 		}
-		if _, _, err := runner.runCommand("remote", "add", "origin", remoteDir); err != nil {
+		if _, _, err := runner.runCommand(context.Background(), localTimeout, "remote", "add", "origin", remoteDir); err != nil {
 			t.Fatalf("failed to add remote: %v", err)
 		}
-		if _, _, err := runner.runCommand("push", "-u", "origin", "HEAD:master"); err != nil {
+		if _, _, err := runner.runCommand(context.Background(), localTimeout, "push", "-u", "origin", "HEAD:master"); err != nil {
 			t.Skipf("cannot push to bare repo: %v", err)
 		}
 
-		upstream, err := runner.Upstream()
+		upstream, err := runner.Upstream(context.Background())
 		if err != nil {
 			t.Fatalf("Upstream() error = %v", err)
 		}
@@ -767,16 +768,16 @@ func TestGitRunnerCountRange(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0644); err != nil {
 			t.Fatalf("failed to create %s: %v", name, err)
 		}
-		if err := runner.Add(name); err != nil {
+		if err := runner.Add(context.Background(), name); err != nil {
 			t.Fatalf("failed to add %s: %v", name, err)
 		}
-		if err := runner.Commit("add "+name, "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "add "+name, "", ""); err != nil {
 			t.Fatalf("failed to commit %s: %v", name, err)
 		}
 	}
 
 	commit("one.txt")
-	base, _, err := runner.runCommand("rev-parse", "HEAD")
+	base, _, err := runner.runCommand(context.Background(), localTimeout, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("failed to read HEAD: %v", err)
 	}
@@ -786,7 +787,7 @@ func TestGitRunnerCountRange(t *testing.T) {
 	commit("three.txt")
 
 	t.Run("counts commits ahead", func(t *testing.T) {
-		n, err := runner.CountRange(baseRef, "HEAD")
+		n, err := runner.CountRange(context.Background(), baseRef, "HEAD")
 		if err != nil {
 			t.Fatalf("CountRange() error = %v", err)
 		}
@@ -796,7 +797,7 @@ func TestGitRunnerCountRange(t *testing.T) {
 	})
 
 	t.Run("identical refs count zero", func(t *testing.T) {
-		n, err := runner.CountRange("HEAD", "HEAD")
+		n, err := runner.CountRange(context.Background(), "HEAD", "HEAD")
 		if err != nil {
 			t.Fatalf("CountRange() error = %v", err)
 		}
@@ -806,7 +807,7 @@ func TestGitRunnerCountRange(t *testing.T) {
 	})
 
 	t.Run("unknown ref is an error", func(t *testing.T) {
-		if _, err := runner.CountRange("HEAD", "no-such-ref"); err == nil {
+		if _, err := runner.CountRange(context.Background(), "HEAD", "no-such-ref"); err == nil {
 			t.Error("CountRange() should fail on an unknown ref")
 		}
 	})
@@ -825,38 +826,38 @@ func TestGitRunnerMergeFFOnly(t *testing.T) {
 	}
 
 	write("base.txt", "base")
-	if err := runner.Add("base.txt"); err != nil {
+	if err := runner.Add(context.Background(), "base.txt"); err != nil {
 		t.Fatalf("failed to add: %v", err)
 	}
-	if err := runner.Commit("base", "", ""); err != nil {
+	if err := runner.Commit(context.Background(), "base", "", ""); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
 
-	mainBranch, err := runner.CurrentBranch()
+	mainBranch, err := runner.CurrentBranch(context.Background())
 	if err != nil {
 		t.Fatalf("CurrentBranch() error = %v", err)
 	}
 
 	// A branch strictly ahead of main: the merge can fast-forward.
-	if _, _, err := runner.runCommand("checkout", "-b", "ahead"); err != nil {
+	if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", "-b", "ahead"); err != nil {
 		t.Skipf("cannot create branch: %v", err)
 	}
 	write("ahead.txt", "ahead")
-	if err := runner.Add("ahead.txt"); err != nil {
+	if err := runner.Add(context.Background(), "ahead.txt"); err != nil {
 		t.Fatalf("failed to add: %v", err)
 	}
-	if err := runner.Commit("ahead", "", ""); err != nil {
+	if err := runner.Commit(context.Background(), "ahead", "", ""); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
-	if _, _, err := runner.runCommand("checkout", mainBranch); err != nil {
+	if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", mainBranch); err != nil {
 		t.Fatalf("failed to check out %s: %v", mainBranch, err)
 	}
 
 	t.Run("fast-forwards a linear history", func(t *testing.T) {
-		if err := runner.MergeFFOnly("ahead"); err != nil {
+		if err := runner.MergeFFOnly(context.Background(), "ahead"); err != nil {
 			t.Fatalf("MergeFFOnly() error = %v", err)
 		}
-		merges, _, err := runner.runCommand("rev-list", "--count", "--merges", "HEAD")
+		merges, _, err := runner.runCommand(context.Background(), localTimeout, "rev-list", "--count", "--merges", "HEAD")
 		if err != nil {
 			t.Fatalf("failed to count merges: %v", err)
 		}
@@ -866,18 +867,18 @@ func TestGitRunnerMergeFFOnly(t *testing.T) {
 	})
 
 	t.Run("refuses diverged history", func(t *testing.T) {
-		if _, _, err := runner.runCommand("checkout", "-b", "diverged", "HEAD~1"); err != nil {
+		if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", "-b", "diverged", "HEAD~1"); err != nil {
 			t.Skipf("cannot create branch: %v", err)
 		}
 		write("diverged.txt", "diverged")
-		if err := runner.Add("diverged.txt"); err != nil {
+		if err := runner.Add(context.Background(), "diverged.txt"); err != nil {
 			t.Fatalf("failed to add: %v", err)
 		}
-		if err := runner.Commit("diverged", "", ""); err != nil {
+		if err := runner.Commit(context.Background(), "diverged", "", ""); err != nil {
 			t.Fatalf("failed to commit: %v", err)
 		}
 
-		err := runner.MergeFFOnly(mainBranch)
+		err := runner.MergeFFOnly(context.Background(), mainBranch)
 		if err == nil {
 			t.Fatal("MergeFFOnly() should refuse to merge diverged history")
 		}
@@ -900,10 +901,10 @@ func TestGitRunnerRebase(t *testing.T) {
 	}
 	commit := func(name string) {
 		t.Helper()
-		if err := runner.Add("."); err != nil {
+		if err := runner.Add(context.Background(), "."); err != nil {
 			t.Fatalf("failed to add: %v", err)
 		}
-		if err := runner.Commit(name, "", ""); err != nil {
+		if err := runner.Commit(context.Background(), name, "", ""); err != nil {
 			t.Fatalf("failed to commit %s: %v", name, err)
 		}
 	}
@@ -911,30 +912,30 @@ func TestGitRunnerRebase(t *testing.T) {
 	write("base.txt", "base")
 	commit("base")
 
-	mainBranch, err := runner.CurrentBranch()
+	mainBranch, err := runner.CurrentBranch(context.Background())
 	if err != nil {
 		t.Fatalf("CurrentBranch() error = %v", err)
 	}
 
 	// upstream advances on one path...
-	if _, _, err := runner.runCommand("checkout", "-b", "upstream"); err != nil {
+	if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", "-b", "upstream"); err != nil {
 		t.Skipf("cannot create branch: %v", err)
 	}
 	write("upstream.txt", "upstream")
 	commit("upstream work")
 
 	// ...while a local branch advances on another.
-	if _, _, err := runner.runCommand("checkout", "-b", "local", mainBranch); err != nil {
+	if _, _, err := runner.runCommand(context.Background(), localTimeout, "checkout", "-b", "local", mainBranch); err != nil {
 		t.Skipf("cannot create branch: %v", err)
 	}
 	write("local.txt", "local")
 	commit("local work")
 
-	if err := runner.Rebase("upstream"); err != nil {
+	if err := runner.Rebase(context.Background(), "upstream"); err != nil {
 		t.Fatalf("Rebase() error = %v", err)
 	}
 
-	merges, _, err := runner.runCommand("rev-list", "--count", "--merges", "HEAD")
+	merges, _, err := runner.runCommand(context.Background(), localTimeout, "rev-list", "--count", "--merges", "HEAD")
 	if err != nil {
 		t.Fatalf("failed to count merges: %v", err)
 	}
@@ -942,7 +943,7 @@ func TestGitRunnerRebase(t *testing.T) {
 		t.Errorf("rebase wrote %s merge commit(s), want a linear history", strings.TrimSpace(merges))
 	}
 
-	subject, _, err := runner.runCommand("log", "-1", "--format=%s")
+	subject, _, err := runner.runCommand(context.Background(), localTimeout, "log", "-1", "--format=%s")
 	if err != nil {
 		t.Fatalf("failed to read log: %v", err)
 	}

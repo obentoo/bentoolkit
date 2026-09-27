@@ -47,11 +47,11 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
-		first, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+		first, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("first fetchContent returned an unexpected error: %v", err)
 		}
-		second, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+		second, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("second fetchContent returned an unexpected error: %v", err)
 		}
@@ -86,10 +86,10 @@ func TestCheckerFetchDedup(t *testing.T) {
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
 		if _, err := checker.fetchContent(server.URL, map[string]string{"Range": "bytes=0-15"},
-			checker.operationTimeout(nil)); err != nil {
+			credentialScope{}, checker.operationTimeout(nil)); err != nil {
 			t.Fatalf("the Range read returned an unexpected error: %v", err)
 		}
-		if _, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil)); err != nil {
+		if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 			t.Fatalf("the full read returned an unexpected error: %v", err)
 		}
 
@@ -130,7 +130,7 @@ func TestCheckerFetchDedup(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				bodies[i], errs[i] = checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+				bodies[i], errs[i] = checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 			}(i)
 		}
 		wg.Wait()
@@ -172,11 +172,11 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
-		if _, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil)); err == nil {
+		if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err == nil {
 			t.Fatal("expected the first read to fail on the 404, got nil")
 		}
 
-		body, err := checker.fetchContent(server.URL, nil, checker.operationTimeout(nil))
+		body, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("the second read returned %v; a cached FAILURE would have poisoned this identity (S024-R3.2)", err)
 		}

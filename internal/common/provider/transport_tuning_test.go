@@ -91,6 +91,13 @@ func assertTunedTransport(t *testing.T, name string, got http.RoundTripper, want
 	if tr.ForceAttemptHTTP2 != want.ForceAttemptHTTP2 {
 		t.Errorf("%s: ForceAttemptHTTP2 = %v, want %v", name, tr.ForceAttemptHTTP2, want.ForceAttemptHTTP2)
 	}
+	if tr.ResponseHeaderTimeout != want.ResponseHeaderTimeout {
+		t.Errorf("%s: ResponseHeaderTimeout = %v, want %v", name, tr.ResponseHeaderTimeout, want.ResponseHeaderTimeout)
+	}
+	// Proxy is a func and funcs are not comparable, so only its presence is checked.
+	if tr.Proxy == nil {
+		t.Errorf("%s: Proxy = nil, want http.ProxyFromEnvironment", name)
+	}
 }
 
 // TestAllHTTPClients_UseTunedTransport asserts that every provider HTTP-client

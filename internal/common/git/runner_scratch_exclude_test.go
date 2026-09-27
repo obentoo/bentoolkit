@@ -4,6 +4,7 @@ package git
 // question is what `git add` actually stages, which no fake runner can answer.
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,7 +78,7 @@ func TestAddExcludesBentooScratchFiles(t *testing.T) {
 				}
 			}
 
-			if err := NewGitRunner(dir).Add(tc.paths...); err != nil {
+			if err := NewGitRunner(dir).Add(context.Background(), tc.paths...); err != nil {
 				t.Fatalf("Add(%q): %v", tc.paths, err)
 			}
 

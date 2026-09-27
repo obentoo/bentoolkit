@@ -85,7 +85,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, leaderErr = checker.fetchContent(server.URL, nil, leaderBudget)
+		_, leaderErr = checker.fetchContent(server.URL, nil, credentialScope{}, leaderBudget)
 	}()
 
 	select {
@@ -97,7 +97,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		followerBody, followerErr = checker.fetchContent(server.URL, nil, followerBudget)
+		followerBody, followerErr = checker.fetchContent(server.URL, nil, credentialScope{}, followerBudget)
 	}()
 
 	// Prove the follower genuinely JOINED the in-flight fetch. Without this the
@@ -117,10 +117,10 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Wait()
 
 	// The leader spent its own short budget and got nothing. Its error is not
-	// matched with errors.Is: the retry client wraps a final failure with
-	// ErrMaxRetriesExceeded using %v rather than %w, so the sentinel does not
-	// survive that path. That the leader failed at all is the whole premise
-	// here; which sentinel it carries is story 019's concern, not this one.
+	// matched with errors.Is: whether it ends as ErrMaxRetriesExceeded or as
+	// its own context's deadline depends on where the budget ran out, and both
+	// keep their cause reachable. That the leader failed at all is the whole
+	// premise here; which sentinel it carries is not this test's concern.
 	if leaderErr == nil {
 		t.Fatal("the leader was expected to exhaust its short budget and fail, got nil")
 	}

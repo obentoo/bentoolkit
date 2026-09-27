@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 const (
@@ -106,12 +108,34 @@ func extractGitHubOrgRepo(uri string) string {
 	return parts[0] + "/" + parts[1]
 }
 
+// registryHTTPTimeout bounds one registry download: a host that never sends a
+// complete response is abandoned and the eselect cache is used instead.
+const registryHTTPTimeout = 30 * time.Second
+
 // RepositoryRegistry fetches, caches, and parses repositories.xml
 type RepositoryRegistry struct {
 	CacheDir string
 	CacheTTL time.Duration
 	XMLPath  string
 	url      string
+	// httpClient performs the download; nil means a client with
+	// registryHTTPTimeout and the tuned transport (see client).
+	httpClient *http.Client
+}
+
+// newRegistryHTTPClient is the client every registry download uses unless one
+// was injected.
+func newRegistryHTTPClient() *http.Client {
+	return &http.Client{Timeout: registryHTTPTimeout, Transport: httputil.BuildTransport()}
+}
+
+// client returns the injected HTTP client, or the default timed one when none
+// was set (a registry built as a struct literal has none).
+func (r *RepositoryRegistry) client() *http.Client {
+	if r.httpClient != nil {
+		return r.httpClient
+	}
+	return newRegistryHTTPClient()
 }
 
 func NewRepositoryRegistry() (*RepositoryRegistry, error) {
@@ -126,10 +150,11 @@ func NewRepositoryRegistry() (*RepositoryRegistry, error) {
 	}
 
 	return &RepositoryRegistry{
-		CacheDir: cacheDir,
-		CacheTTL: defaultCacheTTL,
-		XMLPath:  filepath.Join(cacheDir, registryXMLFile),
-		url:      registryURL,
+		CacheDir:   cacheDir,
+		CacheTTL:   defaultCacheTTL,
+		XMLPath:    filepath.Join(cacheDir, registryXMLFile),
+		url:        registryURL,
+		httpClient: newRegistryHTTPClient(),
 	}, nil
 }
 
@@ -156,19 +181,22 @@ func (r *RepositoryRegistry) ensureXML() ([]byte, error) {
 }
 
 func (r *RepositoryRegistry) download() ([]byte, error) {
-	resp, err := http.Get(r.url)
+	resp, err := r.client().Get(r.url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetching registry %s: %w", r.url, err)
 	}
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching registry", resp.StatusCode)
 	}
 
+	// An oversized body fails here, before the write, so it never replaces
+	// the cache.
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading registry %s: %w", r.url, httputil.ClassifyBodyReadError(err))
 	}
 
 	if err := os.WriteFile(r.XMLPath, data, 0o600); err != nil {

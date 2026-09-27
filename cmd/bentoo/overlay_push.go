@@ -23,14 +23,17 @@ func newPushCmd() *cobra.Command {
 }
 
 func runPush(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	ctx, stop := signalContext(cmd.Context())
+	defer stop()
+
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
 	}
 
 	if pushDryRun {
-		result, err := overlay.PushDryRun(ctx.Config)
+		result, err := overlay.PushDryRun(ctx, appCtx.Config)
 		if err != nil {
 			logger.Error("%v", err)
 			osExit(1)
@@ -40,7 +43,7 @@ func runPush(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	result, err := overlay.Push(ctx.Config)
+	result, err := overlay.Push(ctx, appCtx.Config)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)

@@ -956,8 +956,9 @@ func TestVersionDistanceIsMonotoneAlongTheVersionOrder(t *testing.T) {
 // anything here".
 //
 // Identity is STRING equality and not `ebuild.CompareVersions`, on the
-// constraint story.md states: that comparison pads missing components with
-// zeros, so `1.0` and `1.0.0` order equal while being two different ebuilds.
+// constraint story.md states: two ebuild files are identified by their version
+// text, and PMS equality (`1.0` and `1.0-r0`, `1.010` and `1.01`) is not file
+// identity.
 // The `distance == 0 -> 1` floor is what keeps them apart, and it must survive
 // D1 unchanged.
 //

@@ -81,13 +81,29 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		osExit(1)
 	}
 
+	// Wire the signals signalContext listens for into a context and hand it to
+	// the analyzer (its HTTP and LLM calls) and to the LLM provider. The `claude`
+	// CLI runs in its own process group, so a Ctrl+C at the terminal no longer
+	// reaches it: without this context an interrupt killed bentoo and left
+	// `claude` running (story 054, R4.3). The handler is released before either
+	// confirmation prompt (see confirmAfterRelease), so a Ctrl+C there still ends
+	// the command. stop is also deferred for the paths that return; the ones that
+	// end in osExit skip it, which is harmless — the process, and with it the
+	// handler, is gone — and under a test's exit intercept the unwinding panic
+	// still runs it.
+	runCtx, stop := signalContext(cmd.Context())
+	defer stop()
+
 	// Build analyzer options, conditionally injecting an LLM provider. When a
 	// provider is configured but cannot be constructed (e.g. the `claude` CLI is
 	// absent or not authenticated), we log a Warn and fall back to the heuristic
 	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
-	analyzerOpts := []autoupdate.AnalyzerOption{autoupdate.WithAnalyzerConfigDir(configDir)}
+	analyzerOpts := []autoupdate.AnalyzerOption{
+		autoupdate.WithAnalyzerConfigDir(configDir),
+		autoupdate.WithAnalyzerContext(runCtx),
+	}
 	llmCfg := ctx.Config.Autoupdate.LLM
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(runCtx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		analyzerOpts = append(analyzerOpts, autoupdate.WithAnalyzerLLMClient(p))
@@ -110,14 +126,15 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 
 	// Handle different modes
 	if analyzeAll {
-		runAnalyzeAll(analyzer, opts)
+		runAnalyzeAll(analyzer, opts, stop)
 	} else {
-		runAnalyzeSingle(analyzer, args[0], opts)
+		runAnalyzeSingle(analyzer, args[0], opts, stop)
 	}
 }
 
-// runAnalyzeSingle handles single package analysis
-func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions) {
+// runAnalyzeSingle handles single package analysis. release unregisters the
+// command's signal handler; it runs before the confirmation prompt.
+func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) {
 	output.Info.Printf("Analyzing %s...\n", pkg)
 
 	result, err := analyzer.Analyze(pkg, opts)
@@ -140,7 +157,7 @@ func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate
 			output.Warning.Println("\nWarning: Extracted version does not match ebuild version")
 			output.Warning.Printf("  Extracted: %s\n", result.ExtractedVersion)
 			output.Warning.Printf("  Ebuild:    %s\n", result.EbuildVersion)
-			if !confirmAction("Save schema anyway?") {
+			if !confirmAfterRelease(release, "Save schema anyway?") {
 				logger.Info("Schema not saved")
 				return
 			}
@@ -154,8 +171,9 @@ func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate
 	}
 }
 
-// runAnalyzeAll handles batch analysis of all packages
-func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions) {
+// runAnalyzeAll handles batch analysis of all packages. release unregisters the
+// command's signal handler; it runs before the confirmation prompt.
+func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) {
 	output.Info.Println("Analyzing all packages without schema...")
 
 	// AnalyzeAll never returns a fatal error: enumeration and per-package
@@ -199,7 +217,7 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 
 	// Ask for confirmation to save all successful schemas
 	output.Info.Printf("\n%d schema(s) ready to save\n", successful)
-	if !confirmAction("Save all successful schemas?") {
+	if !confirmAfterRelease(release, "Save all successful schemas?") {
 		logger.Info("Schemas not saved")
 		osExit(result.ExitCode())
 		return
@@ -353,6 +371,16 @@ func suggestedComments(pkg string, schema *autoupdate.PackageConfig) string {
 
 	return first + "\nSuggested by `bentoo overlay analyze`: replace this line with WHY this source and\n" +
 		"parser, plus every caveat a future bump must know."
+}
+
+// confirmAfterRelease releases the command's signal handler, then prompts. While
+// signal.NotifyContext holds SIGINT, a Ctrl+C only cancels a context and a read
+// blocked on stdin never returns; the analysis that context guarded is over by
+// the time a prompt is shown, so releasing it gives Ctrl+C back its default
+// action — ending the command — as it had before story 054 (R4.3).
+func confirmAfterRelease(release func(), prompt string) bool {
+	release()
+	return confirmAction(prompt)
 }
 
 // confirmAction prompts the user for confirmation

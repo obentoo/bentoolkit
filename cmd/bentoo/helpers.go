@@ -23,7 +23,19 @@ func validateGitPathArgs(args []string) error {
 }
 
 // signalContext derives a context that is cancelled when the process receives
-// SIGINT or SIGTERM, so an in-flight command aborts cleanly within ~2 s (R3.1).
+// SIGINT, SIGTERM or SIGHUP, so an in-flight command aborts cleanly within ~2 s
+// (R3.1).
+//
+// SIGHUP is here because of process groups (story 054, R4.4). The kernel sends
+// a terminal's Ctrl+C and its hang-up — an SSH session dropping, a terminal
+// window closed — to the terminal's FOREGROUND group only, and the children
+// bentoo runs in their own group (the `claude` CLI, pkgdev, the unprivileged
+// ebuild) are outside it. They receive neither signal, so this context is what
+// stops them: without SIGHUP in the list a hang-up killed bentoo by its default
+// action and left those children running, orphaned. Catching it turns the
+// hang-up into the same clean cancel as a Ctrl+C. syscall.SIGHUP is defined on
+// every Unix and on Windows (where nothing ever sends it), so the list needs no
+// build-tagged split.
 //
 // OQ-1: cmd.Context() is NOT signal-aware on its own — main.go uses
 // rootCmd.Execute() (not ExecuteContext) and never wires signal.NotifyContext.
@@ -39,7 +51,7 @@ func signalContext(parent context.Context) (context.Context, context.CancelFunc)
 	if parent == nil {
 		parent = context.Background()
 	}
-	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 }
 
 // padColumn lays value into a column that is cells display columns wide, so the

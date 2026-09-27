@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -20,32 +21,32 @@ type PushResult struct {
 }
 
 // PushDryRun shows what would be pushed without actually pushing
-func PushDryRun(cfg *config.Config) (string, error) {
+func PushDryRun(ctx context.Context, cfg *config.Config) (string, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return "", err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return runner.PushDryRun()
+	return runner.PushDryRun(ctx)
 }
 
 // Push pushes committed changes to the remote repository
 // Returns ErrUpToDate if there's nothing to push
-func Push(cfg *config.Config) (*PushResult, error) {
+func Push(ctx context.Context, cfg *config.Config) (*PushResult, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return PushWithExecutor(runner)
+	return PushWithExecutor(ctx, runner)
 }
 
 // PushWithExecutor pushes committed changes using the provided GitExecutor.
 // This function is useful for testing with mock implementations.
-func PushWithExecutor(executor git.GitExecutor) (*PushResult, error) {
-	err := executor.Push()
+func PushWithExecutor(ctx context.Context, executor git.GitExecutor) (*PushResult, error) {
+	err := executor.Push(ctx)
 
 	if err != nil {
 		// Check if the error indicates up-to-date status

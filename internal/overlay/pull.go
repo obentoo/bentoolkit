@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -58,7 +59,7 @@ type PullResult struct {
 
 // Pull fetches the configured remote and integrates the current branch's
 // upstream into it.
-func Pull(cfg *config.Config, mode PullMode, dryRun bool) (*PullResult, error) {
+func Pull(ctx context.Context, cfg *config.Config, mode PullMode, dryRun bool) (*PullResult, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func Pull(cfg *config.Config, mode PullMode, dryRun bool) (*PullResult, error) {
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return PullWithRunner(runner, remote, mode, dryRun)
+	return PullWithRunner(ctx, runner, remote, mode, dryRun)
 }
 
 // PullWithRunner performs the pull using a provided GitExecutor.
@@ -79,30 +80,30 @@ func Pull(cfg *config.Config, mode PullMode, dryRun bool) (*PullResult, error) {
 // The upstream is resolved from the branch that is actually checked out, not
 // from the remote's default branch: merging origin/HEAD into whatever happens
 // to be checked out silently drags the default branch into unrelated work.
-func PullWithRunner(runner git.GitExecutor, remote string, mode PullMode, dryRun bool) (*PullResult, error) {
+func PullWithRunner(ctx context.Context, runner git.GitExecutor, remote string, mode PullMode, dryRun bool) (*PullResult, error) {
 	if remote == "" {
 		return nil, ErrNoRemote
 	}
 
 	// Resolve branch and upstream before touching the network: both failures
 	// are cheap, and neither is worth a fetch to discover.
-	branch, err := runner.CurrentBranch()
+	branch, err := runner.CurrentBranch(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	upstream, err := runner.Upstream()
+	upstream, err := runner.Upstream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("branch %q has no upstream to pull from: %w", branch, err)
 	}
 
-	if err := runner.Fetch(remote); err != nil {
+	if err := runner.Fetch(ctx, remote); err != nil {
 		return nil, err
 	}
 
 	// Counted after the fetch, so the number reflects what was just fetched
 	// rather than a stale remote-tracking ref.
-	behind, err := runner.CountRange("HEAD", upstream)
+	behind, err := runner.CountRange(ctx, "HEAD", upstream)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +123,7 @@ func PullWithRunner(runner git.GitExecutor, remote string, mode PullMode, dryRun
 
 	// Only now does a dirty worktree matter. A pull that has nothing to
 	// integrate should not complain about work in progress.
-	dirty, err := hasUncommittedChanges(runner)
+	dirty, err := hasUncommittedChanges(ctx, runner)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func PullWithRunner(runner git.GitExecutor, remote string, mode PullMode, dryRun
 		return result, nil
 	}
 
-	if err := integrate(runner, upstream, mode); err != nil {
+	if err := integrate(ctx, runner, upstream, mode); err != nil {
 		errStr := err.Error()
 		if isConflictError(errStr) {
 			result.Conflicts = parseConflicts(errStr)
@@ -163,14 +164,14 @@ func PullWithRunner(runner git.GitExecutor, remote string, mode PullMode, dryRun
 }
 
 // integrate applies the fetched commits using the selected mode.
-func integrate(runner git.GitExecutor, upstream string, mode PullMode) error {
+func integrate(ctx context.Context, runner git.GitExecutor, upstream string, mode PullMode) error {
 	switch mode {
 	case PullRebase:
-		return runner.Rebase(upstream)
+		return runner.Rebase(ctx, upstream)
 	case PullMerge:
-		return runner.Merge(upstream)
+		return runner.Merge(ctx, upstream)
 	default:
-		return runner.MergeFFOnly(upstream)
+		return runner.MergeFFOnly(ctx, upstream)
 	}
 }
 
@@ -180,8 +181,8 @@ func integrate(runner git.GitExecutor, upstream string, mode PullMode) error {
 // files) and blocking on their mere presence would make the pull unusable.
 // Git still refuses when an untracked file is about to be overwritten, and
 // that refusal is translated by classifyIntegrationError.
-func hasUncommittedChanges(runner git.GitExecutor) (bool, error) {
-	entries, err := runner.Status()
+func hasUncommittedChanges(ctx context.Context, runner git.GitExecutor) (bool, error) {
+	entries, err := runner.Status(ctx)
 	if err != nil {
 		return false, err
 	}
