@@ -76,7 +76,10 @@ func snapshotState[V any](m map[string]V) (map[string]json.RawMessage, error) {
 // meanwhile survive, and entries it deleted stay deleted.
 func mergeState[V any](memory map[string]V, baseline map[string]json.RawMessage, disk map[string]V) (map[string]V, error) {
 	merged := make(map[string]V, len(disk)+len(memory))
-	keys := make(map[string]struct{}, len(memory)+len(baseline)+len(disk))
+	// No size hint: sizing it by the sum of three lengths is an arithmetic
+	// overflow on paper (CodeQL go/allocation-size-overflow) for a hint the map
+	// does not need.
+	keys := make(map[string]struct{})
 	for k := range memory {
 		keys[k] = struct{}{}
 	}
