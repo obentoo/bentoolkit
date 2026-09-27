@@ -91,7 +91,9 @@ const DefaultOpTimeout = 30 * time.Second
 // the per-request timeout (not the operation budget) is what fires on a slow
 // host, so the failure surfaces as the clearer "max retries exceeded" rather than
 // a premature "context deadline exceeded". rc carries the retry parameters from
-// the HTTP client; a zero/blank rc still yields a budget >= perReq.
+// the HTTP client; a zero/blank rc still yields a budget >= perReq. The backoff
+// is summed from backoffCeilingFor, the same ceiling the retry wait draws its
+// jitter below, so a jittered wait never exceeds what the budget allows for.
 func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 	maxRetries := rc.MaxRetries
 	if maxRetries < 0 {
@@ -100,15 +102,9 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 	attempts := maxRetries + 1
 	total := perReq * time.Duration(attempts)
 
-	// Sum the backoff delays the retry loop would sleep between attempts, mirroring
-	// calculateDelay: BaseDelay×2^(i-1), capped at MaxDelay.
+	// Sum the longest wait the retry loop can take before each retry.
 	for i := 1; i <= maxRetries; i++ {
-		multiplier := 1 << (i - 1) // 2^(i-1): 1, 2, 4, ...
-		delay := rc.BaseDelay * time.Duration(multiplier)
-		if rc.MaxDelay > 0 && delay > rc.MaxDelay {
-			delay = rc.MaxDelay
-		}
-		total += delay
+		total += backoffCeilingFor(rc, i)
 	}
 
 	return total + time.Second
@@ -677,7 +673,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if errors.Is(err, ErrBaseVersionUnresolved) {
 				result.Error = err
 			} else {
-				result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+				result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 			}
 			return result, result.Error
 		}
@@ -772,7 +768,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	// Fetch upstream version
 	upstreamVersion, err := c.fetchUpstreamVersion(pkg, &pkgConfig)
 	if err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+		result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 		return result, result.Error
 	}
 	result.UpstreamVersion = upstreamVersion
@@ -1075,7 +1071,7 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 
 		// Highest version ::gentoo currently carries. A package ::gentoo does not
 		// have is simply not revivable from a gentoo base, so skip it silently.
-		versions, err := prov.GetPackageVersions(category, pkgName)
+		versions, err := prov.GetPackageVersions(c.ctx, category, pkgName)
 		if err != nil {
 			if errors.Is(err, provider.ErrNotFound) {
 				continue

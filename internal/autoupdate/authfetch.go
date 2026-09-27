@@ -703,7 +703,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
+		return "", withCtxCause(fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, creds.scrub(err.Error())), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -850,7 +850,7 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 	switch {
 	case copyErr != nil:
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, creds.scrub(copyErr.Error()))
+		return "", withCtxCause(fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, creds.scrub(copyErr.Error())), copyErr)
 	case closeErr != nil:
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: closing temp file: %v", ErrAuthFetchFailed, closeErr)
@@ -888,4 +888,42 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
 	}
 	return destPath, nil
+}
+
+// ctxCause returns the bare context sentinel behind err — context.Canceled or
+// context.DeadlineExceeded — or nil when err was not caused by its context
+// ending. The sentinel carries no request data, which is why it, and never err
+// itself, may be exposed from an authenticated fetch.
+func ctxCause(err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// authFetchCtxError is an authenticated-fetch failure that also exposes the
+// context sentinel that caused it. Its text is the failure's own, already
+// scrubbed; the cause adds no text, so errors.Is reaches context.Canceled or
+// context.DeadlineExceeded without anything from the original error — which
+// may render a resolved credential — entering the Unwrap chain.
+type authFetchCtxError struct {
+	err   error // the scrubbed failure, wrapping ErrAuthFetchFailed
+	cause error // context.Canceled or context.DeadlineExceeded
+}
+
+func (e *authFetchCtxError) Error() string   { return e.err.Error() }
+func (e *authFetchCtxError) Unwrap() []error { return []error{e.err, e.cause} }
+
+// withCtxCause returns failure unchanged unless original was caused by its
+// context ending; then it returns failure with that bare sentinel reachable
+// through errors.Is. original is only inspected, never wrapped.
+func withCtxCause(failure, original error) error {
+	cause := ctxCause(original)
+	if cause == nil {
+		return failure
+	}
+	return &authFetchCtxError{err: failure, cause: cause}
 }

@@ -1015,7 +1015,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// only copy of the candidate's archive in existence locally.
 	cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
-		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, manifestErr))
+		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 
 	// The static gates — the Meson option gate and the advisory QA scan (story
@@ -1902,6 +1902,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
+		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
@@ -1933,7 +1934,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
+		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools))
 	}
 
 	result.Fixed = true
@@ -2465,7 +2466,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 		// this is the host, and no fixer will be invoked to edit an ebuild that
 		// was never the problem.
 		return buildAttempt{
-			err:             fmt.Errorf("%w: %v", ErrCompileFailed, err),
+			err:             fmt.Errorf("%w: %w", ErrCompileFailed, err),
 			resolvedDistdir: distdir,
 			enforcedDistdir: enforced,
 		}
@@ -2502,7 +2503,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
 	if err != nil {
 		attempt.logPath = a.saveCompileLog(pkg, version, output)
-		attempt.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+		attempt.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 	}
 	return attempt
 }

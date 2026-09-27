@@ -65,6 +65,8 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetDelayFunc(func(d time.Duration) {
 				recordedDelays = append(recordedDelays, d)
 			})
+			// Identity jitter: the property pins the backoff ceilings.
+			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
 			resp, err := client.Get(server.URL)
@@ -156,6 +158,8 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetDelayFunc(func(d time.Duration) {
 				recordedDelays = append(recordedDelays, d)
 			})
+			// Identity jitter: the property pins the backoff ceilings.
+			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
 			resp, err := client.Get(server.URL)
@@ -476,6 +480,8 @@ func TestRetryableHTTPClientContextCancellation(t *testing.T) {
 // TestCalculateDelay tests the delay calculation
 func TestCalculateDelay(t *testing.T) {
 	client := NewRetryableHTTPClient()
+	// Identity jitter: this table pins the backoff ceilings, not the draw.
+	client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 	testCases := []struct {
 		attempt  int
@@ -1197,7 +1203,7 @@ func TestHTTPClient_CircuitRecovery(t *testing.T) {
 		MaxDelay:   0,
 		Timeout:    5 * time.Second,
 	})
-	client.breaker = cb
+	client.newBreaker = func(string) *gobreaker.CircuitBreaker { return cb }
 	client.SetDelayFunc(func(time.Duration) {})
 
 	// Open the circuit with 5 failures
@@ -1238,7 +1244,7 @@ func TestHTTPClient_CircuitProbeFailure(t *testing.T) {
 		MaxDelay:   0,
 		Timeout:    5 * time.Second,
 	})
-	client.breaker = cb
+	client.newBreaker = func(string) *gobreaker.CircuitBreaker { return cb }
 	client.SetDelayFunc(func(time.Duration) {})
 
 	// Open the circuit
@@ -1303,7 +1309,7 @@ func TestHTTPClient_CircuitAndRateLimiterIndependent(t *testing.T) {
 	}
 
 	// Circuit breaker should still be closed
-	if client.breaker.State() != gobreaker.StateClosed {
+	if client.breakerFor(server.Listener.Addr().String()).State() != gobreaker.StateClosed {
 		t.Error("Expected circuit to remain closed after successful request")
 	}
 }

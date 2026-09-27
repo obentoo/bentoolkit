@@ -131,7 +131,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err)
+		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -166,7 +166,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Response, creds authFetchCredentials) (*http.Response, error) {
 	raw, err := io.ReadAll(io.LimitReader(first.Body, urlBodyLimit))
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
+		return nil, withCtxCause(fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, creds.scrub(err.Error())), err)
 	}
 
 	target, err := parseDownloadURL(string(raw), first.Header.Get("Content-Type"))
@@ -190,7 +190,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err)
+		return nil, withCtxCause(fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err), err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()

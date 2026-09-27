@@ -110,11 +110,7 @@ func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(nil, body, limit))
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			return nil, fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, maxBytesErr.Limit)
-		}
-		return nil, err
+		return nil, classifyBodyReadError(err)
 	}
 	return data, nil
 }

@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -358,7 +359,7 @@ func (p *authorshipProvider) LocalPackagePath(category, pkg string) (string, err
 // GetPackageVersions must never run. The pass annotates a report the comparison
 // has already produced; a version lookup here would be a second round of
 // provider traffic for every differing package, on a question already answered.
-func (p *authorshipProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *authorshipProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	p.t.Errorf("the authorship pass asked %s/%s for its versions; it annotates a finished report and looks nothing up",
 		category, pkg)
 	return nil, provider.ErrNotFound

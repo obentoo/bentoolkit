@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,7 +101,7 @@ func (c *Client) SetCacheDir(dir string) error {
 }
 
 // GetPackageVersions fetches all ebuild versions for a package from GitHub
-func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
+func (c *Client) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	// Check cache first
 	if c.CacheDir != "" {
 		if versions, ok := c.loadFromCache(category, pkg); ok {
@@ -109,7 +110,7 @@ func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
 	}
 
 	// Fetch from API
-	versions, err := c.fetchPackageVersions(category, pkg)
+	versions, err := c.fetchPackageVersions(ctx, category, pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -123,10 +124,10 @@ func (c *Client) GetPackageVersions(category, pkg string) ([]string, error) {
 }
 
 // fetchPackageVersions fetches versions from GitHub API
-func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
+func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	url := fmt.Sprintf("%s/repos/%s/contents/%s/%s", c.BaseURL, c.Repository, category, pkg)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +142,11 @@ func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GitHub lookup %s/%s: %w", category, pkg, err)
 	}
+	// Cap every read of this body: an oversized or hostile response fails
+	// with httputil.ErrResponseTooLarge instead of exhausting memory.
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	// Handle rate limiting
@@ -158,14 +162,19 @@ func (c *Client) fetchPackageVersions(category, pkg string) ([]string, error) {
 
 	// Handle other errors
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		// The quoted error body is best-effort, except that an oversized one
+		// is reported as such rather than quoted.
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr = httputil.ClassifyBodyReadError(readErr); errors.Is(readErr, httputil.ErrResponseTooLarge) {
+			return nil, fmt.Errorf("reading GitHub error response for %s/%s: %w", category, pkg, readErr)
+		}
 		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading GitHub response for %s/%s: %w", category, pkg, httputil.ClassifyBodyReadError(err))
 	}
 
 	var entries []ContentEntry
@@ -292,11 +301,12 @@ func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err err
 	if err != nil {
 		return 0, time.Time{}, err
 	}
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, fmt.Errorf("reading GitHub rate_limit response: %w", httputil.ClassifyBodyReadError(err))
 	}
 
 	var result struct {
