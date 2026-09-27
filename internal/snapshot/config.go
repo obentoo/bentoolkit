@@ -11,6 +11,7 @@ package snapshot
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -354,6 +355,58 @@ func LoadFrom(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// ErrInvalidConfigValue is returned by Validate when a value that reaches
+// btrbk.conf or a systemd unit carries a control character (053 R7.1). A
+// newline there would inject a directive of the file's own grammar.
+var ErrInvalidConfigValue = errors.New("invalid snapshot config value")
+
+// hasControl reports whether s contains a byte below 0x20 or equal to 0x7F.
+// Bytes of multi-byte UTF-8 sequences are all 0x80 or above, so any non-ASCII
+// text passes.
+func hasControl(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+// checkControlCharacters rejects a control character in every value that
+// renderBtrbkConf or the systemd unit templates interpolate, naming the key
+// (with its index) and quoting the value (053 R7.1).
+func (c *Config) checkControlCharacters() error {
+	type field struct{ key, value string }
+	fields := make([]field, 0, len(c.Engine.Subvolumes)+len(c.Ship)+5)
+	for i, sv := range c.Engine.Subvolumes {
+		fields = append(fields, field{fmt.Sprintf("engine.subvolumes[%d]", i), sv})
+	}
+	fields = append(fields,
+		field{"engine.snapshot_dir", c.Engine.SnapshotDir},
+		field{"engine.retention.preserve_min", c.Engine.Retention.PreserveMin},
+	)
+	for i, sh := range c.Ship {
+		if sh.Type == "ssh" {
+			fields = append(fields, field{fmt.Sprintf("ship[%d].target", i), sh.Target})
+		}
+	}
+	fields = append(fields,
+		field{"schedule.on_calendar", c.Schedule.OnCalendar},
+		field{"schedule.randomized_delay", c.Schedule.RandomizedDelay},
+	)
+	for _, f := range fields {
+		if hasControl(f.value) {
+			return fmt.Errorf("%w: %s contains a control character: %q", ErrInvalidConfigValue, f.key, f.value)
+		}
+	}
+	return nil
+}
+
+// ErrShipEngineMismatch is returned by Validate when a ship type cannot work
+// with the configured engine: ssh shipping is btrbk's own transfer, so snapper
+// cannot perform it (053 R3.1).
+var ErrShipEngineMismatch = errors.New("ship type not supported by engine")
+
 // Validate checks the config before any side effect (R1.3, R1.4, AD4). It fails
 // hard with ErrInvalidDriver on an unknown engine.driver, ship.type, or
 // schedule.backend; warns-but-continues on non-fatal issues (empty subvolumes);
@@ -384,6 +437,21 @@ func (c *Config) Validate() error {
 		// "" = no scheduling; "systemd" = supported
 	default:
 		return fmt.Errorf("%w: schedule.backend %q", ErrInvalidDriver, c.Schedule.Backend)
+	}
+
+	// snapper never receives the ssh targets (only btrbk folds them into its
+	// conf), so an ssh ship under snapper would report success while sending
+	// nothing. Refused here, ahead of binary detection (053 R3.1, R3.2).
+	if c.Engine.Driver == "snapper" {
+		for i, sh := range c.Ship {
+			if sh.Type == "ssh" {
+				return fmt.Errorf("%w: ship[%d] %q: type \"ssh\" needs engine.driver = \"btrbk\" (btrbk performs the transfer); with snapper use type \"archive\" or \"restic\"", ErrShipEngineMismatch, i, sh.Name)
+			}
+		}
+	}
+
+	if err := c.checkControlCharacters(); err != nil {
+		return err
 	}
 
 	// Non-fatal: an empty subvolume list means nothing is snapshotted, but it is

@@ -302,22 +302,23 @@ func validateChain(chain []chainLink) error {
 // restoreArchive validates the delta chain and then replays it into target
 // (R5.2). The chain is validated FIRST: a broken chain returns ErrBrokenChain and
 // NO `btrfs receive` runs (G3) — nothing is applied against a missing base. On a
-// valid chain, each link is applied in order through the existing runPipe helper
-// with stages `rclone cat <remote>/<object> | <decompress> | btrfs receive
+// valid chain, each link is applied in order, one stage after another, with
+// stages `rclone cat <remote>/<object>`, `<decompress>` and `btrfs receive
 // <target>`. All subprocesses go through opts.Run (R7.2).
 //
-// NOTE (R-archive-memory): runPipe buffers each stage's full output in memory (the
-// 004 Runner returns []byte), so a multi-GB stream is a real memory cost here just
-// as on the ship side; a true streaming pipe is future work gated behind live
-// tests and does not change the mock-tested correctness (argv wiring, ordered
-// receive, refuse-before-receive).
+// Each link runs through runStagesBuffered, not the streaming runPipe the ship
+// side uses: `btrfs receive` must start only once the download and the
+// decompression have both succeeded. Streamed, a failed download or a truncated
+// object reaches receive as a partial stream, which leaves a partial, writable
+// subvolume at the target, and the retry then fails because it already exists.
+// The price is that a link is held in memory, as it always was here.
 func restoreArchive(ctx context.Context, id, target string, opts RestoreOptions) error {
 	if err := validateChain(opts.Chain); err != nil {
 		return err // refuse BEFORE any btrfs receive (R5.2/G3)
 	}
 	for _, link := range opts.Chain {
 		stages := restorePipeStages(opts.Remote, link.Object, opts.Compress, target)
-		if _, err := runPipe(ctx, opts.Run, stages); err != nil {
+		if _, err := runStagesBuffered(ctx, opts.Run, stages); err != nil {
 			return fmt.Errorf("restore archive link %q: %w", link.ID, err)
 		}
 	}

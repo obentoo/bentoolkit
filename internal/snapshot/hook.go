@@ -104,6 +104,12 @@ func emergeBashrcPath() string {
 // It is called exclusively by the explicit `bentoo snapshot hook --install`
 // verb — never by apply (R4.3).
 func InstallEmergeHook() error {
+	// The bashrc is checked first: a broken block refuses the install before
+	// any file is created or rewritten (053 R6.1).
+	stripped, err := checkEmergeBashrc()
+	if err != nil {
+		return err
+	}
 	script := emergeHookScriptPath()
 	// MkdirAll with the conventional /etc perms first; atomicWrite's internal
 	// MkdirAll (0o750) then no-ops on the already-existing directories.
@@ -113,7 +119,7 @@ func InstallEmergeHook() error {
 	if err := atomicWrite(script, []byte(emergeHookScript), 0o644); err != nil {
 		return fmt.Errorf("write hook script %s: %w", script, err)
 	}
-	return ensureEmergeBashrcBlock()
+	return ensureEmergeBashrcBlock(stripped)
 }
 
 // UninstallEmergeHook removes the Portage emerge hook (R4.2): it deletes the
@@ -122,21 +128,21 @@ func InstallEmergeHook() error {
 // Absent files are a clean no-op so uninstall succeeds on a never-installed
 // system.
 func UninstallEmergeHook() error {
+	// The bashrc is checked first: a broken block refuses the uninstall before
+	// the hook script is removed or the bashrc rewritten (053 R6.2).
+	stripped, err := checkEmergeBashrc()
+	if err != nil {
+		return err
+	}
 	script := emergeHookScriptPath()
 	if err := os.Remove(script); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove hook script %s: %w", script, err)
 	}
 
-	bashrc := emergeBashrcPath()
-	existing, err := os.ReadFile(bashrc)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil // never installed (or already removed): clean no-op
-		}
-		return fmt.Errorf("read bashrc %s: %w", bashrc, err)
+	if stripped == nil {
+		return nil // no bashrc: never installed (or already removed), a clean no-op
 	}
-
-	stripped := stripEmergeHookBlock(existing)
+	bashrc := emergeBashrcPath()
 	if len(bytes.TrimSpace(stripped)) == 0 {
 		// Nothing but our block (plus whitespace) lived there: remove the file
 		// rather than leave an empty bashrc behind.
@@ -152,17 +158,13 @@ func UninstallEmergeHook() error {
 }
 
 // ensureEmergeBashrcBlock creates or updates the bashrc so it contains exactly
-// one managed block sourcing the hook script: any existing block is dropped
-// (replacement in place, never duplication) and a fresh one is appended, with
-// every byte of user content outside the block preserved.
-func ensureEmergeBashrcBlock() error {
+// one managed block sourcing the hook script: stripped is the bashrc with any
+// existing block already dropped by checkEmergeBashrc (replacement in place,
+// never duplication), and a fresh block is appended, with every byte of user
+// content outside the block preserved.
+func ensureEmergeBashrcBlock(stripped []byte) error {
 	bashrc := emergeBashrcPath()
-	existing, err := os.ReadFile(bashrc)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("read bashrc %s: %w", bashrc, err)
-	}
-
-	content := stripEmergeHookBlock(existing)
+	content := stripped
 	if len(content) > 0 && !bytes.HasSuffix(content, []byte("\n")) {
 		content = append(content, '\n')
 	}
@@ -174,23 +176,59 @@ func ensureEmergeBashrcBlock() error {
 	return nil
 }
 
+// checkEmergeBashrc reads the bashrc and returns it with the managed block
+// stripped, or nil when there is no bashrc. A block with no end marker is
+// refused with an error naming the file, the line, and the manual fix
+// (053 R6.3), before the caller has touched anything.
+func checkEmergeBashrc() ([]byte, error) {
+	bashrc := emergeBashrcPath()
+	existing, err := os.ReadFile(bashrc)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read bashrc %s: %w", bashrc, err)
+	}
+	stripped, err := stripEmergeHookBlock(existing)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w; nothing was changed — add %q after the block's last line, or delete the block, then re-run", bashrc, err, emergeHookBlockEnd)
+	}
+	if stripped == nil {
+		stripped = []byte{}
+	}
+	return stripped, nil
+}
+
+// ErrBrokenHookBlock marks a bashrc whose managed-block begin marker has no end
+// marker after it. Stripping such a block would drop every line to the end of
+// the file, so install and uninstall refuse it instead (053 R6).
+var ErrBrokenHookBlock = errors.New("bentoo snapshot hook block has no end marker")
+
 // stripEmergeHookBlock removes the managed block — the begin-marker line, the
 // end-marker line, and everything between — from bashrc content. Lines outside
 // the block pass through untouched, so user content round-trips byte-for-byte;
 // content without a block is returned unchanged.
-func stripEmergeHookBlock(content []byte) []byte {
+//
+// A begin marker with no end marker after it returns ErrBrokenHookBlock naming
+// the 1-based line number and text of that begin marker (053 R6.3).
+func stripEmergeHookBlock(content []byte) ([]byte, error) {
 	lines := strings.Split(string(content), "\n")
 	kept := make([]string, 0, len(lines))
 	inBlock := false
-	for _, line := range lines {
+	beginLine, beginText := 0, ""
+	for i, line := range lines {
 		switch trimmed := strings.TrimSpace(line); {
 		case !inBlock && trimmed == emergeHookBlockBegin:
 			inBlock = true
+			beginLine, beginText = i+1, line
 		case inBlock && trimmed == emergeHookBlockEnd:
 			inBlock = false
 		case !inBlock:
 			kept = append(kept, line)
 		}
 	}
-	return []byte(strings.Join(kept, "\n"))
+	if inBlock {
+		return nil, fmt.Errorf("%w: line %d: %q", ErrBrokenHookBlock, beginLine, beginText)
+	}
+	return []byte(strings.Join(kept, "\n")), nil
 }

@@ -153,9 +153,11 @@ func markerRunner(t *testing.T, mr *MockRunner, markers map[string][]byte) {
 	}
 }
 
-// TestArchiveShipper_Send_PipeChaining asserts Send runs exactly 3 stages in order
-// (btrfs send → compressor → rclone rcat) and that each stage's stdin equals the
-// previous stage's stdout — i.e. the pipe is wired through the Runner (R2.1).
+// TestArchiveShipper_Send_PipeChaining asserts Send drives exactly one pipe
+// through the Runner's piper seam, with 3 stages in order (btrfs send →
+// compressor → rclone rcat) (R2.1, 053 R5.1). MockRunner's Pipe chains the stages
+// through Run, so each stage's recorded stdin still equals the previous stage's
+// stdout; the production execRunner streams them through OS pipes instead.
 func TestArchiveShipper_Send_PipeChaining(t *testing.T) {
 	mr := &MockRunner{}
 	markerRunner(t, mr, map[string][]byte{
@@ -170,6 +172,9 @@ func TestArchiveShipper_Send_PipeChaining(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 
+	if len(mr.PipeCalls) != 1 || !equalStrings(mr.PipeCalls[0], []string{"btrfs", "zstd", "rclone"}) {
+		t.Fatalf("PipeCalls = %q, want one pipe of btrfs, zstd, rclone", mr.PipeCalls)
+	}
 	if len(mr.Calls) != 3 {
 		t.Fatalf("got %d calls, want 3 (btrfs, zstd, rclone)", len(mr.Calls))
 	}

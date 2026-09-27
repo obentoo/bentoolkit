@@ -49,7 +49,9 @@ func (e *snapperEngine) Name() string { return "snapper" }
 // Create runs `snapper -c <config> create` with the bentoo description tag
 // (R1.2), the timeline cleanup algorithm (so Prune's `cleanup timeline`
 // governs these snapshots, R1.4), and --print-number so the trimmed stdout
-// becomes the snapshot's ID. A non-zero exit is wrapped with ErrEngineFailed
+// becomes the snapshot's ID, and Path follows snapperSnapshotPath (053 R1.1).
+// Output that is not a positive number yields a snapshot with no ID or Path
+// and one warning (053 R1.4). A non-zero exit is wrapped with ErrEngineFailed
 // so the Manager can record a failed stage (R6.1).
 func (e *snapperEngine) Create(ctx context.Context, subvolume string) (Snapshot, error) {
 	args := []string{
@@ -62,10 +64,35 @@ func (e *snapperEngine) Create(ctx context.Context, subvolume string) (Snapshot,
 	if err != nil {
 		return Snapshot{}, errors.Join(ErrEngineFailed, fmt.Errorf("snapper create %s: %w", subvolume, err))
 	}
+	id := strings.TrimSpace(string(out))
+	if !isSnapperNumber(id) {
+		// The snapshot exists; only its identity is unknown. The ships that
+		// need a Path refuse it with ErrSnapshotUnidentified.
+		warnLogf("snapshot: snapper create %s printed %q, not a snapshot number; its ships cannot address it", subvolume, out)
+		return Snapshot{Subvolume: subvolume}, nil
+	}
 	return Snapshot{
-		ID:        strings.TrimSpace(string(out)),
+		ID:        id,
 		Subvolume: subvolume,
+		Path:      snapperSnapshotPath(subvolume, id),
 	}, nil
+}
+
+// isSnapperNumber reports whether s is a positive decimal snapshot number, the
+// only shape `snapper create --print-number` prints on success.
+func isSnapperNumber(s string) bool {
+	if s == "" || strings.TrimLeft(s, "0123456789") != "" {
+		return false
+	}
+	n, err := strconv.Atoi(s)
+	return err == nil && n > 0
+}
+
+// snapperSnapshotPath is snapper's fixed on-disk layout for snapshot id of
+// subvolume: <subvolume>/.snapshots/<id>/snapshot. Create and
+// parseSnapperListJSON both derive Path through it so the two cannot drift.
+func snapperSnapshotPath(subvolume, id string) string {
+	return filepath.Join(subvolume, ".snapshots", id, "snapshot")
 }
 
 // Prune runs `snapper -c <config> cleanup timeline` (R1.4). Retention is
@@ -164,7 +191,7 @@ func parseSnapperListJSON(out []byte, subvolume string) []Snapshot {
 			snap := Snapshot{
 				ID:        id,
 				Subvolume: subvolume,
-				Path:      filepath.Join(subvolume, ".snapshots", id, "snapshot"),
+				Path:      snapperSnapshotPath(subvolume, id),
 			}
 			if t, err := time.Parse(snapperDateLayout, strings.TrimSpace(entry.Date)); err == nil {
 				snap.CreatedAt = t

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -37,12 +38,120 @@ func (e *btrbkEngine) Name() string { return "btrbk" }
 // Create runs `btrbk run <subvolume>` against the rendered conf (R2.2). The
 // snapshot (and any configured send) is performed by btrbk; a non-zero exit is
 // wrapped with ErrEngineFailed so the Manager can record a failed stage (§6).
+//
+// btrbk run prints nothing a caller can address the new snapshot by, so a
+// second call, `btrbk -c <conf> --format=raw list latest <subvolume>`, resolves
+// its Path and ID (053 R1.2). When that listing fails, is empty or names more
+// than one snapshot, the snapshot is returned unidentified with one warning and
+// a nil error (053 R1.3): btrbk run succeeded, and btrbk may already have
+// shipped it over ssh. Only the ships that need a Path refuse it.
 func (e *btrbkEngine) Create(ctx context.Context, subvolume string) (Snapshot, error) {
 	args := []string{"-c", e.confPath, "run", subvolume}
 	if _, err := e.run.Run(ctx, "btrbk", args, nil); err != nil {
 		return Snapshot{}, errors.Join(ErrEngineFailed, fmt.Errorf("btrbk run %s: %w", subvolume, err))
 	}
-	return Snapshot{Subvolume: subvolume}, nil
+	path, reason := e.resolveLatest(ctx, subvolume)
+	if reason != "" {
+		warnLogf("snapshot: btrbk snapshot of %s is unidentified (%s); its archive and restic ships cannot address it", subvolume, reason)
+		return Snapshot{Subvolume: subvolume}, nil
+	}
+	return Snapshot{ID: filepath.Base(path), Subvolume: subvolume, Path: path}, nil
+}
+
+// resolveLatest asks btrbk for the latest snapshot of subvolume and returns
+// its path, or an empty path and the reason it could not be resolved. It never
+// picks among several candidates.
+func (e *btrbkEngine) resolveLatest(ctx context.Context, subvolume string) (path, reason string) {
+	out, err := e.run.Run(ctx, "btrbk", []string{"-c", e.confPath, "--format=raw", "list", "latest", subvolume}, nil)
+	if err != nil {
+		return "", fmt.Sprintf("btrbk list latest failed: %v", err)
+	}
+	paths, err := parseBtrbkLatestRaw(out)
+	switch {
+	case err != nil:
+		return "", err.Error()
+	case len(paths) == 0:
+		return "", "btrbk list latest reported no snapshot"
+	case len(paths) > 1:
+		return "", fmt.Sprintf("btrbk list latest reported %d snapshots: %q", len(paths), paths)
+	}
+	return paths[0], ""
+}
+
+// errMalformed marks a `btrbk --format=raw` line that is not a sequence of
+// key=value tokens.
+var errMalformed = errors.New("malformed btrbk raw row")
+
+// parseBtrbkLatestRaw extracts the snapshot paths from
+// `btrbk --format=raw list latest` output (053 R1.2). Each row is
+// `format="latest"` followed by key='value' pairs, every value written by
+// btrbk's quoteshell, which closes the quote, writes an escaped \' and reopens
+// it for every ' inside a value. Rows whose type contains "snapshot" and carry
+// a non-empty snapshot_subvolume contribute that path; the distinct paths are
+// returned in order of appearance, so one snapshot listed once per target
+// collapses to one entry.
+func parseBtrbkLatestRaw(out []byte) ([]string, error) {
+	var paths []string
+	for n, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		row, err := parseBtrbkRawRow(line)
+		if err != nil {
+			return nil, fmt.Errorf("parse btrbk list latest line %d: %w", n+1, err)
+		}
+		p := row["snapshot_subvolume"]
+		if !strings.Contains(row["type"], "snapshot") || p == "" || slices.Contains(paths, p) {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	return paths, nil
+}
+
+// parseBtrbkRawRow splits one raw row into its key=value pairs. A value is a
+// concatenation of '…' and "…" segments and \-escaped characters, read the way
+// a POSIX shell reads a word, so text that merely looks like key='value' inside
+// a quoted value stays part of that value.
+func parseBtrbkRawRow(line string) (map[string]string, error) {
+	row := map[string]string{}
+	i := 0
+	for {
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		if i == len(line) {
+			return row, nil
+		}
+		eq := strings.IndexByte(line[i:], '=')
+		if eq <= 0 || strings.ContainsAny(line[i:i+eq], " \t'\"") {
+			return nil, errMalformed
+		}
+		key := line[i : i+eq]
+		i += eq + 1
+		var val strings.Builder
+		for i < len(line) && line[i] != ' ' && line[i] != '\t' {
+			switch c := line[i]; c {
+			case '\'', '"':
+				end := strings.IndexByte(line[i+1:], c)
+				if end < 0 {
+					return nil, errMalformed
+				}
+				val.WriteString(line[i+1 : i+1+end])
+				i += end + 2
+			case '\\':
+				if i+1 == len(line) {
+					return nil, errMalformed
+				}
+				val.WriteByte(line[i+1])
+				i += 2
+			default:
+				val.WriteByte(c)
+				i++
+			}
+		}
+		row[key] = val.String()
+	}
 }
 
 // Prune runs `btrbk clean <subvolume>` (R2.3). Retention is delegated to btrbk via
