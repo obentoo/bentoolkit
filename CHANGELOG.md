@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Every `claude` agent bentoo spawns now receives an allow-listed environment,
+  not bentoo's whole one.** The text client, the manifest, registry and build
+  fixers and the bump reviewer used to inherit every variable bentoo had —
+  `GITHUB_TOKEN`, the ntfy token, the SMTP password, every `BENTOO_*` value — in
+  a process that reads untrusted upstream pages. The child now gets only `PATH`,
+  `HOME`, `TMPDIR`, `LANG`, `TERM`, `CLAUDE_CONFIG_DIR`, the CA and proxy
+  variables, and the `LC_*` and `XDG_*` families; the manifest fixer also gets
+  `PORTAGE_*` and exactly one `DISTDIR`, the one the applier computed. In bare
+  mode the resolved API key is the only `ANTHROPIC_API_KEY` entry, so a key the
+  caller's shell exports can no longer sit beside it as a duplicate (this is
+  also why `TestChildEnv_InjectsResolvedKey` failed inside a Claude Code
+  session). `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches are not on the
+  list, so those setups lose the agents until a later change adds them.
+
+- **One builder now writes every `claude` agent's permission arguments.** Each
+  rule is its own argv element; `Read` and `Edit` are scoped to the agent's own
+  directory as `Read(//<dir>/**)` and `Edit(//<dir>/**)` (writes are scoped
+  through `Edit`, the only rule the CLI consults for them); the secrets files
+  are denied by path; WebFetch is granted only as `WebFetch(domain:<host>)` for
+  hosts that are lowercase DNS names — a host from `packages.toml` or `pkgdev`
+  output that is not one is dropped with a warning, so it cannot widen or forge
+  a rule. Every agent runs with `--permission-mode dontAsk`, no user, project or
+  local settings, no MCP servers or account connectors, and inline settings that
+  block reads outside its working directories and refuse `bypassPermissions`.
+  A directory outside `[A-Za-z0-9._+@/-]` (for example an overlay path with a
+  space) now stops the fixer before it spawns, with an error naming the path.
+
+- **An IPv4 literal never becomes a WebFetch host.** A host whose last label is
+  a number — `127.0.0.1`, `10.0.0.1`, `169.254.169.254`, and the spellings a
+  WHATWG URL parser also reads as an address, such as `127.1` and
+  `127.0.0.0x1` — is dropped with a warning, like any other host that is not a
+  DNS name. The manifest fixer takes hosts from the URLs `pkgdev` prints, which
+  upstream controls, and a literal there would grant a fetch straight to
+  loopback, the internal network or a cloud metadata endpoint. This judges the
+  host's spelling, not its resolution: a DNS name that resolves to such an
+  address (for example `169.254.169.254.nip.io`) is still granted, and only
+  egress rules for the agent's user close that — see `SECURITY.md`.
+
+- **Every agent now runs under those scoped permissions.** The manifest fixer
+  keeps `Read`, `Edit`, `Write`, `Bash(pkgdev *)` and WebFetch — its WebFetch
+  reaches the hosts of the package's `url`/`fallback_url` and the http(s) URLs
+  `pkgdev` printed, plus GitHub; `Bash(wget *)`, `Bash(cat *)` and
+  `Bash(ls *)` are gone. The registry fixer keeps `Read`, `Edit`, `Write` and
+  WebFetch to its entry's own hosts; `Bash(curl *)` is gone. The build fixer's
+  `Read`/`Edit` reach only the staged package directory. The text client (no
+  tools at all) and the bump reviewer (`Read` only) now run in a private 0700
+  directory created for each call and removed afterwards, instead of in
+  bentoo's working directory, which a read-only tool could otherwise read.
+
 ### Fixed
 
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
@@ -37,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A tool the agent was refused is now named in the failure.** When a fixer
+  or the bump reviewer fails, the error ends with `refused tools:` and the
+  refused tools — `WebFetch(<host>)` for a fetch, the bare name otherwise —
+  and never the refused call's input. When a manifest or registry fix
+  "succeeds" but its re-check fails, the "still failed" / "still failing after
+  fix" message adds `(agent was refused: …)`. Nothing retries with wider
+  permissions, and no setting widens an agent's tools, hosts or paths.
+
 - **`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured** by every client
   built on the shared transport, including the GitHub and GitLab providers,
   which used to connect directly.
@@ -45,6 +104,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like any other timeout. A larger
   `http_timeout` raises this wait with it, and the Ollama client waits up to
   its full 120 s for a non-streaming reply.
+
+### Documentation
+
+- **`SECURITY.md` now states the boundary the code enforces.** It listed 0.11.x
+  as the supported version and claimed that only secret paths ever reached a
+  subprocess, while every agent inherited the values. It now lists 0.31.x,
+  says which environment an agent receives and that other subprocesses
+  (`pkgdev`, `git`, `ebuild`) still inherit bentoo's, and gains an "LLM Agents"
+  section: each agent's tools and directory scope, the denied secrets paths,
+  the WebFetch host rule, the pinned settings, and the residual risk that
+  permission rules do not confine a program such as `pkgdev` run by the agent.
 
 ## [0.31.1] - 2026-09-22
 
@@ -1086,7 +1156,6 @@ below for why that is a measurement rather than a hope.
   not yet emitted; `--export` still writes the shape it wrote before. The commits
   that move the renderers and the check onto it say so where they land.
 
-
 ### Fixed
 
 - **Every requirement number in this story's comments now names the story that
@@ -1207,7 +1276,6 @@ below for why that is a measurement rather than a hope.
       overlay autoupdate --check, overlay with no packages.toml
       control:          exit 1, "failed to initialize checker: … packages.toml not found in overlay"
       BENTOO_UI=bogus:  exit 1, identical message
-
 
 - **`overlay validate` states a refused ambient render mode too, and `--json`
   stops advertising a value it never took.** Two follow-ups to the entry above,
@@ -3921,7 +3989,6 @@ below for why that is a measurement rather than a hope.
   recurring case: the tooling that opens them does not write changelog entries,
   so the omission was silent by construction. Now it is loud. Verified against
   six cases, including the two that must fail.
-
 
 ### Changed
 - Bumped dependencies: `github.com/antchfx/xpath` v1.3.7 → v1.3.8,

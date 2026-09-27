@@ -55,7 +55,7 @@ import (
 // CREATE files is not needed to change one that exists, and an unused capability
 // is only a liability.
 //
-// This is strictly narrower than manifestFixAllowedTools (manifest_fixer.go:53),
+// This is strictly narrower than `var manifestFixAllowedTools` (manifest_fixer.go),
 // which holds `Write` and `Bash(pkgdev *)` — defensible there, because running
 // `pkgdev manifest` is that fixer's whole job, and the tree it edits is already
 // the overlay. Here the staged tree is the last boundary between a bad agent edit
@@ -83,7 +83,7 @@ var buildFixAllowedTools = []string{
 //
 // The actionable part of a build log lives at its two ends — the first error says
 // what broke, the last lines name the phase that failed — so the log is embedded
-// through truncateMiddle (manifest_fixer.go:349), which keeps both ends and
+// through `func truncateMiddle` (manifest_fixer.go), which keeps both ends and
 // elides the noisy middle. That function is reused, never reimplemented.
 const buildLogBudget = 64 * 1024
 
@@ -321,27 +321,40 @@ func NewClaudeCodeBuildFixer(cfg LLMConfig, opts ...BuildFixerOption) (*ClaudeCo
 // as separate flags an injected newline could forge.
 //
 // pkgDir — the staged package directory, already confined by stagedPackageDir —
-// is the sole --add-dir scope, and buildFixAllowedTools is the sole tool grant.
-func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir string) []string {
+// is the sole --add-dir scope, and buildFixAllowedTools is the sole tool grant,
+// with Read and Edit confined to pkgDir by `func agentPermissionArgs` (S051-R2.2,
+// S051-R2.3). A pkgDir the rules cannot carry safely is an error, and nothing
+// is spawned (S051-R2.8).
+func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir, pkg string) ([]string, error) {
+	perms, err := agentPermissionArgs(agentPermissions{
+		agent: "build fixer",
+		dir:   pkgDir,
+		tools: buildFixAllowedTools,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build fixer for %s: %w", pkg, err)
+	}
 	args := []string{
 		"-p", instruction,
 		"--output-format", "json",
 		"--add-dir", pkgDir,
-		"--allowedTools", strings.Join(buildFixAllowedTools, " "),
+	}
+	args = append(args, perms...)
+	args = append(args,
 		"--append-system-prompt", buildFixGuidance,
 		// The turn cap is shared with the manifest fixer rather than tuned: it
 		// bounds cost and guarantees termination, and a Read/Edit-only agent
 		// cannot spend turns on anything slower than reading the staged tree.
 		"--max-turns", strconv.Itoa(manifestFixMaxTurns),
 		"--model", f.model,
-	}
+	)
 	if f.bareMode {
 		args = append(args, "--bare")
 	}
 	if f.maxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(f.maxBudgetUSD, 'f', -1, 64))
 	}
-	return args
+	return args, nil
 }
 
 // stagedPackageDir derives the ONE directory the agent is granted write access
@@ -514,7 +527,10 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 	// same rule used above, so it renders "attempt 1 of 2" for an unattributed
 	// call whether or not this function rewrote the field first.
 	instruction := buildFixInstruction(req)
-	args := f.buildArgs(instruction, pkgDir)
+	args, err := f.buildArgs(instruction, pkgDir, req.Package)
+	if err != nil {
+		return BuildFixResult{Attempt: attempt}, err
+	}
 
 	cmd := f.execCommand(runCtx, "claude", args...)
 	// cwd = the staged package directory, so the agent's relative paths resolve
@@ -530,7 +546,7 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey)
+	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

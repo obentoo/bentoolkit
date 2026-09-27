@@ -127,13 +127,22 @@ func TestFixManifest_AgenticArgvAndCwd(t *testing.T) {
 		t.Errorf("--max-turns = %q (found=%v), want 30", turns, ok)
 	}
 
-	allowed, ok := flagValue(cap.args, "--allowedTools")
-	if !ok {
-		t.Fatal("expected --allowedTools flag")
+	// The allow list is variadic, one rule per element (S051-R2.7), so it is
+	// read with flagValues rather than as one joined string. Edit is scoped to
+	// the package directory, pkgdev is the only Bash rule, and WebFetch reaches
+	// named hosts only (S051-R2.3, S051-R3.1..R3.3).
+	allowed := flagValues(cap.args, "--allowedTools")
+	if len(allowed) == 0 {
+		t.Fatal("expected --allowedTools rules")
 	}
-	for _, want := range []string{"Edit", "Bash(pkgdev *)"} {
-		if !strings.Contains(allowed, want) {
+	for _, want := range []string{"Bash(pkgdev *)", "Edit(/" + req.PkgDir + "/**)", "WebFetch(domain:github.com)"} {
+		if !containsRule(allowed, want) {
 			t.Errorf("--allowedTools %q missing %q", allowed, want)
+		}
+	}
+	for _, banned := range []string{"Bash(wget *)", "Bash(cat *)", "Bash(ls *)", "WebFetch", "Read"} {
+		if containsRule(allowed, banned) {
+			t.Errorf("--allowedTools %q grants %q (S051-R3.1, S051-R2.3)", allowed, banned)
 		}
 	}
 

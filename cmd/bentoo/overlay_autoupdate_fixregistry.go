@@ -193,9 +193,10 @@ loop:
 		}
 		// The still-failing line carries the model record too: an edit the
 		// operator may choose to KEEP is exactly the one an audit will come
-		// back to (S030-R4.1).
-		fmt.Printf("  %s still failing after fix using %s: %s\n  error: %v\n",
-			pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, newErr)
+		// back to (S030-R4.1). It also names the tools the agent was refused,
+		// the likeliest reason its fix fell short, never their input (S051-R5.2).
+		fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
+			pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, autoupdate.RefusedToolsNote(res.DeniedTools), newErr)
 		fmt.Print("Keep the edit anyway? [y/N] ")
 		if readAnswer(reader) == "y" {
 			// User chose to keep a still-failing edit (R5.3).

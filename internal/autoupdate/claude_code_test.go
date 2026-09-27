@@ -346,6 +346,14 @@ func TestBuildArgs_FixedFlagsAlwaysPresent(t *testing.T) {
 	if v, ok := flagValue(args, "--allowedTools"); !ok || v != "" {
 		t.Errorf("--allowedTools value = %q (found=%v), want empty string", v, ok)
 	}
+	// --tools "" removes every tool, read-only ones included, and dontAsk
+	// refuses whatever is not pre-approved (S051-R2.1, S051-R2.6).
+	if v, ok := flagValue(args, "--tools"); !ok || v != "" {
+		t.Errorf("--tools value = %q (found=%v), want empty string", v, ok)
+	}
+	if v, ok := flagValue(args, "--permission-mode"); !ok || v != "dontAsk" {
+		t.Errorf("--permission-mode = %q (found=%v), want dontAsk", v, ok)
+	}
 }
 
 func TestBuildArgs_BareOnlyWhenBareMode(t *testing.T) {
