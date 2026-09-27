@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
+	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- retry jitter (defaultJitter), not a secret
 	"net/http"
 	"net/textproto"
 	"os"
