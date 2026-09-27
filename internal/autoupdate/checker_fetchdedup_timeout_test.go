@@ -117,10 +117,10 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Wait()
 
 	// The leader spent its own short budget and got nothing. Its error is not
-	// matched with errors.Is: the retry client wraps a final failure with
-	// ErrMaxRetriesExceeded using %v rather than %w, so the sentinel does not
-	// survive that path. That the leader failed at all is the whole premise
-	// here; which sentinel it carries is story 019's concern, not this one.
+	// matched with errors.Is: whether it ends as ErrMaxRetriesExceeded or as
+	// its own context's deadline depends on where the budget ran out, and both
+	// keep their cause reachable. That the leader failed at all is the whole
+	// premise here; which sentinel it carries is not this test's concern.
 	if leaderErr == nil {
 		t.Fatal("the leader was expected to exhaust its short budget and fail, got nil")
 	}

@@ -64,7 +64,7 @@ func TestGitCloneStreamsTail(t *testing.T) {
 	}
 	p.SetReporter(rec, "y")
 
-	if err := p.cloneRepo(); err != nil {
+	if err := p.cloneRepo(t.Context()); err != nil {
 		t.Fatalf("cloneRepo: %v", err)
 	}
 	ev := rec.snap()
@@ -93,7 +93,7 @@ func TestGitCloneErrorPreservesOutput(t *testing.T) {
 	}
 	p.SetReporter(rec, "y")
 
-	err := p.cloneRepo()
+	err := p.cloneRepo(t.Context())
 	if err == nil {
 		t.Fatal("expected a clone error")
 	}

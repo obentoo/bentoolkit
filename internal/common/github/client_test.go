@@ -137,7 +137,7 @@ func TestGetPackageVersions(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	versions, err := client.GetPackageVersions("app-editors", "vscode")
+	versions, err := client.GetPackageVersions(t.Context(), "app-editors", "vscode")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestGetPackageVersionsNotFound(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	_, err := client.GetPackageVersions("app-misc", "nonexistent")
+	_, err := client.GetPackageVersions(t.Context(), "app-misc", "nonexistent")
 	if err != ErrNotFound {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
@@ -179,7 +179,7 @@ func TestGetPackageVersionsRateLimit(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	_, err := client.GetPackageVersions("app-misc", "hello")
+	_, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Error("Expected rate limit error")
 	}
@@ -209,13 +209,13 @@ func TestCaching(t *testing.T) {
 	client.SetCacheDir(tempDir)
 
 	// First call - should hit server
-	versions1, err := client.GetPackageVersions("app-misc", "hello")
+	versions1, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
 	}
 
 	// Second call - should use cache
-	versions2, err := client.GetPackageVersions("app-misc", "hello")
+	versions2, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Second call failed: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestCacheExpiry(t *testing.T) {
 	client.CacheTTL = 24 * time.Hour
 
 	// Should hit server because cache is expired
-	versions, err := client.GetPackageVersions("app-misc", "hello")
+	versions, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Call failed: %v", err)
 	}
@@ -397,11 +397,11 @@ func TestGetPackageVersionsCacheDisabled(t *testing.T) {
 	client.BaseURL = server.URL
 	// CacheDir is empty by default — no caching
 
-	_, err := client.GetPackageVersions("app-misc", "hello")
+	_, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
 	}
-	_, err = client.GetPackageVersions("app-misc", "hello")
+	_, err = client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Second call failed: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestGetPackageVersionsAPIError(t *testing.T) {
 			client := NewClient()
 			client.BaseURL = server.URL
 
-			_, err := client.GetPackageVersions("app-misc", "hello")
+			_, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 			if err == nil {
 				t.Fatal("Expected error, got nil")
 			}
@@ -499,7 +499,7 @@ func TestGetPackageVersionsInvalidJSON(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	_, err := client.GetPackageVersions("app-misc", "hello")
+	_, err := client.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Fatal("Expected parse error, got nil")
 	}
@@ -525,7 +525,7 @@ func TestSaveToCacheFileMode(t *testing.T) {
 	client.BaseURL = server.URL
 	client.CacheDir = cacheDir
 
-	if _, err := client.GetPackageVersions("app-misc", "hello"); err != nil {
+	if _, err := client.GetPackageVersions(t.Context(), "app-misc", "hello"); err != nil {
 		t.Fatalf("GetPackageVersions returned error: %v", err)
 	}
 

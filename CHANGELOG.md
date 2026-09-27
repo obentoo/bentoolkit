@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **One failing upstream no longer stalls every check.** The autoupdate HTTP
+  client kept a single circuit breaker for all hosts, so two dead hosts made
+  every other package fail with "circuit breaker open" for 30 s. Each
+  upstream host:port now has its own breaker, and the refusal names the host
+  that was refused.
+- **Ctrl-C no longer waits out retries and lookups.** A retry wait now ends as
+  soon as the check is cancelled or its deadline passes, and the error says
+  "cancelled" or "deadline exceeded". `overlay compare`, `--list-revivable` and
+  revive stop their in-flight GitHub and GitLab lookups instead of running into
+  their 30 s timeouts. A git-clone lookup no longer starts once the command is
+  cancelled, and a clone already in flight stops with it (it was, and still
+  is, bounded at 2 minutes); updating an existing clone is not yet
+  cancellable.
+- **Retries are spread out and honour `Retry-After`.** The 1 s / 2 s / 4 s
+  backoff is now the ceiling of a random wait, so many packages retrying one
+  host no longer retry in lockstep. A 429 or 503 carrying `Retry-After` waits
+  exactly that long; one asking for more than 60 s, or for longer than the
+  check has left, fails at once with a message naming the host and the wait.
+- **Provider and registry responses are bounded.** GitHub and GitLab API
+  bodies and the repository-registry download are capped at 10 MiB, and the
+  registry download gives up after 30 s and falls back to the eselect cache.
+- **Error causes survive wrapping.** A failed check, retry exhaustion, a
+  manifest or compile failure and an authenticated distfile fetch keep their
+  underlying cause (cancellation, timeout, process exit) reachable, without
+  changing their text; the authenticated fetch still never shows a credential.
+
+### Changed
+
+- **`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured** by every client
+  built on the shared transport, including the GitHub and GitLab providers,
+  which used to connect directly.
+- **A server that accepts a connection but sends no response headers within
+  30 s** now ends the attempt as a timeout; the autoupdate client retries it
+  like any other timeout. A larger
+  `http_timeout` raises this wait with it, and the Ollama client waits up to
+  its full 120 s for a non-streaming reply.
+
 ## [0.31.1] - 2026-09-22
 
 A maintenance release: dependency updates, one piece of source hygiene, and the

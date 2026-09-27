@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,7 +18,7 @@ type fakeProvider struct {
 	versions map[string][]string
 }
 
-func (f *fakeProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (f *fakeProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	key := category + "/" + pkg
 	v, ok := f.versions[key]
 	if !ok {

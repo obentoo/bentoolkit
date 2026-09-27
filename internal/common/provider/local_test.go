@@ -42,7 +42,7 @@ func TestNewLocalProvider_ReadsInPlace(t *testing.T) {
 		t.Errorf("LocalPackagePath = %q, want %q", got, pkgDir)
 	}
 
-	versions, err := prov.GetPackageVersions("sys-firmware", "edk2")
+	versions, err := prov.GetPackageVersions(t.Context(), "sys-firmware", "edk2")
 	if err != nil {
 		t.Fatalf("GetPackageVersions failed: %v", err)
 	}
