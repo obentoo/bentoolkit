@@ -114,6 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$1`/`${2}` inside the value itself, so `a${1}b` became `aMY_BUILD="b`. The
   value's `$` is now escaped before substitution.
 
+- **A `snapshot.toml` value can no longer inject a directive into btrbk.conf
+  or a systemd unit.** A newline in a value reached `btrbk.conf` or the timer
+  unit as an extra directive, and a config path containing a space, `%` or `$`
+  was split or expanded by systemd. A control character in any value those
+  files use is now refused with an error naming it, and `ExecStart` arguments
+  are quoted and escaped as systemd expects. Ordinary values render exactly as
+  before.
+
 ### Fixed
 
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
@@ -177,6 +185,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different newest version for such pairs — a package once shown as up to date
   can now show as outdated. A string that fails the version grammar now orders
   below every real version instead of being read as a near-zero one.
+
+- **`bentoo snapshot run` ships through `archive` and `restic` again.** Both
+  engines returned a snapshot without its path, so the ship ran
+  `btrfs send ""` or bound-mounted an empty path and failed on every run. The
+  path is now carried from snapper and btrbk, and a snapshot neither engine can
+  identify is refused before anything runs.
+- **An `ssh` ship under the snapper engine is refused instead of reporting a
+  success that sent nothing.** Only btrbk sends to ssh targets; the config is
+  now rejected with a message pointing at `archive` or `restic`.
+- **A restic snapshot mount is never deleted while it may still be mounted.**
+  The cleanup ignored a failed unmount and then removed the mountpoint
+  recursively, walking into the snapshot. It now leaves the directory in place
+  when the unmount fails, and removes it only after a successful one.
+- **The archive ship streams instead of holding each stage in memory.** A
+  multi-GB `btrfs send` was held in RAM about twice. The stages are now
+  connected by pipes, and a failed upload removes the partial object it left.
+  Restore still waits for the download and decompression to succeed before
+  `btrfs receive` starts, so a failed download leaves no partial subvolume.
+- **A half-written bentoo block no longer eats `/etc/portage/bashrc`.** A begin
+  marker with no end marker made install and uninstall drop every line after
+  it, or the whole file. Both now stop with an error naming the file and how
+  to repair the block.
+- **An SMTP server that stops answering no longer hangs the timer-driven run.**
+  Sending a notification is bounded at 15 s and stops when the run is
+  cancelled; the error names the step and the server, never the password or
+  the message.
 
 ### Changed
 
