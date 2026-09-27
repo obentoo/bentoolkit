@@ -55,7 +55,7 @@ func captureSMTP(t *testing.T) *smtpCapture {
 	sc := &smtpCapture{}
 	orig := smtpSendMail
 	t.Cleanup(func() { smtpSendMail = orig })
-	smtpSendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+	smtpSendMail = func(_ context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error {
 		sc.called, sc.auth, sc.addr = true, a, addr
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/filelock"
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -450,7 +453,14 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 			var buf bytes.Buffer
 			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
-			cmd.Stdin = os.Stdin
+			// Only a Stdin the caller left nil gets the terminal. The privileged
+			// compile leaves it nil so sudo/doas can prompt; the build gates'
+			// `ebuild` sets an empty one, because it runs in its own process
+			// group and reading the terminal from there stops it on SIGTTIN
+			// (S054-R3.2).
+			if cmd.Stdin == nil {
+				cmd.Stdin = os.Stdin
+			}
 			err := tui.RunAttached(prog, cmd)
 			return buf.Bytes(), err
 		}),
@@ -643,6 +653,34 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		logger.Debug("the ambient UI mode did not resolve before the package work: %v", err)
 	}
 
+	// One run per overlay (S056-R4.1): every mode that writes the overlay or
+	// the registry holds <overlay>/.autoupdate.bentoo-lock until it returns, so
+	// a cron run and a manual run never edit packages.toml and the ebuilds at
+	// once. It is taken here, after the config resolved and before the mode
+	// runs, so the registry-fix loop inside --check runs under it too.
+	if autoupdateNeedsOverlayLock() {
+		lock, err := acquireOverlayLock(overlayPath)
+		if err != nil {
+			if errors.Is(err, filelock.ErrLocked) {
+				logger.Error("another bentoo run holds the overlay: %v", err)
+			} else {
+				logger.Error("cannot take the overlay lock: %v", err)
+			}
+			osExit(1)
+			return
+		}
+		// Released on return and on every osExit inside a mode, including after
+		// SIGINT/SIGTERM cancelled the mode's context (S056-R4.7): os.Exit skips
+		// deferred calls, so the release is also registered with exitProcess.
+		// Release is idempotent, and the defer covers a test's stubbed osExit.
+		unregister := registerExitCleanup(lock.Release)
+		defer func() {
+			unregister()
+			lock.Release()
+		}()
+		sweepStaleTemps(overlayPath, configDir)
+	}
+
 	// Handle different modes
 	switch {
 	case autoupdateLint:
@@ -736,7 +774,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
 	// (R5.3) and we avoid a double-warn with the failure line just below.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -847,12 +885,12 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// treated as absent — never box a nil pointer (AD9). When the gate is false
 	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
 	// code below are exactly as before this story (R7.x / R10.1).
-	fixer, ferr := newConfiguredRegistryFixer(llmCfg)
+	fixer, ferr := checkRegistryFixerFn(llmCfg)
 	if ferr != nil {
 		logger.Warn("LLM registry fixer unavailable; --check will not offer registry repair: %v", ferr)
 		fixer = nil
 	}
-	if fixer != nil && stdinIsTerminal() {
+	if fixer != nil && checkInteractiveFn() {
 		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
 			logger.Warn("registry-fix prompt ended with an error: %v", perr)
 		}
@@ -910,6 +948,63 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	osExit(result.ExitCode())
+}
+
+// checkRegistryFixerFn and checkInteractiveFn are the seams through which
+// runCheck builds the LLM registry fixer and asks whether stdin is interactive —
+// the same shape as pruneInteractiveFn. Without them the registry-fix loop, and
+// the overlay lock it must run under (S056-R4.6), could only be reached from a
+// terminal with a configured claude CLI.
+var (
+	checkRegistryFixerFn = newConfiguredRegistryFixer
+	checkInteractiveFn   = stdinIsTerminal
+)
+
+// autoupdateNeedsOverlayLock reports whether the selected mode writes the
+// overlay or its registry and so must hold the overlay lock. It mirrors the
+// dispatch in runAutoupdate: --list, --lint without --fix and the help default
+// only read and take no lock; every other mode takes it.
+func autoupdateNeedsOverlayLock() bool {
+	switch {
+	case autoupdateLint:
+		return autoupdateFix
+	case autoupdateMarkAutoDisabledFlag, autoupdateCheck:
+		return true
+	case autoupdateList:
+		return false
+	case autoupdateApply != "", autoupdateReviveList, autoupdateRevive != "", autoupdateClean:
+		return true
+	default:
+		return false
+	}
+}
+
+// acquireOverlayLock takes the overlay's exclusive lock, waiting up to
+// filelock.Wait for a live holder and reaping one left by a dead run. A
+// timeout wraps filelock.ErrLocked and names the lock path and holder's PID.
+func acquireOverlayLock(overlayPath string) (*filelock.Lock, error) {
+	return filelock.Acquire(filepath.Join(overlayPath, ".autoupdate.bentoo-lock"), "bentoo overlay autoupdate")
+}
+
+// sweepStaleTemps removes the temporary files killed runs left under the
+// overlay (skipping .git) and directly in the autoupdate config dir, one Warn
+// line per removed path (S056-R6.1). It runs with the overlay lock held, and
+// only files whose writer's PID is dead are removed, so no live writer loses
+// its file. A sweep failure is logged and the run proceeds: debris is a
+// nuisance, not a reason to refuse the run.
+func sweepStaleTemps(overlayPath, configDir string) {
+	for _, target := range []struct {
+		root      string
+		recursive bool
+	}{{overlayPath, true}, {configDir, false}} {
+		removed, err := fileutil.RemoveStaleTemps(target.root, target.recursive)
+		for _, path := range removed {
+			logger.Warn("removed a temporary file left by a killed run: %s", path)
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			logger.Warn("sweeping temporary files left by killed runs under %s: %v", target.root, err)
+		}
+	}
 }
 
 // stdinIsTerminal reports whether standard input is an interactive terminal (a
@@ -1991,7 +2086,7 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 		if c := ebuild.CompareVersions(kept[i], kept[j]); c != 0 {
 			return c < 0
 		}
-		// Two versions the comparison calls equal ("1.0" and "1.0.0") are still
+		// Two versions the comparison calls equal ("1.0" and "1.0-r0") are still
 		// two files; order them by text so the report is total and stable.
 		return kept[i] < kept[j]
 	})
@@ -2036,7 +2131,7 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpT
 	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
 	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
 	// "unused llm_prompt" Warn when a provider was requested.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -2291,7 +2386,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	}
 
 	// Highest ::gentoo version is the base ebuild we copy in.
-	versions, err := prov.GetPackageVersions(category, pkgName)
+	versions, err := prov.GetPackageVersions(ctx, category, pkgName)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
 	}

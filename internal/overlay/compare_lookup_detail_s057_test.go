@@ -9,6 +9,7 @@ package overlay
 // StatusError (assertion failure, no missing symbol).
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -21,7 +22,7 @@ import (
 // s057DetailProvider fails each listed atom with its error.
 type s057DetailProvider struct{ errs map[string]error }
 
-func (p *s057DetailProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *s057DetailProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	if err, ok := p.errs[category+"/"+pkg]; ok {
 		return nil, err
 	}

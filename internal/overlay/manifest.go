@@ -14,6 +14,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -660,8 +661,8 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 	// child that sleeps 30s, from a cancel delivered at 300ms — which is a run
 	// that cannot report, because the report is assembled before it is rendered
 	// (R1.3) and there is nothing to assemble until this returns. See
-	// manifest_cancel_unix.go for what it does and what it costs.
-	stopWithDescendants(cmd)
+	// procgroup.KillGroupNow for what it does and what it costs.
+	procgroup.KillGroupNow(cmd)
 
 	runErr := cmd.Run()
 	// StreamCapture.Close only flushes a trailing partial line to the reporter

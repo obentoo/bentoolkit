@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -518,7 +519,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 		var capturedMessage, capturedUser, capturedEmail string
 
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.CommitFunc = func(message, user, email string) error {
+		mock.CommitFunc = func(_ context.Context, message, user, email string) error {
 			capturedMessage = message
 			capturedUser = user
 			capturedEmail = email
@@ -532,7 +533,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 			},
 		}
 
-		err := CommitWithExecutor(cfg, "add(app-misc/hello-1.0)", mock)
+		err := CommitWithExecutor(context.Background(), cfg, "add(app-misc/hello-1.0)", mock)
 		if err != nil {
 			t.Errorf("CommitWithExecutor() error = %v, want nil", err)
 		}
@@ -550,7 +551,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 
 	t.Run("commit with error", func(t *testing.T) {
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.CommitFunc = func(message, user, email string) error {
+		mock.CommitFunc = func(_ context.Context, message, user, email string) error {
 			return errors.New("git commit failed: nothing to commit")
 		}
 
@@ -561,7 +562,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 			},
 		}
 
-		err := CommitWithExecutor(cfg, "test message", mock)
+		err := CommitWithExecutor(context.Background(), cfg, "test message", mock)
 		if err == nil {
 			t.Error("CommitWithExecutor() error = nil, want error")
 		}
@@ -574,7 +575,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 		var capturedUser, capturedEmail string
 
 		mock := git.NewMockGitRunner("/test/overlay")
-		mock.CommitFunc = func(message, user, email string) error {
+		mock.CommitFunc = func(_ context.Context, message, user, email string) error {
 			capturedUser = user
 			capturedEmail = email
 			return nil
@@ -587,7 +588,7 @@ func TestCommitWithMockGitRunner(t *testing.T) {
 			},
 		}
 
-		err := CommitWithExecutor(cfg, "test message", mock)
+		err := CommitWithExecutor(context.Background(), cfg, "test message", mock)
 		if err != nil {
 			t.Errorf("CommitWithExecutor() error = %v, want nil", err)
 		}
@@ -639,7 +640,7 @@ func TestCommitMessageGeneration(t *testing.T) {
 			var capturedMessage string
 
 			mock := git.NewMockGitRunner("/test/overlay")
-			mock.CommitFunc = func(message, user, email string) error {
+			mock.CommitFunc = func(_ context.Context, message, user, email string) error {
 				capturedMessage = message
 				return nil
 			}
@@ -652,7 +653,7 @@ func TestCommitMessageGeneration(t *testing.T) {
 			}
 
 			message := GenerateMessage(tc.changes)
-			err := CommitWithExecutor(cfg, message, mock)
+			err := CommitWithExecutor(context.Background(), cfg, message, mock)
 			if err != nil {
 				t.Errorf("CommitWithExecutor() error = %v", err)
 			}

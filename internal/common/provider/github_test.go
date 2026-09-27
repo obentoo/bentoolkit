@@ -54,7 +54,7 @@ func TestGitHubProvider_GetPackageVersions(t *testing.T) {
 	prov.CacheDir = "" // Disable cache for tests
 
 	t.Run("existing package", func(t *testing.T) {
-		versions, err := prov.GetPackageVersions("app-misc", "hello")
+		versions, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 		if err != nil {
 			t.Errorf("GetPackageVersions failed: %v", err)
 		}
@@ -72,7 +72,7 @@ func TestGitHubProvider_GetPackageVersions(t *testing.T) {
 	})
 
 	t.Run("package not found", func(t *testing.T) {
-		_, err := prov.GetPackageVersions("app-misc", "notfound")
+		_, err := prov.GetPackageVersions(t.Context(), "app-misc", "notfound")
 		if err != ErrNotFound {
 			t.Errorf("Expected ErrNotFound, got: %v", err)
 		}
@@ -107,7 +107,7 @@ func TestGitHubProvider_Cache(t *testing.T) {
 	prov.CacheTTL = 1 * time.Hour
 
 	// First call should hit server
-	_, err := prov.GetPackageVersions("app-misc", "hello")
+	_, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestGitHubProvider_Cache(t *testing.T) {
 	}
 
 	// Second call should use cache
-	_, err = prov.GetPackageVersions("app-misc", "hello")
+	_, err = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Second call failed: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestGitHubProvider_TokenAuth(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, _ = prov.GetPackageVersions("app-misc", "hello")
+	_, _ = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 
 	if authHeader != "Bearer test-token-123" {
 		t.Errorf("Expected 'Bearer test-token-123', got '%s'", authHeader)
@@ -294,7 +294,7 @@ func TestGitHubProvider_APIError(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err := prov.GetPackageVersions("app-misc", "hello")
+	_, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -344,7 +344,7 @@ func TestGitHubProvider_CacheExpiry(t *testing.T) {
 	prov.CacheDir = cacheDir
 	prov.CacheTTL = 24 * time.Hour
 
-	versions, err := prov.GetPackageVersions("app-misc", "hello")
+	versions, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

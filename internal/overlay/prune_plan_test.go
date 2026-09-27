@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ type pruneRecordingProvider struct {
 	dirCalls []string            // every "category/pkg" whose directory was asked for
 }
 
-func (p *pruneRecordingProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *pruneRecordingProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	v, ok := p.versions[category+"/"+pkg]
 	if !ok {
 		return nil, provider.ErrNotFound

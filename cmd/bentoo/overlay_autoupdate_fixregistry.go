@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // readRegistrySnapshot reads the raw packages.toml bytes and its file mode so the
@@ -42,20 +43,14 @@ func readRegistrySnapshot(configPath string) ([]byte, os.FileMode, error) {
 }
 
 // restoreRegistrySnapshot atomically rewrites configPath with the captured
-// snapshot bytes and mode, mirroring the temp-file+rename discipline of
-// setPackagesEnabled (config.go). The temp file lives in the SAME directory as
-// configPath so the rename is a same-filesystem (atomic) operation; on a write or
-// rename failure the temp file is removed and the underlying error is returned so
-// the caller surfaces a clear "could not restore" rather than leaving a stray
-// `.tmp`. Only the permission bits of mode are applied (matching setPackagesEnabled).
+// snapshot bytes and the permission bits of mode, through the shared
+// fileutil.WriteFileAtomic — the same helper every other registry writer uses —
+// so the restored registry carries exactly the captured mode whatever the umask
+// and whatever stale temporary file sits beside it. On failure the underlying
+// error is returned so the caller surfaces a clear "could not restore".
 func restoreRegistrySnapshot(configPath string, data []byte, mode os.FileMode) error {
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, mode.Perm()); err != nil {
-		return fmt.Errorf("failed to write temp config: %w", err)
-	}
-	if err := os.Rename(tmpPath, configPath); err != nil {
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to restore packages.toml: %w", err)
+	if err := fileutil.WriteFileAtomic(configPath, data, mode.Perm()); err != nil {
+		return fmt.Errorf("failed to restore %s: %w", configPath, err)
 	}
 	return nil
 }
@@ -193,9 +188,10 @@ loop:
 		}
 		// The still-failing line carries the model record too: an edit the
 		// operator may choose to KEEP is exactly the one an audit will come
-		// back to (S030-R4.1).
-		fmt.Printf("  %s still failing after fix using %s: %s\n  error: %v\n",
-			pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, newErr)
+		// back to (S030-R4.1). It also names the tools the agent was refused,
+		// the likeliest reason its fix fell short, never their input (S051-R5.2).
+		fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
+			pkg, autoupdate.FormatModelUsed(res.Model), res.Summary, autoupdate.RefusedToolsNote(res.DeniedTools), newErr)
 		fmt.Print("Keep the edit anyway? [y/N] ")
 		if readAnswer(reader) == "y" {
 			// User chose to keep a still-failing edit (R5.3).

@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -21,6 +23,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -72,6 +75,24 @@ var (
 	// applier never authored — see copyEbuild's guard for why this is fatal
 	// rather than a silent overwrite.
 	ErrEbuildExists = errors.New("destination ebuild already exists")
+	// ErrInvalidAuxValue is returned (wrapped) when a pending update's AuxValue
+	// is outside auxValueRe. The value was scraped from an upstream page and is
+	// written into the bash source of the new ebuild, so anything that could
+	// close the quoted assignment or reach the shell is refused, not repaired.
+	ErrInvalidAuxValue = errors.New("invalid aux value for ebuild")
+	// ErrInvalidCommitHash is returned (wrapped) when a pending update's
+	// CommitHash is not 40 lowercase hex — the only form substituteCommitHash
+	// can find again on the next bump.
+	ErrInvalidCommitHash = errors.New("invalid commit hash for ebuild")
+)
+
+// auxValueRe and commitHashRe are the shapes an upstream-supplied value must
+// have before any writer puts it into an ebuild — checkUpstreamValues applies
+// them in Applier.Apply, Applier.Validate and applySubstitutions. `$` without `(?m)` only
+// matches at the end of the text, so a trailing newline is refused.
+var (
+	auxValueRe   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
+	commitHashRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 // ApplyResult represents the result of applying an update.
@@ -817,6 +838,17 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		}
 		return result, result.Error
 	}
+	// The aux value and the commit hash come from upstream, untrimmed and
+	// unrepaired here: the checker already trimmed them, so inner or trailing
+	// whitespace is refused. Gated before anything is staged or copied, so a
+	// refused package leaves its directory byte-identical.
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		result.Error = err
+		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+		}
+		return result, result.Error
+	}
 	// Attach the slot's pinned revision, when the entry declares one. Upstream
 	// yields a bare PV; for a slot discriminated by its revision suffix that PV
 	// names the WRONG slot's ebuild, so the whole apply — copy destination,
@@ -1015,7 +1047,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// only copy of the candidate's archive in existence locally.
 	cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
-		return a.failApply(pkg, result, fmt.Errorf("%w: %v", ErrManifestFailed, manifestErr))
+		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 
 	// The static gates — the Meson option gate and the advisory QA scan (story
@@ -1374,7 +1406,17 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 // is what lets the staged candidate be the one edited: an edit applied to the
 // published tree here would be an unvalidated write into the overlay, and a staged
 // tree validated without the substitution would prove the wrong file.
+//
+// It is also the one function every writer of a candidate calls — Apply through
+// prepareInOverlay and prepareInStagingTree, Validate through the latter — so the
+// upstream-value allow-list is enforced here as the backstop, before either value
+// is written: a malformed pair leaves the file byte-identical. Apply and Validate
+// still refuse earlier, before anything is staged; a writer added later inherits
+// this check without having to remember it.
 func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpdate) error {
+	if err := checkUpstreamValues(pkg, update); err != nil {
+		return err
+	}
 	// Snapshot packages tracked by commit (track="commit"): point SRC_URI's
 	// commit-hash variable at the correct tarball.
 	if update.CommitHash != "" {
@@ -1612,9 +1654,8 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
 
-	// Reject same-version copy: srcPath and dstPath would coincide, and
-	// os.Create truncates the destination before io.Copy reads, silently
-	// zeroing the source ebuild.
+	// Reject same-version copy: srcPath and dstPath would coincide, so the
+	// source would be the destination the copy refuses to overwrite.
 	if oldVersion == newVersion {
 		return fmt.Errorf("source and destination versions are equal: %s", newVersion)
 	}
@@ -1629,10 +1670,10 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
 	}
 
-	// Refuse to write over an ebuild that already exists. os.Create truncates,
-	// so without this the copy silently destroys a file the applier never wrote
-	// — and Apply's deferred orphan-rollback would then os.Remove it outright on
-	// any later failure, turning truncation into deletion.
+	// Refuse to write over an ebuild that already exists. Overwriting it would
+	// silently destroy a file the applier never wrote — and Apply's deferred
+	// orphan-rollback would then os.Remove it outright on any later failure,
+	// turning the overwrite into deletion.
 	//
 	// The oldVersion == newVersion check above only covers the case where source
 	// and destination are the same file. A distinct destination can still exist
@@ -1649,28 +1690,27 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("failed to stat destination ebuild %s: %w", dstPath, err)
 	}
 
-	// Open source file
-	src, err := os.Open(srcPath)
+	body, err := os.ReadFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to open source ebuild: %w", err)
+		return fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
-	defer src.Close() //nolint:errcheck
-
-	// Create destination file
-	dst, err := os.Create(dstPath)
+	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination ebuild: %w", err)
-	}
-	defer dst.Close() //nolint:errcheck
-
-	// Copy content
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("failed to copy ebuild content: %w", err)
+		return fmt.Errorf("failed to stat source ebuild %s: %w", srcPath, err)
 	}
 
-	// Sync to ensure data is written
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("failed to sync destination ebuild: %w", err)
+	// The check above is the fast, precise refusal; the publish itself is what
+	// makes it safe. fileutil.PublishNewFile writes a synced temporary file and
+	// hard-links it to dstPath, which fails if ANY entry — one created after the
+	// check, or a dangling symlink the Stat could not see — already sits there,
+	// and it never leaves a partial ebuild behind. The new ebuild carries the
+	// source ebuild's mode rather than one the umask chose.
+	if err := fileutil.PublishNewFile(dstPath, body, srcInfo.Mode().Perm()); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %s (refusing to overwrite; %s-%s would be written over it)",
+				ErrEbuildExists, dstPath, pkgName, oldVersion)
+		}
+		return fmt.Errorf("failed to publish destination ebuild %s: %w", dstPath, err)
 	}
 
 	return nil
@@ -1744,14 +1784,15 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 		return fmt.Errorf("no commit hash variable (EGIT_COMMIT/GIT_COMMIT/BUILD_ID/COMMIT) found in %s", ebuildPath)
 	}
 
-	updated := reQuoted.ReplaceAllString(string(content), "${1}"+newHash+"${2}")
-	updated = reBare.ReplaceAllString(updated, "${1}"+newHash)
+	literal := literalReplacement(newHash)
+	updated := reQuoted.ReplaceAllString(string(content), "${1}"+literal+"${2}")
+	updated = reBare.ReplaceAllString(updated, "${1}"+literal)
 
 	if updated == string(content) {
 		return nil
 	}
 
-	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+	if err := replaceEbuildKeepingMode(ebuildPath, updated); err != nil {
 		return fmt.Errorf("failed to write ebuild after hash substitution: %w", err)
 	}
 
@@ -1761,9 +1802,10 @@ func substituteCommitHash(ebuildPath, newHash string) error {
 // substituteAuxVar replaces the quoted assignment of a free-text auxiliary
 // variable in an ebuild (e.g. MY_BUILD="esr-bb23" → MY_BUILD="esr-bb24"). It is
 // the sibling of substituteCommitHash but without the 40-hex-SHA lock, so it can
-// carry any value captured from a regex/html upstream page. The value is bounded
-// by the surrounding double quotes, so the substitution cannot bleed past the
-// assignment.
+// carry any value captured from a regex/html upstream page. The match is bounded
+// by the surrounding double quotes; the value is inserted literally and is not
+// checked here — applySubstitutions, its only caller, refuses one that could
+// close those quotes.
 func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	if varName == "" {
 		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
@@ -1792,16 +1834,56 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 		return fmt.Errorf("aux var %q not found in %s", varName, ebuildPath)
 	}
 
-	updated := re.ReplaceAllString(string(content), "${1}"+newValue+"${2}")
+	updated := re.ReplaceAllString(string(content), "${1}"+literalReplacement(newValue)+"${2}")
 	if updated == string(content) {
 		return nil
 	}
 
-	if err := os.WriteFile(ebuildPath, []byte(updated), 0o600); err != nil {
+	if err := replaceEbuildKeepingMode(ebuildPath, updated); err != nil {
 		return fmt.Errorf("failed to write ebuild after aux var substitution: %w", err)
 	}
 
 	return nil
+}
+
+// replaceEbuildKeepingMode replaces the ebuild at ebuildPath with content,
+// keeping the mode it has. The replacement is atomic (fileutil.WriteFileAtomic):
+// a crash leaves the previous ebuild under its name, never a truncated one that
+// the overlay would commit and publish. The error names ebuildPath.
+func replaceEbuildKeepingMode(ebuildPath, content string) error {
+	info, err := os.Stat(ebuildPath)
+	if err != nil {
+		return fmt.Errorf("reading the mode of %s: %w", ebuildPath, err)
+	}
+	if err := fileutil.WriteFileAtomic(ebuildPath, []byte(content), info.Mode().Perm()); err != nil {
+		return fmt.Errorf("replacing %s: %w", ebuildPath, err)
+	}
+	return nil
+}
+
+// checkUpstreamValues refuses a non-empty AuxValue outside auxValueRe or a
+// non-empty CommitHash outside commitHashRe. The value is quoted with %q so a
+// control byte or terminal escape cannot reach a log or notification raw.
+func checkUpstreamValues(pkg string, update *PendingUpdate) error {
+	if update.AuxValue != "" && !auxValueRe.MatchString(update.AuxValue) {
+		return fmt.Errorf("%w for %s: %q", ErrInvalidAuxValue, pkg, update.AuxValue)
+	}
+	if update.CommitHash != "" && !commitHashRe.MatchString(update.CommitHash) {
+		return fmt.Errorf("%w for %s: %q", ErrInvalidCommitHash, pkg, update.CommitHash)
+	}
+	return nil
+}
+
+// literalReplacement escapes a value for use inside a regexp replacement
+// template, so that ReplaceAllString inserts its bytes unchanged. The template
+// around it still expands `${1}`/`${2}` (the `NAME="` prefix and the closing
+// quote); only the value's own `$` is doubled. Without it an upstream value
+// such as `a${1}b` would expand to the capture group instead of being written.
+// substituteCommitHash and substituteAuxVar do not validate the value —
+// applySubstitutions, their only caller, refuses a malformed one before either
+// is reached.
+func literalReplacement(value string) string {
+	return strings.ReplaceAll(value, "$", "$$")
 }
 
 // runManifestWithFix runs the manifest step and, when it fails and an LLM fixer is
@@ -1902,6 +1984,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
+		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
@@ -1933,7 +2016,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)", firstErr, secondErr)
+		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools))
 	}
 
 	result.Fixed = true
@@ -2322,6 +2405,14 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 		return "", nil
 	}
 
+	// S054-R3.5. A compile its context stopped is not a failure to repair: it
+	// says nothing about the ebuild, and the fixer is an LLM invocation the
+	// operator has just asked this run to stop. compileOnce has already kept the
+	// partial transcript (R3.6), so returning here throws no evidence away.
+	if a.ctx.Err() != nil {
+		return first.logPath, first.err
+	}
+
 	return a.repairBuildAndRerun(cand, pkg, version, privTool, first, result)
 }
 
@@ -2340,9 +2431,12 @@ type buildAttempt struct {
 	// transcript is the child's captured output — the evidence the attribution
 	// gate reasons from and the log the fixer is given.
 	transcript string
-	// logPath is the retained compile log, empty unless the attempt failed.
+	// logPath is the retained compile log, empty unless the attempt failed or
+	// was interrupted.
 	logPath string
-	// err is the failure, already wrapped in ErrCompileFailed, or nil.
+	// err is the failure, already wrapped in ErrCompileFailed, or nil. A build
+	// its context stopped is not a failure: err then wraps ctx.Err() and never
+	// ErrCompileFailed (S054-R3.5).
 	err error
 	// resolvedDistdir is the directory this attempt resolved for the build's
 	// archives, and enforcedDistdir the one the privilege tool actually carried
@@ -2465,16 +2559,16 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 		// this is the host, and no fixer will be invoked to edit an ebuild that
 		// was never the problem.
 		return buildAttempt{
-			err:             fmt.Errorf("%w: %v", ErrCompileFailed, err),
+			err:             fmt.Errorf("%w: %w", ErrCompileFailed, err),
 			resolvedDistdir: distdir,
 			enforcedDistdir: enforced,
 		}
 	}
 
 	// sudo [DISTDIR=<dir>] ebuild <path> clean compile, bound to the applier's
-	// parent context so a SIGINT or deadline kills the spawned process. The
-	// assignment PRECEDES the command, because sudo reads the first non-assignment
-	// argument as the program to run.
+	// parent context so a SIGINT or deadline stops the spawned process (see
+	// procgroup.Foreground below for how). The assignment PRECEDES the command,
+	// because sudo reads the first non-assignment argument as the program to run.
 	//
 	// Built into a slice of its OWN rather than appended onto the one
 	// privilegedDistdirArgs returned: appending to a caller's slice writes into
@@ -2486,6 +2580,19 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
 	cmd := a.execCommand(a.ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
+	// S054-R3.3/R3.4. Foreground and not Group: sudo and doas ask for the
+	// password on the terminal, and a child moved into a process group of its
+	// own is a BACKGROUND group there, stopped by SIGTTIN at its first read — a
+	// compile hung on a prompt nobody can answer. In the caller's group a cancel
+	// reaches the privilege tool as SIGTERM, which sudo relays to the root
+	// `ebuild`; os/exec's SIGKILL comes procgroup.GracePeriod later, and only
+	// then, because SIGKILL is the one signal sudo cannot relay. doas relays
+	// nothing: it execs the root `ebuild` in place, so the child IS root and
+	// both signals are refused (EPERM, kept by keepStopRefusal); Wait then
+	// returns only when that build ends by itself. A terminal Ctrl+C still
+	// reaches it, since tty signals skip the permission check.
+	procgroup.Foreground(cmd)
+	stopRefused := keepStopRefusal(cmd)
 
 	// cmd.Env is deliberately left nil here (S040-R2.4), which is a MEASURED
 	// decision and not an omission. validate/build.go installs an allow-list on
@@ -2499,12 +2606,112 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	// run needed the child to have travels as an argument instead.
 
 	output, err := a.runAttached(cmd)
+	// Foreground's WaitDelay also runs after a NORMAL exit: a compile that exited
+	// 0 while a helper it left behind still held the output pipe comes back as
+	// exec.ErrWaitDelay, and that is a success (S054-R1.5).
+	err = procgroup.Result(cmd, err)
 	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
 	if err != nil {
 		attempt.logPath = a.saveCompileLog(pkg, version, output)
-		attempt.err = fmt.Errorf("%w: %v", ErrCompileFailed, err)
+		// S054-R3.5. Checked on the context and not on err: a compile stopped by
+		// SIGTERM reports `signal: terminated`, which wraps nothing. The log above
+		// is written first and on purpose — an interrupted compile's partial
+		// transcript is evidence too (R3.6).
+		if ctxErr := a.ctx.Err(); ctxErr != nil {
+			pid, refused := stopRefused()
+			attempt.err = interruptedCompileError(pkg, version, privTool, ctxErr, pid, refused)
+			if refused == nil && killedAfterGrace(cmd) {
+				// The SIGTERM was delivered but not obeyed within the grace period,
+				// so os/exec killed the tool; a SIGKILL is the one signal sudo
+				// cannot relay, so the root build is not known to have stopped.
+				attempt.err = fmt.Errorf("%w; %s (process %d) was still running %s after the stop and had to be killed, which it cannot pass on, so the privileged build may still be running",
+					attempt.err, privTool, cmd.Process.Pid, procgroup.GracePeriod)
+			}
+			return attempt
+		}
+		attempt.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
 	}
 	return attempt
+}
+
+// killedAfterGrace reports whether the finished cmd was ended by SIGKILL, which
+// for a Foreground child whose context is done means os/exec's kill after
+// procgroup.GracePeriod: the stop was delivered and not obeyed in time.
+func killedAfterGrace(cmd *exec.Cmd) bool {
+	if cmd.ProcessState == nil {
+		return false
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
+}
+
+// interruptedCompileError is what a privileged compile its context stopped
+// returns (S054-R3.5): it wraps ctxErr, says "interrupted", and wraps no
+// ErrCompileFailed, because an interrupt is no verdict on the ebuild.
+//
+// refused is the stop the privilege tool could not be sent — EPERM, from a tool
+// that now runs as root — and pid the process it was refused for (see
+// keepStopRefusal). The build is then not known to have stopped, and the error
+// says so and names the process, so the operator knows what to look for
+// (S054-R3.7).
+func interruptedCompileError(pkg, version, privTool string, ctxErr error, pid int, refused error) error {
+	interrupted := fmt.Errorf("the compile of %s-%s was interrupted, so it says nothing about this ebuild: %w", pkg, version, ctxErr)
+	if refused == nil {
+		return interrupted
+	}
+	return fmt.Errorf("%w; %s (process %d) could not be asked to stop, so the privileged build may still be running: %w",
+		interrupted, privTool, pid, refused)
+}
+
+// keepStopRefusal wraps cmd.Cancel, as procgroup.Foreground configured it, so
+// that a stop the child could not be sent is kept. The returned function reads
+// it once Wait (or Run) has returned: the pid the stop was refused for and the
+// refusal, or a nil error when every stop was delivered (S054-R3.7).
+//
+// # Why Wait's error cannot carry it
+//
+// Foreground's Cancel does return the refusal, wrapped and naming the pid, but
+// os/exec hands that error to Wait's caller only when the child then exits 0.
+// Once WaitDelay expires os/exec calls Process.Kill, and a Kill refused as well
+// REPLACES it with its own error; and against a child nothing can signal, Wait
+// returns only when that child exits by itself, with whatever status it chose.
+// The one moment the refusal is certain to exist is when Cancel returns it, so
+// that is where it is kept.
+//
+// os/exec calls Cancel before it hands the context's outcome to Wait, so a
+// Cancel that ran has returned before Wait does; the mutex covers a runner that
+// starts the command and reads the refusal without waiting for it.
+//
+// A child that had already exited (os.ErrProcessDone) is not a refusal: there
+// was nothing left to stop. A command with no Cancel is left without one,
+// because os/exec refuses to start a command that has a Cancel and was not
+// created by exec.CommandContext.
+func keepStopRefusal(cmd *exec.Cmd) func() (pid int, refused error) {
+	var (
+		mu      sync.Mutex
+		stopPID int
+		stopErr error
+	)
+	read := func() (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return stopPID, stopErr
+	}
+	cancel := cmd.Cancel
+	if cancel == nil {
+		return read
+	}
+	cmd.Cancel = func() error {
+		err := cancel()
+		if err != nil && !errors.Is(err, os.ErrProcessDone) {
+			mu.Lock()
+			// Process is non-nil: os/exec calls Cancel only after a successful Start.
+			stopPID, stopErr = cmd.Process.Pid, err
+			mu.Unlock()
+		}
+		return err
+	}
+	return read
 }
 
 // repairBuildAndRerun is what happens after the build gate has failed once: the
@@ -2614,6 +2821,12 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	// The re-run is the verdict (R8.2), so its distdir facts are the ones the
 	// gate must report: this build is the one the PASS would be about.
 	recordCompileDistdir(result, second)
+	// S054-R3.5 holds for the re-run as well: a re-run its context stopped is no
+	// verdict on the edit, so it is returned as the interrupt it is — never as the
+	// first failure "still" standing, which would wrap ErrCompileFailed.
+	if second.err != nil && a.ctx.Err() != nil {
+		return second.logPath, second.err
+	}
 	if second.err != nil {
 		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
 			first.err, compileGatePhase, second.err)

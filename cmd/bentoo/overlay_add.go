@@ -19,13 +19,16 @@ If no paths are specified, adds all changes (equivalent to "git add .").`,
 }
 
 func runAdd(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	ctx, stop := signalContext(cmd.Context())
+	defer stop()
+
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
 	}
 
-	result, err := overlay.AddFiles(ctx.Config, args...)
+	result, err := overlay.AddFiles(ctx, appCtx.Config, args...)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)
@@ -40,7 +43,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 	// Show only what is staged in the index — not the whole working tree — so
 	// "overlay add <pkg>" reports just the package(s) the user staged.
 	if len(result.Added) > 0 {
-		statuses, err := overlay.StagedStatus(ctx.Config)
+		statuses, err := overlay.StagedStatus(ctx, appCtx.Config)
 		if err != nil {
 			logger.Error("getting status: %v", err)
 			osExit(1)

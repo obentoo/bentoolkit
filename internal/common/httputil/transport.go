@@ -18,14 +18,23 @@ const (
 	// "1", forces BuildTransport to disable HTTP/2 negotiation. This provides an
 	// operational escape hatch for environments where HTTP/2 misbehaves.
 	EnvDisableHTTP2 = "BENTOO_DISABLE_HTTP2"
+
+	// DefaultResponseHeaderTimeout bounds how long a transport built here
+	// waits for response headers after the request is written. A server that
+	// accepts the connection but never answers ends the attempt as a timeout
+	// instead of holding it until the whole-request timeout.
+	DefaultResponseHeaderTimeout = 30 * time.Second
 )
 
 // BuildTransport returns a freshly constructed *http.Transport tuned with the
 // bentoolkit's standard connection-pool limits and timeouts.
 //
 // The returned transport sets MaxIdleConnsPerHost, MaxConnsPerHost,
-// IdleConnTimeout, TLSHandshakeTimeout, ExpectContinueTimeout, and enables
-// ForceAttemptHTTP2.
+// IdleConnTimeout, TLSHandshakeTimeout, ExpectContinueTimeout and
+// ResponseHeaderTimeout (DefaultResponseHeaderTimeout), enables
+// ForceAttemptHTTP2, and routes requests through http.ProxyFromEnvironment so
+// HTTP_PROXY, HTTPS_PROXY and NO_PROXY are honoured. ProxyFromEnvironment reads
+// the environment once per process and never proxies loopback hosts.
 //
 // When the environment variable named by EnvDisableHTTP2 is set to "1", HTTP/2
 // is disabled: ForceAttemptHTTP2 is set to false and TLSNextProto is set to a
@@ -36,11 +45,13 @@ const (
 // and may mutate it further before use.
 func BuildTransport() *http.Transport {
 	t := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
 		MaxIdleConnsPerHost:   16,
 		MaxConnsPerHost:       32,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
 	}
 

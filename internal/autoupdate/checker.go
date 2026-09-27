@@ -47,6 +47,11 @@ var (
 	// ebuild's own base is what let six Khronos packages drift up to seven
 	// releases behind while still reporting "up to date".
 	ErrBaseVersionUnresolved = errors.New("declared base version source resolved nothing")
+	// ErrAuxUnresolved is recorded (wrapped, on CheckResult.Error) when a package
+	// declares aux_pattern or commit_sha_path and that value could not be
+	// resolved. The bump is held rather than queued: applying it would ship the
+	// previous release's value under the new version.
+	ErrAuxUnresolved = errors.New("auxiliary value unresolved")
 )
 
 // CheckResult represents the result of checking a single package for updates.
@@ -91,7 +96,9 @@ const DefaultOpTimeout = 30 * time.Second
 // the per-request timeout (not the operation budget) is what fires on a slow
 // host, so the failure surfaces as the clearer "max retries exceeded" rather than
 // a premature "context deadline exceeded". rc carries the retry parameters from
-// the HTTP client; a zero/blank rc still yields a budget >= perReq.
+// the HTTP client; a zero/blank rc still yields a budget >= perReq. The backoff
+// is summed from backoffCeilingFor, the same ceiling the retry wait draws its
+// jitter below, so a jittered wait never exceeds what the budget allows for.
 func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 	maxRetries := rc.MaxRetries
 	if maxRetries < 0 {
@@ -100,15 +107,9 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 	attempts := maxRetries + 1
 	total := perReq * time.Duration(attempts)
 
-	// Sum the backoff delays the retry loop would sleep between attempts, mirroring
-	// calculateDelay: BaseDelay×2^(i-1), capped at MaxDelay.
+	// Sum the longest wait the retry loop can take before each retry.
 	for i := 1; i <= maxRetries; i++ {
-		multiplier := 1 << (i - 1) // 2^(i-1): 1, 2, 4, ...
-		delay := rc.BaseDelay * time.Duration(multiplier)
-		if rc.MaxDelay > 0 && delay > rc.MaxDelay {
-			delay = rc.MaxDelay
-		}
-		total += delay
+		total += backoffCeilingFor(rc, i)
 	}
 
 	return total + time.Second
@@ -677,7 +678,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if errors.Is(err, ErrBaseVersionUnresolved) {
 				result.Error = err
 			} else {
-				result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+				result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 			}
 			return result, result.Error
 		}
@@ -759,7 +760,9 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if result.HasUpdate {
 				sha := c.resolveAuxSHA(&pkgConfig, result)
 				aux := c.resolveAuxValue(&pkgConfig, result)
-				if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
+				if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
+					result.Error = errors.Join(result.Error, held)
+				} else if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -772,7 +775,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	// Fetch upstream version
 	upstreamVersion, err := c.fetchUpstreamVersion(pkg, &pkgConfig)
 	if err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrFetchFailed, err)
+		result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
 		return result, result.Error
 	}
 	result.UpstreamVersion = upstreamVersion
@@ -792,7 +795,11 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	if result.HasUpdate {
 		sha := c.resolveAuxSHA(&pkgConfig, result)
 		aux := c.resolveAuxValue(&pkgConfig, result)
-		if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
+		if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
+			// Joined, not overwritten: result.Error may already hold the cache
+			// write error, in which case the helper did not record its own cause.
+			result.Error = errors.Join(result.Error, held)
+		} else if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -1075,7 +1082,7 @@ func (c *Checker) FindRevivableOrphans(prov provider.Provider) ([]ReviveCandidat
 
 		// Highest version ::gentoo currently carries. A package ::gentoo does not
 		// have is simply not revivable from a gentoo base, so skip it silently.
-		versions, err := prov.GetPackageVersions(category, pkgName)
+		versions, err := prov.GetPackageVersions(c.ctx, category, pkgName)
 		if err != nil {
 			if errors.Is(err, provider.ErrNotFound) {
 				continue
@@ -1170,8 +1177,9 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 // hasUpdate is true only when upstream is strictly newer than current.
 // comparable is false when either side is not a well-formed version that can be
 // ordered; in that case hasUpdate is always false and the caller MUST treat the
-// result as a warning rather than "up to date" (parseVersion would otherwise
-// coerce junk to 0.0.0 and silently report no update — see ebuild.IsValidVersion).
+// result as a warning rather than "up to date" (ebuild.CompareVersions would
+// otherwise order junk below every real version and silently report no update —
+// see ebuild.IsValidVersion).
 func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparable bool) {
 	u := stripVersionPrefix(strings.TrimSpace(upstream))
 	cur := stripVersionPrefix(strings.TrimSpace(current))
@@ -1199,11 +1207,28 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxV
 	return c.pending.Add(update)
 }
 
+// heldBump returns an error wrapping ErrAuxUnresolved when pkg declares
+// commit_sha_path or aux_pattern and the matching value came back empty, and
+// nil otherwise. CheckPackage then leaves the pending list alone: a held bump
+// is not a failed check, and an entry queued by an earlier successful check
+// stays as it was. The value is fetched again on the next check, cache hit
+// included, so the bump resolves itself once upstream serves it.
+func heldBump(pkg string, cfg *PackageConfig, sha, aux string) error {
+	if cfg.CommitSHAPath != "" && sha == "" {
+		return fmt.Errorf("%w for %s: commit_sha_path %q resolved nothing, bump held until it resolves", ErrAuxUnresolved, pkg, cfg.CommitSHAPath)
+	}
+	if cfg.AuxPattern != "" && aux == "" {
+		return fmt.Errorf("%w for %s: aux_pattern resolved nothing, bump held until it resolves", ErrAuxUnresolved, pkg)
+	}
+	return nil
+}
+
 // resolveAuxSHA fetches the auxiliary commit SHA for a version-tracked package
 // that declares commit_sha_path (e.g. cursor's BUILD_ID, which is part of the
 // download URL and changes with every release). It returns "" when no SHA path
-// is configured. A fetch/parse failure is recorded on result.Error but does not
-// abort the update: the apply simply skips the SHA substitution.
+// is configured. A fetch/parse failure is recorded on result.Error and returns
+// "", which makes CheckPackage hold the bump (see heldBump) instead of queueing
+// it with the previous release's SHA.
 //
 // Commit-tracked packages (track="commit") resolve their SHA via fetchCommitInfo
 // instead and never reach this path.
@@ -1211,7 +1236,7 @@ func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string 
 	if cfg.CommitSHAPath == "" {
 		return ""
 	}
-	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to fetch commit sha: %w", err)
@@ -1233,13 +1258,14 @@ func (c *Checker) resolveAuxSHA(cfg *PackageConfig, result *CheckResult) string 
 // nomachine's MY_P build number). It returns "" when no aux_pattern is
 // configured. Unlike resolveAuxSHA it is parser-agnostic: the aux_pattern regex
 // is applied directly to the fetched body, so regex/html sources work. A
-// fetch/parse failure is recorded on result.Error but does not abort the
-// update; the apply simply skips the substitution.
+// fetch/parse failure is recorded on result.Error and returns "", which makes
+// CheckPackage hold the bump (see heldBump) instead of queueing it with the
+// previous release's value.
 func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) string {
 	if cfg.AuxPattern == "" {
 		return ""
 	}
-	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to fetch aux value: %w", err)
@@ -1369,7 +1395,7 @@ type gitLabTag struct {
 // back. Highest-of-family matches what the release actually is for every package
 // this serves, and the exact-tag test below is precise regardless.
 func (c *Checker) resolveBaseFromTag(cfg *PackageConfig, headSHA string) (string, bool, error) {
-	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return "", false, fmt.Errorf("base version tags %s: %w", cfg.BaseURL, err)
 	}
@@ -1458,7 +1484,7 @@ func parseTagListing(content []byte) (names, shas []string, err error) {
 // highest base version found in commit titles since the last snapshot.
 // Called only when cfg.Track == "commit".
 func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
-	content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -1540,7 +1566,7 @@ func (c *Checker) fetchCommitInfo(cfg *PackageConfig) (*commitInfo, error) {
 // declaration. All three must be loud — a base that silently stops advancing
 // looks identical to one that is simply up to date.
 func (c *Checker) resolveBaseFromFile(cfg *PackageConfig) (string, error) {
-	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(cfg.BaseURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return "", fmt.Errorf("base version file %s: %w", cfg.BaseURL, err)
 	}
@@ -1672,6 +1698,12 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 	}
 	primaryErr := err
 
+	// A credential refusal is a verdict on the record, not a failed source:
+	// neither the fallback nor the LLM stage may run after it (S052-R2.2).
+	if errors.Is(err, ErrCredentialHostMismatch) {
+		return "", fmt.Errorf("all version extraction methods failed: %w", err)
+	}
+
 	// Try fallback URL if configured
 	if cfg.FallbackURL != "" && cfg.FallbackParser != "" {
 		fallbackPattern := cfg.FallbackPattern
@@ -1700,7 +1732,7 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 	// Try LLM if configured and available
 	if c.llmClient != nil && cfg.LLMPrompt != "" {
 		// Fetch content from primary URL for LLM
-		content, err := c.fetchContent(cfg.URL, cfg.Headers, c.operationTimeout(cfg))
+		content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 		if err == nil {
 			version, err = c.llmClient.ExtractVersion(content, cfg.LLMPrompt)
 			if err == nil {
@@ -1728,7 +1760,7 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 // scrape plus optional regex post-processing (carried in Pattern).
 func (c *Checker) fetchAndParse(rawURL string, cfg *PackageConfig) (string, error) {
 	// Fetch content
-	content, err := c.fetchContent(rawURL, cfg.Headers, c.operationTimeout(cfg))
+	content, err := c.fetchContent(rawURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return "", err
 	}
@@ -1864,13 +1896,25 @@ func (c *Checker) parseLive(cfg *PackageConfig) (string, error) {
 // The error is returned exactly as the underlying fetch produced it: bodyCache.do
 // neither caches nor shares a failure, so callers' errors.Is checks against
 // context.Canceled, context.DeadlineExceeded and ErrResponseTooLarge keep holding.
-func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
+//
+// scope is the package's credential scope (packageCredentialScope). The binding
+// check runs FIRST, before the cache is consulted (S052-R2.3): the key is built
+// from the URL and the unexpanded declared headers, not from the scope, so a
+// record bound elsewhere shares its key with a record that legitimately fetched
+// the same URL, and would otherwise be served that record's body. A refusal is
+// returned before the join, so the sentence above stays true — no refusal is
+// cached or shared — and the key needs no scope term (S052-R9.4).
+func (c *Checker) fetchContent(rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
+	if err := checkCredentialBinding(rawURL, headers, scope); err != nil {
+		return nil, err
+	}
+
 	if c.bodies == nil {
-		return c.fetchContentUncached(rawURL, headers, opTimeout)
+		return c.fetchContentUncached(rawURL, headers, scope, opTimeout)
 	}
 
 	return c.bodies.do(c.ctx, bodyKey(rawURL, headers), func() ([]byte, error) {
-		return c.fetchContentUncached(rawURL, headers, opTimeout)
+		return c.fetchContentUncached(rawURL, headers, scope, opTimeout)
 	})
 }
 
@@ -1897,10 +1941,12 @@ func (c *Checker) fetchContent(rawURL string, headers map[string]string, opTimeo
 //
 // headers carries the per-package custom headers from packages.toml (cfg.Headers);
 // they are merged with the client's default User-Agent and, for api.github.com
-// URLs, the configured GitHub token. Passing them through GetWithHeadersContext
-// (rather than the bare GetWithContext) is what actually puts the User-Agent,
-// the Authorization token, and any TOML-declared headers on the wire.
-func (c *Checker) fetchContentUncached(rawURL string, headers map[string]string, opTimeout time.Duration) ([]byte, error) {
+// URLs, the configured GitHub token. Passing them through the header-applying
+// GET (rather than the bare GetWithContext) is what actually puts the User-Agent,
+// the Authorization token, and any TOML-declared headers on the wire. scope is
+// handed to that GET so the client re-checks the credential binding against the
+// package's hosts, not the request's own (S052-R1.4).
+func (c *Checker) fetchContentUncached(rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -1934,7 +1980,7 @@ func (c *Checker) fetchContentUncached(rawURL string, headers map[string]string,
 	ctx, cancel := context.WithTimeout(c.ctx, opTimeout)
 	defer cancel()
 
-	resp, err := c.httpClient.GetWithHeadersContext(ctx, rawURL, headers)
+	resp, err := c.httpClient.getWithHeadersScopedContext(ctx, rawURL, headers, scope)
 	if err != nil {
 		// Name the host and the per-request cap so a timeout points the user at
 		// the slow endpoint and the knob to raise (autoupdate.http_timeout /

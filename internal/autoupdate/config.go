@@ -13,6 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
 // Error variables for configuration errors
@@ -1069,40 +1070,29 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 	return writePackagesConfigAtomically(configPath, []byte(strings.Join(out, "\n")))
 }
 
-// writePackagesConfigAtomically replaces packages.toml with data through a temp
-// file in the same directory and a rename, preserving the mode the file already
-// has. Every writer of the registry goes through it, so there is one copy of the
+// writePackagesConfigAtomically replaces packages.toml with data, preserving the
+// mode the file already has. It, the analyzer's savePackagesConfig and the
+// registry fixer's snapshot restore are the three writers of the registry, and
+// all three go through fileutil.WriteFileAtomic, so there is one copy of the
 // "never leave a half-written registry behind" policy rather than one per caller.
 //
 // Atomicity is what the policy buys: the registry is a hand-maintained,
 // auto-committing file, and a truncated write would publish the truncation. The
-// rename is atomic within a filesystem, so a reader sees either the old file or
-// the new one — never a partial one — and a failed rename removes the temp file
-// instead of leaving debris beside the registry.
+// helper writes a synced temporary file beside it and renames it into place, so
+// a reader — or a crash — sees either the old file or the new one, never a
+// partial one, and the directory is synced so the rename survives a power loss.
 //
-// The mode is set explicitly rather than left to os.WriteFile's create mode,
-// which the process umask masks: under umask 077 a 0644 registry would come back
+// The mode is set explicitly by the helper rather than left to a create mode the
+// process umask masks: under umask 077 a 0644 registry would otherwise come back
 // 0600 and stop being readable by anything else on the box.
 func writePackagesConfigAtomically(configPath string, data []byte) error {
 	info, err := os.Stat(configPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat packages.toml: %w", err)
+		return fmt.Errorf("failed to stat %s: %w", configPath, err)
 	}
-	mode := info.Mode().Perm()
-
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, mode); err != nil {
-		return fmt.Errorf("failed to write temp config: %w", err)
+	if err := fileutil.WriteFileAtomic(configPath, data, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("failed to replace %s: %w", configPath, err)
 	}
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to preserve packages.toml mode: %w", err)
-	}
-	if err := os.Rename(tmpPath, configPath); err != nil {
-		os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("failed to replace packages.toml: %w", err)
-	}
-
 	return nil
 }
 

@@ -5,6 +5,7 @@ package github
 // RED ON ARRIVAL: github.ErrUnauthorized does not exist.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -44,7 +45,7 @@ func TestGetPackageVersionsUnauthorized(t *testing.T) {
 			client.CacheDir = ""
 			client.Token = "bad-token"
 
-			_, err := client.GetPackageVersions("app-misc", "hello")
+			_, err := client.GetPackageVersions(context.Background(), "app-misc", "hello")
 			if err == nil {
 				t.Fatalf("HTTP %d returned no error", tc.status)
 			}

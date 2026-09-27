@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
@@ -187,10 +188,16 @@ func (a *Applier) promote(cand candidatePaths, pkg, version string) (publishedUn
 		manifestPath: filepath.Join(dst.pkgDir, "Manifest"),
 	}
 
-	if err := writeThenRename(dst.ebuildPath, body, publishedFileMode); err != nil {
-		// The rename is the only step that publishes anything, and it is atomic:
-		// a failure here leaves the package directory exactly as it was, and
-		// writeThenRename has already taken its temporary file away.
+	// Published with no-clobber (fileutil.PublishNewFile links a synced
+	// temporary file to the name): an ebuild that appeared after the check
+	// above — or a dangling symlink the check could not see — is refused and
+	// left byte-identical, never replaced. The link is the only step that
+	// publishes anything, so a failure leaves the package directory exactly as
+	// it was, with no temporary file.
+	if err := fileutil.PublishNewFile(dst.ebuildPath, body, publishedFileMode); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return nil, fmt.Errorf("%w: %s (refusing to overwrite it with the validated %s-%s)", ErrEbuildExists, dst.ebuildPath, pkg, version)
+		}
 		return nil, fmt.Errorf("publishing the validated ebuild for %s-%s as %s: %w", pkg, version, dst.ebuildPath, err)
 	}
 	promoted.ebuildPublished = true

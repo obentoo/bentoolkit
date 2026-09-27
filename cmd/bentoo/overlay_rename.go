@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -107,6 +108,17 @@ func runRename(cmd *cobra.Command, args []string) {
 	// Display preview
 	logger.Info("%s", overlay.FormatRenamePreview(previewResult, spec.Category == "*"))
 
+	// Two ebuilds sharing one target cannot be renamed, --force or not, so the
+	// plan is refused here — before the dry-run return, so a script reading the
+	// exit code learns the plan cannot run, and before the prompt, so nobody is
+	// asked to confirm it. overlay.Rename refuses it again as a second line.
+	if len(previewResult.Collisions) > 0 {
+		err := &overlay.CollisionError{Collisions: previewResult.Collisions}
+		logger.Error("%v", err)
+		osExit(1)
+		return
+	}
+
 	// Check if confirmation is needed
 	needsConfirmation := !opts.SkipPrompt
 	isGlobalSearch := spec.Category == "*"
@@ -170,6 +182,10 @@ var (
 	ErrEmptyPackagePattern = errors.New("package pattern cannot be empty")
 	ErrEmptyOldVersion     = errors.New("old version cannot be empty")
 	ErrEmptyNewVersion     = errors.New("new version cannot be empty")
+	// ErrInvalidNewVersion is returned when the new version is not a Gentoo
+	// version. The value becomes part of the target filename, so a path such as
+	// `1.2/../../../x` would otherwise move the ebuild out of its package.
+	ErrInvalidNewVersion = errors.New("new version is not a valid Gentoo version")
 )
 
 // ParseRenameArgs parses command-line arguments into a RenameSpec.
@@ -207,6 +223,9 @@ func ParseRenameArgs(args []string) (*overlay.RenameSpec, error) {
 	}
 	if newVersion == "" {
 		return nil, ErrEmptyNewVersion
+	}
+	if !ebuild.IsValidVersion(newVersion) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidNewVersion, newVersion)
 	}
 
 	return &overlay.RenameSpec{

@@ -35,7 +35,7 @@ type s057LookupProvider struct {
 	versions map[string][]string
 }
 
-func (p *s057LookupProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *s057LookupProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	if err, ok := p.errs[category+"/"+pkg]; ok {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func TestLookupFailureRecordsCauseAndText(t *testing.T) {
 	prov := newProv(srv.URL)
 	direct := func(p *provider.GitHubProvider, atom string) string {
 		cat, pkg, _ := strings.Cut(atom, "/")
-		_, err := p.GetPackageVersions(cat, pkg)
+		_, err := p.GetPackageVersions(context.Background(), cat, pkg)
 		if err == nil {
 			t.Fatalf("the fixture is wrong: %s did not fail", atom)
 		}

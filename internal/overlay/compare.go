@@ -684,8 +684,8 @@ type githubProviderAdapter struct {
 // Maps github.ErrNotFound to provider.ErrNotFound for interface compatibility,
 // and every other github sentinel to its provider counterpart without changing
 // the client's text (see `type translatedErr`).
-func (a *githubProviderAdapter) GetPackageVersions(category, pkg string) ([]string, error) {
-	versions, err := a.client.GetPackageVersions(category, pkg)
+func (a *githubProviderAdapter) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
+	versions, err := a.client.GetPackageVersions(ctx, category, pkg)
 	switch {
 	case err == nil:
 		return versions, nil
@@ -801,7 +801,7 @@ func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, op
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			result := comparePackageWithProvider(p, prov, opts)
+			result := comparePackageWithProvider(ctx, p, prov, opts)
 
 			// Filter based on options using switch for clarity.
 			include := false
@@ -937,8 +937,8 @@ func sortCompareResults(results []CompareResult) {
 // can ever come to depend on the registry: the version comparison keeps its
 // current four values and their current meanings by construction, not by
 // convention.
-func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
-	result := comparePackageVersions(pkg, prov)
+func comparePackageWithProvider(ctx context.Context, pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
+	result := comparePackageVersions(ctx, pkg, prov)
 	// comparePackageVersions has no opts, so the text it recorded is scrubbed
 	// here, before anything else can read it.
 	result.FailureText = redactFailure(result.FailureText, opts.Redact)
@@ -982,7 +982,7 @@ func comparePackageWithProvider(pkg PackageInfo, prov provider.Provider, opts Co
 // comparePackageVersions resolves how the local package's latest version relates
 // to the provider's copy. It sets Status and the two version fields, and knows
 // nothing about divergence.
-func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResult {
+func comparePackageVersions(ctx context.Context, pkg PackageInfo, prov provider.Provider) CompareResult {
 	result := CompareResult{
 		Category:     pkg.Category,
 		Package:      pkg.Package,
@@ -990,7 +990,7 @@ func comparePackageVersions(pkg PackageInfo, prov provider.Provider) CompareResu
 	}
 
 	// Fetch remote versions
-	remoteVersions, err := prov.GetPackageVersions(pkg.Category, pkg.Package)
+	remoteVersions, err := prov.GetPackageVersions(ctx, pkg.Category, pkg.Package)
 	if err != nil {
 		if errors.Is(err, provider.ErrNotFound) {
 			result.Status = StatusNotInRemote

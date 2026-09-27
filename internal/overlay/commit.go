@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -612,35 +613,35 @@ func formatPackageVersion(c Change, ct ChangeType) string {
 }
 
 // Commit executes a git commit with the given message
-func Commit(cfg *config.Config, message string) error {
+func Commit(ctx context.Context, cfg *config.Config, message string) error {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	return CommitWithExecutor(cfg, message, runner)
+	return CommitWithExecutor(ctx, cfg, message, runner)
 }
 
 // CommitWithExecutor executes a git commit using the provided GitExecutor.
 // This function is useful for testing with mock implementations.
-func CommitWithExecutor(cfg *config.Config, message string, executor git.GitExecutor) error {
+func CommitWithExecutor(ctx context.Context, cfg *config.Config, message string, executor git.GitExecutor) error {
 	// Get git user info
 	user := cfg.Git.User
 	email := cfg.Git.Email
 
-	return executor.Commit(message, user, email)
+	return executor.Commit(ctx, message, user, email)
 }
 
 // GetStagedChanges returns the list of changes from staged files
-func GetStagedChanges(cfg *config.Config) ([]Change, error) {
+func GetStagedChanges(ctx context.Context, cfg *config.Config) ([]Change, error) {
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
 	}
 
 	runner := git.NewGitRunner(overlayPath)
-	entries, err := runner.Status()
+	entries, err := runner.Status(ctx)
 	if err != nil {
 		return nil, err
 	}

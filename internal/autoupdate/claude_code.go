@@ -16,12 +16,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -127,8 +129,9 @@ type ClaudeCodeClient struct {
 	// DefaultClaudeCodeTimeout.
 	timeout time.Duration
 	// ctx is the parent context for spawned CLI processes. Defaults to
-	// context.Background(); a cancelled parent (or the per-call timeout) kills
-	// the child via exec.CommandContext (S003-R7.1).
+	// context.Background(); a cancelled parent (or the per-call timeout) stops
+	// the child and every process it started, through procgroup.Group
+	// (S003-R7.1, story 054 R4.1).
 	ctx context.Context
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
 	// exec.CommandContext and is injectable for testing.
@@ -148,6 +151,10 @@ type ClaudeCodeOption func(*ClaudeCodeClient)
 // WithClaudeCodeExecCommand overrides the context-aware exec.Command factory used
 // to spawn the `claude` CLI. The function mirrors exec.CommandContext so injected
 // commands also observe context cancellation. Intended for tests (scripted seam).
+//
+// The command it returns must come from exec.CommandContext with the ctx it was
+// given: run configures it with procgroup.Group, which sets cmd.Cancel, and
+// os/exec refuses to start a command that has a Cancel but no context.
 func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ClaudeCodeOption {
 	return func(c *ClaudeCodeClient) {
 		c.execCommand = fn
@@ -155,9 +162,14 @@ func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...
 }
 
 // WithClaudeCodeContext sets the parent context threaded into every spawned CLI
-// process, so cancelling it (e.g. on SIGINT or a deadline) kills the in-flight
-// `claude` process. A nil context is ignored, leaving the default
-// context.Background().
+// process, so cancelling it (e.g. on SIGINT or a deadline) stops the in-flight
+// `claude` process and everything it started. A nil context is ignored, leaving
+// the default context.Background().
+//
+// Since story 054 the child runs in its own process group, so a Ctrl+C typed at
+// the terminal no longer reaches it directly: this context is the only way an
+// interrupt does. A caller that can be interrupted should pass the context its
+// signal handler cancels.
 func WithClaudeCodeContext(ctx context.Context) ClaudeCodeOption {
 	return func(c *ClaudeCodeClient) {
 		if ctx != nil {
@@ -201,62 +213,98 @@ func resolveBare(cfg LLMConfig, key string) bool {
 	}
 }
 
-// scrubbedAuthEnvVars are the environment variables the `claude` CLI honours as
-// non-interactive API auth sources. In non-bare mode they are stripped from the
-// child environment so the CLI cannot silently prefer an inherited API key over
-// its own logged-in (subscription) session — the canonical ANTHROPIC_API_KEY and
-// ANTHROPIC_AUTH_TOKEN, plus the operator-configured key var (apiKeyEnv) which
-// may be a custom name feeding the same key.
-var scrubbedAuthEnvVars = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+// agentEnvAllowed names the parent variables a spawned `claude` agent may
+// receive, byte for byte (S051-R1.1). Everything else stays in bentoo's own
+// process: GITHUB_TOKEN, the notifier tokens, every BENTOO_* value and any
+// ANTHROPIC_* auth source (S051-R1.2). An agent reads untrusted upstream pages,
+// so what it inherits is what one prompt injection can exfiltrate.
+//
+// HOME, CLAUDE_CONFIG_DIR and the XDG_* prefix stay because the CLI finds its
+// logged-in (subscription) credentials through them; the proxy and CA names stay
+// because a host behind a proxy reaches the API only through them. The list has
+// no config switch: a variable an operator needs here is a code change, reviewed.
+var agentEnvAllowed = map[string]struct{}{
+	"PATH": {}, "HOME": {}, "TMPDIR": {}, "LANG": {}, "TERM": {},
+	"CLAUDE_CONFIG_DIR": {}, "NODE_EXTRA_CA_CERTS": {}, "SSL_CERT_FILE": {},
+	"HTTP_PROXY": {}, "HTTPS_PROXY": {}, "NO_PROXY": {},
+	"http_proxy": {}, "https_proxy": {}, "no_proxy": {},
+}
 
-// childEnv builds the environment for a spawned `claude` process from the
-// resolved auth mode.
-//
-//   - bare mode: the inherited environment plus an injected ANTHROPIC_API_KEY set
-//     to key — the single credential the caller already resolved via
-//     secrets.Lookup (injected only when non-empty). The value travels solely
-//     through the env, never argv/logs, and is NOT re-read from apiKeyEnv here, so
-//     a key that lives only in a secrets file (absent from the process env) is
-//     still injected into the child.
-//   - non-bare mode: the inherited environment with every auth source in
-//     scrubbedAuthEnvVars AND apiKeyEnv REMOVED, so an API key present in the
-//     parent env (e.g. exported from a shell rc) cannot override the operator's
-//     explicit `bare: false` choice to run on the CLI's logged-in session.
-//
-// It always returns a non-nil slice so callers assign cmd.Env unconditionally
-// (a nil cmd.Env would make the child inherit the parent env verbatim, defeating
-// the non-bare scrub).
-func childEnv(bareMode bool, apiKeyEnv string, key string) []string {
-	if bareMode {
-		env := os.Environ()
-		if key != "" {
-			env = append(env, "ANTHROPIC_API_KEY="+key)
+// agentEnvAllowedPrefixes admits whole families by prefix (S051-R1.1). The
+// trailing underscore is part of the prefix, so LCX_* and XDGX_* stay out.
+var agentEnvAllowedPrefixes = []string{"LC_", "XDG_"}
+
+// agentEnvExtra carries what one spawner adds to the shared allow-list. Only the
+// manifest fixer sets it: it runs `pkgdev manifest`, which reads PORTAGE_* and
+// needs the one DISTDIR the applier computed (S051-R1.3). The zero value is what
+// every other agent gets — no PORTAGE_* and no DISTDIR at all (S051-R1.4).
+type agentEnvExtra struct {
+	// portage admits the parent's PORTAGE_* variables.
+	portage bool
+	// distDir, when non-empty, is emitted as the ONLY DISTDIR entry; a parent
+	// DISTDIR is never admitted beside it, for the reason `buildEnvAllowed` in
+	// validate/build.go gives: two assignments leave the choice to os/exec's
+	// duplicate-key order, which is a decision nobody made.
+	distDir string
+}
+
+// agentEnvAllows reports whether the parent variable name may cross into an
+// agent's environment under extra.
+func agentEnvAllows(name string, extra agentEnvExtra) bool {
+	if _, ok := agentEnvAllowed[name]; ok {
+		return true
+	}
+	for _, p := range agentEnvAllowedPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
 		}
-		return env
 	}
+	return extra.portage && strings.HasPrefix(name, "PORTAGE_")
+}
 
-	// Non-bare: drop every auth var the CLI could read so it falls back to its
-	// own session. Build the strip set once (canonical vars + the configured
-	// name), then filter the inherited environment by KEY prefix.
-	strip := make(map[string]struct{}, len(scrubbedAuthEnvVars)+1)
-	for _, name := range scrubbedAuthEnvVars {
-		strip[name] = struct{}{}
-	}
-	if apiKeyEnv != "" {
-		strip[apiKeyEnv] = struct{}{}
-	}
-
+// childEnv builds the environment for a spawned `claude` process: the parent's
+// allow-listed variables (agentEnvAllowed, agentEnvAllowedPrefixes, plus what
+// extra admits) and nothing else (S051-R1.1, S051-R1.2).
+//
+//   - bare mode: one ANTHROPIC_API_KEY entry set to key — the single credential
+//     the caller already resolved via secrets.Lookup — appended only when key is
+//     non-empty (S051-R1.5). ANTHROPIC_API_KEY is on no list, so a key the parent
+//     happens to export never crosses and can never sit beside the resolved one
+//     as a duplicate whose order decides which the CLI reads. The value travels
+//     solely through the env, never argv or logs.
+//   - non-bare mode: no API key at all, and apiKeyEnv is dropped even when its
+//     name falls inside an allowed prefix such as XDG_, so the CLI falls back to
+//     its own logged-in session (S051-R1.6).
+//
+// No name appears twice (S051-R1.8): a parent environment carrying a duplicate
+// keeps its first assignment, the one os.Getenv reads in this process.
+//
+// It always returns a non-nil slice, empty when the parent holds no allowed
+// variable, so callers assign cmd.Env unconditionally: a nil cmd.Env would make
+// the child inherit the parent environment verbatim (S051-R1.7).
+func childEnv(bareMode bool, apiKeyEnv, key string, extra agentEnvExtra) []string {
 	parent := os.Environ()
-	env := make([]string, 0, len(parent))
+	env := make([]string, 0, len(agentEnvAllowed)+2)
+	seen := make(map[string]struct{}, len(agentEnvAllowed))
 	for _, kv := range parent {
-		name := kv
-		if eq := strings.IndexByte(kv, '='); eq >= 0 {
-			name = kv[:eq]
-		}
-		if _, drop := strip[name]; drop {
+		name, _, assigned := strings.Cut(kv, "=")
+		if !assigned || !agentEnvAllows(name, extra) {
 			continue
 		}
+		if !bareMode && name == apiKeyEnv {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
 		env = append(env, kv)
+	}
+	if extra.distDir != "" {
+		env = append(env, "DISTDIR="+extra.distDir)
+	}
+	if bareMode && key != "" {
+		env = append(env, "ANTHROPIC_API_KEY="+key)
 	}
 	return env
 }
@@ -334,13 +382,68 @@ func (c *ClaudeCodeClient) GetModel() string {
 
 // claudeCodeEnvelope is the JSON envelope emitted by `claude --output-format json`.
 // Only the fields the provider consumes are modeled.
+//
+// PermissionDenials lists every tool call the CLI refused, on a failed AND on a
+// successful run. Its shape was observed on claude 2.1.281 (2026-09-23):
+// `"permission_denials":[{"tool_name":"Read","tool_use_id":"toolu_…",
+// "tool_input":{"file_path":"…"}}]`, with `{"command":…}` as a Bash call's
+// input and `{"url":…,"prompt":…}` as a WebFetch call's (S051-R5.1).
 type claudeCodeEnvelope struct {
-	Type         string   `json:"type"`
-	Subtype      string   `json:"subtype"`
-	IsError      bool     `json:"is_error"`
-	Result       string   `json:"result"`
-	Errors       []string `json:"errors"`
-	TotalCostUSD float64  `json:"total_cost_usd"`
+	Type              string                   `json:"type"`
+	Subtype           string                   `json:"subtype"`
+	IsError           bool                     `json:"is_error"`
+	Result            string                   `json:"result"`
+	Errors            []string                 `json:"errors"`
+	TotalCostUSD      float64                  `json:"total_cost_usd"`
+	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+}
+
+// claudePermissionDenial is one refused tool call in the envelope.
+// ToolInput is kept raw on purpose: it is read for a WebFetch host and nothing
+// else, because the full input can echo page content or a secrets path.
+type claudePermissionDenial struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// refusedToolLabels names each refused tool once, in the order the CLI refused
+// them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
+// — so two refusals of one tool to different hosts stay distinguishable
+// (S051-R5.1). The host is taken from the call's url only when it has the SHAPE
+// of a lowercase DNS name (dnsHost); anything else leaves the bare tool name, so
+// no injected text can ride into a label. The shape check is deliberately
+// weaker than `func checkWebFetchHost`: a label is text shown to the operator,
+// a rule is a grant, and an IPv4 literal is safe text but not a safe grant — a
+// refused fetch to 169.254.169.254 is exactly the host the operator needs to
+// see (S051-R5.4). No other part of the input is ever read, so a label can
+// never carry a URL path or query, a fetch prompt or a shell command.
+func refusedToolLabels(denials []claudePermissionDenial) []string {
+	var labels []string
+	seen := make(map[string]struct{}, len(denials))
+	for _, d := range denials {
+		if d.ToolName == "" {
+			continue
+		}
+		label := d.ToolName
+		if d.ToolName == "WebFetch" {
+			var in struct {
+				URL string `json:"url"`
+			}
+			if json.Unmarshal(d.ToolInput, &in) == nil {
+				if u, err := url.Parse(in.URL); err == nil {
+					if host := strings.ToLower(u.Hostname()); dnsHost.MatchString(host) {
+						label += "(" + host + ")"
+					}
+				}
+			}
+		}
+		if _, dup := seen[label]; dup {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	return labels
 }
 
 // buildArgs assembles the CLI argument vector (S003-R1.2, S003-R1.3, S003-R1.5, S003-R7, S003-R7.2).
@@ -351,6 +454,12 @@ type claudeCodeEnvelope struct {
 // tool-free round-trip (S003-R1.3, S003-R1.5). --bare is added in bare mode; --json-schema
 // is added only for a structured request with a non-empty schema; --max-budget-usd
 // is added when a positive cap is configured.
+//
+// --allowedTools "" only removes pre-approval: read-only tools need none inside
+// the working directory. So the client also holds no tool at all (`--tools ""`)
+// and runs under the pinned permission flags every agent gets — dontAsk, no
+// settings sources, no MCP servers, the secrets deny rules (S051-R2.1, S051-R3.7,
+// `func agentArgv`).
 func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema string) []string {
 	args := []string{
 		"-p", instruction,
@@ -359,6 +468,7 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 		"--allowedTools", "",
 		"--model", c.model,
 	}
+	args = append(args, agentArgv(nil, nil, false)...)
 	if c.bareMode {
 		args = append(args, "--bare")
 	}
@@ -376,9 +486,10 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 //
 // Page content is piped on stdin (AD8); the instruction travels in -p. The call
 // is bound to a child context derived from c.ctx with c.timeout, so a cancelled
-// parent or an elapsed timeout kills the child (S003-R7.1). In bare mode the API key
-// is injected ONLY through the child environment (never argv/logs — S003-R2.1, S003-R2.4).
-// stdout and stderr are captured separately.
+// parent or an elapsed timeout stops the child and its descendants, and run
+// returns within procgroup.GracePeriod of it (S003-R7.1, story 054 R4.1). In
+// bare mode the API key is injected ONLY through the child environment (never
+// argv/logs — S003-R2.1, S003-R2.4). stdout and stderr are captured separately.
 //
 // A FAILED invocation is classified before any exit-code framing, in the
 // precedence the package keeps in one place (S048-R1.1, S048-R1.2, S048-R1.3):
@@ -396,7 +507,38 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
 	defer cancel()
 
+	// The child runs in a private 0700 directory made for this one invocation
+	// and removed afterwards, never in bentoo's own cwd, which a read-only tool
+	// could otherwise read (S051-R2.1). A directory that cannot be made stops the
+	// call before anything is spawned; one that cannot be removed is a warning,
+	// because the answer is already in hand (S051-R2.9).
+	dir, err := os.MkdirTemp("", "bentoo-claude-")
+	if err != nil {
+		return "", fmt.Errorf("%w: claude CLI: create private working directory: %w", ErrLLMRequestFailed, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			warnLogf("claude CLI: remove private working directory %s: %v", dir, err)
+		}
+	}()
+
 	cmd := c.execCommand(ctx, "claude", c.buildArgs(instruction, schema != "", schema)...)
+	cmd.Dir = dir
+
+	// GROUP MODE (story 054, R4.1). exec.CommandContext alone stops only the
+	// direct child, and a helper the CLI started inherits the stdout pipe: Wait
+	// does not return while that helper runs, so a budget of seconds lasted as
+	// long as the helper did. The child now leads its own process group. When
+	// ctx is done the whole group gets SIGTERM, whatever is left of it gets
+	// SIGKILL procgroup.GracePeriod later, and Wait returns within that grace
+	// even if a descendant left the group and still holds the pipe.
+	//
+	// Group owns cmd.Cancel and cmd.WaitDelay; run sets neither. It also takes
+	// the child out of the terminal's foreground group, which is safe here for
+	// the reason procgroup names: stdin is the piped content below, never the
+	// terminal, so the child cannot stop on SIGTTIN. The cost is that a Ctrl+C
+	// typed at the terminal reaches the child only through c.ctx.
+	procgroup.Group(cmd)
 
 	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
 	cmd.Stdin = bytes.NewReader(content)
@@ -404,21 +546,29 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// (only via env, never argv/logs — S003-R2.1, S003-R2.4, G5); non-bare scrubs any
 	// inherited API key so the CLI uses its logged-in session.
-	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv, c.apiKey)
+	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv, c.apiKey, agentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	startedAt := time.Now()
-	runErr := cmd.Run()
+	// procgroup.Result turns exec.ErrWaitDelay after a ZERO exit into success:
+	// WaitDelay's timer also starts on a normal exit, and a helper still holding
+	// the pipe then would fail a CLI that answered (story 054, R1.5). Every other
+	// error passes through unchanged, so each ending is classified as it was
+	// before.
+	runErr := procgroup.Result(cmd, cmd.Run())
 
 	// The context is read HERE, before anything frames this failure, because the
-	// exit status of a child our own deadline SIGKILLed is only what the kernel
-	// left behind: "signal: killed" names neither the deadline nor the budget,
-	// and a message built from it sends whoever reads it looking for a broken
-	// CLI. Reading the context afterwards would print that noise first and reach
-	// the cause too late to say it (S048-R1.1).
+	// exit status of a child our own deadline stopped is only what the kernel
+	// left behind: "signal: terminated" — or "signal: killed" once the grace ran
+	// out — names neither the deadline nor the budget, and a message built from
+	// it sends whoever reads it looking for a broken CLI. Reading the context
+	// afterwards would print that noise first and reach the cause too late to
+	// say it (S048-R1.1). It is also why group mode cannot turn a deadline into
+	// a non-zero exit: whatever signal ended the group, ctx.Err() outranks it in
+	// classifyClaudeFailure (story 054, R4.2).
 	ctxErr := ctx.Err()
 
 	// The elapsed time is taken at the same boundary and for a related reason:
@@ -491,8 +641,13 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 				// raise the number that elapsed and not the one that did not.
 				// `func formatBumpReviewSkipTimeout` is the precedent this
 				// follows.
-				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered",
-					ErrLLMRequestFailed, c.timeout), ErrClaudeTimedOut)
+				//
+				// ctxErr is wrapped too, so the deadline stays a deadline to
+				// errors.Is(err, context.DeadlineExceeded) and not only to a
+				// reader of this sentence — including when the group it
+				// stopped died of a signal (story 054, R4.2).
+				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered: %w",
+					ErrLLMRequestFailed, c.timeout, ctxErr), ErrClaudeTimedOut)
 			}
 			// Ended by anything other than this client's own budget: the cause
 			// travels verbatim and no number is claimed. One sentence, written

@@ -40,11 +40,11 @@ type s057CmdProvider struct {
 	errs map[string]error
 }
 
-func (p *s057CmdProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *s057CmdProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	if err, ok := p.errs[category+"/"+pkg]; ok {
 		return nil, err
 	}
-	return p.reviewDirProvider.GetPackageVersions(category, pkg)
+	return p.reviewDirProvider.GetPackageVersions(ctx, category, pkg)
 }
 
 type s057CmdReviewer struct{ errs map[string]error }

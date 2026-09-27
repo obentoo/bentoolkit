@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -38,13 +39,36 @@ func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
 //
 // This helper is shared by the analyze wiring (T4) and the --check wiring (T5),
 // so it stays general: the only policy it encodes is the empty-provider
-// short-circuit; every other decision (which provider, defaults) lives in
-// autoupdate.NewLLMProvider via the existing llmConfigToAutoupdate mapper.
-func newConfiguredLLMProvider(c config.LLMConfig) (autoupdate.LLMProvider, error) {
-	if c.Provider == "" {
+// short-circuit and the context below; every other decision (which provider,
+// defaults) lives in autoupdate.NewLLMProvider via the existing
+// llmConfigToAutoupdate mapper.
+//
+// # Why claude-code takes the caller's context
+//
+// The `claude` CLI runs in its own process group (story 054), so a Ctrl+C or a
+// hang-up at the terminal no longer reaches it: the kernel signals the
+// terminal's foreground group only. ctx — the command's signalContext — is then
+// the only way an interrupt stops that child and everything it started (R4.3).
+// The HTTP providers take no context here; their constructors do not accept one.
+//
+// On a construction failure the claude-code branch returns a TRUE nil, never
+// the nil *ClaudeCodeClient boxed into the interface: every caller gates on the
+// error first, and a boxed nil would make a `p != nil` check lie (the same
+// discipline as newConfiguredBuildFixer below). The error travels unwrapped, as
+// it did through NewLLMProvider; each caller's Warn line names the provider.
+func newConfiguredLLMProvider(ctx context.Context, c config.LLMConfig) (autoupdate.LLMProvider, error) {
+	switch c.Provider {
+	case "":
 		return nil, nil
+	case "claude-code":
+		client, err := autoupdate.NewClaudeCodeClient(llmConfigToAutoupdate(c), autoupdate.WithClaudeCodeContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		return client, nil
+	default:
+		return autoupdate.NewLLMProvider(llmConfigToAutoupdate(c))
 	}
-	return autoupdate.NewLLMProvider(llmConfigToAutoupdate(c))
 }
 
 // newConfiguredManifestFixer builds an LLM manifest fixer from the CLI config for
@@ -93,12 +117,12 @@ func newConfiguredRegistryFixer(c config.LLMConfig) (autoupdate.RegistryFixer, e
 // holding a nil pointer, so it walks straight through that gate and the applier
 // calls a nil receiver on the first failed build — the capability looks enabled and
 // is not. Returning a bare `nil` on both the short-circuit and the error path is
-// what keeps the caller's gate honest (see the same note at the registry fixer
-// above, llm_wiring.go:66-68).
+// what keeps the caller's gate honest (see the same note on
+// newConfiguredRegistryFixer above).
 //
 // A configured-but-unconstructable claude-code fixer (typically: no `claude` on
 // PATH) returns (nil, err) so the caller can Warn and continue — the precedent set
-// by applierFixerOption (overlay_autoupdate.go:1251). The variadic options exist so
+// by applierFixerOption in overlay_autoupdate.go. The variadic options exist so
 // the caller can pass the operator's `autoupdate.validate.timeout` through
 // WithBuildFixerTimeout, which is that key's only consumer on the fixer side.
 func newConfiguredBuildFixer(c config.LLMConfig, opts ...autoupdate.BuildFixerOption) (autoupdate.BuildFixer, error) {
@@ -168,7 +192,7 @@ func llmCapabilities(llm bool, v config.ValidateConfig) (review, fix bool) {
 // cannot drift apart on what --llm meant.
 //
 // A construction failure is a WARNING, never fatal — applierFixerOption's
-// precedent (overlay_autoupdate.go:1251) and the only defensible reading of the
+// precedent in overlay_autoupdate.go and the only defensible reading of the
 // feature: on a host with no `claude` CLI, --llm degrades the run to the same apply
 // it would have done anyway rather than refusing to publish a bump that is fine.
 // The failed capability is simply not appended, which leaves the Applier in the

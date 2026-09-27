@@ -113,21 +113,26 @@ func TestFixRegistry_ScopedArgvAndCwd(t *testing.T) {
 		t.Errorf("--max-turns = %q (found=%v), want 30", turns, ok)
 	}
 
-	allowed, ok := flagValue(cap.args, "--allowedTools")
-	if !ok {
-		t.Fatal("expected --allowedTools flag")
+	// The allow list is variadic, one rule per element (S051-R2.7). Edit is
+	// scoped to ConfigDir, WebFetch to the entry's own host, and the registry
+	// agent holds no Bash at all — neither pkgdev nor curl (S051-R2.3,
+	// S051-R3.1, S051-R3.3, S051-R3.4).
+	allowed := flagValues(cap.args, "--allowedTools")
+	if len(allowed) == 0 {
+		t.Fatal("expected --allowedTools rules")
 	}
-	for _, want := range []string{"Read", "Edit", "Write", "WebFetch", "Bash(curl *)"} {
-		if !strings.Contains(allowed, want) {
+	for _, want := range []string{"Edit(/" + req.ConfigDir + "/**)", "WebFetch(domain:inkscape.org)"} {
+		if !containsRule(allowed, want) {
 			t.Errorf("--allowedTools %q missing %q", allowed, want)
 		}
 	}
-	// The registry agent must NOT be granted pkgdev or an unscoped Bash.
-	if strings.Contains(allowed, "pkgdev") {
-		t.Errorf("--allowedTools %q must not grant pkgdev", allowed)
+	for _, rule := range allowed {
+		if strings.HasPrefix(rule, "Bash") {
+			t.Errorf("--allowedTools %q grants %q; the registry agent holds no Bash", allowed, rule)
+		}
 	}
-	if strings.Contains(allowed, "Bash(*)") {
-		t.Errorf("--allowedTools %q must not grant an unscoped Bash", allowed)
+	if toolSet(cap.args)["Bash"] {
+		t.Errorf("--tools %q holds Bash; the registry agent holds no Bash", flagValues(cap.args, "--tools"))
 	}
 
 	if argsContain(cap.args, "--dangerously-skip-permissions") ||

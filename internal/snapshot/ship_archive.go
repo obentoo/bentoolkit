@@ -63,10 +63,13 @@ func (a *archiveShipper) Name() string {
 // object was never uploaded (which would make the next `-p` reference a missing
 // base). When recording itself fails AFTER a successful upload, the error is
 // surfaced rather than swallowed: the operator must see that parent bookkeeping
-// broke even though the bytes are up. The already-uploaded object is acceptable —
-// per design §6, a partial/duplicate remote object is left for rclone to overwrite
-// on the next run.
+// broke even though the bytes are up. That complete object stays under its key.
+// A failed pipe is different: the object it may have left is truncated, so Send
+// deletes it (053 R5.5).
 func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, error) {
+	if snap.Path == "" || snap.ID == "" {
+		return ShipReport{}, fmt.Errorf("ship %q subvolume %q: %w", a.Name(), snap.Subvolume, ErrSnapshotUnidentified)
+	}
 	var parentPath string
 	if a.mode != "full" {
 		parent, ok, err := a.parents.Last(snap.Subvolume, a.Name())
@@ -82,13 +85,24 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 
 	stages := archivePipeStages(snap, parentPath, a.remote, a.compress)
 	if _, err := runPipe(ctx, a.run, stages); err != nil {
+		// A streamed pipe can let rclone rcat finish a truncated upload after
+		// btrfs send dies, so the object under this snapshot's key is removed,
+		// best-effort (053 R5.5). The pipe error stays the returned error.
+		// The deletion outlives a cancelled Send, bounded by
+		// archiveDeleteTimeout so an unreachable remote cannot hold the error.
+		dest := archiveDest(a.remote, snap)
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveDeleteTimeout)
+		defer cancel()
+		if _, derr := a.run.Run(dctx, "rclone", []string{"deletefile", dest}, nil); derr != nil {
+			warnLogf("snapshot: ship %q: removing possibly truncated %s failed: %v", a.Name(), dest, derr)
+		}
 		return ShipReport{}, err
 	}
 
 	// Record THIS snapshot as the new lineage head — only now that the ship
 	// succeeded (R3.2/G3). Surface a record failure: the upload is up but the
-	// bookkeeping broke, and the operator must know (the partial object is left for
-	// rclone to overwrite next run, design §6).
+	// bookkeeping broke, and the operator must know (the complete object stays
+	// under its key).
 	if err := a.parents.Record(snap.Subvolume, a.Name(), snap); err != nil {
 		return ShipReport{}, err
 	}
@@ -150,7 +164,7 @@ func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pip
 
 	prog, compArgs := compressorStage(compress)
 
-	dest := remote + "/" + archiveObjectName(snap)
+	dest := archiveDest(remote, snap)
 
 	return []pipeStage{
 		{name: "btrfs", args: send},
@@ -158,6 +172,16 @@ func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pip
 		{name: "rclone", args: []string{"rcat", dest}},
 	}
 }
+
+// archiveDest is the rclone destination of snap's archive object: the rcat
+// target of archivePipeStages and the object a failed ship deletes.
+func archiveDest(remote string, snap Snapshot) string {
+	return remote + "/" + archiveObjectName(snap)
+}
+
+// archiveDeleteTimeout bounds the best-effort `rclone deletefile` that follows
+// a failed archive pipe (053 R5.5). It is a var only so tests can shrink it.
+var archiveDeleteTimeout = 30 * time.Second
 
 // compressorStage resolves the compressor program and its stdin→stdout argv. An
 // empty or "zstd" compress selects `zstd -c`; any other value is treated as a
@@ -618,27 +642,36 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 	return errors.Join(errs...)
 }
 
-// runPipe runs stages sequentially through run, feeding each stage's stdout as the
-// next stage's stdin, and returns the final stage's stdout. Any stage error fails
-// the whole pipe immediately (R2.3); because every stage shares the single ctx,
-// cancelling it kills the pipe (the Runner binds each child to ctx, R7.2).
+// runPipe runs stages as one streaming pipe through run's piper seam and returns
+// the final stage's stdout (053 R5.1). Any stage error fails the whole pipe
+// (R2.3), and cancelling ctx kills every stage (R7.2).
 //
-// NOTE (R-archive-memory): this buffers each stage's FULL output in memory because
-// the 004 Runner returns []byte. For a multi-GB `btrfs send` stream that is a real
-// memory cost. A true streaming pipe (io.Pipe between exec.Cmds) is FUTURE WORK
-// gated behind *_live_test.go; it does not change the mock-tested correctness here
-// (argv wiring, stage-failure-fails-ship, ctx-cancel), which this buffered form
-// already satisfies.
+// A Runner without the seam is refused rather than driven stage by stage: the
+// buffered chain it would need holds each stage's whole output in memory, about
+// twice a multi-GB `btrfs send` stream at peak (053 R5.7).
 func runPipe(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
-	var prevOut []byte
-	for _, stage := range stages {
-		out, err := run.Run(ctx, stage.name, stage.args, prevOut)
-		if err != nil {
-			return nil, fmt.Errorf("archive pipe stage %q: %w", stage.name, err)
-		}
-		prevOut = out
+	p, ok := run.(piper)
+	if !ok {
+		return nil, fmt.Errorf("runner %T cannot stream the archive pipe", run)
 	}
-	return prevOut, nil
+	return p.Pipe(ctx, stages)
+}
+
+// runStagesBuffered runs stages one after another through run, feeding each
+// stage's whole stdout to the next as stdin, and returns the last stage's
+// stdout. A stage starts only after every earlier one succeeded, which is what
+// restoreArchive needs and what the streaming runPipe cannot give; the cost is
+// that each stage's output is held in memory.
+func runStagesBuffered(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
+	var prev []byte
+	for _, st := range stages {
+		out, err := run.Run(ctx, st.name, st.args, prev)
+		if err != nil {
+			return nil, fmt.Errorf("archive pipe stage %q: %w", st.name, err)
+		}
+		prev = out
+	}
+	return prev, nil
 }
 
 // newArchiveShipper assembles an archiveShipper from cfg, the subprocess seam, and

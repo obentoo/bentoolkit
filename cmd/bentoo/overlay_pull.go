@@ -49,7 +49,10 @@ func pullModeFromFlags(rebase, merge bool) overlay.PullMode {
 }
 
 func runPull(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContext()
+	ctx, stop := signalContext(cmd.Context())
+	defer stop()
+
+	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		osExit(1)
@@ -58,7 +61,7 @@ func runPull(cmd *cobra.Command, args []string) {
 
 	mode := pullModeFromFlags(pullRebase, pullMerge)
 
-	result, err := overlay.Pull(ctx.Config, mode, pullDryRun)
+	result, err := overlay.Pull(ctx, appCtx.Config, mode, pullDryRun)
 	if err != nil {
 		logger.Error("%v", err)
 		osExit(1)

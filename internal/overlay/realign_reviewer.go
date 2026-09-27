@@ -47,9 +47,11 @@ var noticeLogf = logger.Info
 // What is deliberately absent:
 //
 //   - Bash, for exactly the reason Write is absent: `bash -c 'echo > x'` writes,
-//     and an allow-list that admits a shell has narrowed nothing. registry_fixer.go
-//     narrows to `Bash(curl *)` because a registry repair must confirm an upstream
-//     page; this review reads two local files and needs no process at all.
+//     and an allow-list that admits a shell has narrowed nothing. Even the
+//     registry fixer, which must confirm an upstream page, holds no Bash — it
+//     fetches through host-scoped WebFetch (`var registryFixAllowedTools` in the
+//     autoupdate package); this review reads two local files and needs no process
+//     at all.
 //   - WebFetch and every other network tool. R1.4 puts the whole of this review
 //     in the local tree, and a verdict grounded in a page fetched at review time
 //     could not be reproduced by the operator checking it.

@@ -10,6 +10,7 @@ package provider
 // RED ON ARRIVAL: provider.ErrUnauthorized does not exist.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +82,7 @@ func TestGitHubProvider_Unauthorized(t *testing.T) {
 			}
 			prov.BaseURL = srv.URL
 			prov.CacheDir = ""
-			_, err = prov.GetPackageVersions("app-misc", "hello")
+			_, err = prov.GetPackageVersions(context.Background(), "app-misc", "hello")
 			s057CheckStatus(t, tc, err)
 		})
 	}
@@ -108,7 +109,7 @@ func TestGitLabProvider_Unauthorized(t *testing.T) {
 			}
 			prov.BaseURL = srv.URL
 			prov.CacheDir = ""
-			_, err = prov.GetPackageVersions("app-misc", "hello")
+			_, err = prov.GetPackageVersions(context.Background(), "app-misc", "hello")
 			s057CheckStatus(t, tc, err)
 		})
 	}

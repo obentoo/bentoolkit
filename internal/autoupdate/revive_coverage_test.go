@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ type errProvider struct {
 	err error
 }
 
-func (e *errProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (e *errProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	return nil, e.err
 }
 

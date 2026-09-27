@@ -110,6 +110,20 @@ func assertTunedTransport(t *testing.T, name string, got http.RoundTripper, want
 	if tr.ForceAttemptHTTP2 != want.ForceAttemptHTTP2 {
 		t.Errorf("%s: ForceAttemptHTTP2 = %v, want %v", name, tr.ForceAttemptHTTP2, want.ForceAttemptHTTP2)
 	}
+	// Ollama waits for a non-streaming local inference, which sends no headers
+	// until it finishes, so its header wait is its whole client timeout rather
+	// than the transport default.
+	wantHeader := want.ResponseHeaderTimeout
+	if name == "NewOllamaClient" {
+		wantHeader = ollamaClientTimeout
+	}
+	if tr.ResponseHeaderTimeout != wantHeader {
+		t.Errorf("%s: ResponseHeaderTimeout = %v, want %v", name, tr.ResponseHeaderTimeout, wantHeader)
+	}
+	// Proxy is a func and funcs are not comparable, so only its presence is checked.
+	if tr.Proxy == nil {
+		t.Errorf("%s: Proxy = nil, want http.ProxyFromEnvironment", name)
+	}
 }
 
 // TestAllHTTPClients_UseTunedTransport asserts that every autoupdate HTTP-client

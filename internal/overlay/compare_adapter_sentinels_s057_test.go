@@ -12,6 +12,7 @@ package overlay
 // through untranslated.
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -53,11 +54,11 @@ func TestGitHubAdapterTranslatesSentinels(t *testing.T) {
 			client.BaseURL = srv.URL
 			client.CacheDir = ""
 
-			_, clientErr := client.GetPackageVersions("app-misc", "hello")
+			_, clientErr := client.GetPackageVersions(context.Background(), "app-misc", "hello")
 			if clientErr == nil {
 				t.Fatalf("the client returned no error for HTTP %d; the fixture is wrong", tc.status)
 			}
-			_, err := (&githubProviderAdapter{client: client}).GetPackageVersions("app-misc", "hello")
+			_, err := (&githubProviderAdapter{client: client}).GetPackageVersions(context.Background(), "app-misc", "hello")
 			if err == nil {
 				t.Fatalf("the adapter returned no error for HTTP %d", tc.status)
 			}
@@ -85,8 +86,8 @@ func TestGitHubAdapterTranslatesSentinels(t *testing.T) {
 		client := github.NewClient()
 		client.BaseURL = url
 		client.CacheDir = ""
-		_, clientErr := client.GetPackageVersions("app-misc", "hello")
-		_, err := (&githubProviderAdapter{client: client}).GetPackageVersions("app-misc", "hello")
+		_, clientErr := client.GetPackageVersions(context.Background(), "app-misc", "hello")
+		_, err := (&githubProviderAdapter{client: client}).GetPackageVersions(context.Background(), "app-misc", "hello")
 		if err == nil || clientErr == nil {
 			t.Fatalf("a closed server returned no error (client %v, adapter %v)", clientErr, err)
 		}
