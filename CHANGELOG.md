@@ -122,6 +122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are quoted and escaped as systemd expects. Ordinary values render exactly as
   before.
 
+- **A branch or path beginning with `-` can no longer be read as a git
+  option.** `overlay add` stages a path after `--`, and merge, fast-forward and
+  rebase pass the branch after `--end-of-options`, so such a name is taken as a
+  file or a revision.
+
 ### Fixed
 
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
@@ -212,6 +217,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cancelled; the error names the step and the server, never the password or
   the message.
 
+- **Ctrl+C stops the whole run, not just the process bentoo started.** Only
+  the direct child was killed, while `pkgdev manifest`, the build's `ebuild`,
+  the `claude` CLI and every `git` call left descendants holding the output
+  pipe, so the run kept waiting — for a download, a compile of hours, or
+  forever on a stalled `git push`. A cancel now sends SIGTERM to the child and
+  everything it started, then SIGKILL 5 s later, and the run returns within
+  6 s. SIGHUP, from a closed terminal, now cancels like SIGINT and SIGTERM.
+- **A cancelled build says it was interrupted.** A privileged compile stopped
+  by a cancel is no longer reported as a compile failure and no longer starts
+  the LLM build fixer; its partial log is still kept. The `sudo` password prompt
+  keeps working, and if the stop cannot reach the privileged build, the error
+  names its process and says it may still be running.
+- **The distfile lock wait stops on cancel** instead of waiting up to 2
+  minutes, and `overlay analyze` stops starting new packages once cancelled,
+  runs at most 3 at a time, and records a package that panics instead of
+  crashing.
+- **Captured child output keeps its last 64 KiB**, with a line saying how much
+  was dropped, so a noisy failure no longer produces an unbounded error
+  message. Build verdicts and retained logs still read the whole transcript.
+
 ### Changed
 
 - **A tool the agent was refused is now named in the failure.** When a fixer
@@ -230,6 +255,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like any other timeout. A larger
   `http_timeout` raises this wait with it, and the Ollama client waits up to
   its full 120 s for a non-streaming reply.
+
+- **git calls are time-bounded:** 5 minutes for network operations (push,
+  fetch, clone, the provider's update) and 1 minute for local ones, with an
+  error that names the operation and the bound. A provider clone may now take
+  5 minutes instead of 2.
 
 ### Documentation
 
