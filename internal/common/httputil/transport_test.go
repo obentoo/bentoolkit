@@ -24,6 +24,7 @@ func TestBuildTransport_DefaultsTuned(t *testing.T) {
 		{"IdleConnTimeout", tr.IdleConnTimeout, 90 * time.Second},
 		{"TLSHandshakeTimeout", tr.TLSHandshakeTimeout, 10 * time.Second},
 		{"ExpectContinueTimeout", tr.ExpectContinueTimeout, 1 * time.Second},
+		{"ResponseHeaderTimeout", tr.ResponseHeaderTimeout, 30 * time.Second},
 		{"ForceAttemptHTTP2", tr.ForceAttemptHTTP2, true},
 	}
 
@@ -33,6 +34,12 @@ func TestBuildTransport_DefaultsTuned(t *testing.T) {
 				t.Errorf("%s = %v, want %v", tt.name, tt.got, tt.want)
 			}
 		})
+	}
+
+	// Proxy is a func, so it cannot sit in the comparable table above; its
+	// presence is what routes requests through HTTP(S)_PROXY.
+	if tr.Proxy == nil {
+		t.Error("Proxy = nil, want http.ProxyFromEnvironment")
 	}
 
 	// With HTTP/2 enabled, TLSNextProto must be left at its zero value (nil)

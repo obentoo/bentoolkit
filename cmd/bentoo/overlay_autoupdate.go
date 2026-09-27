@@ -2291,7 +2291,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	}
 
 	// Highest ::gentoo version is the base ebuild we copy in.
-	versions, err := prov.GetPackageVersions(category, pkgName)
+	versions, err := prov.GetPackageVersions(ctx, category, pkgName)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
 	}

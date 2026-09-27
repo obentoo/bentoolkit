@@ -46,7 +46,7 @@ func TestGitLabProvider_GetPackageVersions(t *testing.T) {
 	prov.CacheDir = "" // Disable cache
 
 	t.Run("existing package", func(t *testing.T) {
-		versions, err := prov.GetPackageVersions("app-misc", "hello")
+		versions, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 		if err != nil {
 			t.Errorf("GetPackageVersions failed: %v", err)
 			return
@@ -79,7 +79,7 @@ func TestGitLabProvider_TokenAuth(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, _ = prov.GetPackageVersions("app-misc", "hello")
+	_, _ = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 
 	if privateToken != "glpat-test-token" {
 		t.Errorf("Expected 'glpat-test-token', got '%s'", privateToken)
@@ -146,7 +146,7 @@ func TestGitLabProvider_RateLimit(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err = prov.GetPackageVersions("app-misc", "hello")
+	_, err = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -232,11 +232,11 @@ func TestGitLabProvider_Cache(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = t.TempDir()
 
-	_, err := prov.GetPackageVersions("app-misc", "hello")
+	_, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
 	}
-	_, err = prov.GetPackageVersions("app-misc", "hello")
+	_, err = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err != nil {
 		t.Fatalf("Second call failed: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestGitLabProvider_NotFound(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err := prov.GetPackageVersions("app-misc", "nonexistent")
+	_, err := prov.GetPackageVersions(t.Context(), "app-misc", "nonexistent")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -287,7 +287,7 @@ func TestGitLabProvider_InvalidToken(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err = prov.GetPackageVersions("app-misc", "hello")
+	_, err = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Fatal("Expected error for 401, got nil")
 	}
@@ -320,7 +320,7 @@ func TestGitLabProvider_RepoNotFound(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err = prov.GetPackageVersions("cat", "pkg-that-does-not-exist")
+	_, err = prov.GetPackageVersions(t.Context(), "cat", "pkg-that-does-not-exist")
 	if err == nil {
 		t.Fatal("Expected error for repo not found, got nil")
 	}
@@ -350,7 +350,7 @@ func TestGitLabProvider_RateLimitWithRetryAfterHeader(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = ""
 
-	_, err = prov.GetPackageVersions("app-misc", "hello")
+	_, err = prov.GetPackageVersions(t.Context(), "app-misc", "hello")
 	if err == nil {
 		t.Fatal("Expected ErrRateLimit, got nil")
 	}
@@ -390,7 +390,7 @@ func TestGitLabProvider_SaveToCacheFileMode(t *testing.T) {
 	prov.BaseURL = server.URL
 	prov.CacheDir = t.TempDir()
 
-	if _, err := prov.GetPackageVersions("app-misc", "hello"); err != nil {
+	if _, err := prov.GetPackageVersions(t.Context(), "app-misc", "hello"); err != nil {
 		t.Fatalf("GetPackageVersions returned error: %v", err)
 	}
 

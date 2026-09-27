@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -33,14 +34,27 @@ func TestResolveBare_UsesPassedKey(t *testing.T) {
 // TestChildEnv_InjectsResolvedKey pins the critical single-resolution fix: in bare
 // mode childEnv injects exactly the resolved key it is handed (never os.Getenv, so
 // never an empty credential), and it uses that value even when the environment
-// holds a different one under api_key_env.
+// holds a different one under api_key_env — or under ANTHROPIC_API_KEY itself.
+//
+// The ambient ANTHROPIC_API_KEY is what made this test fail inside a Claude Code
+// session (S051-R1.5): the old builder appended the resolved key AFTER the
+// inherited one, and lookupEnv reads the first match while os/exec uses the
+// last. The count below judges the slice itself, so neither reader's choice of
+// duplicate can make it pass.
 func TestChildEnv_InjectsResolvedKey(t *testing.T) {
 	t.Setenv("MYKEY", "env-value-should-be-ignored")
+	t.Setenv("ANTHROPIC_API_KEY", "ambient")
 
-	env := childEnv(true, "MYKEY", "resolved-secret")
+	env := childEnv(true, "MYKEY", "resolved-secret", agentEnvExtra{})
 
-	if got := envValue(env, "ANTHROPIC_API_KEY"); got != "resolved-secret" {
-		t.Fatalf("ANTHROPIC_API_KEY = %q, want resolved-secret (the passed key, not env)", got)
+	var keys []string
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "ANTHROPIC_API_KEY="); ok {
+			keys = append(keys, v)
+		}
+	}
+	if len(keys) != 1 || keys[0] != "resolved-secret" {
+		t.Fatalf("ANTHROPIC_API_KEY entries = %q, want exactly [resolved-secret] (the passed key, not env)", keys)
 	}
 }
 
@@ -51,7 +65,7 @@ func TestChildEnv_NonBareScrubs(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "inherited")
 	t.Setenv("MYKEY", "inherited")
 
-	env := childEnv(false, "MYKEY", "resolved-secret")
+	env := childEnv(false, "MYKEY", "resolved-secret", agentEnvExtra{})
 
 	if _, ok := lookupEnv(env, "ANTHROPIC_API_KEY"); ok {
 		t.Error("ANTHROPIC_API_KEY survived non-bare scrub")
@@ -59,12 +73,6 @@ func TestChildEnv_NonBareScrubs(t *testing.T) {
 	if _, ok := lookupEnv(env, "MYKEY"); ok {
 		t.Error("api_key_env (MYKEY) survived non-bare scrub")
 	}
-}
-
-// envValue returns the value for key in a KEY=VALUE slice, or "" if absent.
-func envValue(env []string, key string) string {
-	v, _ := lookupEnv(env, key)
-	return v
 }
 
 // lookupEnv reports the value and presence of key in a KEY=VALUE slice.

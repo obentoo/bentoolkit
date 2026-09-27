@@ -42,6 +42,27 @@ func (e *ConflictError) Error() string {
 	return fmt.Sprintf("target files already exist (%d conflicts); use --force to overwrite", len(e.Conflicts))
 }
 
+// CollisionError indicates that two or more matched ebuilds map to the same
+// target filename. Renaming them would move each onto the next, so the rename
+// is refused before any file moves, and --force does not override it: unlike a
+// Conflict, there is no pre-existing file the operator could choose to replace
+// — one of the sources itself would be destroyed.
+type CollisionError struct {
+	Collisions []Collision
+}
+
+// Error implements the error interface. It names, per collision, the
+// category/package, the target filename and every source filename.
+func (e *CollisionError) Error() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d target file(s) would receive more than one ebuild; rename refused (--force does not override this):", len(e.Collisions))
+	for _, c := range e.Collisions {
+		sb.WriteString("\n  ")
+		sb.WriteString(c.describe())
+	}
+	return sb.String()
+}
+
 // RenameSpec specifies what to rename.
 type RenameSpec struct {
 	Category       string // "*" for all categories, or specific category
@@ -76,6 +97,7 @@ type RenameResult struct {
 	Failed          []RenameError    // Failed operations
 	VersionFiles    []VersionFile    // Version-specific files detected
 	Conflicts       []Conflict       // Target files that already exist
+	Collisions      []Collision      // Targets shared by two or more matches
 	ManifestUpdates []ManifestUpdate // Manifest update results
 	Warnings        []string         // Non-fatal scan warnings
 }
@@ -98,6 +120,45 @@ type VersionFile struct {
 type Conflict struct {
 	Match    RenameMatch
 	Existing string // Path to existing file
+}
+
+// Collision represents one target path that two or more matches map to — for
+// example foo-1.0.ebuild and foo-1.0-r1.ebuild both becoming foo-1.1.ebuild,
+// because the matcher strips the revision.
+type Collision struct {
+	Target  string        // Full path both sources would be renamed to
+	Sources []RenameMatch // Every match mapping to Target, in match order
+}
+
+// describe renders the collision as "category/package: target ← src, src".
+func (c Collision) describe() string {
+	names := make([]string, len(c.Sources))
+	for i, m := range c.Sources {
+		names[i] = m.OldFilename
+	}
+	first := c.Sources[0]
+	return fmt.Sprintf("%s/%s: %s ← %s", first.Category, first.Package, first.NewFilename, strings.Join(names, ", "))
+}
+
+// findCollisions groups matches by NewPath and returns every target that more
+// than one match maps to. It iterates the slice, not the map, so the order is
+// the match order and the output is deterministic.
+func findCollisions(matches []RenameMatch) []Collision {
+	byTarget := make(map[string][]RenameMatch, len(matches))
+	var order []string
+	for _, m := range matches {
+		if _, seen := byTarget[m.NewPath]; !seen {
+			order = append(order, m.NewPath)
+		}
+		byTarget[m.NewPath] = append(byTarget[m.NewPath], m)
+	}
+	var collisions []Collision
+	for _, target := range order {
+		if sources := byTarget[target]; len(sources) > 1 {
+			collisions = append(collisions, Collision{Target: target, Sources: sources})
+		}
+	}
+	return collisions
 }
 
 // ManifestUpdate represents a Manifest update operation.
@@ -196,6 +257,7 @@ func RenamePreview(cfg *config.Config, spec *RenameSpec) (*RenameResult, error) 
 	detector := NewVersionFilesDetector(overlayPath)
 	versionFiles := detector.Detect(result.Matches, spec.OldVersion)
 	result.VersionFiles = versionFiles
+	result.Collisions = findCollisions(result.Matches)
 
 	// Check for conflicts (target files that already exist)
 	for _, match := range result.Matches {
@@ -244,6 +306,14 @@ func FormatRenamePreview(result *RenameResult, isGlobalSearch bool) string {
 		sb.WriteString("\nUse --force to overwrite.\n")
 	}
 
+	if len(result.Collisions) > 0 {
+		fmt.Fprintf(&sb, "\n⚠ Error: %d target file(s) would receive more than one ebuild:\n", len(result.Collisions))
+		for _, c := range result.Collisions {
+			fmt.Fprintf(&sb, "  %s\n", c.describe())
+		}
+		sb.WriteString("\nThe rename is refused: one source would overwrite the other. --force does not override this.\n")
+	}
+
 	return sb.String()
 }
 
@@ -277,6 +347,13 @@ func Rename(cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameR
 	// No matches found
 	if len(result.Matches) == 0 {
 		return result, nil
+	}
+
+	// Two matches sharing one target would overwrite each other. Refused before
+	// every other check and before any os.Rename, whatever Force and DryRun say.
+	if collisions := findCollisions(result.Matches); len(collisions) > 0 {
+		result.Collisions = collisions
+		return result, &CollisionError{Collisions: collisions}
 	}
 
 	// Detect version-specific files

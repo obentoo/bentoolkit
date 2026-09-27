@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,7 +38,7 @@ type localRootedFakeProvider struct {
 	versions map[string][]string // keyed by "category/pkg"
 }
 
-func (p *localRootedFakeProvider) GetPackageVersions(category, pkg string) ([]string, error) {
+func (p *localRootedFakeProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
 	v, ok := p.versions[category+"/"+pkg]
 	if !ok {
 		return nil, provider.ErrNotFound

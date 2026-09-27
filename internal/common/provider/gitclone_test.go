@@ -248,7 +248,7 @@ func TestGitCloneProvider_EnsureRepo_NeedsClone(t *testing.T) {
 		Branch:    "master",
 	}
 	// Will fail to clone but exercises the path
-	_ = prov.ensureRepo()
+	_ = prov.ensureRepo(t.Context())
 }
 
 // TestGitCloneProvider_EnsureRepo_UpToDate tests ensureRepo when repo is fresh
@@ -263,7 +263,7 @@ func TestGitCloneProvider_EnsureRepo_UpToDate(t *testing.T) {
 		UpdateInterval: 24 * time.Hour,
 	}
 	// Repo is fresh — ensureRepo should return nil without calling update
-	err := prov.ensureRepo()
+	err := prov.ensureRepo(t.Context())
 	if err != nil {
 		t.Errorf("Expected nil for up-to-date repo, got %v", err)
 	}
@@ -416,7 +416,7 @@ func TestGitCloneProvider_TimeoutHonored(t *testing.T) {
 
 	done := make(chan error, 1)
 	start := time.Now()
-	go func() { done <- prov.cloneRepo() }()
+	go func() { done <- prov.cloneRepo(t.Context()) }()
 
 	select {
 	case err := <-done:

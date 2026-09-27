@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/httputil"
 )
 
 // This file holds the three things a gated download needs once the vendor stops
@@ -72,6 +74,34 @@ func refuseMethodDowngrade(req *http.Request, via []*http.Request) error {
 		ErrAuthFetchFailed, req.URL.Redacted(), original, req.Method, metaFetchURL)
 }
 
+// refuseFormRedirect is the form leg's redirect policy. It runs, in order:
+//
+//  1. refuseMethodDowngrade, unchanged, so a 301/302/303 keeps its message;
+//  2. a host check for a request that still carries its body (307/308): the
+//     body holds the serial and the identity fields, and it was addressed to
+//     fetch_url's host, so a redirect that would re-post it to another
+//     hostname is refused and nothing is sent there (S052-R7.1). A 307/308 on
+//     the same hostname is followed (S052-R7.2);
+//  3. httputil.CredentialRedirectPolicy, for the credential headers and the
+//     redirect limit.
+//
+// This message names hostnames only, never req.URL: on a GET form leg the serial
+// rides in the query string. net/http still wraps the returned error in a
+// *url.Error carrying the full Location, so fetchDistfile scrubs the text it
+// reports (creds.scrub) — that scrub, not this function, is what keeps a
+// credential out of the final message.
+func refuseFormRedirect(req *http.Request, via []*http.Request) error {
+	if err := refuseMethodDowngrade(req, via); err != nil {
+		return err
+	}
+	if len(via) > 0 && req.Method != http.MethodGet && req.Method != http.MethodHead &&
+		!strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+		return fmt.Errorf("%w: %s redirected the form to another host (%s); refusing to send the form body there — point %s at the address the redirect names",
+			ErrAuthFetchFailed, via[0].URL.Hostname(), req.URL.Hostname(), metaFetchURL)
+	}
+	return httputil.CredentialRedirectPolicy(req, via)
+}
+
 // resolveEndpointID fetches the document that publishes the per-release download
 // id and extracts it with fetch_id_pattern.
 //
@@ -95,11 +125,13 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	}
 	req.Header.Set("User-Agent", authFetchUserAgent)
 
-	client := &http.Client{Timeout: s.timeout}
+	// No credential rides here; the policy re-imposes the redirect limit a
+	// custom CheckRedirect would otherwise drop (S052-R4.6).
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: httputil.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err)
+		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -134,7 +166,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Response, creds authFetchCredentials) (*http.Response, error) {
 	raw, err := io.ReadAll(io.LimitReader(first.Body, urlBodyLimit))
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, creds.scrub(err.Error()))
+		return nil, withCtxCause(fmt.Errorf("%w: reading the download URL: %v", ErrAuthFetchFailed, creds.scrub(err.Error())), err)
 	}
 
 	target, err := parseDownloadURL(string(raw), first.Header.Get("Content-Type"))
@@ -153,12 +185,12 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 
 	// Redirects are FOLLOWED here, unlike on the form leg: this is already a GET
 	// with no body, so nothing can be dropped, and a CDN edge redirecting to a
-	// region is ordinary.
-	client := &http.Client{Timeout: s.timeout}
+	// region is ordinary. The shared policy still applies (S052-R4.6).
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: httputil.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err)
+		return nil, withCtxCause(fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err), err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
