@@ -459,7 +459,7 @@ func TestSavePackagesConfigEveryField(t *testing.T) {
 		BaseTagPattern:       `vulkan-sdk-([0-9.]+)`,
 		Headers:              map[string]string{"User-Agent": "bentoo-autoupdate", "Accept": "application/json"},
 		Timeout:              60,
-		Meta:                 map[string]string{"fetch_url": "https://example.com/dl", "note": "it's fine"},
+		Meta:                 map[string]string{"fetch_url": "https://example.com/dl", "fetch_filename": "x-{version}.tar.gz", "note": "it's fine"},
 		Type:                 "bin",
 		Patched:              "keeps a wayland-by-default patch ::gentoo does not carry",
 		Series:               `^1\.`,

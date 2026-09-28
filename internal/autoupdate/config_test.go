@@ -1231,18 +1231,21 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		}
 	})
 
-	// The validator must stop where parseAuthFetchSpec already fails loudly:
-	// those companions are checked at apply time with a precise message, and
-	// re-checking them here would let one broken record block the whole load.
-	t.Run("companions the parser checks are left to the parser", func(t *testing.T) {
+	// Story 068 (R2.3, R2.4): the companions only the parser checks are now
+	// reported by the validator too, with the parser's own text, so --lint
+	// refuses what the fetch refuses. The load is unaffected: LoadPackagesConfig
+	// does not validate, and lint reports this as one issue for this record.
+	t.Run("companions the parser checks are reported with the parser's text", func(t *testing.T) {
 		for _, key := range []string{"fetch_serial_env", "fetch_serial_field", "fetch_filename"} {
 			meta := filezillaMeta()
 			delete(meta, key)
-			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
-				t.Errorf("missing %s: expected the load to pass and the apply to fail, got: %v", key, err)
+			_, _, perr := parseAuthFetchSpec(meta)
+			if perr == nil {
+				t.Fatalf("missing %s: expected parseAuthFetchSpec to reject it", key)
 			}
-			if _, _, perr := parseAuthFetchSpec(meta); perr == nil {
-				t.Errorf("missing %s: expected parseAuthFetchSpec to reject it at apply time", key)
+			err := ValidatePackageConfig("test/pkg", base(meta))
+			if err == nil || err.Error() != perr.Error() {
+				t.Errorf("missing %s: validator returned %v, want the parser's error %q", key, err, perr)
 			}
 		}
 	})

@@ -116,9 +116,9 @@ var metaFetchKeys = []string{
 	metaFetchTimeout,
 }
 
-// Validation errors for the meta.fetch_* sub-schema. They are checked at config
-// load / lint time, unlike the Err* pair above, which report a download that
-// actually failed.
+// Validation errors for the meta.fetch_* sub-schema. They are checked at lint
+// time (the registry load does not validate), unlike the Err* pair above, which
+// report a download that actually failed.
 var (
 	// ErrMetaFetchURLRequired is returned when a [meta] block configures an
 	// authenticated fetch but its trigger, fetch_url, is missing or blank.
@@ -142,15 +142,20 @@ var (
 // rules only stay correct while they mirror that consumer, and holding the two
 // in different files is what let the schema go undocumented.
 //
-// The rules are deliberately NOT the parser's full requirement set. Once
-// fetch_url is present the parser already fails loudly on a missing filename and
-// on a half-declared serial (one of fetch_serial_env/fetch_serial_field without
-// the other), so repeating those checks here would move an already-visible
-// failure earlier at the price of letting one broken record block the whole
-// registry load. What the parser cannot report is the silent
-// case: a [meta] block whose trigger is missing or misspelled does not read as
+// Its own rules come first and cover what the parser cannot report: the silent
+// case. A [meta] block whose trigger is missing or misspelled does not read as
 // broken, it reads as "no authenticated fetch", and pkgdev is then sent to
 // digest a distfile that exists on no public mirror.
+//
+// Once those pass and fetch_url is set, it runs parseAuthFetchSpec itself and
+// returns the parser's error unchanged. The parser is the one place a record is
+// refused — a missing filename, a half-declared serial, a variable outside the
+// BENTOO_FETCH_ namespace — so --lint, the sweep and `bentoo distfile` refuse the
+// same records with the same text instead of lint approving what the fetch then
+// rejects. Running it here costs nothing on the load path: LoadPackagesConfig
+// does not validate, and LintPackagesConfig reports one message per record, so a
+// broken record is one issue for that package and never blocks the others. The
+// parser only reads the map: it resolves no variable and does no I/O.
 func validateMetaFetch(pkg string, meta map[string]string) error {
 	var present, unknown []string
 	for k := range meta {
@@ -219,6 +224,13 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 		if !slices.Contains(e.valid, strings.ToLower(strings.TrimSpace(value))) {
 			return fmt.Errorf("package %s: %w: got %q", pkg, e.err, value)
 		}
+	}
+
+	// The parser's own verdict, with the same input the sweep and
+	// FetchAuthDistfile pass it. Returned as is: the text must match theirs,
+	// and the lint issue already names the package.
+	if _, _, err := parseAuthFetchSpec(meta); err != nil {
+		return err
 	}
 
 	return nil
