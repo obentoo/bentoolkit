@@ -21,7 +21,8 @@ import (
 //  1. the header name must be one of a small fixed set of auth headers, and
 //  2. the referenced environment variable must be explicitly allow-listed
 //     (either a known token name or carry the BENTOO_ prefix), except
-//     bentoolkit's own secrets, which are never expandable (S052-R1.9).
+//     bentoolkit's own secrets, which are never expandable (S052-R1.9), and
+//     the BENTOO_FETCH_* authenticated-fetch secrets (S068-R3.1).
 //
 // There is intentionally NO escape hatch: a user that needs another variable
 // expanded must rename it to BENTOO_*. The constants below are package-private
@@ -114,9 +115,14 @@ const (
 // expanded into a header (S052-R1.9): R1.4 binds a BENTOO_* variable to the
 // host of the record's own url, and the record's author picks that url, so a
 // packages.toml PR could otherwise send them to a host of its choosing.
+// Authenticated-fetch secrets (authFetchSecretPrefix, bare prefix included) are
+// reserved too: they travel only to their own record's fetch_url (S068-R3.1).
 func isReservedBentooSecret(name string) bool {
 	switch name {
 	case "BENTOO_NTFY_TOKEN", "BENTOO_SMTP_PASSWORD":
+		return true
+	}
+	if strings.HasPrefix(name, authFetchSecretPrefix) {
 		return true
 	}
 	return len(name) > len(repoVarNamePrefix)+len(repoVarNameSuffix) &&
