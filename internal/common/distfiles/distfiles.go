@@ -587,7 +587,9 @@ func manifestDistFilenames(body []byte) []string {
 		name := fields[1]
 		// Reject path traversal: filenames in Manifest are basenames by
 		// spec — anything else means the file is malformed (or hostile).
-		if name == "" || strings.ContainsAny(name, "/\\") {
+		// "." and ".." carry no separator yet, joined onto the distdir, name
+		// the distdir itself or its parent.
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 			return
 		}
 		names = append(names, name)
