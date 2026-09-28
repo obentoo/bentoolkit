@@ -843,6 +843,7 @@ func TestParallelProcessingLimit(t *testing.T) {
 			var maxConcurrent int32
 			var currentConcurrent int32
 			var mu sync.Mutex
+			barrier := newOverlapBarrier(t)
 
 			// Create mock server that tracks concurrency
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -853,8 +854,9 @@ func TestParallelProcessingLimit(t *testing.T) {
 				}
 				mu.Unlock()
 
-				// Simulate minimal work to allow concurrency to build up
-				time.Sleep(2 * time.Millisecond)
+				// Held until as many requests as the limit allows are in here
+				// at once, so the bound below is checked at its peak.
+				barrier.arrive()
 
 				mu.Lock()
 				currentConcurrent--
@@ -900,9 +902,11 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			_ = analyzer.AnalyzeAll(opts)
+			analyzeAllThroughBarrier(t, analyzer, opts, barrier, min(numPackages, 3))
 
 			// Max concurrent should be at most 3
+			mu.Lock()
+			defer mu.Unlock()
 			return maxConcurrent <= 3
 		},
 		gen.IntRange(1, 10),
@@ -925,6 +929,7 @@ HOMEPAGE="`+server.URL+`"
 			var mu sync.Mutex
 			var wg sync.WaitGroup
 			sem := make(chan struct{}, maxConcurrent)
+			barrier := newOverlapBarrier(t)
 
 			for i := 0; i < numGoroutines; i++ {
 				wg.Add(1)
@@ -942,8 +947,9 @@ HOMEPAGE="`+server.URL+`"
 					}
 					mu.Unlock()
 
-					// Simulate minimal work
-					time.Sleep(1 * time.Millisecond)
+					// Held until the semaphore is full, so the bound below
+					// is checked at its peak.
+					barrier.arrive()
 
 					mu.Lock()
 					current--
@@ -951,9 +957,17 @@ HOMEPAGE="`+server.URL+`"
 				}()
 			}
 
-			wg.Wait()
+			barrier.openOnceArrived(t, "semaphore holders", int64(min(numGoroutines, maxConcurrent)))
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				wg.Wait()
+			}()
+			waitReturned(t, "the semaphore workers", done)
 
 			// Max observed should be at most maxConcurrent
+			mu.Lock()
+			defer mu.Unlock()
 			return maxObserved <= maxConcurrent
 		},
 		gen.IntRange(1, 20),
@@ -1055,6 +1069,7 @@ HOMEPAGE="`+server.URL+`"
 			var maxObserved int32
 			var current int32
 			var mu sync.Mutex
+			barrier := newOverlapBarrier(t)
 
 			// Create mock server that tracks concurrency
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1065,8 +1080,9 @@ HOMEPAGE="`+server.URL+`"
 				}
 				mu.Unlock()
 
-				// Hold the connection briefly to allow concurrency to build up
-				time.Sleep(2 * time.Millisecond)
+				// Held until the limit's worth of requests are in here at
+				// once, so the bound below is checked at its peak.
+				barrier.arrive()
 
 				mu.Lock()
 				current--
@@ -1113,16 +1129,34 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			_ = analyzer.AnalyzeAll(opts)
+			analyzeAllThroughBarrier(t, analyzer, opts, barrier, expectedMaxConcurrent)
 
-			// Max observed should be exactly 3 (the limit)
-			// With 6 packages and 100ms delay, we should hit the limit
+			// The barrier held expectedMaxConcurrent requests in flight at
+			// once, so the limit was reached; it must not have been exceeded.
+			mu.Lock()
+			defer mu.Unlock()
 			return maxObserved <= expectedMaxConcurrent
 		},
 		gen.IntRange(1, 10),
 	))
 
 	properties.TestingRun(t)
+}
+
+// analyzeAllThroughBarrier runs analyzer.AnalyzeAll on its own goroutine while
+// the test server holds each request at barrier, opens the barrier once want
+// requests are in flight at once, and waits for AnalyzeAll to return. It fails
+// the test when the overlap is not reached, or AnalyzeAll does not return,
+// within signalWaitDeadline.
+func analyzeAllThroughBarrier(t *testing.T, analyzer *Analyzer, opts AnalyzeOptions, barrier *overlapBarrier, want int) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = analyzer.AnalyzeAll(opts)
+	}()
+	barrier.openOnceArrived(t, "analyzer requests", int64(want))
+	waitReturned(t, "AnalyzeAll", done)
 }
 
 // TestAnalyzeAll_ReturnsBatchResult verifies AnalyzeAll returns a BatchResult

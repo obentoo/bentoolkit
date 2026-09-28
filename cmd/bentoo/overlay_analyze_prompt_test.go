@@ -26,7 +26,7 @@ func TestConfirmAfterReleaseReleasesSignalsBeforeReading(t *testing.T) {
 		defer w.Close()
 		deadline := time.Now().Add(3 * time.Second)
 		for !released.Load() && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) // polling: the prompt under test has been reached (released)
 		}
 		if released.Load() {
 			_, _ = w.WriteString("y\n")

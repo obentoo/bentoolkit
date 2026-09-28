@@ -301,11 +301,14 @@ func TestTruncateString(t *testing.T) {
 // =============================================================================
 
 // fakeProvider is a concurrency-safe test double for provider.Provider. Each
-// GetPackageVersions call sleeps for delay (so a parallel run is measurably
-// faster than a serial one), tracks the in-flight count, and returns versions
-// from a per-package table.
+// GetPackageVersions call tracks the in-flight count, runs hook, and returns
+// versions from a per-package table.
 type fakeProvider struct {
-	delay    time.Duration
+	// hook, when set, runs inside every GetPackageVersions call while that call
+	// is counted in flight. A test asserting an overlap holds the calls at an
+	// overlapBarrier through it; a test that cancels mid-scan holds them until
+	// the cancel with holdUntilCancelled. Nil — the usual case — returns at once.
+	hook     func(ctx context.Context, category, pkg string)
 	versions map[string][]string // keyed by "category/pkg"
 	// errs makes a package fail with something other than provider.ErrNotFound,
 	// which is how a caller reaches StatusError. It is keyed like versions and
@@ -317,7 +320,7 @@ type fakeProvider struct {
 	callCount   atomic.Int64
 }
 
-func (f *fakeProvider) GetPackageVersions(_ context.Context, category, pkg string) ([]string, error) {
+func (f *fakeProvider) GetPackageVersions(ctx context.Context, category, pkg string) ([]string, error) {
 	f.callCount.Add(1)
 	cur := f.inFlight.Add(1)
 	defer f.inFlight.Add(-1)
@@ -328,8 +331,8 @@ func (f *fakeProvider) GetPackageVersions(_ context.Context, category, pkg strin
 			break
 		}
 	}
-	if f.delay > 0 {
-		time.Sleep(f.delay)
+	if f.hook != nil {
+		f.hook(ctx, category, pkg)
 	}
 	if err, ok := f.errs[category+"/"+pkg]; ok {
 		return nil, err
@@ -345,13 +348,56 @@ func (f *fakeProvider) GetName() string   { return "fake" }
 func (f *fakeProvider) SupportsAPI() bool { return true }
 func (f *fakeProvider) Close() error      { return nil }
 
+// holdUntilCancelled returns a fakeProvider hook that keeps every call in flight
+// until its context is cancelled, so a test that cancels mid-scan finds the scan
+// still running however fast the host gets through packages. A test that fails
+// before cancelling must not leave the calls blocked, so t.Cleanup releases them.
+func holdUntilCancelled(t *testing.T) func(ctx context.Context, category, pkg string) {
+	t.Helper()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	return func(ctx context.Context, _, _ string) {
+		select {
+		case <-ctx.Done():
+		case <-release:
+		}
+	}
+}
+
+// compareThroughBarrier runs CompareWithProvider on its own goroutine while
+// prov holds each call at barrier, opens the barrier once want calls are in
+// flight at once, and returns what the run returned. prov's hook must be the
+// barrier's arrive. It fails the test when the overlap is not reached, or the
+// run does not return, within signalWaitDeadline.
+func compareThroughBarrier(t *testing.T, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, barrier *overlapBarrier, want int) (*CompareReport, error) {
+	t.Helper()
+	var (
+		report *CompareReport
+		err    error
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		report, err = CompareWithProvider(pkgs, prov, opts)
+	}()
+	barrier.openOnceArrived(t, "provider calls", int64(want))
+	waitReturned(t, "CompareWithProvider", done)
+	return report, err
+}
+
 // TestCompareOptions_DefaultConcurrency verifies that a non-positive
 // Concurrency on CompareOptions is sanitized to DefaultCompareConcurrency:
 // a zero-valued CompareOptions still drives a working parallel comparison.
+//
+// The provider holds every call at a barrier until DefaultCompareConcurrency of
+// them are in flight at once: the run cannot finish unless the default pool
+// really runs that many in parallel, and the high-water mark below is read at
+// that peak.
 func TestCompareOptions_DefaultConcurrency(t *testing.T) {
 	const numPkgs = 30
+	barrier := newOverlapBarrier(t)
 	prov := &fakeProvider{
-		delay:    20 * time.Millisecond,
+		hook:     func(context.Context, string, string) { barrier.arrive() },
 		versions: map[string][]string{},
 	}
 	pkgs := make([]PackageInfo, 0, numPkgs)
@@ -366,9 +412,7 @@ func TestCompareOptions_DefaultConcurrency(t *testing.T) {
 	// Concurrency left at zero -> must be sanitized to the default (10).
 	opts := CompareOptions{IncludeSynced: true}
 
-	start := time.Now()
-	report, err := CompareWithProvider(pkgs, prov, opts)
-	elapsed := time.Since(start)
+	report, err := compareThroughBarrier(t, pkgs, prov, opts, barrier, DefaultCompareConcurrency)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned an error: %v", err)
 	}
@@ -376,11 +420,6 @@ func TestCompareOptions_DefaultConcurrency(t *testing.T) {
 		t.Errorf("ComparedPackages = %d, want %d", report.ComparedPackages, numPkgs)
 	}
 
-	// A serial run would take >= 30*20ms = 600ms. With the default concurrency
-	// of 10 it should finish well under that; allow generous slack for CI.
-	if elapsed >= 500*time.Millisecond {
-		t.Errorf("comparison took %v; expected default concurrency to parallelize (serial would be ~600ms)", elapsed)
-	}
 	// The high-water mark must exceed 1 (proves parallelism) and never exceed
 	// the default cap.
 	if hi := prov.maxInFlight.Load(); hi <= 1 {
@@ -398,8 +437,11 @@ func TestCompareWithProvider_Parallel(t *testing.T) {
 	const numPkgs = 40
 	const concurrency = 8
 
+	// Every call is held at the barrier until concurrency of them are in flight
+	// at once, so the cap check below is read at the peak.
+	barrier := newOverlapBarrier(t)
 	prov := &fakeProvider{
-		delay:    10 * time.Millisecond,
+		hook:     func(context.Context, string, string) { barrier.arrive() },
 		versions: map[string][]string{},
 	}
 	pkgs := make([]PackageInfo, 0, numPkgs)
@@ -416,7 +458,7 @@ func TestCompareWithProvider_Parallel(t *testing.T) {
 		ProgressCallback: func(done, total uint64) { progressCalls.Add(1) },
 	}
 
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := compareThroughBarrier(t, pkgs, prov, opts, barrier, concurrency)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned an error: %v", err)
 	}
@@ -459,8 +501,10 @@ func TestCompareWithProvider_Parallel(t *testing.T) {
 // dispatch and the partial report is returned together with the context error.
 func TestCompareWithProvider_ContextCancel(t *testing.T) {
 	const numPkgs = 200
+	// Every call stays in flight until the cancel, so dispatch is still going
+	// when it lands.
 	prov := &fakeProvider{
-		delay:    30 * time.Millisecond,
+		hook:     holdUntilCancelled(t),
 		versions: map[string][]string{},
 	}
 	pkgs := make([]PackageInfo, 0, numPkgs)
@@ -476,13 +520,9 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 	const concurrency = 5
 	opts := CompareOptions{Concurrency: concurrency, IncludeSynced: true, Ctx: ctx}
 
-	// Cancel shortly after dispatch begins.
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		cancel()
-	}()
-
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	// Cancel once dispatch has begun: the first provider call is the event
+	// that says so, rather than a guess at how long reaching it takes.
+	report, err := compareCancelledOnceDispatched(t, pkgs, prov, opts, cancel)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
@@ -499,6 +539,38 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 			(prev.Category == cur.Category && prev.Package > cur.Package) {
 			t.Errorf("partial Results not sorted at index %d", i)
 		}
+	}
+}
+
+// compareCancelledOnceDispatched runs CompareWithProvider on its own goroutine,
+// waits until prov has received its first call — dispatch has begun — and only
+// then calls cancel, so the cancellation lands mid-scan however slowly the
+// host reaches the first package. It fails the test when dispatch never begins
+// or the run does not return within signalWaitDeadline of the cancel.
+func compareCancelledOnceDispatched(t *testing.T, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, cancel context.CancelFunc) (*CompareReport, error) {
+	t.Helper()
+	type result struct {
+		report *CompareReport
+		err    error
+	}
+	resc := make(chan result, 1)
+	var returned atomic.Bool
+	go func() {
+		report, err := CompareWithProvider(pkgs, prov, opts)
+		returned.Store(true)
+		resc <- result{report, err}
+	}()
+	pollUntil(t, "the first provider call (dispatch has begun)", func() (bool, string) {
+		n := prov.callCount.Load()
+		return n >= 1, fmt.Sprintf("%d provider call(s), CompareWithProvider returned: %t", n, returned.Load())
+	})
+	cancel()
+	select {
+	case res := <-resc:
+		return res.report, res.err
+	case <-time.After(signalWaitDeadline):
+		t.Fatalf("CompareWithProvider still running %v after its context was cancelled", signalWaitDeadline)
+		return nil, nil
 	}
 }
 

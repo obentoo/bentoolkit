@@ -3,6 +3,7 @@ package autoupdate
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,6 +47,19 @@ func (p *joinFetchProbe) fetch() ([]byte, error) {
 
 func (p *joinFetchProbe) count() int64 { return p.calls.Load() }
 
+// waitForJoins waits until the cache has counted want callers joining an
+// in-flight fetch: the event "every follower reached its wait". The Join
+// counter is the cache's own waiter count, incremented when an arrival is
+// classified as a wait, so it is the nearest observable point to the wait
+// itself without touching production code.
+func waitForJoins(t *testing.T, c *bodyCache, want int) {
+	t.Helper()
+	pollUntil(t, fmt.Sprintf("%d caller(s) to join the in-flight fetch", want), func() (bool, string) {
+		got := c.snapshot().Joins
+		return got == want, fmt.Sprintf("stats.Joins = %d", got)
+	})
+}
+
 // TestBodyCacheJoin proves the three arrival states of one key: the first caller
 // fetches, callers arriving while that fetch is in flight WAIT for it instead of
 // issuing their own (S024-R2.3), and a caller arriving afterwards is served from
@@ -88,10 +102,12 @@ func TestBodyCacheJoin(t *testing.T) {
 		}(i)
 	}
 
-	// Give every follower time to reach its wait. Without this pause a follower
-	// could arrive after the leader completed and be counted as a Hit rather
-	// than a Join — the same body either way, but a weaker assertion below.
-	time.Sleep(150 * time.Millisecond)
+	// Release the leader only once every follower has joined. Released earlier,
+	// a follower could arrive after the leader completed and be counted as a
+	// Hit rather than a Join — the same body either way, but a weaker assertion
+	// below. The cache counts a Join when it classifies the arrival, and the
+	// leader is held, so no follower can be anything but a Join until release.
+	waitForJoins(t, c, callers-1)
 	close(probe.release)
 	wg.Wait()
 

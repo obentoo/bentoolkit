@@ -287,9 +287,8 @@ func killAtomicWriterMidWrite(t *testing.T, target string, size int) (pid int, l
 			t.Fatalf("the writer child (pid %d) never showed a temporary file named .%s.bentoo-%d-* in %s; the directory holds %q",
 				pid, base, pid, dir, entryNames(t, dir))
 		}
-		// Polling an observable condition, not sleeping as synchronisation:
-		// the kill is sent only once the temporary file is seen.
-		time.Sleep(200 * time.Microsecond)
+		// The kill is sent only once the temporary file is seen.
+		time.Sleep(200 * time.Microsecond) // polling: the writer child's temporary file has appeared
 	}
 
 	if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {

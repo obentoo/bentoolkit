@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // =============================================================================
@@ -109,10 +108,14 @@ func TestCheckerFetchDedup(t *testing.T) {
 	t.Run("concurrent reads of one identity issue a single request", func(t *testing.T) {
 		const readers = 12
 
+		// The barrier holds the leader's request at the server until every other
+		// reader has joined its fetch, so the overlap the counters below judge
+		// is certain rather than the likely outcome of a fixed hold.
+		barrier := newOverlapBarrier(t)
 		var requests atomic.Int64
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			requests.Add(1)
-			time.Sleep(80 * time.Millisecond) // hold the leader so the others really overlap
+			barrier.arrive()
 			fmt.Fprint(w, payload)
 		}))
 		defer server.Close()
@@ -133,6 +136,12 @@ func TestCheckerFetchDedup(t *testing.T) {
 				bodies[i], errs[i] = checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 			}(i)
 		}
+		barrier.openWhen(t, fmt.Sprintf("%d follower(s) to join the leader's in-flight fetch", readers-1),
+			func() (bool, string) {
+				joins, got := checker.bodies.snapshot().Joins, requests.Load()
+				return got >= 1 && joins == readers-1,
+					fmt.Sprintf("stats.Joins = %d, requests held at the server = %d", joins, got)
+			})
 		wg.Wait()
 
 		for i := range errs {

@@ -104,15 +104,21 @@ func TestOpenAIExtractVersionMalformedJSON(t *testing.T) {
 func TestOpenAIExtractVersionContextCancellation(t *testing.T) {
 	t.Setenv("OPENAI_TEST_KEY", "test-key")
 
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		select { // held until the client gives up, or the test releases it
+		case <-r.Context().Done():
+		case <-release:
+		}
 		json.NewEncoder(w).Encode(openAIResponse{
 			Choices: []openAIChoice{
 				{Message: openAIMessage{Role: "assistant", Content: "1.2.3"}},
 			},
 		})
 	}))
-	defer server.Close()
+	// Cleanups run last-in first-out: release the handler, then close the server.
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
 
 	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {

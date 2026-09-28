@@ -30,6 +30,12 @@ type concurrencyRateLimiter struct {
 	panicHost  string // when non-empty, WaitHTTP panics for this host
 	blockUntil chan struct{}
 
+	// startedAt and started announce a wave: when non-nil, started is closed
+	// by the call that makes calls reach startedAt, so a test can act once
+	// that many workers are inside the limiter instead of sleeping for a guess.
+	startedAt int64
+	started   chan struct{}
+
 	inFlight    atomic.Int64
 	maxInFlight atomic.Int64
 	calls       atomic.Int64
@@ -37,7 +43,10 @@ type concurrencyRateLimiter struct {
 
 // WaitHTTP records concurrency, then applies the configured behaviour.
 func (m *concurrencyRateLimiter) WaitHTTP(ctx context.Context, domain string) error {
-	m.calls.Add(1)
+	// Exactly one call observes n == startedAt, so started is closed once.
+	if n := m.calls.Add(1); m.started != nil && n == m.startedAt {
+		close(m.started)
+	}
 
 	if m.panicHost != "" && domain == m.panicHost {
 		panic("injected rate-limiter panic for " + domain)
@@ -378,9 +387,14 @@ func TestCheckAll_ContextCancelMidFlight(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Each worker is held ~120ms inside the limiter, so when the context is
-	// cancelled ~50ms in only the first wave (<= concurrency) is in flight.
-	rl := &concurrencyRateLimiter{delay: 120 * time.Millisecond}
+	// Each worker is held ~120ms inside the limiter, and the context is
+	// cancelled as soon as the first wave (concurrency workers) is inside it,
+	// so only that wave is in flight when cancellation lands.
+	rl := &concurrencyRateLimiter{
+		delay:     120 * time.Millisecond,
+		startedAt: concurrency,
+		started:   make(chan struct{}),
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -392,14 +406,37 @@ func TestCheckAll_ContextCancelMidFlight(t *testing.T) {
 		WithOpTimeout(10*time.Second),
 	)
 
+	type checkAllOutcome struct {
+		batch   BatchResult[CheckResult]
+		elapsed time.Duration
+	}
+	outcome := make(chan checkAllOutcome, 1)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
+		start := time.Now()
+		b := checker.CheckAll(true)
+		outcome <- checkAllOutcome{batch: b, elapsed: time.Since(start)}
 	}()
 
-	start := time.Now()
-	batch := checker.CheckAll(true)
-	elapsed := time.Since(start)
+	// Cancel only once the first wave is inside the limiter: that is the
+	// mid-flight moment this test is about.
+	select {
+	case <-rl.started:
+	case <-outcome:
+		t.Fatalf("CheckAll returned before %d workers reached the rate limiter (calls=%d)",
+			concurrency, rl.calls.Load())
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the first wave never reached the rate limiter within 5s: calls=%d, want %d",
+			rl.calls.Load(), concurrency)
+	}
+	cancel()
+
+	var got checkAllOutcome
+	select {
+	case got = <-outcome:
+	case <-time.After(10 * time.Second):
+		t.Fatal("CheckAll did not return within 10s of the parent context being cancelled")
+	}
+	batch, elapsed := got.batch, got.elapsed
 
 	// Every package is accounted for, in Items or Failures.
 	if total := len(batch.Items) + len(batch.Failures); total != numPkgs {

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // =============================================================================
@@ -695,6 +694,10 @@ func TestExecuteOverlaySweepLeavesBlockedDirectoriesAlone(t *testing.T) {
 
 // TestExecuteOverlaySweepRespectsConcurrencyBound: the pool never runs more
 // directories at once than it was told to.
+//
+// The seam holds every manifest run at a barrier until bound of them are in
+// flight at once, so the bound check below reads the peak the pool actually
+// allows rather than whatever overlap a sleep happened to produce.
 func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 	overlayDir := filepath.Join(t.TempDir(), "overlay")
 	cfgs := map[string]PackageConfig{}
@@ -713,6 +716,7 @@ func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 	}
 
 	const bound = 3
+	barrier := newOverlapBarrier(t)
 	var inFlight, peak atomic.Int64
 	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 		cur := inFlight.Add(1)
@@ -722,13 +726,20 @@ func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(5 * time.Millisecond)
+		barrier.arrive()
 		inFlight.Add(-1)
 		return exec.CommandContext(ctx, "true")
 	}
 
-	report := ExecuteOverlaySweep(context.Background(), overlayDir, batch,
-		WithSweepConcurrency(bound), WithSweepExecCommand(seam))
+	var report SweepReport
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		report = ExecuteOverlaySweep(context.Background(), overlayDir, batch,
+			WithSweepConcurrency(bound), WithSweepExecCommand(seam))
+	}()
+	barrier.openOnceArrived(t, "manifest runs", bound)
+	waitReturned(t, "ExecuteOverlaySweep", done)
 
 	if peak.Load() > bound {
 		t.Errorf("peak concurrency = %d, want <= %d", peak.Load(), bound)
