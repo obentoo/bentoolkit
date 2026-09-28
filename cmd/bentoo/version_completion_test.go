@@ -221,6 +221,9 @@ func TestCompletionScriptGeneration(t *testing.T) {
 // TestVerboseFlagBehavior tests Requirement 9.3: --verbose flag runs without error
 // and PersistentPreRun is invoked (logger.SetVerbose called).
 func TestVerboseFlagBehavior(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	// Reset flag state before test
 	if err := rootCmd.PersistentFlags().Set("verbose", "false"); err != nil {
 		t.Fatalf("failed to reset verbose flag: %v", err)
@@ -231,13 +234,14 @@ func TestVerboseFlagBehavior(t *testing.T) {
 		t.Errorf("--verbose flag should not cause an error, got: %v", err)
 	}
 
-	// Cleanup: reset flag
-	_ = rootCmd.PersistentFlags().Set("verbose", "false")
 }
 
 // TestQuietFlagBehavior tests Requirement 9.3: --quiet flag runs without error
 // and PersistentPreRun is invoked (logger.SetQuiet called).
 func TestQuietFlagBehavior(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	if err := rootCmd.PersistentFlags().Set("quiet", "false"); err != nil {
 		t.Fatalf("failed to reset quiet flag: %v", err)
 	}
@@ -247,7 +251,6 @@ func TestQuietFlagBehavior(t *testing.T) {
 		t.Errorf("--quiet flag should not cause an error, got: %v", err)
 	}
 
-	_ = rootCmd.PersistentFlags().Set("quiet", "false")
 }
 
 // TestNoColorFlagBehavior tests Requirement 9.3: --no-color flag disables ANSI color output.
