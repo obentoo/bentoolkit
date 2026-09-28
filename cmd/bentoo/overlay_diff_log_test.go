@@ -14,8 +14,7 @@ import (
 // TestDiffWithValidPath tests that runDiff accepts a valid file path argument.
 // **Feature: quality-improvements, Requirement 12.1**
 func TestDiffWithValidPath(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -31,8 +30,7 @@ func TestDiffWithValidPath(t *testing.T) {
 // TestDiffWithStagedFlag tests that runDiff works with --staged flag.
 // **Feature: quality-improvements, Requirement 12.2**
 func TestDiffWithStagedFlag(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origStaged := diffStaged
 	diffStaged = true
@@ -48,8 +46,7 @@ func TestDiffWithStagedFlag(t *testing.T) {
 // TestDiffRejectsGitFlags tests that runDiff rejects flag-like positional arguments.
 // **Feature: quality-improvements, Requirement 12.3**
 func TestDiffRejectsGitFlags(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -87,8 +84,7 @@ func TestLogDefaultCount(t *testing.T) {
 		t.Errorf("--count default should be 10, got %q", flag.DefValue)
 	}
 
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 10
@@ -102,8 +98,7 @@ func TestLogDefaultCount(t *testing.T) {
 // TestLogCustomCount tests that log command accepts a custom count.
 // **Feature: quality-improvements, Requirement 12.5**
 func TestLogCustomCount(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 5
@@ -117,8 +112,7 @@ func TestLogCustomCount(t *testing.T) {
 // TestLogOnelineFlag tests that log command works with --oneline flag.
 // **Feature: quality-improvements, Requirement 12.6**
 func TestLogOnelineFlag(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 3

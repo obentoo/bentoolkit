@@ -947,8 +947,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Set environment variable
-			os.Setenv(varName, varValue)
-			defer os.Unsetenv(varName)
+			t.Setenv(varName, varValue)
 
 			// Test substitution
 			template := "Bearer ${" + varName + "}"
@@ -985,10 +984,8 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			var2Name := allowedHeaderEnvPrefix + var2Suffix
 
 			// Set environment variables
-			os.Setenv(var1Name, var1Value)
-			os.Setenv(var2Name, var2Value)
-			defer os.Unsetenv(var1Name)
-			defer os.Unsetenv(var2Name)
+			t.Setenv(var1Name, var1Value)
+			t.Setenv(var2Name, var2Value)
 
 			// Test substitution with multiple variables
 			template := "${" + var1Name + "}-${" + var2Name + "}"
@@ -1019,7 +1016,10 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Ensure variable is not set
-			os.Unsetenv(varName)
+			t.Setenv(varName, "")
+			if err := os.Unsetenv(varName); err != nil {
+				t.Fatalf("unsetting %s: %v", varName, err)
+			}
 
 			// Test substitution: unset allow-listed var -> literal passthrough.
 			template := "prefix-${" + varName + "}-suffix"
@@ -1068,8 +1068,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			const headerKey = "X-Api-Key"
 
 			// Set environment variable
-			os.Setenv(varName, varValue)
-			defer os.Unsetenv(varName)
+			t.Setenv(varName, varValue)
 
 			var receivedHeaders http.Header
 

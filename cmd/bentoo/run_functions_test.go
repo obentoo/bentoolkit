@@ -9,8 +9,8 @@ import (
 )
 
 // setupTestHome creates a temp HOME with a valid config file pointing to a temp overlay dir.
-// Sets HOME and XDG_CONFIG_HOME env vars. Returns overlayPath and cleanup func.
-func setupTestHome(t *testing.T) (overlayPath string, cleanup func()) {
+// Sets HOME and XDG_CONFIG_HOME for the test (restored when it ends) and returns the overlay path.
+func setupTestHome(t *testing.T) (overlayPath string) {
 	t.Helper()
 	tmpHome := t.TempDir()
 
@@ -31,15 +31,10 @@ func setupTestHome(t *testing.T) (overlayPath string, cleanup func()) {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
-	return overlayDir, func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}
+	return overlayDir
 }
 
 // exitSentinel is used as a panic value to simulate os.Exit in tests.
@@ -73,15 +68,13 @@ func withExitIntercept(fn func()) (exitCode int) {
 // TestRunStatusValidOverlay tests runStatus with a valid (empty) overlay.
 // Exits 0 or 1 depending on git status — just must not panic.
 func TestRunStatusValidOverlay(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 	withExitIntercept(func() { runStatus(statusCmd, nil) })
 }
 
 // TestRunStatusInvalidOverlay tests runStatus when overlay is missing profiles/.
 func TestRunStatusInvalidOverlay(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	tmpHome := os.Getenv("HOME")
 	os.RemoveAll(filepath.Join(tmpHome, "overlay", "profiles"))
@@ -93,15 +86,13 @@ func TestRunStatusInvalidOverlay(t *testing.T) {
 
 // TestRunAddNoArgs tests runAdd with no args on a valid overlay.
 func TestRunAddNoArgs(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 	withExitIntercept(func() { runAdd(addCmd, nil) })
 }
 
 // TestRunAddWithArgs tests runAdd with a file arg on a valid overlay.
 func TestRunAddWithArgs(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	dummyFile := filepath.Join(overlayDir, "dummy.txt")
 	_ = os.WriteFile(dummyFile, []byte("test"), 0644)
@@ -113,8 +104,7 @@ func TestRunAddWithArgs(t *testing.T) {
 
 // TestRunPushDryRun tests runPush with --dry-run flag.
 func TestRunPushDryRun(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origDryRun := pushDryRun
 	pushDryRun = true
@@ -125,8 +115,7 @@ func TestRunPushDryRun(t *testing.T) {
 
 // TestRunPushNoDryRunExitsOnGitError tests runPush without dry-run exits(1) when git fails.
 func TestRunPushNoDryRunExitsOnGitError(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origDryRun := pushDryRun
 	pushDryRun = false
@@ -142,8 +131,7 @@ func TestRunPushNoDryRunExitsOnGitError(t *testing.T) {
 
 // TestRunDiffUnstaged tests runDiff without --staged flag.
 func TestRunDiffUnstaged(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -154,8 +142,7 @@ func TestRunDiffUnstaged(t *testing.T) {
 
 // TestRunDiffStaged tests runDiff with --staged flag.
 func TestRunDiffStaged(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origStaged := diffStaged
 	diffStaged = true
@@ -166,8 +153,7 @@ func TestRunDiffStaged(t *testing.T) {
 
 // TestRunDiffWithPath tests runDiff with a path argument.
 func TestRunDiffWithPath(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -180,8 +166,7 @@ func TestRunDiffWithPath(t *testing.T) {
 
 // TestRunLogDefault tests runLog with default flags.
 func TestRunLogDefault(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 5
@@ -193,8 +178,7 @@ func TestRunLogDefault(t *testing.T) {
 
 // TestRunLogOneline tests runLog with --oneline flag.
 func TestRunLogOneline(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 3
@@ -208,8 +192,7 @@ func TestRunLogOneline(t *testing.T) {
 
 // TestRunSync tests runPull on a valid overlay (fails at git level, not config).
 func TestRunPull(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 	withExitIntercept(func() { runPull(pullCmd, nil) })
 }
 
@@ -217,8 +200,7 @@ func TestRunPull(t *testing.T) {
 
 // TestRunCompareUnknownRepo tests runCompare with unknown repo name exits(1).
 func TestRunCompareUnknownRepo(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	code := withExitIntercept(func() { runCompare(compareCmd, []string{"nonexistent-repo-xyz"}) })
 	if code != 1 {
@@ -229,8 +211,7 @@ func TestRunCompareUnknownRepo(t *testing.T) {
 // TestRunCompareDefaultRepo tests runCompare with default repo (gentoo).
 // Will fail at provider/network level — just must not panic.
 func TestRunCompareDefaultRepo(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origClone, origNoCache, origTimeout := compareClone, compareNoCache, compareTimeout
 	compareClone = false
@@ -247,8 +228,7 @@ func TestRunCompareDefaultRepo(t *testing.T) {
 
 // TestRunCompareWithRepoArg tests runCompare with explicit repo arg.
 func TestRunCompareWithRepoArg(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origTimeout := compareTimeout
 	compareTimeout = 1
@@ -261,8 +241,7 @@ func TestRunCompareWithRepoArg(t *testing.T) {
 
 // TestRunAnalyzeNoArgs tests runAnalyze with no args and no --all flag exits(1).
 func TestRunAnalyzeNoArgs(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origAll := analyzeAll
 	analyzeAll = false
@@ -276,8 +255,7 @@ func TestRunAnalyzeNoArgs(t *testing.T) {
 
 // TestRunAnalyzeWithPackage tests runAnalyze with a package arg (dry-run, no-cache).
 func TestRunAnalyzeWithPackage(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	pkgDir := filepath.Join(overlayDir, "net-misc", "foo")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -300,8 +278,7 @@ func TestRunAnalyzeWithPackage(t *testing.T) {
 
 // TestRunAnalyzeAll tests runAnalyze with --all flag (dry-run).
 func TestRunAnalyzeAll(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origAll, origDryRun := analyzeAll, analyzeDryRun
 	analyzeAll = true
@@ -315,8 +292,7 @@ func TestRunAnalyzeAll(t *testing.T) {
 
 // TestRunAutoupdateNoFlag tests runAutoupdate with no flags (shows help, no exit).
 func TestRunAutoupdateNoFlag(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = false
@@ -333,8 +309,7 @@ func TestRunAutoupdateNoFlag(t *testing.T) {
 
 // TestRunAutoupdateList tests runAutoupdate with --list flag.
 func TestRunAutoupdateList(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = false
@@ -351,8 +326,7 @@ func TestRunAutoupdateList(t *testing.T) {
 
 // TestRunAutoupdateCheck tests runAutoupdate with --check flag.
 func TestRunAutoupdateCheck(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = true
@@ -369,8 +343,7 @@ func TestRunAutoupdateCheck(t *testing.T) {
 
 // TestRunAutoupdateApply tests runAutoupdate with --apply flag.
 func TestRunAutoupdateApply(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = false
@@ -389,8 +362,7 @@ func TestRunAutoupdateApply(t *testing.T) {
 
 // TestRunCommitDryRun tests runCommit with --dry-run flag (no staged changes → exits 0).
 func TestRunCommitDryRun(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origDryRun, origMsg := commitDryRun, commitMessage
 	commitDryRun = true
@@ -402,8 +374,7 @@ func TestRunCommitDryRun(t *testing.T) {
 
 // TestRunCommitWithMessage tests runCommit with a custom message (will fail at git level).
 func TestRunCommitWithMessage(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origDryRun, origMsg := commitDryRun, commitMessage
 	commitDryRun = false
@@ -417,8 +388,7 @@ func TestRunCommitWithMessage(t *testing.T) {
 
 // TestRunRenameNoArgs tests runRename with no args exits(1).
 func TestRunRenameNoArgs(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	code := withExitIntercept(func() { runRename(renameCmd, nil) })
 	if code != 1 {
@@ -428,8 +398,7 @@ func TestRunRenameNoArgs(t *testing.T) {
 
 // TestRunRenameInvalidArgs tests runRename with invalid args format exits(1).
 func TestRunRenameInvalidArgs(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	code := withExitIntercept(func() { runRename(renameCmd, []string{"invalid-format"}) })
 	if code != 1 {
@@ -439,8 +408,7 @@ func TestRunRenameInvalidArgs(t *testing.T) {
 
 // TestRunRenameValidArgsDryRun tests runRename with valid args and --dry-run.
 func TestRunRenameValidArgsDryRun(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origFlags := renameFlags
 	renameFlags.DryRun = true
@@ -478,8 +446,7 @@ func withStdin(t *testing.T, input string, fn func()) {
 
 // TestRunInitAbortOnExistingConfig tests runInit aborts when user says no to overwrite.
 func TestRunInitAbortOnExistingConfig(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	// Respond "n" to "Overwrite?" prompt
 	withStdin(t, "n\n", func() {
@@ -489,8 +456,7 @@ func TestRunInitAbortOnExistingConfig(t *testing.T) {
 
 // TestRunInitOverwriteWithDefaults tests runInit with all-default inputs (empty lines).
 func TestRunInitOverwriteWithDefaults(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	// "y" to overwrite, then all defaults (empty lines for path, remote, user, email)
 	withStdin(t, "y\n\n\n\n\n", func() {
@@ -506,14 +472,8 @@ func TestRunInitWithCustomPath(t *testing.T) {
 		t.Fatalf("failed to create overlay dir: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
 
 	// No existing config — provide path, remote, user, email
 	withStdin(t, overlayDir+"\norigin\nTestUser\ntest@example.com\n", func() {
@@ -524,14 +484,8 @@ func TestRunInitWithCustomPath(t *testing.T) {
 // TestRunInitNoExistingConfig tests runInit when no config exists yet.
 func TestRunInitNoExistingConfig(t *testing.T) {
 	tmpHome := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
 
 	// No existing config — all defaults
 	withStdin(t, "\n\n\n\n", func() {
@@ -619,8 +573,7 @@ func TestPromptConfirmationEOF(t *testing.T) {
 
 // TestRunRenameWithMatchesAndConfirmNo tests runRename with valid args, matches found, user says no.
 func TestRunRenameWithMatchesAndConfirmNo(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Create a matching ebuild
 	pkgDir := filepath.Join(overlayDir, "app-misc", "foo")
@@ -645,8 +598,7 @@ func TestRunRenameWithMatchesAndConfirmNo(t *testing.T) {
 
 // TestRunRenameWithMatchesSkipPrompt tests runRename with --yes flag (skip confirmation).
 func TestRunRenameWithMatchesSkipPrompt(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "bar")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -667,8 +619,7 @@ func TestRunRenameWithMatchesSkipPrompt(t *testing.T) {
 
 // TestRunRenameGlobalSearchRequiresConfirm tests runRename with "*" category requires confirm.
 func TestRunRenameGlobalSearchRequiresConfirm(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "baz")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -695,8 +646,7 @@ func TestRunRenameGlobalSearchRequiresConfirm(t *testing.T) {
 // TestRunCommitDryRunWithStagedChanges tests runCommit dry-run path with staged changes.
 // We need a git repo for this — skip if git init fails.
 func TestRunCommitDryRunWithStagedChanges(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Init git repo in overlay dir
 	if err := runGitCmd(overlayDir, "init"); err != nil {
@@ -732,8 +682,7 @@ func runGitCmd(dir string, args ...string) error {
 
 // TestRunPullWithGitRepo tests runPull with an initialized git repo.
 func TestRunPullWithGitRepo(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	if err := runGitCmd(overlayDir, "init"); err != nil {
 		t.Skip("git init failed, skipping")
@@ -771,14 +720,8 @@ repositories:
 `
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origTimeout := compareTimeout
 	compareTimeout = 1
@@ -788,25 +731,23 @@ repositories:
 }
 
 // setupTestHomeWithGitRepo creates a temp HOME with a valid config AND an initialized git repo.
-func setupTestHomeWithGitRepo(t *testing.T) (overlayDir string, cleanup func()) {
+func setupTestHomeWithGitRepo(t *testing.T) (overlayDir string) {
 	t.Helper()
-	overlayDir, cleanup = setupTestHome(t)
+	overlayDir = setupTestHome(t)
 
 	if err := runGitCmd(overlayDir, "init"); err != nil {
-		cleanup()
 		t.Skip("git init not available, skipping")
 	}
 	_ = runGitCmd(overlayDir, "config", "user.email", "test@test.com")
 	_ = runGitCmd(overlayDir, "config", "user.name", "Test")
-	return overlayDir, cleanup
+	return overlayDir
 }
 
 // ---- runCommit interactive paths ----
 
 // TestRunCommitInteractiveYes tests runCommit interactive path with "y" response.
 func TestRunCommitInteractiveYes(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	// Stage a file
 	pkgDir := filepath.Join(overlayDir, "app-misc", "mypkg")
@@ -828,8 +769,7 @@ func TestRunCommitInteractiveYes(t *testing.T) {
 
 // TestRunCommitInteractiveCancel tests runCommit interactive path with "c" response.
 func TestRunCommitInteractiveCancel(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "cancelpkg")
 	_ = os.MkdirAll(pkgDir, 0755)
@@ -849,8 +789,7 @@ func TestRunCommitInteractiveCancel(t *testing.T) {
 
 // TestRunCommitInteractiveEdit tests runCommit interactive path with "e" then custom message.
 func TestRunCommitInteractiveEdit(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "editpkg")
 	_ = os.MkdirAll(pkgDir, 0755)
@@ -871,8 +810,7 @@ func TestRunCommitInteractiveEdit(t *testing.T) {
 
 // TestRunCommitInteractiveDefault tests runCommit interactive path with default (empty) response.
 func TestRunCommitInteractiveDefault(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "defpkg")
 	_ = os.MkdirAll(pkgDir, 0755)
@@ -893,8 +831,7 @@ func TestRunCommitInteractiveDefault(t *testing.T) {
 
 // TestRunCommitInteractiveInvalidOption tests runCommit with invalid option exits(1).
 func TestRunCommitInteractiveInvalidOption(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	pkgDir := filepath.Join(overlayDir, "app-misc", "invpkg")
 	_ = os.MkdirAll(pkgDir, 0755)
@@ -940,8 +877,7 @@ func withStdinCode(t *testing.T, input string, fn func() int) int {
 
 // TestRunAddSuccessPath tests runAdd when files are successfully added.
 func TestRunAddSuccessPath(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	// Create a file to add
 	pkgDir := filepath.Join(overlayDir, "app-misc", "addpkg")
@@ -970,8 +906,7 @@ parser = "github"
 
 // TestRunAutoupdateCheckWithConfig tests runAutoupdate --check with a packages.toml.
 func TestRunAutoupdateCheckWithConfig(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
@@ -990,8 +925,7 @@ func TestRunAutoupdateCheckWithConfig(t *testing.T) {
 
 // TestRunAutoupdateCheckSpecificPkg tests runAutoupdate --check with a specific package arg.
 func TestRunAutoupdateCheckSpecificPkg(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
@@ -1028,14 +962,8 @@ func TestRunCompareWithPackages(t *testing.T) {
 	configContent := "overlay:\n  path: " + overlayDir + "\n  remote: origin\ngit:\n  user: Test\n  email: test@test.com\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origTimeout, origNoCache := compareTimeout, compareNoCache
 	compareTimeout = 1
@@ -1050,8 +978,7 @@ func TestRunCompareWithPackages(t *testing.T) {
 
 // TestRunAnalyzeAllNonDryRun tests runAnalyzeAll without dry-run (user says "n" to save).
 func TestRunAnalyzeAllNonDryRun(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origAll, origDryRun := analyzeAll, analyzeDryRun
 	analyzeAll = true
@@ -1080,14 +1007,8 @@ func TestRunAnalyzeWithTildePath(t *testing.T) {
 	configContent := "overlay:\n  path: ~/overlay\n  remote: origin\ngit:\n  user: Test\n  email: test@test.com\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origAll, origDryRun := analyzeAll, analyzeDryRun
 	analyzeAll = true
@@ -1112,14 +1033,8 @@ func TestRunAutoupdateWithTildePath(t *testing.T) {
 	configContent := "overlay:\n  path: ~/overlay\n  remote: origin\ngit:\n  user: Test\n  email: test@test.com\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = false
@@ -1138,8 +1053,7 @@ func TestRunAutoupdateWithTildePath(t *testing.T) {
 
 // TestRunStatusWithGitRepo tests runStatus with an initialized git repo.
 func TestRunStatusWithGitRepo(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 	withExitIntercept(func() { runStatus(statusCmd, nil) })
 	_ = overlayDir
 }
@@ -1148,8 +1062,7 @@ func TestRunStatusWithGitRepo(t *testing.T) {
 
 // TestRunPushDryRunWithGitRepo tests runPush dry-run with an initialized git repo.
 func TestRunPushDryRunWithGitRepo(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 	_ = overlayDir
 
 	origDryRun := pushDryRun
@@ -1170,14 +1083,8 @@ func TestRunAutoupdateEmptyOverlayPath(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"),
 		[]byte("overlay:\n  path: \"\"\n  remote: origin\n"), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = true
@@ -1205,14 +1112,8 @@ func TestRunAnalyzeEmptyOverlayPath(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"),
 		[]byte("overlay:\n  path: \"\"\n  remote: origin\n"), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origAll := analyzeAll
 	analyzeAll = true
@@ -1228,8 +1129,7 @@ func TestRunAnalyzeEmptyOverlayPath(t *testing.T) {
 
 // TestRunCheckWithPackagesConfig tests runCheck when packages.toml exists in overlay.
 func TestRunCheckWithPackagesConfig(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Put packages.toml in the correct location: overlay/.autoupdate/packages.toml
 	setupAutoupdateConfig(t, overlayDir)
@@ -1250,8 +1150,7 @@ func TestRunCheckWithPackagesConfig(t *testing.T) {
 
 // TestRunCheckSpecificPkgWithConfig tests runCheck with a specific package and packages.toml.
 func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
@@ -1274,8 +1173,7 @@ func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
 // TestRunPullFetchFailure tests runPull when sync returns a conflict result.
 // We use a git repo with a remote that fails fetch — gets to the error path.
 func TestRunPullFetchFailure(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	// Add a remote that doesn't exist — fetch will fail, runPull exits(1)
 	_ = runGitCmd(overlayDir, "remote", "add", "origin", "https://invalid.example.com/repo.git")
@@ -1288,8 +1186,7 @@ func TestRunPullFetchFailure(t *testing.T) {
 // TestRunPushWithGitRepoNoRemote tests runPush (no dry-run) with git repo but no remote.
 // overlay.Push will fail at git push level, runPush exits(1).
 func TestRunPushWithGitRepoNoRemote(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 	_ = overlayDir
 
 	origDryRun := pushDryRun
@@ -1306,8 +1203,7 @@ func TestRunPushWithGitRepoNoRemote(t *testing.T) {
 
 // TestRunStatusSuccessWithGitRepo tests runStatus with a proper git repo (no staged changes).
 func TestRunStatusSuccessWithGitRepo(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 	_ = overlayDir
 
 	// Should succeed: git status works, no changes
@@ -1318,8 +1214,7 @@ func TestRunStatusSuccessWithGitRepo(t *testing.T) {
 
 // TestRunAddWithGitRepoNoFiles tests runAdd with git repo but no files to add.
 func TestRunAddWithGitRepoNoFiles(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	withExitIntercept(func() { runAdd(addCmd, nil) })
 }
@@ -1328,8 +1223,7 @@ func TestRunAddWithGitRepoNoFiles(t *testing.T) {
 
 // TestRunDiffWithGitRepo tests runDiff with an initialized git repo.
 func TestRunDiffWithGitRepo(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -1342,8 +1236,7 @@ func TestRunDiffWithGitRepo(t *testing.T) {
 
 // TestRunLogWithGitRepo tests runLog with an initialized git repo (no commits yet).
 func TestRunLogWithGitRepo(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 5
@@ -1355,8 +1248,7 @@ func TestRunLogWithGitRepo(t *testing.T) {
 
 // TestRunLogOnelineWithGitRepo tests runLog --oneline with an initialized git repo.
 func TestRunLogOnelineWithGitRepo(t *testing.T) {
-	_, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	setupTestHomeWithGitRepo(t)
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 3
@@ -1370,7 +1262,7 @@ func TestRunLogOnelineWithGitRepo(t *testing.T) {
 
 // setupGitRepoWithRemote creates a local git repo with a bare remote that has commits.
 // Returns the overlay dir, remote dir, and cleanup func.
-func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string, cleanup func()) {
+func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string) {
 	t.Helper()
 
 	tmpHome := t.TempDir()
@@ -1416,21 +1308,15 @@ func setupGitRepoWithRemote(t *testing.T) (overlayDir, remoteDir string, cleanup
 	configContent := "overlay:\n  path: " + overlayDir + "\n  remote: origin\ngit:\n  user: Test\n  email: test@test.com\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
-	return overlayDir, remoteDir, func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}
+	return overlayDir, remoteDir
 }
 
 // TestRunPullSuccessPath tests runPull when already up-to-date (fetch+merge succeeds).
 func TestRunPullSuccessPath(t *testing.T) {
-	_, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	setupGitRepoWithRemote(t)
 
 	// Already up-to-date — fetch succeeds, merge is a no-op → result.Success == true
 	withExitIntercept(func() { runPull(pullCmd, nil) })
@@ -1438,8 +1324,7 @@ func TestRunPullSuccessPath(t *testing.T) {
 
 // TestRunPullWithNewRemoteCommits tests runPull when remote has new commits.
 func TestRunPullWithNewRemoteCommits(t *testing.T) {
-	overlayDir, remoteDir, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	overlayDir, remoteDir := setupGitRepoWithRemote(t)
 
 	// Clone remote to add a new commit
 	cloneDir := filepath.Join(filepath.Dir(overlayDir), "clone")
@@ -1462,8 +1347,7 @@ func TestRunPullWithNewRemoteCommits(t *testing.T) {
 
 // TestRunAddSuccessWithGitRepo tests runAdd when files are staged successfully.
 func TestRunAddSuccessWithGitRepo(t *testing.T) {
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	defer cleanup()
+	overlayDir := setupTestHomeWithGitRepo(t)
 
 	// Create a file and add it
 	pkgDir := filepath.Join(overlayDir, "app-misc", "newpkg")
@@ -1479,8 +1363,7 @@ func TestRunAddSuccessWithGitRepo(t *testing.T) {
 
 // TestRunPushDryRunSuccessWithGitRepo tests runPush dry-run with a real git repo.
 func TestRunPushDryRunSuccessWithGitRepo(t *testing.T) {
-	_, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	setupGitRepoWithRemote(t)
 
 	origDryRun := pushDryRun
 	pushDryRun = true
@@ -1491,8 +1374,7 @@ func TestRunPushDryRunSuccessWithGitRepo(t *testing.T) {
 
 // TestRunPushSuccessWithGitRepo tests runPush (no dry-run) with a real git repo and remote.
 func TestRunPushSuccessWithGitRepo(t *testing.T) {
-	overlayDir, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	overlayDir, _ := setupGitRepoWithRemote(t)
 
 	// Stage and commit something to push, set upstream tracking
 	testFile := filepath.Join(overlayDir, "app-misc", "pkg", "pkg-1.0.ebuild")
@@ -1514,8 +1396,7 @@ func TestRunPushSuccessWithGitRepo(t *testing.T) {
 
 // TestRunStatusSuccessNoChanges tests runStatus with a git repo and no changes.
 func TestRunStatusSuccessNoChanges(t *testing.T) {
-	_, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	setupGitRepoWithRemote(t)
 
 	withExitIntercept(func() { runStatus(statusCmd, nil) })
 }
@@ -1524,8 +1405,7 @@ func TestRunStatusSuccessNoChanges(t *testing.T) {
 
 // TestRunCommitWithMessageSuccess tests runCommit with a custom message and git repo.
 func TestRunCommitWithMessageSuccess(t *testing.T) {
-	overlayDir, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	overlayDir, _ := setupGitRepoWithRemote(t)
 
 	// Stage a file
 	testFile := filepath.Join(overlayDir, "app-misc", "staged", "staged-1.0.ebuild")
@@ -1545,8 +1425,7 @@ func TestRunCommitWithMessageSuccess(t *testing.T) {
 
 // TestRunListSuccessPath tests runList when pending list loads successfully.
 func TestRunListSuccessPath(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
 	autoupdateCheck = false
@@ -1617,14 +1496,8 @@ func TestRunPullDivergedRefusesFastForward(t *testing.T) {
 	configContent := "overlay:\n  path: " + overlayDir + "\n  remote: origin\ngit:\n  user: Test\n  email: test@test.com\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	// Local and remote have diverged. The default mode is fast-forward only,
 	// so the pull must refuse and exit 1 — where the previous command wrote a
@@ -1661,8 +1534,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 // TestRunCompareGitHubRateLimitPath tests runCompare when GitHub API is accessible.
 // This covers the rate limit check block (lines 125-140).
 func TestRunCompareGitHubRateLimitPath(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	// Add a package to the overlay so we get past the "no packages" check
 	tmpHome := os.Getenv("HOME")
@@ -1694,14 +1566,8 @@ func TestRunDiffOverlayPathError(t *testing.T) {
 	configContent := "overlay:\n  path: " + invalidPath + "\n  remote: origin\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origStaged := diffStaged
 	diffStaged = false
@@ -1723,14 +1589,8 @@ func TestRunLogOverlayPathError(t *testing.T) {
 	configContent := "overlay:\n  path: " + invalidPath + "\n  remote: origin\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origCount, origOneline := logCount, logOneline
 	logCount = 5
@@ -1755,14 +1615,8 @@ func TestRunStatusOverlayPathError(t *testing.T) {
 	configContent := "overlay:\n  path: " + invalidPath + "\n  remote: origin\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	code := withExitIntercept(func() { runStatus(statusCmd, nil) })
 	if code != 1 {
@@ -1782,14 +1636,8 @@ func TestRunPushDryRunOverlayError(t *testing.T) {
 	configContent := "overlay:\n  path: " + invalidPath + "\n  remote: origin\n"
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origDryRun := pushDryRun
 	pushDryRun = true
@@ -1806,14 +1654,8 @@ func TestRunPushDryRunOverlayError(t *testing.T) {
 // TestRunInitCreateNonExistentPath tests runInit when overlay path doesn't exist and user says "y" to create.
 func TestRunInitCreateNonExistentPath(t *testing.T) {
 	tmpHome := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
 
 	newOverlayPath := filepath.Join(tmpHome, "new-overlay")
 	// Input: path that doesn't exist, "y" to create, default remote, user, email
@@ -1826,14 +1668,8 @@ func TestRunInitCreateNonExistentPath(t *testing.T) {
 // TestRunInitPathDoesNotExistSayNo tests runInit when overlay path doesn't exist and user says "n".
 func TestRunInitPathDoesNotExistSayNo(t *testing.T) {
 	tmpHome := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", tmpHome+"/.config")
 
 	nonExistentPath := filepath.Join(tmpHome, "does-not-exist")
 	// Input: non-existent path, "n" to not create, default remote, user, email
@@ -1847,8 +1683,7 @@ func TestRunInitPathDoesNotExistSayNo(t *testing.T) {
 
 // TestRunPushDryRunWithUpstream tests runPush dry-run with a repo that has upstream set.
 func TestRunPushDryRunWithUpstream(t *testing.T) {
-	_, _, cleanup := setupGitRepoWithRemote(t)
-	defer cleanup()
+	setupGitRepoWithRemote(t)
 
 	origDryRun := pushDryRun
 	pushDryRun = true
@@ -1906,14 +1741,8 @@ repositories:
 `
 	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("HOME", tmpHome)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
-	defer func() {
-		os.Setenv("HOME", oldHome)
-		os.Setenv("XDG_CONFIG_HOME", oldXDG)
-	}()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
 	origTimeout := compareTimeout
 	compareTimeout = 30

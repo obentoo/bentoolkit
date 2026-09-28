@@ -54,8 +54,7 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Declare enough packages (with on-disk ebuilds) that the check has real,
 	// long-running work to cancel.
@@ -150,8 +149,7 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	const (
 		pkg        = "test-cat/test-pkg"
