@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -264,6 +265,23 @@ type authFetchSpec struct {
 	timeout time.Duration // whole-download budget; authFetchTimeout when unset
 }
 
+// authFetchSecretPrefix is the namespace every variable a record names must sit
+// in. packages.toml lives in the public overlay and the record's author also
+// picks fetch_url, so a record naming an arbitrary variable (GITHUB_TOKEN,
+// bentoolkit's own BENTOO_REPO_* tokens) would post it to a url of their choice.
+// Confining the names to a prefix the user only ever sets on purpose makes
+// "given to this record" an explicit act.
+const authFetchSecretPrefix = "BENTOO_FETCH_" //nolint:gosec // G101: a variable-NAME prefix, not a credential; no value ever lives here
+
+// checkAuthFetchSecretName reports whether name, already trimmed, is a variable
+// a record may send: authFetchSecretPrefix followed by at least one character,
+// compared exactly and case-sensitively. It decides from the name alone and
+// never reads the environment or a secrets file, so the verdict is the same on
+// every machine and never hints whether the secret exists.
+func checkAuthFetchSecretName(name string) bool {
+	return len(name) > len(authFetchSecretPrefix) && strings.HasPrefix(name, authFetchSecretPrefix)
+}
+
 // parseAuthFetchSpec extracts an authFetchSpec from a package's meta map.
 //
 // It returns (nil, false, nil) when the package defines no authenticated fetch
@@ -311,6 +329,13 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 		return nil, false, fmt.Errorf("%w: %s is set but %s is not — configure both or neither", ErrAuthFetchFailed, metaFetchSerialField, metaFetchSerialEnv)
 	case spec.serialEnv != "" && spec.serialField == "":
 		return nil, false, fmt.Errorf("%w: %s is set but %s is not — configure both or neither", ErrAuthFetchFailed, metaFetchSerialEnv, metaFetchSerialField)
+	}
+	// The serial's variable must be one the user gave to records on purpose.
+	// Refused here, from the name only and before anything is resolved, so no
+	// lookup ever runs for a variable the record was not entitled to name.
+	if spec.serialEnv != "" && !checkAuthFetchSecretName(spec.serialEnv) {
+		return nil, false, fmt.Errorf("%w: %s = %q is not a BENTOO_FETCH_ variable; rename it to %s in the record and in the environment or secrets file (a record may only send variables it was given on purpose)",
+			ErrAuthFetchFailed, metaFetchSerialEnv, spec.serialEnv, authFetchSecretPrefix+spec.serialEnv)
 	}
 	if spec.filename == "" {
 		return nil, false, fmt.Errorf("%w: %s is required", ErrAuthFetchFailed, metaFetchFilename)
@@ -513,6 +538,20 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 				ErrAuthFetchFailed, field, metaFetchSerialField, metaFetchFormEnv)
 		}
 		fields.Set(field, strings.TrimSpace(names[0]))
+	}
+
+	// Every offender is named at once, in sorted field order, so fixing a record
+	// takes one round and the text never depends on map iteration order.
+	var offenders []string
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
+		name := fields.Get(field)
+		if !checkAuthFetchSecretName(name) {
+			offenders = append(offenders, fmt.Sprintf("field %q -> %s (rename to %s)", field, name, authFetchSecretPrefix+name))
+		}
+	}
+	if len(offenders) > 0 {
+		return fmt.Errorf("%w: %s names variables that are not BENTOO_FETCH_ variables: %s; rename each in the record and in the environment or secrets file",
+			ErrAuthFetchFailed, metaFetchFormEnv, strings.Join(offenders, "; "))
 	}
 	s.formEnv = fields
 	return nil

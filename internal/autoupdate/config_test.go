@@ -1096,7 +1096,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		return map[string]string{
 			"fetch_method":       "post",
 			"fetch_url":          "https://filezilla-project.org/prodownload.php?beta=0",
-			"fetch_serial_env":   "FILEZILLA_PRO_KEY",
+			"fetch_serial_env":   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
 			"fetch_serial_field": "key",
 			"fetch_form":         "mail=&number=&platform=linux&download_program=Start download of FileZilla Pro",
 			"fetch_filename":     "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
@@ -1124,7 +1124,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	// R5.1 — the silent failure the whole rule exists for: the trigger is gone,
 	// so the applier reads the block as "no authenticated fetch" and says nothing.
 	t.Run("fetch_serial_env without fetch_url fails", func(t *testing.T) {
-		cfg := base(map[string]string{"fetch_serial_env": "FILEZILLA_PRO_KEY"})
+		cfg := base(map[string]string{"fetch_serial_env": "BENTOO_FETCH_FILEZILLA_PRO_KEY"})
 		err := ValidatePackageConfig("net-ftp/filezilla-pro", cfg)
 		if err == nil {
 			t.Fatal("Expected error for a fetch_* block without fetch_url")
@@ -1192,7 +1192,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	t.Run("misspelled fetch_serial_env is reported as unknown", func(t *testing.T) {
 		meta := filezillaMeta()
 		delete(meta, "fetch_serial_env")
-		meta["fetch_seral_env"] = "FILEZILLA_PRO_KEY"
+		meta["fetch_seral_env"] = "BENTOO_FETCH_FILEZILLA_PRO_KEY"
 		err := ValidatePackageConfig("net-ftp/filezilla-pro", base(meta))
 		if err == nil {
 			t.Fatal("Expected error for the misspelled fetch_seral_env")

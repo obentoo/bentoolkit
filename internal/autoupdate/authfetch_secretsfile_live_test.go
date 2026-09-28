@@ -15,9 +15,9 @@ import (
 // path and successfully downloads the FileZilla Pro distfile.
 //
 // Unlike TestFetchDistfileLiveFileZillaPro (which reads the serial from
-// FILEZILLA_PRO_KEY), this test deliberately blanks that env var so resolveSecret
+// BENTOO_FETCH_FILEZILLA_PRO_KEY), this test deliberately blanks that env var so resolveSecret
 // must fall back to the secrets file — exercising exactly the configuration a
-// user sets up by writing `FILEZILLA_PRO_KEY=<serial>` into ~/.config/bentoo/secrets.
+// user sets up by writing `BENTOO_FETCH_FILEZILLA_PRO_KEY=<serial>` into ~/.config/bentoo/secrets.
 //
 // Gated on a dedicated opt-in so it never runs in CI or for contributors:
 //
@@ -37,12 +37,12 @@ func TestFetchDistfileLiveFileZillaProSecretsFile(t *testing.T) {
 
 	// Force the secrets-file path: if the serial is also exported, blank it for
 	// this test so resolveSecret cannot satisfy the lookup from the environment.
-	t.Setenv("FILEZILLA_PRO_KEY", "")
+	t.Setenv("BENTOO_FETCH_FILEZILLA_PRO_KEY", "")
 
 	// Fail loudly (rather than silently testing nothing) if the secrets file does
 	// not actually contain the key — that is the very thing being verified.
-	if v, err := resolveSecret("FILEZILLA_PRO_KEY"); err != nil || v == "" {
-		t.Fatalf("FILEZILLA_PRO_KEY not resolvable from %s (err=%v) — add `FILEZILLA_PRO_KEY=<serial>` to it", strings.Join(secrets.Paths(), ", "), err)
+	if v, err := resolveSecret("BENTOO_FETCH_FILEZILLA_PRO_KEY"); err != nil || v == "" {
+		t.Fatalf("BENTOO_FETCH_FILEZILLA_PRO_KEY not resolvable from %s (err=%v) — add `BENTOO_FETCH_FILEZILLA_PRO_KEY=<serial>` to it", strings.Join(secrets.Paths(), ", "), err)
 	}
 
 	version := os.Getenv("FILEZILLA_PRO_VERSION")
@@ -54,7 +54,7 @@ func TestFetchDistfileLiveFileZillaProSecretsFile(t *testing.T) {
 	spec, ok, err := parseAuthFetchSpec(map[string]string{
 		metaFetchMethod:      "post",
 		metaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",
-		metaFetchSerialEnv:   "FILEZILLA_PRO_KEY",
+		metaFetchSerialEnv:   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
 		metaFetchSerialField: "key",
 		metaFetchFilename:    "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
 		metaFetchForm: "mail=&number=&platform=linux&platform_cli=win&platform_cli_nonpro=win&" +

@@ -39,15 +39,15 @@ func TestAuthFetchCauseNeverCarriesSecret(t *testing.T) {
 	withSecretsFile(t, "")
 	const serial = "SERIAL-055-DO-NOT-LEAK-7f3a"
 	const street = "Rua-Exemplo-055-Numero-100"
-	t.Setenv("TEST_055_SERIAL", serial)
-	t.Setenv("TEST_055_STREET", street)
+	t.Setenv("BENTOO_FETCH_TEST_055_SERIAL", serial)
+	t.Setenv("BENTOO_FETCH_TEST_055_STREET", street)
 
 	spec, ok, err := parseAuthFetchSpec(map[string]string{
 		metaFetchURL:         "http://127.0.0.1:1/dl/" + street + "/" + serial,
 		metaFetchFilename:    "x-{version}.zip",
-		metaFetchSerialEnv:   "TEST_055_SERIAL",
+		metaFetchSerialEnv:   "BENTOO_FETCH_TEST_055_SERIAL",
 		metaFetchSerialField: "key",
-		metaFetchFormEnv:     "street=TEST_055_STREET",
+		metaFetchFormEnv:     "street=BENTOO_FETCH_TEST_055_STREET",
 	})
 	if err != nil || !ok {
 		t.Fatalf("parseAuthFetchSpec: ok=%v err=%v", ok, err)

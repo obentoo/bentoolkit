@@ -216,7 +216,7 @@ the same one.
 url = "https://example.com/pro/version-history/"
 parser = "regex"
 pattern = 'Latest:\s*([0-9]+\.[0-9]+\.[0-9]+)'
-meta = { fetch_method = "post", fetch_url = "https://example.com/pro/download.php", fetch_serial_env = "EXAMPLE_PRO_KEY", fetch_serial_field = "key", fetch_filename = "example-pro-{version}.tar.xz" }
+meta = { fetch_method = "post", fetch_url = "https://example.com/pro/download.php", fetch_serial_env = "BENTOO_FETCH_EXAMPLE_PRO_KEY", fetch_serial_field = "key", fetch_filename = "example-pro-{version}.tar.xz" }
 timeout = 60
 comments = """
 An inline table carried through verbatim, out of order against its neighbour:

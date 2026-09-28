@@ -188,7 +188,7 @@ type PackageConfig struct {
 	// other key is annotation nothing reads.
 	//
 	// Never store secrets here; reference an env var instead (e.g.
-	// fetch_serial_env = "FILEZILLA_PRO_KEY").
+	// fetch_serial_env = "BENTOO_FETCH_FILEZILLA_PRO_KEY").
 	Meta map[string]string `toml:"meta,omitempty"`
 
 	// New fields for version history
