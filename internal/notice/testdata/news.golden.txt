@@ -1,0 +1,17 @@
+Title: foo 1.2 heap overflow
+Author: Jane Doe <jane@example.org>
+Posted: 2026-10-02
+Revision: 1
+News-Item-Format: 2.0
+Display-If-Installed: dev-libs/foo:1
+Display-If-Installed: <dev-libs/foo-0.9.8:0
+Display-If-Installed: app-misc/foo-tools
+
+A crafted archive overflows a heap buffer in libfoo when it is unpacked,
+which lets an attacker run code as the user running the extraction.
+
+What to do
+==========
+
+    Upgrade to dev-libs/foo-1.2.3 or later, then rebuild every package
+    linked against it.

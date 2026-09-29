@@ -1,0 +1,26 @@
+id: 2026-10-02-foo-cve
+type: security
+severity: critical
+title: "foo 1.2 heap overflow"
+summary: "A crafted archive overflows a heap buffer in foo before 1.2.3."
+body: |
+  A crafted archive overflows a heap buffer in libfoo when it is unpacked, which lets an attacker run code as the user running the extraction.
+
+  What to do
+  ==========
+
+  	Upgrade to dev-libs/foo-1.2.3 or later, then rebuild every package linked against it.
+affects:
+  - cp: dev-libs/foo
+    slot: "1"
+    ranges:
+      - {op: ">=", ver: "1.0"}
+      - {op: "<", ver: "1.2.3"}
+  - cp: dev-libs/foo
+    slot: "0"
+    ranges:
+      - {op: "<", ver: "0.9.8"}
+  - cp: app-misc/foo-tools
+    ranges: []
+published: "2026-10-02T00:00:00Z"
+updated: "2026-10-02T00:00:00Z"
