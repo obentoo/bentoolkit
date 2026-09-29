@@ -52,7 +52,6 @@ func TestParseManifestScope(t *testing.T) {
 
 func TestResolveManifestTargets_WholeOverlay(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 	createRenameTestEbuild(t, overlayPath, "app-misc", "world", "2.0.0")
@@ -76,7 +75,6 @@ func TestResolveManifestTargets_WholeOverlay(t *testing.T) {
 
 func TestResolveManifestTargets_Category(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 	createRenameTestEbuild(t, overlayPath, "dev-libs", "foo", "0.1.0")
@@ -92,7 +90,6 @@ func TestResolveManifestTargets_Category(t *testing.T) {
 
 func TestResolveManifestTargets_Package(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -107,7 +104,6 @@ func TestResolveManifestTargets_Package(t *testing.T) {
 
 func TestResolveManifestTargets_PackageMissing(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	_, err := ResolveManifestTargets(overlayPath, ManifestScope{Category: "app-misc", Package: "ghost"})
 	if err == nil {
@@ -117,7 +113,6 @@ func TestResolveManifestTargets_PackageMissing(t *testing.T) {
 
 func TestResolveManifestTargets_EmptyOverlay(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	_, err := ResolveManifestTargets(overlayPath, ManifestScope{})
 	if !errors.Is(err, ErrManifestNoTargets) {
@@ -157,7 +152,6 @@ func TestRegenerateManifests_PkgdevMissing(t *testing.T) {
 	}
 
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
 	targets := []ManifestUpdate{{Category: "app-misc", Package: "hello"}}
@@ -176,7 +170,6 @@ func TestRegenerateManifests_RestoresBackupOnFailure(t *testing.T) {
 	}
 
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 	manifestPath := filepath.Join(overlayPath, "app-misc", "hello", "Manifest")
@@ -258,7 +251,6 @@ func TestRegenerateManifestsForScope_NoConfig(t *testing.T) {
 
 func TestRegenerateManifestsForScope_DryRun(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
 	cfg := &config.Config{Overlay: config.OverlayConfig{Path: overlayPath}}

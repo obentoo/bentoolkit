@@ -101,7 +101,8 @@ func TestAgentPermissionArgs_WriteIsScopedAsEdit(t *testing.T) {
 	// "Edit". A neutral directory and secrets home keep the check about the
 	// argv's rules rather than about the fixture's path (story 051 run, recorded
 	// in the deviation register as a surface adjustment).
-	neutral, err := os.MkdirTemp("", "bentoo051-")
+	neutral, err := os.MkdirTemp("", "bentoo051-") //nolint:usetesting // t.TempDir would name the path after this test, putting "Write" and "Edit" back into the argv
+
 	if err != nil {
 		t.Fatalf("creating a neutral directory: %v", err)
 	}

@@ -11,14 +11,11 @@ import (
 )
 
 // setupVersionFilesTestOverlay creates a temporary overlay structure for testing.
-// Returns the overlay path. Caller should use defer os.RemoveAll().
+// Returns the overlay path; t.TempDir removes it when the test ends.
 func setupVersionFilesTestOverlay(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "versionfiles-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Create required overlay structure
 	dirs := []string{
@@ -27,7 +24,6 @@ func setupVersionFilesTestOverlay(t *testing.T) string {
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0755); err != nil {
-			os.RemoveAll(tmpDir)
 			t.Fatalf("failed to create dir %s: %v", dir, err)
 		}
 	}
@@ -75,11 +71,7 @@ func TestVersionFilesDetection(t *testing.T) {
 	properties.Property("all files containing version string are detected", prop.ForAll(
 		func(category, pkgName, version string, fileCount int) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-vf-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -132,11 +124,7 @@ func TestVersionFilesDetection(t *testing.T) {
 	properties.Property("detected files have correct category and package", prop.ForAll(
 		func(category, pkgName, version string) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-vf-meta-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -266,7 +254,6 @@ func TestVersionFilesBlocking(t *testing.T) {
 // **Validates: Requirements 5.5**
 func TestNoVersionFilesReturnsEmpty(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package directory without files/ subdirectory
 	createPackageDir(t, overlayPath, "app-misc", "testpkg")
@@ -296,7 +283,6 @@ func TestNoVersionFilesReturnsEmpty(t *testing.T) {
 // **Validates: Requirements 5.5**
 func TestNoVersionFilesWithEmptyFilesDir(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package with empty files/ directory
 	filesDir := filepath.Join(overlayPath, "app-misc", "testpkg", "files")
@@ -325,7 +311,6 @@ func TestNoVersionFilesWithEmptyFilesDir(t *testing.T) {
 // **Validates: Requirements 5.1**
 func TestVersionFilesWithNonMatchingFiles(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create files that don't contain the version string
 	createVersionFile(t, overlayPath, "app-misc", "testpkg", "generic-fix.patch")
@@ -353,7 +338,6 @@ func TestVersionFilesWithNonMatchingFiles(t *testing.T) {
 // **Validates: Requirements 5.1, 5.2**
 func TestVersionFilesDetectsMultipleFiles(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create multiple version-specific files
 	createVersionFile(t, overlayPath, "media-plugins", "gst-plugins-base", "gst-plugins-base-1.24.11-fix.patch")
@@ -388,7 +372,6 @@ func TestVersionFilesDetectsMultipleFiles(t *testing.T) {
 // **Validates: Requirements 5.1**
 func TestVersionFilesAcrossMultiplePackages(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create version files in multiple packages
 	createVersionFile(t, overlayPath, "media-plugins", "gst-plugins-base", "gst-plugins-base-1.24.11-fix.patch")
@@ -432,7 +415,6 @@ func TestVersionFilesAcrossMultiplePackages(t *testing.T) {
 // **Validates: Requirements 5.1**
 func TestVersionFilesDeduplicatesPackages(t *testing.T) {
 	overlayPath := setupVersionFilesTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create one version file
 	createVersionFile(t, overlayPath, "app-misc", "testpkg", "testpkg-1.0.0-fix.patch")

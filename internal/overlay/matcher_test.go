@@ -12,14 +12,11 @@ import (
 )
 
 // setupMatcherTestOverlay creates a temporary overlay structure for matcher testing.
-// Returns the overlay path. Caller should use t.Cleanup() or defer os.RemoveAll().
+// Returns the overlay path; t.TempDir removes it when the test ends.
 func setupMatcherTestOverlay(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "matcher-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Create required overlay structure
 	dirs := []string{
@@ -28,7 +25,6 @@ func setupMatcherTestOverlay(t *testing.T) string {
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0755); err != nil {
-			os.RemoveAll(tmpDir)
 			t.Fatalf("failed to create dir %s: %v", dir, err)
 		}
 	}
@@ -69,11 +65,7 @@ func TestCategorySearchScope(t *testing.T) {
 	properties.Property("specific category search only returns matches from that category", prop.ForAll(
 		func(targetCategory string, otherCategories []string, pkgName, version string) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-scope-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -168,11 +160,7 @@ func TestPackageAndVersionMatching(t *testing.T) {
 	properties.Property("ebuild is matched when package matches pattern AND version matches", prop.ForAll(
 		func(category, pkgPrefix, pkgSuffix, version string) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-match-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -219,11 +207,7 @@ func TestPackageAndVersionMatching(t *testing.T) {
 			}
 
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-nomatch-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -262,11 +246,7 @@ func TestPackageAndVersionMatching(t *testing.T) {
 	properties.Property("ebuild is NOT matched when package name doesn't match pattern", prop.ForAll(
 		func(category, pkgName, version string) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-nopattern-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -329,11 +309,7 @@ func TestRevisionStripping(t *testing.T) {
 	properties.Property("new filename has no revision suffix when old has revision", prop.ForAll(
 		func(category, pkgName, version string, revNum int) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-rev-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -387,11 +363,7 @@ func TestRevisionStripping(t *testing.T) {
 	properties.Property("new filename has no revision when old has no revision", prop.ForAll(
 		func(category, pkgName, version string) bool {
 			// Setup test overlay
-			overlayPath, err := os.MkdirTemp("", "overlay-norev-*")
-			if err != nil {
-				return false
-			}
-			defer os.RemoveAll(overlayPath)
+			overlayPath := t.TempDir()
 
 			// Create required overlay structure
 			os.MkdirAll(filepath.Join(overlayPath, "profiles"), 0755)
@@ -447,7 +419,6 @@ func TestRevisionStripping(t *testing.T) {
 // **Validates: Requirements 3.2**
 func TestGlobalSearchWithAsterisk(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create ebuilds in multiple categories
 	createMatcherTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
@@ -491,7 +462,6 @@ func TestGlobalSearchWithAsterisk(t *testing.T) {
 // **Validates: Requirements 3.5**
 func TestNoMatchesReturnsEmpty(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create an ebuild with different version
 	createMatcherTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
@@ -521,7 +491,6 @@ func TestNoMatchesReturnsEmpty(t *testing.T) {
 // Test specific example: package-1.0.0-r3.ebuild → package-2.0.0.ebuild
 func TestRevisionStrippingSpecificExample(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create ebuild with revision suffix
 	pkgDir := filepath.Join(overlayPath, "app-misc", "mypackage")
@@ -575,7 +544,6 @@ func TestRevisionStrippingSpecificExample(t *testing.T) {
 // **Validates: Requirements 11.3**
 func TestCategoryNotFoundError(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	matcher := NewEbuildMatcher(overlayPath)
 	spec := &RenameSpec{
@@ -606,7 +574,6 @@ func TestCategoryNotFoundError(t *testing.T) {
 // **Validates: Requirements 3.3**
 func TestMatchPackageExactMatch(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create two packages with similar names
 	createMatcherTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
@@ -640,7 +607,6 @@ func TestMatchPackageExactMatch(t *testing.T) {
 // **Validates: Requirements 3.3**
 func TestMatchPackageGlobPattern(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create packages with similar prefixes
 	createMatcherTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
@@ -678,7 +644,6 @@ func TestMatchPackageGlobPattern(t *testing.T) {
 // **Validates: Requirements 8.1**
 func TestPathsAreCorrect(t *testing.T) {
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createMatcherTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -726,7 +691,6 @@ func TestMatchWarningCollection(t *testing.T) {
 	}
 
 	overlayPath := setupMatcherTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create a readable category with a matching ebuild
 	createMatcherTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")

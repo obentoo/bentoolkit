@@ -13,16 +13,12 @@ import (
 func setupRenameTestOverlay(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "rename-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Create required overlay structure
 	dirs := []string{"profiles", "metadata"}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0755); err != nil {
-			os.RemoveAll(tmpDir)
 			t.Fatalf("failed to create dir %s: %v", dir, err)
 		}
 	}
@@ -50,7 +46,6 @@ func createRenameTestEbuild(t *testing.T, overlayPath, category, pkg, version st
 // TestRenamePreview tests the RenamePreview function.
 func TestRenamePreview(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create test ebuilds
 	createRenameTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
@@ -80,7 +75,6 @@ func TestRenamePreview(t *testing.T) {
 // TestRenamePreviewNoMatches tests RenamePreview with no matching ebuilds.
 func TestRenamePreviewNoMatches(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -108,7 +102,6 @@ func TestRenamePreviewNoMatches(t *testing.T) {
 // TestRenamePreviewWithConflicts tests RenamePreview detecting conflicts.
 func TestRenamePreviewWithConflicts(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create old and new version (conflict)
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
@@ -138,7 +131,6 @@ func TestRenamePreviewWithConflicts(t *testing.T) {
 // TestRenamePreviewWithVersionFiles tests RenamePreview detecting version files.
 func TestRenamePreviewWithVersionFiles(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -171,7 +163,6 @@ func TestRenamePreviewWithVersionFiles(t *testing.T) {
 // TestRenamePreviewInvalidPattern tests RenamePreview with invalid pattern.
 func TestRenamePreviewInvalidPattern(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	cfg := &config.Config{
 		Overlay: config.OverlayConfig{Path: overlayPath},
@@ -277,7 +268,6 @@ func TestFormatRenamePreviewWithWarnings(t *testing.T) {
 // TestRename tests the Rename function.
 func TestRename(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -323,7 +313,6 @@ func TestRename(t *testing.T) {
 // TestRenameDryRun tests Rename in dry-run mode.
 func TestRenameDryRun(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -366,7 +355,6 @@ func TestRenameDryRun(t *testing.T) {
 // TestRenameWithVersionFilesBlocking tests Rename blocked by version files.
 func TestRenameWithVersionFilesBlocking(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -405,7 +393,6 @@ func TestRenameWithVersionFilesBlocking(t *testing.T) {
 // TestRenameWithVersionFilesForce tests Rename with --force bypassing version files.
 func TestRenameWithVersionFilesForce(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -443,7 +430,6 @@ func TestRenameWithVersionFilesForce(t *testing.T) {
 // TestRenameWithConflictBlocking tests Rename blocked by conflicts.
 func TestRenameWithConflictBlocking(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create both old and new version (conflict)
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
@@ -479,7 +465,6 @@ func TestRenameWithConflictBlocking(t *testing.T) {
 // TestRenameWithConflictForce tests Rename with --force overwriting conflicts.
 func TestRenameWithConflictForce(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create both old and new version (conflict)
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
@@ -662,7 +647,6 @@ func searchSubstring(s, substr string) bool {
 // TestRenameNoMatches tests Rename with no matching ebuilds.
 func TestRenameNoMatches(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -694,7 +678,6 @@ func TestRenameNoMatches(t *testing.T) {
 // TestRenameMultipleEbuilds tests Rename with multiple matching ebuilds.
 func TestRenameMultipleEbuilds(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
 	createRenameTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-good", "1.24.11")
@@ -788,7 +771,6 @@ func TestFormatRenameResultWithConflicts(t *testing.T) {
 // TestRenameGlobalSearch tests Rename with global search across categories.
 func TestRenameGlobalSearch(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "media-plugins", "gst-plugins-base", "1.24.11")
 	createRenameTestEbuild(t, overlayPath, "dev-libs", "gst-core", "1.24.11")
@@ -821,7 +803,6 @@ func TestRenameGlobalSearch(t *testing.T) {
 // TestRenameWithRevision tests Rename with revision suffix stripping.
 func TestRenameWithRevision(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create ebuild with revision
 	pkgDir := filepath.Join(overlayPath, "app-misc", "hello")
@@ -887,7 +868,6 @@ func TestRenameInvalidOverlayPath(t *testing.T) {
 // TestRenameInvalidPattern tests Rename with invalid pattern.
 func TestRenameInvalidPattern(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	cfg := &config.Config{
 		Overlay: config.OverlayConfig{Path: overlayPath},
@@ -955,7 +935,6 @@ func TestFormatRenamePreviewWithRevision(t *testing.T) {
 // TestRenamePreviewGlobalSearch tests RenamePreview with global search.
 func TestRenamePreviewGlobalSearch(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "media-plugins", "gst-base", "1.0.0")
 	createRenameTestEbuild(t, overlayPath, "dev-libs", "gst-core", "1.0.0")
@@ -1010,7 +989,6 @@ func TestPatternValidatorEdgeCases(t *testing.T) {
 // TestMatcherEdgeCases tests edge cases in ebuild matching.
 func TestMatcherEdgeCases(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package with hidden directory (should be skipped)
 	hiddenDir := filepath.Join(overlayPath, "app-misc", ".hidden")
@@ -1045,7 +1023,6 @@ func TestMatcherEdgeCases(t *testing.T) {
 // TestMatcherWithNonEbuildFiles tests that non-ebuild files are skipped.
 func TestMatcherWithNonEbuildFiles(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package directory with various files
 	pkgDir := filepath.Join(overlayPath, "app-misc", "hello")
@@ -1079,7 +1056,6 @@ func TestMatcherWithNonEbuildFiles(t *testing.T) {
 // TestMatcherWithSubdirectories tests that subdirectories in package are skipped.
 func TestMatcherWithSubdirectories(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package with files/ subdirectory
 	pkgDir := filepath.Join(overlayPath, "app-misc", "hello")
@@ -1113,7 +1089,6 @@ func TestMatcherWithSubdirectories(t *testing.T) {
 // TestVersionFilesDetectorWithSubdirectories tests that subdirectories in files/ are skipped.
 func TestVersionFilesDetectorWithSubdirectories(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package with files/ containing a subdirectory
 	filesDir := filepath.Join(overlayPath, "app-misc", "hello", "files")
@@ -1174,7 +1149,6 @@ func TestShouldBlockForVersionFilesEdgeCases(t *testing.T) {
 // This test will fail if pkgdev is not installed, which is expected.
 func TestRenameWithManifestUpdate(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -1213,7 +1187,6 @@ func TestRenameWithManifestUpdate(t *testing.T) {
 // TestMatcherWithInvalidGlobPattern tests matcher with invalid glob pattern.
 func TestMatcherWithInvalidGlobPattern(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
@@ -1241,7 +1214,6 @@ func TestMatcherWithInvalidGlobPattern(t *testing.T) {
 // TestMatcherEbuildVersionMismatch tests that ebuilds with wrong package name prefix are skipped.
 func TestMatcherEbuildVersionMismatch(t *testing.T) {
 	overlayPath := setupRenameTestOverlay(t)
-	defer os.RemoveAll(overlayPath)
 
 	// Create package directory
 	pkgDir := filepath.Join(overlayPath, "app-misc", "hello")

@@ -14,6 +14,8 @@ linters:
     - bodyclose
     - contextcheck
     - errorlint
+    - usetesting
+    - tparallel
 
   settings:
     errcheck:
