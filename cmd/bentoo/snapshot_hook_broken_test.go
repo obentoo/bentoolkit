@@ -29,7 +29,7 @@ func TestRunSnapshotHook_UninstallRefusesBrokenBlock(t *testing.T) {
 	var exited bool
 	stop := captureStream(t, 2, &os.Stderr)
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotHook(snapshotHookCmd, nil) })
+		code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 	})
 	stderr := stop()
 

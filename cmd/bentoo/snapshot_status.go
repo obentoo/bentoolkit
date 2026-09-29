@@ -20,21 +20,19 @@ func newSnapshotStatusCmd() *cobra.Command {
 		Use:         "status",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
 		Short:       "Show the last run, timer state, and free space",
-		Run:         runSnapshotStatus,
+		RunE:        runSnapshotStatus,
 	}
 	return cmd
 }
 
-func runSnapshotStatus(cmd *cobra.Command, _ []string) {
+func runSnapshotStatus(cmd *cobra.Command, _ []string) error {
 	cfg, _, err := loadSnapshotConfigLenient()
 	if err != nil {
 		logger.Error("snapshot status: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	// Last run, aggregate line plus the per-stage breakdown (008 R5.1): each
 	// stage of the persisted RunResult with its subvolume, ship target when
@@ -85,6 +83,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string) {
 			output.PrintInfo("free space on %s: %s", target, humanBytes(avail))
 		}
 	}
+	return nil
 }
 
 // stageLine renders one stage of the last RunResult for `status` (008 R5.1):

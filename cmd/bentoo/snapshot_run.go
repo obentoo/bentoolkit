@@ -20,19 +20,18 @@ func newSnapshotRunCmd() *cobra.Command {
 		Long: `Execute the engine → prune → ship pipeline for every configured subvolume,
 persist a RunResult for 'status', and exit non-zero if any stage failed. This is
 the command driven by the systemd timer.`,
-		Run: runSnapshotRun,
+		RunE: runSnapshotRun,
 	}
 	cmd.Flags().BoolVar(&snapshotRunDryRun, "dry-run", false,
 		"print the pipeline that would run, without executing it")
 	return cmd
 }
 
-func runSnapshotRun(cmd *cobra.Command, _ []string) {
+func runSnapshotRun(cmd *cobra.Command, _ []string) error {
 	cfg, path, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot run: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if snapshotRunDryRun {
@@ -63,25 +62,22 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) {
 		// Adding one would answer a new requirement about previews, not this one
 		// about runs.
 		printDryRunPlan(snapshot.PlanRun(cfg))
-		return
+		return nil
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	// Ensure the engine's native config exists (btrbk.conf or the snapper
 	// configs) so the run is self-contained even if 'apply' was never executed.
 	if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
 		logger.Error("snapshot run: render engine config: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot run: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	result, runErr := mgr.Run(ctx)
@@ -119,6 +115,7 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) {
 		buildSnapshotReport(&result, cfg.Engine.Subvolumes, ctx.Err() != nil))
 
 	if runErr != nil {
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }

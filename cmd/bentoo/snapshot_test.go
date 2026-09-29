@@ -13,9 +13,11 @@ import (
 // sentinelExit distinguishes our osExit panic from a real one in captureExit.
 type sentinelExit struct{}
 
-// captureExit stubs osExit, runs fn, and reports the exit code (if any). The
-// run* verbs call osExit(1) then `return`; the stub panics so the `return` is
-// never reached, and the panic is recovered here.
+// captureExit stubs osExit, runs fn, and reports the exit code (if any). It
+// serves the handlers that still end the process through osExit; the stub
+// panics so the handler's next statement is never reached, and the panic is
+// recovered here. A handler that returns its outcome (story 058) is read
+// through func exitOf instead.
 func captureExit(t *testing.T, fn func()) (code int, exited bool) {
 	t.Helper()
 	orig := osExit
@@ -34,6 +36,15 @@ func captureExit(t *testing.T, fn func()) (code int, exited bool) {
 	}()
 	fn()
 	return code, exited
+}
+
+// exitOf reads a returned handler outcome the way captureExit reads an osExit
+// call: code is the process exit status func exitCodeFor maps err to, and
+// exited reports a non-zero one. The snapshot handlers never ended the process
+// with status 0, so exited keeps the meaning captureExit gave it.
+func exitOf(err error) (code int, exited bool) {
+	code = exitCodeFor(err)
+	return code, code != 0
 }
 
 // captureStdout redirects os.Stdout (and fatih/color's Output) for the duration

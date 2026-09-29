@@ -20,36 +20,34 @@ func newSnapshotApplyCmd() *cobra.Command {
 		Short:       "Render native config and install the systemd timer",
 		Long: `Load and validate snapshot.toml, render the btrbk.conf, and install +
 enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
-		Run: runSnapshotApply,
+		RunE: runSnapshotApply,
 	}
 	cmd.Flags().BoolVar(&snapshotApplyDryRun, "dry-run", false,
 		"print the configs and systemd units that would be written, without writing them")
 	return cmd
 }
 
-func runSnapshotApply(cmd *cobra.Command, _ []string) {
+func runSnapshotApply(cmd *cobra.Command, _ []string) error {
 	cfg, path, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot apply: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if snapshotApplyDryRun {
 		// 008 R2.1: preview only — print the engine config(s) and systemd units
 		// the apply would write, with zero writes and zero subprocesses.
 		printDryRunPlan(snapshot.PlanApply(cfg, path))
-		return
+		return nil
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	if err := snapshot.Apply(ctx, cfg, path, snapshotRunner); err != nil {
 		logger.Error("snapshot apply: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	output.PrintSuccess("snapshot configuration applied (%s)", path)
+	return nil
 }

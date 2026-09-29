@@ -60,9 +60,7 @@ func TestRunSnapshotHook_InstallWritesHook(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotHook(snapshotHookCmd, nil)
-		})
+		code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 	})
 	if exited {
 		t.Fatalf("hook --install exited with code %d, want success", code)
@@ -97,9 +95,7 @@ func TestRunSnapshotHook_InstallIdempotent(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		_ = captureStdout(t, func() {
-			if code, exited := captureExit(t, func() {
-				runSnapshotHook(snapshotHookCmd, nil)
-			}); exited {
+			if code, exited := exitOf(runSnapshotHook(snapshotHookCmd, nil)); exited {
 				t.Fatalf("install #%d exited with code %d", i+1, code)
 			}
 		})
@@ -134,9 +130,7 @@ func TestRunSnapshotHook_UninstallRemovesPreservingUserBashrc(t *testing.T) {
 
 	setHookFlags(t, true, false)
 	_ = captureStdout(t, func() {
-		if code, exited := captureExit(t, func() {
-			runSnapshotHook(snapshotHookCmd, nil)
-		}); exited {
+		if code, exited := exitOf(runSnapshotHook(snapshotHookCmd, nil)); exited {
 			t.Fatalf("install exited with code %d", code)
 		}
 	})
@@ -147,9 +141,7 @@ func TestRunSnapshotHook_UninstallRemovesPreservingUserBashrc(t *testing.T) {
 
 	setHookFlags(t, false, true)
 	_ = captureStdout(t, func() {
-		if code, exited := captureExit(t, func() {
-			runSnapshotHook(snapshotHookCmd, nil)
-		}); exited {
+		if code, exited := exitOf(runSnapshotHook(snapshotHookCmd, nil)); exited {
 			t.Fatalf("uninstall exited with code %d", code)
 		}
 	})
@@ -179,9 +171,7 @@ func TestRunSnapshotHook_UninstallNoopWhenAbsent(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotHook(snapshotHookCmd, nil)
-		})
+		code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 	})
 	if exited {
 		t.Errorf("uninstall on clean root exited with code %d, want clean no-op", code)
@@ -189,7 +179,7 @@ func TestRunSnapshotHook_UninstallNoopWhenAbsent(t *testing.T) {
 }
 
 // TestRunSnapshotHook_InstallRefusedNonSnapper: the hook shells out to snapper,
-// so --install with a non-snapper engine is refused — osExit(1) and nothing is
+// so --install with a non-snapper engine is refused — exit status 1 and nothing is
 // written under the root.
 func TestRunSnapshotHook_InstallRefusedNonSnapper(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
@@ -200,9 +190,7 @@ func TestRunSnapshotHook_InstallRefusedNonSnapper(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotHook(snapshotHookCmd, nil)
-		})
+		code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 	})
 	if !exited || code != 1 {
 		t.Errorf("non-snapper install exit = (%d, %v), want (1, true)", code, exited)
@@ -213,7 +201,7 @@ func TestRunSnapshotHook_InstallRefusedNonSnapper(t *testing.T) {
 }
 
 // TestRunSnapshotHook_RequiresExactlyOneFlag: neither or both of
-// --install/--uninstall is an argument error → osExit(1), nothing written.
+// --install/--uninstall is an argument error → exit status 1, nothing written.
 func TestRunSnapshotHook_RequiresExactlyOneFlag(t *testing.T) {
 	writeSnapshotConfig(t, hookTOMLSnapper)
 	root := stubHookRoot(t)
@@ -227,9 +215,7 @@ func TestRunSnapshotHook_RequiresExactlyOneFlag(t *testing.T) {
 			var code int
 			var exited bool
 			_ = captureStdout(t, func() {
-				code, exited = captureExit(t, func() {
-					runSnapshotHook(snapshotHookCmd, nil)
-				})
+				code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 			})
 			if !exited || code != 1 {
 				t.Errorf("exit = (%d, %v), want (1, true)", code, exited)

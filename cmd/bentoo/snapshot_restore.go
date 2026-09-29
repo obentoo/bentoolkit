@@ -57,7 +57,7 @@ know which subvolume it reads from. With exactly one subvolume configured that i
 implied and --subvolume is unnecessary; with several, name one — the restore
 refuses to guess rather than read another subvolume's backups.`,
 		Args: cobra.ExactArgs(1),
-		Run:  runSnapshotRestore,
+		RunE: runSnapshotRestore,
 	}
 	cmd.Flags().StringVar(&snapshotRestoreTarget, "target", "",
 		"path to restore the snapshot into (required)")
@@ -74,7 +74,7 @@ refuses to guess rather than read another subvolume's backups.`,
 	return cmd
 }
 
-func runSnapshotRestore(cmd *cobra.Command, args []string) {
+func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	id := args[0]
 
 	// Restore is destructive: load AND validate the config (drivers + deps) so an
@@ -82,15 +82,13 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 	cfg, _, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot restore: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	ship, ok := findShipByName(cfg, snapshotRestoreShip)
 	if !ok {
 		logger.Error("snapshot restore: no ship entry named %q", snapshotRestoreShip)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// WHICH subvolume this restore reads back from is decided HERE — before the
@@ -115,8 +113,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 	subvolume, err := snapshot.ResolveRestoreSubvolume(cfg, snapshotRestoreSubvolume)
 	if err != nil {
 		logger.Error("snapshot restore: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if snapshotRestoreDryRun {
@@ -125,7 +122,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 		// snapshot.Restore, no subprocess, and the confirm gate is never consulted.
 		output.PrintInfo("dry-run: would restore snapshot %s into %s via ship %q (%s)",
 			id, snapshotRestoreTarget, ship.Name, ship.Type)
-		return
+		return nil
 	}
 
 	opts := snapshot.RestoreOptions{
@@ -154,8 +151,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 		PasswordFile: ship.PasswordFile,
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	err = snapshot.Restore(ctx, id, snapshotRestoreTarget, opts)
 	switch {
@@ -163,12 +159,13 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) {
 		output.PrintSuccess("snapshot restored (%s → %s)", id, snapshotRestoreTarget)
 	case errors.Is(err, snapshot.ErrRestoreDeclined):
 		// Declining a destructive restore is a clean abort, not a failure: report
-		// it and return WITHOUT osExit(1) so the exit code stays 0 (R5.4).
+		// it and return nil — no exit status — so the exit code stays 0 (R5.4).
 		output.PrintInfo("restore declined")
 	default:
 		logger.Error("snapshot restore: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }
 
 // findShipByName returns the [[ship]] entry whose Name matches name. Match is by
