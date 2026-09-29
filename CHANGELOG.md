@@ -352,9 +352,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   swallow a second signal while it wound down; the second one now ends the
   process at once. The first signal behaves as before (apart from SIGHUP at
   `overlay manifest`, under Fixed).
-- **A failing command no longer prints its usage text.** Only the error is
-  printed. The usage text is still printed for a usage error — an unknown flag
-  or a wrong argument count.
 - **Exit codes and first-signal behaviour are unchanged.** Every command exits
   with the same code as before in every situation, and the first signal is
   handled as before: one `Ctrl+C` at the `overlay commit` and `overlay analyze`
