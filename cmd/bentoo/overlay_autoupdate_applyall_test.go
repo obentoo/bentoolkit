@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
@@ -90,8 +89,10 @@ func setupApplyAllTest(t *testing.T, n int, factory func(context.Context, string
 // must still return results in input order despite out-of-order completion.
 //
 // The exec factory tracks how many goroutines are inside it at once; a serial
-// implementation would never exceed 1. A short sleep widens the overlap window
-// so the assertion is robust rather than timing-fragile.
+// implementation would never exceed 1. Each one is held at a barrier until
+// concurrency of them are inside at once, so the overlap the peak assertion
+// judges is certain rather than likely: a serial implementation never fills
+// the barrier and fails on its deadline.
 func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 	const (
 		n           = 6
@@ -102,6 +103,7 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 		mu           sync.Mutex
 		active, peak int
 	)
+	barrier := newOverlapBarrier(t)
 	factory := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 		mu.Lock()
 		active++
@@ -110,7 +112,7 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 		}
 		mu.Unlock()
 
-		time.Sleep(20 * time.Millisecond) // overlap window
+		barrier.arrive()
 
 		mu.Lock()
 		active--
@@ -120,7 +122,17 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 
 	applier, updates := setupApplyAllTest(t, n, factory)
 
-	results, failures := applyAllPackages(applier, updates, false, concurrency)
+	var (
+		results  []*autoupdate.ApplyResult
+		failures int
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		results, failures = applyAllPackages(applier, updates, false, concurrency)
+	}()
+	barrier.openOnceArrived(t, "manifest steps", concurrency)
+	waitReturned(t, "applyAllPackages", done)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)

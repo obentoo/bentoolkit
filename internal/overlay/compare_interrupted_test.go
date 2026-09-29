@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 )
 
 // TestCompareReportInterrupted guards CompareReport.Interrupted: the run-level
@@ -83,10 +82,10 @@ import (
 func TestCompareReportInterrupted(t *testing.T) {
 	t.Run("a run cancelled mid-scan reports Interrupted", func(t *testing.T) {
 		// Same fixture shape as TestCompareWithProvider_ContextCancel: enough
-		// packages, slow enough, that dispatch is still going when the cancel
-		// lands.
+		// packages, each held in flight until the cancel, that dispatch is still
+		// going when the cancel lands.
 		const numPkgs = 200
-		prov := &fakeProvider{delay: 30 * time.Millisecond, versions: map[string][]string{}}
+		prov := &fakeProvider{hook: holdUntilCancelled(t), versions: map[string][]string{}}
 		pkgs := make([]PackageInfo, 0, numPkgs)
 		for i := 0; i < numPkgs; i++ {
 			name := fmt.Sprintf("pkg%03d", i)
@@ -96,16 +95,13 @@ func TestCompareReportInterrupted(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go func() {
-			time.Sleep(40 * time.Millisecond)
-			cancel()
-		}()
 
-		report, err := CompareWithProvider(pkgs, prov, CompareOptions{
+		// Cancel once the first provider call shows dispatch has begun.
+		report, err := compareCancelledOnceDispatched(t, pkgs, prov, CompareOptions{
 			Concurrency:   5,
 			IncludeSynced: true,
 			Ctx:           ctx,
-		})
+		}, cancel)
 
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("CompareWithProvider returned err = %v; want context.Canceled", err)

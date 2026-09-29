@@ -318,6 +318,9 @@ func TestCompletionPowershellOutput(t *testing.T) {
 
 // TestVerboseFlagConfiguresLogger tests --verbose flag triggers PersistentPreRun.
 func TestVerboseFlagConfiguresLogger(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	_, err := executeCommand(rootCmd, "--verbose", "version")
 	if err != nil {
 		t.Fatalf("--verbose version returned error: %v", err)
@@ -326,6 +329,9 @@ func TestVerboseFlagConfiguresLogger(t *testing.T) {
 
 // TestQuietFlagConfiguresLogger tests --quiet flag triggers PersistentPreRun.
 func TestQuietFlagConfiguresLogger(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	_, err := executeCommand(rootCmd, "--quiet", "version")
 	if err != nil {
 		t.Fatalf("--quiet version returned error: %v", err)

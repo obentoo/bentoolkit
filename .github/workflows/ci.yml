@@ -99,8 +99,8 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.out ./...
+      - name: Run tests with coverage, race detector and shuffled order
+        run: go test -race -shuffle=on -v -coverprofile=coverage.out ./...
 
       - name: Report coverage
         run: go tool cover -func=coverage.out | tail -1

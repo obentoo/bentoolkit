@@ -55,7 +55,6 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 		t.Fatal("newConfiguredLLMProvider(claude-code) returned no provider and no error")
 	}
 
-	startedAt := time.Now()
 	finished := make(chan struct{})
 	var gotVersion string
 	var gotErr error
@@ -74,12 +73,10 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 		}
 	})
 
+	// Cancel only once the grandchild is known to hold the pipe: its recorded
+	// PID is that event. No elapsed floor is added on top — no assertion below
+	// depends on how long the call ran before the cancel.
 	grandchild := readClaudeStubPID(t, pidFile, 10*time.Second)
-
-	// Cancel no earlier than 300 ms into the call, and only once the grandchild
-	// is known to hold the pipe — on a loaded host the stub can take longer
-	// than 300 ms to get there.
-	time.Sleep(time.Until(startedAt.Add(300 * time.Millisecond)))
 	cancelledAt := time.Now()
 	cancel()
 
@@ -108,7 +105,7 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("grandchild %d of the claude stub still runs 1 s after the call returned: the group was not stopped", grandchild)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond) // polling: the stub's grandchild process has exited
 	}
 }
 
@@ -182,7 +179,7 @@ func readClaudeStubPID(t *testing.T, pidFile string, wait time.Duration) int {
 		if time.Now().After(deadline) {
 			t.Fatalf("the claude stub never recorded its grandchild's PID in %s within %v", pidFile, wait)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) // polling: the stub has written its grandchild's PID file
 	}
 }
 

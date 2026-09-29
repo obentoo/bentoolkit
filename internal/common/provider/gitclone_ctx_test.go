@@ -77,7 +77,7 @@ func TestUpdateRepoStopsOnCancel(t *testing.T) {
 			t.Errorf("grandchild %d survived the cancel: updateRepo's git is not run in group mode (R5.9)", grandchild)
 			break
 		}
-		time.Sleep(10 * time.Millisecond) // polling kernel state, not synchronising goroutines
+		time.Sleep(10 * time.Millisecond) // polling: the process has exited or is a zombie
 	}
 }
 

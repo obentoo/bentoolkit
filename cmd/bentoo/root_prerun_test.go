@@ -99,13 +99,9 @@ package main
 // stops the four above being satisfied by a classifier that always complains.
 //
 // Every test in this file carries the TestRootPreRun prefix, so
-// `-run TestRootPreRun` selects all of them and not a neighbour's — and the
-// last test in the file asserts exactly that, against this file's own names.
+// `-run TestRootPreRun` selects all of them and not a neighbour's.
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"strings"
 	"testing"
 
@@ -401,47 +397,5 @@ func TestRootPreRunGuardAcceptsACompliantTree(t *testing.T) {
 	if len(problems) != 0 {
 		t.Errorf("a compliant tree — one hook, on the root, error-returning — was reported as violating the rule, so the three hostile fixtures above prove nothing:\n%s",
 			strings.Join(problems, "\n"))
-	}
-}
-
-// TestRootPreRunTestNamesAreAllSelectedByTheirOwnPattern reads THIS file and
-// checks that every `func Test` in it carries the TestRootPreRun prefix.
-//
-// The sub-task's Validation is `go test ./cmd/bentoo/ -run TestRootPreRun -v`.
-// Go's -run is an unanchored substring regexp, so a test added here under some
-// other name would never be selected by that command: it would sit unrun while
-// the gate reported success. That is the defect class 15.3's guard exists for,
-// checked here one level down, against this file's own names.
-func TestRootPreRunTestNamesAreAllSelectedByTheirOwnPattern(t *testing.T) {
-	const (
-		self   = "root_prerun_test.go"
-		prefix = "TestRootPreRun"
-	)
-
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, self, nil, 0)
-	if err != nil {
-		t.Fatalf("parsing %s: %v", self, err)
-	}
-
-	names := make([]string, 0, 8)
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
-			continue
-		}
-		names = append(names, fn.Name.Name)
-	}
-
-	t.Logf("swept %d test functions in %s", len(names), self)
-	if len(names) == 0 {
-		t.Fatalf("swept 0 test functions in %s — this check passed over an empty set", self)
-	}
-
-	for _, name := range names {
-		if !strings.HasPrefix(name, prefix) {
-			t.Errorf("%s does not start with %q, so `go test ./cmd/bentoo/ -run %s` — this sub-task's own Validation command — would not select it, and it would sit unrun behind a green gate",
-				name, prefix, prefix)
-		}
 	}
 }

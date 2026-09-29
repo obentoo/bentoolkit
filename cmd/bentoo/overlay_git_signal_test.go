@@ -114,8 +114,7 @@ func silentGitRemote(t *testing.T) silentRemote {
 // branch tracks origin, origin being the silent git:// remote at addr.
 func overlayWithSilentRemote(t *testing.T, addr string) {
 	t.Helper()
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHomeWithGitRepo(t)
 	if err := os.WriteFile(filepath.Join(overlayDir, "README"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

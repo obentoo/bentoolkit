@@ -26,6 +26,12 @@ GOTEST := $(GO) test
 GOBUILD := $(GO) build
 GOMOD := $(GO) mod
 
+# Test order: `on` draws a fresh seed per run; a failing run prints
+# `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.
+SHUFFLE ?= on
+# How long `make fuzz` runs each fuzz target.
+FUZZTIME ?= 30s
+
 # Default target
 .PHONY: all
 all: build
@@ -65,17 +71,31 @@ install-config:
 		echo "install-config: wrote $(CONFIG_FILE) (edit it and set overlay.path)"; \
 	fi
 
-# Run tests
+# Run tests with the race detector, in shuffled order
 .PHONY: test
 test:
-	$(GOTEST) -v ./...
+	$(GOTEST) -race -shuffle=$(SHUFFLE) -v ./...
 
-# Run tests with coverage
+# Run tests with coverage (race detector and shuffled order, like `test`)
 .PHONY: coverage
 coverage:
-	$(GOTEST) -v -coverprofile=coverage.out ./...
+	$(GOTEST) -race -shuffle=$(SHUFFLE) -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
+
+# Run every fuzz target for FUZZTIME each. `go test -list` prints a package's
+# matching names and then its `ok <pkg>` line, so each name is paired with the
+# package on the next `ok` line. -fuzz takes exactly one target and one package
+# per run, hence the loop; the first failure stops it, naming the target.
+.PHONY: fuzz
+fuzz:
+	@set -eu; \
+	targets="$$($(GOTEST) -list '^Fuzz' ./... | awk '/^Fuzz/ { names = names " " $$1; next } /^ok / { n = split(names, a, " "); for (i = 1; i <= n; i++) print $$2 " " a[i]; names = "" }')"; \
+	if [ -z "$$targets" ]; then echo "fuzz: no fuzz targets found"; exit 1; fi; \
+	printf '%s\n' "$$targets" | while read -r pkg name; do \
+		echo "fuzz: $$name ($$pkg) for $(FUZZTIME)"; \
+		$(GOTEST) -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || { echo "fuzz: $$name in $$pkg FAILED"; exit 1; }; \
+	done
 
 # Audit the context spine: no naked context.Background() may appear in
 # internal/autoupdate or internal/overlay outside of test files. The naive
@@ -171,8 +191,9 @@ help:
 	@echo "  install         Install to $(INSTALL_DIR)"
 	@echo "  uninstall       Remove from $(INSTALL_DIR)"
 	@echo "  install-config  Copy config.example.yaml to the user's config dir (no overwrite)"
-	@echo "  test            Run tests"
-	@echo "  coverage        Run tests with coverage report"
+	@echo "  test            Run tests with -race in shuffled order (SHUFFLE=<seed> replays an order)"
+	@echo "  coverage        Run tests with coverage report (-race, shuffled)"
+	@echo "  fuzz            Run every fuzz target for FUZZTIME each (default 30s)"
 	@echo "  audit-ctx       Verify no naked context.Background() in internal/autoupdate, internal/overlay"
 	@echo "  audit           Run security audit (audit-ctx + go mod verify + govulncheck)"
 	@echo "  clean           Remove build artifacts"

@@ -1513,11 +1513,18 @@ bentoo overlay push
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests, with the race detector, in random order
 make test
 
-# Run tests with coverage
+# Replay the order of a failing run (the seed is printed as -test.shuffle <seed>)
+make test SHUFFLE=1790618260127275631
+
+# Run tests with coverage (also -race, random order)
 make coverage
+
+# Run every fuzz target for FUZZTIME each (default 30s)
+make fuzz
+make fuzz FUZZTIME=5m
 
 # Run specific package tests
 go test -v ./internal/overlay/...

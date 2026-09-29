@@ -56,7 +56,7 @@ func waitGone(t *testing.T, pid int, what string) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 			return
 		}
-		time.Sleep(10 * time.Millisecond) // polling kernel state, not synchronising goroutines
+		time.Sleep(10 * time.Millisecond) // polling: the process has exited or is a zombie
 	}
 }
 

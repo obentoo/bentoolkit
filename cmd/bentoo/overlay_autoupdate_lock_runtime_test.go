@@ -59,8 +59,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	overlayDir, cleanup := setupTestHome(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHome(t)
 	const pkg = "app-misc/probe"
 	writeExitTestPackagesConfig(t, overlayDir, server.URL, []string{pkg})
 	writeExitTestEbuild(t, overlayDir, pkg, "0.9.0")
@@ -123,8 +122,7 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	overlayDir, cleanup := setupTestHome(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHome(t)
 	pkgs := []string{"cat-a/pkg1", "cat-a/pkg2"}
 	writeExitTestPackagesConfig(t, overlayDir, server.URL, pkgs)
 	for _, pkg := range pkgs {

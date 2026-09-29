@@ -28,6 +28,11 @@ type recordingRateLimiter struct {
 	calls    atomic.Int64
 	block    bool  // when true, WaitHTTP blocks until ctx is Done
 	failWith error // when non-nil (and not blocking), WaitHTTP returns this
+
+	// blocking, when non-nil, is closed the first time WaitHTTP starts
+	// blocking, so a test can cancel a wait that is genuinely in progress.
+	blocking     chan struct{}
+	blockingOnce sync.Once
 }
 
 // WaitHTTP records the host and applies the configured behaviour.
@@ -38,6 +43,9 @@ func (m *recordingRateLimiter) WaitHTTP(ctx context.Context, domain string) erro
 	m.mu.Unlock()
 
 	if m.block {
+		if m.blocking != nil {
+			m.blockingOnce.Do(func() { close(m.blocking) })
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -208,7 +216,7 @@ func TestFetchContent_RateLimitContextCancelled(t *testing.T) {
 	defer server.Close()
 
 	// A limiter that blocks until the context is cancelled.
-	mock := &recordingRateLimiter{block: true}
+	mock := &recordingRateLimiter{block: true, blocking: make(chan struct{})}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -219,15 +227,34 @@ func TestFetchContent_RateLimitContextCancelled(t *testing.T) {
 		WithOpTimeout(10*time.Second), // generous: the cancel, not the deadline, ends the wait
 	)
 
-	// Cancel the parent context shortly after the fetch starts blocking.
+	type fetchOutcome struct {
+		err     error
+		elapsed time.Duration
+	}
+	outcome := make(chan fetchOutcome, 1)
 	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
+		start := time.Now()
+		_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		outcome <- fetchOutcome{err: err, elapsed: time.Since(start)}
 	}()
 
-	start := time.Now()
-	_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
-	elapsed := time.Since(start)
+	// Cancel the parent context once the fetch is blocked in the rate-limit wait.
+	select {
+	case <-mock.blocking:
+	case got := <-outcome:
+		t.Fatalf("fetchContent returned (err=%v) before it blocked in the rate-limit wait", got.err)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("fetchContent never blocked in the rate-limit wait within 5s (WaitHTTP calls=%d)", mock.callCount())
+	}
+	cancel()
+
+	var got fetchOutcome
+	select {
+	case got = <-outcome:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fetchContent did not return within 10s of the parent context being cancelled")
+	}
+	err, elapsed := got.err, got.elapsed
 
 	if err == nil {
 		t.Fatal("expected an error when the rate-limit wait is cancelled, got nil")

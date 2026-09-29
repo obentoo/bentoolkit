@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/leanovate/gopter"
@@ -947,8 +948,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Set environment variable
-			os.Setenv(varName, varValue)
-			defer os.Unsetenv(varName)
+			t.Setenv(varName, varValue)
 
 			// Test substitution
 			template := "Bearer ${" + varName + "}"
@@ -985,10 +985,8 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			var2Name := allowedHeaderEnvPrefix + var2Suffix
 
 			// Set environment variables
-			os.Setenv(var1Name, var1Value)
-			os.Setenv(var2Name, var2Value)
-			defer os.Unsetenv(var1Name)
-			defer os.Unsetenv(var2Name)
+			t.Setenv(var1Name, var1Value)
+			t.Setenv(var2Name, var2Value)
 
 			// Test substitution with multiple variables
 			template := "${" + var1Name + "}-${" + var2Name + "}"
@@ -1019,7 +1017,10 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			varName := allowedHeaderEnvPrefix + varSuffix
 
 			// Ensure variable is not set
-			os.Unsetenv(varName)
+			t.Setenv(varName, "")
+			if err := os.Unsetenv(varName); err != nil {
+				t.Fatalf("unsetting %s: %v", varName, err)
+			}
 
 			// Test substitution: unset allow-listed var -> literal passthrough.
 			template := "prefix-${" + varName + "}-suffix"
@@ -1068,8 +1069,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 			const headerKey = "X-Api-Key"
 
 			// Set environment variable
-			os.Setenv(varName, varValue)
-			defer os.Unsetenv(varName)
+			t.Setenv(varName, varValue)
 
 			var receivedHeaders http.Header
 
@@ -1179,101 +1179,113 @@ func TestHTTPClient_CircuitOpens(t *testing.T) {
 	}
 }
 
-// TestHTTPClient_CircuitRecovery verifies that after the breaker timeout a probe succeeds
-// and the circuit closes.
-func TestHTTPClient_CircuitRecovery(t *testing.T) {
-	var mode int32 // 0 = fail, 1 = succeed
+// breakerRT is an in-memory transport answering 500 until succeed is set, then
+// 200. The breaker tests run inside a synctest bubble, where a goroutine
+// blocked on a real socket is not durably blocked and the fake clock could not
+// advance past it — hence no httptest.Server here.
+type breakerRT struct{ succeed atomic.Bool }
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.LoadInt32(&mode) == 0 {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-	}))
-	defer server.Close()
+func (rt *breakerRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	status := http.StatusInternalServerError
+	if rt.succeed.Load() {
+		status = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("")),
+		Request:    r,
+	}, nil
+}
 
-	// Use a very short timeout so the breaker moves to half-open quickly
-	breakerTimeout := 10 * time.Millisecond
-	cb := newBreakerWithTimeout(breakerTimeout)
-
+// newBreakerTestClient returns a client with no retries whose every host shares
+// cb and whose requests go to rt.
+func newBreakerTestClient(cb *gobreaker.CircuitBreaker, rt http.RoundTripper) *RetryableHTTPClient {
 	client := NewRetryableHTTPClientWithConfig(RetryConfig{
 		MaxRetries: 0,
 		BaseDelay:  0,
 		MaxDelay:   0,
 		Timeout:    5 * time.Second,
 	})
+	client.SetHTTPClient(&http.Client{Transport: rt})
 	client.newBreaker = func(string) *gobreaker.CircuitBreaker { return cb }
 	client.SetDelayFunc(func(time.Duration) {})
+	return client
+}
 
-	// Open the circuit with 5 failures
-	for i := 0; i < DefaultBreakerMaxFailures; i++ {
-		r, _ := client.Get(server.URL)
-		if r != nil {
-			r.Body.Close()
+// TestHTTPClient_CircuitRecovery verifies that after the breaker timeout a probe succeeds
+// and the circuit closes.
+func TestHTTPClient_CircuitRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt := &breakerRT{}
+		// The breaker reads the bubble's clock, so it is built inside the bubble.
+		breakerTimeout := 10 * time.Millisecond
+		client := newBreakerTestClient(newBreakerWithTimeout(breakerTimeout), rt)
+
+		// Open the circuit with 5 failures
+		for i := 0; i < DefaultBreakerMaxFailures; i++ {
+			r, _ := client.Get("http://breaker.test/pkg")
+			if r != nil {
+				r.Body.Close()
+			}
 		}
-	}
 
-	// Switch server to success mode and wait for breaker timeout
-	atomic.StoreInt32(&mode, 1)
-	time.Sleep(breakerTimeout * 3)
+		// Switch the upstream to success and let the breaker timeout elapse on
+		// the bubble's fake clock: the sleep returns at once in real time.
+		rt.succeed.Store(true)
+		time.Sleep(breakerTimeout * 3) // hold: advances the bubble's fake clock past the breaker timeout
 
-	// Probe should succeed and circuit should close
-	resp, err := client.Get(server.URL)
-	if err != nil {
-		t.Errorf("Expected success after circuit recovery, got: %v", err)
-	}
-	if resp != nil {
-		resp.Body.Close()
-	}
+		// Probe should succeed and circuit should close
+		resp, err := client.Get("http://breaker.test/pkg")
+		if err != nil {
+			t.Errorf("Expected success after circuit recovery, got: %v", err)
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	})
 }
 
 // TestHTTPClient_CircuitProbeFailure verifies that a failed probe keeps the circuit open.
 func TestHTTPClient_CircuitProbeFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		rt := &breakerRT{}
+		breakerTimeout := 10 * time.Millisecond
+		client := newBreakerTestClient(newBreakerWithTimeout(breakerTimeout), rt)
 
-	breakerTimeout := 10 * time.Millisecond
-	cb := newBreakerWithTimeout(breakerTimeout)
+		// Open the circuit
+		for i := 0; i < DefaultBreakerMaxFailures; i++ {
+			resp, _ := client.Get("http://breaker.test/pkg")
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+		}
 
-	client := NewRetryableHTTPClientWithConfig(RetryConfig{
-		MaxRetries: 0,
-		BaseDelay:  0,
-		MaxDelay:   0,
-		Timeout:    5 * time.Second,
-	})
-	client.newBreaker = func(string) *gobreaker.CircuitBreaker { return cb }
-	client.SetDelayFunc(func(time.Duration) {})
+		// Let the breaker timeout elapse on the bubble's fake clock, then make a
+		// probe that fails.
+		time.Sleep(breakerTimeout * 3) // hold: advances the bubble's fake clock past the breaker timeout
 
-	// Open the circuit
-	for i := 0; i < DefaultBreakerMaxFailures; i++ {
-		resp, _ := client.Get(server.URL)
+		// Probe will fail (the upstream still returns 500)
+		resp, err := client.Get("http://breaker.test/pkg")
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
-	}
+		// This might succeed as a probe attempt but then circuit should re-open
+		_ = err
 
-	// Wait for the breaker timeout, then make a probe that fails
-	time.Sleep(breakerTimeout * 3)
-
-	// Probe will fail (server still returns 500)
-	resp, err := client.Get(server.URL)
-	if resp != nil && resp.Body != nil {
-		resp.Body.Close()
-	}
-	// This might succeed as a probe attempt but then circuit should re-open
-	_ = err
-
-	// Next request should indicate circuit is still open or re-opened
-	resp, err = client.Get(server.URL)
-	if resp != nil && resp.Body != nil {
-		resp.Body.Close()
-	}
-	if err == nil {
-		t.Error("Expected error after failed probe keeps circuit open")
-	}
+		// Next request should indicate circuit is still open or re-opened
+		resp, err = client.Get("http://breaker.test/pkg")
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		if err == nil {
+			t.Error("Expected error after failed probe keeps circuit open")
+		}
+	})
 }
 
 // TestHTTPClient_CircuitAndRateLimiterIndependent verifies that circuit breaker and rate

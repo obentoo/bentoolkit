@@ -413,8 +413,7 @@ func configWithGentooGitHub() *config.Config {
 // config entry, so the network registry is never consulted). It asserts a
 // non-nil provider that, being API-only, is NOT a provider.PackageDirProvider.
 func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	cfg := configWithGentooGitHub()
 
@@ -438,8 +437,7 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 // applier.Apply work. Fully binary-free (no clone, no pkgdev).
 func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 	pinReviveConcurrency(t)
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
 	configDir := t.TempDir()
@@ -460,8 +458,7 @@ func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 // binary. resolveGentooProvider's success path is exercised here too.
 func TestRunReviveList_NoCandidates(t *testing.T) {
 	pinReviveConcurrency(t)
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
 	configDir := t.TempDir()

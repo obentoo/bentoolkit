@@ -54,8 +54,7 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Declare enough packages (with on-disk ebuilds) that the check has real,
 	// long-running work to cancel.
@@ -141,17 +140,20 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	}
 
 	// Stub `pkgdev` binary on PATH: an `exec sleep 3600` blocks indefinitely,
-	// and `exec.CommandContext` SIGKILLs it on cancellation.
+	// and `exec.CommandContext` SIGKILLs it on cancellation. Before blocking it
+	// creates readyFile, the event the SIGTERM below waits for. The path is
+	// written into the script, not passed through the environment, because
+	// the child's environment is not the test's to decide.
 	binDir := t.TempDir()
 	stubPath := filepath.Join(binDir, "pkgdev")
-	stubScript := "#!/bin/sh\nexec sleep 3600\n"
+	readyFile := filepath.Join(t.TempDir(), "pkgdev.ready")
+	stubScript := "#!/bin/sh\n: > '" + readyFile + "'\nexec sleep 3600\n"
 	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
 		t.Fatalf("write stub pkgdev: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	const (
 		pkg        = "test-cat/test-pkg"
@@ -212,8 +214,18 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 		withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
 	}()
 
-	// Give runApply time to copyEbuild and spawn the stub `ebuild`.
-	time.Sleep(400 * time.Millisecond)
+	// Signal only once runApply has copied the ebuild and spawned the stub
+	// `pkgdev`: its ready file says so. A run that returns before spawning it
+	// fails here instead of letting the SIGTERM meet the default disposition
+	// and kill the test binary.
+	waitForReadyFile(t, readyFile, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
 
 	signalAt := time.Now()
 	proc, err := os.FindProcess(os.Getpid())

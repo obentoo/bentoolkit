@@ -89,9 +89,7 @@ func TestMissingConfigError(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Set HOME to temp dir to use a non-existent config
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create config directory and file with empty overlay path
 	configDir := filepath.Join(tmpDir, ".config", "bentoo")
