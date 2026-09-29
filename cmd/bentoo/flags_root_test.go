@@ -20,10 +20,11 @@ package main
 // so `overlay manifest --ui=plain` is rejected as an unknown flag.
 
 import (
-	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/snapshot"
 )
 
 // TestRootFlagsAppearOnACommandThatDeclaresNone is the help-text half of R3.1,

@@ -52,3 +52,12 @@ linters:
         linters:
           - errcheck
           - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - ^\.epic/
+      - ^\.claude/
