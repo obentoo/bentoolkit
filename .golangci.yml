@@ -42,6 +42,11 @@ linters:
         - G704
 
   exclusions:
+    # .epic holds staged authored tests and .claude holds agent worktrees (full
+    # repository copies); neither is this module's code.
+    paths:
+      - ^\.epic/
+      - ^\.claude/
     rules:
       - path: _test\.go
         linters:
