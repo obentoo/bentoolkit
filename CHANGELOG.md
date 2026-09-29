@@ -138,6 +138,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A Manifest `DIST` line named `.` or `..` is no longer read as a
+  distfile.** Joined onto the distdir, such a name points at the distdir
+  itself or its parent. Names that merely contain dots (`...`, `.foo`,
+  `foo..tar.gz`) are still read.
+- **An ebuild path whose category or package is `.` or `..` is refused.**
+  `././x/x-1.ebuild` used to parse with category `.`, and the path it
+  rendered back (`./x/x-1.ebuild`) did not parse at all.
+
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
   client kept a single circuit breaker for all hosts, so two dead hosts made
   every other package fail with "circuit breaker open" for 30 s. Each
@@ -314,6 +322,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unwrapped.
 
 ### Changed
+
+- **`make test` and `make coverage` run with the race detector in random
+  order**, as the CI test job now does. A failing run prints
+  `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.
+  `make fuzz` runs every fuzz target for `FUZZTIME` each (default 30s).
 
 - **A tool the agent was refused is now named in the failure.** When a fixer
   or the bump reviewer fails, the error ends with `refused tools:` and the
