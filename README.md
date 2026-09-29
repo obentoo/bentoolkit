@@ -689,11 +689,14 @@ bentoo notice revise 2026-09-28-foo-cve --severity warning
   ranges is written there as the bare package, with a warning: the news item
   then targets every installed version, while the feed stays precise.
 - **The body** comes from `--body-file`, or from `$VISUAL`, else `$EDITOR`,
-  opened on a temporary file. Write it below the `# --- >8 ---` scissors
-  line: everything below that line is kept as written, `#` lines included (a
-  root prompt such as `# emerge --sync` survives), and the instructions above
-  it are dropped. An empty body aborts without writing anything. The editor command is split into
-  words and run directly, never through a shell.
+  opened on a temporary file. Type it anywhere in that file. The file's
+  instructions end with a scissors line,
+  `# ------------------------ >8 ------------------------`: above it, lines
+  starting with `#` are the instructions and are dropped, and any other text
+  is kept; below it, everything is kept as written, `#` lines included, so a
+  root prompt such as `# emerge --sync` survives. An empty body aborts without
+  writing anything. The editor command is split into words and run directly,
+  never through a shell.
 - **`notice.site_path`** in the configuration points at the site repository.
   Without it only the news item is written, and the site YAML is printed for
   you to save by hand.

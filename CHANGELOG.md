@@ -161,6 +161,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bentoo notice` no longer loses the text typed above the scissors line.**
+  The editor's file ends its instructions with a scissors line, and only what
+  was below it used to be kept — so a body typed at the top of the file, where
+  most editors open, was discarded, `notice new` failed with an empty body and
+  the temporary file went with the text. Text above the line is now kept; only
+  the `#` instruction lines there are dropped, and everything below the line is
+  still kept as written.
+
 - **A Manifest `DIST` line named `.` or `..` is no longer read as a
   distfile.** Joined onto the distdir, such a name points at the distdir
   itself or its parent. Names that merely contain dots (`...`, `.foo`,
