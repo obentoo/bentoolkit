@@ -244,11 +244,16 @@ func TestRealignPublishReportsRefusalAndErrorDifferently(t *testing.T) {
 		needsAHuman    = "needs a human"
 	)
 
+	// Story 058 (R3.3): the write error is a diagnostic and is printed on
+	// stderr by `func offerRealignPublish`; the refusal is a report line and
+	// stays on stdout. mustSay is asserted on its own stream, mustNot on both,
+	// so neither literal can hide in the stream this test does not read.
 	cases := []struct {
-		name    string
-		err     error
-		mustSay string
-		mustNot string
+		name     string
+		err      error
+		mustSay  string
+		onStderr bool
+		mustNot  string
 	}{
 		{
 			name:    "a refusal is the system working",
@@ -257,10 +262,11 @@ func TestRealignPublishReportsRefusalAndErrorDifferently(t *testing.T) {
 			mustNot: needsAHuman,
 		},
 		{
-			name:    "a write error needs a human",
-			err:     errors.New("replacing the published ebuild: disk went away"),
-			mustSay: needsAHuman,
-			mustNot: publishRefused,
+			name:     "a write error needs a human",
+			err:      errors.New("replacing the published ebuild: disk went away"),
+			mustSay:  needsAHuman,
+			onStderr: true,
+			mustNot:  publishRefused,
 		},
 	}
 
@@ -278,16 +284,24 @@ func TestRealignPublishReportsRefusalAndErrorDifferently(t *testing.T) {
 				return tc.err
 			}
 
-			out, code := realignRun(t, nil)
+			var out string
+			var code int
+			errOut := captureStderr(t, func() {
+				out, code = realignRun(t, nil)
+			})
 
 			if code != 0 {
 				t.Fatalf("exit code is %d, want 0 — the report is the outcome, and D9 keeps the exit code for the review", code)
 			}
-			if !strings.Contains(out, tc.mustSay) {
-				t.Errorf("the outcome does not read as %q:\n%s", tc.mustSay, out)
+			said := out
+			if tc.onStderr {
+				said = errOut
 			}
-			if strings.Contains(out, tc.mustNot) {
-				t.Errorf("the outcome also reads as %q; the two must never be readable as one another:\n%s", tc.mustNot, out)
+			if !strings.Contains(said, tc.mustSay) {
+				t.Errorf("the outcome does not read as %q (stderr=%v):\n%s", tc.mustSay, tc.onStderr, said)
+			}
+			if strings.Contains(out+errOut, tc.mustNot) {
+				t.Errorf("the outcome also reads as %q; the two must never be readable as one another:\n%s%s", tc.mustNot, out, errOut)
 			}
 		})
 	}

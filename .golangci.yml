@@ -26,6 +26,7 @@ linters:
         - (*github.com/fatih/color.Color).Printf
         - (*github.com/fatih/color.Color).Println
         - (*github.com/fatih/color.Color).Fprintf
+        - (*github.com/fatih/color.Color).Fprintln
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Printf

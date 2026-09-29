@@ -1128,7 +1128,7 @@ func reconcileRegistryAfterCheck(overlayPath string) {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
 		// and its exit code says so. The next run proposes the same batch again.
 		logger.Error("reconcile: failed to write %d version pin(s) to packages.toml: %v", len(pins), err)
-		output.Error.Printf("  The registry was NOT updated: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  The registry was NOT updated: %v\n", err)
 		return
 	}
 	output.Success.Printf("  Wrote %d version pin(s) to packages.toml.\n", len(pins))

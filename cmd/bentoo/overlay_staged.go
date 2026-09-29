@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -181,13 +182,13 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string) error {
 
 	appCtx, err := loadAppContext()
 	if err != nil {
-		output.Error.Printf("  loading config: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
 		return exitWith(1)
 	}
 
 	stagingRoot, err := autoupdateStagingRoot()
 	if err != nil {
-		output.Error.Printf("  the staged trees could not be located: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  the staged trees could not be located: %v\n", err)
 		return exitWith(1)
 	}
 
@@ -224,7 +225,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error 
 		// Reported verbatim: the refusal an operator reads has to be the one the
 		// planner reached — "the staging root is inside the overlay" and "the
 		// root could not be walked" are different problems with different fixes.
-		output.Error.Printf("  the staged trees could not be planned: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  the staged trees could not be planned: %v\n", err)
 		return exitWith(1)
 	}
 

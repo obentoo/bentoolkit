@@ -360,7 +360,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// it would have switched the gates off in silence.
 	depth, err := validate.ParseDepth(compareDepth)
 	if err != nil {
-		output.Error.Printf("\n  Nothing was proved — --depth: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "\n  Nothing was proved — --depth: %v\n", err)
 		return
 	}
 
@@ -375,7 +375,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// anybody is asked to agree to builds that could not happen.
 	stagingRoot, err := autoupdateStagingRoot()
 	if err != nil {
-		output.Error.Printf("\n  Nothing was proved — --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
+		output.Error.Fprintf(os.Stderr, "\n  Nothing was proved — --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
 		return
 	}
 

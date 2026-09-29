@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -178,7 +179,7 @@ func runPruneCmd(cmd *cobra.Command, args []string) error {
 
 	appCtx, err := loadAppContext()
 	if err != nil {
-		output.Error.Printf("  loading config: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
 		return exitWith(1)
 	}
 
@@ -239,7 +240,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	scan, err := overlay.ScanOverlay(overlayPath)
 	if err != nil {
-		output.Error.Printf("  cannot scan the overlay at %s: %v\n", overlayPath, err)
+		output.Error.Fprintf(os.Stderr, "  cannot scan the overlay at %s: %v\n", overlayPath, err)
 		return exitWith(1)
 	}
 	if len(scan.Errors) > 0 {
@@ -263,8 +264,8 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// R1.3. The quiet failure this prevents: an unmatched restriction yields an
 		// empty plan, an empty plan reads as "the overlay is clean", and the operator
 		// walks away from a misspelled category believing they were told something.
-		output.Error.Printf("  %v\n", err)
-		output.Info.Println("  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all.")
+		output.Error.Fprintf(os.Stderr, "  %v\n", err)
+		output.Info.Fprintln(os.Stderr, "  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all.")
 		return exitWith(1)
 	}
 
@@ -278,7 +279,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
-		output.Error.Printf("  %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  %v\n", err)
 		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // closing a read-only provider cannot invalidate a plan already printed
@@ -337,7 +338,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		OverlayPath:        overlayPath,
 	})
 	if err != nil {
-		output.Error.Printf("  comparing packages: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  comparing packages: %v\n", err)
 		return exitWith(1)
 	}
 
@@ -829,8 +830,8 @@ func prunedRegistryAtoms(results []overlay.PruneResult) []string {
 func removePruneRegistryEntries(overlayPath string, atoms []string) error {
 	if err := autoupdate.RemovePackagesFromConfig(overlayPath, atoms); err != nil {
 		wrapped := fmt.Errorf("removing %d atom(s) from .autoupdate/packages.toml: %w", len(atoms), err)
-		output.Error.Printf("  %v\n", wrapped)
-		output.Warning.Println("  The package directories are gone and the registry still lists them; delete those entries by hand. An entry whose package directory no longer exists promises an endpoint for something that is not there, and the next --check disables it without saying why.")
+		output.Error.Fprintf(os.Stderr, "  %v\n", wrapped)
+		output.Warning.Fprintln(os.Stderr, "  The package directories are gone and the registry still lists them; delete those entries by hand. An entry whose package directory no longer exists promises an endpoint for something that is not there, and the next --check disables it without saying why.")
 		return wrapped
 	}
 

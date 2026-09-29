@@ -236,7 +236,7 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 	for _, r := range result.Items {
 		if r.SuggestedSchema != nil && r.Error == nil {
 			if err := analyzer.SaveSchema(r.Package, r.SuggestedSchema); err != nil {
-				output.Error.Printf("Failed to save schema for %s: %v\n", r.Package, err)
+				output.Error.Fprintf(os.Stderr, "Failed to save schema for %s: %v\n", r.Package, err)
 			} else {
 				saved++
 			}

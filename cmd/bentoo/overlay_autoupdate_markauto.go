@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -48,7 +49,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 		// load cannot be migrated either, and failing here is the cheapest place
 		// to say so.
 		logger.Error("failed to plan the disable-origin migration: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
 
@@ -63,12 +64,12 @@ func runMarkAutoDisabled(overlayPath string) error {
 	// list above waiting to be stamped — after which the reconciliation is free
 	// to re-enable and bump the very pin that exists to prevent that.
 	if len(plan.UnmatchedExcept) > 0 {
-		output.Error.Println("  --except names entries that are not in packages.toml, so they protect nothing:")
+		output.Error.Fprintln(os.Stderr, "  --except names entries that are not in packages.toml, so they protect nothing:")
 		for _, pkg := range plan.UnmatchedExcept {
-			output.Error.Println("    " + pkg)
+			output.Error.Fprintln(os.Stderr, "    "+pkg)
 		}
 		logger.Error("refusing to migrate: %d --except entry(ies) match no record — fix the spelling and re-run", len(plan.UnmatchedExcept))
-		output.Error.Println("  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
 
@@ -93,7 +94,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		logger.Error("failed to record the automatic origin: %v", err)
-		output.Error.Printf("  packages.toml was NOT modified: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  packages.toml was NOT modified: %v\n", err)
 		return exitWith(1)
 	}
 

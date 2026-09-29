@@ -305,16 +305,20 @@ func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
 	setOverlayPruneFlags(t, false, false, false, false)
 	forbidOverlayPruneRemoval(t)
 
+	// The error is a diagnostic, so it is read on stderr (story 058, R3.3).
 	var code int
-	out := captureStdout(t, func() {
-		code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}))
+	var errOut string
+	_ = captureStdout(t, func() {
+		errOut = captureStderr(t, func() {
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}))
+		})
 	})
 
 	if code <= 0 {
 		t.Errorf("exit code = %d, want non-zero; an unmatched target that exits 0 reads as 'nothing to clean'", code)
 	}
-	if !strings.Contains(out, typo) {
-		t.Errorf("the error does not name the argument %q, so the operator cannot see the typo:\n%s", typo, out)
+	if !strings.Contains(errOut, typo) {
+		t.Errorf("the error does not name the argument %q on stderr, so the operator cannot see the typo:\n%s", typo, errOut)
 	}
 }
 

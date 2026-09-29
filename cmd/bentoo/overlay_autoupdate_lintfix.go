@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -44,7 +45,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 		// rewrite failed the inertness gate. Both mean report it and change
 		// nothing; neither is a condition to retry around.
 		logger.Error("failed to repair packages.toml: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
 
@@ -66,7 +67,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 		// No diff means no review, and no review means no write: this gate exists
 		// to stop a change nobody has seen from being published.
 		logger.Error("failed to render the repair as a diff: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
 
@@ -92,7 +93,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 		// "the filesystem refused" and "the rewrite stopped being provably inert
 		// between the diff and now". Either way the registry is untouched.
 		logger.Error("failed to write the repaired packages.toml: %v", err)
-		output.Error.Printf("  The registry was NOT repaired: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  The registry was NOT repaired: %v\n", err)
 		return exitWith(1)
 	}
 

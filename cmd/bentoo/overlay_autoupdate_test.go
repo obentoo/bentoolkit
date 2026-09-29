@@ -832,10 +832,15 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 		return wantErr
 	})
 
+	// The failure is a diagnostic, so it is read on stderr (story 058, R3.3);
+	// the check's report stays on stdout.
 	var code int
+	var errOut string
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
-			&config.Config{}, config.LLMConfig{}))
+		errOut = captureStderr(t, func() {
+			code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+				&config.Config{}, config.LLMConfig{}))
+		})
 	})
 
 	if code != 0 {
@@ -844,11 +849,11 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("the writer was called %d times, want exactly 1 (design D4: one batch, one call)", calls)
 	}
-	if !strings.Contains(out, wantErr.Error()) {
-		t.Errorf("the write failure was swallowed; want the cause %q in the output, got:\n%s", wantErr, out)
+	if !strings.Contains(errOut, wantErr.Error()) {
+		t.Errorf("the write failure was swallowed; want the cause %q on stderr, got:\n%s", wantErr, errOut)
 	}
-	if strings.Contains(out, "Wrote ") {
-		t.Errorf("a failed write reported success; got:\n%s", out)
+	if strings.Contains(out+errOut, "Wrote ") {
+		t.Errorf("a failed write reported success; got:\n%s%s", out, errOut)
 	}
 	if after := f.readRegistry(t); !bytes.Equal(before, after) {
 		t.Error("the stubbed writer must not have touched the file; the fixture is no longer a valid control")

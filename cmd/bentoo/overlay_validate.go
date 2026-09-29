@@ -529,7 +529,7 @@ const infoCountLabel = "info:"
 // nothing they can act on.
 func renderValidateText(report validate.Report) {
 	if report.UnmatchedSelector != "" {
-		output.Error.Printf("  nothing in the overlay matches %q\n", report.UnmatchedSelector)
+		output.Error.Fprintf(os.Stderr, "  nothing in the overlay matches %q\n", report.UnmatchedSelector)
 		return
 	}
 
