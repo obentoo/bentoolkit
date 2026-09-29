@@ -182,7 +182,7 @@ func (i LintIssue) String() string {
 // per-record line the other rules produce instead of only a fatal error.
 func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrPackagesConfigNotFound

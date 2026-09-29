@@ -53,7 +53,7 @@ func Acquire(path, purpose string) (*Lock, error) {
 		// open the lock read-only to take its flock and reap it after a crash.
 		// Nothing secret is in it — only the holder's PID and purpose.
 		// #nosec G302 -- readable by design; see above
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller
 		switch {
 		case err == nil:
 			held, err := claim(file, path, purpose)
@@ -69,7 +69,7 @@ func Acquire(path, purpose string) (*Lock, error) {
 				return nil, fmt.Errorf("inspecting the lock %s: %w", path, err)
 			}
 			// A reaped lock is retried at once, without waiting a poll.
-			if _, statErr := os.Lstat(path); errors.Is(statErr, fs.ErrNotExist) {
+			if _, statErr := os.Lstat(path); errors.Is(statErr, fs.ErrNotExist) { //nolint:gosec // G703: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller of Acquire
 				continue
 			}
 		default:
@@ -93,7 +93,7 @@ func (l *Lock) Release() {
 		return
 	}
 	if same, err := pathNamesFile(l.path, l.file); err == nil && same {
-		_ = os.Remove(l.path) // best effort: a leftover without a flock is reaped by the next Acquire
+		_ = os.Remove(l.path) //nolint:gosec // G703: l.path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller of Acquire; best effort, a leftover without a flock is reaped by the next Acquire
 	}
 	_ = l.file.Close()
 	l.file = nil
@@ -155,7 +155,7 @@ func reapIfAbandoned(path string) error {
 	if err != nil || !same {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) { //nolint:gosec // G703: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller of Acquire
 		return err
 	}
 	return nil
@@ -167,7 +167,7 @@ func reapIfAbandoned(path string) error {
 // a symlink must not redirect the open to its target, and a FIFO or directory
 // must neither hang the open nor be reaped as if it were a stale lock.
 func openLockReadOnly(path string) (*os.File, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: path is the lock path Acquire was given, a constant name in the overlay or the user's autoupdate config directory
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) {
 			return nil, fmt.Errorf("%s is a symlink; refusing to treat it as a lock: %w", path, err)
@@ -189,7 +189,7 @@ func openLockReadOnly(path string) (*os.File, error) {
 // pathNamesFile reports whether path (not followed if it is a symlink) is the
 // open file, by device and inode.
 func pathNamesFile(path string, file *os.File) (bool, error) {
-	onDisk, err := os.Lstat(path)
+	onDisk, err := os.Lstat(path) //nolint:gosec // G703: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller of Acquire; Lstat never follows a planted symlink
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil

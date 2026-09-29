@@ -427,7 +427,7 @@ func secretDestination(envName string) string {
 
 // LoadFrom reads configuration from a specific file path
 func LoadFrom(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own config file (FindConfigPath: XDG or ~/.bentoo)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create default config
@@ -628,7 +628,7 @@ func defaultGitconfigPath() (string, error) {
 // parseGitconfig reads user.name and user.email from a gitconfig file.
 // The gitconfig file uses INI format.
 func parseGitconfig(path string) (user, email string, err error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // G304: path is the user's ~/.gitconfig (defaultGitconfigPath)
 	if err != nil {
 		return "", "", err
 	}

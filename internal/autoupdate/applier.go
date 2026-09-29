@@ -1350,7 +1350,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	if srcPath == "" {
 		return candidatePaths{}, fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	body, err := os.ReadFile(srcPath)
+	body, err := os.ReadFile(srcPath) //nolint:gosec // G304: srcPath comes from candidateIn: the overlay, a package key splitPkgAtom confines to one category/package directory, and the current version read from that directory's ebuild filenames
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		// Same sentinel copyEbuild reports, so a caller that recognises a missing
@@ -1690,7 +1690,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("failed to stat destination ebuild %s: %w", dstPath, err)
 	}
 
-	body, err := os.ReadFile(srcPath)
+	body, err := os.ReadFile(srcPath) //nolint:gosec // G304: srcPath joins the overlay, a package key splitPkgAtom confines to one category/package directory, and the current version read from that directory's ebuild filenames
 	if err != nil {
 		return fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
@@ -1765,7 +1765,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 // assignment with `(?m)^\s*` (checker.go, ebuildCommitRegex, whose own comment
 // already claimed the two shared this anchoring).
 func substituteCommitHash(ebuildPath, newHash string) error {
-	content, err := os.ReadFile(ebuildPath)
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate path candidateIn built from a package key splitPkgAtom confines and a version ebuild.IsValidVersion gated
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
 	}
@@ -1810,7 +1810,7 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	if varName == "" {
 		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
 	}
-	content, err := os.ReadFile(ebuildPath)
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate path candidateIn built from a package key splitPkgAtom confines and a version ebuild.IsValidVersion gated
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for aux var substitution: %w", err)
 	}
@@ -3067,13 +3067,13 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 // copyFileContents copies a regular file from src to dst, mirroring copyEbuild's
 // open/create/io.Copy/Sync idiom. The destination is truncated if it exists.
 func copyFileContents(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // G304: src is the ::gentoo ebuild/metadata.xml named by a confined package key and an IsValidVersion-gated version, or an entry walked under that ::gentoo package's files/
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", src, err)
 	}
 	defer in.Close() //nolint:errcheck
 
-	out, err := os.Create(dst)
+	out, err := os.Create(dst) //nolint:gosec // G304: dst is the overlay package directory a confined package key names, plus the same file name or walked relative path as src
 	if err != nil {
 		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}

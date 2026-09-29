@@ -80,13 +80,51 @@ func splitPkgSlot(key string) (atom, slot string) {
 // error wording to each caller. This is the single place that knows a package
 // key is not necessarily a bare atom, so path building cannot silently inherit a
 // suffix.
+//
+// Both halves are joined under the overlay (and the staged tree) as directory
+// names, and the key comes from packages.toml, so each half must name exactly
+// one directory: "../x" or "cat/.." would otherwise be accepted as an atom and
+// build a path outside the package directory (S064-R1.4). parsePkgAtom says
+// which half was refused and why.
 func splitPkgAtom(key string) (category, pkgName string, ok bool) {
-	atom, _ := splitPkgSlot(key)
-	parts := strings.Split(atom, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	category, pkgName, err := parsePkgAtom(key)
+	if err != nil {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	return category, pkgName, true
+}
+
+// parsePkgAtom is splitPkgAtom with the refusal explained: the error names the
+// half that cannot be used as one directory name. Callers that report a bad key
+// to a person (ValidatePackageConfig) use it; path builders use splitPkgAtom.
+func parsePkgAtom(key string) (category, pkgName string, err error) {
+	atom, _ := splitPkgSlot(key)
+	category, pkgName, found := strings.Cut(atom, "/")
+	if !found {
+		return "", "", fmt.Errorf("%q does not name category/package", atom)
+	}
+	for _, half := range []struct{ kind, value string }{{"category", category}, {"package name", pkgName}} {
+		if err := atomPathElementError(half.kind, half.value); err != nil {
+			return "", "", err
+		}
+	}
+	return category, pkgName, nil
+}
+
+// atomPathElementError refuses a value that would make a joined path mean
+// something other than "one directory named this": empty, the two relative
+// directory names, a separator of either flavour, and a NUL byte. It mirrors
+// validate.usableAsPathElement, which guards the staged side of the same key.
+func atomPathElementError(kind, value string) error {
+	switch {
+	case value == "":
+		return fmt.Errorf("the %s is empty", kind)
+	case value == "." || value == "..":
+		return fmt.Errorf("the %s %q names a directory other than itself", kind, value)
+	case strings.ContainsAny(value, `/\`) || strings.ContainsRune(value, 0):
+		return fmt.Errorf("the %s %q contains a path separator, so it cannot be one directory name", kind, value)
+	}
+	return nil
 }
 
 // SplitPackageKey splits a packages.toml key into its category and package-name

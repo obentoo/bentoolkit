@@ -208,7 +208,7 @@ func (a *Applier) promote(cand candidatePaths, pkg, version string) (publishedUn
 	}
 
 	stagedManifest := filepath.Join(cand.pkgDir, "Manifest")
-	stagedBody, err := os.ReadFile(stagedManifest)
+	stagedBody, err := os.ReadFile(stagedManifest) //nolint:gosec // G304: stagedManifest is <staged package dir>/Manifest; stagedCandidate built that directory from a package key splitPkgAtom confines
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		// The validated tree has no Manifest: `pkgdev manifest` writes none for a

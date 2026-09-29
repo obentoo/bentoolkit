@@ -236,7 +236,7 @@ func (p *GitHubProvider) loadFromCache(category, pkg string) ([]string, bool) {
 	}
 
 	cacheFile := p.cacheFilePath(category, pkg)
-	data, err := os.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile) //nolint:gosec // G304: cacheFile is <CacheDir>/<category>_<pkg>.json; CacheDir is under ~/.cache/bentoo and both parts are single path elements from splitPkgAtom or the overlay scan
 	if err != nil {
 		return nil, false
 	}

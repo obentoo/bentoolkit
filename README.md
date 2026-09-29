@@ -790,7 +790,7 @@ var, never the value.
 
 | Key | Required | Meaning |
 |---|---|---|
-| `fetch_url` | **yes** — it is the trigger | The form action / endpoint. Without it the whole block is inert, which is why `--lint` refuses a `fetch_*` key beside a missing or blank one. May carry `{id}` (see the id lookup below) |
+| `fetch_url` | **yes** — it is the trigger | The form action / endpoint. Without it the whole block is inert, which is why `--lint` refuses a `fetch_*` key beside a missing or blank one. Must be an absolute `http(s)://` URL with a fixed host. May carry `{id}` (see the id lookup below) — in the path or query only, so an upstream value can never choose the host |
 | `fetch_filename` | **yes** | Destination name, `{version}` substituted. Must equal the basename the ebuild's `SRC_URI` expects, or the Manifest will not match |
 | `fetch_method` | no — defaults to `post` | `post` or `get` |
 | `fetch_body` | no — defaults to `form` | `form` (urlencoded) or `json`. In `json` the values of `fetch_form` become a JSON object: exactly the literals `true` and `false` become booleans, **everything else stays a string** (so a postcode is not silently turned into a number) |
@@ -800,7 +800,7 @@ var, never the value.
 | `fetch_min_bytes` | no | Smallest believable size for the finished file. Checked on the bytes actually written, so a truncated transfer fails too |
 | `fetch_serial_env` | no — **but only together with** `fetch_serial_field` | Name of the env var holding the serial |
 | `fetch_serial_field` | no — **but only together with** `fetch_serial_env` | Form field the serial is submitted in |
-| `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted) |
+| `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted). Same rule as `fetch_url`: absolute `http(s)://`, `{version}` in the path or query only |
 | `fetch_id_pattern` | no — **but only together with** `fetch_id_url` | Regex over that body with **1 capture group**, the id. `{version}` is substituted **quoted**, so `21.1` matches `21.1` and not `2101` |
 | `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims |
 | `fetch_timeout` | no — defaults to 300 | Seconds for the whole download |

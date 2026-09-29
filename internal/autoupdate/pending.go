@@ -114,7 +114,7 @@ func WithPendingNowFunc(fn func() time.Time) PendingListOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewPendingList(configDir string, opts ...PendingListOption) (*PendingList, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment
 		return nil, fmt.Errorf("failed to create pending directory: %w", err)
 	}
 
@@ -161,7 +161,7 @@ func (p *PendingList) adoptBaseline() error {
 // left it; a missing or corrupted file reads as empty.
 func readPendingFileForMerge(path string) (pendingFile, error) {
 	var pf pendingFile
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is <configDir>/pending.json, a constant name in the user's autoupdate config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return pf, nil

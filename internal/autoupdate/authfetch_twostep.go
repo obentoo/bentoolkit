@@ -119,7 +119,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 		return "", fmt.Errorf("%w: %s does not compile with version %q substituted: %v", ErrAuthFetchFailed, metaFetchIDPattern, version, err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, lookupURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, lookupURL, nil) //nolint:gosec // G704: lookupURL is the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {version} cannot move it, and no credential rides on this leg
 	if err != nil {
 		return "", fmt.Errorf("%w: building the %s request: %v", ErrAuthFetchFailed, metaFetchIDURL, err)
 	}
@@ -129,7 +129,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	// custom CheckRedirect would otherwise drop (S052-R4.6).
 	client := &http.Client{Timeout: s.timeout, CheckRedirect: httputil.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time, and no credential rides on this leg (httputil.CredentialRedirectPolicy bounds redirects)
 	if err != nil {
 		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err)
 	}

@@ -542,7 +542,7 @@ func copyRegularFile(src, dst string) (err error) {
 	}
 	defer in.Close() //nolint:errcheck
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm()) //nolint:gosec // G304: dst is the walked relative path joined under the staged root this function creates; O_EXCL refuses an existing entry
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", dst, err)
 	}

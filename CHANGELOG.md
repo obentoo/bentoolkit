@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A `packages.toml` key can no longer name a directory outside its
+  category.** A key whose category or package half is `.`, `..`, or holds a
+  `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
+  as-is; it is now refused as an invalid package key, naming the half that was
+  refused. No real Gentoo atom has that shape.
+- **`fetch_url` and `fetch_id_url` must be absolute `http(s)` URLs with a fixed
+  host.** A `file:`, `ftp:` or relative template, or one with `{id}` or
+  `{version}` in the host, is refused by the download and by `--lint`, so a
+  catalogue id or an upstream version can no longer choose which host receives
+  the request. Placeholders in the path or query still work.
+
 - **Every `claude` agent bentoo spawns now receives an allow-listed environment,
   not bentoo's whole one.** The text client, the manifest, registry and build
   fixers and the bump reviewer used to inherit every variable bentoo had —

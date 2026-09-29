@@ -415,7 +415,7 @@ func removeStagedTree(dir string) error {
 func recognisedStagedTree(dir, pkg, version string) (bool, string) {
 	marker := filepath.Join(dir, "profiles", "repo_name")
 
-	body, err := os.ReadFile(marker)
+	body, err := os.ReadFile(marker) //nolint:gosec // G304: marker is <dir>/profiles/repo_name, where dir is an entry the sweeper listed under the user's staging root
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return false, "it carries no profiles/repo_name, so it is not a tree this package produced"

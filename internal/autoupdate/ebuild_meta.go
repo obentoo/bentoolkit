@@ -105,7 +105,7 @@ func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 	ebuildPath, version := selectBestEbuild(ebuilds)
 
 	// Read and parse the ebuild file
-	content, err := os.ReadFile(ebuildPath)
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is a directory entry listed in the package directory of a key splitPkgAtom confines
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEbuildParseFailed, err)
 	}

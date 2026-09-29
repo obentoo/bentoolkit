@@ -350,7 +350,7 @@ func Probe(dir string) error {
 	name := fmt.Sprintf(".bentoo-distdir-probe-%d-%d", os.Getpid(), probeSeq.Add(1))
 	path := filepath.Join(dir, name)
 
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600) //nolint:gosec // G304: path is a generated probe name joined to the distdir resolved from the host's Portage configuration
 	if err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrDistdirNotWritable, dir, err)
 	}
@@ -358,7 +358,7 @@ func Probe(dir string) error {
 	// this function. A removal failure is not reported: the write already
 	// answered the question this call asks, and having created the file we hold
 	// the directory permission needed to unlink it.
-	defer func() { _ = os.Remove(path) }()
+	defer func() { _ = os.Remove(path) }() //nolint:gosec // G703: path is a generated probe name joined to the distdir resolved from the host's Portage configuration
 
 	if _, err := file.WriteString(probePayload); err != nil {
 		// Close before returning; the deferred Remove still runs.
@@ -640,7 +640,7 @@ func ParseManifestDistFilenames(manifestPath string) []string {
 // Unwrapped also keeps errors.Is(err, fs.ErrNotExist) answerable by callers that
 // distinguish an absent Manifest from an unreadable one.
 func ReadManifestDistFilenames(manifestPath string) ([]string, error) {
-	body, err := os.ReadFile(manifestPath)
+	body, err := os.ReadFile(manifestPath) //nolint:gosec // G304: manifestPath is <package dir>/Manifest in the user's overlay or staged tree, under a package directory a confined key or the overlay scan names
 	if err != nil {
 		return nil, err
 	}

@@ -699,8 +699,8 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // nothing would mark an atom.
 //
 // One thing this function deliberately does NOT do is sanitise the key.
-// SplitPackageKey does not either — splitPkgAtom only requires two non-empty
-// "/"-separated parts, so "../x" splits happily — and no validation runs here.
+// SplitPackageKey refuses a "." or ".." half, and no other validation runs
+// here.
 // What keeps traversal out is that the key is used only as a map key and never
 // to build a filesystem path: the verification step builds its path from the
 // scanned directory names instead. Keep it that way.

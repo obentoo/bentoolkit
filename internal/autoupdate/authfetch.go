@@ -187,6 +187,10 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 		}
 		return fmt.Errorf("package %s: %w; %s", pkg, ErrMetaFetchURLRequired, detail)
 	}
+	// The fetch refuses a URL whose host is not fixed, so --lint does too.
+	if err := checkFetchURLTemplates(strings.TrimSpace(meta[metaFetchURL]), strings.TrimSpace(meta[metaFetchIDURL])); err != nil {
+		return fmt.Errorf("package %s: %w", pkg, err)
+	}
 
 	// Mirror the parser exactly: it trims and lowercases before comparing, and
 	// an empty value is the documented "post" default rather than an error.
@@ -329,6 +333,9 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 		return nil, false, err
 	}
 	if err := spec.parseIDLookup(meta); err != nil {
+		return nil, false, err
+	}
+	if err := checkFetchURLTemplates(spec.url, spec.idURL); err != nil {
 		return nil, false, err
 	}
 	if err := spec.parseFormEnv(meta); err != nil {
@@ -701,7 +708,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 	// download, so a pooled idle connection would otherwise outlive the call
 	// (and trip goroutine-leak detection in tests).
 	defer client.CloseIdleConnections()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 	if err != nil {
 		return "", withCtxCause(fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, creds.scrub(err.Error())), err)
 	}
@@ -768,7 +775,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 	case s.method == "post" && s.body == fetchBodyJSON:
 		var encoded []byte
 		if encoded, err = jsonForm(body); err == nil {
-			req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(encoded)))
+			req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(encoded))) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 			if err == nil {
 				// The charset is spelled out because it is what the vendor's own
 				// page sends (the AngularJS default), so an API that sniffs this
@@ -777,7 +784,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 			}
 		}
 	case s.method == "post":
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode())) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 		if err == nil {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
@@ -786,7 +793,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 		if strings.Contains(endpoint, "?") {
 			sep = "&"
 		}
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint+sep+body.Encode(), nil)
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint+sep+body.Encode(), nil) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 	default:
 		return nil, fmt.Errorf("%w: unsupported method %q", ErrAuthFetchFailed, s.method)
 	}
@@ -883,7 +890,7 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
 	}
 
-	if err := os.Rename(tmpName, destPath); err != nil {
+	if err := os.Rename(tmpName, destPath); err != nil { //nolint:gosec // G703: destPath is the caller's distdir joined to the resolved fetch_filename, which fetchDistfile refuses unless it is a bare file name (no separator, no "..")
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
 	}

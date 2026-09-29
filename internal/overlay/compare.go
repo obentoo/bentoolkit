@@ -1218,10 +1218,10 @@ func resolvePackagePaths(result CompareResult, prov provider.Provider, opts Comp
 	// Both directories are built from the CATEGORY AND PACKAGE DIRECTORY NAMES
 	// THE SCANNER FOUND — result.Category/result.Package come from walking the
 	// overlay, and the upstream side is resolved by the provider from those same
-	// two names. Nothing here comes from a registry key, which matters because no
-	// validation runs on that path: SplitPackageKey accepts "../x" happily and
-	// LoadPackagesConfig never calls ValidatePackageConfig. The structure is what
-	// keeps traversal absent, not a sanitiser. Keep it that way — including in
+	// two names. Nothing here comes from a registry key, which matters because
+	// LoadPackagesConfig never calls ValidatePackageConfig (SplitPackageKey
+	// refuses a "." or ".." half, but nothing else on that path is checked). The
+	// structure is what keeps traversal absent, not a sanitiser. Keep it that way — including in
 	// whatever is joined ONTO these directories: the ebuild name below is built
 	// from the same two scanned strings, and the only other thing appended to
 	// them anywhere is a filename the ebuild's own text spells out, which

@@ -1159,7 +1159,7 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 	if err != nil {
 		return "source"
 	}
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // G304: path is the current ebuild selectCurrentEbuild listed in the package directory of a key splitPkgAtom confines
 	if err != nil {
 		return "source"
 	}

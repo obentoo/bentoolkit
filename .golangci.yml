@@ -36,10 +36,7 @@ linters:
       # against validated inputs, and the remaining call sites carry inline
       # //nolint:gosec justifications documenting why each is safe.
       excludes:
-        - G304
         - G104
-        - G703
-        - G704
 
   exclusions:
     # .epic holds staged authored tests and .claude holds agent worktrees (full

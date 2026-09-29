@@ -87,7 +87,7 @@ func (l *Logger) EnableFileLogging() error {
 	}
 
 	logFile := filepath.Join(logDir, "bentoo.log")
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // G304: logFile is a constant name under LogDir (XDG_STATE_HOME or ~/.local/state), the user's own state directory
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

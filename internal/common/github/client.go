@@ -242,7 +242,7 @@ func (c *Client) loadFromCache(category, pkg string) ([]string, bool) {
 	}
 
 	cacheFile := c.cacheFilePath(category, pkg)
-	data, err := os.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile) //nolint:gosec // G304: cacheFile is <CacheDir>/<category>_<pkg>.json; CacheDir is the caller's cache directory and both parts are single path elements from splitPkgAtom or the overlay scan
 	if err != nil {
 		return nil, false
 	}
