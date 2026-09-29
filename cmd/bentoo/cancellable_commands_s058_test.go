@@ -306,6 +306,20 @@ func s058NewCancellableFixture(t *testing.T) *s058CancellableFixture {
 		t.Fatal(err)
 	}
 
+	// The snapshot pins read this file through --config {home}/snapshot.toml.
+	// The default search tries /etc/bentoo first, so without the flag a host
+	// that has /etc/bentoo/snapshot.toml would feed its own config to the child
+	// and a runner that has none would fail before any wait. Written from the
+	// internal/snapshot schema: the snapper engine and the systemd schedule,
+	// whose binaries (snapper, systemctl) are stubs on PATH, so Validate passes
+	// and every snapshot command reaches a stub before the SIGINT.
+	snapshotConfig := "[engine]\ndriver = \"snapper\"\nsubvolumes = [\"/\"]\nsnapshot_dir = \"/.snapshots\"\n\n" +
+		"[engine.retention]\ndaily = 7\n\n" +
+		"[schedule]\nbackend = \"systemd\"\non_calendar = \"daily\"\n"
+	if err := os.WriteFile(filepath.Join(f.home, "snapshot.toml"), []byte(snapshotConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	proxyURL := "http://" + proxy.Addr().String()
 	f.env = append(os.Environ(),
 		s058CancellableMarkEnv+"="+f.marks,
@@ -424,7 +438,7 @@ func s058CancellablePins() []s058CancellablePin {
 		// Would wrongly die: each exits with its own interrupted code.
 		{command: "overlay validate", args: []string{"overlay", "validate"}, want: 130},
 		{command: "overlay autoupdate", args: []string{"overlay", "autoupdate", "--check", "--force"}, want: 2},
-		{command: "snapshot status", args: []string{"snapshot", "status"}, want: 0},
+		{command: "snapshot status", args: []string{"snapshot", "status", "--config", "{home}/snapshot.toml"}, want: 0},
 		{command: "distfile fetch", args: []string{"distfile", "fetch", "app-misc/s058-one"}, want: 1},
 		{command: "overlay add", args: []string{"overlay", "add", "app-misc/s058-one"}, want: 1},
 		{command: "overlay analyze", args: []string{"overlay", "analyze", "app-misc/s058-two"}, want: 1},
@@ -433,11 +447,11 @@ func s058CancellablePins() []s058CancellablePin {
 		{command: "overlay pull", args: []string{"overlay", "pull"}, want: 1},
 		{command: "overlay push", args: []string{"overlay", "push"}, want: 1},
 		{command: "overlay status", args: []string{"overlay", "status"}, want: 1},
-		{command: "snapshot apply", args: []string{"snapshot", "apply"}, want: 1},
-		{command: "snapshot list", args: []string{"snapshot", "list"}, want: 1},
-		{command: "snapshot prune", args: []string{"snapshot", "prune"}, want: 1},
-		{command: "snapshot rollback", args: []string{"snapshot", "rollback", "1", "--yes"}, want: 1},
-		{command: "snapshot run", args: []string{"snapshot", "run"}, want: 1},
+		{command: "snapshot apply", args: []string{"snapshot", "apply", "--config", "{home}/snapshot.toml"}, want: 1},
+		{command: "snapshot list", args: []string{"snapshot", "list", "--config", "{home}/snapshot.toml"}, want: 1},
+		{command: "snapshot prune", args: []string{"snapshot", "prune", "--config", "{home}/snapshot.toml"}, want: 1},
+		{command: "snapshot rollback", args: []string{"snapshot", "rollback", "1", "--yes", "--config", "{home}/snapshot.toml"}, want: 1},
+		{command: "snapshot run", args: []string{"snapshot", "run", "--config", "{home}/snapshot.toml"}, want: 1},
 		// Not pinned, with the reason measured at 6be73ec:
 		//   overlay compare, overlay prune — interrupted while a network peer
 		//     never answers, both were still running 30 s after the SIGINT;
