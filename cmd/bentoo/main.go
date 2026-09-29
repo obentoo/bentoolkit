@@ -21,11 +21,6 @@ var (
 	noColor bool
 )
 
-// osExit is a variable so tests can replace it to avoid process termination.
-// In production it is exitProcess, so a mode that ends through osExit still
-// runs the cleanups it registered — os.Exit alone skips every deferred call.
-var osExit = exitProcess
-
 // exitCleanups holds the cleanups registered with registerExitCleanup, in
 // registration order. Each carries its own id so an unregister removes exactly
 // its own entry, even when two cleanups are indistinguishable.
@@ -42,7 +37,7 @@ type exitCleanup struct {
 
 // registerExitCleanup arranges for fn to run when the process ends through
 // exitProcess, and returns a func that cancels the registration; calling it
-// more than once is harmless. A cleanup must not call osExit itself.
+// more than once is harmless. A cleanup must not call exitProcess itself.
 func registerExitCleanup(fn func()) (unregister func()) {
 	exitCleanupsMu.Lock()
 	defer exitCleanupsMu.Unlock()

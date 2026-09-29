@@ -81,7 +81,7 @@ func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 
 // TestRunSnapshotRollback_ConfirmDeniedCleanAbort is the R3.2 gate: without
 // --yes and a confirm seam that DENIES, the rollback is a clean abort — exit
-// success (osExit NOT called) and NO subprocess runs.
+// success (the handler returns nil) and NO subprocess runs.
 func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)

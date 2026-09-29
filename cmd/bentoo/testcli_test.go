@@ -300,38 +300,22 @@ func (c *testCLI) Home() string { return c.home }
 //
 // # The status is returned, never exited
 //
-// osExit is replaced with a panic carrying the code, so a failing run is an
-// assertion rather than a dead test binary. A code of 0 means the command
-// returned normally.
+// The run goes through runMain, which returns the code func main would pass to
+// exitProcess, so a failing run is an assertion rather than a dead test binary.
+// A code of 0 means the command succeeded.
 func (c *testCLI) Run(args ...string) (stdout, stderr string, code int) {
 	c.t.Helper()
 
 	readOut := captureStream(c.t, 1, &os.Stdout)
 	readErr := captureStream(c.t, 2, &os.Stderr)
 
-	// Transitional shim, removed by sub-task 7.1: handlers not yet migrated
-	// still call osExit, and without this intercept the first of them would
-	// end the test binary.
-	origExit := osExit
-	osExit = func(status int) { panic(exitSentinel(status)) }
-
 	// fatih/color caches its writer at package init, so redirecting the file
 	// descriptor is not enough to stop it reaching the real terminal.
 	origColorOut, origNoColor := color.Output, color.NoColor
 	color.Output, color.NoColor = os.Stdout, true
 
-	code = func() (status int) {
-		defer func() {
-			osExit = origExit
-			color.Output, color.NoColor = origColorOut, origNoColor
-			if r := recover(); r != nil {
-				if sentinel, ok := r.(exitSentinel); ok {
-					status = int(sentinel)
-					return
-				}
-				panic(r)
-			}
-		}()
+	code = func() int {
+		defer func() { color.Output, color.NoColor = origColorOut, origNoColor }()
 
 		cmd := newRootCmd()
 		cmd.SetArgs(args)

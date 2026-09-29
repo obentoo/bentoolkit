@@ -4,8 +4,8 @@ package main
 // removed before the process exits, including when the mode ends through the
 // PRODUCTION osExit. The in-process intercept of that time made osExit panic,
 // which unwound the deferred Release; that is how the earlier tests missed the gap.
-// Here a re-exec'd child runs runAutoupdate with osExit left exactly as the
-// binary ships it, and the parent inspects the overlay after the child is gone.
+// Here a re-exec'd child runs the real tree and ends through exitProcess exactly
+// as the binary does, and the parent inspects the overlay after the child is gone.
 //
 // Since story 058 the child ends the way func main does: the command tree runs
 // through func runMain (or func execute, for the cancelled role), every
@@ -74,7 +74,7 @@ func s056RunProductionExitChild(t *testing.T, role string) (code int, out, overl
 	case errors.As(err, &exitErr):
 		code = exitErr.ExitCode()
 		if code < 0 {
-			t.Fatalf("the child was killed by a signal (%v), not ended by osExit:\n%s", err, data)
+			t.Fatalf("the child was killed by a signal (%v), not ended by exitProcess:\n%s", err, data)
 		}
 	default:
 		t.Fatalf("running the child: %v", err)
@@ -86,7 +86,7 @@ func s056RunProductionExitChild(t *testing.T, role string) (code int, out, overl
 func s056AssertLockGoneAfterProductionExit(t *testing.T, code, wantCode int, out, overlay, witness string) {
 	t.Helper()
 	if code == s056ProdExitReturned {
-		t.Fatalf("runAutoupdate returned instead of ending the process through osExit; the scenario did not exercise the exit path:\n%s", out)
+		t.Fatalf("runAutoupdate returned instead of ending the process through exitProcess; the scenario did not exercise the exit path:\n%s", out)
 	}
 	if code != wantCode {
 		t.Errorf("the child exited %d, want %d (the code the --check chose):\n%s", code, wantCode, out)
@@ -97,14 +97,14 @@ func s056AssertLockGoneAfterProductionExit(t *testing.T, code, wantCode int, out
 	lockPath := filepath.Join(overlay, ".autoupdate.bentoo-lock")
 	if _, err := os.Lstat(lockPath); err == nil {
 		data, _ := os.ReadFile(lockPath)
-		t.Errorf("%s is still on disk after the child ended through the production osExit with code %d (holds %q): the lock was not removed before the process exited", lockPath, code, data)
+		t.Errorf("%s is still on disk after the child ended through the production exitProcess with code %d (holds %q): the lock was not removed before the process exited", lockPath, code, data)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("inspecting %s: %v", lockPath, err)
 	}
 }
 
 // TestAutoupdateOverlayLock_RemovedOnProductionExit: R4.7 — a --check ends in
-// osExit (exit 0 included); the lock file is gone once the process is.
+// exitProcess (exit 0 included); the lock file is gone once the process is.
 func TestAutoupdateOverlayLock_RemovedOnProductionExit(t *testing.T) {
 	code, out, overlay, witness := s056RunProductionExitChild(t, "plain")
 	s056AssertLockGoneAfterProductionExit(t, code, 0, out, overlay, witness)
@@ -112,7 +112,7 @@ func TestAutoupdateOverlayLock_RemovedOnProductionExit(t *testing.T) {
 
 // TestAutoupdateOverlayLock_RemovedOnProductionExitAfterCancel: R4.7's signal
 // clause — the run's context is already cancelled (as SIGINT/SIGTERM would
-// leave it) when the mode ends through osExit; the lock file is still removed.
+// leave it) when the run ends through exitProcess; the lock file is still removed.
 func TestAutoupdateOverlayLock_RemovedOnProductionExitAfterCancel(t *testing.T) {
 	code, out, overlay, witness := s056RunProductionExitChild(t, "cancelled")
 	s056AssertLockGoneAfterProductionExit(t, code, 0, out, overlay, witness)

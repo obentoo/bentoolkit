@@ -37,9 +37,6 @@ func setupTestHome(t *testing.T) (overlayPath string) {
 	return overlayDir
 }
 
-// exitSentinel is used as a panic value to simulate os.Exit in tests.
-type exitSentinel int
-
 // ---- runStatus ----
 
 // TestRunStatusValidOverlay tests runStatus with a valid (empty) overlay.

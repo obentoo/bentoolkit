@@ -162,7 +162,7 @@ func hasCall(calls []snapshot.RunnerCall, name string, prefix ...string) bool {
 // TestRunSnapshotRestore_ArchiveHappyPath: `restore <id> --target /mnt/r --ship
 // cloud --yes` resolves the archive ship, builds a single-full-link chain, and
 // drives snapshot.Restore — which runs `rclone cat | zstd -d | btrfs receive
-// /mnt/r`. Exit is success (osExit not called).
+// /mnt/r`. Exit is success (the handler returns nil).
 func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
@@ -213,7 +213,7 @@ func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 
 // TestRunSnapshotRestore_ConfirmDeniedCleanAbort is the R5.4 gate at the verb
 // level: without --yes and a confirm seam that DENIES, the restore is a clean
-// abort — ErrRestoreDeclined is mapped to a non-error exit (osExit NOT called)
+// abort — ErrRestoreDeclined is mapped to a non-error exit (the handler returns nil)
 // and NO destructive subprocess runs.
 func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")

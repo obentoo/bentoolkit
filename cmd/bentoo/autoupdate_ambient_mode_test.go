@@ -184,8 +184,8 @@ func TestAutoupdateAmbientModeFromTheEnvironmentKeepsTheRunAndStatesItself(t *te
 
 	if code != controlCode {
 		t.Errorf("`overlay autoupdate --check` exited %d with BENTOO_UI=bogus and %d without it — R3.7 degrades the RENDER, it does not fail the run.\n"+
-			"    Remedy: overlay_autoupdate.go:617 resolves the whole precedence chain and calls\n"+
-			"    osExit(1) on any error, citing S044-R3.9 — which covers the --ui FLAG alone.\n"+
+			"    Remedy: func runAutoupdate resolves the whole precedence chain and returns\n"+
+			"    exit status 1 on any error, citing S044-R3.9 — which covers the --ui FLAG alone.\n"+
 			"    Since Task 4 the root already rejects that flag, so this gate now fires only on\n"+
 			"    the two ambient sources, which R3.7 answers the opposite way.\n"+
 			"    Observed stderr: %q", code, controlCode, stderr)
