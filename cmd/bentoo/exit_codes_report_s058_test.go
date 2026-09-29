@@ -12,6 +12,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,7 +40,12 @@ func s058ReportRows() []s058Row {
 				return ctx
 			},
 			want: 2},
-		{name: "compare on an overlay with no packages", args: []string{"overlay", "compare"}, want: 0},
+		{name: "compare on an overlay with no packages", args: []string{"overlay", "compare"},
+			setup: func(t *testing.T, c *testCLI) []string {
+				s058LocalGentoo(t, c)
+				return nil
+			},
+			want: 0},
 		{name: "analyze --all with nothing to analyze", args: []string{"overlay", "analyze", "--all"}, want: 0},
 		{name: "staged clean with nothing staged", args: []string{"overlay", "staged", "clean"}, want: 0},
 		{name: "analyze with no package prints help and fails", args: []string{"overlay", "analyze"}, want: 1, usage: true},
@@ -49,4 +56,28 @@ func s058ReportRows() []s058Row {
 
 func TestS058OverlayReportCommandsKeepTheirExitCodes(t *testing.T) {
 	s058RunRows(t, s058ReportRows())
+}
+
+// s058LocalGentoo configures the ::gentoo repository as `provider: local` over
+// an empty temporary tree that carries only profiles/repo_name.
+//
+// Without it, compare resolves "gentoo" through the api.gentoo.org registry and
+// builds a GitHub provider that asks api.github.com for its rate limit, sending
+// whatever token the developer's machine resolves: the row then passed or failed
+// with the network and the host's API quota. A config repository wins over the
+// registry in ResolveRepository, and a local provider builds no GitHub client,
+// so the run stays on the disk. The block is appended through
+// appendHarnessConfig, the way seedCompareFixture does it, because the overlay
+// path newTestCLI already wrote is what makes the run a run.
+func s058LocalGentoo(t *testing.T, c *testCLI) {
+	t.Helper()
+	gentoo := t.TempDir()
+	profiles := filepath.Join(gentoo, "profiles")
+	if err := os.MkdirAll(profiles, 0o750); err != nil {
+		t.Fatalf("mkdir %s: %v", profiles, err)
+	}
+	if err := os.WriteFile(filepath.Join(profiles, "repo_name"), []byte("gentoo\n"), 0o600); err != nil {
+		t.Fatalf("write repo_name: %v", err)
+	}
+	appendHarnessConfig(t, c, "repositories:\n  gentoo:\n    provider: local\n    path: "+gentoo+"\n")
 }

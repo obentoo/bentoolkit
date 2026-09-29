@@ -36,12 +36,24 @@ import (
 // s058Env prepares an isolated run: newTestCLI's temporary HOME, config and
 // overlay, plus the XDG state, cache and data homes under that same temporary
 // HOME, so nothing a command writes (logs, caches) reaches the real home.
+//
+// It also keeps the developer's machine out of the run. GITHUB_TOKEN and
+// GH_TOKEN are blanked so no row authenticates with a real credential from the
+// environment; the user-scope secrets file already sits under the temporary
+// HOME. An empty value only reads as "unset" to the secrets chain, so the
+// root-owned /etc/bentoo/secrets is still consulted on a host where it is
+// readable — no S058 row depends on a token, but only a masked /etc/bentoo
+// removes that read. GIT_CONFIG_NOSYSTEM=1 stops git from reading /etc/gitconfig;
+// the global config already resolves under the temporary HOME.
 func s058Env(t *testing.T) *testCLI {
 	t.Helper()
 	c := newTestCLI(t)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(c.Home(), ".local", "state"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(c.Home(), ".cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(c.Home(), ".local", "share"))
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	return c
 }
 
