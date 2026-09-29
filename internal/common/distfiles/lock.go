@@ -289,8 +289,7 @@ func acquireLock(ctx context.Context, distdir, name string, deadline time.Time) 
 		// is the exact mutual exclusion R2.4 asks for, lost. Nothing secret is
 		// in the file: it carries the holder's PID so a stale lock is
 		// diagnosable, and no user but the owner may write it.
-		// #nosec G302 -- readable by design; see above
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: path is the host distdir joined with a lock name built from distfileName, which refuses anything but one bare file name
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302: 0o644 is readable by design, see above; G304: path is the host distdir joined with a lock name built from distfileName, which refuses anything but one bare file name
 		switch {
 		case err == nil:
 			held, err := claimLock(file, path, name)

@@ -517,7 +517,7 @@ func realignRequestFor(result CompareResult, opts CompareOptions) (RealignReques
 	if err != nil {
 		return RealignRequest{}, false
 	}
-	baseline, err := os.ReadFile(result.Baseline.Path) //nolint:gosec // path resolved by ResolveBaseline inside the ::gentoo tree, never from registry input
+	baseline, err := os.ReadFile(result.Baseline.Path)
 	if err != nil {
 		return RealignRequest{}, false
 	}

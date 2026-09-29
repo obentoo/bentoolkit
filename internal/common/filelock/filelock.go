@@ -52,8 +52,7 @@ func Acquire(path, purpose string) (*Lock, error) {
 		// 0644, not 0600: another user sharing the directory must be able to
 		// open the lock read-only to take its flock and reap it after a crash.
 		// Nothing secret is in it — only the holder's PID and purpose.
-		// #nosec G302 -- readable by design; see above
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302: 0o644 is readable by design, see above; G304: path is a constant lock name joined to the overlay or the user's autoupdate config directory by every caller
 		switch {
 		case err == nil:
 			held, err := claim(file, path, purpose)
@@ -112,7 +111,6 @@ func claim(file *os.File, path, purpose string) (*Lock, error) {
 	}
 	// The create mode was narrowed by the umask; the lock must stay readable
 	// by other users for the reap to work.
-	//nolint:gosec // G302: readable by design, see Acquire.
 	if err := file.Chmod(0o644); err != nil {
 		_ = file.Close()
 		return nil, err

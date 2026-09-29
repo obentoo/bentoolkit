@@ -569,7 +569,7 @@ func (c *RetryableHTTPClient) retryOverHTTP1(ctx context.Context, req *http.Requ
 	// it to release the connection back to the pool.
 	if h2Resp.Body != nil {
 		io.Copy(io.Discard, h2Resp.Body) //nolint:errcheck // discarding a response we are replacing
-		h2Resp.Body.Close()              //nolint:errcheck
+		h2Resp.Body.Close()
 	}
 
 	return h1Resp
@@ -592,7 +592,7 @@ func (c *RetryableHTTPClient) executeRequest(req *http.Request) (*http.Response,
 		// Treat retryable status codes as circuit-breaker failures
 		if c.shouldRetry(resp.StatusCode) {
 			if resp.Body != nil {
-				io.Copy(io.Discard, resp.Body) //nolint:errcheck
+				io.Copy(io.Discard, resp.Body) //nolint:errcheck // best-effort drain so the connection can be reused; the retryable status is the error returned
 				resp.Body.Close()
 			}
 			return nil, &retryableStatusError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}

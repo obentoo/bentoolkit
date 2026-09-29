@@ -122,7 +122,7 @@ func WithNowFunc(fn func() time.Time) CacheOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment
+	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec,nolintlint // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment; nolintlint: gosec's G703 taint analysis reports this line in some runs and not in others, so the directive is not always used
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 

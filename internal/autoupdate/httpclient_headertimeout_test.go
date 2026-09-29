@@ -78,7 +78,7 @@ func TestHeaderTimeoutRetriedLikeTimeout(t *testing.T) {
 				}
 				return
 			}
-			io.WriteString(w, "ok") //nolint:errcheck // test handler
+			io.WriteString(w, "ok")
 		}))
 		t.Cleanup(srv.Close)
 		t.Cleanup(func() { close(release) }) // runs before srv.Close (LIFO)
@@ -104,7 +104,7 @@ func TestHeaderTimeoutRetriedLikeTimeout(t *testing.T) {
 			t.Fatalf("GetWithContext: %v; want the header timeout retried and the 2nd attempt to succeed", err)
 		}
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // compared below
+		body, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode != http.StatusOK || string(body) != "ok" {
 			t.Errorf("got %d %q, want 200 \"ok\"", resp.StatusCode, body)
 		}

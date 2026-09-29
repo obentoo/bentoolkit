@@ -17,6 +17,7 @@ linters:
     - usetesting
     - tparallel
     - forbidigo
+    - nolintlint
 
   settings:
     errcheck:
@@ -34,6 +35,9 @@ linters:
         - (*github.com/spf13/cobra.Command).GenFishCompletion
         - (*github.com/spf13/cobra.Command).GenPowerShellCompletionWithDesc
 
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     forbidigo:
       # A list, so story 058 can append its os.Exit entry beside this one.
       forbid:

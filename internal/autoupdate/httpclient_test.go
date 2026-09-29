@@ -1753,7 +1753,7 @@ func TestGetWithContext_BodyCapAllowsSmallBody(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write(payload) //nolint:errcheck // test server
+		w.Write(payload)
 	}))
 	defer server.Close()
 

@@ -92,7 +92,6 @@ func TestNoFetchCacheFlag(t *testing.T) {
 		orig := autoupdateNoFetchCache
 		t.Cleanup(func() {
 			autoupdateNoFetchCache = orig
-			//nolint:errcheck // restoring a bool flag on a known-registered name cannot fail
 			_ = autoupdateCmd.Flags().Set("no-fetch-cache", strconv.FormatBool(orig))
 		})
 

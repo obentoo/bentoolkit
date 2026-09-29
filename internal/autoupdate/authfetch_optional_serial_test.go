@@ -103,7 +103,7 @@ func TestFetchDistfileWithoutSerialPostsTheFormAlone(t *testing.T) {
 	if filepath.Base(got) != "Foo_1.2.3.tar.xz" {
 		t.Fatalf("written file = %q", got)
 	}
-	data, err := os.ReadFile(got) //nolint:gosec // path produced by the call under test
+	data, err := os.ReadFile(got)
 	if err != nil || string(data) != payload {
 		t.Fatalf("file content = %q (err %v), want %q", data, err, payload)
 	}

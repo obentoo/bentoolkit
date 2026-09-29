@@ -391,7 +391,6 @@ func writeThenRename(path string, body []byte, mode fs.FileMode) error {
 	// mode has to be set on the temporary file — after the last write and before
 	// the rename, so the file is never reachable under its final name with the
 	// wrong one.
-	//nolint:gosec // G302: the mode is publishedFileMode (or the mode the file being replaced already carried); see publishedFileMode.
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return fmt.Errorf("setting mode %04o on %s before publishing it as %s: %w", mode.Perm(), tmpName, path, err)
 	}

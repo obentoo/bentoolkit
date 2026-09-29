@@ -459,7 +459,6 @@ func mkdirStaged(dir string) error {
 	if err := os.MkdirAll(dir, stagedDirMode); err != nil {
 		return fmt.Errorf("creating staged directory %s: %w", dir, err)
 	}
-	//nolint:gosec // G302: 0750 is deliberate and is the mode the applier already uses for logs/; see stagedDirMode.
 	if err := os.Chmod(dir, stagedDirMode); err != nil {
 		return fmt.Errorf("setting mode %04o on staged directory %s: %w", stagedDirMode.Perm(), dir, err)
 	}
@@ -536,11 +535,11 @@ func copyRegularFile(src, dst string) (err error) {
 		return fmt.Errorf("reading %s: %w", src, err)
 	}
 
-	in, err := os.Open(src) //nolint:gosec // the path comes from walking the overlay being staged, not from input
+	in, err := os.Open(src) //nolint:gosec // G304: the path comes from walking the overlay being staged, not from input
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", src, err)
 	}
-	defer in.Close() //nolint:errcheck
+	defer in.Close() //nolint:errcheck // read-only handle: a failed close cannot lose data; the write side checks its close below
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm()) //nolint:gosec // G304: dst is the walked relative path joined under the staged root this function creates; O_EXCL refuses an existing entry
 	if err != nil {

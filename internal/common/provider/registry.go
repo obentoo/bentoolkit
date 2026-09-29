@@ -169,7 +169,7 @@ func (r *RepositoryRegistry) ensureXML() ([]byte, error) {
 		return data, nil
 	}
 
-	home, _ := os.UserHomeDir() //nolint:errcheck // best-effort fallback, error handled by empty check below
+	home, _ := os.UserHomeDir()
 	if home != "" {
 		fallback := filepath.Join(home, eselectCachePath)
 		if fbData, fbErr := os.ReadFile(fallback); fbErr == nil { //nolint:gosec // G304: fallback is a constant path (eselectCachePath) under the user's home directory

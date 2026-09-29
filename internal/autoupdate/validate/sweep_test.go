@@ -253,7 +253,7 @@ func sweepFingerprint(t *testing.T, root string) string {
 			lines = append(lines, "d "+rel)
 			return nil
 		}
-		body, readErr := os.ReadFile(path) //nolint:gosec // path comes from walking a t.TempDir()
+		body, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return readErr
 		}

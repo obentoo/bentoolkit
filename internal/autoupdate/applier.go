@@ -3071,13 +3071,13 @@ func copyFileContents(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", src, err)
 	}
-	defer in.Close() //nolint:errcheck
+	defer in.Close() //nolint:errcheck // read-only handle: a failed close cannot lose data
 
 	out, err := os.Create(dst) //nolint:gosec // G304: dst is the overlay package directory a confined package key names, plus the same file name or walked relative path as src
 	if err != nil {
 		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}
-	defer out.Close() //nolint:errcheck
+	defer out.Close() //nolint:errcheck // out.Sync below is checked, so the data is on disk before this close runs; on an earlier error the copy is already reported as failed
 
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("failed to copy %s -> %s: %w", src, dst, err)

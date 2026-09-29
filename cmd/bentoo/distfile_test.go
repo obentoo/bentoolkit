@@ -160,7 +160,7 @@ func TestDistfileFetchWritesTheFileEmergeWillLookFor(t *testing.T) {
 	// names, and the record's fetch_filename resolves against the version the
 	// overlay carries (2.1.0), not against the newest release upstream.
 	want := filepath.Join(dest, "Example_2.1.0.tar.xz")
-	data, err := os.ReadFile(want) //nolint:gosec // path built from the test's own temp dir
+	data, err := os.ReadFile(want)
 	if err != nil {
 		t.Fatalf("the distfile is not where emerge would look: %v", err)
 	}

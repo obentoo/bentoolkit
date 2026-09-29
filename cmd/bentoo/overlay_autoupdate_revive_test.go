@@ -424,7 +424,7 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 	if prov == nil {
 		t.Fatal("resolveGentooProvider returned nil for a valid config gentoo repo")
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close()
 
 	if _, ok := prov.(provider.PackageDirProvider); ok {
 		t.Error("API-only GitHub provider unexpectedly implements PackageDirProvider")

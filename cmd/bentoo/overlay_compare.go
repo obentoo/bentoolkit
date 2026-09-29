@@ -240,7 +240,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 		logger.Error("Failed to create provider: %v", err)
 		osExit(1)
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	// Refuse what THIS INVOCATION cannot do, before it costs anything (R7.4).
 	//

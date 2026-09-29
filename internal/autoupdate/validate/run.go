@@ -811,7 +811,7 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		overlay:     opts.Overlay,
 		stagingRoot: opts.StagingRoot,
 		ebuild: func() ([]byte, error) {
-			return os.ReadFile(target.path) //nolint:gosec // the path comes from scanning the overlay under validation, not from input
+			return os.ReadFile(target.path)
 		},
 		manifest:         manifest,
 		manifestSupplied: supplied,

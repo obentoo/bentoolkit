@@ -1178,7 +1178,7 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 			// `// nolint:... —` line suppresses nothing; leaving one here would
 			// read as the suppression and invite deleting the inline directive
 			// that actually does the work.
-			results[i] = sweepOneDir(s, dir) //nolint:contextcheck
+			results[i] = sweepOneDir(s, dir) //nolint:contextcheck // s was built with this ctx (withSweeperContext), so cancellation still reaches runManifest; see above
 		}(i, dir)
 	}
 	wg.Wait()

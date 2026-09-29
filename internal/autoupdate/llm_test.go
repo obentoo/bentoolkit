@@ -79,7 +79,7 @@ func TestClaudeClient_EndpointOverride(t *testing.T) {
 			},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

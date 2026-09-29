@@ -200,7 +200,7 @@ func TestClassifyInsufficientFreeSpaceIsEnvironment(t *testing.T) {
 			return 64 << 30, nil
 		}
 
-		ClassifyManifestFailure(dir, manifestFailure(englishManifestOutput), nil, space) //nolint:errcheck // verdict irrelevant here
+		ClassifyManifestFailure(dir, manifestFailure(englishManifestOutput), nil, space)
 
 		if len(asked) != 1 || asked[0] != dir {
 			t.Fatalf("space func was asked about %v, want exactly [%q]", asked, dir)

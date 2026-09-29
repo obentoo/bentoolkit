@@ -1348,7 +1348,7 @@ func currentEbuildCommit(overlayPath, pkg, series string) string {
 	if err != nil || best.Path == "" {
 		return ""
 	}
-	content, err := os.ReadFile(best.Path) //nolint:gosec // path comes from the overlay dir listing
+	content, err := os.ReadFile(best.Path)
 	if err != nil {
 		return ""
 	}

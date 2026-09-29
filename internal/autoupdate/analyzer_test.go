@@ -1862,7 +1862,7 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 	if err := os.Chmod(cacheDir, 0555); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
-	defer os.Chmod(cacheDir, 0755) //nolint:errcheck
+	defer os.Chmod(cacheDir, 0755)
 
 	// Verify Set() actually fails (confirms test premise)
 	schema := &PackageConfig{Parser: "json", Path: "tag_name"}
@@ -2038,7 +2038,7 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 	// Mock data source returning arbitrary content.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body>release 1.2.3</body></html>")) //nolint:errcheck
+		w.Write([]byte("<html><body>release 1.2.3</body></html>"))
 	}))
 	defer server.Close()
 

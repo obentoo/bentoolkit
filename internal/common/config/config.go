@@ -632,7 +632,7 @@ func parseGitconfig(path string) (user, email string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer file.Close() //nolint:errcheck
+	defer file.Close() //nolint:errcheck // read-only handle: a failed close cannot lose data
 
 	return ParseGitconfigContent(file)
 }

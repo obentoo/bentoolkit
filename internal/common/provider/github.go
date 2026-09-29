@@ -161,7 +161,7 @@ func (p *GitHubProvider) fetchPackageVersions(ctx context.Context, category, pkg
 
 	// Handle rejected credentials: still an API error, and also an auth one
 	if resp.StatusCode == http.StatusUnauthorized {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%w: %w: status %d: %s", ErrAPIError, ErrUnauthorized, resp.StatusCode, string(body))
 	}
 
@@ -272,7 +272,7 @@ func (p *GitHubProvider) saveToCache(category, pkg string, versions []string) {
 	cacheFile := p.cacheFilePath(category, pkg)
 	// Cache files use 0600 (owner-only): they may hold sensitive upstream
 	// metadata. os.WriteFile applies the mode on file creation directly.
-	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode)
 }
 
 // GetRateLimitInfo returns current rate limit status

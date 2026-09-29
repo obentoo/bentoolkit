@@ -86,7 +86,7 @@ func TestFetchAuthDistfileResolvesTheOverlayVersion(t *testing.T) {
 	if res.SerialEnv != "" {
 		t.Errorf("SerialEnv = %q, want empty for a record that configures no serial", res.SerialEnv)
 	}
-	data, err := os.ReadFile(res.Path) //nolint:gosec // path produced by the call under test
+	data, err := os.ReadFile(res.Path)
 	if err != nil || string(data) != payload {
 		t.Errorf("file content = %q (err %v), want %q", data, err, payload)
 	}

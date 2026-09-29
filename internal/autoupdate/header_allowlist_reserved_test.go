@@ -197,7 +197,7 @@ func TestIsAllowedEnvVar_ReservedBentooSecrets(t *testing.T) {
 			{filepath.Join("..", "..", "cmd", "bentoo", "overlay_compare.go"), regexp.MustCompile(`"BENTOO_REPO_"\s*\+[^\n]*\+\s*"_TOKEN"`)},
 		}
 		for _, o := range owners {
-			src, err := os.ReadFile(o.file) //nolint:gosec // fixed, test-local source path
+			src, err := os.ReadFile(o.file)
 			if err != nil {
 				t.Fatalf("reading owner %s: %v", o.file, err)
 			}

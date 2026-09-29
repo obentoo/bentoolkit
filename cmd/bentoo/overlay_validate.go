@@ -393,7 +393,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 // attempted and the directory needed to reproduce it, rather than only what the
 // operating system said.
 func publishedManifestBytes(pkgDir string) ([]byte, error) {
-	body, err := os.ReadFile(publishedManifestPath(pkgDir)) //nolint:gosec // the path is the package directory the runner is walking, joined with a fixed filename
+	body, err := os.ReadFile(publishedManifestPath(pkgDir))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

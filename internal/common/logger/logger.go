@@ -101,7 +101,7 @@ func (l *Logger) Close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.fileOutput != nil {
-		l.fileOutput.Close() //nolint:errcheck
+		l.fileOutput.Close() //nolint:errcheck // Close has no error return and the logger is the channel an error would be reported on; the handle is dropped either way
 		l.fileOutput = nil
 	}
 }

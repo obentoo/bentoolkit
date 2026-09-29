@@ -15,7 +15,7 @@ import (
 func readRepoDoc(t *testing.T, name string) string {
 	t.Helper()
 	path := filepath.Join("..", "..", name)
-	data, err := os.ReadFile(path) //nolint:gosec // fixed, test-local doc path
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", name, err)
 	}
