@@ -1,0 +1,10 @@
+id: 2026-09-27-gui+tray
+type: announcement
+severity: info
+title: bentoo-tray brings notices to the desktop
+summary: A system tray client now shows bentoo notices for the packages you have installed.
+body: |
+  bentoo-tray polls the notices feed and notifies you about the packages you have installed.
+affects: []
+published: "2026-09-27T00:00:00Z"
+updated: "2026-09-27T00:00:00Z"

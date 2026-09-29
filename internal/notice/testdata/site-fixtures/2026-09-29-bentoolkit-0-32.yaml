@@ -1,0 +1,15 @@
+id: 2026-09-29-bentoolkit-0-32
+type: release
+severity: warning
+title: bentoolkit 0.32 fixes overlay sync
+summary: bentoolkit before 0.32 can leave the overlay half-synced after an interrupted run.
+body: |
+  Versions before 0.32 do not roll back a sync interrupted by a signal.
+
+  Upgrade with emerge --oneshot app-portage/bentoolkit.
+affects:
+  - cp: app-portage/bentoolkit
+    ranges:
+      - { op: "<", ver: "0.32" }
+published: "2026-09-29T00:00:00Z"
+updated: "2026-09-29T00:00:00Z"

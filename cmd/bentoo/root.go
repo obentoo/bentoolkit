@@ -135,6 +135,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&autoupdateExport, "export", "", "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had")
 
 	root.AddCommand(newDistfileCmd())
+	root.AddCommand(newNoticeCmd())
 	root.AddCommand(newOverlayCmd())
 	root.AddCommand(newSnapshotCmd())
 	root.AddCommand(newVersionCmd())

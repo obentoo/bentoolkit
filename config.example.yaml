@@ -134,3 +134,14 @@ autoupdate:
 # ----------------------------------------------------------------------------
 # ui:
 #   mode: auto
+
+# ----------------------------------------------------------------------------
+# notice — onde `bentoo notice new|revise` grava a metade "site" de um aviso.
+#
+# site_path é a raiz do repositório do site; o YAML do aviso vai para
+# <site_path>/src/content/notices/<id>.yaml. Um `~/` no início é expandido
+# para o diretório home. Sem a chave, o comando grava só o news item no
+# overlay e imprime o YAML na saída padrão.
+# ----------------------------------------------------------------------------
+# notice:
+#   site_path: ~/Projetos/obentoo.org/coming-soon
