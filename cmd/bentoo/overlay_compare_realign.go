@@ -306,7 +306,7 @@ func realignIsTree(path string) bool {
 	if path == "" {
 		return false
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) //nolint:gosec,nolintlint // G703: path is a repository path from the user's own compare config or the provider's clone cache; nolintlint: gosec's G703 taint analysis reports this line in some runs and not in others
 	return err == nil && info.IsDir()
 }
 

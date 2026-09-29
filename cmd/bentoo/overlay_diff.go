@@ -20,7 +20,7 @@ func newDiffCmd() *cobra.Command {
 		Short: "Show diff of changes",
 		Long: `Show the diff of changes in the overlay repository.
 By default shows unstaged changes. Use --staged to show staged changes.`,
-		Run: runDiff,
+		RunE: runDiff,
 	}
 	cmd.Flags().BoolVarP(&diffStaged, "staged", "s", false, "Show staged changes")
 	return cmd
@@ -34,11 +34,11 @@ func gitDiffFoundDifferences(err error) bool {
 	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
-func runDiff(cmd *cobra.Command, args []string) {
+func runDiff(cmd *cobra.Command, args []string) error {
 	ctx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	overlayPath := ctx.OverlayPath
@@ -50,7 +50,7 @@ func runDiff(cmd *cobra.Command, args []string) {
 	}
 	if err := validateGitPathArgs(args); err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 	gitArgs = append(gitArgs, args...)
 
@@ -62,9 +62,10 @@ func runDiff(cmd *cobra.Command, args []string) {
 	if err := gitCmd.Run(); err != nil {
 		// git diff returns exit code 1 if there are differences, which is not an error
 		if gitDiffFoundDifferences(err) {
-			return
+			return nil
 		}
 		logger.Error("running git diff: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }

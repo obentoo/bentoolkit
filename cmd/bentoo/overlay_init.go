@@ -19,12 +19,12 @@ func newInitCmd() *cobra.Command {
 		Short: "Initialize bentoo configuration",
 		Long: `Initialize bentoo configuration interactively.
 Creates a config file with overlay path and git settings.`,
-		Run: runInit,
+		RunE: runInit,
 	}
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, args []string) {
+func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Check if config already exists
@@ -35,7 +35,7 @@ func runInit(cmd *cobra.Command, args []string) {
 		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) != "y" {
 			logger.Info("Aborted.")
-			return
+			return nil
 		}
 	}
 
@@ -68,7 +68,7 @@ func runInit(cmd *cobra.Command, args []string) {
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			if err := os.MkdirAll(overlayPath, 0o750); err != nil {
 				logger.Error("Failed to create directory: %v", err)
-				osExit(1)
+				return exitWith(1)
 			}
 			logger.Info("Created directory: %s", overlayPath)
 		}
@@ -110,7 +110,7 @@ func runInit(cmd *cobra.Command, args []string) {
 	configPath, _ := config.DefaultConfigPath()
 	if err := cfg.SaveTo(configPath); err != nil {
 		logger.Error("Failed to save config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	fmt.Println()
@@ -121,4 +121,5 @@ func runInit(cmd *cobra.Command, args []string) {
 	logger.Info("  bentoo overlay add     - Stage changes")
 	logger.Info("  bentoo overlay commit  - Commit with auto-generated message")
 	logger.Info("  bentoo overlay push    - Push to remote")
+	return nil
 }

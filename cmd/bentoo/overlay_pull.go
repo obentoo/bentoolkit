@@ -27,7 +27,7 @@ By default the integration is fast-forward only: if the overlay has diverged
 from its upstream, the pull refuses rather than writing a merge commit. Use
 --rebase to replay local commits on top of the upstream, or --merge to accept
 a merge commit.`,
-		Run: runPull,
+		RunE: runPull,
 	}
 	cmd.Flags().BoolVar(&pullRebase, "rebase", false, "Replay local commits on top of the upstream")
 	cmd.Flags().BoolVar(&pullMerge, "merge", false, "Merge the upstream, allowing a merge commit")
@@ -49,15 +49,13 @@ func pullModeFromFlags(rebase, merge bool) overlay.PullMode {
 	}
 }
 
-func runPull(cmd *cobra.Command, args []string) {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runPull(cmd *cobra.Command, args []string) error {
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	mode := pullModeFromFlags(pullRebase, pullMerge)
@@ -65,8 +63,7 @@ func runPull(cmd *cobra.Command, args []string) {
 	result, err := overlay.Pull(ctx, appCtx.Config, mode, pullDryRun)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if !result.Success {
@@ -84,9 +81,9 @@ func runPull(cmd *cobra.Command, args []string) {
 				logger.Info("Or abort the merge with 'git merge --abort'")
 			}
 		}
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	logger.Info("%s", result.Message)
+	return nil
 }

@@ -21,7 +21,7 @@ func TestDiffWithValidPath(t *testing.T) {
 	defer func() { diffStaged = origStaged }()
 
 	// A valid path should not cause exit(1) from validation
-	code := withExitIntercept(func() { runDiff(diffCmd, []string{overlayDir}) })
+	code := exitCodeFor(runDiff(diffCmd, []string{overlayDir}))
 	if code == 1 {
 		t.Errorf("runDiff with valid path should not exit(1), got exit(%d)", code)
 	}
@@ -37,7 +37,7 @@ func TestDiffWithStagedFlag(t *testing.T) {
 	defer func() { diffStaged = origStaged }()
 
 	// --staged should not cause a validation error
-	code := withExitIntercept(func() { runDiff(diffCmd, nil) })
+	code := exitCodeFor(runDiff(diffCmd, nil))
 	if code == 1 {
 		t.Errorf("runDiff with --staged should not exit(1), got exit(%d)", code)
 	}
@@ -63,7 +63,7 @@ func TestDiffRejectsGitFlags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code := withExitIntercept(func() { runDiff(diffCmd, tt.args) })
+			code := exitCodeFor(runDiff(diffCmd, tt.args))
 			if code != 1 {
 				t.Errorf("runDiff with %v should exit(1), got exit(%d)", tt.args, code)
 			}
@@ -92,7 +92,7 @@ func TestLogDefaultCount(t *testing.T) {
 	defer func() { logCount = origCount; logOneline = origOneline }()
 
 	// Default count should work without errors
-	withExitIntercept(func() { runLog(logCmd, nil) })
+	_ = runLog(logCmd, nil)
 }
 
 // TestLogCustomCount tests that log command accepts a custom count.
@@ -106,7 +106,7 @@ func TestLogCustomCount(t *testing.T) {
 	defer func() { logCount = origCount; logOneline = origOneline }()
 
 	// Custom count should work without errors
-	withExitIntercept(func() { runLog(logCmd, nil) })
+	_ = runLog(logCmd, nil)
 }
 
 // TestLogOnelineFlag tests that log command works with --oneline flag.
@@ -120,7 +120,7 @@ func TestLogOnelineFlag(t *testing.T) {
 	defer func() { logCount = origCount; logOneline = origOneline }()
 
 	// --oneline should work without errors
-	withExitIntercept(func() { runLog(logCmd, nil) })
+	_ = runLog(logCmd, nil)
 }
 
 // TestLogRejectsPositionalArgs tests that log command rejects extra positional arguments.

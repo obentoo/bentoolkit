@@ -343,7 +343,10 @@ func s058InterruptChild(t *testing.T, args []string) s058CancellableOutcome {
 	for i := range args {
 		args[i] = strings.ReplaceAll(args[i], "{home}", f.home)
 	}
-	cmd.Env = append(f.env, s058CancellableArgsEnv+"="+strings.Join(args, "\x1f"))
+	// A copy, so the child's variable never lands in spare capacity of f.env.
+	env := append([]string(nil), f.env...)
+	env = append(env, s058CancellableArgsEnv+"="+strings.Join(args, "\x1f"))
+	cmd.Env = env
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = f.overlay
 	var out bytes.Buffer

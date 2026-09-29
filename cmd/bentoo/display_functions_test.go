@@ -350,8 +350,8 @@ func TestNoColorFlagConfiguresOutput(t *testing.T) {
 
 // TestOverlayAddSubcommandRegistered tests add subcommand is registered.
 func TestOverlayAddSubcommandRegistered(t *testing.T) {
-	if addCmd.Run == nil {
-		t.Error("add command should have a Run function")
+	if addCmd.RunE == nil {
+		t.Error("add command should have a RunE function")
 	}
 	if addCmd.Use == "" {
 		t.Error("add command should have a Use field")
@@ -360,22 +360,22 @@ func TestOverlayAddSubcommandRegistered(t *testing.T) {
 
 // TestOverlayCommitSubcommandRegistered tests commit subcommand is registered.
 func TestOverlayCommitSubcommandRegistered(t *testing.T) {
-	if commitCmd.Run == nil {
-		t.Error("commit command should have a Run function")
+	if commitCmd.RunE == nil {
+		t.Error("commit command should have a RunE function")
 	}
 }
 
 // TestOverlayPushSubcommandRegistered tests push subcommand is registered.
 func TestOverlayPushSubcommandRegistered(t *testing.T) {
-	if pushCmd.Run == nil {
-		t.Error("push command should have a Run function")
+	if pushCmd.RunE == nil {
+		t.Error("push command should have a RunE function")
 	}
 }
 
 // TestOverlayRenameSubcommandRegistered tests rename subcommand is registered.
 func TestOverlayRenameSubcommandRegistered(t *testing.T) {
-	if renameCmd.Run == nil {
-		t.Error("rename command should have a Run function")
+	if renameCmd.RunE == nil {
+		t.Error("rename command should have a RunE function")
 	}
 }
 

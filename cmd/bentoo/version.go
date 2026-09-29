@@ -13,8 +13,9 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Long:  `Print the version, commit hash, and build date of bentoo.`,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println(version.Info())
+			return nil
 		},
 	}
 	return cmd

@@ -61,7 +61,7 @@ func renameDirState(t *testing.T, dir string) map[string]string {
 }
 
 // runRenameObserved runs runRename with the given flags, stdin and args, and
-// returns the exit code (-1 when runRename returned without exiting), what was
+// returns the exit code its returned error maps to (0 for nil), what was
 // printed to stdout (where the confirmation prompt goes), and whatever stdin
 // input was left unread.
 func runRenameObserved(t *testing.T, flags renameFlagsSnapshot, stdin string, args []string) (code int, stdout, unread string) {
@@ -91,7 +91,7 @@ func runRenameObserved(t *testing.T, flags renameFlagsSnapshot, stdin string, ar
 	os.Stdin, os.Stdout = inR, outW
 	func() {
 		defer func() { os.Stdin, os.Stdout = origIn, origOut }()
-		code = withExitIntercept(func() { runRename(renameCmd, args) })
+		code = exitCodeFor(runRename(renameCmd, args))
 	}()
 	if err := outW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)

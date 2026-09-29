@@ -105,7 +105,7 @@ Examples:
   # Write it somewhere else (it will not be found by emerge there)
   bentoo distfile fetch app-misc/example --distdir /tmp/dl`,
 		Args: cobra.ExactArgs(1),
-		Run:  runDistfileFetch,
+		RunE: runDistfileFetch,
 	}
 	cmd.Flags().StringVar(&distfileFetchDistdir, "distdir", "",
 		"Directory the file is written into (default: the host's own DISTDIR, as reported by portageq distdir)")
@@ -117,15 +117,13 @@ Examples:
 // runDistfileFetch is the cobra half: signals, config, DISTDIR. The decision
 // this command exists for lives in internal/autoupdate, reached through the one
 // exported call below.
-func runDistfileFetch(cmd *cobra.Command, args []string) {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runDistfileFetch(cmd *cobra.Command, args []string) error {
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		output.PrintError("loading config: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Resolve rather than Locate: this directory is about to be WRITTEN to, and
@@ -136,8 +134,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) {
 	dir, err := distfiles.Resolve(distfileFetchDistdir, "")
 	if err != nil {
 		output.PrintError("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	res, err := autoupdate.FetchAuthDistfile(ctx, autoupdate.AuthDistfileRequest{
@@ -148,8 +145,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) {
 	})
 	if err != nil {
 		reportDistfileFetchError(args[0], err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	output.PrintSuccess("%s-%s: wrote %s", res.Package, res.Version, res.Path)
@@ -157,6 +153,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) {
 		fmt.Printf("  serial read from $%s\n", res.SerialEnv)
 	}
 	fmt.Println("  emerge can now install it without downloading anything.")
+	return nil
 }
 
 // reportDistfileFetchError prints the failure with the remedy that belongs to

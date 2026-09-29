@@ -77,16 +77,16 @@ func TestOverlaySubcommandsHaveRunFunc(t *testing.T) {
 				t.Error("overlay compare should have a Run function")
 			}
 		case cmd.Use == "pull":
-			if cmd.Run == nil {
-				t.Error("overlay pull should have a Run function")
+			if cmd.RunE == nil {
+				t.Error("overlay pull should have a RunE function")
 			}
 		case cmd.Use == "diff" || strings.HasPrefix(cmd.Use, "diff "):
-			if cmd.Run == nil {
-				t.Error("overlay diff should have a Run function")
+			if cmd.RunE == nil {
+				t.Error("overlay diff should have a RunE function")
 			}
 		case cmd.Use == "log":
-			if cmd.Run == nil {
-				t.Error("overlay log should have a Run function")
+			if cmd.RunE == nil {
+				t.Error("overlay log should have a RunE function")
 			}
 		}
 	}
@@ -196,8 +196,8 @@ func TestInitCommandRegistered(t *testing.T) {
 	if initCmd.Short == "" {
 		t.Error("init command should have a Short description")
 	}
-	if initCmd.Run == nil {
-		t.Error("init command should have a Run function")
+	if initCmd.RunE == nil {
+		t.Error("init command should have a RunE function")
 	}
 }
 
@@ -209,8 +209,8 @@ func TestPullCommandRegistered(t *testing.T) {
 	if pullCmd.Short == "" {
 		t.Error("pull command should have a Short description")
 	}
-	if pullCmd.Run == nil {
-		t.Error("pull command should have a Run function")
+	if pullCmd.RunE == nil {
+		t.Error("pull command should have a RunE function")
 	}
 }
 
@@ -293,8 +293,9 @@ func TestOverlaySubcommandsWithoutConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, cmd := range overlayCmd.Commands() {
 				if cmd.Use == tc.use || strings.HasPrefix(cmd.Use, tc.use+" ") {
-					if cmd.Run == nil {
-						t.Errorf("overlay %s should have a Run function that handles missing config", tc.name)
+					// compare is still a Run command; pull, diff and log are RunE.
+					if cmd.Run == nil && cmd.RunE == nil {
+						t.Errorf("overlay %s should have a Run or RunE function that handles missing config", tc.name)
 					}
 					return
 				}
