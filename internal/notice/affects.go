@@ -14,7 +14,7 @@ import (
 var ErrAffects = errors.New("invalid --affects value")
 
 var (
-	// cpRe and slotRe are the site schema's patterns (site story 073). The
+	// cpRe and slotRe are the site schema's patterns (site story 002). The
 	// slot pattern has no `/` on purpose: a subslot is refused, because the
 	// feed and the tray compare the slot only and would silently drop it.
 	cpRe   = regexp.MustCompile(`^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$`)

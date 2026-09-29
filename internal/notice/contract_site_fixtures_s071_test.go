@@ -1,6 +1,6 @@
 package notice
 
-// Story 071, sub-task 8.1 (Q12): for every notice fixture of site story 073,
+// Story 071, sub-task 8.1 (Q12): for every notice fixture of site story 002,
 // copied into testdata/site-fixtures/, the YAML RenderSiteYAML produces from
 // the equivalent Notice decodes to the same field names, value types and
 // values. The site build consumes this output, so the site's own fixtures are
@@ -131,10 +131,10 @@ func TestContract_SiteFixturesRenderIdentically(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(paths) == 0 {
-		t.Fatal("no site fixtures in testdata/site-fixtures/: copy site story 073's tests/fixtures/notices/*.yaml there")
+		t.Fatal("no site fixtures in testdata/site-fixtures/: copy site story 002's tests/fixtures/notices/*.yaml there")
 	}
 	if len(paths) != 4 {
-		t.Errorf("found %d site fixtures, want the four of site story 073", len(paths))
+		t.Errorf("found %d site fixtures, want the four of site story 002", len(paths))
 	}
 	contractEdgeS071(t, filepath.Join("testdata", "site-fixtures", "2026-09-28-edge+case_1.yaml"))
 	for _, path := range paths {

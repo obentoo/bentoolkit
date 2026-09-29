@@ -1,7 +1,7 @@
 package notice
 
 // Story 071, sub-task 3.2: RenderSiteYAML emits the site notice schema
-// (site story 073 "Data Models"): id, type, severity, title, summary, body,
+// (site story 002 "Data Models"): id, type, severity, title, summary, body,
 // affects (cp, optional slot, ranges of op/ver), published, updated — in that
 // order, with quoted RFC 3339 timestamps (R4.1).
 //
