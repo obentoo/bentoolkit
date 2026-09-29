@@ -10,38 +10,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 )
 
-// sentinelExit distinguishes our osExit panic from a real one in captureExit.
-type sentinelExit struct{}
-
-// captureExit stubs osExit, runs fn, and reports the exit code (if any). It
-// serves the handlers that still end the process through osExit; the stub
-// panics so the handler's next statement is never reached, and the panic is
-// recovered here. A handler that returns its outcome (story 058) is read
-// through func exitOf instead.
-func captureExit(t *testing.T, fn func()) (code int, exited bool) {
-	t.Helper()
-	orig := osExit
-	t.Cleanup(func() { osExit = orig })
-	osExit = func(c int) {
-		code = c
-		exited = true
-		panic(sentinelExit{})
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(sentinelExit); !ok {
-				panic(r)
-			}
-		}
-	}()
-	fn()
-	return code, exited
-}
-
-// exitOf reads a returned handler outcome the way captureExit reads an osExit
-// call: code is the process exit status func exitCodeFor maps err to, and
-// exited reports a non-zero one. The snapshot handlers never ended the process
-// with status 0, so exited keeps the meaning captureExit gave it.
+// exitOf reads a returned handler outcome: code is the process exit status
+// func exitCodeFor maps err to, and exited reports a non-zero one.
 func exitOf(err error) (code int, exited bool) {
 	code = exitCodeFor(err)
 	return code, code != 0

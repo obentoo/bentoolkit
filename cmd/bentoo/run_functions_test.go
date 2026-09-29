@@ -40,29 +40,6 @@ func setupTestHome(t *testing.T) (overlayPath string) {
 // exitSentinel is used as a panic value to simulate os.Exit in tests.
 type exitSentinel int
 
-// withExitIntercept replaces osExit with a panic-based interceptor, runs fn,
-// and returns the exit code (or -1 if osExit was not called).
-// Real panics (not exitSentinel) are re-panicked.
-func withExitIntercept(fn func()) (exitCode int) {
-	exitCode = -1
-	orig := osExit
-	osExit = func(c int) {
-		panic(exitSentinel(c))
-	}
-	defer func() {
-		osExit = orig
-		if r := recover(); r != nil {
-			if code, ok := r.(exitSentinel); ok {
-				exitCode = int(code)
-			} else {
-				panic(r)
-			}
-		}
-	}()
-	fn()
-	return exitCode
-}
-
 // ---- runStatus ----
 
 // TestRunStatusValidOverlay tests runStatus with a valid (empty) overlay.
@@ -304,7 +281,7 @@ func TestRunAutoupdateNoFlag(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // TestRunAutoupdateList tests runAutoupdate with --list flag.
@@ -321,7 +298,7 @@ func TestRunAutoupdateList(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // TestRunAutoupdateCheck tests runAutoupdate with --check flag.
@@ -338,7 +315,7 @@ func TestRunAutoupdateCheck(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // TestRunAutoupdateApply tests runAutoupdate with --apply flag.
@@ -355,7 +332,7 @@ func TestRunAutoupdateApply(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // ---- runCommit ----
@@ -912,7 +889,7 @@ func TestRunAutoupdateCheckWithConfig(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // TestRunAutoupdateCheckSpecificPkg tests runAutoupdate --check with a specific package arg.
@@ -931,7 +908,7 @@ func TestRunAutoupdateCheckSpecificPkg(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"}) })
+	_ = runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"})
 }
 
 // ---- runCompare with packages in overlay ----
@@ -1038,7 +1015,7 @@ func TestRunAutoupdateWithTildePath(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // ---- runStatus success path ----
@@ -1088,7 +1065,7 @@ func TestRunAutoupdateEmptyOverlayPath(t *testing.T) {
 		autoupdateApply = origApply
 	}()
 
-	code := withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	code := exitCodeFor(runAutoupdate(autoupdateCmd, nil))
 	if code != 1 {
 		t.Errorf("runAutoupdate with empty overlay path should exit(1), got exit(%d)", code)
 	}
@@ -1137,7 +1114,7 @@ func TestRunCheckWithPackagesConfig(t *testing.T) {
 	}()
 
 	// Will fail at HTTP level (no real network), but gets past NewChecker
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // TestRunCheckSpecificPkgWithConfig tests runCheck with a specific package and packages.toml.
@@ -1157,7 +1134,7 @@ func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
 	}()
 
 	// Pass a specific package arg — will fail at HTTP but covers the args > 0 branch
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"}) })
+	_ = runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"})
 }
 
 // ---- runPull with fetch failure ----
@@ -1430,7 +1407,7 @@ func TestRunListSuccessPath(t *testing.T) {
 	}()
 
 	// runList loads pending list from configDir — should succeed with empty list
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 }
 
 // ---- runPull divergence path ----

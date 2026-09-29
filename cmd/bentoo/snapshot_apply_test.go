@@ -102,14 +102,3 @@ func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 		}
 	}
 }
-
-// captureStdoutExit combines stdout capture and exit capture for verbs that print
-// then may exit. It serves the handlers that still call osExit; a handler that
-// returns its outcome is read through func exitOf instead.
-func captureStdoutExit(t *testing.T, fn func()) (code int, exited bool) {
-	t.Helper()
-	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, fn)
-	})
-	return code, exited
-}

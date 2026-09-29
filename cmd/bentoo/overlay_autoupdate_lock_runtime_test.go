@@ -91,7 +91,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
 	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 
 	fixer.mu.Lock()
 	defer fixer.mu.Unlock()
@@ -134,10 +134,15 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
 	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
 
+	// The process-wide handler func runMain installs (func
+	// setProcessSignalContext): without it the SIGINT below takes its default
+	// action and kills the test binary.
+	setProcessSignalContext(t, autoupdateCmd)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		_ = runAutoupdate(autoupdateCmd, nil)
 	}()
 
 	select {

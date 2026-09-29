@@ -152,7 +152,7 @@ func s056RunCapturingFDs(t *testing.T) (code int, out string) {
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		code = withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
 	}()
 	data, _ := os.ReadFile(f.Name())
 	return code, string(data)

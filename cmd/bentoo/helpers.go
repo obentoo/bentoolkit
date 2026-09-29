@@ -171,28 +171,6 @@ func commandContext(cmd *cobra.Command) context.Context {
 	return context.Background()
 }
 
-// signalContext derives a context that is cancelled when the process receives
-// SIGINT, SIGTERM or SIGHUP, so an in-flight command aborts cleanly within ~2 s
-// (R3.1). It coexists with func processContext until every handler reads the
-// process-wide context instead: the first signal's signal.Reset releases both
-// registrations, so the next signal still takes its default action. See func
-// processContext for why SIGHUP is in the list.
-//
-// OQ-1: cmd.Context() may be nil — unit tests call the run* functions directly
-// with a freshly built command whose ctx is still nil, and
-// signal.NotifyContext panics on a nil parent. The nil guard below falls back
-// to context.Background() so both paths are safe.
-//
-// The caller MUST defer the returned stop function to release the signal
-// handler. This mirrors the signal.NotifyContext pattern used in runManifest
-// (AD-1).
-func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
-	if parent == nil {
-		parent = context.Background()
-	}
-	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-}
-
 // padColumn lays value into a column that is cells display columns wide, so the
 // column after it starts in the same place on every row.
 //

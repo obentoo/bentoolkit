@@ -2,10 +2,15 @@ package main
 
 // Authored for story 056, sub-task 8.1 (S056-R4.7): the overlay lock file is
 // removed before the process exits, including when the mode ends through the
-// PRODUCTION osExit. The in-process withExitIntercept makes osExit panic, which
-// unwinds the deferred Release; that is how the earlier tests missed the gap.
+// PRODUCTION osExit. The in-process intercept of that time made osExit panic,
+// which unwound the deferred Release; that is how the earlier tests missed the gap.
 // Here a re-exec'd child runs runAutoupdate with osExit left exactly as the
 // binary ships it, and the parent inspects the overlay after the child is gone.
+//
+// Since story 058 the child ends the way func main does: the command tree runs
+// through func runMain (or func execute, for the cancelled role), every
+// deferred call inside the handler runs as it returns, and only then does func
+// exitProcess end the process with the mapped code.
 
 import (
 	"context"
@@ -15,38 +20,36 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
 
 const (
 	// s056ProdExitRoleEnv selects the child role and names its scenario.
 	s056ProdExitRoleEnv = "BENTOO_TEST_S056_PRODUCTION_EXIT_ROLE"
-	// s056ProdExitReturned is the child's own exit code when runAutoupdate
-	// returned instead of ending the process: the scenario then never reached
-	// osExit, and says nothing about it.
+	// s056ProdExitReturned is the exit code the child used when runAutoupdate
+	// returned instead of ending the process. The child now ends through func
+	// exitProcess, which never picks it, so seeing it means the child did not
+	// run the production exit path.
 	s056ProdExitReturned = 97
 )
 
-// TestHelperS056ProductionExitChild is not a test: in the child role it runs a
-// --check on the fixture its parent built (HOME comes from the environment) with
-// the production osExit, so the process ends wherever the mode ends it.
+// TestHelperS056ProductionExitChild is not a test: in the child role it runs
+// `overlay autoupdate --check` on the fixture its parent built (HOME comes from
+// the environment) through a fresh command tree and ends the process the way
+// func main does, so the process ends only after the handler has returned.
 func TestHelperS056ProductionExitChild(t *testing.T) {
 	role := os.Getenv(s056ProdExitRoleEnv)
 	if role == "" {
 		t.Skip("child role only")
 	}
-	autoupdateLint, autoupdateFix, autoupdateList = false, false, false
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	autoupdateTimeout, autoupdateOnly, autoupdateApply = 0, "", ""
-	autoupdateCheck = true
+	root := newRootCmd()
+	root.SetArgs([]string{"overlay", "autoupdate", "--check"})
 	if role == "cancelled" {
+		// Already cancelled, as SIGINT/SIGTERM would leave the run's context.
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		autoupdateCmd.SetContext(ctx)
+		exitProcess(execute(ctx, root, os.Stderr))
 	}
-	runAutoupdate(autoupdateCmd, nil)
-	os.Exit(s056ProdExitReturned)
+	exitProcess(runMain(root))
 }
 
 // s056RunProductionExitChild builds the --check fixture, plants a dead

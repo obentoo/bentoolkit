@@ -388,8 +388,8 @@ func TestOverlayAnalyzeSubcommandRegistered(t *testing.T) {
 
 // TestOverlayAutoupdateSubcommandRegistered tests autoupdate subcommand is registered.
 func TestOverlayAutoupdateSubcommandRegistered(t *testing.T) {
-	if autoupdateCmd.Run == nil {
-		t.Error("autoupdate command should have a Run function")
+	if autoupdateCmd.RunE == nil {
+		t.Error("autoupdate command should have a RunE function")
 	}
 }
 
