@@ -25,17 +25,20 @@ type Runner func(ctx context.Context, name string, args ...string) error
 // Revise takes one, so the command decides how the body is edited.
 type BodyEditor func(ctx context.Context, current string) (string, error)
 
-// scissorsLine ends the editor's instructions: everything below it is the
-// text, kept verbatim — `#` lines included, since a news item's text often
-// quotes a root prompt such as `# emerge --sync`.
+// scissorsLine ends the editor's instructions: everything below it is kept
+// verbatim — `#` lines included, since a news item's text often quotes a root
+// prompt such as `# emerge --sync`. Above it, only the `#` lines are
+// instructions; text typed there, where most editors open, is kept too.
 const scissorsLine = "# ------------------------ >8 ------------------------"
 
-// editorInstructions prefills the temporary file. Nothing is written below the
-// scissors line, so saving the file untouched is an empty body (R2.4).
-const editorInstructions = `# Write the notice body below the line that follows.
-# Everything below it is kept as written, lines starting with '#' included.
-# Separate paragraphs with a blank line; the news item is wrapped at 72
-# columns. Save and quit to continue, or leave the body empty to abort.
+// editorInstructions prefills the temporary file. Nothing but instructions is
+// written above the scissors line and nothing below it, so saving the file
+// untouched is an empty body (R2.4).
+const editorInstructions = `# Write the notice body in this file. Lines starting with '#' above the
+# line that follows are dropped; everything below it is kept as written,
+# lines starting with '#' included. Separate paragraphs with a blank line;
+# the news item is wrapped at 72 columns. Save and quit to continue, or
+# leave the body empty to abort.
 ` + scissorsLine + "\n"
 
 // TerminalRunner runs the editor on the user's terminal. It never goes through
@@ -49,8 +52,8 @@ func TerminalRunner(ctx context.Context, name string, args ...string) error {
 }
 
 // ReadBody returns the notice body (R2): the content of bodyFile when it is
-// given, otherwise what the user writes in $VISUAL, else $EDITOR, below the
-// scissors line. env reads the environment (os.Getenv in production).
+// given, otherwise what the user writes in $VISUAL, else $EDITOR (see
+// editedText). env reads the environment (os.Getenv in production).
 func ReadBody(ctx context.Context, bodyFile string, env func(string) string, run Runner) (string, error) {
 	if bodyFile != "" {
 		data, err := os.ReadFile(bodyFile) //nolint:gosec // G304: --body-file is the user's own input file, read and never executed
@@ -119,14 +122,16 @@ func editorCommand(env func(string) string) []string {
 	return nil
 }
 
-// editedText is what the user wrote: everything after the scissors line when
-// it is still there, otherwise the file without its comment lines — an editor
-// that rewrote the whole file took the scissors line with it.
+// editedText is what the user wrote. With the scissors line still there, it
+// is the non-comment lines above it followed by every line below it,
+// verbatim. Without it — an editor that rewrote the whole file took the line
+// with it — it is the file without its comment lines.
 func editedText(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		if line == scissorsLine {
-			return strings.Join(lines[i+1:], "\n")
+			above := stripComments(strings.Join(lines[:i], "\n"))
+			return above + "\n" + strings.Join(lines[i+1:], "\n")
 		}
 	}
 	return stripComments(s)
