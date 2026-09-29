@@ -9,7 +9,7 @@ package main
 // into the Go struct: unmarshalling into the struct would pass even if every
 // tag were dropped and the keys silently became Go identifiers.
 //
-// captureStdout comes from overlay_analyze_test.go; captureExit from
+// captureStdout comes from overlay_analyze_test.go; exitOf from
 // snapshot_test.go; stubValidateRunner from overlay_validate_test.go.
 //
 // Red is DEFERRED to Run mode: the command does not exist yet.
@@ -78,7 +78,7 @@ func TestRender_TextNamesEverySkipReason(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+		_ = runValidate(newValidateCmd(), []string{})
 	})
 
 	for _, want := range []string{
@@ -106,7 +106,7 @@ func TestRender_TextNamesTheGateBesideItsReason(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+		_ = runValidate(newValidateCmd(), []string{})
 	})
 
 	for _, want := range []string{
@@ -138,14 +138,13 @@ func TestRender_TextTallyIsTheWorstGatePerEbuild(t *testing.T) {
 		}},
 	})
 
-	// captureStdout goes OUTSIDE captureExit. osExit panics with a sentinel that
-	// captureExit recovers, so with the nesting the other way the assignment of
-	// the captured text never runs and every assertion about it passes on an
-	// empty string.
+	// runValidate returns its exit status (story 058) and func exitOf reads it
+	// inside captureStdout; nothing panics, so the captured text is assigned and
+	// no assertion below can pass on an empty string.
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+		code, exited = exitOf(runValidate(newValidateCmd(), []string{}))
 	})
 
 	if !strings.Contains(out, "1 ebuilds: 1 failed, 0 passed, 0 skipped") {
@@ -162,7 +161,7 @@ func TestRender_JsonIsOneDocument(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{"--json"}) })
+		_ = runValidate(newValidateCmd(), []string{"--json"})
 	})
 
 	var doc map[string]any
@@ -190,7 +189,7 @@ func TestRender_JsonKeysAreTheContract(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{"--json"}) })
+		_ = runValidate(newValidateCmd(), []string{"--json"})
 	})
 
 	var doc map[string]any
@@ -261,7 +260,7 @@ func TestRender_JsonCarriesEveryGatesOwnReason(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{"--json"}) })
+		_ = runValidate(newValidateCmd(), []string{"--json"})
 	})
 
 	// The `payload` hop is story 046's sub-task 8.1: the model moved one level
@@ -307,7 +306,7 @@ func TestRender_JsonCarriesTheEvidence(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
 	out := captureStdout(t, func() {
-		captureExit(t, func() { runValidate(newValidateCmd(), []string{"--json"}) })
+		_ = runValidate(newValidateCmd(), []string{"--json"})
 	})
 
 	if !strings.Contains(out, "gst-plugins-good-1.29.2/meson.options") {
@@ -320,15 +319,15 @@ func TestRender_JsonCarriesTheEvidence(t *testing.T) {
 func TestRender_ExitCodeMatchesTheRenderedOutcomes(t *testing.T) {
 	stubValidateRunner(t, mixedReport())
 
-	// The two captures nest this way round and not the other. osExit panics with
-	// a sentinel captureExit recovers, so with captureExit on the outside the
-	// `out = captureStdout(…)` assignment never runs and the FAILED assertion
-	// below silently tests an empty string — a vacuous green in the very test
-	// that exists to stop the report and the exit code drifting apart.
+	// runValidate returns its exit status (story 058) and func exitOf reads it
+	// inside captureStdout; nothing panics, so the `out = captureStdout(…)`
+	// assignment always runs and the FAILED assertion below never tests an
+	// empty string — a vacuous green in the very test that exists to stop the
+	// report and the exit code drifting apart.
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+		code, exited = exitOf(runValidate(newValidateCmd(), []string{}))
 	})
 
 	if !exited {

@@ -65,6 +65,23 @@ func applySignalPolicy(cmd *cobra.Command) {
 	}
 }
 
+// yieldSignalsToPrompt hands the next SIGINT, SIGTERM or SIGHUP its default
+// action and returns a function that restores the command's own policy. A
+// prompt blocked on stdin does not watch the context, so on a cancellable
+// command the first Ctrl+C would only cancel a context nobody is reading and
+// the prompt would keep waiting. Before story 058 one Ctrl+C at `overlay
+// commit`'s and `overlay analyze`'s prompts ended the command, and this keeps
+// it so. A command running without a policy (a direct handler call in a test)
+// gets a no-op.
+func yieldSignalsToPrompt(cmd *cobra.Command) (restore func()) {
+	policy, ok := commandContext(cmd).Value(signalPolicyKey{}).(*signalPolicy)
+	if !ok {
+		return func() {}
+	}
+	was := policy.cancellable.Swap(false)
+	return func() { policy.cancellable.Store(was) }
+}
+
 // processContext registers the process's one signal handler. It returns a
 // context the first signal cancels while a cancellable command runs, a stop
 // function that unregisters the handler, and the policy the root's

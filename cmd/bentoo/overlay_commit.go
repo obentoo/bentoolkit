@@ -125,8 +125,12 @@ func runCommit(cmd *cobra.Command, args []string) error {
 
 	fmt.Print("Proceed? [y]es / [e]dit / [c]ancel: ")
 
+	// One Ctrl+C at the prompt ends the command (func yieldSignalsToPrompt);
+	// the git calls after it are cancellable again.
 	reader := bufio.NewReader(os.Stdin)
+	restoreSignals := yieldSignalsToPrompt(cmd)
 	input, err := reader.ReadString('\n')
+	restoreSignals()
 	if err != nil {
 		logger.Error("reading input: %v", err)
 		return exitWith(1)
@@ -146,7 +150,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	case "e", "edit":
 		// Allow user to enter custom message
 		fmt.Print("Enter commit message: ")
+		restoreSignals = yieldSignalsToPrompt(cmd)
 		customMessage, err := reader.ReadString('\n')
+		restoreSignals()
 		if err != nil {
 			logger.Error("reading input: %v", err)
 			return exitWith(1)

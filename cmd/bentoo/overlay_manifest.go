@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -86,7 +84,7 @@ Examples:
   # Disable the system distfiles cache lookup
   bentoo overlay manifest --distfiles-cache ""`,
 		Args: cobra.MaximumNArgs(1),
-		Run:  runManifest,
+		RunE: runManifest,
 	}
 	cmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
 	cmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
@@ -96,7 +94,7 @@ Examples:
 	return cmd
 }
 
-func runManifest(cmd *cobra.Command, args []string) {
+func runManifest(cmd *cobra.Command, args []string) error {
 	arg := ""
 	if len(args) == 1 {
 		arg = args[0]
@@ -105,24 +103,30 @@ func runManifest(cmd *cobra.Command, args []string) {
 	scope, err := overlay.ParseManifestScope(arg)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	ctx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	targets, err := overlay.ResolveManifestTargets(ctx.OverlayPath, scope)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
-	// Wire SIGINT/SIGTERM to a context so an in-flight run cancels cleanly:
-	// pkgdev sub-processes inherit the cancellation through exec.CommandContext.
-	runCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The process-wide context (func commandContext): overlay manifest is
+	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels
+	// the run. pkgdev runs in its own process group and receives no terminal
+	// signal, so this context, handed to exec.CommandContext by
+	// overlay.RegenerateManifests, is what stops it (story 054, R4.4). The
+	// child context exists only for its cancel, which func
+	// chooseManifestReporter hands to the live TUI: the TUI reads its own
+	// interrupt key from a raw terminal, where no SIGINT is raised.
+	runCtx, cancel := context.WithCancel(commandContext(cmd))
 	defer cancel()
 
 	// Emit the lead-in line BEFORE building the reporter: once the live TUI
@@ -171,7 +175,7 @@ func runManifest(cmd *cobra.Command, args []string) {
 	presentManifestReport(ctx.Config, buildManifestReport(&result, opts.DryRun))
 
 	if opts.DryRun {
-		return
+		return nil
 	}
 
 	// An interrupted run does not exit 0, and saying so explicitly is what KEEPS
@@ -185,15 +189,14 @@ func runManifest(cmd *cobra.Command, args []string) {
 	// It is checked BEFORE the rows, not instead of them: the two answer
 	// different questions, and the first one to say "not a clean run" wins.
 	if result.Interrupted {
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	for _, u := range result.Updates {
 		if !u.Success {
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 	}
+	return nil
 }
 
 // chooseManifestReporter picks the reporter for the current run: the live TUI

@@ -23,8 +23,8 @@ func TestManifestCommandRegistered(t *testing.T) {
 			if cmd.Long == "" {
 				t.Error("manifest command should have a Long description")
 			}
-			if cmd.Run == nil {
-				t.Error("manifest command should have a Run function")
+			if cmd.RunE == nil {
+				t.Error("manifest command should have a RunE function")
 			}
 			break
 		}

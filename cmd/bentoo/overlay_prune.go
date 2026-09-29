@@ -156,7 +156,7 @@ Examples:
   bentoo overlay prune --apply                  # carry the plan out
   bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry`,
 		Args: cobra.MaximumNArgs(1),
-		Run:  runPruneCmd,
+		RunE: runPruneCmd,
 	}
 	cmd.Flags().BoolVar(&pruneApply, "apply", false, "Carry out the plan (default: plan only, remove nothing)")
 	cmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)")
@@ -169,20 +169,20 @@ Examples:
 // can be decided without them lives in runPrune, which takes both as parameters
 // so the whole flow is drivable from a test — the same split runRevive and
 // runSweep use.
-func runPruneCmd(cmd *cobra.Command, args []string) {
-	// SIGINT/SIGTERM reach the comparison through the context, so an interrupted
-	// run stops looking at packages instead of finishing the scan first.
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runPruneCmd(cmd *cobra.Command, args []string) error {
+	// The process-wide context (func commandContext): overlay prune is
+	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP reaches the
+	// comparison and an interrupted run stops looking at packages instead of
+	// finishing the scan first.
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		output.Error.Printf("  loading config: %v\n", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
-	runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config)
+	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config)
 }
 
 // runPrune plans what may leave the overlay, prints it, and — with --apply —
@@ -232,7 +232,7 @@ func runPruneCmd(cmd *cobra.Command, args []string) {
 // not cost a network round trip before it is reported. The scan is also the
 // authority the target is checked against: it is the set of packages that
 // actually exist here.
-func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config) {
+func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config) error {
 	fmt.Println()
 	output.Header.Println("Overlay Prune")
 	fmt.Println()
@@ -240,8 +240,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	scan, err := overlay.ScanOverlay(overlayPath)
 	if err != nil {
 		output.Error.Printf("  cannot scan the overlay at %s: %v\n", overlayPath, err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	if len(scan.Errors) > 0 {
 		// An incomplete scan makes the plan incomplete, and a plan that silently
@@ -266,8 +265,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// walks away from a misspelled category believing they were told something.
 		output.Error.Printf("  %v\n", err)
 		output.Info.Println("  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all.")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if len(packages) == 0 {
@@ -275,14 +273,13 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// It is the "nothing was EXAMINED" side of R1.5 and not the "nothing
 		// qualified" side: no package was compared, because there was none.
 		reportPruneNothingExamined("  Nothing was examined: this overlay holds no package to compare.")
-		return
+		return nil
 	}
 
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		output.Error.Printf("  %v\n", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // closing a read-only provider cannot invalidate a plan already printed
 
@@ -296,7 +293,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// that cannot answer it, so the command prints the plan it has and exits 0.
 	if _, ok := prov.(provider.PackageDirProvider); !ok {
 		reportPruneAPIOnly(prov.GetName(), len(packages))
-		return
+		return nil
 	}
 
 	// What the overlay declares about itself, and which registry entries belong to
@@ -320,7 +317,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// then have to close with "nothing qualified", which is false. Nothing was
 		// examined; a file could not be read.
 		reportPruneRegistryUnreadable(err, len(packages))
-		return
+		return nil
 	}
 	for _, key := range malformed {
 		logger.Warn("registry key %q is not a category/package atom; it is not listed against any package below", key)
@@ -341,8 +338,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	})
 	if err != nil {
 		output.Error.Printf("  comparing packages: %v\n", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	opts := overlay.PruneOptions{
@@ -359,7 +355,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// R1.5's other side: packages WERE examined and none of them may be
 		// removed. That is "you are done", not "run it again differently".
 		reportPruneNothingQualified(len(report.Results), len(batch.Diverging), pruneIncludePatched)
-		return
+		return nil
 	}
 
 	// ---- the removal half of the command starts here ----
@@ -368,7 +364,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// delete, and the printer only reads.
 	if !pruneApply {
 		output.Info.Printf("  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n", eligible)
-		return
+		return nil
 	}
 
 	// Consent produces a BATCH, not a permission slip: consent.authorised holds
@@ -410,9 +406,9 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// D7's exit table. All three causes are the same answer to a caller — "what you
 	// asked for did not all happen" — and each is reported above in its own words.
 	if failed > 0 || consent.refused > 0 || registryErr != nil {
-		osExit(1)
-		return
+		return exitWith(1)
 	}
+	return nil
 }
 
 // pruneConsentAnswer is what one confirmation gate returned.

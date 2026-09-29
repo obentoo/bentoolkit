@@ -381,8 +381,8 @@ func TestOverlayRenameSubcommandRegistered(t *testing.T) {
 
 // TestOverlayAnalyzeSubcommandRegistered tests analyze subcommand is registered.
 func TestOverlayAnalyzeSubcommandRegistered(t *testing.T) {
-	if analyzeCmd.Run == nil {
-		t.Error("analyze command should have a Run function")
+	if analyzeCmd.RunE == nil {
+		t.Error("analyze command should have a RunE function")
 	}
 }
 

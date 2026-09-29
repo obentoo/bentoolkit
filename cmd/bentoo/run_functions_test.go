@@ -202,7 +202,7 @@ func TestRunPull(t *testing.T) {
 func TestRunCompareUnknownRepo(t *testing.T) {
 	setupTestHome(t)
 
-	code := withExitIntercept(func() { runCompare(compareCmd, []string{"nonexistent-repo-xyz"}) })
+	code := exitCodeFor(runCompare(compareCmd, []string{"nonexistent-repo-xyz"}))
 	if code != 1 {
 		t.Errorf("runCompare with unknown repo should exit(1), got exit(%d)", code)
 	}
@@ -223,7 +223,7 @@ func TestRunCompareDefaultRepo(t *testing.T) {
 		compareTimeout = origTimeout
 	}()
 
-	withExitIntercept(func() { runCompare(compareCmd, nil) })
+	_ = runCompare(compareCmd, nil)
 }
 
 // TestRunCompareWithRepoArg tests runCompare with explicit repo arg.
@@ -234,7 +234,7 @@ func TestRunCompareWithRepoArg(t *testing.T) {
 	compareTimeout = 1
 	defer func() { compareTimeout = origTimeout }()
 
-	withExitIntercept(func() { runCompare(compareCmd, []string{"gentoo"}) })
+	_ = runCompare(compareCmd, []string{"gentoo"})
 }
 
 // ---- runAnalyze ----
@@ -247,7 +247,7 @@ func TestRunAnalyzeNoArgs(t *testing.T) {
 	analyzeAll = false
 	defer func() { analyzeAll = origAll }()
 
-	code := withExitIntercept(func() { runAnalyze(analyzeCmd, nil) })
+	code := exitCodeFor(runAnalyze(analyzeCmd, nil))
 	if code != 1 {
 		t.Errorf("runAnalyze with no args should exit(1), got exit(%d)", code)
 	}
@@ -273,7 +273,7 @@ func TestRunAnalyzeWithPackage(t *testing.T) {
 		analyzeDryRun = origDryRun
 	}()
 
-	withExitIntercept(func() { runAnalyze(analyzeCmd, []string{"net-misc/foo"}) })
+	_ = runAnalyze(analyzeCmd, []string{"net-misc/foo"})
 }
 
 // TestRunAnalyzeAll tests runAnalyze with --all flag (dry-run).
@@ -285,7 +285,7 @@ func TestRunAnalyzeAll(t *testing.T) {
 	analyzeDryRun = true
 	defer func() { analyzeAll = origAll; analyzeDryRun = origDryRun }()
 
-	withExitIntercept(func() { runAnalyze(analyzeCmd, nil) })
+	_ = runAnalyze(analyzeCmd, nil)
 }
 
 // ---- runAutoupdate ----
@@ -719,7 +719,7 @@ repositories:
 	compareTimeout = 1
 	defer func() { compareTimeout = origTimeout }()
 
-	withExitIntercept(func() { runCompare(compareCmd, []string{"localrepo"}) })
+	_ = runCompare(compareCmd, []string{"localrepo"})
 }
 
 // setupTestHomeWithGitRepo creates a temp HOME with a valid config AND an initialized git repo.
@@ -963,7 +963,7 @@ func TestRunCompareWithPackages(t *testing.T) {
 	defer func() { compareTimeout = origTimeout; compareNoCache = origNoCache }()
 
 	// Use a local git repo as provider to avoid network
-	withExitIntercept(func() { runCompare(compareCmd, []string{"gentoo"}) })
+	_ = runCompare(compareCmd, []string{"gentoo"})
 }
 
 // ---- runAnalyzeAll non-dry-run path ----
@@ -979,7 +979,7 @@ func TestRunAnalyzeAllNonDryRun(t *testing.T) {
 
 	// "n" to "Save all successful schemas?"
 	withStdin(t, "n\n", func() {
-		withExitIntercept(func() { runAnalyze(analyzeCmd, nil) })
+		_ = runAnalyze(analyzeCmd, nil)
 	})
 }
 
@@ -1007,7 +1007,7 @@ func TestRunAnalyzeWithTildePath(t *testing.T) {
 	analyzeDryRun = true
 	defer func() { analyzeAll = origAll; analyzeDryRun = origDryRun }()
 
-	withExitIntercept(func() { runAnalyze(analyzeCmd, nil) })
+	_ = runAnalyze(analyzeCmd, nil)
 }
 
 // ---- runAutoupdate with tilde path ----
@@ -1111,7 +1111,7 @@ func TestRunAnalyzeEmptyOverlayPath(t *testing.T) {
 	analyzeAll = true
 	defer func() { analyzeAll = origAll }()
 
-	code := withExitIntercept(func() { runAnalyze(analyzeCmd, nil) })
+	code := exitCodeFor(runAnalyze(analyzeCmd, nil))
 	if code != 1 {
 		t.Errorf("runAnalyze with empty overlay path should exit(1), got exit(%d)", code)
 	}
@@ -1541,7 +1541,7 @@ func TestRunCompareGitHubRateLimitPath(t *testing.T) {
 	defer func() { compareTimeout = origTimeout; compareNoCache = origNoCache }()
 
 	// Use gentoo (GitHub provider) — will hit rate limit check, then fail at API
-	withExitIntercept(func() { runCompare(compareCmd, []string{"gentoo"}) })
+	_ = runCompare(compareCmd, []string{"gentoo"})
 }
 
 // ---- runDiff and runLog error paths ----
@@ -1741,5 +1741,5 @@ repositories:
 	defer func() { compareTimeout = origTimeout }()
 
 	// Compare with local git repo — will clone and compare, likely all up-to-date
-	withExitIntercept(func() { runCompare(compareCmd, []string{"localrepo"}) })
+	_ = runCompare(compareCmd, []string{"localrepo"})
 }

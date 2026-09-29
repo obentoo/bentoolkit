@@ -120,7 +120,7 @@ Examples:
   bentoo overlay compare --no-review        # Contact no model
   bentoo overlay compare --realign          # Review against the ::gentoo baseline`,
 		Args: cobra.MaximumNArgs(1),
-		Run:  runCompare,
+		RunE: runCompare,
 	}
 	cmd.Flags().BoolVar(&compareClone, "clone", false, "Use git clone instead of API")
 	cmd.Flags().StringVar(&compareCacheDir, "cache-dir", "", "Directory to cache data")
@@ -146,13 +146,12 @@ Examples:
 	return cmd
 }
 
-func runCompare(cmd *cobra.Command, args []string) {
+func runCompare(cmd *cobra.Command, args []string) error {
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
 	// with a clear message and a non-zero exit (R4.2).
 	if compareConcurrency < 1 || compareConcurrency > 100 {
 		logger.Error("--concurrency must be in range [1, 100], got %d", compareConcurrency)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Refuse a --depth this invocation has nothing to prove with, in the same
@@ -166,22 +165,20 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// been looked at and prints no report to attach a verdict to.
 	if err := compareDepthPreflight(compareDepth, compareRealign); err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
-	// Wire SIGINT/SIGTERM into a context so an in-flight comparison cancels
-	// cleanly: CompareWithProvider threads it through every upstream lookup and
-	// aborts within ~2 s of a signal (R3.1). See signalContext for the OQ-1
-	// note on why cmd.Context() alone is not signal-aware.
-	runCtx, stop := signalContext(cmd.Context())
-	defer stop()
+	// The process-wide context (func commandContext): overlay compare is
+	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels it.
+	// CompareWithProvider threads it through every upstream lookup, and the
+	// review passes and the realignment builds hand it to the children they
+	// start (R3.1).
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	overlayPath := appCtx.OverlayPath
@@ -200,13 +197,13 @@ func runCompare(cmd *cobra.Command, args []string) {
 	registry, err := provider.NewRepositoryRegistry()
 	if err != nil {
 		logger.Error("Failed to initialize repository registry: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	if compareSync {
 		if err := registry.Sync(); err != nil {
 			logger.Error("Failed to sync repository list: %v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 	}
 
@@ -224,7 +221,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 		} else {
 			logger.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
 		}
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Token precedence (D3) lives in resolveRepoToken. An unreadable secrets file
@@ -239,7 +236,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	prov, err := provider.NewProvider(repoInfo, compareClone)
 	if err != nil {
 		logger.Error("Failed to create provider: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
@@ -258,8 +255,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	if compareRealign {
 		if err := realignPreflight(repoName, prov); err != nil {
 			logger.Error("%v", err)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 	}
 
@@ -290,7 +286,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 				logger.Info("         path: /var/db/repos/gentoo")
 				logger.Info("")
 				logger.Info("  3. Wait until %s for rate limit reset", resetTime.Format("15:04:05"))
-				osExit(1)
+				return exitWith(1)
 			case remaining < 10:
 				logger.Warn("GitHub API rate limit low: %d requests remaining (resets at %s)",
 					remaining, resetTime.Format("15:04:05"))
@@ -308,12 +304,12 @@ func runCompare(cmd *cobra.Command, args []string) {
 	scanResult, err := overlay.ScanOverlay(overlayPath)
 	if err != nil {
 		logger.Error("scanning overlay: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	if len(scanResult.Packages) == 0 {
 		logger.Warn("No packages found in overlay")
-		osExit(0)
+		return nil
 	}
 
 	logger.Info("Found %s packages in Bentoo overlay",
@@ -356,7 +352,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 		// asked for a review (D1).
 		IncludeNotInRemote: compareRealign,
 		Concurrency:        compareConcurrency,
-		Ctx:                runCtx,
+		Ctx:                ctx,
 		Divergence:         divergence,
 		OverlayPath:        overlayPath,
 		ProgressCallback: func(done, total uint64) {
@@ -381,10 +377,10 @@ func runCompare(cmd *cobra.Command, args []string) {
 			logger.Error("GitHub API rate limit exceeded.")
 			logger.Info("Try using --clone flag to download the repository instead:")
 			logger.Info("  bentoo overlay compare %s --clone", repoName)
-			osExit(1)
+			return exitWith(1)
 		}
 		logger.Error("comparing packages: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Clear progress line
@@ -467,7 +463,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// instead of two conditions that could disagree. Nothing here can fail the
 	// run: every way of not getting a reading costs one warning and the report is
 	// printed unchanged.
-	overlay.AnnotateReviews(report, compareDivergenceReviewer(runCtx, compareNoReview, reviewBudget), prov, opts)
+	overlay.AnnotateReviews(report, compareDivergenceReviewer(ctx, compareNoReview, reviewBudget), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
 	// divergence still justified, and what would replace it if not (R4.1, R4.2).
@@ -486,7 +482,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// was judged and none objected".
 	realignJudged := false
 	if realignRan {
-		reviewer := compareRealignReviewer(runCtx, compareNoReview, reviewBudget)
+		reviewer := compareRealignReviewer(ctx, compareNoReview, reviewBudget)
 		realignJudged = reviewer != nil
 		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
 	}
@@ -513,7 +509,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// says no is an answer, and the one non-zero condition is decided below by
 	// exitOnSkippedBaseline over a field nothing here writes.
 	if realignRan && compareDepth != "" {
-		proveRealignments(runCtx, report, overlayPath)
+		proveRealignments(ctx, report, overlayPath)
 	}
 
 	// The report's FINDINGS, re-established now that every annotation pass has
@@ -617,8 +613,8 @@ func runCompare(cmd *cobra.Command, args []string) {
 	// The ONE non-zero condition (R7.5, D9): the review could not locate a
 	// ::gentoo tree, so nothing was examined. It is LAST — after the render and
 	// after the export — because the report is still worth printing and worth
-	// exporting, `compare` did its job, and osExit does not return.
-	exitOnSkippedBaseline(report)
+	// exporting, `compare` did its job, and the status is returned only now.
+	return exitOnSkippedBaseline(report)
 }
 
 // filterCompareResults narrows a report to the rows the operator asked for.

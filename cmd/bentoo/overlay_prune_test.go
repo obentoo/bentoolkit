@@ -229,9 +229,7 @@ func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	if _, err := os.Stat(pkgDir); err != nil {
@@ -272,9 +270,7 @@ func TestPruneAPIOnlyProviderRefusesEverythingWithReason(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
 	})
 
 	if code > 0 {
@@ -311,9 +307,7 @@ func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{})
-		})
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}))
 	})
 
 	if code <= 0 {
@@ -344,9 +338,7 @@ func TestPrunePlanListsFilesAndRegistryKeys(t *testing.T) {
 	forbidOverlayPruneRemoval(t)
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	for _, want := range []string{
@@ -411,9 +403,7 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 	forbidOverlayPruneRemoval(t)
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	if strings.Contains(out, "would be removed") {
@@ -462,9 +452,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		setOverlayPruneFlags(t, false, false, false, false)
 		forbidOverlayPruneRemoval(t)
 		return captureStdout(t, func() {
-			_ = withExitIntercept(func() {
-				runPrune(context.Background(), overlayPath, nil, &config.Config{})
-			})
+			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 		})
 	}
 
@@ -507,9 +495,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 
 		var code int
 		empty = captureStdout(t, func() {
-			code = withExitIntercept(func() {
-				runPrune(context.Background(), overlayPath, nil, &config.Config{})
-			})
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
 		})
 
 		if code > 0 {

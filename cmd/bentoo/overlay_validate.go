@@ -111,7 +111,7 @@ Examples:
   bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir
   bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6`,
 		Args: cobra.MaximumNArgs(1),
-		Run:  runValidate,
+		RunE: runValidate,
 	}
 	// NO BACK-QUOTE IN THE SENTENCE BELOW, and that is load-bearing rather than
 	// stylistic: pflag reads the first back-quoted substring of a usage string as
@@ -133,11 +133,12 @@ Examples:
 	return cmd
 }
 
-// runValidate drives the gate and exits with the report's code.
+// runValidate drives the gate and returns the report's code as its exit
+// status (func exitWith: nil when the code is 0).
 //
 // # Why the flags are parsed here
 //
-// cobra has already parsed them by the time Run is called, and re-parsing the
+// cobra has already parsed them by the time RunE is called, and re-parsing the
 // positional-only args it hands over is a no-op in production. It is not a
 // no-op for a test, which drives this function directly with a raw argv — and a
 // renderer that could only be reached through cobra's own Execute would be a
@@ -160,9 +161,10 @@ Examples:
 // command's tests from depending on the host having a configured overlay, which
 // is one of three environment couplings this repository has had to remove from
 // its suite.
-func runValidate(cmd *cobra.Command, args []string) {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runValidate(cmd *cobra.Command, args []string) error {
+	// The process-wide context (func commandContext): overlay validate is
+	// cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels the run.
+	ctx := commandContext(cmd)
 
 	_ = cmd.ParseFlags(args)
 	asJSON, _ := cmd.Flags().GetBool("json")
@@ -189,14 +191,12 @@ func runValidate(cmd *cobra.Command, args []string) {
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
 		_, _ = fmt.Fprintf(diag, "  reading --depth: %v\n", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	depth, err := validate.ParseDepth(spelled)
 	if err != nil {
 		_, _ = fmt.Fprintf(diag, "  --depth: %v\n", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	var selector string
@@ -205,8 +205,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 	}
 	if !validSelector(selector) {
 		_, _ = fmt.Fprintf(diag, "  %q is not a category or a category/package\n", selector)
-		osExit(2)
-		return
+		return exitWith(2)
 	}
 
 	var overlayPath string
@@ -242,8 +241,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 		stagingRoot, err = autoupdateStagingRoot()
 		if err != nil {
 			_, _ = fmt.Fprintf(diag, "  --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 		// S037-R5.1. A build gate that FAILED says so on its own, but the reason
 		// upstream broke — the option `meson` refused — is only in `ebuild`'s log.
@@ -304,12 +302,10 @@ func runValidate(cmd *cobra.Command, args []string) {
 			// answering an interrupt with it left a script no way to tell a run
 			// that was stopped from a selector that was wrong, short of parsing
 			// the diagnostic text.
-			osExit(130)
-			return
+			return exitWith(130)
 		}
 		_, _ = fmt.Fprintf(diag, "  validating %s: %v\n", overlayLabel(overlayPath), err)
-		osExit(2)
-		return
+		return exitWith(2)
 	}
 
 	presentValidateReport(report, true, asJSON, diag)
@@ -317,7 +313,7 @@ func runValidate(cmd *cobra.Command, args []string) {
 	// after the export deliberately and is unaffected by it: exportReport
 	// returns nothing, so a path that could not be written has no value to
 	// travel back through (R3.5).
-	osExit(report.ExitCode())
+	return exitWith(report.ExitCode())
 }
 
 // publishedManifestBytes is Options.StagedManifest for this command: the bytes

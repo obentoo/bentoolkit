@@ -572,7 +572,9 @@ func realignIndentedBlock(block string) string {
 }
 
 // exitOnSkippedBaseline is R7.5 and D9 in one place: the command's exit code
-// reports the REVIEW's own outcome and nothing about the overlay's shape.
+// reports the REVIEW's own outcome and nothing about the overlay's shape. It
+// returns that status (func exitWith) for func runCompare to return: exit 1
+// when the baseline was skipped, nil otherwise.
 //
 // BaselineSkipped is the only state it reads, and MarkBaselineSkipped is the only
 // thing that writes it, so no count of divergences can reach an exit code through
@@ -586,9 +588,9 @@ func realignIndentedBlock(block string) string {
 // divergence justified are all successful runs that have something to say.
 //
 // _Requirements: R7, R7.5_
-func exitOnSkippedBaseline(report *overlay.CompareReport) {
+func exitOnSkippedBaseline(report *overlay.CompareReport) error {
 	if report == nil || report.BaselineSkipped == "" {
-		return
+		return nil
 	}
-	osExit(1)
+	return exitWith(1)
 }

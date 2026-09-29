@@ -73,8 +73,8 @@ func TestOverlaySubcommandsHaveRunFunc(t *testing.T) {
 	for _, cmd := range overlayCmd.Commands() {
 		switch {
 		case cmd.Use == "compare" || strings.HasPrefix(cmd.Use, "compare "):
-			if cmd.Run == nil {
-				t.Error("overlay compare should have a Run function")
+			if cmd.RunE == nil {
+				t.Error("overlay compare should have a RunE function")
 			}
 		case cmd.Use == "pull":
 			if cmd.RunE == nil {

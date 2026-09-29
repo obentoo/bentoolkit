@@ -18,10 +18,12 @@ package main
 // # How the run is interrupted
 //
 // In process, by signalling this test's own PID, which is the shape story 043
-// already established in overlay_autoupdate_signal_test.go: runManifest wires
-// signal.NotifyContext for the duration of the run, so while that handler is
-// installed the SIGTERM is CAUGHT — the test process is not terminated — and
-// only the run context is cancelled.
+// already established in overlay_autoupdate_signal_test.go. The harness runs
+// the tree through func runMain, whose process-wide handler (func
+// processContext) is installed for the whole run; overlay manifest is annotated
+// cancellable, so the SIGTERM is CAUGHT — the test process is not terminated —
+// and only the run context runManifest took from func commandContext is
+// cancelled.
 //
 // The pkgdev stub is what makes the interrupt land during real work rather than
 // before or after it: it announces itself by creating a marker file and then
