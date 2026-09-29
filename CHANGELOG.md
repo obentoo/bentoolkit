@@ -140,6 +140,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bentoo notice new` and `bentoo notice revise` author a notice in both
+  places it lives.** One command writes the overlay's GLEP 42 news item
+  (`metadata/news/<id>/<id>.en.txt`) and, when the new `notice.site_path` key
+  is set, the site's `src/content/notices/<id>.yaml`, with one shared ID.
+  Everything portage or the site build would reject — type, severity, the ID's
+  short name, title and summary lengths, `--affects` ranges, control
+  characters, a future date — is refused before any file is written, and a
+  failed second write removes the first. `revise` opens the current text in
+  `$VISUAL`/`$EDITOR`, bumps the news item's `Revision` and the site file's
+  `updated` together, and replaces both atomically. Neither command runs git:
+  both print the paths written and the commands to review, commit and push.
+
 - **`--format json` for `overlay compare` gains three keys.** Every package now
   has `cause` and `error`. Both are always present, both are `""` on a row that
   did not fail, and `error` holds the full text on one line. The run gains

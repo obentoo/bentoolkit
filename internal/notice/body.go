@@ -141,3 +141,11 @@ func trimBlankLines(s string) string {
 	}
 	return strings.Join(lines[start:end], "\n")
 }
+
+// NewBodyEditor returns the BodyEditor `notice revise` uses: the current text,
+// under the usual commented instructions, opened in $VISUAL or $EDITOR.
+func NewBodyEditor(env func(string) string, run Runner) BodyEditor {
+	return func(ctx context.Context, current string) (string, error) {
+		return EditBody(ctx, editorInstructions+"\n"+current+"\n", env, run)
+	}
+}
