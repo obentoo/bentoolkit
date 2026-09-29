@@ -334,6 +334,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make lint` runs exactly what the CI Lint job runs.** It builds
+  golangci-lint v2.13.2 (the CI pin; `make lint-pin-check` fails if the two
+  drift) and lints the default, `chromedp` and `playwright` builds. Every `make`
+  target now runs the Go toolchain `go.mod` names, as CI does. The lint set adds
+  gofmt/goimports, errorlint, usetesting, tparallel, forbidigo (no `fmt.Print`
+  in library packages) and a strict nolintlint, and gosec now checks G304,
+  G703 and G704 everywhere. `make clean` also removes `cov.out`, `coverage*.out`
+  and the `bentoo` binary. Pre-commit pins gitleaks by commit and adds gofmt and
+  `go vet` hooks.
+
 - **Error causes stay reachable.** Library errors that formatted their cause
   with `%v` now wrap it, so `errors.Is` and `errors.As` see the cause (a Claude
   run's context error, an LLM request's `*url.Error`, an `fs` or `json` error)
