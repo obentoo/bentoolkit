@@ -13,6 +13,11 @@ linters:
     - misspell
     - bodyclose
     - contextcheck
+    - errorlint
+    - usetesting
+    - tparallel
+    - forbidigo
+    - nolintlint
 
   settings:
     errcheck:
@@ -30,20 +35,45 @@ linters:
         - (*github.com/spf13/cobra.Command).GenFishCompletion
         - (*github.com/spf13/cobra.Command).GenPowerShellCompletionWithDesc
 
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    forbidigo:
+      # A list, so story 058 can append its os.Exit entry beside this one.
+      forbid:
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: library code does not print to stdout; return a value or use internal/common/output
     gosec:
       # G204 (subprocess launched with variable) is intentionally NOT excluded:
       # T6 added ValidateRepoURL/ValidateBranch so every git invocation now runs
       # against validated inputs, and the remaining call sites carry inline
       # //nolint:gosec justifications documenting why each is safe.
       excludes:
-        - G304
         - G104
-        - G703
-        - G704
 
   exclusions:
+    # .epic holds staged authored tests and .claude holds agent worktrees (full
+    # repository copies); neither is this module's code.
+    paths:
+      - ^\.epic/
+      - ^\.claude/
     rules:
+      # Scoped to the fmt.Print rule's text, so another forbidigo entry (the
+      # os.Exit one story 058 appends) is not exempted with it.
+      - path: (^cmd/|^internal/common/output/|^misc/|_test\.go$)
+        linters:
+          - forbidigo
+        text: "fmt\\.Print"
       - path: _test\.go
         linters:
           - errcheck
           - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - ^\.epic/
+      - ^\.claude/

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A `packages.toml` key can no longer name a directory outside its
+  category.** A key whose category or package half is `.`, `..`, or holds a
+  `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
+  as-is; it is now refused as an invalid package key, naming the half that was
+  refused. No real Gentoo atom has that shape.
+- **`fetch_url` and `fetch_id_url` must be absolute `http(s)` URLs with a fixed
+  host.** A `file:`, `ftp:` or relative template, or one with `{id}` or
+  `{version}` in the host, is refused by the download and by `--lint`, so a
+  catalogue id or an upstream version can no longer choose which host receives
+  the request. Placeholders in the path or query still work.
+
 - **Every `claude` agent bentoo spawns now receives an allow-listed environment,
   not bentoo's whole one.** The text client, the manifest, registry and build
   fixers and the bump reviewer used to inherit every variable bentoo had —
@@ -322,6 +333,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unwrapped.
 
 ### Changed
+
+- **`make lint` runs exactly what the CI Lint job runs.** It builds
+  golangci-lint v2.13.2 (the CI pin; `make lint-pin-check` fails if the two
+  drift) and lints the default, `chromedp` and `playwright` builds. Every `make`
+  target now runs the Go toolchain `go.mod` names, as CI does. The lint set adds
+  gofmt/goimports, errorlint, usetesting, tparallel, forbidigo (no `fmt.Print`
+  in library packages) and a strict nolintlint, and gosec now checks G304,
+  G703 and G704 everywhere. `make clean` also removes `cov.out`, `coverage*.out`
+  and the `bentoo` binary. Pre-commit pins gitleaks by commit and adds gofmt and
+  `go vet` hooks.
+
+- **Error causes stay reachable.** Library errors that formatted their cause
+  with `%v` now wrap it, so `errors.Is` and `errors.As` see the cause (a Claude
+  run's context error, an LLM request's `*url.Error`, an `fs` or `json` error)
+  under the same sentinel as before. When a failed manifest was followed by a
+  failed or skipped LLM fix, the manifest failure is now the error's cause and
+  the fix attempt's error is only context in its text; it used to be the other
+  way round. The message text is unchanged apart from that order.
 
 - **`make test` and `make coverage` run with the race detector in random
   order**, as the CI test job now does. A failing run prints

@@ -1332,9 +1332,9 @@ func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
 		logger.Warn("revivable-orphan scan skipped: %v", err)
 		return
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	candidates, ferr := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	candidates, ferr := checker.FindRevivableOrphans(prov)
 	if ferr != nil {
 		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
 	}
@@ -2209,7 +2209,7 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 		osExit(1)
 		return
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	// FindRevivableOrphans threads ctx into every upstream/gentoo lookup via the
 	// Checker (WithContext) and the provider. Soft per-package errors are returned
@@ -2272,7 +2272,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		osExit(1)
 		return
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	// The revive seed copies the ::gentoo package dir off disk; an API-only
 	// provider cannot do that. Detect it ONCE before the loop and bail with an

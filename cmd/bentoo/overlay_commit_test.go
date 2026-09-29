@@ -91,12 +91,12 @@ func TestCommitCmd_CancelExitCode(t *testing.T) {
 	osExit = func(c int) { exitCode = c; panic("exit") }
 	defer func() {
 		osExit = orig
-		recover() //nolint:errcheck
+		recover()
 	}()
 
 	// Simulate the cancel case by calling osExit(1) as the code does
 	func() {
-		defer func() { recover() }() //nolint:errcheck
+		defer func() { recover() }()
 		osExit(1)
 	}()
 
@@ -112,11 +112,11 @@ func TestCommitCmd_EmptyMessageExitCode(t *testing.T) {
 	osExit = func(c int) { exitCode = c; panic("exit") }
 	defer func() {
 		osExit = orig
-		recover() //nolint:errcheck
+		recover()
 	}()
 
 	func() {
-		defer func() { recover() }() //nolint:errcheck
+		defer func() { recover() }()
 		osExit(1)
 	}()
 

@@ -834,7 +834,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	if !ebuild.IsValidVersion(newVersion) {
 		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 		}
 		return result, result.Error
 	}
@@ -845,7 +845,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	if err := checkUpstreamValues(pkg, update); err != nil {
 		result.Error = err
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 		}
 		return result, result.Error
 	}
@@ -873,14 +873,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		if errors.Is(err, ErrSlotNotFound) {
 			result.Error = err
 			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 			}
 			return result, result.Error
 		}
 		// Package no longer present in the overlay (removed/renamed). The pending
 		// entry is obsolete — prune it and report, not as a failure.
 		return a.pruneObsolete(pkg, result,
-			fmt.Errorf("%w: %s no longer in overlay (%v)", ErrObsoletePending, pkg, err))
+			fmt.Errorf("%w: %s no longer in overlay (%w)", ErrObsoletePending, pkg, err))
 	}
 	result.OldVersion = currentVersion
 
@@ -1286,7 +1286,7 @@ func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyR
 	result.Error = err
 	if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
 		// Keep the original error; just say that the status could not be recorded.
-		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
 	return result, result.Error
 }
@@ -1350,7 +1350,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	if srcPath == "" {
 		return candidatePaths{}, fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	body, err := os.ReadFile(srcPath)
+	body, err := os.ReadFile(srcPath) //nolint:gosec // G304: srcPath comes from candidateIn: the overlay, a package key splitPkgAtom confines to one category/package directory, and the current version read from that directory's ebuild filenames
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		// Same sentinel copyEbuild reports, so a caller that recognises a missing
@@ -1690,7 +1690,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 		return fmt.Errorf("failed to stat destination ebuild %s: %w", dstPath, err)
 	}
 
-	body, err := os.ReadFile(srcPath)
+	body, err := os.ReadFile(srcPath) //nolint:gosec // G304: srcPath joins the overlay, a package key splitPkgAtom confines to one category/package directory, and the current version read from that directory's ebuild filenames
 	if err != nil {
 		return fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
@@ -1765,7 +1765,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 // assignment with `(?m)^\s*` (checker.go, ebuildCommitRegex, whose own comment
 // already claimed the two shared this anchoring).
 func substituteCommitHash(ebuildPath, newHash string) error {
-	content, err := os.ReadFile(ebuildPath)
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate path candidateIn built from a package key splitPkgAtom confines and a version ebuild.IsValidVersion gated
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for hash substitution: %w", err)
 	}
@@ -1810,7 +1810,7 @@ func substituteAuxVar(ebuildPath, varName, newValue string) error {
 	if varName == "" {
 		return fmt.Errorf("empty aux_var name for %s", ebuildPath)
 	}
-	content, err := os.ReadFile(ebuildPath)
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate path candidateIn built from a package key splitPkgAtom confines and a version ebuild.IsValidVersion gated
 	if err != nil {
 		return fmt.Errorf("failed to read ebuild for aux var substitution: %w", err)
 	}
@@ -1952,7 +1952,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	fixDistdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
 	if err != nil {
 		// Can't give the agent a private distdir; don't attempt the fix.
-		return distdir, fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
+		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	// THE TRANSFER (S043-R2.1, D2). From this line the agent's directory is what
@@ -1987,7 +1987,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
+		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
@@ -2016,7 +2016,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools))
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	result.Fixed = true
@@ -2829,7 +2829,7 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	}
 	if second.err != nil {
 		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
-			first.err, compileGatePhase, second.err)
+			first.err, compileGatePhase, second.err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
 
 	result.Fixed = true
@@ -2942,7 +2942,7 @@ func (a *Applier) saveCompileLog(pkg, version string, output []byte) string {
 
 // defaultConfirmFunc is the default confirmation function that reads from stdin.
 func defaultConfirmFunc(prompt string) bool {
-	fmt.Printf("%s [y/N]: ", prompt)
+	fmt.Printf("%s [y/N]: ", prompt) //nolint:forbidigo // interactive y/N prompt, paired with the stdin read below
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
 	if err != nil {
@@ -3067,17 +3067,17 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 // copyFileContents copies a regular file from src to dst, mirroring copyEbuild's
 // open/create/io.Copy/Sync idiom. The destination is truncated if it exists.
 func copyFileContents(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // G304: src is the ::gentoo ebuild/metadata.xml named by a confined package key and an IsValidVersion-gated version, or an entry walked under that ::gentoo package's files/
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", src, err)
 	}
-	defer in.Close() //nolint:errcheck
+	defer in.Close() //nolint:errcheck // read-only handle: a failed close cannot lose data
 
-	out, err := os.Create(dst)
+	out, err := os.Create(dst) //nolint:gosec // G304: dst is the overlay package directory a confined package key names, plus the same file name or walked relative path as src
 	if err != nil {
 		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}
-	defer out.Close() //nolint:errcheck
+	defer out.Close() //nolint:errcheck // out.Sync below is checked, so the data is on disk before this close runs; on an earlier error the copy is already reported as failed
 
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("failed to copy %s -> %s: %w", src, dst, err)

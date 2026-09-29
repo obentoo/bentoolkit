@@ -208,7 +208,7 @@ func (a *Applier) promote(cand candidatePaths, pkg, version string) (publishedUn
 	}
 
 	stagedManifest := filepath.Join(cand.pkgDir, "Manifest")
-	stagedBody, err := os.ReadFile(stagedManifest)
+	stagedBody, err := os.ReadFile(stagedManifest) //nolint:gosec // G304: stagedManifest is <staged package dir>/Manifest; stagedCandidate built that directory from a package key splitPkgAtom confines
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		// The validated tree has no Manifest: `pkgdev manifest` writes none for a
@@ -391,7 +391,6 @@ func writeThenRename(path string, body []byte, mode fs.FileMode) error {
 	// mode has to be set on the temporary file — after the last write and before
 	// the rename, so the file is never reachable under its final name with the
 	// wrong one.
-	//nolint:gosec // G302: the mode is publishedFileMode (or the mode the file being replaced already carried); see publishedFileMode.
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return fmt.Errorf("setting mode %04o on %s before publishing it as %s: %w", mode.Perm(), tmpName, path, err)
 	}

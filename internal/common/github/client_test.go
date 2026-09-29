@@ -164,7 +164,7 @@ func TestGetPackageVersionsNotFound(t *testing.T) {
 	client.BaseURL = server.URL
 
 	_, err := client.GetPackageVersions(t.Context(), "app-misc", "nonexistent")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
 }
@@ -187,11 +187,7 @@ func TestGetPackageVersionsRateLimit(t *testing.T) {
 
 func TestCaching(t *testing.T) {
 	// Create temp dir for cache
-	tempDir, err := os.MkdirTemp("", "bentoo-test-cache-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,11 +232,7 @@ func TestCaching(t *testing.T) {
 }
 
 func TestCacheExpiry(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "bentoo-test-cache-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Create expired cache entry
 	cacheFile := filepath.Join(tempDir, "app-misc_hello.json")
@@ -283,11 +275,7 @@ func TestCacheExpiry(t *testing.T) {
 }
 
 func TestClearCache(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "bentoo-test-cache-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Create a cache file
 	cacheFile := filepath.Join(tempDir, "test.json")

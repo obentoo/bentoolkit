@@ -79,7 +79,7 @@ func TestClaudeClient_EndpointOverride(t *testing.T) {
 			},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -105,7 +105,7 @@ func TestNewLLMClientMissingProvider(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for missing provider")
 	}
-	if err != ErrLLMNotConfigured {
+	if !errors.Is(err, ErrLLMNotConfigured) {
 		t.Errorf("Expected ErrLLMNotConfigured, got: %v", err)
 	}
 }
@@ -356,7 +356,7 @@ func TestExtractVersionClaudeEmptyResponse(t *testing.T) {
 	})
 
 	_, err = client.ExtractVersion([]byte("test content"), "Extract version")
-	if err != ErrLLMEmptyResponse {
+	if !errors.Is(err, ErrLLMEmptyResponse) {
 		t.Errorf("Expected ErrLLMEmptyResponse, got: %v", err)
 	}
 }

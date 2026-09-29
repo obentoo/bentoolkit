@@ -38,12 +38,7 @@ func TestOverlayValidationDetectsMissingDirectories(t *testing.T) {
 	properties.Property("Missing directories are detected and reported", prop.ForAll(
 		func(dirConfig DirectoryConfig) bool {
 			// Create temp directory
-			tmpDir, err := os.MkdirTemp("", "overlay-validate-test-*")
-			if err != nil {
-				t.Logf("Failed to create temp dir: %v", err)
-				return false
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			// Create directories based on config
 			if dirConfig.HasProfiles {
@@ -113,11 +108,7 @@ func TestOverlayValidationDetectsMissingDirectories(t *testing.T) {
 // TestValidOverlayPassesValidation tests that a valid overlay passes validation
 // _Requirements: 7.1, 7.2_
 func TestValidOverlayPassesValidation(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "overlay-validate-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create both required directories
 	if err := os.MkdirAll(filepath.Join(tmpDir, "profiles"), 0755); err != nil {
@@ -156,11 +147,10 @@ func TestValidateOverlayNonExistentPath(t *testing.T) {
 // TestValidateOverlayNotADirectory tests validation when path is a file
 // _Requirements: 7.3_
 func TestValidateOverlayNotADirectory(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "overlay-validate-test-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "overlay-validate-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
 	_, err = ValidateOverlay(tmpFile.Name())

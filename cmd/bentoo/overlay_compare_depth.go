@@ -315,7 +315,6 @@ func realignCandidates(report *overlay.CompareReport) (candidates []realignCandi
 
 		name := fmt.Sprintf("%s/%s-%s", r.Category, r.Package, r.LocalVersion)
 
-		//nolint:gosec // G304: the path is ResolveBaseline's own join of the located ::gentoo tree, a validated atom and a filename read from that directory's listing — never registry input.
 		body, err := os.ReadFile(r.Baseline.Path)
 		if err != nil {
 			dropped = append(dropped, fmt.Sprintf(

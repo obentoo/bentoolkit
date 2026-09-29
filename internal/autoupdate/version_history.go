@@ -251,7 +251,7 @@ func (e *XPathVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 	// Find all nodes matching XPath
 	nodes, err := htmlquery.QueryAll(doc, e.VersionsXPath)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidXPath, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidXPath, err)
 	}
 
 	if len(nodes) == 0 {
@@ -314,7 +314,7 @@ func (e *RegexVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 	if e.compiled == nil {
 		re, err := regexp.Compile(e.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		if re.NumSubexp() < 1 {
 			return nil, ErrNoCaptureGroup

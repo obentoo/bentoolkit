@@ -404,14 +404,14 @@ func (g *GitRunner) validateAndAddPath(ctx context.Context, path string) error {
 		// It's a symlink — resolve it; broken symlink → ErrInvalidPath
 		resolved, err := filepath.EvalSymlinks(absPath)
 		if err != nil {
-			return fmt.Errorf("%w: cannot resolve symlink: %v", ErrInvalidPath, err)
+			return fmt.Errorf("%w: cannot resolve symlink: %w", ErrInvalidPath, err)
 		}
 		realPath = resolved
 	} else {
 		// Regular file or directory — resolve any symlink components in the path itself
 		resolved, err := filepath.EvalSymlinks(absPath)
 		if err != nil {
-			return fmt.Errorf("%w: cannot resolve path: %v", ErrInvalidPath, err)
+			return fmt.Errorf("%w: cannot resolve path: %w", ErrInvalidPath, err)
 		}
 		realPath = resolved
 	}

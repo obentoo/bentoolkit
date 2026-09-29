@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,12 +76,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	properties.Property("Config YAML round-trip preserves data", prop.ForAll(
 		func(cfg *Config) bool {
 			// Create temp directory for test
-			tmpDir, err := os.MkdirTemp("", "config-test-*")
-			if err != nil {
-				t.Logf("Failed to create temp dir: %v", err)
-				return false
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			configPath := filepath.Join(tmpDir, "config.yaml")
 
@@ -109,11 +105,7 @@ func TestConfigRoundTrip(t *testing.T) {
 // TestMissingConfigFileCreatesDefault tests that missing config file creates default
 // _Requirements: 1.2_
 func TestMissingConfigFileCreatesDefault(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "config-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	configPath := filepath.Join(tmpDir, "subdir", "config.yaml")
 
@@ -147,7 +139,7 @@ func TestEmptyOverlayPathReturnsError(t *testing.T) {
 	}
 
 	_, err := cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotSet {
+	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("Expected ErrOverlayPathNotSet, got: %v", err)
 	}
 }
@@ -162,18 +154,14 @@ func TestInvalidOverlayPathReturnsError(t *testing.T) {
 	}
 
 	_, err := cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotFound {
+	if !errors.Is(err, ErrOverlayPathNotFound) {
 		t.Errorf("Expected ErrOverlayPathNotFound, got: %v", err)
 	}
 }
 
 // TestValidOverlayPathReturnsPath tests that valid overlay path is returned
 func TestValidOverlayPathReturnsPath(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "overlay-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create required overlay structure
 	if err := os.MkdirAll(filepath.Join(tmpDir, "profiles"), 0755); err != nil {
@@ -364,11 +352,7 @@ func TestGetGitUserFallbackToBentooConfig(t *testing.T) {
 // _Requirements: 6.3_
 func TestGetGitUserErrorWhenNeitherConfigured(t *testing.T) {
 	// Create temp directory for test
-	tmpDir, err := os.MkdirTemp("", "gituser-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create empty gitconfig
 	gitconfigPath := filepath.Join(tmpDir, ".gitconfig")
@@ -404,11 +388,7 @@ func TestGetGitUserErrorWhenNeitherConfigured(t *testing.T) {
 // _Requirements: 6.1_
 func TestGetGitUserWithValidGitconfig(t *testing.T) {
 	// Create temp directory for test
-	tmpDir, err := os.MkdirTemp("", "gituser-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create valid gitconfig
 	gitconfigPath := filepath.Join(tmpDir, ".gitconfig")
@@ -531,12 +511,7 @@ func TestGlobalConfigParsingRoundTrip(t *testing.T) {
 	properties.Property("Config with autoupdate YAML round-trip preserves all fields", prop.ForAll(
 		func(cfg *Config) bool {
 			// Create temp directory for test
-			tmpDir, err := os.MkdirTemp("", "config-autoupdate-test-*")
-			if err != nil {
-				t.Logf("Failed to create temp dir: %v", err)
-				return false
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			configPath := filepath.Join(tmpDir, "config.yaml")
 
@@ -591,11 +566,7 @@ func TestGlobalConfigParsingRoundTrip(t *testing.T) {
 // TestAutoupdateConfigMissingSection tests backward compatibility when autoupdate section is missing
 // _Requirements: 7.1_
 func TestAutoupdateConfigMissingSection(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "config-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create config without autoupdate section
 	configContent := `overlay:
@@ -636,11 +607,7 @@ git:
 // TestAutoupdateConfigPartialConfig tests parsing with partial autoupdate configuration
 // _Requirements: 7.2, 7.3_
 func TestAutoupdateConfigPartialConfig(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "config-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create config with partial autoupdate section (only cache_ttl and llm)
 	configContent := `overlay:
@@ -690,11 +657,7 @@ autoupdate:
 // TestAutoupdateConfigFullConfig tests parsing with full autoupdate configuration
 // _Requirements: 7.1, 7.2, 7.3, 7.4_
 func TestAutoupdateConfigFullConfig(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "config-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create config with full autoupdate section
 	configContent := `overlay:
@@ -832,11 +795,7 @@ func TestConfigPaths(t *testing.T) {
 // _Requirements: 4.2_
 func TestConfigPathsWithXDGConfigHome(t *testing.T) {
 	// Create temp directory for custom XDG_CONFIG_HOME
-	tmpDir, err := os.MkdirTemp("", "xdg-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Set custom XDG_CONFIG_HOME
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
@@ -871,11 +830,7 @@ func TestDefaultConfigPath(t *testing.T) {
 // _Requirements: 4.3_
 func TestFindConfigPathExistingFile(t *testing.T) {
 	// Create temp directory for custom XDG_CONFIG_HOME
-	tmpDir, err := os.MkdirTemp("", "config-find-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Set custom XDG_CONFIG_HOME to isolate test
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
@@ -905,11 +860,7 @@ func TestFindConfigPathExistingFile(t *testing.T) {
 // _Requirements: 4.4_
 func TestFindConfigPathNoFile(t *testing.T) {
 	// Create temp directory for custom XDG_CONFIG_HOME
-	tmpDir, err := os.MkdirTemp("", "config-find-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Set custom XDG_CONFIG_HOME to isolate test (no config file exists)
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
@@ -930,18 +881,10 @@ func TestFindConfigPathNoFile(t *testing.T) {
 // _Requirements: 4.3_
 func TestFindConfigPathLegacyFallback(t *testing.T) {
 	// Create temp directory for home
-	tmpHome, err := os.MkdirTemp("", "home-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	// Create temp directory for XDG (but no config file there)
-	tmpXDG, err := os.MkdirTemp("", "xdg-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpXDG)
+	tmpXDG := t.TempDir()
 
 	// Set custom XDG_CONFIG_HOME
 	t.Setenv("XDG_CONFIG_HOME", tmpXDG)
@@ -1055,11 +998,10 @@ func TestGetOverlayPathTildeExpansion(t *testing.T) {
 // _Requirements: 4.7_
 func TestGetOverlayPathFileAsPath(t *testing.T) {
 	// Create temp file (not a directory)
-	tmpFile, err := os.CreateTemp("", "not-a-dir-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
 	cfg := &Config{
@@ -1070,7 +1012,7 @@ func TestGetOverlayPathFileAsPath(t *testing.T) {
 
 	// GetOverlayPath should return ErrOverlayPathNotFound for file
 	_, err = cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotFound {
+	if !errors.Is(err, ErrOverlayPathNotFound) {
 		t.Errorf("Expected ErrOverlayPathNotFound, got: %v", err)
 	}
 }
@@ -1678,7 +1620,7 @@ func TestGetGitUser_ReturnsErrWhenNoSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected ErrGitUserNotConfigured, got nil")
 	}
-	if err != ErrGitUserNotConfigured {
+	if !errors.Is(err, ErrGitUserNotConfigured) {
 		t.Errorf("Expected ErrGitUserNotConfigured, got %v", err)
 	}
 }

@@ -191,15 +191,11 @@ func TestNewGitRunner(t *testing.T) {
 
 func TestAddPathValidation(t *testing.T) {
 	// Create a temporary directory to act as our overlay
-	tmpDir, err := os.MkdirTemp("", "git-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Initialize a git repo in the temp dir
 	runner := NewGitRunner(tmpDir)
-	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
+	_, _, err := runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
@@ -219,21 +215,21 @@ func TestAddPathValidation(t *testing.T) {
 
 	t.Run("add non-existent file returns file not found error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "nonexistent.txt")
-		if err != ErrFileNotFound {
+		if !errors.Is(err, ErrFileNotFound) {
 			t.Errorf("expected ErrFileNotFound, got %v", err)
 		}
 	})
 
 	t.Run("add path outside overlay returns error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "../outside.txt")
-		if err != ErrPathOutsideOverlay {
+		if !errors.Is(err, ErrPathOutsideOverlay) {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
 	})
 
 	t.Run("add with absolute path outside overlay returns error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "/etc/passwd")
-		if err != ErrPathOutsideOverlay {
+		if !errors.Is(err, ErrPathOutsideOverlay) {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
 	})
@@ -254,16 +250,12 @@ func TestAddPathValidation(t *testing.T) {
 
 func TestGitRunnerCommit(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "git-commit-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	runner := NewGitRunner(tmpDir)
 
 	// Initialize git repo
-	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
+	_, _, err := runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
@@ -307,16 +299,12 @@ func TestGitRunnerCommit(t *testing.T) {
 
 func TestGitRunnerStatus(t *testing.T) {
 	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "git-status-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	runner := NewGitRunner(tmpDir)
 
 	// Initialize git repo
-	_, _, err = runner.runCommand(context.Background(), localTimeout, "init")
+	_, _, err := runner.runCommand(context.Background(), localTimeout, "init")
 	if err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}

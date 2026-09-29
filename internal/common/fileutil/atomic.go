@@ -37,7 +37,7 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) (err error) {
 		}
 	}()
 
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := os.Rename(tmpName, path); err != nil { //nolint:gosec // G703: path is a file the caller owns (a state, cache or registry file in the config dir or overlay, or an ebuild already in a splitPkgAtom-confined package directory); tmpName is os.CreateTemp's name beside it
 		return fmt.Errorf("renaming %s into place as %s: %w", tmpName, path, err)
 	}
 	committed = true
@@ -156,7 +156,7 @@ func writeTemp(path string, data []byte, mode os.FileMode) (tmpName string, err 
 // removeTemp removes a temporary file written for path. A file already gone is
 // not an error; any other failure is returned naming the file left behind.
 func removeTemp(tmpName, path string) error {
-	if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) { //nolint:gosec // G703: tmpName is the name os.CreateTemp generated beside the caller's own file, never an input
 		return fmt.Errorf("removing the temporary file %s left beside %s: %w", tmpName, path, err)
 	}
 	return nil
@@ -166,7 +166,7 @@ func removeTemp(tmpName, path string) error {
 // loss. A filesystem that cannot sync a directory reports EINVAL, which is
 // ignored: there is nothing more durable to ask of it.
 func syncDir(dir string) error {
-	d, err := os.Open(dir)
+	d, err := os.Open(dir) //nolint:gosec // G304: dir is filepath.Dir of the file the caller is writing; it is opened read-only to fsync, nothing is read from it
 	if err != nil {
 		return fmt.Errorf("opening directory %s to sync it: %w", dir, err)
 	}

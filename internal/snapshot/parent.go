@@ -129,7 +129,7 @@ func (fileParentStore) Record(subvol, ship string, snap Snapshot) error {
 // normal first-run state and yields (zero, false, nil).
 func (fileParentStore) Last(subvol, ship string) (Snapshot, bool, error) {
 	path := filepath.Join(parentsDir(), keyFilename(subvol, ship))
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is a keyFilename (sanitised slug plus hash, no separator) under the user's snapshot state directory
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Snapshot{}, false, nil

@@ -90,7 +90,7 @@ func (r *RunResult) SaveLastRun() error {
 
 // LoadRunResult reads and decodes a RunResult from path.
 func LoadRunResult(path string) (*RunResult, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is LastRunPath, a constant name in the user's snapshot state directory
 	if err != nil {
 		return nil, err
 	}

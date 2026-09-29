@@ -64,7 +64,7 @@ func proveAuthorship(result CompareResult, prov provider.Provider, opts CompareO
 		return AuthorshipUnproved, ""
 	}
 
-	ours, err := os.ReadFile(paths.ourEbuild()) //nolint:gosec // path built from scanned overlay directory names, never from registry input
+	ours, err := os.ReadFile(paths.ourEbuild())
 	if err != nil {
 		return AuthorshipUnproved, ""
 	}

@@ -289,8 +289,7 @@ func acquireLock(ctx context.Context, distdir, name string, deadline time.Time) 
 		// is the exact mutual exclusion R2.4 asks for, lost. Nothing secret is
 		// in the file: it carries the holder's PID so a stale lock is
 		// diagnosable, and no user but the owner may write it.
-		// #nosec G302 -- readable by design; see above
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302: 0o644 is readable by design, see above; G304: path is the host distdir joined with a lock name built from distfileName, which refuses anything but one bare file name
 		switch {
 		case err == nil:
 			held, err := claimLock(file, path, name)
@@ -380,7 +379,7 @@ func reapIfAbandoned(path string) error {
 	// belong to another user of the shared distdir. Unlinking it needs
 	// permission on the DIRECTORY, which is the same permission that let us
 	// try to create the lock in the first place.
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // G304: path is the lock path acquireLock built: the host distdir plus a distfileName-confined bare name
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// Released between our create and this open. Nothing to reap.
@@ -408,7 +407,7 @@ func reapIfAbandoned(path string) error {
 		// ours to remove.
 		return nil
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) { //nolint:gosec // G703: path is the lock path acquireLock built: the host distdir plus a distfileName-confined bare name
 		return err
 	}
 	return nil
@@ -426,7 +425,7 @@ func (h *heldLock) release() {
 	// can have replaced the file while we hold its flock, which is exactly why
 	// the check is cheap enough to keep.
 	if same, err := pathNamesFile(h.path, h.file); err == nil && same {
-		_ = os.Remove(h.path)
+		_ = os.Remove(h.path) //nolint:gosec // G703: h.path is the lock path acquireLock built: the host distdir plus a distfileName-confined bare name
 	}
 	_ = h.file.Close()
 	h.file = nil
@@ -440,7 +439,7 @@ func (h *heldLock) release() {
 // treats that as "not ours" and backs off — which is the safe direction for all
 // three of them, since each is deciding whether it may unlink.
 func pathNamesFile(path string, file *os.File) (bool, error) {
-	onDisk, err := os.Lstat(path)
+	onDisk, err := os.Lstat(path) //nolint:gosec // G703: path is the lock path acquireLock built: the host distdir plus a distfileName-confined bare name; Lstat never follows a planted symlink
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -505,7 +504,7 @@ func describeHolder(path string) string {
 // file is the same answer — nobody named — because this value is only ever put
 // into a message.
 func holderPID(path string) (int, bool) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the lock path acquireLock built: the host distdir plus a distfileName-confined bare name
 	if err != nil {
 		return 0, false
 	}

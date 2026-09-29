@@ -172,14 +172,7 @@ func TestClassify_ReadsNothingButTheTwoStrings(t *testing.T) {
 
 	// An empty working directory, watched for creations.
 	work := t.TempDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(work); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	t.Chdir(work)
 
 	for _, pair := range [][2]string{
 		{"1.28.6", "1.29.2"},

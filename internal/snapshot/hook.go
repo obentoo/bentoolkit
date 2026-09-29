@@ -182,7 +182,7 @@ func ensureEmergeBashrcBlock(stripped []byte) error {
 // (053 R6.3), before the caller has touched anything.
 func checkEmergeBashrc() ([]byte, error) {
 	bashrc := emergeBashrcPath()
-	existing, err := os.ReadFile(bashrc)
+	existing, err := os.ReadFile(bashrc) //nolint:gosec // G304: bashrc is the constant etc/portage/bashrc under EmergeHookRoot ("/" in production, a temp dir in tests)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil

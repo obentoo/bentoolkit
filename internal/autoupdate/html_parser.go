@@ -109,7 +109,7 @@ func (p *HTMLParser) parseWithXPath(content []byte) (string, error) {
 	// Find nodes matching XPath
 	nodes, err := htmlquery.QueryAll(doc, p.XPath)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidXPath, err)
+		return "", fmt.Errorf("%w: %w", ErrInvalidXPath, err)
 	}
 
 	if len(nodes) == 0 {
@@ -128,7 +128,7 @@ func (p *HTMLParser) applyRegex(text string) (string, error) {
 	if p.compiled == nil {
 		re, err := regexp.Compile(p.Regex)
 		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return "", fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		p.compiled = re
 	}
@@ -169,7 +169,7 @@ func NewHTMLParser(selector, xpath, regex string) (*HTMLParser, error) {
 	if regex != "" {
 		re, err := regexp.Compile(regex)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		parser.compiled = re
 	}

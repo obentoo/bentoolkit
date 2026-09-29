@@ -1122,7 +1122,7 @@ func fakeBinDir(t *testing.T, scripts map[string]string) string {
 	dir := t.TempDir()
 	for name, body := range scripts {
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte(body), 0o755); err != nil { //nolint:gosec // a stub that must be executable is the point
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 			t.Fatalf("writing the fake %s: %v", name, err)
 		}
 	}

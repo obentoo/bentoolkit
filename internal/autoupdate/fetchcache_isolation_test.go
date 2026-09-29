@@ -173,7 +173,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 					recovered.Store(true)
 				}
 			}()
-			_, _ = c.do(ctx, key, fetch) //nolint:errcheck // the panic, not the error, is under test
+			_, _ = c.do(ctx, key, fetch)
 		}()
 
 		select {
@@ -239,7 +239,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = c.do(context.Background(), key, fetch) //nolint:errcheck // the leader is only scenery here
+			_, _ = c.do(context.Background(), key, fetch)
 		}()
 		select {
 		case <-entered:

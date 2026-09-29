@@ -74,7 +74,7 @@ func validatePattern(p string) error {
 		return fmt.Errorf("%w: backreferences not supported", ErrInvalidPattern)
 	}
 	if _, err := regexp.Compile(p); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidPattern, err)
+		return fmt.Errorf("%w: %w", ErrInvalidPattern, err)
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func validateXPath(x string) error {
 		return nil
 	}
 	if _, err := xpath.Compile(x); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidXPath, err)
+		return fmt.Errorf("%w: %w", ErrInvalidXPath, err)
 	}
 	return nil
 }
@@ -508,7 +508,7 @@ func (a *Analyzer) analyzeContent(content []byte, meta *EbuildMetadata, hint str
 
 		analysis, err := a.llmClient.AnalyzeContent(content, meta, hint)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrAnalysisFailed, err)
+			return nil, fmt.Errorf("%w: %w", ErrAnalysisFailed, err)
 		}
 
 		return a.schemaFromAnalysis(analysis, source)

@@ -16,8 +16,8 @@ import (
 // belt-and-braces for its own sake — it is the observation that the plan reaches
 // this function as a STRUCT, and a struct can be built by anything. The planner
 // fills Category and Package from the overlay scan; nothing in the type system
-// says a future caller will. `SplitPackageKey` accepts "../x" happily and no
-// validation runs on a registry path, so the guard's job is to make the class of
+// says a future caller will. `SplitPackageKey` refuses "../x" since story 064,
+// but a struct never passes through it, so the guard's job is to make the class of
 // mistake unrepresentable at the point of no return rather than to distrust the
 // planner specifically.
 //

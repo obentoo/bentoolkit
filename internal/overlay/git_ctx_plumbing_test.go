@@ -59,8 +59,7 @@ func TestExecutorFunctionsPassTheCallersContext(t *testing.T) {
 		},
 	}
 
-	_, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	_, cfg := setupTestOverlay(t)
 	if _, err := PushWithExecutor(ctx, mock); err != nil {
 		t.Fatalf("PushWithExecutor: %v", err)
 	}
@@ -92,8 +91,7 @@ func TestExecutorFunctionsPassTheCallersContext(t *testing.T) {
 // report context.Canceled; one that ran git under a context of its own would
 // report git's answer instead.
 func TestConfigFunctionsPassTheirContext(t *testing.T) {
-	tmpDir, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	tmpDir, cfg := setupTestOverlay(t)
 	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +128,7 @@ func TestConfigFunctionsPassTheirContext(t *testing.T) {
 // A cancel stops AddFiles at the path it reached: the paths after it are
 // reported once as not attempted, not failed one by one.
 func TestAddFilesStopsAtTheCancel(t *testing.T) {
-	_, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	_, cfg := setupTestOverlay(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

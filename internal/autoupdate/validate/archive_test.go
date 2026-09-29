@@ -120,14 +120,7 @@ func TestExtractArchiveMember_WritesNothingToDisk(t *testing.T) {
 	work := t.TempDir()
 	before := countEntries(t, work)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(work); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	t.Chdir(work)
 
 	if _, err := extractArchiveMember(context.Background(), archive, "proj-1.0/meson.options"); err != nil {
 		t.Fatalf("extractArchiveMember: %v", err)

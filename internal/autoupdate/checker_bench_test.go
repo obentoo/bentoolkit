@@ -54,7 +54,7 @@ func newCheckerOverDistinctURLs(tb testing.TB, numPkgs int, limiter httpRateLimi
 	tb.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"}) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]string{"version": "1.0.0"})
 	}))
 	tb.Cleanup(server.Close)
 

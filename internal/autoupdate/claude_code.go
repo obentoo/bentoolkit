@@ -656,14 +656,14 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 			if endedBy == nil {
 				endedBy = ctxErr
 			}
-			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI was stopped before it answered: %v", ErrLLMRequestFailed, endedBy), ErrClaudeStopped)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI was stopped before it answered: %w", ErrLLMRequestFailed, endedBy), ErrClaudeStopped)
 		case claudeCouldNotStart:
 			// S048-R1.2, S040-R5.6: the process never reached its first
 			// instruction, so there is no exit status to frame it with and none
 			// may be implied. The remedy is on the host — a missing binary, an
 			// unreachable working directory — and it is the opposite of the
 			// deadline's, which is why the two sentences must not be one.
-			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI could not start: %v", ErrLLMRequestFailed, runErr), ErrClaudeCouldNotStart)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI could not start: %w", ErrLLMRequestFailed, runErr), ErrClaudeCouldNotStart)
 		}
 
 		// claudeExitedNonZero: the process ran and exited with a status. This is
@@ -675,17 +675,17 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; ")), ErrClaudeExitedNonZero)
 		}
 		if stderrStr != "" {
-			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %v: %s", ErrLLMRequestFailed, runErr, stderrStr), ErrClaudeExitedNonZero)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %w: %s", ErrLLMRequestFailed, runErr, stderrStr), ErrClaudeExitedNonZero)
 		}
-		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %v", ErrLLMRequestFailed, runErr), ErrClaudeExitedNonZero)
+		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed: %w", ErrLLMRequestFailed, runErr), ErrClaudeExitedNonZero)
 	}
 
 	if jsonErr != nil {
 		// Exited zero but stdout was not valid JSON.
 		if stderrStr != "" {
-			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %v: %s", ErrLLMRequestFailed, jsonErr, stderrStr), ErrClaudeUnusableOutput)
+			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %w: %s", ErrLLMRequestFailed, jsonErr, stderrStr), ErrClaudeUnusableOutput)
 		}
-		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %v", ErrLLMRequestFailed, jsonErr), ErrClaudeUnusableOutput)
+		return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI emitted non-JSON output: %w", ErrLLMRequestFailed, jsonErr), ErrClaudeUnusableOutput)
 	}
 
 	if env.IsError {
@@ -860,12 +860,12 @@ func (c *ClaudeCodeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, 
 	fallbackInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, true)
 	fallbackResult, fallbackErr := c.run(fallbackInstruction, content, "")
 	if fallbackErr != nil {
-		return nil, fmt.Errorf("claude-code schema analysis failed (structured: %v; fallback: %w)", err, fallbackErr)
+		return nil, fmt.Errorf("claude-code schema analysis failed (structured: %v; fallback: %w)", err, fallbackErr) //nolint:errorlint // secondary error is context: the structured attempt's failure is superseded by the fallback's, which is the cause
 	}
 
 	analysis, parseErr := parseSchemaAnalysis(stripJSONFences(fallbackResult))
 	if parseErr != nil {
-		return nil, fmt.Errorf("claude-code schema analysis could not be parsed (structured: %v; fallback parse: %w)", err, parseErr)
+		return nil, fmt.Errorf("claude-code schema analysis could not be parsed (structured: %v; fallback parse: %w)", err, parseErr) //nolint:errorlint // secondary error is context: the structured attempt's failure is superseded by the fallback's, which is the cause
 	}
 	return analysis, nil
 }

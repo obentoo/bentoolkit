@@ -603,7 +603,7 @@ func containsError(err, target error) bool {
 		return false
 	}
 	return err.Error() != "" && target.Error() != "" &&
-		(err == target || err.Error() == target.Error() ||
+		(errors.Is(err, target) || err.Error() == target.Error() ||
 			len(err.Error()) > len(target.Error()) &&
 				err.Error()[:len(target.Error())] == target.Error())
 }
@@ -1753,7 +1753,7 @@ func TestGetWithContext_BodyCapAllowsSmallBody(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write(payload) //nolint:errcheck // test server
+		w.Write(payload)
 	}))
 	defer server.Close()
 

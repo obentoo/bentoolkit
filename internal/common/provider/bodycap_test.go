@@ -19,7 +19,7 @@ func hugeBodyServer(t *testing.T, status int, size int64) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		io.WriteString(w, "[") //nolint:errcheck // client may hang up
+		io.WriteString(w, "[")
 		written := int64(1)
 		for written < size-1 {
 			n := min(int64(len(chunk)), size-1-written)
@@ -28,7 +28,7 @@ func hugeBodyServer(t *testing.T, status int, size int64) *httptest.Server {
 			}
 			written += n
 		}
-		io.WriteString(w, "]") //nolint:errcheck
+		io.WriteString(w, "]")
 	}))
 	t.Cleanup(srv.Close)
 	return srv

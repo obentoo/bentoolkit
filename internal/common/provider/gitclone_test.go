@@ -64,7 +64,7 @@ func TestGitCloneProvider_NotFound(t *testing.T) {
 	}
 
 	_, err := prov.scanLocalPackage(filepath.Join(tmpDir, "nonexistent"), "hello")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got: %v", err)
 	}
 }

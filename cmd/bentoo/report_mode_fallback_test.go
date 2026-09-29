@@ -54,6 +54,7 @@ package main
 // profile has a typo — which is the exact thing root.go:66 says it will not do.
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -441,7 +442,7 @@ func runBentoo(t *testing.T, bin, uiEnv string, args ...string) (stdout, stderr 
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
+		if !errors.As(err, new(*exec.ExitError)) {
 			t.Fatalf("running %s %v: %v", bin, args, err)
 		}
 	}

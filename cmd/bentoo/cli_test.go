@@ -82,11 +82,7 @@ func TestAddCommandUsage(t *testing.T) {
 // TestMissingConfigError tests error handling when config is missing
 func TestMissingConfigError(t *testing.T) {
 	// Create a temporary directory for test config
-	tmpDir, err := os.MkdirTemp("", "bentoo-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Set HOME to temp dir to use a non-existent config
 	t.Setenv("HOME", tmpDir)

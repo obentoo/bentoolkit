@@ -13,34 +13,28 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/git"
 )
 
-// setupTestOverlay creates a temporary directory with a git repo for testing
-func setupTestOverlay(t *testing.T) (string, *config.Config, func()) {
+// setupTestOverlay creates a temporary directory with a git repo for testing;
+// t.TempDir removes it when the test ends.
+func setupTestOverlay(t *testing.T) (string, *config.Config) {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "overlay-add-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Create required overlay structure (profiles/ and metadata/)
 	if err := os.MkdirAll(filepath.Join(tmpDir, "profiles"), 0755); err != nil {
-		os.RemoveAll(tmpDir)
 		t.Fatalf("failed to create profiles dir: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(tmpDir, "metadata"), 0755); err != nil {
-		os.RemoveAll(tmpDir)
 		t.Fatalf("failed to create metadata dir: %v", err)
 	}
 
 	// Initialize git repo using exec.Command
 	runner := git.NewGitRunner(tmpDir)
-	_, err = runner.Status(context.Background())
-	if err != nil {
+	if _, err := runner.Status(context.Background()); err != nil {
 		// Need to init - use exec.Command
 		initCmd := exec.Command("git", "init")
 		initCmd.Dir = tmpDir
 		if err := initCmd.Run(); err != nil {
-			os.RemoveAll(tmpDir)
 			t.Fatalf("failed to init git repo: %v", err)
 		}
 	}
@@ -52,18 +46,13 @@ func setupTestOverlay(t *testing.T) (string, *config.Config, func()) {
 		},
 	}
 
-	cleanup := func() {
-		os.RemoveAll(tmpDir)
-	}
-
-	return tmpDir, cfg, cleanup
+	return tmpDir, cfg
 }
 
 // TestAddFilesWithDefaultPath tests AddFiles with no arguments (defaults to ".")
 // _Requirements: 2.1_
 func TestAddFilesWithDefaultPath(t *testing.T) {
-	tmpDir, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	tmpDir, cfg := setupTestOverlay(t)
 
 	// Create a test file
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -89,8 +78,7 @@ func TestAddFilesWithDefaultPath(t *testing.T) {
 // TestAddFilesWithSpecificPaths tests AddFiles with specific file paths
 // _Requirements: 2.2_
 func TestAddFilesWithSpecificPaths(t *testing.T) {
-	tmpDir, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	tmpDir, cfg := setupTestOverlay(t)
 
 	// Create test files
 	file1 := filepath.Join(tmpDir, "file1.txt")
@@ -120,8 +108,7 @@ func TestAddFilesWithSpecificPaths(t *testing.T) {
 // TestAddFilesWithNonExistentFile tests AddFiles with a file that doesn't exist
 // _Requirements: 2.3, 2.4_
 func TestAddFilesWithNonExistentFile(t *testing.T) {
-	_, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	_, cfg := setupTestOverlay(t)
 
 	// Try to add non-existent file
 	result, err := AddFiles(context.Background(), cfg, "nonexistent.txt")
@@ -151,8 +138,7 @@ func TestAddFilesWithNonExistentFile(t *testing.T) {
 // TestAddFilesWithMixedPaths tests AddFiles with both valid and invalid paths
 // _Requirements: 2.1, 2.4_
 func TestAddFilesWithMixedPaths(t *testing.T) {
-	tmpDir, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	tmpDir, cfg := setupTestOverlay(t)
 
 	// Create one valid file
 	validFile := filepath.Join(tmpDir, "valid.txt")
@@ -234,7 +220,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := AddFiles(context.Background(), cfg, "file.txt")
-		if err != config.ErrOverlayPathNotSet {
+		if !errors.Is(err, config.ErrOverlayPathNotSet) {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotSet, got %v", err)
 		}
 	})
@@ -247,7 +233,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := AddFiles(context.Background(), cfg, "file.txt")
-		if err != config.ErrOverlayPathNotFound {
+		if !errors.Is(err, config.ErrOverlayPathNotFound) {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotFound, got %v", err)
 		}
 	})
@@ -256,8 +242,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 // TestAddFilesWithPathOutsideOverlay tests AddFiles with a path that escapes the overlay
 // _Requirements: 2.4_
 func TestAddFilesWithPathOutsideOverlay(t *testing.T) {
-	_, cfg, cleanup := setupTestOverlay(t)
-	defer cleanup()
+	_, cfg := setupTestOverlay(t)
 
 	// Try to add a path outside the overlay using ".."
 	result, err := AddFiles(context.Background(), cfg, "../outside.txt")

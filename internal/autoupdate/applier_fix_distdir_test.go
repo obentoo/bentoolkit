@@ -235,7 +235,7 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 				}
 			}
 
-			applier.Apply("a/b", true) //nolint:errcheck // the apply's verdict is not what this test is about
+			applier.Apply("a/b", true)
 
 			if dir == "" {
 				t.Fatal("the fixer was never invoked")

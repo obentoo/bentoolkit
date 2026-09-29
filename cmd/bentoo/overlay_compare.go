@@ -240,7 +240,7 @@ func runCompare(cmd *cobra.Command, args []string) {
 		logger.Error("Failed to create provider: %v", err)
 		osExit(1)
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	// Refuse what THIS INVOCATION cannot do, before it costs anything (R7.4).
 	//
@@ -699,8 +699,8 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // nothing would mark an atom.
 //
 // One thing this function deliberately does NOT do is sanitise the key.
-// SplitPackageKey does not either — splitPkgAtom only requires two non-empty
-// "/"-separated parts, so "../x" splits happily — and no validation runs here.
+// SplitPackageKey refuses a "." or ".." half, and no other validation runs
+// here.
 // What keeps traversal out is that the key is used only as a map key and never
 // to build a filesystem path: the verification step builds its path from the
 // scanned directory names instead. Keep it that way.

@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -143,7 +144,7 @@ func TestWaitLLMContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	err := rl.WaitLLM(ctx)
-	if err != ErrRateLimitExceeded {
+	if !errors.Is(err, ErrRateLimitExceeded) {
 		t.Errorf("Expected ErrRateLimitExceeded, got %v", err)
 	}
 }
@@ -160,7 +161,7 @@ func TestWaitHTTPContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	err := rl.WaitHTTP(ctx, domain)
-	if err != ErrRateLimitExceeded {
+	if !errors.Is(err, ErrRateLimitExceeded) {
 		t.Errorf("Expected ErrRateLimitExceeded, got %v", err)
 	}
 }
@@ -454,7 +455,7 @@ func TestLLMRateLimiting(t *testing.T) {
 			cancel() // Cancel immediately
 
 			err := rl.WaitLLM(ctx)
-			return err == ErrRateLimitExceeded
+			return errors.Is(err, ErrRateLimitExceeded)
 		},
 		gen.IntRange(1, 100),
 	))
@@ -624,7 +625,7 @@ func TestHTTPRateLimiting(t *testing.T) {
 			cancel() // Cancel immediately
 
 			err := rl.WaitHTTP(ctx, domain)
-			return err == ErrRateLimitExceeded
+			return errors.Is(err, ErrRateLimitExceeded)
 		},
 		gen.OneConstOf(
 			"example.com",

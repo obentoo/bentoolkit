@@ -26,7 +26,7 @@ func TestClassifyBodyReadErrorSharedSentinel(t *testing.T) {
 		}
 		// Identity, not errors.Is with its arguments reversed (staticcheck
 		// SA1032): one value means the same pointer from either side.
-		if httputil.ErrResponseTooLarge != ErrResponseTooLarge {
+		if httputil.ErrResponseTooLarge != ErrResponseTooLarge { //nolint:errorlint // asserts the exact, unwrapped sentinel: both names must be one pointer, and errors.Is would also pass for a second value that merely wraps the first
 			t.Error("httputil.ErrResponseTooLarge != autoupdate.ErrResponseTooLarge; want one shared sentinel")
 		}
 	})

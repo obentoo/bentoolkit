@@ -254,7 +254,7 @@ func (p *RegexParser) Parse(content []byte) (string, error) {
 	if p.compiled == nil {
 		re, err := regexp.Compile(p.Pattern)
 		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return "", fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		p.compiled = re
 	}
@@ -291,7 +291,7 @@ func NewParser(parserType, pathOrPattern string) (Parser, error) {
 		// Validate regex pattern upfront
 		re, err := regexp.Compile(pathOrPattern)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		if re.NumSubexp() < 1 {
 			return nil, ErrNoCaptureGroup
@@ -314,7 +314,7 @@ func NewParserFromConfig(cfg *PackageConfig) (Parser, error) {
 	case "regex":
 		re, err := regexp.Compile(cfg.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidRegexPattern, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidRegexPattern, err)
 		}
 		if re.NumSubexp() < 1 {
 			return nil, ErrNoCaptureGroup
@@ -355,7 +355,7 @@ func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 		}
 		fallbackParser, err := NewParserFromConfig(fallbackCfg)
 		if err != nil {
-			return "", fmt.Errorf("primary parser failed (%w), fallback parser creation failed: %v", primaryErr, err)
+			return "", fmt.Errorf("primary parser failed (%w), fallback parser creation failed: %v", primaryErr, err) //nolint:errorlint // secondary error is context: the primary parser's failure is the cause
 		}
 
 		version, err = fallbackParser.Parse(content)
@@ -365,5 +365,5 @@ func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 	}
 
 	// All parsers failed
-	return "", fmt.Errorf("%w: %v", ErrNoVersionFound, primaryErr)
+	return "", fmt.Errorf("%w: %w", ErrNoVersionFound, primaryErr)
 }

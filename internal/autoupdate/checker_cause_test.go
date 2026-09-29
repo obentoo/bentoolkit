@@ -49,7 +49,7 @@ func TestCheckPackageCancelledKeepsCause(t *testing.T) {
 		t.Cleanup(srv.Close)
 
 		checker := newRateLimitTestChecker(t, srv.URL, WithContext(context.Background()))
-		result, _ := checker.CheckPackage(pkg, true) //nolint:errcheck // result.Error is asserted
+		result, _ := checker.CheckPackage(pkg, true)
 		if result == nil || result.Error == nil {
 			t.Fatalf("CheckPackage against a 404: result=%v; want a failed check", result)
 		}

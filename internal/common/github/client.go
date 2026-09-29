@@ -165,7 +165,7 @@ func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string)
 
 	// Handle rejected credentials: still an API error, and also an auth one
 	if resp.StatusCode == http.StatusUnauthorized {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%w: %w: status %d: %s", ErrAPIError, ErrUnauthorized, resp.StatusCode, string(body))
 	}
 
@@ -242,7 +242,7 @@ func (c *Client) loadFromCache(category, pkg string) ([]string, bool) {
 	}
 
 	cacheFile := c.cacheFilePath(category, pkg)
-	data, err := os.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile) //nolint:gosec // G304: cacheFile is <CacheDir>/<category>_<pkg>.json; CacheDir is the caller's cache directory and both parts are single path elements from splitPkgAtom or the overlay scan
 	if err != nil {
 		return nil, false
 	}
@@ -279,7 +279,7 @@ func (c *Client) saveToCache(category, pkg string, versions []string) {
 	cacheFile := c.cacheFilePath(category, pkg)
 	// Cache files use fileutil.CacheFileMode (0600, owner-only) because they
 	// may hold sensitive upstream metadata. (R9.1, R9.3)
-	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode)
 }
 
 // ClearCache removes all cached data

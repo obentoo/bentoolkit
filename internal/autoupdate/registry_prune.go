@@ -70,7 +70,7 @@ func RemovePackagesFromConfig(overlayPath string, atoms []string) error {
 	}
 
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
 		if os.IsNotExist(err) {
 			return ErrPackagesConfigNotFound

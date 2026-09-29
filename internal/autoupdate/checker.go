@@ -1159,7 +1159,7 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 	if err != nil {
 		return "source"
 	}
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // G304: path is the current ebuild selectCurrentEbuild listed in the package directory of a key splitPkgAtom confines
 	if err != nil {
 		return "source"
 	}
@@ -1348,7 +1348,7 @@ func currentEbuildCommit(overlayPath, pkg, series string) string {
 	if err != nil || best.Path == "" {
 		return ""
 	}
-	content, err := os.ReadFile(best.Path) //nolint:gosec // path comes from the overlay dir listing
+	content, err := os.ReadFile(best.Path)
 	if err != nil {
 		return ""
 	}
@@ -1407,7 +1407,7 @@ func (c *Checker) resolveBaseFromTag(cfg *PackageConfig, headSHA string) (string
 
 	names, shas, err := parseTagListing(content)
 	if err != nil {
-		return "", false, fmt.Errorf("%w: %v (%s)", ErrBaseVersionUnresolved, err, cfg.BaseURL)
+		return "", false, fmt.Errorf("%w: %w (%s)", ErrBaseVersionUnresolved, err, cfg.BaseURL)
 	}
 
 	var best, bestSHA string

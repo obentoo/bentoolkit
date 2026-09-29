@@ -149,7 +149,7 @@ func ResolveBaseline(gentooTree, atom, version string) (Baseline, error) {
 	// true for the process that tries. The content is discarded — every
 	// consumer opens the path for itself — so this costs one small file per
 	// package and answers with the same evidence they will get.
-	if _, err := os.ReadFile(baseline.Path); err != nil { //nolint:gosec // path built from the given tree, a validated atom and a filename read from that directory's own listing, never from registry input
+	if _, err := os.ReadFile(baseline.Path); err != nil {
 		baseline.Unexamined = fmt.Sprintf("the baseline ebuild could not be read: %v", err)
 	}
 

@@ -491,8 +491,8 @@ func TestApplierRetain_TwoFailuresStillLeaveTheOverlayUntouched(t *testing.T) {
 	applier, overlayDir, pkg, _, pins := promoteFixture(t)
 	before := hashOverlayTree(t, overlayDir)
 
-	applier.Apply(pkg, false) //nolint:errcheck // the failure is the fixture
-	applier.Apply(pkg, false) //nolint:errcheck // the failure is the fixture
+	applier.Apply(pkg, false)
+	applier.Apply(pkg, false)
 
 	if after := hashOverlayTree(t, overlayDir); after != before {
 		t.Errorf("the published overlay changed across two failed attempts: %s -> %s", before, after)
@@ -1362,7 +1362,7 @@ func TestApplierPromote_TheApplierNamesItselfAsTheProducerOfItsRecord(t *testing
 	// so the bytes are the only place it can be asked. The expectation is
 	// unchanged; only where it looks moved. tasks.md's Tests field for this
 	// sub-task says "on disk" for exactly this reason.
-	rawRecord, err := os.ReadFile(validate.StageRecordPath(staged)) //nolint:gosec // path derived from the test's own staging root
+	rawRecord, err := os.ReadFile(validate.StageRecordPath(staged))
 	if err != nil {
 		t.Fatalf("no stage record beside %q: %v", staged, err)
 	}

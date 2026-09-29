@@ -405,12 +405,12 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 		// already names the package to install; exec's own wording ("executable
 		// file not found in $PATH") would only lengthen it. What the caller
 		// HOLDS keeps exec's error in the chain, so the lookup that produced the
-		// verdict is still reachable and is not simply dropped, while errors.Is
-		// still matches ErrPkgdevNotFound through the single %w.
+		// verdict is still reachable and is not simply dropped: errors.Is matches
+		// ErrPkgdevNotFound, and exec.ErrNotFound through lookErr.
 		for i := range updates {
 			updates[i].Success = false
 			updates[i].Error = ErrPkgdevNotFound.Error()
-			updates[i].Err = fmt.Errorf("%s/%s: %w (%v)",
+			updates[i].Err = fmt.Errorf("%s/%s: %w (%w)",
 				updates[i].Category, updates[i].Package, ErrPkgdevNotFound, lookErr)
 		}
 		return reached(updates)

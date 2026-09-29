@@ -139,13 +139,13 @@ func TestLookupFailureRecordsCauseAndText(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		case strings.HasSuffix(r.URL.Path, "/cat/denied"):
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"message":"Bad credentials"}`)) //nolint:errcheck
+			w.Write([]byte(`{"message":"Bad credentials"}`))
 		case strings.HasSuffix(r.URL.Path, "/cat/broken"):
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("upstream exploded")) //nolint:errcheck
+			w.Write([]byte("upstream exploded"))
 		case strings.HasSuffix(r.URL.Path, "/cat/fine"):
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`[{"name":"fine-1.0.ebuild","type":"file"}]`)) //nolint:errcheck
+			w.Write([]byte(`[{"name":"fine-1.0.ebuild","type":"file"}]`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
