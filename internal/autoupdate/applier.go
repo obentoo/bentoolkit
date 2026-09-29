@@ -834,7 +834,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	if !ebuild.IsValidVersion(newVersion) {
 		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 		}
 		return result, result.Error
 	}
@@ -845,7 +845,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	if err := checkUpstreamValues(pkg, update); err != nil {
 		result.Error = err
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err)
+			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 		}
 		return result, result.Error
 	}
@@ -873,14 +873,14 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		if errors.Is(err, ErrSlotNotFound) {
 			result.Error = err
 			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 			}
 			return result, result.Error
 		}
 		// Package no longer present in the overlay (removed/renamed). The pending
 		// entry is obsolete — prune it and report, not as a failure.
 		return a.pruneObsolete(pkg, result,
-			fmt.Errorf("%w: %s no longer in overlay (%v)", ErrObsoletePending, pkg, err))
+			fmt.Errorf("%w: %s no longer in overlay (%w)", ErrObsoletePending, pkg, err))
 	}
 	result.OldVersion = currentVersion
 
@@ -1286,7 +1286,7 @@ func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyR
 	result.Error = err
 	if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
 		// Keep the original error; just say that the status could not be recorded.
-		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr)
+		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
 	return result, result.Error
 }
@@ -1952,7 +1952,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	fixDistdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
 	if err != nil {
 		// Can't give the agent a private distdir; don't attempt the fix.
-		return distdir, fmt.Errorf("%v (manifest fix skipped: failed to create temp distdir: %w)", firstErr, err)
+		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	// THE TRANSFER (S043-R2.1, D2). From this line the agent's directory is what
@@ -1987,7 +1987,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
 	})
 	if fixErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix attempt failed: %w)", firstErr, fixErr)
+		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
@@ -2016,7 +2016,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%v (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools))
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	result.Fixed = true
@@ -2829,7 +2829,7 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	}
 	if second.err != nil {
 		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
-			first.err, compileGatePhase, second.err)
+			first.err, compileGatePhase, second.err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
 
 	result.Fixed = true

@@ -1407,7 +1407,7 @@ func (c *Checker) resolveBaseFromTag(cfg *PackageConfig, headSHA string) (string
 
 	names, shas, err := parseTagListing(content)
 	if err != nil {
-		return "", false, fmt.Errorf("%w: %v (%s)", ErrBaseVersionUnresolved, err, cfg.BaseURL)
+		return "", false, fmt.Errorf("%w: %w (%s)", ErrBaseVersionUnresolved, err, cfg.BaseURL)
 	}
 
 	var best, bestSHA string

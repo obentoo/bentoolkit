@@ -234,7 +234,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := AddFiles(context.Background(), cfg, "file.txt")
-		if err != config.ErrOverlayPathNotSet {
+		if !errors.Is(err, config.ErrOverlayPathNotSet) {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotSet, got %v", err)
 		}
 	})
@@ -247,7 +247,7 @@ func TestAddFilesWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := AddFiles(context.Background(), cfg, "file.txt")
-		if err != config.ErrOverlayPathNotFound {
+		if !errors.Is(err, config.ErrOverlayPathNotFound) {
 			t.Errorf("AddFiles() should return ErrOverlayPathNotFound, got %v", err)
 		}
 	})

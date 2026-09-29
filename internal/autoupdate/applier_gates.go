@@ -859,7 +859,7 @@ func (a *Applier) repairBuildGatesAndRerun(cand candidatePaths, pkg, version str
 	}
 	if second.err != nil {
 		return nil, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
-			first.err, gate, second.err)
+			first.err, gate, second.err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
 
 	result.Fixed = true

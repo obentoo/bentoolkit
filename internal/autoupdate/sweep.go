@@ -297,7 +297,7 @@ func normaliseSweepTarget(overlayPath, target string) (atom, category string, er
 		}
 		atom = cat + "/" + pkgName
 		if err := dirMustExist(filepath.Join(overlayPath, cat, pkgName)); err != nil {
-			return "", "", fmt.Errorf("%w: %q: %v", ErrInvalidSweepTarget, target, err)
+			return "", "", fmt.Errorf("%w: %q: %w", ErrInvalidSweepTarget, target, err)
 		}
 		return atom, "", nil
 	}
@@ -305,7 +305,7 @@ func normaliseSweepTarget(overlayPath, target string) (atom, category string, er
 		return "", "", fmt.Errorf("%w: %q is not a category/package atom", ErrInvalidSweepTarget, target)
 	}
 	if err := dirMustExist(filepath.Join(overlayPath, target)); err != nil {
-		return "", "", fmt.Errorf("%w: %q is not a category in this overlay: %v", ErrInvalidSweepTarget, target, err)
+		return "", "", fmt.Errorf("%w: %q is not a category in this overlay: %w", ErrInvalidSweepTarget, target, err)
 	}
 	return "", target, nil
 }
@@ -776,7 +776,7 @@ func (s *sweeper) prefetchAuthDistfile(pkg, version, distdir string) error {
 	}
 	spec, enabled, err := parseAuthFetchSpec(cfg.Meta)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrManifestFailed, err)
+		return fmt.Errorf("%w: %w", ErrManifestFailed, err)
 	}
 	if !enabled {
 		return nil

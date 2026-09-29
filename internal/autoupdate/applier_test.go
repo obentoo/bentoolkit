@@ -527,7 +527,7 @@ func TestApplyPackageNotInPending(t *testing.T) {
 	}
 
 	result, err := applier.Apply("nonexistent/pkg", false)
-	if err != ErrPackageNotInPending {
+	if !errors.Is(err, ErrPackageNotInPending) {
 		t.Errorf("Expected ErrPackageNotInPending, got: %v", err)
 	}
 	if result.Success {
@@ -995,7 +995,7 @@ func TestApplyWithCompileUserDeclines(t *testing.T) {
 
 	result, err := applier.Apply(pkg, true)
 
-	if err != ErrUserDeclined {
+	if !errors.Is(err, ErrUserDeclined) {
 		t.Errorf("Expected ErrUserDeclined, got: %v", err)
 	}
 	if result.Success {

@@ -116,12 +116,12 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	if err != nil {
 		// parseIDLookup already compiled this against a stand-in version, so
 		// reaching here means the VERSION made it invalid, not the pattern.
-		return "", fmt.Errorf("%w: %s does not compile with version %q substituted: %v", ErrAuthFetchFailed, metaFetchIDPattern, version, err)
+		return "", fmt.Errorf("%w: %s does not compile with version %q substituted: %w", ErrAuthFetchFailed, metaFetchIDPattern, version, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, lookupURL, nil) //nolint:gosec // G704: lookupURL is the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {version} cannot move it, and no credential rides on this leg
 	if err != nil {
-		return "", fmt.Errorf("%w: building the %s request: %v", ErrAuthFetchFailed, metaFetchIDURL, err)
+		return "", fmt.Errorf("%w: building the %s request: %v", ErrAuthFetchFailed, metaFetchIDURL, err) //nolint:errorlint // a request-leg error may carry request data and never enters the Unwrap chain (see authFetchCtxError)
 	}
 	req.Header.Set("User-Agent", authFetchUserAgent)
 
@@ -131,7 +131,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time, and no credential rides on this leg (httputil.CredentialRedirectPolicy bounds redirects)
 	if err != nil {
-		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err)
+		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err) //nolint:errorlint // the raw transport error may render request data and never enters the Unwrap chain; withCtxCause exposes only its context sentinel
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -140,7 +140,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	}
 	doc, err := io.ReadAll(io.LimitReader(resp.Body, idBodyLimit))
 	if err != nil {
-		return "", fmt.Errorf("%w: reading %s: %v", ErrAuthFetchFailed, metaFetchIDURL, err)
+		return "", fmt.Errorf("%w: reading %s: %v", ErrAuthFetchFailed, metaFetchIDURL, err) //nolint:errorlint // a request-leg error may carry request data and never enters the Unwrap chain (see authFetchCtxError)
 	}
 
 	m := pattern.FindSubmatch(doc)
@@ -179,7 +179,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	// a CDN would only widen where it can appear.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: building the download request: %v", ErrAuthFetchFailed, err)
+		return nil, fmt.Errorf("%w: building the download request: %v", ErrAuthFetchFailed, err) //nolint:errorlint // a request-leg error may carry request data and never enters the Unwrap chain (see authFetchCtxError)
 	}
 	req.Header.Set("User-Agent", authFetchUserAgent)
 
@@ -190,7 +190,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, withCtxCause(fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err), err)
+		return nil, withCtxCause(fmt.Errorf("%w: downloading from the URL the endpoint returned: %v", ErrAuthFetchFailed, err), err) //nolint:errorlint // the raw transport error may render request data and never enters the Unwrap chain; withCtxCause exposes only its context sentinel
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()

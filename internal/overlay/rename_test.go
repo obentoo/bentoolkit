@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -203,7 +204,7 @@ func TestRenamePreviewNoOverlayPath(t *testing.T) {
 	}
 
 	_, err := RenamePreview(cfg, spec)
-	if err != ErrOverlayPathNotSet {
+	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("RenamePreview() error = %v, want ErrOverlayPathNotSet", err)
 	}
 }
@@ -396,7 +397,7 @@ func TestRenameWithVersionFilesBlocking(t *testing.T) {
 	}
 
 	// Should be VersionFilesBlockError
-	if _, ok := err.(*VersionFilesBlockError); !ok {
+	if !errors.As(err, new(*VersionFilesBlockError)) {
 		t.Errorf("Rename() error type = %T, want *VersionFilesBlockError", err)
 	}
 }
@@ -470,7 +471,7 @@ func TestRenameWithConflictBlocking(t *testing.T) {
 	}
 
 	// Should be ConflictError
-	if _, ok := err.(*ConflictError); !ok {
+	if !errors.As(err, new(*ConflictError)) {
 		t.Errorf("Rename() error type = %T, want *ConflictError", err)
 	}
 }
@@ -878,7 +879,7 @@ func TestRenameInvalidOverlayPath(t *testing.T) {
 	opts := &RenameOptions{NoManifest: true}
 
 	_, err := Rename(cfg, spec, opts)
-	if err != ErrOverlayPathNotSet {
+	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("Rename() error = %v, want ErrOverlayPathNotSet", err)
 	}
 }

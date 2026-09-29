@@ -334,6 +334,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Error causes stay reachable.** Library errors that formatted their cause
+  with `%v` now wrap it, so `errors.Is` and `errors.As` see the cause (a Claude
+  run's context error, an LLM request's `*url.Error`, an `fs` or `json` error)
+  under the same sentinel as before. When a failed manifest was followed by a
+  failed or skipped LLM fix, the manifest failure is now the error's cause and
+  the fix attempt's error is only context in its text; it used to be the other
+  way round. The message text is unchanged apart from that order.
+
 - **`make test` and `make coverage` run with the race detector in random
   order**, as the CI test job now does. A failing run prints
   `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,7 +148,7 @@ func TestEmptyOverlayPathReturnsError(t *testing.T) {
 	}
 
 	_, err := cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotSet {
+	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("Expected ErrOverlayPathNotSet, got: %v", err)
 	}
 }
@@ -162,7 +163,7 @@ func TestInvalidOverlayPathReturnsError(t *testing.T) {
 	}
 
 	_, err := cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotFound {
+	if !errors.Is(err, ErrOverlayPathNotFound) {
 		t.Errorf("Expected ErrOverlayPathNotFound, got: %v", err)
 	}
 }
@@ -1070,7 +1071,7 @@ func TestGetOverlayPathFileAsPath(t *testing.T) {
 
 	// GetOverlayPath should return ErrOverlayPathNotFound for file
 	_, err = cfg.GetOverlayPath()
-	if err != ErrOverlayPathNotFound {
+	if !errors.Is(err, ErrOverlayPathNotFound) {
 		t.Errorf("Expected ErrOverlayPathNotFound, got: %v", err)
 	}
 }
@@ -1678,7 +1679,7 @@ func TestGetGitUser_ReturnsErrWhenNoSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected ErrGitUserNotConfigured, got nil")
 	}
-	if err != ErrGitUserNotConfigured {
+	if !errors.Is(err, ErrGitUserNotConfigured) {
 		t.Errorf("Expected ErrGitUserNotConfigured, got %v", err)
 	}
 }

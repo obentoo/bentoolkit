@@ -32,6 +32,7 @@ package main
 // The sentence is printed twice today, once by cobra and once by main.go.
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -86,8 +87,8 @@ func TestRejectionKeepsItsExitStatusAndItsSentence(t *testing.T) {
 
 	out, err := exec.Command(bentoo, "version", "--ui=bogus").CombinedOutput()
 
-	exit, ok := err.(*exec.ExitError)
-	if !ok {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
 		t.Fatalf("expected a non-zero exit, got err=%v", err)
 	}
 	if exit.ExitCode() != 1 {

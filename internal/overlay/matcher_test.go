@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -590,8 +591,8 @@ func TestCategoryNotFoundError(t *testing.T) {
 	}
 
 	// Verify it's a CategoryNotFoundError
-	catErr, ok := err.(*CategoryNotFoundError)
-	if !ok {
+	var catErr *CategoryNotFoundError
+	if !errors.As(err, &catErr) {
 		t.Errorf("Expected CategoryNotFoundError, got %T", err)
 	}
 

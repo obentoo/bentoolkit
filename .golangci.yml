@@ -13,6 +13,7 @@ linters:
     - misspell
     - bodyclose
     - contextcheck
+    - errorlint
 
   settings:
     errcheck:

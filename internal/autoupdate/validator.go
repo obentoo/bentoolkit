@@ -53,7 +53,7 @@ func ValidateSchema(content []byte, schema *PackageConfig, ebuildVersion string)
 	// Step 1: Test version extraction
 	extractedVersion, err := TestExtraction(content, schema)
 	if err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrExtractionFailed, err)
+		result.Error = fmt.Errorf("%w: %w", ErrExtractionFailed, err)
 		return result
 	}
 	result.ExtractedVersion = extractedVersion

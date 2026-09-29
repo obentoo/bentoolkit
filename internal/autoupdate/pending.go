@@ -183,7 +183,7 @@ func (p *PendingList) load() error {
 
 	var pf pendingFile
 	if err := json.Unmarshal(data, &pf); err != nil {
-		return fmt.Errorf("%w: %v", ErrPendingCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrPendingCorrupted, err)
 	}
 
 	if pf.Updates != nil {

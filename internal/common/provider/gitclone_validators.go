@@ -63,7 +63,7 @@ func ValidateRepoURL(raw string) error {
 		if isSCPLikeSSHURL(raw) {
 			return nil
 		}
-		return fmt.Errorf("%w: %s: %v", ErrInvalidRepoURL, raw, err)
+		return fmt.Errorf("%w: %s: %w", ErrInvalidRepoURL, raw, err)
 	}
 
 	scheme := strings.ToLower(u.Scheme)

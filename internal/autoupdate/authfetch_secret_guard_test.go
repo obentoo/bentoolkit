@@ -19,7 +19,7 @@ func authFetchErrorChain(err error) []error {
 			continue
 		}
 		out = append(out, e)
-		switch u := e.(type) {
+		switch u := e.(type) { //nolint:errorlint // this IS the Unwrap walk: each link is inspected on its own, which errors.As would skip past
 		case interface{ Unwrap() []error }:
 			queue = append(queue, u.Unwrap()...)
 		case interface{ Unwrap() error }:

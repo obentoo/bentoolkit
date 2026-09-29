@@ -219,21 +219,21 @@ func TestAddPathValidation(t *testing.T) {
 
 	t.Run("add non-existent file returns file not found error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "nonexistent.txt")
-		if err != ErrFileNotFound {
+		if !errors.Is(err, ErrFileNotFound) {
 			t.Errorf("expected ErrFileNotFound, got %v", err)
 		}
 	})
 
 	t.Run("add path outside overlay returns error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "../outside.txt")
-		if err != ErrPathOutsideOverlay {
+		if !errors.Is(err, ErrPathOutsideOverlay) {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
 	})
 
 	t.Run("add with absolute path outside overlay returns error", func(t *testing.T) {
 		err := runner.Add(context.Background(), "/etc/passwd")
-		if err != ErrPathOutsideOverlay {
+		if !errors.Is(err, ErrPathOutsideOverlay) {
 			t.Errorf("expected ErrPathOutsideOverlay, got %v", err)
 		}
 	})

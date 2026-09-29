@@ -107,7 +107,7 @@ func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 	// Read and parse the ebuild file
 	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is a directory entry listed in the package directory of a key splitPkgAtom confines
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrEbuildParseFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrEbuildParseFailed, err)
 	}
 
 	// Extract metadata
@@ -138,7 +138,7 @@ func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 func findEbuilds(pkgDir string) ([]string, error) {
 	entries, err := os.ReadDir(pkgDir)
 	if err != nil {
-		return nil, fmt.Errorf("%w: cannot read directory: %v", ErrEbuildParseFailed, err)
+		return nil, fmt.Errorf("%w: cannot read directory: %w", ErrEbuildParseFailed, err)
 	}
 
 	var ebuilds []string

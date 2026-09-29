@@ -200,7 +200,7 @@ func (c *Cache) load() error {
 
 	var cf cacheFile
 	if err := json.Unmarshal(data, &cf); err != nil {
-		return fmt.Errorf("%w: %v", ErrCacheCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrCacheCorrupted, err)
 	}
 
 	if cf.Entries != nil {

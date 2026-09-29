@@ -162,7 +162,7 @@ func lookupInFile(path, name string, userScope bool) (string, bool, error) {
 		case !userScope && errors.Is(err, os.ErrPermission):
 			return "", false, nil
 		default:
-			return "", false, fmt.Errorf("%w: %s: %v", ErrUnreadable, path, err)
+			return "", false, fmt.Errorf("%w: %s: %w", ErrUnreadable, path, err)
 		}
 	}
 	warnIfLoose(path)

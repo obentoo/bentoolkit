@@ -81,7 +81,7 @@ func NewLocalProvider(repoInfo *RepositoryInfo) (*GitCloneProvider, error) {
 
 	info, err := os.Stat(abs)
 	if err != nil {
-		return nil, fmt.Errorf("%w: local repository path %q: %v", ErrInvalidRepoURL, repoInfo.Path, err)
+		return nil, fmt.Errorf("%w: local repository path %q: %w", ErrInvalidRepoURL, repoInfo.Path, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("%w: local repository path %q is not a directory", ErrInvalidRepoURL, repoInfo.Path)

@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/leanovate/gopter"
@@ -129,8 +130,8 @@ func TestBareAsteriskRejection(t *testing.T) {
 			}
 			if tt.wantErr && err != nil {
 				// Verify error message is helpful
-				valErr, ok := err.(*ValidationError)
-				if !ok {
+				var valErr *ValidationError
+				if !errors.As(err, &valErr) {
 					t.Errorf("expected ValidationError, got %T", err)
 				}
 				if valErr.Pattern != tt.pattern {

@@ -322,7 +322,7 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 
 	form, err := url.ParseQuery(meta[metaFetchForm])
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchForm, err)
+		return nil, false, fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchForm, err)
 	}
 	spec.form = form
 
@@ -459,7 +459,7 @@ func (s *authFetchSpec) parseIDLookup(meta map[string]string) error {
 	// request goes out rather than a failure in the middle of a sweep.
 	probe, err := regexp.Compile(strings.ReplaceAll(s.idPattern, versionPlaceholder, "0"))
 	if err != nil {
-		return fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchIDPattern, err)
+		return fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchIDPattern, err)
 	}
 	if got := probe.NumSubexp(); got != 1 {
 		return fmt.Errorf("%w: %s must have exactly 1 capture group (the id), it has %d", ErrAuthFetchFailed, metaFetchIDPattern, got)
@@ -489,7 +489,7 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 	}
 	fields, err := url.ParseQuery(raw)
 	if err != nil {
-		return fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchFormEnv, err)
+		return fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchFormEnv, err)
 	}
 
 	// A GET puts every field in the query string, where it is written to the
@@ -835,7 +835,7 @@ func jsonForm(fields url.Values) ([]byte, error) {
 	}
 	encoded, err := json.Marshal(obj)
 	if err != nil {
-		return nil, fmt.Errorf("%w: encoding %s as %s: %v", ErrAuthFetchFailed, metaFetchForm, fetchBodyJSON, err)
+		return nil, fmt.Errorf("%w: encoding %s as %s: %v", ErrAuthFetchFailed, metaFetchForm, fetchBodyJSON, err) //nolint:errorlint // a request-leg error may carry request data and never enters the Unwrap chain (see authFetchCtxError)
 	}
 	return encoded, nil
 }
@@ -847,7 +847,7 @@ func jsonForm(fields url.Values) ([]byte, error) {
 func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredentials, minBytes int64) (string, error) {
 	tmp, err := os.CreateTemp(destDir, ".authfetch-*")
 	if err != nil {
-		return "", fmt.Errorf("%w: creating temp file: %v", ErrAuthFetchFailed, err)
+		return "", fmt.Errorf("%w: creating temp file: %v", ErrAuthFetchFailed, err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 	tmpName := tmp.Name()
 
@@ -860,7 +860,7 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 		return "", withCtxCause(fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, creds.scrub(copyErr.Error())), copyErr)
 	case closeErr != nil:
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: closing temp file: %v", ErrAuthFetchFailed, closeErr)
+		return "", fmt.Errorf("%w: closing temp file: %w", ErrAuthFetchFailed, closeErr)
 	case n == 0:
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: downloaded zero bytes", ErrAuthFetchFailed)
@@ -887,12 +887,12 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 	// concurrent reader can see never exists with the wrong bits.
 	if err := os.Chmod(tmpName, distfileMode); err != nil {
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
+		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 
 	if err := os.Rename(tmpName, destPath); err != nil { //nolint:gosec // G703: destPath is the caller's distdir joined to the resolved fetch_filename, which fetchDistfile refuses unless it is a bare file name (no separator, no "..")
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
+		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 	return destPath, nil
 }

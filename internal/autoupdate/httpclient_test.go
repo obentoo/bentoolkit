@@ -603,7 +603,7 @@ func containsError(err, target error) bool {
 		return false
 	}
 	return err.Error() != "" && target.Error() != "" &&
-		(err == target || err.Error() == target.Error() ||
+		(errors.Is(err, target) || err.Error() == target.Error() ||
 			len(err.Error()) > len(target.Error()) &&
 				err.Error()[:len(target.Error())] == target.Error())
 }

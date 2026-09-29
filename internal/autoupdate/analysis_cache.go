@@ -153,7 +153,7 @@ func (c *AnalysisCache) load() error {
 
 	var cf analysisCacheFile
 	if err := json.Unmarshal(data, &cf); err != nil {
-		return fmt.Errorf("%w: %v", ErrAnalysisCacheCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrAnalysisCacheCorrupted, err)
 	}
 
 	if cf.Entries != nil {

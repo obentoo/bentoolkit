@@ -164,7 +164,7 @@ func TestGetPackageVersionsNotFound(t *testing.T) {
 	client.BaseURL = server.URL
 
 	_, err := client.GetPackageVersions(t.Context(), "app-misc", "nonexistent")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
 }
