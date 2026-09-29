@@ -20,16 +20,19 @@ CONFIG_EXAMPLE := config.example.yaml
 CONFIG_DIR := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/bentoo
 CONFIG_FILE := $(CONFIG_DIR)/config.yaml
 
-# Go commands
+# Go commands. Every target runs the toolchain go.mod names, as CI does
+# (setup-go reads go.mod): a newer host Go formats and vets differently. Set
+# GOTOOLCHAIN in the environment to override.
+GO_TOOLCHAIN := $(shell awk '/^toolchain /{print $$2}' go.mod)
+export GOTOOLCHAIN ?= $(GO_TOOLCHAIN)
 GO := go
 GOTEST := $(GO) test
 GOBUILD := $(GO) build
 GOMOD := $(GO) mod
 
-# golangci-lint at the version the CI Lint job installs. `go run pkg@version`
-# builds it with the toolchain go.mod names, which golangci-lint needs: a binary
-# built with a Go older than the targeted Go refuses to run. lint-pin-check keeps
-# this pin and the CI one equal.
+# golangci-lint at the version the CI Lint job installs, built with the toolchain
+# exported above — the one CI uses; built with a newer host Go, its gofmt
+# disagrees with CI's. lint-pin-check keeps this pin and the CI one equal.
 GOLANGCI_LINT_VERSION := v2.13.2
 GOLANGCI_LINT := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 # Extra golangci-lint arguments, e.g. LINT_ARGS="--enable-only misspell".
