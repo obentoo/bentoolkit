@@ -45,6 +45,10 @@ being one of <, <=, =, >=, > followed by a version, for example
 --affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// The flags parsed, so any error from here on is about their
+			// values or the files, and the usage block would bury the one
+			// line that names the flag to fix.
+			cmd.SilenceUsage = true
 			return runNoticeNew(cmd, in, bodyFile)
 		},
 	}
@@ -118,6 +122,7 @@ item's Revision goes up by one and the site file's updated becomes now;
 the ID and the publication date stay.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true // as in notice new
 			if !cmd.Flags().Changed("affects") {
 				changes.Affects = nil
 			}
@@ -168,20 +173,29 @@ func printNoticeResult(out, errOut io.Writer, res notice.Result, id, overlay, si
 	for _, p := range res.Paths {
 		fmt.Fprintf(out, "%s %s\n", verb, p)
 	}
-	if sitePath == "" {
-		fmt.Fprintf(out, "\nnotice.site_path is not configured; save this as src/content/notices/%s.yaml in the site repository:\n\n", id)
+	siteFile := filepath.Join("src", "content", "notices", id+".yaml")
+	// Only `new` has a site document to show without a site path: `revise`
+	// reads the site file to build one, and with no site path it has none.
+	printedYAML := sitePath == "" && len(res.YAML) > 0
+	switch {
+	case printedYAML:
+		fmt.Fprintf(out, "\nnotice.site_path is not configured; save this as %s in the site repository:\n\n", siteFile)
 		_, _ = out.Write(res.YAML)
+	case sitePath == "":
+		fmt.Fprintf(out, "\nnotice.site_path is not configured, so the site notice was not updated; revise %s in the site repository by hand.\n", siteFile)
 	}
 
 	newsDir := filepath.Join("metadata", "news", id)
 	fmt.Fprintf(out, "\nNext steps (bentoo performs no git operation):\n")
 	fmt.Fprintf(out, "  1. Review the files above.\n")
 	fmt.Fprintf(out, "  2. git -C %s add %s && git -C %s commit\n", overlay, newsDir, overlay)
-	if sitePath != "" {
-		siteFile := filepath.Join("src", "content", "notices", id+".yaml")
+	switch {
+	case sitePath != "":
 		fmt.Fprintf(out, "  3. git -C %s add %s && git -C %s commit\n", sitePath, siteFile, sitePath)
-	} else {
+	case printedYAML:
 		fmt.Fprintf(out, "  3. Add and commit the YAML above in the site repository.\n")
+	default:
+		fmt.Fprintf(out, "  3. Update, add and commit %s in the site repository.\n", siteFile)
 	}
 	fmt.Fprintf(out, "  4. Push both repositories.\n")
 }

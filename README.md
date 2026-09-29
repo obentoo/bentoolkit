@@ -672,7 +672,7 @@ from one input, with one ID (`<published>-<name>`), so they cannot drift.
 ```bash
 # A security notice; the body is read from a file
 bentoo notice new --type security --severity critical \
-  --name foo-cve --title "foo 1.2 heap overflow" \
+  --name foo-cve --published 2026-09-28 --title "foo 1.2 heap overflow" \
   --summary "A crafted archive overflows a heap buffer in foo before 1.2.3." \
   --affects 'dev-libs/foo:1 >=1.0,<1.2.3' \
   --body-file body.txt
@@ -689,8 +689,10 @@ bentoo notice revise 2026-09-28-foo-cve --severity warning
   ranges is written there as the bare package, with a warning: the news item
   then targets every installed version, while the feed stays precise.
 - **The body** comes from `--body-file`, or from `$VISUAL`, else `$EDITOR`,
-  opened on a temporary file. Lines starting with `#` are dropped, and an
-  empty body aborts without writing anything. The editor command is split into
+  opened on a temporary file. Write it below the `# --- >8 ---` scissors
+  line: everything below that line is kept as written, `#` lines included (a
+  root prompt such as `# emerge --sync` survives), and the instructions above
+  it are dropped. An empty body aborts without writing anything. The editor command is split into
   words and run directly, never through a shell.
 - **`notice.site_path`** in the configuration points at the site repository.
   Without it only the news item is written, and the site YAML is printed for

@@ -25,12 +25,18 @@ type Runner func(ctx context.Context, name string, args ...string) error
 // Revise takes one, so the command decides how the body is edited.
 type BodyEditor func(ctx context.Context, current string) (string, error)
 
-// editorInstructions prefills the temporary file. Every line is a comment, so
-// saving the file untouched is an empty body (R2.4).
-const editorInstructions = `# Write the notice body below. Lines starting with '#' are removed.
+// scissorsLine ends the editor's instructions: everything below it is the
+// text, kept verbatim — `#` lines included, since a news item's text often
+// quotes a root prompt such as `# emerge --sync`.
+const scissorsLine = "# ------------------------ >8 ------------------------"
+
+// editorInstructions prefills the temporary file. Nothing is written below the
+// scissors line, so saving the file untouched is an empty body (R2.4).
+const editorInstructions = `# Write the notice body below the line that follows.
+# Everything below it is kept as written, lines starting with '#' included.
 # Separate paragraphs with a blank line; the news item is wrapped at 72
 # columns. Save and quit to continue, or leave the body empty to abort.
-`
+` + scissorsLine + "\n"
 
 // TerminalRunner runs the editor on the user's terminal. It never goes through
 // a shell (R2.6), and it stays in bentoo's process group on purpose: an
@@ -43,8 +49,8 @@ func TerminalRunner(ctx context.Context, name string, args ...string) error {
 }
 
 // ReadBody returns the notice body (R2): the content of bodyFile when it is
-// given, otherwise what the user writes in $VISUAL, else $EDITOR, with comment
-// lines removed. env reads the environment (os.Getenv in production).
+// given, otherwise what the user writes in $VISUAL, else $EDITOR, below the
+// scissors line. env reads the environment (os.Getenv in production).
 func ReadBody(ctx context.Context, bodyFile string, env func(string) string, run Runner) (string, error) {
 	if bodyFile != "" {
 		data, err := os.ReadFile(bodyFile) //nolint:gosec // G304: --body-file is the user's own input file, read and never executed
@@ -61,8 +67,8 @@ func ReadBody(ctx context.Context, bodyFile string, env func(string) string, run
 }
 
 // EditBody opens initial in the user's editor on a temporary file and returns
-// the text saved, with comment lines removed and surrounding blank lines
-// trimmed. The temporary file is removed on every path.
+// the text saved (see editedText), with surrounding blank lines trimmed. The
+// temporary file is removed on every path.
 func EditBody(ctx context.Context, initial string, env func(string) string, run Runner) (body string, err error) {
 	argv := editorCommand(env)
 	if len(argv) == 0 {
@@ -95,7 +101,7 @@ func EditBody(ctx context.Context, initial string, env func(string) string, run 
 	if err != nil {
 		return "", fmt.Errorf("reading the edited body from %s: %w", path, err)
 	}
-	body = trimBlankLines(stripComments(string(data)))
+	body = trimBlankLines(editedText(string(data)))
 	if body == "" {
 		return "", ErrEmptyBody
 	}
@@ -111,6 +117,19 @@ func editorCommand(env func(string) string) []string {
 		}
 	}
 	return nil
+}
+
+// editedText is what the user wrote: everything after the scissors line when
+// it is still there, otherwise the file without its comment lines — an editor
+// that rewrote the whole file took the scissors line with it.
+func editedText(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line == scissorsLine {
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return stripComments(s)
 }
 
 // stripComments drops every line that starts with '#'. A '#' later in a line
@@ -143,9 +162,10 @@ func trimBlankLines(s string) string {
 }
 
 // NewBodyEditor returns the BodyEditor `notice revise` uses: the current text,
-// under the usual commented instructions, opened in $VISUAL or $EDITOR.
+// below the instructions and the scissors line, opened in $VISUAL or $EDITOR.
+// Saved untouched, it comes back unchanged, `#` lines included (R5.6).
 func NewBodyEditor(env func(string) string, run Runner) BodyEditor {
 	return func(ctx context.Context, current string) (string, error) {
-		return EditBody(ctx, editorInstructions+"\n"+current+"\n", env, run)
+		return EditBody(ctx, editorInstructions+current+"\n", env, run)
 	}
 }
