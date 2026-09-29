@@ -1,0 +1,17 @@
+id: 2026-09-30-foo-cve
+type: security
+severity: critical
+title: foo 1.2 heap overflow
+summary: A heap overflow in foo before 1.2.3 lets a crafted file run code.
+body: |
+  foo before 1.2.3 overflows a heap buffer while parsing a crafted header.
+
+  Upgrade to 1.2.3 or later. Slot 0 is not affected.
+affects:
+  - cp: dev-libs/foo
+    slot: "1"
+    ranges:
+      - { op: ">=", ver: "1.0" }
+      - { op: "<", ver: "1.2.3" }
+published: "2026-09-30T00:00:00Z"
+updated: "2026-09-30T00:00:00Z"

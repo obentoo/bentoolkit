@@ -1,0 +1,15 @@
+id: 2026-09-28-edge+case_1
+type: news
+severity: info
+title: Edge case for the feed contract
+summary: Exercises "+" and "_" in an id, a "+" in a package name, a slot and suffixed versions.
+body: |
+  This notice exists to pin the feed contract's edge cases.
+affects:
+  - cp: dev-libs/libfoo+
+    slot: "0.1"
+    ranges:
+      - { op: ">=", ver: "1.0_rc1_p2" }
+      - { op: "<", ver: "1.0b-r0" }
+published: "2026-09-28T00:00:00Z"
+updated: "2026-09-28T00:00:00Z"
