@@ -18,9 +18,10 @@ var snapshotListRemote bool
 // newSnapshotListCmd builds `snapshot list`.
 func newSnapshotListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List local snapshots per subvolume",
-		Run:   runSnapshotList,
+		Use:         "list",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "List local snapshots per subvolume",
+		Run:         runSnapshotList,
 	}
 	cmd.Flags().BoolVar(&snapshotListRemote, "remote", false,
 		"also list remote snapshots (btrbk targets, restic repository)")

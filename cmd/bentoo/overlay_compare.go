@@ -73,8 +73,9 @@ var (
 // newCompareCmd builds `overlay compare`.
 func newCompareCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "compare [repository]",
-		Short: "Compare overlay packages with upstream repository",
+		Use:         "compare [repository]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Compare overlay packages with upstream repository",
 		Long: `Compare package versions in your local Bentoo overlay against
 an upstream repository.
 

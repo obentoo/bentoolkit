@@ -15,7 +15,8 @@ var (
 // newPullCmd builds `overlay pull`.
 func newPullCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "pull",
+		Use:         "pull",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
 		// "sync" is the name this command shipped under. It stays as an alias so
 		// existing scripts and muscle memory keep working.
 		Aliases: []string{"sync"},

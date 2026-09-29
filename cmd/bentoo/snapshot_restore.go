@@ -42,8 +42,9 @@ var (
 // newSnapshotRestoreCmd builds `snapshot restore`.
 func newSnapshotRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "restore <id>",
-		Short: "Restore a snapshot from a ship target into a path",
+		Use:         "restore <id>",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Restore a snapshot from a ship target into a path",
 		Long: `Restore snapshot <id> into --target using the named --ship entry.
 
 The ship's type selects the path: an "archive" ship replays the object chain

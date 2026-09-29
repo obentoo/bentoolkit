@@ -23,8 +23,9 @@ var (
 // newCommitCmd builds `overlay commit`.
 func newCommitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "commit",
-		Short: "Commit staged changes with auto-generated message",
+		Use:         "commit",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Commit staged changes with auto-generated message",
 		Long: `Commit staged changes to the overlay repository.
 If no message is provided with -m, an automatic commit message is generated
 based on the ebuild changes and a confirmation prompt is shown.

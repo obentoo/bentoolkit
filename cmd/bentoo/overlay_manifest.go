@@ -29,8 +29,9 @@ var manifestFlags ManifestFlags
 // newManifestCmd builds `overlay manifest`.
 func newManifestCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "manifest [<category> | <category>/<package>]",
-		Short: "Regenerate Manifest files for overlay packages",
+		Use:         "manifest [<category> | <category>/<package>]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Regenerate Manifest files for overlay packages",
 		Long: `Regenerate Manifest files for one or more packages in the overlay.
 
 By default, the existing Manifest is moved aside before pkgdev runs so a

@@ -210,8 +210,9 @@ var autoupdateValidateCfg config.ValidateConfig
 // newAutoupdateCmd builds `overlay autoupdate`.
 func newAutoupdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "autoupdate [package]",
-		Short: "Check and apply ebuild version updates",
+		Use:         "autoupdate [package]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Check and apply ebuild version updates",
 		Long: `Automatically check upstream sources for new versions and apply updates.
 
 Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):

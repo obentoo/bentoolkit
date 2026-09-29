@@ -65,8 +65,9 @@ perform it.`,
 // newDistfileFetchCmd builds `distfile fetch`.
 func newDistfileFetchCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "fetch <category/package>",
-		Short: "Download a gated distfile into DISTDIR, ready for emerge",
+		Use:         "fetch <category/package>",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Download a gated distfile into DISTDIR, ready for emerge",
 		Long: `Perform the download the overlay records for a package, and write the file
 into DISTDIR under the exact name its Manifest expects.
 

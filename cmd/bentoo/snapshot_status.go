@@ -17,9 +17,10 @@ import (
 // newSnapshotStatusCmd builds `snapshot status`.
 func newSnapshotStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show the last run, timer state, and free space",
-		Run:   runSnapshotStatus,
+		Use:         "status",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Show the last run, timer state, and free space",
+		Run:         runSnapshotStatus,
 	}
 	return cmd
 }

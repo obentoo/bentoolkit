@@ -61,8 +61,9 @@ var validateRunnerFn = validate.Run
 // case's --json cannot survive into the next.
 func newValidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "validate [category[/package]]",
-		Short: "Check that each ebuild still matches the source it points at",
+		Use:         "validate [category[/package]]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Check that each ebuild still matches the source it points at",
 		Long: `Read the build options the upstream archive declares, read the ones the
 ebuild passes, and report the difference. At the default depth nothing is built,
 downloaded or changed: the archive is the one already on disk, put there by the

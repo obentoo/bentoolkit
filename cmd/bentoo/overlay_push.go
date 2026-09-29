@@ -13,10 +13,11 @@ var (
 // newPushCmd builds `overlay push`.
 func newPushCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "push",
-		Short: "Push committed changes to remote",
-		Long:  `Push committed changes to the remote repository.`,
-		Run:   runPush,
+		Use:         "push",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Push committed changes to remote",
+		Long:        `Push committed changes to the remote repository.`,
+		Run:         runPush,
 	}
 	cmd.Flags().BoolVarP(&pushDryRun, "dry-run", "n", false, "Show what would be pushed without pushing")
 	return cmd

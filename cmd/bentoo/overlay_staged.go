@@ -101,8 +101,9 @@ under this command reads, writes or removes anything in the overlay itself.`,
 // newStagedCleanCmd builds `overlay staged clean`.
 func newStagedCleanCmd() *cobra.Command {
 	clean := &cobra.Command{
-		Use:   "clean",
-		Short: "Remove the staged trees no longer worth keeping, and say what stays",
+		Use:         "clean",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Remove the staged trees no longer worth keeping, and say what stays",
 		Long: `Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
 'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and
 report every tree left behind with the reason it stays.

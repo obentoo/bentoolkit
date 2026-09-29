@@ -9,10 +9,11 @@ import (
 // newStatusCmd builds `overlay status`.
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show the status of changes in the overlay",
-		Long:  `Display the current status of changes in the overlay repository, grouped by category/package.`,
-		Run:   runStatus,
+		Use:         "status",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Show the status of changes in the overlay",
+		Long:        `Display the current status of changes in the overlay repository, grouped by category/package.`,
+		Run:         runStatus,
 	}
 	return cmd
 }

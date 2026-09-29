@@ -15,8 +15,9 @@ var snapshotApplyDryRun bool
 // newSnapshotApplyCmd builds `snapshot apply`.
 func newSnapshotApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply",
-		Short: "Render native config and install the systemd timer",
+		Use:         "apply",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Render native config and install the systemd timer",
 		Long: `Load and validate snapshot.toml, render the btrbk.conf, and install +
 enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
 		Run: runSnapshotApply,

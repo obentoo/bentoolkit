@@ -21,8 +21,9 @@ var (
 // newSnapshotPruneCmd builds `snapshot prune`.
 func newSnapshotPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "prune",
-		Short: "Apply the retention policy on demand",
+		Use:         "prune",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Apply the retention policy on demand",
 		Long: `Apply the [engine.retention] policy now, without taking a snapshot: the
 engine-native prune for every subvolume (btrbk clean / snapper cleanup timeline)
 plus the GFS retention sweep on every archive ship's rclone remote.

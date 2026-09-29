@@ -26,8 +26,9 @@ var (
 // newSnapshotRollbackCmd builds `snapshot rollback`.
 func newSnapshotRollbackCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "rollback <id>",
-		Short: "Roll the system back to a snapshot (snapper only)",
+		Use:         "rollback <id>",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Roll the system back to a snapshot (snapper only)",
 		Long: `Roll the system back to snapshot <id> via snapper rollback.
 
 Rollback is snapper-specific: it requires engine.driver = "snapper" and is refused

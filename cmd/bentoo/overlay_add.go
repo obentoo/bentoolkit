@@ -9,8 +9,9 @@ import (
 // newAddCmd builds `overlay add`.
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add [paths...]",
-		Short: "Add files to the staging area",
+		Use:         "add [paths...]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Add files to the staging area",
 		Long: `Add files to the Git staging area in the overlay repository.
 If no paths are specified, adds all changes (equivalent to "git add .").`,
 		Run: runAdd,

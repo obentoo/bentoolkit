@@ -106,8 +106,9 @@ const pruneNoLocalTreeRefusal = "no local ::gentoo tree; re-run with --clone or 
 // newPruneCmd builds `overlay prune`.
 func newPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "prune [category[/package]]",
-		Short: "Remove overlay packages ::gentoo already ships identically",
+		Use:         "prune [category[/package]]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Remove overlay packages ::gentoo already ships identically",
 		Long: `Plan the removal of overlay packages ::gentoo already ships, and with
 --apply carry that plan out.
 

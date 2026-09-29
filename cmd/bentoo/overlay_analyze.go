@@ -31,8 +31,9 @@ var (
 // newAnalyzeCmd builds `overlay analyze`.
 func newAnalyzeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "analyze [category/package]",
-		Short: "Analyze package and generate autoupdate schema",
+		Use:         "analyze [category/package]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Analyze package and generate autoupdate schema",
 		Long: `Analyze a package to determine the best way to check for upstream versions.
 
 The analyze command uses intelligent analysis to discover data sources and
