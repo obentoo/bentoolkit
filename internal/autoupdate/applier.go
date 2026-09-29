@@ -2942,7 +2942,7 @@ func (a *Applier) saveCompileLog(pkg, version string, output []byte) string {
 
 // defaultConfirmFunc is the default confirmation function that reads from stdin.
 func defaultConfirmFunc(prompt string) bool {
-	fmt.Printf("%s [y/N]: ", prompt)
+	fmt.Printf("%s [y/N]: ", prompt) //nolint:forbidigo // interactive y/N prompt, paired with the stdin read below
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
 	if err != nil {
