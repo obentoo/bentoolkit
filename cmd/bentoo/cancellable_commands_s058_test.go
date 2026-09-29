@@ -22,6 +22,10 @@ package main
 //     this same test (see red-evidence.yaml). A command that installed no
 //     signal context at 6be73ec is killed by that same first signal.
 //
+// `notice new` and `notice revise`, which main gained after 6be73ec, are
+// held to the same promises measured at e051559, the main commit the branch
+// integrates.
+//
 // Four cancellable commands are not pinned (see s058CancellablePins for the
 // reason each could not be interrupted mid-work at 6be73ec).
 //
@@ -84,6 +88,10 @@ func cancellableCommands() []string {
 		"snapshot rollback",
 		"snapshot run",
 		"snapshot status",
+		// Main gained these after 6be73ec; both installed a signal context at
+		// e051559, the main commit the branch integrates (R4.7).
+		"notice new",
+		"notice revise",
 	}
 }
 
@@ -183,7 +191,13 @@ var s058CancellableTools = []string{
 	"systemctl", "findmnt", "mount", "umount", "ebuild", "emerge", "curl",
 	"wget", "ssh", "rsync", "sudo", "doas", "pkexec", "portageq", "equery",
 	"qlist", "gh", "gemato",
+	// The editor `notice new` and `notice revise` open: the fixture names it
+	// in EDITOR, so the host's own VISUAL and EDITOR never reach a child.
+	s058CancellableEditor,
 }
+
+// s058CancellableEditor is the stub editor the fixture sets as EDITOR.
+const s058CancellableEditor = "s058-editor"
 
 // s058CancellableFixture is one child's world: a HOME with a config, an overlay
 // that is a git repository holding one package, a stub directory first on
@@ -333,6 +347,7 @@ func s058NewCancellableFixture(t *testing.T) *s058CancellableFixture {
 		"http_proxy="+proxyURL, "https_proxy="+proxyURL,
 		"NO_PROXY=", "no_proxy=",
 		"GIT_CONFIG_NOSYSTEM=1",
+		"VISUAL=", "EDITOR="+s058CancellableEditor,
 	)
 	return f
 }
@@ -348,10 +363,14 @@ type s058CancellableOutcome struct {
 
 // s058InterruptChild starts the real tree with args in a re-exec'd child,
 // waits until it waits on a stub tool or a network peer, sends one SIGINT and
-// reports how the child ended.
-func s058InterruptChild(t *testing.T, args []string) s058CancellableOutcome {
+// reports how the child ended. setup, when not nil, adds to the fixture's
+// overlay what this one command needs before the child starts.
+func s058InterruptChild(t *testing.T, args []string, setup func(t *testing.T, overlay string)) s058CancellableOutcome {
 	t.Helper()
 	f := s058NewCancellableFixture(t)
+	if setup != nil {
+		setup(t, f.overlay)
+	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestS058CancellableHelperChild$", "-test.count=1")
 	args = append([]string(nil), args...)
 	for i := range args {
@@ -425,8 +444,28 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 type s058CancellablePin struct {
 	command string // the command path, as in cancellableCommands
 	args    []string
-	want    int  // the exit code measured at 6be73ec
+	want    int  // the exit code measured at 6be73ec (e051559 for the notice commands)
 	killed  bool // measured at 6be73ec: terminated by the signal itself
+	// setup, when not nil, prepares the overlay for this command alone.
+	setup func(t *testing.T, overlay string)
+}
+
+// s058NoticeID is the news item s058WriteNoticeItem puts in the overlay.
+const s058NoticeID = "2026-09-28-s058"
+
+// s058WriteNoticeItem writes one published news item, the notice that
+// `notice revise` opens in the editor.
+func s058WriteNoticeItem(t *testing.T, overlay string) {
+	t.Helper()
+	dir := filepath.Join(overlay, "metadata", "news", s058NoticeID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := "Title: s058 notice\nAuthor: Test <test@test.com>\nPosted: 2026-09-28\nRevision: 1\n" +
+		"News-Item-Format: 2.0\n\nThe notice text.\n"
+	if err := os.WriteFile(filepath.Join(dir, s058NoticeID+".en.txt"), []byte(item), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func s058CancellablePins() []s058CancellablePin {
@@ -452,6 +491,11 @@ func s058CancellablePins() []s058CancellablePin {
 		{command: "snapshot prune", args: []string{"snapshot", "prune", "--config", "{home}/snapshot.toml"}, want: 1},
 		{command: "snapshot rollback", args: []string{"snapshot", "rollback", "1", "--yes", "--config", "{home}/snapshot.toml"}, want: 1},
 		{command: "snapshot run", args: []string{"snapshot", "run", "--config", "{home}/snapshot.toml"}, want: 1},
+		// Main gained these after 6be73ec; measured at e051559, each waiting
+		// on the stub editor.
+		{command: "notice new", args: []string{"notice", "new", "--type", "news", "--severity", "info",
+			"--title", "s058", "--summary", "s058 summary.", "--name", "s058", "--published", "2026-09-28"}, want: 1},
+		{command: "notice revise", args: []string{"notice", "revise", s058NoticeID}, want: 1, setup: s058WriteNoticeItem},
 		// Not pinned, with the reason measured at 6be73ec:
 		//   overlay compare, overlay prune — interrupted while a network peer
 		//     never answers, both were still running 30 s after the SIGINT;
@@ -482,15 +526,15 @@ func TestS058CancellableCommandsKeepTheirInterruptedCodes(t *testing.T) {
 				t.Fatalf("pin %q contradicts cancellableCommands: killed=%t but listed=%t", pin.command, pin.killed, listed[pin.command])
 			}
 			t.Parallel()
-			o := s058InterruptChild(t, pin.args)
+			o := s058InterruptChild(t, pin.args, pin.setup)
 			label := "bentoo " + strings.Join(pin.args, " ")
 			switch {
 			case pin.killed && !o.signaled:
 				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT; at 6be73ec it installed no signal context and was killed by the signal (R4.6):\n%s", label, o.ready, o.code, o.output)
 			case !pin.killed && o.signaled:
-				t.Errorf("%s (waiting on %s) was killed by its first %v; at 6be73ec its signal context was cancelled and it exited %d (R4.7, R4.8):\n%s", label, o.ready, o.sig, pin.want, o.output)
+				t.Errorf("%s (waiting on %s) was killed by its first %v; at 6be73ec (e051559 for the notice commands) its signal context was cancelled and it exited %d (R4.7, R4.8):\n%s", label, o.ready, o.sig, pin.want, o.output)
 			case !pin.killed && o.code != pin.want:
-				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT, want %d, the code measured at 6be73ec (R4.8):\n%s", label, o.ready, o.code, pin.want, o.output)
+				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT, want %d, the code measured at 6be73ec (e051559 for the notice commands) (R4.8):\n%s", label, o.ready, o.code, pin.want, o.output)
 			case pin.killed && o.sig != syscall.SIGINT:
 				t.Errorf("%s was killed by %v, want SIGINT", label, o.sig)
 			}

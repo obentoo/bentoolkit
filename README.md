@@ -1288,6 +1288,7 @@ argument count, not when a command fails.
 | `overlay autoupdate` (`--check --force`) | exit `2` |
 | `snapshot status` | exit `0` — the interrupted run renders and returns normally |
 | `distfile fetch`, `overlay add`, `overlay analyze`, `overlay commit`, `overlay manifest`, `overlay pull`, `overlay push`, `overlay status`, `snapshot apply`, `snapshot list`, `snapshot prune`, `snapshot rollback`, `snapshot run` | exit `1` |
+| `notice new`, `notice revise` | exit `1` — measured while the editor is open: the editor is stopped and nothing is written |
 | `overlay compare`, `overlay prune` | may not stop promptly: while an upstream never answers, the HTTP wait ignores the interruption (it was still running 30 s after SIGINT) — a second interrupt terminates it |
 | `overlay staged clean` | waits on no external program; with nothing staged it exits `0` before an interrupt can land |
 | `snapshot restore` | refuses before any wait unless a ship entry is configured; its interrupted exit code has not been measured |

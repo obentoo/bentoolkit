@@ -371,7 +371,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section now documents the whole contract — success, failure, usage error,
   `overlay validate`'s `1`/`2`/`130`, the batch `0`/`1`/`2` of `overlay
   autoupdate --check` and `overlay analyze --all`, and what each cancellable
-  command does when interrupted.
+  command does when interrupted. `notice new` and `notice revise` are
+  cancellable too: a first interrupt while the editor is open stops it, writes
+  nothing and exits `1`, as before; a second one now terminates them at once.
 
 - **`make lint` runs exactly what the CI Lint job runs.** It builds
   golangci-lint v2.13.2 (the CI pin; `make lint-pin-check` fails if the two
