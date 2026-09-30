@@ -138,7 +138,10 @@ func (h *lockHelper) waitUntilHolding(ready string, names []string) int {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		data, err := os.ReadFile(ready)
-		if err == nil {
+		// os.WriteFile creates the file before it writes the pid, so a read
+		// can land between the two and see it empty: that is "not announced
+		// yet", not a bad announcement.
+		if err == nil && strings.TrimSpace(string(data)) != "" {
 			pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
 			if convErr != nil {
 				h.t.Fatalf("lock helper announced %q, which is not a pid: %v", data, convErr)
