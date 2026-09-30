@@ -350,7 +350,7 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 	// Refused here, from the name only and before anything is resolved, so no
 	// lookup ever runs for a variable the record was not entitled to name.
 	if spec.serialEnv != "" && !checkAuthFetchSecretName(spec.serialEnv) {
-		return nil, false, fmt.Errorf("%w: %s = %q is not a BENTOO_FETCH_ variable; rename it to %s in the record and in the environment or secrets file (a record may only send variables it was given on purpose)",
+		return nil, false, fmt.Errorf("%w: %s = %q is not a BENTOO_FETCH_ variable; rename it to %q in the record and in the environment or secrets file (a record may only send variables it was given on purpose)",
 			ErrAuthFetchFailed, metaFetchSerialEnv, spec.serialEnv, authFetchSecretPrefix+spec.serialEnv)
 	}
 	if spec.filename == "" {
@@ -565,7 +565,7 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		name := fields.Get(field)
 		if !checkAuthFetchSecretName(name) {
-			offenders = append(offenders, fmt.Sprintf("field %q -> %s (rename to %s)", field, name, authFetchSecretPrefix+name))
+			offenders = append(offenders, fmt.Sprintf("field %q -> %q (rename to %q)", field, name, authFetchSecretPrefix+name))
 		}
 	}
 	if len(offenders) > 0 {

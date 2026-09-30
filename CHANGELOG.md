@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variables are also never expanded in a header: they stay literal with a
   `Warn`. **Migration:** rename each variable `X` to `BENTOO_FETCH_X` in the
   record and in the environment or secrets file.
+- **The `BENTOO_FETCH_` refusals print the record's variable names quoted.**
+  A `fetch_form_env` name is URL-decoded, so `%0A` or `%1B` put a raw newline
+  or escape sequence into `--lint`, the sweep report and `bentoo distfile`
+  output — enough to forge a report line or drive the terminal. The name and
+  its suggested `BENTOO_FETCH_` replacement are now quoted and escaped in both
+  the `fetch_serial_env` and the `fetch_form_env` refusal.
 - **A `packages.toml` key can no longer name a directory outside its
   category.** A key whose category or package half is `.`, `..`, or holds a
   `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
