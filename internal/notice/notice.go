@@ -18,7 +18,7 @@ import (
 	"unicode/utf8"
 )
 
-// Limits of the GLEP 42 news item and the site schema (site story 073, R2).
+// Limits of the GLEP 42 news item and the site schema (site story 002, R2).
 const (
 	maxNameLen    = 20
 	maxTitleLen   = 50
