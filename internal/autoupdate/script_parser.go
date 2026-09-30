@@ -78,7 +78,7 @@ func resolveScript(script, scriptsDir string) (string, error) {
 		return "", fmt.Errorf("invalid script file reference %q (must be a bare file name)", script)
 	}
 	path := filepath.Join(scriptsDir, name)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path joins scriptsDir and a script name refused above unless it is a bare file name (no separator, no "..")
 	if err != nil {
 		return "", fmt.Errorf("failed to read script file %q: %w", path, err)
 	}

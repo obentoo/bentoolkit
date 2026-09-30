@@ -82,16 +82,10 @@ func TestAddCommandUsage(t *testing.T) {
 // TestMissingConfigError tests error handling when config is missing
 func TestMissingConfigError(t *testing.T) {
 	// Create a temporary directory for test config
-	tmpDir, err := os.MkdirTemp("", "bentoo-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Set HOME to temp dir to use a non-existent config
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create config directory and file with empty overlay path
 	configDir := filepath.Join(tmpDir, ".config", "bentoo")
@@ -111,8 +105,8 @@ func TestMissingConfigError(t *testing.T) {
 	// The status command should fail with overlay path not set error
 	// We can't easily test the actual execution without mocking,
 	// but we can verify the command structure is correct
-	if statusCmd.Run == nil {
-		t.Error("status command should have a Run function")
+	if statusCmd.RunE == nil {
+		t.Error("status command should have a RunE function")
 	}
 }
 

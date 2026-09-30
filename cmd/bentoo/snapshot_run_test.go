@@ -20,7 +20,7 @@ func TestRunSnapshotRun_SuccessPersistsResult(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotRun(snapshotRunCmd, nil) })
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
 	})
 	if exited {
 		t.Fatalf("run exited with code %d, want success", code)
@@ -47,7 +47,7 @@ func TestRunSnapshotRun_DryRunPrintsPlanZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotRun(snapshotRunCmd, nil) })
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
 	})
 	if exited {
 		t.Fatalf("run --dry-run exited with code %d, want success", code)
@@ -86,7 +86,7 @@ func TestRunSnapshotRun_FailureExitsNonZero(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotRun(snapshotRunCmd, nil) })
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
 	})
 	if !exited || code != 1 {
 		t.Errorf("run exit = (%d, %v), want (1, true) on pipeline failure", code, exited)

@@ -8,6 +8,7 @@ import (
 	"net/smtp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,7 +16,12 @@ import (
 // s053ReviewSMTP serves one session: it greets, answers every line with the
 // reply reply(line) returns, and records what the client sent. A "" reply
 // means stay silent.
-func s053ReviewSMTP(t *testing.T, reply func(line string) string) (addr string, seen func() []string) {
+//
+// accepted reports how many connections the server has accepted. It is
+// incremented BEFORE the greeting is written, so a client that has read the
+// greeting — as every SMTP client does before it sends a byte — has already
+// been counted by the time its call returns, with no wait on the test's side.
+func s053ReviewSMTP(t *testing.T, reply func(line string) string) (addr string, seen func() []string, accepted func() int32) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -23,11 +29,13 @@ func s053ReviewSMTP(t *testing.T, reply func(line string) string) (addr string, 
 	}
 	var mu sync.Mutex
 	var lines []string
+	var conns atomic.Int32
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
+		conns.Add(1)
 		defer c.Close()
 		w := bufio.NewWriter(c)
 		w.WriteString("220 test ESMTP\r\n")
@@ -53,7 +61,7 @@ func s053ReviewSMTP(t *testing.T, reply func(line string) string) (addr string, 
 		mu.Lock()
 		defer mu.Unlock()
 		return append([]string(nil), lines...)
-	}
+	}, conns.Load
 }
 
 // TestSendMailBounded_HelloErrorIsReported pins the review fix: a greeting that
@@ -63,7 +71,7 @@ func TestSendMailBounded_HelloErrorIsReported(t *testing.T) {
 	orig := smtpTimeout
 	smtpTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { smtpTimeout = orig })
-	addr, _ := s053ReviewSMTP(t, func(string) string { return "" })
+	addr, _, _ := s053ReviewSMTP(t, func(string) string { return "" })
 	auth := smtp.PlainAuth("", "u", "SECRETPW", "127.0.0.1")
 	err := sendMailBounded(t.Context(), addr, auth, "a@example.org", []string{"b@example.org"}, []byte("x"))
 	if err == nil || !strings.Contains(err.Error(), "smtp hello") {
@@ -78,14 +86,19 @@ func TestSendMailBounded_HelloErrorIsReported(t *testing.T) {
 // smtp.SendMail, an address with CR or LF is refused before any byte, let
 // alone a credential, reaches the server.
 func TestSendMailBounded_RefusesCRLFBeforeDialing(t *testing.T) {
-	addr, seen := s053ReviewSMTP(t, func(string) string { return "250 ok" })
+	addr, seen, accepted := s053ReviewSMTP(t, func(string) string { return "250 ok" })
 	auth := smtp.PlainAuth("", "u", "SECRETPW", "127.0.0.1")
 	for _, tc := range []struct{ from, to string }{{"a@x\r\nRCPT TO:<evil>", "b@x"}, {"a@x", "b@x\nDATA"}} {
 		if err := sendMailBounded(t.Context(), addr, auth, tc.from, []string{tc.to}, []byte("x")); err == nil {
 			t.Errorf("from %q to %q: err = nil, want a refusal", tc.from, tc.to)
 		}
 	}
-	time.Sleep(50 * time.Millisecond)
+	// No wait is needed: the refusal comes before any dial, and a call that
+	// had dialled would have read the greeting, which the server writes only
+	// after counting the connection.
+	if n := accepted(); n != 0 {
+		t.Errorf("server accepted %d connection(s), want none: an address with CR or LF was dialled", n)
+	}
 	if l := seen(); len(l) != 0 {
 		t.Errorf("server saw %q, want nothing", l)
 	}
@@ -95,7 +108,7 @@ func TestSendMailBounded_RefusesCRLFBeforeDialing(t *testing.T) {
 // cancelled session returns an error for which errors.Is(context.Canceled)
 // holds.
 func TestSendMailBounded_CancelIsContextCanceled(t *testing.T) {
-	addr, _ := s053ReviewSMTP(t, func(string) string { return "" })
+	addr, _, _ := s053ReviewSMTP(t, func(string) string { return "" })
 	ctx, cancel := context.WithCancel(t.Context())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	start := time.Now()
@@ -112,7 +125,7 @@ func TestSendMailBounded_CancelIsContextCanceled(t *testing.T) {
 // rejected AUTH returns the server's reply, not a second "use of closed
 // network connection" from closing what Auth already closed.
 func TestSendMailBounded_FailedAuthCarriesNoCloseNoise(t *testing.T) {
-	addr, _ := s053ReviewSMTP(t, func(l string) string {
+	addr, _, _ := s053ReviewSMTP(t, func(l string) string {
 		switch {
 		case strings.HasPrefix(l, "EHLO"):
 			return "250-test\r\n250 AUTH PLAIN"

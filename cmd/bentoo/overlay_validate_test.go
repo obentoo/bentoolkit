@@ -10,7 +10,8 @@ package main
 // able to prove the runner was NOT REACHED, which is only observable if
 // reaching it goes through a replaceable name.
 //
-// captureExit comes from snapshot_test.go in this package.
+// exitOf comes from snapshot_test.go in this package: runValidate returns its
+// exit status (story 058), and exitOf reads the code off the returned error.
 //
 // Red is DEFERRED to Run mode: the command does not exist yet.
 
@@ -48,9 +49,7 @@ func stubValidateRunner(t *testing.T, report validate.Report) *validate.Options 
 func TestOverlayValidate_NoSelectorTakesTheWholeOverlay(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	code, exited := captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{})
-	})
+	code, exited := exitOf(runValidate(newValidateCmd(), []string{}))
 
 	if exited && code != 0 {
 		t.Errorf("exit code: got %d, want 0", code)
@@ -63,9 +62,7 @@ func TestOverlayValidate_NoSelectorTakesTheWholeOverlay(t *testing.T) {
 func TestOverlayValidate_CategorySelectorNarrows(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"media-plugins"})
 
 	if seen.Selector != "media-plugins" {
 		t.Errorf("Selector: got %q, want %q", seen.Selector, "media-plugins")
@@ -75,9 +72,7 @@ func TestOverlayValidate_CategorySelectorNarrows(t *testing.T) {
 func TestOverlayValidate_PackageSelectorNarrows(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
 
 	if seen.Selector != "media-plugins/gst-plugins-qt6" {
 		t.Errorf("Selector: got %q, want %q", seen.Selector, "media-plugins/gst-plugins-qt6")
@@ -90,9 +85,7 @@ func TestOverlayValidate_PackageSelectorNarrows(t *testing.T) {
 func TestOverlayValidate_UnknownSelectorExitsTwo(t *testing.T) {
 	stubValidateRunner(t, validate.Report{UnmatchedSelector: "media-plugins/does-not-exist"})
 
-	code, exited := captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/does-not-exist"})
-	})
+	code, exited := exitOf(runValidate(newValidateCmd(), []string{"media-plugins/does-not-exist"}))
 
 	if !exited {
 		t.Fatal("the command did not exit")
@@ -119,9 +112,7 @@ func TestOverlayValidate_ErrorFindingExitsOne(t *testing.T) {
 		}},
 	})
 
-	code, exited := captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
-	})
+	code, exited := exitOf(runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"}))
 
 	if !exited || code != 1 {
 		t.Errorf("exit code: got %d (exited=%v), want 1", code, exited)
@@ -139,9 +130,7 @@ func TestOverlayValidate_UnknownSelectorNeverReachesTheRunner(t *testing.T) {
 	}
 	t.Cleanup(func() { validateRunnerFn = orig })
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"not-a-category/nor-a-package/too-many-parts"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"not-a-category/nor-a-package/too-many-parts"})
 
 	if reached {
 		t.Error("a malformed selector reached the runner; it should be rejected before any work")
@@ -154,9 +143,7 @@ func TestOverlayValidate_UnknownSelectorNeverReachesTheRunner(t *testing.T) {
 func TestOverlayValidate_NoDepthKeepsTheShippedReadOnlyContract(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	code, exited := captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
-	})
+	code, exited := exitOf(runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"}))
 
 	if exited && code != 0 {
 		t.Errorf("exit code: got %d, want 0", code)
@@ -178,9 +165,7 @@ func TestOverlayValidate_DepthIsHandedToTheRunner(t *testing.T) {
 		t.Run(depth, func(t *testing.T) {
 			seen := stubValidateRunner(t, validate.Report{})
 
-			captureExit(t, func() {
-				runValidate(newValidateCmd(), []string{"--depth=" + depth, "media-plugins/gst-plugins-qt6"})
-			})
+			_ = runValidate(newValidateCmd(), []string{"--depth=" + depth, "media-plugins/gst-plugins-qt6"})
 
 			if seen.Depth != depth {
 				t.Errorf("Depth = %q, want %q", seen.Depth, depth)
@@ -197,17 +182,13 @@ func TestOverlayValidate_DepthIsHandedToTheRunner(t *testing.T) {
 // var would make the second invocation inherit the first's compile depth.
 func TestOverlayValidate_DepthDoesNotLeakBetweenCommands(t *testing.T) {
 	first := stubValidateRunner(t, validate.Report{})
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
 	if first.Depth != "compile" {
 		t.Fatalf("Depth = %q on the first invocation, want compile", first.Depth)
 	}
 
 	second := stubValidateRunner(t, validate.Report{})
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
 
 	if second.Depth == "compile" {
 		t.Error("the second invocation inherited --depth=compile from the first; the flag is read off the command, " +
@@ -220,9 +201,7 @@ func TestOverlayValidate_DepthDoesNotLeakBetweenCommands(t *testing.T) {
 func TestOverlayValidate_BuildDepthStagesAndNamesWhere(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
 
 	if seen.StagingRoot == "" {
 		t.Fatal("--depth=configure passed no StagingRoot; the build gates would then run against the published overlay, " +
@@ -251,9 +230,7 @@ func TestOverlayValidate_BuildDepthLeavesTheOverlayByteIdentical(t *testing.T) {
 	}
 	t.Cleanup(func() { validateRunnerFn = orig })
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"--depth=compile", "media-plugins/gst-plugins-qt6"})
 
 	if !reached {
 		t.Fatal("the runner was never reached for a build-depth invocation")
@@ -281,18 +258,14 @@ func TestOverlayValidate_UnknownDepthExitsOneNamingTheValidSet(t *testing.T) {
 	}
 	t.Cleanup(func() { validateRunnerFn = orig })
 
-	// captureStdout OUTSIDE captureExit, the order captureStdoutExit
-	// (snapshot_apply_test.go:110) already uses for a verb that prints and then
-	// exits. Nested the other way, osExit's stub panics, the panic unwinds
-	// through captureStdout before captureExit recovers it, and the assignment
-	// never runs — out would be "" whatever was printed. Surface only; every
-	// assertion below is the one that was authored.
+	// runValidate returns its exit status (story 058), so the code is read off
+	// the returned error by func exitOf inside captureStdout; nothing panics,
+	// and the assignment runs before captureStdout returns what was printed.
+	// Surface only; every assertion below is the one that was authored.
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runValidate(newValidateCmd(), []string{"--depth=shallow", "media-plugins/gst-plugins-qt6"})
-		})
+		code, exited = exitOf(runValidate(newValidateCmd(), []string{"--depth=shallow", "media-plugins/gst-plugins-qt6"}))
 	})
 
 	if !exited {
@@ -336,9 +309,7 @@ func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T)
 		}},
 	})
 
-	code, exited := captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
-	})
+	code, exited := exitOf(runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"}))
 
 	if !exited || code != 1 {
 		t.Errorf("exit code: got %d (exited=%v), want 1 for an error finding from the configure gate", code, exited)
@@ -358,7 +329,7 @@ func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T)
 // # Symbols
 //
 // Added: the two tests. Borrowed, never re-declared: stubValidateRunner and
-// captureExit (this file / snapshot_test.go).
+// exitOf (this file / snapshot_test.go).
 //
 // # PINNED CONTRACT (design D1, D3 — S037-R4, R4.1, R4.2, R4.3)
 //
@@ -385,9 +356,7 @@ func TestOverlayValidate_CompileDepthStillExitsOneOnAnErrorFinding(t *testing.T)
 func TestOverlayValidate_BuildDepthPopulatesTheManifestSeams(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
 
 	if seen.DistNames == nil {
 		t.Fatal("--depth=configure handed the runner no DistNames producer; the option gate over a staged " +
@@ -438,9 +407,7 @@ func TestOverlayValidate_BuildDepthPopulatesTheManifestSeams(t *testing.T) {
 func TestOverlayValidate_NoDepthLeavesTheSeamsNil(t *testing.T) {
 	seen := stubValidateRunner(t, validate.Report{})
 
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"media-plugins/gst-plugins-qt6"})
 
 	if seen.DistNames != nil {
 		t.Error("a depth-less run populated DistNames; the shipped read-only contract is Options exactly as " +
@@ -551,7 +518,7 @@ func TestOverlayValidate_AnInterruptedRunRendersItsPartialReport(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runValidate(cmd, []string{}) })
+		code, exited = exitOf(runValidate(cmd, []string{}))
 	})
 
 	if !exited {
@@ -579,7 +546,7 @@ func TestOverlayValidate_AnInterruptedTextRunAlsoExits130(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runValidate(newValidateCmd(), []string{}) })
+		code, exited = exitOf(runValidate(newValidateCmd(), []string{}))
 	})
 
 	if !exited {
@@ -633,9 +600,7 @@ func TestOverlayValidate_RequireIsolationReachesTheRunner(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
 	seen := stubValidateRunner(t, validate.Report{})
-	captureExit(t, func() {
-		runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
-	})
+	_ = runValidate(newValidateCmd(), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"})
 
 	if !seen.RequireIsolation {
 		t.Error("autoupdate.validate.require_isolation is set and the runner was handed RequireIsolation=false; " +

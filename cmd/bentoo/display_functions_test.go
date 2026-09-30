@@ -318,6 +318,9 @@ func TestCompletionPowershellOutput(t *testing.T) {
 
 // TestVerboseFlagConfiguresLogger tests --verbose flag triggers PersistentPreRun.
 func TestVerboseFlagConfiguresLogger(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	_, err := executeCommand(rootCmd, "--verbose", "version")
 	if err != nil {
 		t.Fatalf("--verbose version returned error: %v", err)
@@ -326,6 +329,9 @@ func TestVerboseFlagConfiguresLogger(t *testing.T) {
 
 // TestQuietFlagConfiguresLogger tests --quiet flag triggers PersistentPreRun.
 func TestQuietFlagConfiguresLogger(t *testing.T) {
+	// The flag's effect is a process-wide logger level; put it back so it does
+	// not silence a later test that reads the logger's output.
+	t.Cleanup(func() { resetLoggerLevelFlagState(t) })
 	_, err := executeCommand(rootCmd, "--quiet", "version")
 	if err != nil {
 		t.Fatalf("--quiet version returned error: %v", err)
@@ -344,8 +350,8 @@ func TestNoColorFlagConfiguresOutput(t *testing.T) {
 
 // TestOverlayAddSubcommandRegistered tests add subcommand is registered.
 func TestOverlayAddSubcommandRegistered(t *testing.T) {
-	if addCmd.Run == nil {
-		t.Error("add command should have a Run function")
+	if addCmd.RunE == nil {
+		t.Error("add command should have a RunE function")
 	}
 	if addCmd.Use == "" {
 		t.Error("add command should have a Use field")
@@ -354,36 +360,36 @@ func TestOverlayAddSubcommandRegistered(t *testing.T) {
 
 // TestOverlayCommitSubcommandRegistered tests commit subcommand is registered.
 func TestOverlayCommitSubcommandRegistered(t *testing.T) {
-	if commitCmd.Run == nil {
-		t.Error("commit command should have a Run function")
+	if commitCmd.RunE == nil {
+		t.Error("commit command should have a RunE function")
 	}
 }
 
 // TestOverlayPushSubcommandRegistered tests push subcommand is registered.
 func TestOverlayPushSubcommandRegistered(t *testing.T) {
-	if pushCmd.Run == nil {
-		t.Error("push command should have a Run function")
+	if pushCmd.RunE == nil {
+		t.Error("push command should have a RunE function")
 	}
 }
 
 // TestOverlayRenameSubcommandRegistered tests rename subcommand is registered.
 func TestOverlayRenameSubcommandRegistered(t *testing.T) {
-	if renameCmd.Run == nil {
-		t.Error("rename command should have a Run function")
+	if renameCmd.RunE == nil {
+		t.Error("rename command should have a RunE function")
 	}
 }
 
 // TestOverlayAnalyzeSubcommandRegistered tests analyze subcommand is registered.
 func TestOverlayAnalyzeSubcommandRegistered(t *testing.T) {
-	if analyzeCmd.Run == nil {
-		t.Error("analyze command should have a Run function")
+	if analyzeCmd.RunE == nil {
+		t.Error("analyze command should have a RunE function")
 	}
 }
 
 // TestOverlayAutoupdateSubcommandRegistered tests autoupdate subcommand is registered.
 func TestOverlayAutoupdateSubcommandRegistered(t *testing.T) {
-	if autoupdateCmd.Run == nil {
-		t.Error("autoupdate command should have a Run function")
+	if autoupdateCmd.RunE == nil {
+		t.Error("autoupdate command should have a RunE function")
 	}
 }
 

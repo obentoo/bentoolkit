@@ -25,9 +25,11 @@ import (
 // TestClaudeClient_DefaultEndpoint tests that ClaudeClient uses DefaultClaudeEndpoint when
 // CLAUDE_API_ENDPOINT is not set.
 func TestClaudeClient_DefaultEndpoint(t *testing.T) {
-	os.Unsetenv("CLAUDE_API_ENDPOINT")
-	os.Setenv("TEST_LLM_API_KEY_EP", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY_EP")
+	t.Setenv("CLAUDE_API_ENDPOINT", "")
+	if err := os.Unsetenv("CLAUDE_API_ENDPOINT"); err != nil {
+		t.Fatalf("unsetting %s: %v", "CLAUDE_API_ENDPOINT", err)
+	}
+	t.Setenv("TEST_LLM_API_KEY_EP", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -47,11 +49,9 @@ func TestClaudeClient_DefaultEndpoint(t *testing.T) {
 // default endpoint.
 func TestClaudeClient_EndpointOverride(t *testing.T) {
 	customEndpoint := "https://custom.api.example.com/v1/messages"
-	os.Setenv("CLAUDE_API_ENDPOINT", customEndpoint)
-	defer os.Unsetenv("CLAUDE_API_ENDPOINT")
+	t.Setenv("CLAUDE_API_ENDPOINT", customEndpoint)
 
-	os.Setenv("TEST_LLM_API_KEY_EP2", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY_EP2")
+	t.Setenv("TEST_LLM_API_KEY_EP2", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -79,7 +79,7 @@ func TestClaudeClient_EndpointOverride(t *testing.T) {
 			},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -105,7 +105,7 @@ func TestNewLLMClientMissingProvider(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for missing provider")
 	}
-	if err != ErrLLMNotConfigured {
+	if !errors.Is(err, ErrLLMNotConfigured) {
 		t.Errorf("Expected ErrLLMNotConfigured, got: %v", err)
 	}
 }
@@ -165,8 +165,7 @@ func TestNewLLMClientMissingAPIKey(t *testing.T) {
 // TestNewLLMClientSuccess tests successful LLM client creation
 func TestNewLLMClientSuccess(t *testing.T) {
 	// Set up test API key
-	os.Setenv("TEST_LLM_API_KEY", "test-key-12345")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key-12345")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -185,8 +184,7 @@ func TestNewLLMClientSuccess(t *testing.T) {
 
 // TestNewLLMClientDefaultModel tests that default model is set when not specified
 func TestNewLLMClientDefaultModel(t *testing.T) {
-	os.Setenv("TEST_LLM_API_KEY", "test-key-12345")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key-12345")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -242,8 +240,7 @@ func TestExtractVersionClaudeSuccess(t *testing.T) {
 	defer server.Close()
 
 	// Set up test API key
-	os.Setenv("TEST_LLM_API_KEY", "test-key-12345")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key-12345")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -302,8 +299,7 @@ func TestExtractVersionClaudeAPIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_LLM_API_KEY", "invalid-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "invalid-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -342,8 +338,7 @@ func TestExtractVersionClaudeEmptyResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -361,15 +356,14 @@ func TestExtractVersionClaudeEmptyResponse(t *testing.T) {
 	})
 
 	_, err = client.ExtractVersion([]byte("test content"), "Extract version")
-	if err != ErrLLMEmptyResponse {
+	if !errors.Is(err, ErrLLMEmptyResponse) {
 		t.Errorf("Expected ErrLLMEmptyResponse, got: %v", err)
 	}
 }
 
 // TestExtractVersionClaudeNetworkError tests handling of network errors
 func TestExtractVersionClaudeNetworkError(t *testing.T) {
-	os.Setenv("TEST_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -558,8 +552,7 @@ func TestExtractVersionRequestFormat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -609,8 +602,7 @@ func TestExtractVersionWithVersionPrefix(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_LLM_API_KEY", "test-key")
-	defer os.Unsetenv("TEST_LLM_API_KEY")
+	t.Setenv("TEST_LLM_API_KEY", "test-key")
 
 	cfg := LLMConfig{
 		Provider:  "claude",
@@ -813,7 +805,10 @@ func TestAPIKeyValidation(t *testing.T) {
 	properties.Property("Claude without API key returns ErrLLMAPIKeyMissing", prop.ForAll(
 		func(envVarName string) bool {
 			// Ensure the env var is not set
-			os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "")
+			if err := os.Unsetenv(envVarName); err != nil {
+				t.Fatalf("unsetting %s: %v", envVarName, err)
+			}
 
 			cfg := LLMConfig{
 				Provider:  "claude",
@@ -839,7 +834,10 @@ func TestAPIKeyValidation(t *testing.T) {
 	properties.Property("OpenAI without API key returns ErrLLMAPIKeyMissing", prop.ForAll(
 		func(envVarName string) bool {
 			// Ensure the env var is not set
-			os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "")
+			if err := os.Unsetenv(envVarName); err != nil {
+				t.Fatalf("unsetting %s: %v", envVarName, err)
+			}
 
 			cfg := LLMConfig{
 				Provider:  "openai",
@@ -888,8 +886,7 @@ func TestAPIKeyValidation(t *testing.T) {
 	properties.Property("Claude with valid API key succeeds", prop.ForAll(
 		func(apiKey string) bool {
 			envVarName := "TEST_CLAUDE_VALID_KEY"
-			os.Setenv(envVarName, apiKey)
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, apiKey)
 
 			cfg := LLMConfig{
 				Provider:  "claude",
@@ -914,8 +911,7 @@ func TestAPIKeyValidation(t *testing.T) {
 	properties.Property("OpenAI with valid API key succeeds", prop.ForAll(
 		func(apiKey string) bool {
 			envVarName := "TEST_OPENAI_VALID_KEY"
-			os.Setenv(envVarName, apiKey)
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, apiKey)
 
 			cfg := LLMConfig{
 				Provider:  "openai",
@@ -940,8 +936,7 @@ func TestAPIKeyValidation(t *testing.T) {
 	properties.Property("NewLLMProvider routes to correct provider", prop.ForAll(
 		func(provider string) bool {
 			envVarName := "TEST_PROVIDER_KEY"
-			os.Setenv(envVarName, "test-key")
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "test-key")
 
 			cfg := LLMConfig{
 				Provider:  provider,
@@ -989,8 +984,7 @@ func TestModelConfiguration(t *testing.T) {
 	properties.Property("Claude client uses configured model name", prop.ForAll(
 		func(modelName string) bool {
 			envVarName := "TEST_CLAUDE_MODEL_KEY"
-			os.Setenv(envVarName, "test-api-key")
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "test-api-key")
 
 			cfg := LLMConfig{
 				Provider:  "claude",
@@ -1017,8 +1011,7 @@ func TestModelConfiguration(t *testing.T) {
 	properties.Property("OpenAI client uses configured model name", prop.ForAll(
 		func(modelName string) bool {
 			envVarName := "TEST_OPENAI_MODEL_KEY"
-			os.Setenv(envVarName, "test-api-key")
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "test-api-key")
 
 			cfg := LLMConfig{
 				Provider:  "openai",
@@ -1070,8 +1063,7 @@ func TestModelConfiguration(t *testing.T) {
 	properties.Property("Claude uses default model when not specified", prop.ForAll(
 		func(apiKey string) bool {
 			envVarName := "TEST_CLAUDE_DEFAULT_MODEL"
-			os.Setenv(envVarName, apiKey)
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, apiKey)
 
 			cfg := LLMConfig{
 				Provider:  "claude",
@@ -1098,8 +1090,7 @@ func TestModelConfiguration(t *testing.T) {
 	properties.Property("OpenAI uses default model when not specified", prop.ForAll(
 		func(apiKey string) bool {
 			envVarName := "TEST_OPENAI_DEFAULT_MODEL"
-			os.Setenv(envVarName, apiKey)
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, apiKey)
 
 			cfg := LLMConfig{
 				Provider:  "openai",
@@ -1172,8 +1163,7 @@ func TestModelConfiguration(t *testing.T) {
 			defer server.Close()
 
 			envVarName := "TEST_CLAUDE_REQUEST_MODEL"
-			os.Setenv(envVarName, "test-api-key")
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "test-api-key")
 
 			cfg := LLMConfig{
 				Provider:  "claude",
@@ -1234,8 +1224,7 @@ func TestModelConfiguration(t *testing.T) {
 			defer server.Close()
 
 			envVarName := "TEST_OPENAI_REQUEST_MODEL"
-			os.Setenv(envVarName, "test-api-key")
-			defer os.Unsetenv(envVarName)
+			t.Setenv(envVarName, "test-api-key")
 
 			cfg := LLMConfig{
 				Provider:  "openai",

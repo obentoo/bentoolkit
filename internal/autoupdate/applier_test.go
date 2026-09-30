@@ -527,7 +527,7 @@ func TestApplyPackageNotInPending(t *testing.T) {
 	}
 
 	result, err := applier.Apply("nonexistent/pkg", false)
-	if err != ErrPackageNotInPending {
+	if !errors.Is(err, ErrPackageNotInPending) {
 		t.Errorf("Expected ErrPackageNotInPending, got: %v", err)
 	}
 	if result.Success {
@@ -995,7 +995,7 @@ func TestApplyWithCompileUserDeclines(t *testing.T) {
 
 	result, err := applier.Apply(pkg, true)
 
-	if err != ErrUserDeclined {
+	if !errors.Is(err, ErrUserDeclined) {
 		t.Errorf("Expected ErrUserDeclined, got: %v", err)
 	}
 	if result.Success {
@@ -1368,12 +1368,16 @@ func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
 		Status:         StatusPending,
 	})
 
+	// The stub child creates readyFile once it is running, so the test cancels
+	// a child that is genuinely blocked under runManifest.
+	readyFile := filepath.Join(t.TempDir(), "child-started")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
-		WithExecCommand(mockExecCommandBlocking),
+		WithExecCommand(blockingChildWithReadyFile(readyFile)),
 		WithApplierContext(ctx),
 	)
 	if err != nil {
@@ -1388,8 +1392,8 @@ func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
 		done <- applyErr
 	}()
 
-	// Give the spawned `sleep 3600` a beat to actually start under runManifest.
-	time.Sleep(100 * time.Millisecond)
+	// Cancel only once the spawned child is actually running under runManifest.
+	waitForReadyFile(t, readyFile, func() bool { return len(done) > 0 })
 	cancelAt := time.Now()
 	cancel()
 

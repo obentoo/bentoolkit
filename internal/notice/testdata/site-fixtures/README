@@ -1,0 +1,6 @@
+Copied from obentoo.org/coming-soon, site story 002 pre-authored fixtures
+(.epic/stories/002-notices-feed/.draft/authored-tests/tests/fixtures/notices/),
+working tree at commit 632c3c1 on 2026-09-29. Story 002 has not run yet, so the
+fixtures are not committed there; re-copy from tests/fixtures/notices/ once it lands.
+2026-09-27-gui+tray.yaml gained `affects: []` at the source (story 071 run, 2026-09-29)
+so that it is reproducible by `bentoo notice new`, which always writes the key.

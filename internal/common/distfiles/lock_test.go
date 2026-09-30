@@ -138,7 +138,10 @@ func (h *lockHelper) waitUntilHolding(ready string, names []string) int {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		data, err := os.ReadFile(ready)
-		if err == nil {
+		// os.WriteFile creates the file before it writes the pid, so a read
+		// can land between the two and see it empty: that is "not announced
+		// yet", not a bad announcement.
+		if err == nil && strings.TrimSpace(string(data)) != "" {
 			pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
 			if convErr != nil {
 				h.t.Fatalf("lock helper announced %q, which is not a pid: %v", data, convErr)
@@ -151,7 +154,7 @@ func (h *lockHelper) waitUntilHolding(ready string, names []string) int {
 		if time.Now().After(deadline) {
 			h.t.Fatalf("lock helper never reported holding %v in the distdir (its stderr is above)", names)
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond) // polling: the lock helper has announced it holds the locks
 	}
 }
 
@@ -320,9 +323,8 @@ func TestLockIsExclusiveForTheSameDistfile(t *testing.T) {
 					if counters[idx].Add(1) != 1 {
 						overlaps.Add(1)
 					}
-					// Long enough that an overlapping holder would be caught,
-					// short enough that the test stays quick.
-					time.Sleep(50 * time.Microsecond)
+					// Short enough that the test stays quick.
+					time.Sleep(50 * time.Microsecond) // hold: widens the window an overlapping holder would be caught in
 					counters[idx].Add(-1)
 					lock.Release()
 				}
@@ -429,7 +431,7 @@ func TestLockAllowsDifferentDistfilesConcurrently(t *testing.T) {
 						continue
 					}
 					acquisitions.Add(1)
-					time.Sleep(20 * time.Microsecond)
+					time.Sleep(20 * time.Microsecond) // hold: widens the window an overlapping holder would be caught in
 					lock.Release()
 				}
 			}(w)

@@ -292,14 +292,12 @@ func forbidPruneRemovalAttempt(t *testing.T, why string) {
 	})
 }
 
-// runPruneApply drives one --apply invocation and returns its output and exit
-// code (-1 when the run ended without calling osExit).
+// runPruneApply drives one --apply invocation and returns its output and the
+// exit status its returned outcome maps to (func exitCodeFor).
 func runPruneApply(t *testing.T, overlayPath string) (out string, code int) {
 	t.Helper()
 	out = captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
 	})
 	return out, code
 }

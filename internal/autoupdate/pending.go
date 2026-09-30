@@ -114,7 +114,7 @@ func WithPendingNowFunc(fn func() time.Time) PendingListOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewPendingList(configDir string, opts ...PendingListOption) (*PendingList, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec,nolintlint // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment; nolintlint: gosec's G703 taint analysis reports this line in some runs and not in others, so the directive is not always used
 		return nil, fmt.Errorf("failed to create pending directory: %w", err)
 	}
 
@@ -161,7 +161,7 @@ func (p *PendingList) adoptBaseline() error {
 // left it; a missing or corrupted file reads as empty.
 func readPendingFileForMerge(path string) (pendingFile, error) {
 	var pf pendingFile
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is <configDir>/pending.json, a constant name in the user's autoupdate config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return pf, nil
@@ -183,7 +183,7 @@ func (p *PendingList) load() error {
 
 	var pf pendingFile
 	if err := json.Unmarshal(data, &pf); err != nil {
-		return fmt.Errorf("%w: %v", ErrPendingCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrPendingCorrupted, err)
 	}
 
 	if pf.Updates != nil {

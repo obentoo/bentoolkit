@@ -226,14 +226,7 @@ func TestDependenciesSatisfied_WritesNoFileAnywhere(t *testing.T) {
 	// A watched, empty working directory: a relative path written by mistake
 	// lands here.
 	work := t.TempDir()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(work); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	t.Chdir(work)
 
 	// And a watched TMPDIR, so an os.MkdirTemp/CreateTemp is visible too.
 	tmp := t.TempDir()

@@ -158,7 +158,7 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrOllamaConnectionFailed, err)
+		return "", fmt.Errorf("%w: %w", ErrOllamaConnectionFailed, err)
 	}
 	defer resp.Body.Close()
 
@@ -232,7 +232,7 @@ func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrOllamaConnectionFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrOllamaConnectionFailed, err)
 	}
 	defer resp.Body.Close()
 

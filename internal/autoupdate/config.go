@@ -607,7 +607,7 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 	}
 
 	// Read and parse the TOML file
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
@@ -1019,7 +1019,7 @@ func editPackagesConfigSections(overlayPath string, targets map[string]bool, edi
 	}
 
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
 		return fmt.Errorf("failed to read packages.toml: %w", err)
 	}
@@ -1142,9 +1142,9 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 
 	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
 	// malformed key would otherwise surface much later as a path built from
-	// nonsense.
-	if _, _, ok := splitPkgAtom(pkg); !ok {
-		return fmt.Errorf("package %s: %w", pkg, ErrInvalidPackageKey)
+	// nonsense — or, for a "../x" key, as a path outside the overlay (S064-R1.4).
+	if _, _, err := parsePkgAtom(pkg); err != nil {
+		return fmt.Errorf("package %s: %w: %w", pkg, ErrInvalidPackageKey, err)
 	}
 	// An empty label ("cat/pkg@") is a typo: it makes the key no more unique
 	// than the bare atom while looking like it does.

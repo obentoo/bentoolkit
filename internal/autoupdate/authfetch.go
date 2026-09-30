@@ -193,6 +193,10 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 		}
 		return fmt.Errorf("package %s: %w; %s", pkg, ErrMetaFetchURLRequired, detail)
 	}
+	// The fetch refuses a URL whose host is not fixed, so --lint does too.
+	if err := checkFetchURLTemplates(strings.TrimSpace(meta[metaFetchURL]), strings.TrimSpace(meta[metaFetchIDURL])); err != nil {
+		return fmt.Errorf("package %s: %w", pkg, err)
+	}
 
 	// Mirror the parser exactly: it trims and lowercases before comparing, and
 	// an empty value is the documented "post" default rather than an error.
@@ -355,7 +359,7 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 
 	form, err := url.ParseQuery(meta[metaFetchForm])
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchForm, err)
+		return nil, false, fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchForm, err)
 	}
 	spec.form = form
 
@@ -366,6 +370,9 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 		return nil, false, err
 	}
 	if err := spec.parseIDLookup(meta); err != nil {
+		return nil, false, err
+	}
+	if err := checkFetchURLTemplates(spec.url, spec.idURL); err != nil {
 		return nil, false, err
 	}
 	if err := spec.parseFormEnv(meta); err != nil {
@@ -489,7 +496,7 @@ func (s *authFetchSpec) parseIDLookup(meta map[string]string) error {
 	// request goes out rather than a failure in the middle of a sweep.
 	probe, err := regexp.Compile(strings.ReplaceAll(s.idPattern, versionPlaceholder, "0"))
 	if err != nil {
-		return fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchIDPattern, err)
+		return fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchIDPattern, err)
 	}
 	if got := probe.NumSubexp(); got != 1 {
 		return fmt.Errorf("%w: %s must have exactly 1 capture group (the id), it has %d", ErrAuthFetchFailed, metaFetchIDPattern, got)
@@ -519,7 +526,7 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 	}
 	fields, err := url.ParseQuery(raw)
 	if err != nil {
-		return fmt.Errorf("%w: invalid %s: %v", ErrAuthFetchFailed, metaFetchFormEnv, err)
+		return fmt.Errorf("%w: invalid %s: %w", ErrAuthFetchFailed, metaFetchFormEnv, err)
 	}
 
 	// A GET puts every field in the query string, where it is written to the
@@ -752,7 +759,7 @@ func (s *authFetchSpec) fetchDistfile(ctx context.Context, version, destDir stri
 	// download, so a pooled idle connection would otherwise outlive the call
 	// (and trip goroutine-leak detection in tests).
 	defer client.CloseIdleConnections()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 	if err != nil {
 		return "", withCtxCause(fmt.Errorf("%w: request failed: %v", ErrAuthFetchFailed, creds.scrub(err.Error())), err)
 	}
@@ -819,7 +826,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 	case s.method == "post" && s.body == fetchBodyJSON:
 		var encoded []byte
 		if encoded, err = jsonForm(body); err == nil {
-			req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(encoded)))
+			req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(encoded))) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 			if err == nil {
 				// The charset is spelled out because it is what the vendor's own
 				// page sends (the AngularJS default), so an API that sniffs this
@@ -828,7 +835,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 			}
 		}
 	case s.method == "post":
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode())) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 		if err == nil {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
@@ -837,7 +844,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 		if strings.Contains(endpoint, "?") {
 			sep = "&"
 		}
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint+sep+body.Encode(), nil)
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint+sep+body.Encode(), nil) //nolint:gosec // G704: endpoint is the packages.toml fetch_url, fetched by design; checkFetchURLTemplates fixes its host at parse time so {id} cannot move it, and refuseFormRedirect keeps the credentials on that host
 	default:
 		return nil, fmt.Errorf("%w: unsupported method %q", ErrAuthFetchFailed, s.method)
 	}
@@ -879,7 +886,7 @@ func jsonForm(fields url.Values) ([]byte, error) {
 	}
 	encoded, err := json.Marshal(obj)
 	if err != nil {
-		return nil, fmt.Errorf("%w: encoding %s as %s: %v", ErrAuthFetchFailed, metaFetchForm, fetchBodyJSON, err)
+		return nil, fmt.Errorf("%w: encoding %s as %s: %v", ErrAuthFetchFailed, metaFetchForm, fetchBodyJSON, err) //nolint:errorlint // a request-leg error may carry request data and never enters the Unwrap chain (see authFetchCtxError)
 	}
 	return encoded, nil
 }
@@ -891,7 +898,7 @@ func jsonForm(fields url.Values) ([]byte, error) {
 func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredentials, minBytes int64) (string, error) {
 	tmp, err := os.CreateTemp(destDir, ".authfetch-*")
 	if err != nil {
-		return "", fmt.Errorf("%w: creating temp file: %v", ErrAuthFetchFailed, err)
+		return "", fmt.Errorf("%w: creating temp file: %v", ErrAuthFetchFailed, err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 	tmpName := tmp.Name()
 
@@ -904,7 +911,7 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 		return "", withCtxCause(fmt.Errorf("%w: writing body: %v", ErrAuthFetchFailed, creds.scrub(copyErr.Error())), copyErr)
 	case closeErr != nil:
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: closing temp file: %v", ErrAuthFetchFailed, closeErr)
+		return "", fmt.Errorf("%w: closing temp file: %w", ErrAuthFetchFailed, closeErr)
 	case n == 0:
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("%w: downloaded zero bytes", ErrAuthFetchFailed)
@@ -931,12 +938,12 @@ func writeBody(destDir, destPath string, body io.Reader, creds authFetchCredenti
 	// concurrent reader can see never exists with the wrong bits.
 	if err := os.Chmod(tmpName, distfileMode); err != nil {
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
+		return "", fmt.Errorf("%w: making %s readable: %v", ErrAuthFetchFailed, filepath.Base(destPath), err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 
-	if err := os.Rename(tmpName, destPath); err != nil {
+	if err := os.Rename(tmpName, destPath); err != nil { //nolint:gosec // G703: destPath is the caller's distdir joined to the resolved fetch_filename, which fetchDistfile refuses unless it is a bare file name (no separator, no "..")
 		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err)
+		return "", fmt.Errorf("%w: finalizing %s: %v", ErrAuthFetchFailed, filepath.Base(destPath), err) //nolint:errorlint // wrapped, an ENOENT here would satisfy fs.ErrNotExist and environmentVerdict would misreport it as a manifest command that never started
 	}
 	return destPath, nil
 }

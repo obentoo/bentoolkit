@@ -76,7 +76,7 @@ func s056StartOverlayHolder(t *testing.T, path string) int {
 		if time.Now().After(deadline) {
 			t.Fatal("the overlay-lock holder never announced itself")
 		}
-		time.Sleep(time.Millisecond) // polling the ready file
+		time.Sleep(time.Millisecond) // polling: the ready file exists
 	}
 }
 
@@ -152,7 +152,7 @@ func s056RunCapturingFDs(t *testing.T) (code int, out string) {
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		code = withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
 	}()
 	data, _ := os.ReadFile(f.Name())
 	return code, string(data)

@@ -270,7 +270,7 @@ func TestGitLabProvider_NotFound(t *testing.T) {
 func TestGitLabProvider_InvalidToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"message":"401 Unauthorized"}`)) //nolint:errcheck
+		w.Write([]byte(`{"message":"401 Unauthorized"}`))
 	}))
 	defer server.Close()
 

@@ -74,7 +74,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 				_, errs[i] = c.do(ctx, key, fetch)
 			}(i)
 		}
-		time.Sleep(150 * time.Millisecond) // let every waiter reach its wait
+		waitForJoins(t, c, callers-1) // every waiter has reached its wait
 		close(release)
 
 		done := make(chan struct{})
@@ -173,7 +173,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 					recovered.Store(true)
 				}
 			}()
-			_, _ = c.do(ctx, key, fetch) //nolint:errcheck // the panic, not the error, is under test
+			_, _ = c.do(ctx, key, fetch)
 		}()
 
 		select {
@@ -191,7 +191,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 				bodies[i], errsOut[i] = c.do(ctx, key, fetch)
 			}(i)
 		}
-		time.Sleep(150 * time.Millisecond)
+		waitForJoins(t, c, waiters) // every waiter has reached its wait
 		close(release)
 
 		done := make(chan struct{})
@@ -239,7 +239,7 @@ func TestBodyCacheIsolation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = c.do(context.Background(), key, fetch) //nolint:errcheck // the leader is only scenery here
+			_, _ = c.do(context.Background(), key, fetch)
 		}()
 		select {
 		case <-entered:
@@ -247,15 +247,32 @@ func TestBodyCacheIsolation(t *testing.T) {
 			t.Fatal("the leader never entered fetch")
 		}
 
+		// The waiter runs on its own goroutine so the test can cancel it at the
+		// right moment: once the cache has counted it as joined, it is in (or
+		// committed to) the wait that the cancellation must abort.
+		type waitOutcome struct {
+			err     error
+			elapsed time.Duration
+		}
 		waitCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		outcome := make(chan waitOutcome, 1)
 		go func() {
-			time.Sleep(50 * time.Millisecond)
-			cancel()
+			start := time.Now()
+			_, err := c.do(waitCtx, key, fetch)
+			outcome <- waitOutcome{err: err, elapsed: time.Since(start)}
 		}()
 
-		start := time.Now()
-		_, err := c.do(waitCtx, key, fetch)
-		elapsed := time.Since(start)
+		waitForJoins(t, c, 1)
+		cancel()
+
+		var got waitOutcome
+		select {
+		case got = <-outcome:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the cancelled waiter did not return within 10s of its context being cancelled")
+		}
+		err, elapsed := got.err, got.elapsed
 
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("the cancelled waiter returned %v, want an error wrapping context.Canceled", err)

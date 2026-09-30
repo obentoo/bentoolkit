@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/signal"
@@ -12,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // Story 054, R5.8: `overlay push` and `overlay pull` cancel their git call on
@@ -19,13 +22,20 @@ import (
 // connection and never answers — so git waits forever unless the command's
 // signal context stops it. The signal is sent to this process once git has
 // connected, i.e. while the command is genuinely blocked on the network.
+//
+// The handler no longer installs a signal handler of its own (story 058): it
+// reads the process-wide context through func commandContext. The test builds
+// that context with func processContext, marks the policy from the command's
+// own annotation as the root's PersistentPreRunE does, and sets it on the
+// command before calling the handler.
 func TestOverlayGitCommandsStopOnSIGINT(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		run  func()
+		cmd  *cobra.Command
+		run  func(*cobra.Command, []string) error
 	}{
-		{"push", func() { runPush(pushCmd, nil) }},
-		{"pull", func() { runPull(pullCmd, nil) }},
+		{"push", pushCmd, runPush},
+		{"pull", pullCmd, runPull},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			connected := silentGitRemote(t)
@@ -38,8 +48,16 @@ func TestOverlayGitCommandsStopOnSIGINT(t *testing.T) {
 			signal.Notify(sink, syscall.SIGINT)
 			t.Cleanup(func() { signal.Stop(sink) })
 
+			ctx, stop, policy := processContext()
+			t.Cleanup(stop)
+			policy.setFrom(tc.cmd)
+			tc.cmd.SetContext(ctx)
+			// The command is a package-level tree shared with other tests: do
+			// not leave it holding this test's cancelled context.
+			t.Cleanup(func() { tc.cmd.SetContext(context.Background()) })
+
 			done := make(chan int, 1)
-			go func() { done <- withExitIntercept(tc.run) }()
+			go func() { done <- exitCodeFor(tc.run(tc.cmd, nil)) }()
 
 			select {
 			case <-connected.ch:
@@ -114,8 +132,7 @@ func silentGitRemote(t *testing.T) silentRemote {
 // branch tracks origin, origin being the silent git:// remote at addr.
 func overlayWithSilentRemote(t *testing.T, addr string) {
 	t.Helper()
-	overlayDir, cleanup := setupTestHomeWithGitRepo(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHomeWithGitRepo(t)
 	if err := os.WriteFile(filepath.Join(overlayDir, "README"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func TestPushWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := Push(context.Background(), cfg)
-		if err != config.ErrOverlayPathNotSet {
+		if !errors.Is(err, config.ErrOverlayPathNotSet) {
 			t.Errorf("Push() should return ErrOverlayPathNotSet, got %v", err)
 		}
 	})
@@ -33,7 +33,7 @@ func TestPushWithInvalidConfig(t *testing.T) {
 		}
 
 		_, err := Push(context.Background(), cfg)
-		if err != config.ErrOverlayPathNotFound {
+		if !errors.Is(err, config.ErrOverlayPathNotFound) {
 			t.Errorf("Push() should return ErrOverlayPathNotFound, got %v", err)
 		}
 	})

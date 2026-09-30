@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,8 +76,8 @@ func manifestSingleVoiceRun(t *testing.T, bin string, env []string, extraEnv str
 
 	status := 0
 	if err != nil {
-		exit, ok := err.(*exec.ExitError)
-		if !ok {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
 			t.Fatalf("running %v: %v\n%s", args, err, out)
 		}
 		status = exit.ExitCode()

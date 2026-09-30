@@ -55,8 +55,9 @@ func TestRunCompareEndsInTheReport(t *testing.T) {
 // TestRunCompareExitsOnSkippedBaselineAfterTheReport is the ORDER S047-R7.2
 // fixes: render, export, exit.
 //
-// osExit does not return, so an exit taken before the presentation would leave
-// the operator with the exit status and none of the comparison they waited on.
+// A return of the exit status executes nothing further in the handler (story
+// 058), so an exit taken before the presentation would leave the operator with
+// the exit status and none of the comparison they waited on.
 // The two assertions together are what states the order — a non-zero code AND a
 // report on stdout can only both be true if the exit ran last.
 func TestRunCompareExitsOnSkippedBaselineAfterTheReport(t *testing.T) {

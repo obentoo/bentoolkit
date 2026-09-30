@@ -10,7 +10,7 @@ import (
 // ---------------------------------------------------------------------------
 // Story 007 T2.1 — `snapshot rollback <id>` verb (R3, R6.1).
 //
-// Mirrors snapshot_restore_test.go: osExit stubbed via captureExit, a
+// Mirrors snapshot_restore_test.go: the outcome read through exitOf, a
 // MockRunner injected as snapshotRunner, temp snapshot.toml via the shared
 // helpers, and the confirm gate driven through the snapshotRollbackConfirm
 // seam. Rollback is snapper-specific: a non-snapper engine is refused (R3.3).
@@ -64,9 +64,7 @@ func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRollback(snapshotRollbackCmd, []string{"42"})
-		})
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
 	})
 	if exited {
 		t.Fatalf("rollback exited with code %d, want success", code)
@@ -83,7 +81,7 @@ func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 
 // TestRunSnapshotRollback_ConfirmDeniedCleanAbort is the R3.2 gate: without
 // --yes and a confirm seam that DENIES, the rollback is a clean abort — exit
-// success (osExit NOT called) and NO subprocess runs.
+// success (the handler returns nil) and NO subprocess runs.
 func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
@@ -95,9 +93,7 @@ func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRollback(snapshotRollbackCmd, []string{"42"})
-		})
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
 	})
 	if exited {
 		t.Fatalf("declined rollback exited with code %d; declining is a clean abort", code)
@@ -120,9 +116,7 @@ func TestRunSnapshotRollback_ConfirmApprovedProceeds(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRollback(snapshotRollbackCmd, []string{"42"})
-		})
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
 	})
 	if exited {
 		t.Fatalf("approved rollback exited with code %d, want success", code)
@@ -136,7 +130,7 @@ func TestRunSnapshotRollback_ConfirmApprovedProceeds(t *testing.T) {
 }
 
 // TestRunSnapshotRollback_NonSnapperEngineRefused is R3.3: with a btrbk engine
-// the rollback is refused — osExit(1), no subprocess, and the confirm gate is
+// the rollback is refused — exit status 1, no subprocess, and the confirm gate is
 // never even consulted (the engine guard fires first).
 func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
@@ -149,9 +143,7 @@ func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRollback(snapshotRollbackCmd, []string{"42"})
-		})
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
 	})
 	if !exited || code != 1 {
 		t.Errorf("non-snapper rollback exit = (%d, %v), want (1, true)", code, exited)
@@ -183,7 +175,7 @@ func TestRunSnapshotRollback_DryRunPrintsActionsZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotRollback(snapshotRollbackCmd, []string{"42"}) })
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
 	})
 	if exited {
 		t.Fatalf("rollback --dry-run exited with code %d, want success", code)

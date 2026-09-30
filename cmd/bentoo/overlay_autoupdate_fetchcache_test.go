@@ -58,9 +58,7 @@ func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
 	setReconcileInteractive(t, func() bool { return false }) // never prompt, never write
 
 	captureStdout(t, func() {
-		withExitIntercept(func() {
-			runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
-		})
+		_ = runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
 	})
 
 	return requests.Load()
@@ -92,7 +90,6 @@ func TestNoFetchCacheFlag(t *testing.T) {
 		orig := autoupdateNoFetchCache
 		t.Cleanup(func() {
 			autoupdateNoFetchCache = orig
-			//nolint:errcheck // restoring a bool flag on a known-registered name cannot fail
 			_ = autoupdateCmd.Flags().Set("no-fetch-cache", strconv.FormatBool(orig))
 		})
 

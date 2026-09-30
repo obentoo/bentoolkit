@@ -30,9 +30,11 @@ package main
 // What the RUN does about it — the exit status the interruption earned — is
 // decided by runSnapshotRun, so the third test interrupts a real `snapshot run`
 // with SIGTERM, the shape story 043 established in
-// overlay_autoupdate_signal_test.go: signalContext installs the handler for the
-// duration of the run, so the signal is CAUGHT — the test process is not
-// terminated — and only the run's context is cancelled.
+// overlay_autoupdate_signal_test.go. The run goes through func runMain, whose
+// func processContext installs the handler for the process and whose root
+// PersistentPreRunE marks `snapshot run` cancellable from its annotation, so
+// the signal is CAUGHT — the test process is not terminated — and only the
+// run's context is cancelled.
 //
 // The second test is the hostile half. A rule that says "state the gap when the
 // run stopped short" can be satisfied by a report that says it of every run,

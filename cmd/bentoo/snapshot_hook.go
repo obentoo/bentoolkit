@@ -31,7 +31,7 @@ user content in /etc/portage/bashrc.
 
 The hook is never installed implicitly: 'bentoo snapshot apply' does not touch
 /etc/portage — only this explicit command does.`,
-		Run: runSnapshotHook,
+		RunE: runSnapshotHook,
 	}
 	cmd.Flags().BoolVar(&snapshotHookInstall, "install", false,
 		"install the Portage emerge hook (pre/post snapper snapshots)")
@@ -40,14 +40,13 @@ The hook is never installed implicitly: 'bentoo snapshot apply' does not touch
 	return cmd
 }
 
-func runSnapshotHook(cmd *cobra.Command, _ []string) {
+func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 	// EXACTLY ONE of --install/--uninstall is required. Validated before
 	// anything else — no config load, no filesystem write — so invalid usage
 	// leaves the system untouched.
 	if snapshotHookInstall == snapshotHookUninstall {
 		logger.Error("snapshot hook: exactly one of --install or --uninstall is required")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if snapshotHookUninstall {
@@ -55,11 +54,10 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) {
 		// broken or absent snapshot.toml (R4.2).
 		if err := snapshot.UninstallEmergeHook(); err != nil {
 			logger.Error("snapshot hook: %v", err)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 		output.PrintSuccess("Portage emerge hook removed")
-		return
+		return nil
 	}
 
 	// --install: load AND validate the config so an unknown driver or a missing
@@ -67,22 +65,20 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) {
 	cfg, _, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot hook: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	// The hook script shells out to snapper for its pre/post pairs, so any
 	// other engine is refused — with nothing written (R4.1).
 	if cfg.Engine.Driver != "snapper" {
 		logger.Error(`snapshot hook: the emerge hook shells out to snapper and requires engine.driver = "snapper"; active engine is %q`,
 			cfg.Engine.Driver)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if err := snapshot.InstallEmergeHook(); err != nil {
 		logger.Error("snapshot hook: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	output.PrintSuccess("Portage emerge hook installed — snapper pre/post snapshots around each emerged package")
+	return nil
 }

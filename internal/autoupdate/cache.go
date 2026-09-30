@@ -122,7 +122,7 @@ func WithNowFunc(fn func() time.Time) CacheOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec,nolintlint // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment; nolintlint: gosec's G703 taint analysis reports this line in some runs and not in others, so the directive is not always used
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -178,7 +178,7 @@ func (c *Cache) adoptBaseline() error {
 // it; any other read error is returned naming the path.
 func readCacheFileForMerge(path string) (cacheFile, error) {
 	var cf cacheFile
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is <configDir>/cache.json, a constant name in the user's autoupdate config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cf, nil
@@ -200,7 +200,7 @@ func (c *Cache) load() error {
 
 	var cf cacheFile
 	if err := json.Unmarshal(data, &cf); err != nil {
-		return fmt.Errorf("%w: %v", ErrCacheCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrCacheCorrupted, err)
 	}
 
 	if cf.Entries != nil {

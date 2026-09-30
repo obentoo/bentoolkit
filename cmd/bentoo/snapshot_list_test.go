@@ -73,7 +73,7 @@ func TestRunSnapshotList_RemoteIncludesBtrbkTargetsAndRestic(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotList(snapshotListCmd, nil) })
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
 	})
 	if exited {
 		t.Fatalf("list --remote exited with code %d", code)
@@ -108,7 +108,7 @@ func TestRunSnapshotList_WithoutRemoteSkipsRemoteQueries(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotList(snapshotListCmd, nil) })
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
 	})
 	if exited {
 		t.Fatalf("list exited with code %d", code)
@@ -144,7 +144,7 @@ func TestRunSnapshotList_RendersSnapshots(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotList(snapshotListCmd, nil) })
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
 	})
 	if exited {
 		t.Fatalf("list exited with code %d", code)

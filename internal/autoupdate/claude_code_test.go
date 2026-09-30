@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -574,12 +575,14 @@ func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 func TestRun_ContextCancellationKillsChild(t *testing.T) {
 	stubLookPathFound(t)
 
-	// Blocking child: sleeps far longer than the test budget.
-	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, "sleep", "3600")
-	}
+	// Blocking child: sleeps far longer than the test budget, after creating
+	// readyFile to announce that it is running.
+	readyFile := filepath.Join(t.TempDir(), "child-started")
+	seam := blockingChildWithReadyFile(readyFile)
 
 	parent, cancel := context.WithCancel(context.Background())
+	// A test that fails before its own cancel must still stop the child.
+	defer cancel()
 	c, err := NewClaudeCodeClient(LLMConfig{},
 		WithClaudeCodeExecCommand(seam),
 		WithClaudeCodeContext(parent),
@@ -596,8 +599,8 @@ func TestRun_ContextCancellationKillsChild(t *testing.T) {
 		done <- runErr
 	}()
 
-	// Give the spawned sleep a beat to start, then cancel the parent.
-	time.Sleep(100 * time.Millisecond)
+	// Cancel the parent only once the spawned child is actually running.
+	waitForReadyFile(t, readyFile, func() bool { return len(done) > 0 })
 	cancel()
 
 	select {

@@ -541,7 +541,7 @@ func exportFormatFor(path string) exportFormat {
 // truncated. The deferred close is the fallback for the error paths above it;
 // closing twice returns os.ErrClosed, which is exactly the nothing it should be.
 func writeExport(path string, run report.Run) error {
-	file, err := os.Create(path)
+	file, err := os.Create(path) //nolint:gosec // G304: path is the user's own --export flag; writing where the user asked is the feature
 	if err != nil {
 		return fmt.Errorf("creating the export %s: %w", path, err)
 	}

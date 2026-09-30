@@ -684,7 +684,6 @@ func replacePublishedEbuild(path string, body []byte, mode fs.FileMode) (err err
 	// os.CreateTemp creates at 0600 and os.Rename keeps the mode it finds, so
 	// the mode has to be set here — after the last write and before the rename,
 	// so the file is never reachable under its published name with the wrong one.
-	//nolint:gosec // G302: mode is the mode the published ebuild being replaced already carried; see publishProvedEbuild.
 	if chmodErr := os.Chmod(tmpName, mode); chmodErr != nil {
 		return fmt.Errorf("setting mode %04o on %s before publishing it as %s: %w", mode.Perm(), tmpName, path, chmodErr)
 	}

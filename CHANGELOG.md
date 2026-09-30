@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variables are also never expanded in a header: they stay literal with a
   `Warn`. **Migration:** rename each variable `X` to `BENTOO_FETCH_X` in the
   record and in the environment or secrets file.
+- **A `packages.toml` key can no longer name a directory outside its
+  category.** A key whose category or package half is `.`, `..`, or holds a
+  `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
+  as-is; it is now refused as an invalid package key, naming the half that was
+  refused. No real Gentoo atom has that shape.
+- **`fetch_url` and `fetch_id_url` must be absolute `http(s)` URLs with a fixed
+  host.** A `file:`, `ftp:` or relative template, or one with `{id}` or
+  `{version}` in the host, is refused by the download and by `--lint`, so a
+  catalogue id or an upstream version can no longer choose which host receives
+  the request. Placeholders in the path or query still work.
 
 - **Every `claude` agent bentoo spawns now receives an allow-listed environment,
   not bentoo's whole one.** The text client, the manifest, registry and build
@@ -143,6 +153,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bentoo notice new` and `bentoo notice revise` author a notice in both
+  places it lives.** One command writes the overlay's GLEP 42 news item
+  (`metadata/news/<id>/<id>.en.txt`) and, when the new `notice.site_path` key
+  is set, the site's `src/content/notices/<id>.yaml`, with one shared ID.
+  Everything portage or the site build would reject — type, severity, the ID's
+  short name, title and summary lengths, `--affects` ranges, control
+  characters, a future date — is refused before any file is written, and a
+  failed second write removes the first. `revise` opens the current text in
+  `$VISUAL`/`$EDITOR`, bumps the news item's `Revision` and the site file's
+  `updated` together, and replaces both atomically. Neither command runs git:
+  both print the paths written and the commands to review, commit and push.
+
 - **`--format json` for `overlay compare` gains three keys.** Every package now
   has `cause` and `error`. Both are always present, both are `""` on a row that
   did not fail, and `error` holds the full text on one line. The run gains
@@ -151,6 +173,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing key is renamed or removed.
 
 ### Fixed
+
+- **`bentoo notice` no longer loses the text typed above the scissors line.**
+  The editor's file ends its instructions with a scissors line, and only what
+  was below it used to be kept — so a body typed at the top of the file, where
+  most editors open, was discarded, `notice new` failed with an empty body and
+  the temporary file went with the text. Text above the line is now kept; only
+  the `#` instruction lines there are dropped, and everything below the line is
+  still kept as written.
+
+- **A Manifest `DIST` line named `.` or `..` is no longer read as a
+  distfile.** Joined onto the distdir, such a name points at the distdir
+  itself or its parent. Names that merely contain dots (`...`, `.foo`,
+  `foo..tar.gz`) are still read.
+- **An ebuild path whose category or package is `.` or `..` is refused.**
+  `././x/x-1.ebuild` used to parse with category `.`, and the path it
+  rendered back (`./x/x-1.ebuild`) did not parse at all.
 
 - **One failing upstream no longer stalls every check.** The autoupdate HTTP
   client kept a single circuit breaker for all hosts, so two dead hosts made
@@ -327,7 +365,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertion. Nothing visible changes today, since the error reaches the check
   unwrapped.
 
+- **`overlay manifest` is now cancelled cleanly by SIGHUP.** It stopped
+  cleanly on SIGINT and SIGTERM, but SIGHUP (a closed terminal) killed it
+  mid-run. SIGHUP now cancels it like the other two, and it exits `1`.
+
 ### Changed
+
+- **Failure messages now go to stderr; report rows stay on stdout.** The
+  refusals and failures of `overlay prune`, `overlay autoupdate
+  --mark-auto-disabled`, `overlay validate`, `overlay autoupdate --lint --fix`,
+  the registry update after `overlay autoupdate --check`, `overlay staged
+  clean`, `overlay compare --realign` and `overlay analyze --all` — 23
+  messages, with the hint lines printed beside them — used to be written to
+  stdout. The
+  failure messages of these commands now go to stderr, so a script that reads
+  stdout gets only the report; a row or count inside a report stays on stdout.
+- **A second signal now terminates a cancellable command immediately.** A
+  command that stops cleanly on `Ctrl+C` (SIGINT, SIGTERM or SIGHUP) used to
+  swallow a second signal while it wound down; the second one now ends the
+  process at once. The first signal behaves as before (apart from SIGHUP at
+  `overlay manifest`, under Fixed).
+- **Exit codes and first-signal behaviour are unchanged.** Every command exits
+  with the same code as before in every situation, and the first signal is
+  handled as before: one `Ctrl+C` at the `overlay commit` and `overlay analyze`
+  confirmation prompts still ends the command. The README's "Exit codes"
+  section now documents the whole contract — success, failure, usage error,
+  `overlay validate`'s `1`/`2`/`130`, the batch `0`/`1`/`2` of `overlay
+  autoupdate --check` and `overlay analyze --all`, and what each cancellable
+  command does when interrupted. `notice new` and `notice revise` are
+  cancellable too: a first interrupt while the editor is open stops it, writes
+  nothing and exits `1`, as before; a second one now terminates them at once.
+
+- **`make lint` runs exactly what the CI Lint job runs.** It builds
+  golangci-lint v2.13.2 (the CI pin; `make lint-pin-check` fails if the two
+  drift) and lints the default, `chromedp` and `playwright` builds. Every `make`
+  target now runs the Go toolchain `go.mod` names, as CI does. The lint set adds
+  gofmt/goimports, errorlint, usetesting, tparallel, forbidigo (no `fmt.Print`
+  in library packages) and a strict nolintlint, and gosec now checks G304,
+  G703 and G704 everywhere. `make clean` also removes `cov.out`, `coverage*.out`
+  and the `bentoo` binary. Pre-commit pins gitleaks by commit and adds gofmt and
+  `go vet` hooks.
+
+- **Error causes stay reachable.** Library errors that formatted their cause
+  with `%v` now wrap it, so `errors.Is` and `errors.As` see the cause (a Claude
+  run's context error, an LLM request's `*url.Error`, an `fs` or `json` error)
+  under the same sentinel as before. When a failed manifest was followed by a
+  failed or skipped LLM fix, the manifest failure is now the error's cause and
+  the fix attempt's error is only context in its text; it used to be the other
+  way round. The message text is unchanged apart from that order.
+
+- **`make test` and `make coverage` run with the race detector in random
+  order**, as the CI test job now does. A failing run prints
+  `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.
+  `make fuzz` runs every fuzz target for `FUZZTIME` each (default 30s).
 
 - **A tool the agent was refused is now named in the failure.** When a fixer
   or the bump reviewer fails, the error ends with `refused tools:` and the

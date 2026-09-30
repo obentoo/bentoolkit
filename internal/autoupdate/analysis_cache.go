@@ -83,7 +83,7 @@ func WithAnalysisCacheNowFunc(fn func() time.Time) AnalysisCacheOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewAnalysisCache(configDir string, opts ...AnalysisCacheOption) (*AnalysisCache, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment
 		return nil, fmt.Errorf("failed to create analysis cache directory: %w", err)
 	}
 
@@ -131,7 +131,7 @@ func (c *AnalysisCache) adoptBaseline() error {
 // process may have left it; a missing or corrupted file reads as empty.
 func readAnalysisCacheFileForMerge(path string) (analysisCacheFile, error) {
 	var cf analysisCacheFile
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is <configDir>/analysis_cache.json, a constant name in the user's autoupdate config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cf, nil
@@ -153,7 +153,7 @@ func (c *AnalysisCache) load() error {
 
 	var cf analysisCacheFile
 	if err := json.Unmarshal(data, &cf); err != nil {
-		return fmt.Errorf("%w: %v", ErrAnalysisCacheCorrupted, err)
+		return fmt.Errorf("%w: %w", ErrAnalysisCacheCorrupted, err)
 	}
 
 	if cf.Entries != nil {

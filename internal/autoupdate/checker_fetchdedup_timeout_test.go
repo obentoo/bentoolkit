@@ -153,7 +153,7 @@ func awaitCounter(t *testing.T, c *Checker, name string, read func(bodyCacheStat
 		if read(c.bodies.snapshot()) >= 1 {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond) // polling: the named cache counter has reached 1
 	}
 	t.Fatalf("%s (waited 10s for stats.%s to reach 1)", reason, name)
 }

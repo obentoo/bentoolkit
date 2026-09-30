@@ -811,7 +811,7 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		overlay:     opts.Overlay,
 		stagingRoot: opts.StagingRoot,
 		ebuild: func() ([]byte, error) {
-			return os.ReadFile(target.path) //nolint:gosec // the path comes from scanning the overlay under validation, not from input
+			return os.ReadFile(target.path)
 		},
 		manifest:         manifest,
 		manifestSupplied: supplied,
@@ -1424,7 +1424,7 @@ func materializeStagedManifest(stagedRoot string, target ebuildTarget, manifest 
 		// Unreachable after a successful Stage, which split the same atom through
 		// this same function — checked anyway, because "unreachable" is a property
 		// of today's call order rather than of this function.
-		return fmt.Errorf("naming the staged Manifest of %s-%s: %v", target.atom, target.version, err)
+		return fmt.Errorf("naming the staged Manifest of %s-%s: %w", target.atom, target.version, err)
 	}
 	path := filepath.Join(stagedRoot, category, pkg, "Manifest")
 

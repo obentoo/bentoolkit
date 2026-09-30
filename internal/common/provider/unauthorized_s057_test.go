@@ -25,7 +25,7 @@ func s057ProviderStatusServer(t *testing.T, status int) *httptest.Server {
 			w.Header().Set("X-RateLimit-Reset", "1790000000")
 		}
 		w.WriteHeader(status)
-		w.Write([]byte(`{"message":"denied"}`)) //nolint:errcheck
+		w.Write([]byte(`{"message":"denied"}`))
 	}))
 	t.Cleanup(srv.Close)
 	return srv

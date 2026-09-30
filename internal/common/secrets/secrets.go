@@ -154,7 +154,7 @@ func Lookup(name string) (value string, found bool, err error) {
 // a silent miss because /etc/bentoo/secrets is root-owned 0600 by design and a
 // normal user always gets EACCES (D2).
 func lookupInFile(path, name string, userScope bool) (string, bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is one of the two fixed secrets files from pathsFn: the user's config directory or /etc/bentoo/secrets
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -162,7 +162,7 @@ func lookupInFile(path, name string, userScope bool) (string, bool, error) {
 		case !userScope && errors.Is(err, os.ErrPermission):
 			return "", false, nil
 		default:
-			return "", false, fmt.Errorf("%w: %s: %v", ErrUnreadable, path, err)
+			return "", false, fmt.Errorf("%w: %s: %w", ErrUnreadable, path, err)
 		}
 	}
 	warnIfLoose(path)

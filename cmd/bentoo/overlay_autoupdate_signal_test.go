@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,7 +15,25 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/spf13/cobra"
 )
+
+// setProcessSignalContext gives cmd the context func runMain would: the
+// process-wide one from func processContext, carrying the policy the root's
+// PersistentPreRunE sets from the command's own annotation. runAutoupdate
+// installs no signal handler of its own since story 058 — it reads this
+// context through func commandContext — so a test that signals its own process
+// without it would meet the default action and kill the test binary. The
+// command is a package-level tree shared with other tests, so the cleanup
+// hands it back a plain context.
+func setProcessSignalContext(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+	ctx, stop, policy := processContext()
+	t.Cleanup(stop)
+	policy.setFrom(cmd)
+	cmd.SetContext(withSignalPolicy(ctx, policy))
+	t.Cleanup(func() { cmd.SetContext(context.Background()) })
+}
 
 // TestRunAutoupdate_SignalCancels verifies R3.1: a SIGTERM delivered while
 // `bentoo overlay autoupdate --check` is doing in-flight upstream work cancels
@@ -22,10 +41,11 @@ import (
 //
 // The test is intentionally IN-PROCESS — it delivers the signal to its own PID
 // rather than building and running a child binary — so it stays portable
-// across CI environments. runAutoupdate wires signalContext (signal.NotifyContext)
-// for the duration of the run; while that handler is installed the SIGTERM is
-// caught (the test process is NOT terminated) and only cancels the run context.
-// runAutoupdate's deferred stop() restores default signal behaviour on return.
+// across CI environments. The test installs the process-wide handler func
+// runMain would (func setProcessSignalContext); overlay autoupdate is
+// cancellable, so the SIGTERM is caught (the test process is NOT terminated)
+// and only cancels the run context runAutoupdate reads through func
+// commandContext.
 //
 // Skipped on Windows: SIGTERM and syscall.Kill have no portable semantics there.
 func TestRunAutoupdate_SignalCancels(t *testing.T) {
@@ -54,8 +74,7 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	// Declare enough packages (with on-disk ebuilds) that the check has real,
 	// long-running work to cancel.
@@ -83,12 +102,14 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 		autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc
 	}()
 
-	// Run the command in a goroutine. withExitIntercept absorbs the osExit call
-	// that runCheck makes on completion, so the goroutine returns normally.
+	setProcessSignalContext(t, autoupdateCmd)
+
+	// Run the command in a goroutine; runAutoupdate returns its outcome, so the
+	// goroutine returns normally.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		_ = runAutoupdate(autoupdateCmd, nil)
 	}()
 
 	// Wait until in-flight work has genuinely started before signalling.
@@ -98,8 +119,8 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 		t.Fatal("upstream check never started; cannot exercise signal cancellation")
 	}
 
-	// Deliver SIGTERM to this process. runAutoupdate's signal.NotifyContext
-	// handler catches it and cancels the run context instead of terminating.
+	// Deliver SIGTERM to this process. The process-wide handler catches it and
+	// cancels the run context instead of terminating.
 	signalAt := time.Now()
 	proc, err := os.FindProcess(os.Getpid())
 	if err != nil {
@@ -128,7 +149,8 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 //
 // The injected `pkgdev` is a stub script placed on PATH that exec's `sleep`,
 // so the spawned child is killed by exec.CommandContext as soon as runApply's
-// context is cancelled by signalContext. Without runApply threading runCtx
+// context is cancelled by the process-wide signal handler (func
+// setProcessSignalContext). Without runApply threading runCtx
 // into NewApplier via WithApplierContext (T1.2), the SIGTERM would not reach
 // the spawned process and the test would time out — making this a true
 // integration check of the CLI wire.
@@ -141,17 +163,20 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	}
 
 	// Stub `pkgdev` binary on PATH: an `exec sleep 3600` blocks indefinitely,
-	// and `exec.CommandContext` SIGKILLs it on cancellation.
+	// and `exec.CommandContext` SIGKILLs it on cancellation. Before blocking it
+	// creates readyFile, the event the SIGTERM below waits for. The path is
+	// written into the script, not passed through the environment, because
+	// the child's environment is not the test's to decide.
 	binDir := t.TempDir()
 	stubPath := filepath.Join(binDir, "pkgdev")
-	stubScript := "#!/bin/sh\nexec sleep 3600\n"
+	readyFile := filepath.Join(t.TempDir(), "pkgdev.ready")
+	stubScript := "#!/bin/sh\n: > '" + readyFile + "'\nexec sleep 3600\n"
 	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
 		t.Fatalf("write stub pkgdev: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	overlayDir, cleanup := setupTestHome(t)
-	defer cleanup()
+	overlayDir := setupTestHome(t)
 
 	const (
 		pkg        = "test-cat/test-pkg"
@@ -195,10 +220,8 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	// /var/cache/distfiles is absent and uncreatable — a CI runner, a
 	// non-Gentoo box. That refusal is correct (S030-R1.4) but it is fatal to
 	// what THIS test measures: the apply would fail in milliseconds, having
-	// never spawned the blocking `pkgdev` stub, so runAutoupdate returns and
-	// tears its signal handler down before the SIGTERM below is sent. The
-	// signal then meets the default disposition and kills the test binary —
-	// which reads as `signal: terminated`, not as an assertion failure.
+	// never spawned the blocking `pkgdev` stub, so runAutoupdate would return
+	// before the SIGTERM below is sent and the test would measure nothing.
 	autoupdateDistdir = t.TempDir()
 	defer func() {
 		autoupdateCheck, autoupdateApply, autoupdateCompile, autoupdateConcurrency =
@@ -206,14 +229,26 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 		autoupdateDistdir = origDistdir
 	}()
 
+	setProcessSignalContext(t, autoupdateCmd)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		_ = runAutoupdate(autoupdateCmd, nil)
 	}()
 
-	// Give runApply time to copyEbuild and spawn the stub `ebuild`.
-	time.Sleep(400 * time.Millisecond)
+	// Signal only once runApply has copied the ebuild and spawned the stub
+	// `pkgdev`: its ready file says so. A run that returns before spawning it
+	// fails here instead of letting the SIGTERM meet the default disposition
+	// and kill the test binary.
+	waitForReadyFile(t, readyFile, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
 
 	signalAt := time.Now()
 	proc, err := os.FindProcess(os.Getpid())

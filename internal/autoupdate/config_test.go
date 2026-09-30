@@ -189,7 +189,7 @@ func TestLoadPackagesConfigMissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	_, err := LoadPackagesConfig(tmpDir)
-	if err != ErrPackagesConfigNotFound {
+	if !errors.Is(err, ErrPackagesConfigNotFound) {
 		t.Errorf("Expected ErrPackagesConfigNotFound, got: %v", err)
 	}
 }

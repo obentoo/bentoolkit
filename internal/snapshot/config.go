@@ -334,7 +334,7 @@ func warnLegacySMTPPassword(path string) {
 // This is deliberately not a general strict-decode pass: only the single removed
 // key is reported, so forward-compatible additions to snapshot.toml stay silent.
 func LoadFrom(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own --config flag or the XDG config path FindConfigPath resolved
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snapshot.toml: %w", err)
 	}

@@ -19,23 +19,23 @@ func newInitCmd() *cobra.Command {
 		Short: "Initialize bentoo configuration",
 		Long: `Initialize bentoo configuration interactively.
 Creates a config file with overlay path and git settings.`,
-		Run: runInit,
+		RunE: runInit,
 	}
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, args []string) {
+func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Check if config already exists
-	existingPath, _ := config.FindConfigPath() //nolint:errcheck // interactive init, errors handled by UX flow
+	existingPath, _ := config.FindConfigPath()
 	if _, err := os.Stat(existingPath); err == nil {
 		logger.Warn("Config already exists at: %s", existingPath)
 		fmt.Print("Overwrite? [y/N]: ")
-		input, _ := reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) != "y" {
 			logger.Info("Aborted.")
-			return
+			return nil
 		}
 	}
 
@@ -48,7 +48,7 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	defaultOverlayPath := "/var/db/repos/bentoo"
 	fmt.Printf("Overlay path [%s]: ", defaultOverlayPath)
-	overlayPath, _ := reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+	overlayPath, _ := reader.ReadString('\n')
 	overlayPath = strings.TrimSpace(overlayPath)
 	if overlayPath == "" {
 		overlayPath = defaultOverlayPath
@@ -56,7 +56,7 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	// Expand ~ if present
 	if strings.HasPrefix(overlayPath, "~") {
-		home, _ := os.UserHomeDir() //nolint:errcheck // interactive init, errors handled by UX flow
+		home, _ := os.UserHomeDir()
 		overlayPath = filepath.Join(home, overlayPath[1:])
 	}
 
@@ -64,11 +64,11 @@ func runInit(cmd *cobra.Command, args []string) {
 	if _, err := os.Stat(overlayPath); os.IsNotExist(err) {
 		logger.Warn("Path does not exist: %s", overlayPath)
 		fmt.Print("Create it? [y/N]: ")
-		input, _ := reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			if err := os.MkdirAll(overlayPath, 0o750); err != nil {
 				logger.Error("Failed to create directory: %v", err)
-				osExit(1)
+				return exitWith(1)
 			}
 			logger.Info("Created directory: %s", overlayPath)
 		}
@@ -78,7 +78,7 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	// Get remote name
 	fmt.Print("Git remote name [origin]: ")
-	remote, _ := reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+	remote, _ := reader.ReadString('\n')
 	remote = strings.TrimSpace(remote)
 	if remote == "" {
 		remote = "origin"
@@ -96,21 +96,21 @@ func runInit(cmd *cobra.Command, args []string) {
 		fmt.Println()
 
 		fmt.Print("Git user name: ")
-		user, _ = reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+		user, _ = reader.ReadString('\n')
 		cfg.Git.User = strings.TrimSpace(user)
 
 		fmt.Print("Git email: ")
-		email, _ = reader.ReadString('\n') //nolint:errcheck // interactive init, errors handled by UX flow
+		email, _ = reader.ReadString('\n')
 		cfg.Git.Email = strings.TrimSpace(email)
 	} else {
 		logger.Info("Using git config: %s <%s>", user, email)
 	}
 
 	// Save config
-	configPath, _ := config.DefaultConfigPath() //nolint:errcheck // interactive init, errors handled by UX flow
+	configPath, _ := config.DefaultConfigPath()
 	if err := cfg.SaveTo(configPath); err != nil {
 		logger.Error("Failed to save config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	fmt.Println()
@@ -121,4 +121,5 @@ func runInit(cmd *cobra.Command, args []string) {
 	logger.Info("  bentoo overlay add     - Stage changes")
 	logger.Info("  bentoo overlay commit  - Commit with auto-generated message")
 	logger.Info("  bentoo overlay push    - Push to remote")
+	return nil
 }

@@ -1229,7 +1229,7 @@ func treeSnapshot(t *testing.T, root string) map[string]string {
 		if d.IsDir() {
 			return nil
 		}
-		data, err := os.ReadFile(path) //nolint:gosec // path comes from walking the test's own temp tree
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}

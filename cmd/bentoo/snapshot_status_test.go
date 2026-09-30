@@ -43,7 +43,7 @@ func TestRunSnapshotStatus_PerStageTimersAndSpace(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotStatus(snapshotStatusCmd, nil) })
+		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil))
 	})
 	if exited {
 		t.Fatalf("status exited with code %d", code)
@@ -101,7 +101,7 @@ func TestRunSnapshotStatus_ReadsResultAndTimer(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotStatus(snapshotStatusCmd, nil) })
+		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil))
 	})
 	if exited {
 		t.Fatalf("status exited with code %d", code)

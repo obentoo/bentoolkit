@@ -84,7 +84,7 @@ func s056StartStateHolder(t *testing.T, path string) int {
 		if time.Now().After(deadline) {
 			t.Fatal("the state-lock holder never announced itself")
 		}
-		time.Sleep(time.Millisecond) // polling the ready file
+		time.Sleep(time.Millisecond) // polling: the ready file exists
 	}
 }
 

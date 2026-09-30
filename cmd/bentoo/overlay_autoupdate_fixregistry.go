@@ -31,7 +31,7 @@ import (
 // reapplied by restoreRegistrySnapshot. Any read or stat error is returned so the
 // caller can skip the package rather than edit it without a recoverable snapshot.
 func readRegistrySnapshot(configPath string) ([]byte, os.FileMode, error) {
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to read packages.toml: %w", err)
 	}

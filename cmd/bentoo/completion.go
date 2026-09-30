@@ -50,17 +50,18 @@ PowerShell:
 		// global reference here would make an in-process run emit completions for a
 		// tree it is not part of — and it would also make rootCmd's initialiser
 		// depend on itself, which Go rejects as an initialisation cycle.
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
 			case "bash":
-				cmd.Root().GenBashCompletion(os.Stdout) //nolint:errcheck // stdout write errors are not actionable
+				cmd.Root().GenBashCompletion(os.Stdout)
 			case "zsh":
-				cmd.Root().GenZshCompletion(os.Stdout) //nolint:errcheck // stdout write errors are not actionable
+				cmd.Root().GenZshCompletion(os.Stdout)
 			case "fish":
-				cmd.Root().GenFishCompletion(os.Stdout, true) //nolint:errcheck // stdout write errors are not actionable
+				cmd.Root().GenFishCompletion(os.Stdout, true)
 			case "powershell":
-				cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout) //nolint:errcheck // stdout write errors are not actionable
+				cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
 			}
+			return nil
 		},
 	}
 	return cmd

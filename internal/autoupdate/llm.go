@@ -301,7 +301,7 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrLLMRequestFailed, err)
+		return "", fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
 	}
 	defer resp.Body.Close()
 
@@ -378,7 +378,7 @@ func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrLLMRequestFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
 	}
 	defer resp.Body.Close()
 

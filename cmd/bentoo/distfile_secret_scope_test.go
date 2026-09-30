@@ -68,7 +68,7 @@ comments = """the story's reproduction"""
 		exited bool
 	)
 	errOut := captureStderr(t, func() {
-		code, exited = captureExit(t, func() { runDistfileFetch(cmd, []string{"app-misc/leak"}) })
+		code, exited = exitOf(runDistfileFetch(cmd, []string{"app-misc/leak"}))
 	})
 
 	if n := hits.Load(); n != 0 {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -41,16 +42,15 @@ import (
 // in the state the operator asked for? 0 only when it is — so a declined
 // migration, a refused unattended write, an exclusion list with a typo in it and
 // a plan that did not fully land all exit 1.
-func runMarkAutoDisabled(overlayPath string) {
+func runMarkAutoDisabled(overlayPath string) error {
 	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, autoupdateExcept)
 	if err != nil {
 		// Nothing has been written: the plan only reads. A registry that does not
 		// load cannot be migrated either, and failing here is the cheapest place
 		// to say so.
 		logger.Error("failed to plan the disable-origin migration: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
-		osExit(1)
-		return
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		return exitWith(1)
 	}
 
 	fmt.Println()
@@ -64,14 +64,13 @@ func runMarkAutoDisabled(overlayPath string) {
 	// list above waiting to be stamped — after which the reconciliation is free
 	// to re-enable and bump the very pin that exists to prevent that.
 	if len(plan.UnmatchedExcept) > 0 {
-		output.Error.Println("  --except names entries that are not in packages.toml, so they protect nothing:")
+		output.Error.Fprintln(os.Stderr, "  --except names entries that are not in packages.toml, so they protect nothing:")
 		for _, pkg := range plan.UnmatchedExcept {
-			output.Error.Println("    " + pkg)
+			output.Error.Fprintln(os.Stderr, "    "+pkg)
 		}
 		logger.Error("refusing to migrate: %d --except entry(ies) match no record — fix the spelling and re-run", len(plan.UnmatchedExcept))
-		output.Error.Println("  packages.toml was NOT modified.")
-		osExit(1)
-		return
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		return exitWith(1)
 	}
 
 	if len(plan.Mark) == 0 {
@@ -80,7 +79,7 @@ func runMarkAutoDisabled(overlayPath string) {
 		// yes without reading, and the one prompt here that has to survive that
 		// habit is the one that publishes.
 		output.Success.Println("  Nothing to migrate: every disabled entry already states its origin, is held, or was excluded.")
-		return
+		return nil
 	}
 
 	if !confirmAutoDisableMigration(plan) {
@@ -88,17 +87,15 @@ func runMarkAutoDisabled(overlayPath string) {
 		// it stays byte-identical by construction rather than by care. The
 		// entries above are still frozen, so the exit code still says so.
 		output.Warning.Println("  packages.toml is unchanged.")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	marked, err := autoupdate.MarkAutoDisabled(overlayPath, autoupdateExcept)
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		logger.Error("failed to record the automatic origin: %v", err)
-		output.Error.Printf("  packages.toml was NOT modified: %v\n", err)
-		osExit(1)
-		return
+		output.Error.Fprintf(os.Stderr, "  packages.toml was NOT modified: %v\n", err)
+		return exitWith(1)
 	}
 
 	output.Success.Printf("  Stamped %d entry(ies) with disabled_by = \"auto\":\n", len(marked))
@@ -116,9 +113,9 @@ func runMarkAutoDisabled(overlayPath string) {
 		output.Warning.Printf("  %d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it.\n",
 			len(plan.Mark)-len(marked), len(plan.Mark))
 		logger.Error("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked))
-		osExit(1)
-		return
+		return exitWith(1)
 	}
+	return nil
 }
 
 // printAutoDisableMigrationPlan lists the whole decision, group by group, in

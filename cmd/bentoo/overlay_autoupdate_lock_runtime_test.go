@@ -59,8 +59,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	overlayDir, cleanup := setupTestHome(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHome(t)
 	const pkg = "app-misc/probe"
 	writeExitTestPackagesConfig(t, overlayDir, server.URL, []string{pkg})
 	writeExitTestEbuild(t, overlayDir, pkg, "0.9.0")
@@ -92,7 +91,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
 	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 
 	fixer.mu.Lock()
 	defer fixer.mu.Unlock()
@@ -123,8 +122,7 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	overlayDir, cleanup := setupTestHome(t)
-	t.Cleanup(cleanup)
+	overlayDir := setupTestHome(t)
 	pkgs := []string{"cat-a/pkg1", "cat-a/pkg2"}
 	writeExitTestPackagesConfig(t, overlayDir, server.URL, pkgs)
 	for _, pkg := range pkgs {
@@ -136,10 +134,15 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
 	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
 
+	// The process-wide handler func runMain installs (func
+	// setProcessSignalContext): without it the SIGINT below takes its default
+	// action and kills the test binary.
+	setProcessSignalContext(t, autoupdateCmd)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		_ = runAutoupdate(autoupdateCmd, nil)
 	}()
 
 	select {

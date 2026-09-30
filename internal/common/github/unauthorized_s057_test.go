@@ -36,7 +36,7 @@ func TestGetPackageVersionsUnauthorized(t *testing.T) {
 					w.Header().Set("X-RateLimit-Reset", "1790000000")
 				}
 				w.WriteHeader(tc.status)
-				w.Write([]byte(`{"message":"Bad credentials"}`)) //nolint:errcheck
+				w.Write([]byte(`{"message":"Bad credentials"}`))
 			}))
 			t.Cleanup(srv.Close)
 

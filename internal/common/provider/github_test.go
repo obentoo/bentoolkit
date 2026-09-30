@@ -73,7 +73,7 @@ func TestGitHubProvider_GetPackageVersions(t *testing.T) {
 
 	t.Run("package not found", func(t *testing.T) {
 		_, err := prov.GetPackageVersions(t.Context(), "app-misc", "notfound")
-		if err != ErrNotFound {
+		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("Expected ErrNotFound, got: %v", err)
 		}
 	})

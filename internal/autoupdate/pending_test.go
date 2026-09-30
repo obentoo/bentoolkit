@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -523,7 +524,7 @@ func TestPendingListSetStatusNotFound(t *testing.T) {
 	}
 
 	err = pending.SetStatus("non-existent/pkg", StatusValidated, "")
-	if err != ErrPackageNotInPending {
+	if !errors.Is(err, ErrPackageNotInPending) {
 		t.Errorf("Expected ErrPackageNotInPending, got: %v", err)
 	}
 }

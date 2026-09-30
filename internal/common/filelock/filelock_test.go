@@ -87,7 +87,7 @@ func startHolder(t *testing.T, path string) *holder {
 		if time.Now().After(deadline) {
 			t.Fatal("the holder child never announced it holds the lock")
 		}
-		time.Sleep(time.Millisecond) // polling the ready file, not a guess at timing
+		time.Sleep(time.Millisecond) // polling: the ready file exists
 	}
 }
 

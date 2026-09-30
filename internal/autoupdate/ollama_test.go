@@ -89,11 +89,17 @@ func TestOllamaExtractVersionMalformedJSON(t *testing.T) {
 }
 
 func TestOllamaExtractVersionContextCancellation(t *testing.T) {
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		select { // held until the client gives up, or the test releases it
+		case <-r.Context().Done():
+		case <-release:
+		}
 		json.NewEncoder(w).Encode(ollamaResponse{Response: "1.2.3", Done: true})
 	}))
-	defer server.Close()
+	// Cleanups run last-in first-out: release the handler, then close the server.
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
 
 	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
 	if err != nil {

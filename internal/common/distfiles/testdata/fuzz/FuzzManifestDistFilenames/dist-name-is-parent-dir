@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("DIST .. 1234 BLAKE2B 00 SHA512 00\n")

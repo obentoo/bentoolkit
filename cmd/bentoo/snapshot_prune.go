@@ -21,8 +21,9 @@ var (
 // newSnapshotPruneCmd builds `snapshot prune`.
 func newSnapshotPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "prune",
-		Short: "Apply the retention policy on demand",
+		Use:         "prune",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Apply the retention policy on demand",
 		Long: `Apply the [engine.retention] policy now, without taking a snapshot: the
 engine-native prune for every subvolume (btrbk clean / snapper cleanup timeline)
 plus the GFS retention sweep on every archive ship's rclone remote.
@@ -30,7 +31,7 @@ plus the GFS retention sweep on every archive ship's rclone remote.
 --ship NAME scopes the prune to that one destination: the engine-local prune is
 skipped and only the named ship's remote is pruned. Recorded incremental parents
 are never deleted — each is the base of its subvolume's next incremental send.`,
-		Run: runSnapshotPrune,
+		RunE: runSnapshotPrune,
 	}
 	cmd.Flags().BoolVar(&snapshotPruneDryRun, "dry-run", false,
 		"print the prune actions that would run, without executing them")
@@ -42,14 +43,13 @@ are never deleted — each is the base of its subvolume's next incremental send.
 // runSnapshotPrune applies the [engine.retention] policy on demand (008 R3.1):
 // the engine-native prune per subvolume plus the remote GFS per archive ship,
 // honoring --dry-run and --ship scoping (008 R3.2).
-func runSnapshotPrune(cmd *cobra.Command, _ []string) {
+func runSnapshotPrune(cmd *cobra.Command, _ []string) error {
 	// Prune is destructive: load AND validate the config (drivers + deps) so an
 	// unknown driver or missing binary fails fast before any subprocess (G3).
 	cfg, path, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot prune: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// An unknown --ship is a hard error BEFORE any write or subprocess — in
@@ -57,8 +57,7 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) {
 	if snapshotPruneShip != "" {
 		if _, ok := findShipByName(cfg, snapshotPruneShip); !ok {
 			logger.Error("snapshot prune: no ship entry named %q", snapshotPruneShip)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 	}
 
@@ -67,11 +66,10 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) {
 		// the engine-config render and the Manager build: zero subprocesses,
 		// zero writes (G3).
 		printDryRunPlan(snapshot.PlanPrune(cfg, snapshotPruneShip))
-		return
+		return nil
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	// The engine-native prune reads the native config (btrbk clean takes
 	// -c btrbk.conf), so ensure it exists — mirroring `run`. Skipped under
@@ -79,16 +77,14 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) {
 	if snapshotPruneShip == "" {
 		if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
 			logger.Error("snapshot prune: render engine config: %v", err)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 	}
 
 	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot prune: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	result, pruneErr := mgr.Prune(ctx, snapshotPruneShip)
@@ -96,9 +92,9 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) {
 		// Covers failed stages too: Prune returns a non-nil error whenever the
 		// result records any failure — a user-invoked prune must not hide them.
 		logger.Error("snapshot prune: %v", pruneErr)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	output.PrintSuccess("snapshot prune completed (%d stages)", len(result.Stages))
+	return nil
 }

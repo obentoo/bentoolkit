@@ -190,12 +190,18 @@ func TestFormEnvAndTimeoutRefusals(t *testing.T) {
 // client, not merely be parsed. The default is five minutes, so a test that
 // only checked parsing would pass against a spec whose value nothing reads.
 func TestFetchTimeoutIsHonoured(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(2 * time.Second)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select { // held until the client gives up, or the test releases it
+		case <-r.Context().Done():
+		case <-release:
+		}
 		w.Header().Set("Content-Type", "application/zip")
 		_, _ = w.Write([]byte("too late"))
 	}))
-	defer srv.Close()
+	// Cleanups run last-in first-out: release the handler, then close the server.
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
 
 	spec, _, err := parseAuthFetchSpec(map[string]string{
 		metaFetchURL:      srv.URL,

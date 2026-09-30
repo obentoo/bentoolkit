@@ -161,7 +161,7 @@ func (p *GitHubProvider) fetchPackageVersions(ctx context.Context, category, pkg
 
 	// Handle rejected credentials: still an API error, and also an auth one
 	if resp.StatusCode == http.StatusUnauthorized {
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error body read is best-effort
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%w: %w: status %d: %s", ErrAPIError, ErrUnauthorized, resp.StatusCode, string(body))
 	}
 
@@ -236,7 +236,7 @@ func (p *GitHubProvider) loadFromCache(category, pkg string) ([]string, bool) {
 	}
 
 	cacheFile := p.cacheFilePath(category, pkg)
-	data, err := os.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile) //nolint:gosec // G304: cacheFile is <CacheDir>/<category>_<pkg>.json; CacheDir is under ~/.cache/bentoo and both parts are single path elements from splitPkgAtom or the overlay scan
 	if err != nil {
 		return nil, false
 	}
@@ -272,7 +272,7 @@ func (p *GitHubProvider) saveToCache(category, pkg string, versions []string) {
 	cacheFile := p.cacheFilePath(category, pkg)
 	// Cache files use 0600 (owner-only): they may hold sensitive upstream
 	// metadata. os.WriteFile applies the mode on file creation directly.
-	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode) //nolint:errcheck // cache write is best-effort
+	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode)
 }
 
 // GetRateLimitInfo returns current rate limit status

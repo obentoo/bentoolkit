@@ -47,7 +47,7 @@ func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
 //
 // The `claude` CLI runs in its own process group (story 054), so a Ctrl+C or a
 // hang-up at the terminal no longer reaches it: the kernel signals the
-// terminal's foreground group only. ctx — the command's signalContext — is then
+// terminal's foreground group only. ctx — the command's context (func commandContext) — is then
 // the only way an interrupt stops that child and everything it started (R4.3).
 // The HTTP providers take no context here; their constructors do not accept one.
 //

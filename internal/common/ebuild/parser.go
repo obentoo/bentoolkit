@@ -41,6 +41,13 @@ func ParsePath(path string) (*Ebuild, error) {
 	name := matches[3]
 	version := matches[4]
 
+	// A dot segment is a path step, not a name: "././x/x-1.ebuild" would parse
+	// with category "." and render as "./x/x-1.ebuild", which the leading "./"
+	// trim above no longer reads as the same file.
+	if isDotSegment(category) || isDotSegment(pkg) {
+		return nil, ErrInvalidEbuildPath
+	}
+
 	// Validate that the filename prefix matches the package directory name
 	// For packages like "firefox-bin", the name would be "firefox-bin"
 	if name != pkg {
@@ -53,6 +60,10 @@ func ParsePath(path string) (*Ebuild, error) {
 		Name:     name,
 		Version:  version,
 	}, nil
+}
+
+func isDotSegment(s string) bool {
+	return s == "." || s == ".."
 }
 
 // FullName returns the category/package format

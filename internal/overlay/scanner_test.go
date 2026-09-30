@@ -8,11 +8,7 @@ import (
 
 func TestScanOverlay(t *testing.T) {
 	// Create temporary overlay structure
-	tempDir, err := os.MkdirTemp("", "bentoo-test-overlay-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Create overlay structure
 	createTestOverlay(t, tempDir)
@@ -71,11 +67,7 @@ func TestScanOverlay(t *testing.T) {
 }
 
 func TestScanOverlaySkipsSpecialDirs(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "bentoo-test-overlay-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Create special directories that should be skipped
 	specialDirs := []string{"profiles", "metadata", "eclass", "licenses", ".git"}
@@ -98,11 +90,7 @@ func TestScanOverlaySkipsSpecialDirs(t *testing.T) {
 }
 
 func TestScanOverlayEmptyOverlay(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "bentoo-test-overlay-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	result, err := ScanOverlay(tempDir)
 	if err != nil {

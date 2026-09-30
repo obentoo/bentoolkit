@@ -137,9 +137,9 @@ func unverifiable(reason string, checked []string) Content {
 // This function joins no category and no package name of its own, which is what
 // keeps registry-sourced traversal structurally absent (R3.5): the same argument
 // written at verifyAgainstLocalContent's path construction in compare.go applies
-// here, and this is a second site with the same exposure. SplitPackageKey accepts
-// "../x" happily and no validation runs on a registry path; the STRUCTURE is
-// what keeps traversal out, not a sanitiser. Keep it that way. pkg is used only
+// here, and this is a second site with the same exposure. SplitPackageKey now
+// refuses a "." or ".." half, but the STRUCTURE is what keeps traversal out
+// here, not that check. Keep it that way. pkg is used only
 // to recognise the "<pkg>-<pv>.ebuild" filename shape — it is never joined into
 // a path.
 //
@@ -545,8 +545,8 @@ type PruneOptions struct {
 	// this package free of an import edge to internal/autoupdate.
 	//
 	// Nothing is ever joined from one of these keys into a filesystem path.
-	// SplitPackageKey accepts "../x" and no validation runs on that path; the
-	// structure is what keeps traversal absent, not a sanitiser.
+	// SplitPackageKey now refuses a "." or ".." half, but the structure is what
+	// keeps traversal absent here, not that check.
 	RegistryKeys map[string][]string
 }
 
@@ -1095,8 +1095,8 @@ func pruneOverlayRoot(overlayPath string) (string, error) {
 // everywhere else. That is not distrust of the planner. The plan arrives as a
 // STRUCT, and a struct can be built by anything: Category and Package are two
 // strings on it, and nothing in the type system says whoever filled them walked
-// the overlay. SplitPackageKey accepts "../x" happily and no validation runs on a
-// registry path — the structure is what keeps traversal absent, not a sanitiser.
+// the overlay. SplitPackageKey now refuses a "." or ".." half, but the structure
+// is what keeps traversal absent here, not that check.
 //
 // Everywhere else in this repository a wrong path opens the wrong file and
 // something fails. Here it calls os.RemoveAll. The guard exists to make the class

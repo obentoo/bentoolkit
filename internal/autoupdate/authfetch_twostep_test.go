@@ -143,7 +143,7 @@ func TestTwoStepFetchWalksBothLegs(t *testing.T) {
 	if filepath.Base(got) != "Example_21.1_Linux.zip" {
 		t.Errorf("wrote %q, want the name fetch_filename resolves to", got)
 	}
-	data, err := os.ReadFile(got) //nolint:gosec // path produced by the call under test
+	data, err := os.ReadFile(got)
 	if err != nil || string(data) != twoStepPayload {
 		t.Fatalf("file content = %q (err %v), want the CDN payload", data, err)
 	}

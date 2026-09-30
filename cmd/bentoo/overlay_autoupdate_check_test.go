@@ -867,13 +867,15 @@ func TestPendingValidationReturnsThePlanHalf(t *testing.T) {
 // defect is that both get printed, so a fixture where they disagree would be
 // measuring something else.
 func story045Scanned() ([]autoupdate.CheckResult, []report.PackageResult) {
-	return []autoupdate.CheckResult{
+	checks := []autoupdate.CheckResult{
 		{Package: "app-misc/jq", CurrentVersion: "1.7.1", UpstreamVersion: "1.8.0", HasUpdate: true, Type: "source"},
 		{Package: "app-editors/zed", CurrentVersion: "0.199.4", UpstreamVersion: "0.199.4", Type: "bin"},
-	}, []report.PackageResult{
+	}
+	results := []report.PackageResult{
 		{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true, Type: "source"},
 		{Package: "app-editors/zed", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4", Type: "bin"},
 	}
+	return checks, results
 }
 
 // TestValidationPlanHeadingAppearsOnce is the same assertion for the half story

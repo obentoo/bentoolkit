@@ -3,7 +3,9 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -25,13 +27,31 @@ func TestExecRunner_PipesStdin(t *testing.T) {
 // context is cancelled, not run to completion.
 func TestExecRunner_ContextCancelKills(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
 
+	// The child creates readyFile before it blocks, so the cancel below lands
+	// on a child that is genuinely running rather than after a guess at how
+	// long a spawn takes. The path is an argument, not part of the script, so
+	// it needs no quoting; exec keeps the sleeping process the one the context
+	// kills, as the single-command script this replaced did.
+	readyFile := filepath.Join(t.TempDir(), "child.ready")
 	start := time.Now()
-	_, err := execRunner{}.Run(ctx, "sh", []string{"-c", "sleep 5"}, nil)
+	errc := make(chan error, 1)
+	var returned atomic.Bool
+	go func() {
+		_, err := execRunner{}.Run(ctx, "sh", []string{"-c", `: > "$1" && exec sleep 5`, "sh", readyFile}, nil)
+		returned.Store(true)
+		errc <- err
+	}()
+	waitForReadyFile(t, readyFile, returned.Load)
+	cancel()
+
+	var err error
+	select {
+	case err = <-errc:
+	case <-time.After(signalWaitDeadline):
+		t.Fatalf("execRunner.Run still running %v after its context was cancelled", signalWaitDeadline)
+	}
 	elapsed := time.Since(start)
 
 	if err == nil {

@@ -38,6 +38,17 @@ type Config struct {
 	// that has to be repeated per command is a key that ends up set in one
 	// place and forgotten in the other.
 	UI UIConfig `yaml:"ui,omitempty"`
+	// Notice configures `bentoo notice` (S071-R4, R6.1).
+	Notice NoticeConfig `yaml:"notice,omitempty"`
+}
+
+// NoticeConfig is the `notice:` block: where `bentoo notice` writes the site
+// half of a notice.
+type NoticeConfig struct {
+	// SitePath is the site repository's root; the notice YAML goes under
+	// <site_path>/src/content/notices/. Empty means "print the YAML instead"
+	// (S071-R4.2). A leading `~/` is expanded by GetNoticeSitePath.
+	SitePath string `yaml:"site_path,omitempty"`
 }
 
 // UIConfig is the `ui:` block: how a long-running command renders itself.
@@ -386,6 +397,7 @@ type probeConfig struct {
 	Autoupdate   AutoupdateConfig      `yaml:"autoupdate,omitempty"`
 	Repositories map[string]legacyRepo `yaml:"repositories,omitempty"`
 	UI           UIConfig              `yaml:"ui,omitempty"`
+	Notice       NoticeConfig          `yaml:"notice,omitempty"`
 	GitHub       struct {
 		Token string `yaml:"token"`
 	} `yaml:"github"`
@@ -427,7 +439,7 @@ func secretDestination(envName string) string {
 
 // LoadFrom reads configuration from a specific file path
 func LoadFrom(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own config file (FindConfigPath: XDG or ~/.bentoo)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create default config
@@ -595,6 +607,23 @@ func (c *Config) getOverlayPathWithValidation(validate bool) (string, error) {
 	return path, nil
 }
 
+// GetNoticeSitePath returns notice.site_path with a leading `~/` expanded to
+// the home directory (S071-R4.6), or "" when the key is unset. Only a leading
+// `~/` is expanded: `~other/` names another user's home and a tilde anywhere
+// else is an ordinary character, so both are returned unchanged.
+func (c *Config) GetNoticeSitePath() (string, error) {
+	path := c.Notice.SitePath
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expanding notice.site_path %q: %w", path, err)
+	}
+	return filepath.Join(home, rest), nil
+}
+
 // GetGitUser returns the git user name and email.
 // It first tries to read from ~/.gitconfig, then falls back to bentoo config.
 func (c *Config) GetGitUser() (user, email string, err error) {
@@ -628,11 +657,11 @@ func defaultGitconfigPath() (string, error) {
 // parseGitconfig reads user.name and user.email from a gitconfig file.
 // The gitconfig file uses INI format.
 func parseGitconfig(path string) (user, email string, err error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // G304: path is the user's ~/.gitconfig (defaultGitconfigPath)
 	if err != nil {
 		return "", "", err
 	}
-	defer file.Close() //nolint:errcheck
+	defer file.Close() //nolint:errcheck // read-only handle: a failed close cannot lose data
 
 	return ParseGitconfigContent(file)
 }

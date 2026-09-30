@@ -114,6 +114,7 @@ autoupdate:
 | `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
 | `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when `api_key_env` resolves to a non-empty key via env or the secrets file, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
 | `llm.max_budget_usd` | `claude-code` only: optional per-call spend cap passed to `claude --max-budget-usd` (unset = no cap) | No |
+| `notice.site_path` | Root of the site repository `bentoo notice` writes `src/content/notices/<id>.yaml` into. A leading `~/` is expanded. Unset: only the news item is written and the site YAML is printed | No |
 | `ui.mode` | How long-running commands render themselves: `auto`, `plain`, `inline` or `fullscreen`. Unset falls through to `auto` (inline on a terminal, plain in a pipe), which is exactly today's behaviour. Overridden by `--ui <mode>` and `BENTOO_UI` | No |
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
@@ -662,6 +663,54 @@ It is the same download `bentoo overlay autoupdate` performs before it
 regenerates a Manifest — same request, same guards, same file name — so what
 this writes is what the Manifest was computed against.
 
+### Notice Commands
+
+Every notice lives in two places: a GLEP 42 news item in the overlay, read
+offline by portage and `eselect news`, and a YAML file in the site repository,
+from which the notices feed and pages are built. `bentoo notice` writes both
+from one input, with one ID (`<published>-<name>`), so they cannot drift.
+
+```bash
+# A security notice; the body is read from a file
+bentoo notice new --type security --severity critical \
+  --name foo-cve --published 2026-09-28 --title "foo 1.2 heap overflow" \
+  --summary "A crafted archive overflows a heap buffer in foo before 1.2.3." \
+  --affects 'dev-libs/foo:1 >=1.0,<1.2.3' \
+  --body-file body.txt
+
+# Revise it later: the current text opens in your editor
+bentoo notice revise 2026-09-28-foo-cve --severity warning
+```
+
+- **`--affects`** is `<category>/<package>[:<slot>][ <range>[,<range>...]]`, a
+  range being `<`, `<=`, `=`, `>=` or `>` followed by a Gentoo version. Repeat
+  the flag for several packages; `security` and `release` notices need at
+  least one. The ranges of one entry combine with AND. A news item's
+  `Display-If-Installed` headers combine with OR, so an entry with several
+  ranges is written there as the bare package, with a warning: the news item
+  then targets every installed version, while the feed stays precise.
+- **The body** comes from `--body-file`, or from `$VISUAL`, else `$EDITOR`,
+  opened on a temporary file. Type it anywhere in that file. The file's
+  instructions end with a scissors line,
+  `# ------------------------ >8 ------------------------`: above it, lines
+  starting with `#` are the instructions and are dropped, and any other text
+  is kept; below it, everything is kept as written, `#` lines included, so a
+  root prompt such as `# emerge --sync` survives. An empty body aborts without
+  writing anything. The editor command is split into words and run directly,
+  never through a shell.
+- **`notice.site_path`** in the configuration points at the site repository.
+  Without it only the news item is written, and the site YAML is printed for
+  you to save by hand.
+- **`--published`** defaults to today in UTC and cannot be in the future;
+  `--author` defaults to the configured git user.
+- **`revise`** bumps the news item's `Revision` and sets the site file's
+  `updated` to now, keeping the ID and the publication date. `--severity`,
+  `--title`, `--summary` and `--affects` replace those fields. When neither the
+  text nor a field changed, nothing is written.
+- **No git operation.** Both commands print every path they wrote and the
+  `git add`/`git commit` to run in each repository; review, commit and push
+  are yours.
+
 ### Autoupdate System
 
 The autoupdate system automates version tracking by fetching upstream sources and comparing them against the overlay's current versions.
@@ -801,7 +850,7 @@ check that the `fetch_url` is a host you trust with those values.
 
 | Key | Required | Meaning |
 |---|---|---|
-| `fetch_url` | **yes** — it is the trigger | The form action / endpoint. Without it the whole block is inert, which is why `--lint` refuses a `fetch_*` key beside a missing or blank one. May carry `{id}` (see the id lookup below) |
+| `fetch_url` | **yes** — it is the trigger | The form action / endpoint. Without it the whole block is inert, which is why `--lint` refuses a `fetch_*` key beside a missing or blank one. Must be an absolute `http(s)://` URL with a fixed host. May carry `{id}` (see the id lookup below) — in the path or query only, so an upstream value can never choose the host |
 | `fetch_filename` | **yes** | Destination name, `{version}` substituted. Must equal the basename the ebuild's `SRC_URI` expects, or the Manifest will not match |
 | `fetch_method` | no — defaults to `post` | `post` or `get` |
 | `fetch_body` | no — defaults to `form` | `form` (urlencoded) or `json`. In `json` the values of `fetch_form` become a JSON object: exactly the literals `true` and `false` become booleans, **everything else stays a string** (so a postcode is not silently turned into a number) |
@@ -811,7 +860,7 @@ check that the `fetch_url` is a host you trust with those values.
 | `fetch_min_bytes` | no | Smallest believable size for the finished file. Checked on the bytes actually written, so a truncated transfer fails too |
 | `fetch_serial_env` | no — **but only together with** `fetch_serial_field` | Name of the env var holding the serial. Must begin with `BENTOO_FETCH_`; any other name refuses the record, naming the `BENTOO_FETCH_` name to rename it to |
 | `fetch_serial_field` | no — **but only together with** `fetch_serial_env` | Form field the serial is submitted in |
-| `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted) |
+| `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted). Same rule as `fetch_url`: absolute `http(s)://`, `{version}` in the path or query only |
 | `fetch_id_pattern` | no — **but only together with** `fetch_id_url` | Regex over that body with **1 capture group**, the id. `{version}` is substituted **quoted**, so `21.1` matches `21.1` and not `2101` |
 | `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims. Every variable must begin with `BENTOO_FETCH_`; the refusal lists each other name with its field |
 | `fetch_timeout` | no — defaults to 300 | Seconds for the whole download |
@@ -1218,18 +1267,51 @@ bentoo overlay commit
 
 ### Exit codes
 
-`bentoo overlay autoupdate` reports its outcome through the process exit code so
-it can be wired into scripts and CI:
+Every `bentoo` command reports its outcome through the process exit code, so it
+can be wired into scripts and CI:
 
-| Code | Meaning |
-|------|---------|
-| `0` | Every package was processed successfully. |
-| `1` | Partial failure — at least one package failed **and** at least one succeeded. |
-| `2` | Total failure — no package was processed (or the configuration is invalid). |
+| Situation | Code |
+|-----------|------|
+| Success, including "nothing to do" (`overlay commit` or `overlay staged clean` with nothing staged, `overlay compare` on an overlay with no packages, `overlay autoupdate --list` with nothing pending, `version`) | `0` |
+| Any failure a command reports (configuration, git, scan, lock held, write refused, `snapshot hook` without `--install`/`--uninstall`, `overlay manifest` with nothing to update, `overlay autoupdate --lint` with findings) | `1` |
+| Usage error: unknown command, unknown flag, wrong argument count, unusable `--ui` | `1` |
+| `overlay validate`: an error finding from a deciding gate, or a `--depth` that does not parse | `1` |
+| `overlay validate`: the selector matches nothing, or the run fails for a reason other than an interruption | `2` |
+| `overlay validate` interrupted | `130` |
+| `overlay autoupdate --check` and `overlay analyze --all` batches: every package succeeded | `0` |
+| … partial failure — at least one package failed **and** at least one succeeded | `1` |
+| … total failure — no package was processed (or the configuration is invalid) | `2` |
+| First interrupt (SIGINT/`Ctrl+C`, SIGTERM or SIGHUP) while a cancellable command runs | the code its interrupted run returns — see the list below |
+| First interrupt while any other command runs, or before a command is selected | terminated by the signal (a shell reports 128+n) |
+| Second interrupt while a cancellable command is handling the first | terminated by the signal |
 
-A non-zero exit code is therefore distinguishable: `1` means "some work
-landed", `2` means "nothing landed". The per-package errors that caused a `1`
-or `2` are also printed so the failing packages can be retried individually.
+For a batch, a non-zero exit code is therefore distinguishable: `1` means "some
+work landed", `2` means "nothing landed". The per-package errors that caused a
+`1` or `2` are also printed so the failing packages can be retried individually.
+
+A failure prints its message on stderr; report rows stay on stdout. The usage
+text is printed only for a usage error such as an unknown flag or a wrong
+argument count, not when a command fails.
+
+**Cancellable commands.** These commands stop cleanly on their first interrupt
+(SIGINT, SIGTERM or SIGHUP alike) and return the code below:
+
+| Command | Interrupted by its first signal |
+|---------|---------------------------------|
+| `overlay validate` | exit `130` |
+| `overlay autoupdate` (`--check --force`) | exit `2` |
+| `snapshot status` | exit `0` — the interrupted run renders and returns normally |
+| `distfile fetch`, `overlay add`, `overlay analyze`, `overlay commit`, `overlay manifest`, `overlay pull`, `overlay push`, `overlay status`, `snapshot apply`, `snapshot list`, `snapshot prune`, `snapshot rollback`, `snapshot run` | exit `1` |
+| `notice new`, `notice revise` | exit `1` — measured while the editor is open: the editor is stopped and nothing is written |
+| `overlay compare`, `overlay prune` | may not stop promptly: while an upstream never answers, the HTTP wait ignores the interruption (it was still running 30 s after SIGINT) — a second interrupt terminates it |
+| `overlay staged clean` | waits on no external program; with nothing staged it exits `0` before an interrupt can land |
+| `snapshot restore` | refuses before any wait unless a ship entry is configured; its interrupted exit code has not been measured |
+
+At the confirmation prompts of `overlay commit` and `overlay analyze`, a single
+`Ctrl+C` ends the command. Every command not listed above — including
+`overlay log` and `overlay diff` — is terminated by the first signal. A second
+signal always terminates, even while a cancellable command is still winding
+down.
 
 ### Live output
 
@@ -1524,11 +1606,18 @@ bentoo overlay push
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests, with the race detector, in random order
 make test
 
-# Run tests with coverage
+# Replay the order of a failing run (the seed is printed as -test.shuffle <seed>)
+make test SHUFFLE=1790618260127275631
+
+# Run tests with coverage (also -race, random order)
 make coverage
+
+# Run every fuzz target for FUZZTIME each (default 30s)
+make fuzz
+make fuzz FUZZTIME=5m
 
 # Run specific package tests
 go test -v ./internal/overlay/...

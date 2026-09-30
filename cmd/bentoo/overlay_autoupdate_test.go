@@ -64,7 +64,8 @@ func writeExitTestPackagesConfig(t *testing.T, overlayDir, serverURL string, pkg
 // exit-code contract). A package fails deterministically, without any HTTP retry
 // latency, when its config points at a missing JSON field: the fetch returns 200
 // and the failure happens at parse time, so it is a real per-package failure.
-// The exit code is captured via the shared withExitIntercept/exitSentinel harness.
+// runCheck returns its outcome (story 058); func exitCodeFor maps it to the
+// exit status.
 func TestCLI_ExitCodes(t *testing.T) {
 	// Local server returns a valid version payload so a package whose path
 	// matches ("version") succeeds on the first HTTP try (no retries needed).
@@ -142,14 +143,12 @@ func TestCLI_ExitCodes(t *testing.T) {
 			autoupdateConcurrency = autoupdate.DefaultConcurrency
 			defer func() { autoupdateConcurrency = origConc }()
 
-			code := withExitIntercept(func() {
-				// cacheTTL = 0 → runCheck skips WithCacheTTL and the Checker
-				// uses its default 1-hour TTL (R2.2). This test does not
-				// exercise cache freshness; force=true bypasses the cache.
-				// Zero config.LLMConfig{} (Provider == "") → no LLM provider is
-				// wired and the exit-code contract is unaffected.
-				runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
-			})
+			// cacheTTL = 0 → runCheck skips WithCacheTTL and the Checker
+			// uses its default 1-hour TTL (R2.2). This test does not
+			// exercise cache freshness; force=true bypasses the cache.
+			// Zero config.LLMConfig{} (Provider == "") → no LLM provider is
+			// wired and the exit-code contract is unaffected.
+			code := exitCodeFor(runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{}))
 			if code != tt.wantExit {
 				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)
 			}
@@ -215,7 +214,7 @@ func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
 			origCheck, origForce, origApply, origConc
 	}()
 
-	withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+	_ = runAutoupdate(autoupdateCmd, nil)
 
 	// Reload the cache with the SAME TTL the config declared (60 s). If the
 	// TTL had not reached the writer, the entry written above would have been
@@ -294,10 +293,10 @@ func TestAutoupdateCommandDescription(t *testing.T) {
 	}
 }
 
-// TestAutoupdateCommandRun tests that Run function is set
+// TestAutoupdateCommandRun tests that the RunE function is set
 func TestAutoupdateCommandRun(t *testing.T) {
-	if autoupdateCmd.Run == nil {
-		t.Error("autoupdate command should have a Run function")
+	if autoupdateCmd.RunE == nil {
+		t.Error("autoupdate command should have a RunE function")
 	}
 }
 
@@ -796,15 +795,10 @@ func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
 		return true
 	})
 
-	// captureStdout OUTSIDE withExitIntercept: runCheck ends by calling osExit,
-	// which the intercept turns into a panic. Capturing on the inside would let
-	// that panic unwind past the pipe read and yield empty output.
 	var code int
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
-				&config.Config{}, config.LLMConfig{})
-		})
+		code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+			&config.Config{}, config.LLMConfig{}))
 	})
 
 	if code != 0 {
@@ -838,12 +832,14 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 		return wantErr
 	})
 
-	// captureStdout OUTSIDE withExitIntercept — see the sibling test for why.
+	// The failure is a diagnostic, so it is read on stderr (story 058, R3.3);
+	// the check's report stays on stdout.
 	var code int
+	var errOut string
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
-				&config.Config{}, config.LLMConfig{})
+		errOut = captureStderr(t, func() {
+			code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+				&config.Config{}, config.LLMConfig{}))
 		})
 	})
 
@@ -853,11 +849,11 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("the writer was called %d times, want exactly 1 (design D4: one batch, one call)", calls)
 	}
-	if !strings.Contains(out, wantErr.Error()) {
-		t.Errorf("the write failure was swallowed; want the cause %q in the output, got:\n%s", wantErr, out)
+	if !strings.Contains(errOut, wantErr.Error()) {
+		t.Errorf("the write failure was swallowed; want the cause %q on stderr, got:\n%s", wantErr, errOut)
 	}
-	if strings.Contains(out, "Wrote ") {
-		t.Errorf("a failed write reported success; got:\n%s", out)
+	if strings.Contains(out+errOut, "Wrote ") {
+		t.Errorf("a failed write reported success; got:\n%s%s", out, errOut)
 	}
 	if after := f.readRegistry(t); !bytes.Equal(before, after) {
 		t.Error("the stubbed writer must not have touched the file; the fixture is no longer a valid control")

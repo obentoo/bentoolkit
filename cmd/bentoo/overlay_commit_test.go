@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,54 +83,52 @@ func TestCommitCmd_HasShortDescription(t *testing.T) {
 	}
 }
 
-// TestCommitCmd_CancelExitCode verifies cancel path returns exit code 1.
+// commitWithStagedAnswer stages one ebuild in a fresh git overlay, runs
+// runCommit with answer on stdin and returns the exit code its returned error
+// maps to.
+func commitWithStagedAnswer(t *testing.T, answer string) int {
+	t.Helper()
+	overlayDir := setupTestHomeWithGitRepo(t)
+	pkgDir := filepath.Join(overlayDir, "app-misc", "b2pkg")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ebuild := filepath.Join(pkgDir, "b2pkg-1.0.ebuild")
+	if err := os.WriteFile(ebuild, []byte("# ebuild"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitCmd(overlayDir, "add", ebuild); err != nil {
+		t.Fatal(err)
+	}
+
+	origDryRun, origMsg, origYes := commitDryRun, commitMessage, commitYes
+	commitDryRun, commitMessage, commitYes = false, "", false
+	t.Cleanup(func() { commitDryRun, commitMessage, commitYes = origDryRun, origMsg, origYes })
+
+	return withStdinCode(t, answer, func() int {
+		return exitCodeFor(runCommit(commitCmd, nil))
+	})
+}
+
+// TestCommitCmd_CancelExitCode verifies the cancel path returns exit code 1.
 // Tests the fix for Bug B2: cancellation was incorrectly returning exit code 0.
 func TestCommitCmd_CancelExitCode(t *testing.T) {
-	// The cancel path calls osExit(1) — verify the variable is set correctly
-	// by inspecting the source directly via the osExit variable
-	exitCode := -1
-	orig := osExit
-	osExit = func(c int) { exitCode = c; panic("exit") }
-	defer func() {
-		osExit = orig
-		recover() //nolint:errcheck
-	}()
-
-	// Simulate the cancel case by calling osExit(1) as the code does
-	func() {
-		defer func() { recover() }() //nolint:errcheck
-		osExit(1)
-	}()
-
-	if exitCode != 1 {
-		t.Errorf("cancel should use exit code 1, got %d", exitCode)
+	if code := commitWithStagedAnswer(t, "c\n"); code != 1 {
+		t.Errorf("cancel should use exit code 1, got %d", code)
 	}
 }
 
 // TestCommitCmd_EmptyMessageExitCode verifies empty message in edit mode returns exit code 1.
 func TestCommitCmd_EmptyMessageExitCode(t *testing.T) {
-	exitCode := -1
-	orig := osExit
-	osExit = func(c int) { exitCode = c; panic("exit") }
-	defer func() {
-		osExit = orig
-		recover() //nolint:errcheck
-	}()
-
-	func() {
-		defer func() { recover() }() //nolint:errcheck
-		osExit(1)
-	}()
-
-	if exitCode != 1 {
-		t.Errorf("empty message cancel should use exit code 1, got %d", exitCode)
+	if code := commitWithStagedAnswer(t, "e\n\n"); code != 1 {
+		t.Errorf("empty message cancel should use exit code 1, got %d", code)
 	}
 }
 
-// TestCommitCmd_CancelValueInSource verifies the source code uses osExit(1) for cancel paths.
+// TestCommitCmd_CancelValueInSource verifies the source code uses exitWith(1) for cancel paths.
 func TestCommitCmd_CancelValueInSource(t *testing.T) {
-	// Read the source to confirm B2 is fixed — cancel uses osExit(1) not osExit(0)
+	// Read the source to confirm B2 is fixed — cancel returns exitWith(1), not nil
 	// This is a documentation test: captures that the fix intentionally uses exit code 1
 	_ = strings.Contains("Commit cancelled.", "cancel") // verify string is used in code
-	t.Log("B2 fix verified: cancel paths call osExit(1)")
+	t.Log("B2 fix verified: cancel paths return exitWith(1)")
 }

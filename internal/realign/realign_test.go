@@ -236,7 +236,7 @@ func realignPassingGates() []validate.GateResult {
 // TestRealignConsumesStory033Unchanged is the "add no gate, invent no wrapper"
 // assertion, held at compile time.
 //
-// # Why every declaration below is //nolint:staticcheck
+// # Why every declaration below carries a staticcheck nolint directive
 //
 // staticcheck's QF1011 reads `var _ T = expr` as a redundant annotation and
 // offers to drop the T, because the right-hand side already has that type. Here

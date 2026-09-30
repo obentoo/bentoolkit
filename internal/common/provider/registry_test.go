@@ -344,9 +344,7 @@ func TestRegistry_DownloadFailureFallsBackToEselect(t *testing.T) {
 	os.WriteFile(filepath.Join(eselectDir, "repositories.xml"), []byte(testXML), 0o644)
 
 	// Override home for the test
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", home)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", home)
 
 	reg := &RepositoryRegistry{
 		CacheDir: dir,

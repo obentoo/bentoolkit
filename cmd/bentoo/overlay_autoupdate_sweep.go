@@ -44,7 +44,7 @@ var (
 //
 // concurrency is resolved by the caller — see sweepConcurrency below for why it
 // is not read from the flag here.
-func runSweep(ctx context.Context, overlayPath string, args []string, concurrency int) {
+func runSweep(ctx context.Context, overlayPath string, args []string, concurrency int) error {
 	// A sweep with no registry has no claims, and "no entry claims this" is the
 	// state in which planSweep refuses to remove anything. Failing loudly here
 	// is the honest outcome: the alternative is an empty batch that reads as
@@ -52,8 +52,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		logger.Error("cannot sweep: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	var target string
@@ -64,8 +63,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 	batch, err := sweepPlannerFn(overlayPath, cfg.Packages, target)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	displaySweepPlan(batch)
@@ -86,11 +84,11 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 		default:
 			output.Info.Println("  Nothing to sweep: every ebuild is claimed by an entry.")
 		}
-		return
+		return nil
 	}
 
 	if !confirmSweep(batch) {
-		return
+		return nil
 	}
 
 	report := sweepExecutorFn(ctx, overlayPath, batch,
@@ -103,6 +101,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 		autoupdate.WithSweepDistfilesCache(autoupdateDirs.Cache),
 	)
 	displaySweepReport(report)
+	return nil
 }
 
 // sweepConcurrency returns how many directories the sweep may process at once.
@@ -122,7 +121,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 // operator who has verified it can still say so with --concurrency.
 //
 // flagWasSet is passed in rather than read from autoupdateCmd here: that command
-// value is initialised with a Run func that reaches this file, so touching it
+// value is initialised with a RunE func that reaches this file, so touching it
 // from this package closes an initialization cycle.
 func sweepConcurrency(flagWasSet bool) int {
 	if flagWasSet {

@@ -229,9 +229,7 @@ func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	if _, err := os.Stat(pkgDir); err != nil {
@@ -272,9 +270,7 @@ func TestPruneAPIOnlyProviderRefusesEverythingWithReason(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
 	})
 
 	if code > 0 {
@@ -309,18 +305,20 @@ func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
 	setOverlayPruneFlags(t, false, false, false, false)
 	forbidOverlayPruneRemoval(t)
 
+	// The error is a diagnostic, so it is read on stderr (story 058, R3.3).
 	var code int
-	out := captureStdout(t, func() {
-		code = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{})
+	var errOut string
+	_ = captureStdout(t, func() {
+		errOut = captureStderr(t, func() {
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}))
 		})
 	})
 
 	if code <= 0 {
 		t.Errorf("exit code = %d, want non-zero; an unmatched target that exits 0 reads as 'nothing to clean'", code)
 	}
-	if !strings.Contains(out, typo) {
-		t.Errorf("the error does not name the argument %q, so the operator cannot see the typo:\n%s", typo, out)
+	if !strings.Contains(errOut, typo) {
+		t.Errorf("the error does not name the argument %q on stderr, so the operator cannot see the typo:\n%s", typo, errOut)
 	}
 }
 
@@ -344,9 +342,7 @@ func TestPrunePlanListsFilesAndRegistryKeys(t *testing.T) {
 	forbidOverlayPruneRemoval(t)
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	for _, want := range []string{
@@ -411,9 +407,7 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 	forbidOverlayPruneRemoval(t)
 
 	out := captureStdout(t, func() {
-		_ = withExitIntercept(func() {
-			runPrune(context.Background(), overlayPath, nil, &config.Config{})
-		})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 	})
 
 	if strings.Contains(out, "would be removed") {
@@ -462,9 +456,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		setOverlayPruneFlags(t, false, false, false, false)
 		forbidOverlayPruneRemoval(t)
 		return captureStdout(t, func() {
-			_ = withExitIntercept(func() {
-				runPrune(context.Background(), overlayPath, nil, &config.Config{})
-			})
+			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
 		})
 	}
 
@@ -507,9 +499,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 
 		var code int
 		empty = captureStdout(t, func() {
-			code = withExitIntercept(func() {
-				runPrune(context.Background(), overlayPath, nil, &config.Config{})
-			})
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
 		})
 
 		if code > 0 {

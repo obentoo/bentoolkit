@@ -25,8 +25,7 @@ func writeLintRegistry(t *testing.T, content string) string {
 	return dir
 }
 
-// TestRunLintClean pins that a registry obeying the record model exits without
-// calling osExit at all.
+// TestRunLintClean pins that a registry obeying the record model exits 0.
 func TestRunLintClean(t *testing.T) {
 	dir := writeLintRegistry(t, `["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
@@ -38,8 +37,8 @@ claude-code — npm dist-tags.latest is the stable channel.
 # END
 `)
 
-	if code := withExitIntercept(func() { runLint(dir) }); code != -1 {
-		t.Fatalf("clean registry exited with %d, want no exit", code)
+	if code := exitCodeFor(runLint(dir)); code != 0 {
+		t.Fatalf("clean registry exited with %d, want 0", code)
 	}
 }
 
@@ -69,7 +68,7 @@ pnpm — npm package, stable channel.
 # END
 `)
 
-	if code := withExitIntercept(func() { runLint(dir) }); code != 1 {
+	if code := exitCodeFor(runLint(dir)); code != 1 {
 		t.Fatalf("got exit %d, want 1", code)
 	}
 }
@@ -92,15 +91,15 @@ claude-code — npm dist-tags.latest is the stable channel.
 # END
 `)
 
-	if code := withExitIntercept(func() { runLint(dir) }); code != -1 {
-		t.Fatalf("file header exited with %d, want no exit", code)
+	if code := exitCodeFor(runLint(dir)); code != 0 {
+		t.Fatalf("file header exited with %d, want 0", code)
 	}
 }
 
 // TestRunLintMissingRegistry pins that a missing packages.toml is an error, not
 // a silent pass — a lint that quietly succeeds on nothing is worse than none.
 func TestRunLintMissingRegistry(t *testing.T) {
-	if code := withExitIntercept(func() { runLint(t.TempDir()) }); code != 1 {
+	if code := exitCodeFor(runLint(t.TempDir())); code != 1 {
 		t.Fatalf("got exit %d, want 1", code)
 	}
 }
@@ -176,18 +175,14 @@ func readLintRegistry(t *testing.T, overlayDir string) []byte {
 	return data
 }
 
-// runLintCapturing runs runLint over overlayDir and returns its exit code
-// (-1 when it did not exit) together with everything it printed.
-//
-// captureStdout wraps withExitIntercept, never the other way round: runLint ends
-// by calling osExit, which the intercept turns into a panic, and capturing on
-// the inside would let that panic unwind past the pipe read and yield empty
-// output.
+// runLintCapturing runs runLint over overlayDir and returns the exit status its
+// returned outcome maps to (func exitCodeFor) together with everything it
+// printed.
 func runLintCapturing(t *testing.T, overlayDir string) (int, string) {
 	t.Helper()
-	code := -1
+	var code int
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() { runLint(overlayDir) })
+		code = exitCodeFor(runLint(overlayDir))
 	})
 	return code, out
 }
@@ -240,7 +235,7 @@ func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
 
 	var code int
 	captureStdout(t, func() {
-		code = withExitIntercept(func() { runAutoupdate(autoupdateCmd, nil) })
+		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
 	})
 
 	if code != 1 {
@@ -422,8 +417,8 @@ claude-code — npm dist-tags.latest is the stable channel.
 	if strings.Contains(out, "@@") {
 		t.Errorf("a no-op repair printed a diff; got:\n%s", out)
 	}
-	if code != -1 {
-		t.Errorf("exit code = %d, want no exit: the registry is clean", code)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0: the registry is clean", code)
 	}
 }
 

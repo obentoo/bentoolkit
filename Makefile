@@ -20,11 +20,29 @@ CONFIG_EXAMPLE := config.example.yaml
 CONFIG_DIR := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/bentoo
 CONFIG_FILE := $(CONFIG_DIR)/config.yaml
 
-# Go commands
+# Go commands. Every target runs the toolchain go.mod names, as CI does
+# (setup-go reads go.mod): a newer host Go formats and vets differently. Set
+# GOTOOLCHAIN in the environment to override.
+GO_TOOLCHAIN := $(shell awk '/^toolchain /{print $$2}' go.mod)
+export GOTOOLCHAIN ?= $(GO_TOOLCHAIN)
 GO := go
 GOTEST := $(GO) test
 GOBUILD := $(GO) build
 GOMOD := $(GO) mod
+
+# golangci-lint at the version the CI Lint job installs, built with the toolchain
+# exported above — the one CI uses; built with a newer host Go, its gofmt
+# disagrees with CI's. lint-pin-check keeps this pin and the CI one equal.
+GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+# Extra golangci-lint arguments, e.g. LINT_ARGS="--enable-only misspell".
+LINT_ARGS ?=
+
+# Test order: `on` draws a fresh seed per run; a failing run prints
+# `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.
+SHUFFLE ?= on
+# How long `make fuzz` runs each fuzz target.
+FUZZTIME ?= 30s
 
 # Default target
 .PHONY: all
@@ -65,17 +83,31 @@ install-config:
 		echo "install-config: wrote $(CONFIG_FILE) (edit it and set overlay.path)"; \
 	fi
 
-# Run tests
+# Run tests with the race detector, in shuffled order
 .PHONY: test
 test:
-	$(GOTEST) -v ./...
+	$(GOTEST) -race -shuffle=$(SHUFFLE) -v ./...
 
-# Run tests with coverage
+# Run tests with coverage (race detector and shuffled order, like `test`)
 .PHONY: coverage
 coverage:
-	$(GOTEST) -v -coverprofile=coverage.out ./...
+	$(GOTEST) -race -shuffle=$(SHUFFLE) -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
+
+# Run every fuzz target for FUZZTIME each. `go test -list` prints a package's
+# matching names and then its `ok <pkg>` line, so each name is paired with the
+# package on the next `ok` line. -fuzz takes exactly one target and one package
+# per run, hence the loop; the first failure stops it, naming the target.
+.PHONY: fuzz
+fuzz:
+	@set -eu; \
+	targets="$$($(GOTEST) -list '^Fuzz' ./... | awk '/^Fuzz/ { names = names " " $$1; next } /^ok / { n = split(names, a, " "); for (i = 1; i <= n; i++) print $$2 " " a[i]; names = "" }')"; \
+	if [ -z "$$targets" ]; then echo "fuzz: no fuzz targets found"; exit 1; fi; \
+	printf '%s\n' "$$targets" | while read -r pkg name; do \
+		echo "fuzz: $$name ($$pkg) for $(FUZZTIME)"; \
+		$(GOTEST) -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || { echo "fuzz: $$name in $$pkg FAILED"; exit 1; }; \
+	done
 
 # Audit the context spine: no naked context.Background() may appear in
 # internal/autoupdate or internal/overlay outside of test files. The naive
@@ -112,7 +144,7 @@ audit: audit-ctx
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f coverage.out coverage.html
+	rm -f coverage.out coverage.html cov.out coverage*.out $(BINARY_NAME)
 	rm -rf $(BUILD_DIR)
 
 # Cross-compilation targets. CGO is disabled so these build on any host without a
@@ -141,12 +173,26 @@ vet:
 	$(GO) vet ./...
 
 .PHONY: lint
-lint: fmt vet
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	else \
-		echo "golangci-lint not installed, running basic checks only"; \
-		echo "Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+lint: fmt vet lint-pin-check
+	@set -e; \
+	for tag in "" chromedp playwright; do \
+		echo "golangci-lint $(GOLANGCI_LINT_VERSION) (tags: $${tag:-none})"; \
+		if [ -z "$$tag" ]; then \
+			$(GOLANGCI_LINT) run $(LINT_ARGS) ./...; \
+		else \
+			$(GOLANGCI_LINT) run $(LINT_ARGS) --build-tags "$$tag" ./...; \
+		fi; \
+	done
+
+# Fail when the golangci-lint version above differs from the one CI installs.
+.PHONY: lint-pin-check
+lint-pin-check:
+	@ci="$$(grep -o 'golangci-lint@v[0-9][0-9.]*' .github/workflows/ci.yml | head -n 1 | sed 's/.*@//')"; \
+	if [ -z "$$ci" ]; then \
+		echo "cannot find the golangci-lint pin in .github/workflows/ci.yml"; exit 1; \
+	fi; \
+	if [ "$$ci" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "golangci-lint pin mismatch: Makefile $(GOLANGCI_LINT_VERSION), ci.yml $$ci"; exit 1; \
 	fi
 
 # Tidy dependencies
@@ -171,8 +217,9 @@ help:
 	@echo "  install         Install to $(INSTALL_DIR)"
 	@echo "  uninstall       Remove from $(INSTALL_DIR)"
 	@echo "  install-config  Copy config.example.yaml to the user's config dir (no overwrite)"
-	@echo "  test            Run tests"
-	@echo "  coverage        Run tests with coverage report"
+	@echo "  test            Run tests with -race in shuffled order (SHUFFLE=<seed> replays an order)"
+	@echo "  coverage        Run tests with coverage report (-race, shuffled)"
+	@echo "  fuzz            Run every fuzz target for FUZZTIME each (default 30s)"
 	@echo "  audit-ctx       Verify no naked context.Background() in internal/autoupdate, internal/overlay"
 	@echo "  audit           Run security audit (audit-ctx + go mod verify + govulncheck)"
 	@echo "  clean           Remove build artifacts"
@@ -181,7 +228,7 @@ help:
 	@echo "  build-linux-arm64  Build for Linux arm64"
 	@echo "  fmt             Format code"
 	@echo "  vet             Run go vet"
-	@echo "  lint            Run fmt, vet, and golangci-lint (if installed)"
+	@echo "  lint            Run fmt, vet, and golangci-lint $(GOLANGCI_LINT_VERSION) (the CI pin) for every build tag"
 	@echo "  tidy            Tidy dependencies"
 	@echo "  check           Run lint, test, and audit"
 	@echo "  help            Show this help"

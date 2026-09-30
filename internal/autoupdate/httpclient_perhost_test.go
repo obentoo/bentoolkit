@@ -70,7 +70,7 @@ func newPerHostClient(rt http.RoundTripper) *RetryableHTTPClient {
 func perHostGet(c *RetryableHTTPClient, rawURL string) error {
 	resp, err := c.Get(rawURL)
 	if resp != nil && resp.Body != nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck // test drain
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	if err != nil {
@@ -110,7 +110,7 @@ func TestHTTPClient_CircuitIsPerHost(t *testing.T) {
 		c := newPerHostClient(rt)
 
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, "http://dead.test/pkg") //nolint:errcheck // failures are the point
+			_ = perHostGet(c, "http://dead.test/pkg")
 		}
 		if err := perHostGet(c, "http://dead.test/pkg"); err == nil {
 			t.Error("6th request to the failing host succeeded; want it refused")
@@ -134,10 +134,10 @@ func TestHTTPClient_CircuitIsPerHost(t *testing.T) {
 		c := newPerHostClient(rt)
 
 		for _, h := range []string{"a.test", "b.test", "a.test", "b.test", "a.test"} {
-			_ = perHostGet(c, "http://"+h+"/pkg") //nolint:errcheck // failures are the point
+			_ = perHostGet(c, "http://"+h+"/pkg")
 		}
-		_ = perHostGet(c, "http://a.test/pkg") //nolint:errcheck
-		_ = perHostGet(c, "http://b.test/pkg") //nolint:errcheck
+		_ = perHostGet(c, "http://a.test/pkg")
+		_ = perHostGet(c, "http://b.test/pkg")
 
 		if got := rt.count("a.test"); got != 4 {
 			t.Errorf("a.test received %d requests, want 4: its breaker has seen only 3 failures and must still be closed", got)
@@ -154,7 +154,7 @@ func TestHTTPClient_CircuitIsPerHost(t *testing.T) {
 		c := newPerHostClient(nil)
 
 		for _, p := range []string{"/a", "/b?x=1", "/c/d", "/a?x=2", "/"} {
-			_ = perHostGet(c, dead.URL+p) //nolint:errcheck // failures are the point
+			_ = perHostGet(c, dead.URL+p)
 		}
 		before := hits.Load()
 		if err := perHostGet(c, dead.URL+"/never-requested"); err == nil {
@@ -174,7 +174,7 @@ func TestHTTPClient_CircuitRefusalNamesHost(t *testing.T) {
 		c := newPerHostClient(nil)
 
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, dead.URL) //nolint:errcheck // failures are the point
+			_ = perHostGet(c, dead.URL)
 		}
 		err := perHostGet(c, dead.URL)
 		if err == nil {
@@ -197,10 +197,10 @@ func TestHTTPClient_CircuitRefusalNamesHost(t *testing.T) {
 		c := newPerHostClient(rt)
 
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, "http://"+long+"/x") //nolint:errcheck
+			_ = perHostGet(c, "http://"+long+"/x")
 		}
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, "http://"+short+"/x") //nolint:errcheck
+			_ = perHostGet(c, "http://"+short+"/x")
 		}
 
 		errLong := perHostGet(c, "http://"+long+"/x")
@@ -235,7 +235,7 @@ func TestHTTPClient_CircuitKeyIncludesPort(t *testing.T) {
 
 		c := newPerHostClient(nil)
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, dead.URL) //nolint:errcheck
+			_ = perHostGet(c, dead.URL)
 		}
 		if err := perHostGet(c, healthy.URL); err != nil {
 			t.Errorf("%s refused after %s failed: %v", hu.Host, du.Host, err)
@@ -250,7 +250,7 @@ func TestHTTPClient_CircuitKeyIncludesPort(t *testing.T) {
 		rt := newPerHostRT(failing)
 		c := newPerHostClient(rt)
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			_ = perHostGet(c, "http://"+failing+"/x") //nolint:errcheck
+			_ = perHostGet(c, "http://"+failing+"/x")
 		}
 
 		for _, other := range []string{"svc.test:808", "svc.test:80", "svc.test", "svc.test:18080", "svc.test:8081"} {

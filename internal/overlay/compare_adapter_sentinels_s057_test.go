@@ -46,7 +46,7 @@ func TestGitHubAdapterTranslatesSentinels(t *testing.T) {
 					w.Header().Set("X-RateLimit-Reset", "1790000000")
 				}
 				w.WriteHeader(tc.status)
-				w.Write([]byte(`{"message":"no"}`)) //nolint:errcheck
+				w.Write([]byte(`{"message":"no"}`))
 			}))
 			t.Cleanup(srv.Close)
 

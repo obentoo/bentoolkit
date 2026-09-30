@@ -413,8 +413,7 @@ func configWithGentooGitHub() *config.Config {
 // config entry, so the network registry is never consulted). It asserts a
 // non-nil provider that, being API-only, is NOT a provider.PackageDirProvider.
 func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	cfg := configWithGentooGitHub()
 
@@ -425,7 +424,7 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 	if prov == nil {
 		t.Fatal("resolveGentooProvider returned nil for a valid config gentoo repo")
 	}
-	defer prov.Close() //nolint:errcheck
+	defer prov.Close()
 
 	if _, ok := prov.(provider.PackageDirProvider); ok {
 		t.Error("API-only GitHub provider unexpectedly implements PackageDirProvider")
@@ -438,16 +437,13 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 // applier.Apply work. Fully binary-free (no clone, no pkgdev).
 func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 	pinReviveConcurrency(t)
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
 	configDir := t.TempDir()
 	cfg := configWithGentooGitHub()
 
-	code := withExitIntercept(func() {
-		runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{})
-	})
+	code := exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{}))
 	if code != 1 {
 		t.Fatalf("runRevive exit code = %d, want 1 (no PackageDirProvider guard)", code)
 	}
@@ -460,8 +456,7 @@ func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 // binary. resolveGentooProvider's success path is exercised here too.
 func TestRunReviveList_NoCandidates(t *testing.T) {
 	pinReviveConcurrency(t)
-	_, cleanup := setupTestHome(t)
-	defer cleanup()
+	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
 	configDir := t.TempDir()
@@ -476,10 +471,8 @@ func TestRunReviveList_NoCandidates(t *testing.T) {
 	}
 	cfg := configWithGentooGitHub()
 
-	code := withExitIntercept(func() {
-		runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{})
-	})
-	if code != -1 {
-		t.Fatalf("runReviveList exited with code %d, want no exit", code)
+	code := exitCodeFor(runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}))
+	if code != 0 {
+		t.Fatalf("runReviveList exited with code %d, want 0", code)
 	}
 }

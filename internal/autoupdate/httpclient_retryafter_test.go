@@ -73,7 +73,7 @@ func runRetryAfter(t *testing.T, host string, budget time.Duration, first func(t
 	resp, err := c.GetWithContext(ctx, "http://"+host+"/pkg")
 	elapsed := time.Since(start)
 	if resp != nil && resp.Body != nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck // test drain
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 

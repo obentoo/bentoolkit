@@ -114,7 +114,7 @@ func TestCompareCmd_HasTokenFlag(t *testing.T) {
 //
 // Borrowed from other test files in package main, never re-declared:
 //
-//	withExitIntercept (run_functions_test.go:50) · captureStdout (snapshot_test.go:41)
+//	captureStdout (snapshot_test.go:41)
 //	verdictScopeLines (overlay_compare_summary_test.go; the summary builders it
 //	named beside this one were deleted by story 047, sub-task 8.1)
 //
@@ -279,9 +279,8 @@ func realignFlags(t *testing.T, realign, noReview bool) {
 }
 
 // realignRun executes the command and returns what it wrote to stdout together
-// with its exit code. withExitIntercept reports -1 when osExit was never called,
-// which IS exit 0 — the command returns normally on the success path — so it is
-// normalised here rather than at each call site.
+// with its exit code: runCompare returns its exit status (story 058), and func
+// exitCodeFor maps it — nil, the success path, is exit 0.
 //
 // The progress line ("\r  Checking: ...") and the clear sequence the command
 // writes before the report are stripped: they are terminal control, not report
@@ -289,11 +288,8 @@ func realignFlags(t *testing.T, realign, noReview bool) {
 func realignRun(t *testing.T, args []string) (stdout string, code int) {
 	t.Helper()
 	out := captureStdout(t, func() {
-		code = withExitIntercept(func() { runCompare(compareCmd, args) })
+		code = exitCodeFor(runCompare(compareCmd, args))
 	})
-	if code == -1 {
-		code = 0
-	}
 	if i := strings.LastIndex(out, "\r"); i >= 0 {
 		out = out[i+1:]
 	}
