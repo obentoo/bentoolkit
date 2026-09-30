@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output — enough to forge a report line or drive the terminal. The name and
   its suggested `BENTOO_FETCH_` replacement are now quoted and escaped in both
   the `fetch_serial_env` and the `fetch_form_env` refusal.
+- **An authenticated-fetch variable name may use only letters, digits and
+  underscore.** A name such as `BENTOO_FETCH_X%0Aforged` passed the prefix rule
+  and, being unset, reached the missing-secret error with its newline or escape
+  sequence raw. `fetch_serial_env` and every `fetch_form_env` variable outside
+  `BENTOO_FETCH_[A-Za-z0-9_]+` now refuse the record before anything is
+  resolved, in the sweep, `bentoo distfile` and `--lint`; the missing-secret
+  error and the unknown `fetch_*` key error print what they name quoted.
+  **Migration:** a name such as `BENTOO_FETCH_A-B`, resolvable only from the
+  secrets file, must be renamed (e.g. `BENTOO_FETCH_A_B`) in the record and
+  in the secrets file.
 - **A `packages.toml` key can no longer name a directory outside its
   category.** A key whose category or package half is `.`, `..`, or holds a
   `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
