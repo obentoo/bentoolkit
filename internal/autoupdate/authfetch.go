@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -115,9 +116,9 @@ var metaFetchKeys = []string{
 	metaFetchTimeout,
 }
 
-// Validation errors for the meta.fetch_* sub-schema. They are checked at config
-// load / lint time, unlike the Err* pair above, which report a download that
-// actually failed.
+// Validation errors for the meta.fetch_* sub-schema. They are checked at lint
+// time (the registry load does not validate), unlike the Err* pair above, which
+// report a download that actually failed.
 var (
 	// ErrMetaFetchURLRequired is returned when a [meta] block configures an
 	// authenticated fetch but its trigger, fetch_url, is missing or blank.
@@ -141,15 +142,20 @@ var (
 // rules only stay correct while they mirror that consumer, and holding the two
 // in different files is what let the schema go undocumented.
 //
-// The rules are deliberately NOT the parser's full requirement set. Once
-// fetch_url is present the parser already fails loudly on a missing filename and
-// on a half-declared serial (one of fetch_serial_env/fetch_serial_field without
-// the other), so repeating those checks here would move an already-visible
-// failure earlier at the price of letting one broken record block the whole
-// registry load. What the parser cannot report is the silent
-// case: a [meta] block whose trigger is missing or misspelled does not read as
+// Its own rules come first and cover what the parser cannot report: the silent
+// case. A [meta] block whose trigger is missing or misspelled does not read as
 // broken, it reads as "no authenticated fetch", and pkgdev is then sent to
 // digest a distfile that exists on no public mirror.
+//
+// Once those pass and fetch_url is set, it runs parseAuthFetchSpec itself and
+// returns the parser's error unchanged. The parser is the one place a record is
+// refused — a missing filename, a half-declared serial, a variable outside the
+// BENTOO_FETCH_ namespace — so --lint, the sweep and `bentoo distfile` refuse the
+// same records with the same text instead of lint approving what the fetch then
+// rejects. Running it here costs nothing on the load path: LoadPackagesConfig
+// does not validate, and LintPackagesConfig reports one message per record, so a
+// broken record is one issue for that package and never blocks the others. The
+// parser only reads the map: it resolves no variable and does no I/O.
 func validateMetaFetch(pkg string, meta map[string]string) error {
 	var present, unknown []string
 	for k := range meta {
@@ -224,6 +230,13 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 		}
 	}
 
+	// The parser's own verdict, with the same input the sweep and
+	// FetchAuthDistfile pass it. Returned as is: the text must match theirs,
+	// and the lint issue already names the package.
+	if _, _, err := parseAuthFetchSpec(meta); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -266,6 +279,23 @@ type authFetchSpec struct {
 	// The values themselves are resolved at fetch time and never live here.
 	formEnv url.Values
 	timeout time.Duration // whole-download budget; authFetchTimeout when unset
+}
+
+// authFetchSecretPrefix is the namespace every variable a record names must sit
+// in. packages.toml lives in the public overlay and the record's author also
+// picks fetch_url, so a record naming an arbitrary variable (GITHUB_TOKEN,
+// bentoolkit's own BENTOO_REPO_* tokens) would post it to a url of their choice.
+// Confining the names to a prefix the user only ever sets on purpose makes
+// "given to this record" an explicit act.
+const authFetchSecretPrefix = "BENTOO_FETCH_" //nolint:gosec // G101: a variable-NAME prefix, not a credential; no value ever lives here
+
+// checkAuthFetchSecretName reports whether name, already trimmed, is a variable
+// a record may send: authFetchSecretPrefix followed by at least one character,
+// compared exactly and case-sensitively. It decides from the name alone and
+// never reads the environment or a secrets file, so the verdict is the same on
+// every machine and never hints whether the secret exists.
+func checkAuthFetchSecretName(name string) bool {
+	return len(name) > len(authFetchSecretPrefix) && strings.HasPrefix(name, authFetchSecretPrefix)
 }
 
 // parseAuthFetchSpec extracts an authFetchSpec from a package's meta map.
@@ -315,6 +345,13 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 		return nil, false, fmt.Errorf("%w: %s is set but %s is not — configure both or neither", ErrAuthFetchFailed, metaFetchSerialField, metaFetchSerialEnv)
 	case spec.serialEnv != "" && spec.serialField == "":
 		return nil, false, fmt.Errorf("%w: %s is set but %s is not — configure both or neither", ErrAuthFetchFailed, metaFetchSerialEnv, metaFetchSerialField)
+	}
+	// The serial's variable must be one the user gave to records on purpose.
+	// Refused here, from the name only and before anything is resolved, so no
+	// lookup ever runs for a variable the record was not entitled to name.
+	if spec.serialEnv != "" && !checkAuthFetchSecretName(spec.serialEnv) {
+		return nil, false, fmt.Errorf("%w: %s = %q is not a BENTOO_FETCH_ variable; rename it to %s in the record and in the environment or secrets file (a record may only send variables it was given on purpose)",
+			ErrAuthFetchFailed, metaFetchSerialEnv, spec.serialEnv, authFetchSecretPrefix+spec.serialEnv)
 	}
 	if spec.filename == "" {
 		return nil, false, fmt.Errorf("%w: %s is required", ErrAuthFetchFailed, metaFetchFilename)
@@ -520,6 +557,20 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 				ErrAuthFetchFailed, field, metaFetchSerialField, metaFetchFormEnv)
 		}
 		fields.Set(field, strings.TrimSpace(names[0]))
+	}
+
+	// Every offender is named at once, in sorted field order, so fixing a record
+	// takes one round and the text never depends on map iteration order.
+	var offenders []string
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
+		name := fields.Get(field)
+		if !checkAuthFetchSecretName(name) {
+			offenders = append(offenders, fmt.Sprintf("field %q -> %s (rename to %s)", field, name, authFetchSecretPrefix+name))
+		}
+	}
+	if len(offenders) > 0 {
+		return fmt.Errorf("%w: %s names variables that are not BENTOO_FETCH_ variables: %s; rename each in the record and in the environment or secrets file",
+			ErrAuthFetchFailed, metaFetchFormEnv, strings.Join(offenders, "; "))
 	}
 	s.formEnv = fields
 	return nil

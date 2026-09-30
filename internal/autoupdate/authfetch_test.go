@@ -17,7 +17,7 @@ func TestParseAuthFetchSpec(t *testing.T) {
 	full := map[string]string{
 		metaFetchMethod:      "post",
 		metaFetchURL:         "https://example.test/dl",
-		metaFetchSerialEnv:   "EXAMPLE_KEY",
+		metaFetchSerialEnv:   "BENTOO_FETCH_EXAMPLE_KEY",
 		metaFetchSerialField: "key",
 		metaFetchFilename:    "Foo_{version}_linux.tar.xz",
 		metaFetchForm:        "platform=linux&submit=Go",
@@ -42,7 +42,7 @@ func TestParseAuthFetchSpec(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("got (ok=%v, err=%v), want (true, nil)", ok, err)
 		}
-		if spec.method != "post" || spec.serialField != "key" || spec.serialEnv != "EXAMPLE_KEY" {
+		if spec.method != "post" || spec.serialField != "key" || spec.serialEnv != "BENTOO_FETCH_EXAMPLE_KEY" {
 			t.Fatalf("unexpected spec: %+v", spec)
 		}
 		if got := spec.form.Get("platform"); got != "linux" {
@@ -236,7 +236,7 @@ func cloneMeta(m map[string]string) map[string]string {
 func mustForm(t *testing.T, raw string) (v map[string][]string) {
 	t.Helper()
 	spec, _, err := parseAuthFetchSpec(map[string]string{
-		metaFetchURL: "https://x.test", metaFetchSerialEnv: "E", metaFetchSerialField: "k",
+		metaFetchURL: "https://x.test", metaFetchSerialEnv: "BENTOO_FETCH_E", metaFetchSerialField: "k",
 		metaFetchFilename: "f", metaFetchForm: raw,
 	})
 	if err != nil {

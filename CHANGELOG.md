@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **BREAKING: an authenticated fetch only sends `BENTOO_FETCH_*` variables.**
+  A `packages.toml` record's `fetch_serial_env` and `fetch_form_env` could name
+  any variable — `GITHUB_TOKEN`, an LLM key, a `BENTOO_REPO_<NAME>_TOKEN` — and
+  the value was resolved through the secrets chain and posted to the record's
+  own `fetch_url`, which the record's author chooses. A name that does not begin
+  with `BENTOO_FETCH_` now refuses the record before anything is resolved, in
+  the sweep, in `bentoo distfile` and in `overlay autoupdate --lint`, with the
+  same message naming the variable, the key and its replacement; the rest of a
+  sweep still runs. `--lint` now runs the authenticated-fetch parser, so it also
+  reports the records the fetch would refuse for other reasons. `BENTOO_FETCH_*`
+  variables are also never expanded in a header: they stay literal with a
+  `Warn`. **Migration:** rename each variable `X` to `BENTOO_FETCH_X` in the
+  record and in the environment or secrets file.
 - **A `packages.toml` key can no longer name a directory outside its
   category.** A key whose category or package half is `.`, `..`, or holds a
   `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay

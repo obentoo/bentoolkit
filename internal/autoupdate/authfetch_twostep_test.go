@@ -424,7 +424,7 @@ func TestValidateMetaFetchMirrorsTheNewEnums(t *testing.T) {
 		{metaFetchResponse, "redirect", []string{"", "file", "url", "URL", " url "}, ErrInvalidMetaFetchResponse},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			meta := map[string]string{metaFetchURL: "https://vendor.test/dl", tc.key: tc.bad}
+			meta := map[string]string{metaFetchURL: "https://vendor.test/dl", metaFetchFilename: "x-{version}.tar.gz", tc.key: tc.bad}
 			err := validateMetaFetch("test/pkg", meta)
 			if !errors.Is(err, tc.sentinel) {
 				t.Fatalf("err = %v, want %v", err, tc.sentinel)

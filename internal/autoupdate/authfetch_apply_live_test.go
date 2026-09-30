@@ -27,10 +27,10 @@ KEYWORDS="~amd64"
 // real vendor endpoint: it injects a pending 3.70.4 -> 3.70.5 update, runs
 // Apply, and asserts that the authenticated fetch populated the distdir so
 // `pkgdev manifest` produced a Manifest with the known-good SHA512. Gated on
-// FILEZILLA_PRO_E2E=1 + FILEZILLA_PRO_KEY + pkgdev, so it never runs unattended.
+// FILEZILLA_PRO_E2E=1 + BENTOO_FETCH_FILEZILLA_PRO_KEY + pkgdev, so it never runs unattended.
 func TestApplyLiveFileZillaPro(t *testing.T) {
-	if os.Getenv("FILEZILLA_PRO_E2E") != "1" || os.Getenv("FILEZILLA_PRO_KEY") == "" {
-		t.Skip("set FILEZILLA_PRO_E2E=1 and FILEZILLA_PRO_KEY to run the live apply")
+	if os.Getenv("FILEZILLA_PRO_E2E") != "1" || os.Getenv("BENTOO_FETCH_FILEZILLA_PRO_KEY") == "" {
+		t.Skip("set FILEZILLA_PRO_E2E=1 and BENTOO_FETCH_FILEZILLA_PRO_KEY to run the live apply")
 	}
 	if _, err := exec.LookPath("pkgdev"); err != nil {
 		t.Skip("pkgdev not installed")
@@ -77,7 +77,7 @@ func TestApplyLiveFileZillaPro(t *testing.T) {
 		pkg: {URL: "https://x.test", Parser: "regex", Pattern: `(\d)`, Meta: map[string]string{
 			metaFetchMethod:      "post",
 			metaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",
-			metaFetchSerialEnv:   "FILEZILLA_PRO_KEY",
+			metaFetchSerialEnv:   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
 			metaFetchSerialField: "key",
 			metaFetchFilename:    "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
 			metaFetchForm: "mail=&number=&platform=linux&platform_cli=win&platform_cli_nonpro=win&" +

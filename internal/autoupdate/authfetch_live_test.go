@@ -14,17 +14,17 @@ import (
 // env vars so it never runs in CI or for contributors without a license:
 //
 //	FILEZILLA_PRO_E2E=1               # opt in
-//	FILEZILLA_PRO_KEY=<your serial>   # the serial (also read by resolveSecret)
+//	BENTOO_FETCH_FILEZILLA_PRO_KEY=<your serial>   # the serial (also read by resolveSecret)
 //
 // It downloads FileZilla Pro 3.70.5 and asserts the SHA512 matches the value in
 // the overlay Manifest, proving the authenticated POST + form-field set yields
 // the exact distfile pkgdev would digest. The serial is never printed.
 func TestFetchDistfileLiveFileZillaPro(t *testing.T) {
 	if os.Getenv("FILEZILLA_PRO_E2E") != "1" {
-		t.Skip("set FILEZILLA_PRO_E2E=1 and FILEZILLA_PRO_KEY to run the live FileZilla Pro fetch")
+		t.Skip("set FILEZILLA_PRO_E2E=1 and BENTOO_FETCH_FILEZILLA_PRO_KEY to run the live FileZilla Pro fetch")
 	}
-	if os.Getenv("FILEZILLA_PRO_KEY") == "" {
-		t.Skip("FILEZILLA_PRO_KEY not set")
+	if os.Getenv("BENTOO_FETCH_FILEZILLA_PRO_KEY") == "" {
+		t.Skip("BENTOO_FETCH_FILEZILLA_PRO_KEY not set")
 	}
 
 	const (
@@ -38,7 +38,7 @@ func TestFetchDistfileLiveFileZillaPro(t *testing.T) {
 	spec, ok, err := parseAuthFetchSpec(map[string]string{
 		metaFetchMethod:      "post",
 		metaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",
-		metaFetchSerialEnv:   "FILEZILLA_PRO_KEY",
+		metaFetchSerialEnv:   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
 		metaFetchSerialField: "key",
 		metaFetchFilename:    "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
 		metaFetchForm: "mail=&number=&platform=linux&platform_cli=win&platform_cli_nonpro=win&" +

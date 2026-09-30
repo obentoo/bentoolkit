@@ -25,15 +25,15 @@ func TestFormEnvValuesReachTheVendorWithoutEnteringTheRecord(t *testing.T) {
 	defer srv.Close()
 
 	withSecretsFile(t, "")
-	t.Setenv("TEST_BMD_FIRSTNAME", "Ada")
-	t.Setenv("TEST_BMD_EMAIL", "ada@example.com")
+	t.Setenv("BENTOO_FETCH_TEST_BMD_FIRSTNAME", "Ada")
+	t.Setenv("BENTOO_FETCH_TEST_BMD_EMAIL", "ada@example.com")
 
 	meta := map[string]string{
 		metaFetchURL:      srv.URL,
 		metaFetchBody:     fetchBodyJSON,
 		metaFetchFilename: "x-{version}.zip",
 		metaFetchForm:     "product=Example&policy=true",
-		metaFetchFormEnv:  "firstname=TEST_BMD_FIRSTNAME&email=TEST_BMD_EMAIL",
+		metaFetchFormEnv:  "firstname=BENTOO_FETCH_TEST_BMD_FIRSTNAME&email=BENTOO_FETCH_TEST_BMD_EMAIL",
 	}
 	spec, ok, err := parseAuthFetchSpec(meta)
 	if err != nil || !ok {
@@ -63,12 +63,12 @@ func TestFormEnvValuesReachTheVendorWithoutEnteringTheRecord(t *testing.T) {
 
 func TestFormEnvMissingVariableNamesBothTheFieldAndTheVariable(t *testing.T) {
 	withSecretsFile(t, "")
-	t.Setenv("TEST_BMD_PHONE", "")
+	t.Setenv("BENTOO_FETCH_TEST_BMD_PHONE", "")
 
 	spec, _, err := parseAuthFetchSpec(map[string]string{
 		metaFetchURL:      "https://vendor.test/dl",
 		metaFetchFilename: "x-{version}.zip",
-		metaFetchFormEnv:  "phone=TEST_BMD_PHONE",
+		metaFetchFormEnv:  "phone=BENTOO_FETCH_TEST_BMD_PHONE",
 	})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -80,7 +80,7 @@ func TestFormEnvMissingVariableNamesBothTheFieldAndTheVariable(t *testing.T) {
 	}
 	// Both halves, because "a secret is missing" without saying which field
 	// needed it leaves the operator reading the whole record to find out.
-	for _, want := range []string{"TEST_BMD_PHONE", `"phone"`} {
+	for _, want := range []string{"BENTOO_FETCH_TEST_BMD_PHONE", `"phone"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to mention %s", err, want)
 		}
@@ -92,16 +92,16 @@ func TestFormEnvMissingVariableNamesBothTheFieldAndTheVariable(t *testing.T) {
 // to substitute without blanking out unrelated text.
 func TestCredentialsScrubRedactsResolvedValues(t *testing.T) {
 	withSecretsFile(t, "")
-	t.Setenv("TEST_SCRUB_SERIAL", "AB") // short, but a credential
-	t.Setenv("TEST_SCRUB_STREET", "Rua Exemplo 100")
-	t.Setenv("TEST_SCRUB_STATE", "SP") // short identity value
+	t.Setenv("BENTOO_FETCH_TEST_SCRUB_SERIAL", "AB") // short, but a credential
+	t.Setenv("BENTOO_FETCH_TEST_SCRUB_STREET", "Rua Exemplo 100")
+	t.Setenv("BENTOO_FETCH_TEST_SCRUB_STATE", "SP") // short identity value
 
 	spec, _, err := parseAuthFetchSpec(map[string]string{
 		metaFetchURL:         "https://vendor.test/dl",
 		metaFetchFilename:    "x-{version}.zip",
-		metaFetchSerialEnv:   "TEST_SCRUB_SERIAL",
+		metaFetchSerialEnv:   "BENTOO_FETCH_TEST_SCRUB_SERIAL",
 		metaFetchSerialField: "key",
-		metaFetchFormEnv:     "street=TEST_SCRUB_STREET&state=TEST_SCRUB_STATE",
+		metaFetchFormEnv:     "street=BENTOO_FETCH_TEST_SCRUB_STREET&state=BENTOO_FETCH_TEST_SCRUB_STATE",
 	})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -144,7 +144,7 @@ func TestFormEnvAndTimeoutRefusals(t *testing.T) {
 		},
 		{
 			name:  "the serial field repeated",
-			meta:  map[string]string{metaFetchSerialEnv: "S", metaFetchSerialField: "key", metaFetchFormEnv: "key=V"},
+			meta:  map[string]string{metaFetchSerialEnv: "BENTOO_FETCH_S", metaFetchSerialField: "key", metaFetchFormEnv: "key=V"},
 			wants: []string{`"key"`, metaFetchSerialField},
 		},
 		{
