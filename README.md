@@ -148,8 +148,8 @@ BENTOO_SMTP_PASSWORD=your-smtp-password
 | GitHub API token | `GITHUB_TOKEN`, then `GH_TOKEN` |
 | Per-repository token | `BENTOO_REPO_<NAME>_TOKEN` — `<NAME>` is the repository's config key uppercased, every character outside `[A-Z0-9]` replaced by `_` (e.g. `my-overlay` → `BENTOO_REPO_MY_OVERLAY_TOKEN`) |
 | LLM API key | the value of `llm.api_key_env` (e.g. `ANTHROPIC_API_KEY`), itself resolved through this chain |
-| Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `BENTOO_FETCH_FILEZILLA_PRO_KEY`), which must be a `BENTOO_FETCH_*` name; absent for a record that configures no serial |
-| Authenticated-fetch form values | each variable `fetch_form_env` names (e.g. `BENTOO_FETCH_BMD_EMAIL`), each a `BENTOO_FETCH_*` name; absent for a record without `fetch_form_env` |
+| Authenticated-fetch serial | the value of `fetch_serial_env` (e.g. `BENTOO_FETCH_FILEZILLA_PRO_KEY`), which must be a `BENTOO_FETCH_*` name spelled with letters, digits and underscore only; absent for a record that configures no serial |
+| Authenticated-fetch form values | each variable `fetch_form_env` names (e.g. `BENTOO_FETCH_BMD_EMAIL`), each a `BENTOO_FETCH_*` name spelled with letters, digits and underscore only; absent for a record without `fetch_form_env` |
 | ntfy auth token | `BENTOO_NTFY_TOKEN` |
 | SMTP password | `BENTOO_SMTP_PASSWORD` — enables PLAIN auth together with `[notify.email.smtp] user`; unresolvable means the mail is sent unauthenticated |
 
@@ -839,8 +839,9 @@ the download without a word. The rule about secrets stands: reference an env
 var, never the value.
 
 A record may only send variables named `BENTOO_FETCH_*`: `fetch_serial_env` and
-every variable in `fetch_form_env` must begin with that prefix, or the record
-is refused before anything is resolved — by the sweep, by `bentoo distfile` and
+every variable in `fetch_form_env` must begin with that prefix and use only
+letters, digits and underscore, or the record is refused before anything is
+resolved — by the sweep, by `bentoo distfile` and
 by `--lint`, with the same message. The rule reads the name only, so the error
 is the same whether the secret exists or not. It is a namespace, not a binding:
 a record sends its `BENTOO_FETCH_*` values to its own `fetch_url`, and any record
@@ -858,11 +859,11 @@ check that the `fetch_url` is a host you trust with those values.
 | `fetch_response` | no — defaults to `file` | `file` (the reply IS the distfile) or `url` (the reply is the address to download from) |
 | `fetch_content_type` | no | Content type the **finished** file must carry, e.g. `application/zip` |
 | `fetch_min_bytes` | no | Smallest believable size for the finished file. Checked on the bytes actually written, so a truncated transfer fails too |
-| `fetch_serial_env` | no — **but only together with** `fetch_serial_field` | Name of the env var holding the serial. Must begin with `BENTOO_FETCH_`; any other name refuses the record, naming the `BENTOO_FETCH_` name to rename it to |
+| `fetch_serial_env` | no — **but only together with** `fetch_serial_field` | Name of the env var holding the serial. Must begin with `BENTOO_FETCH_` and use only letters, digits and underscore; an unprefixed name refuses the record, naming the `BENTOO_FETCH_` name to rename it to, and any other character refuses it as not a variable name |
 | `fetch_serial_field` | no — **but only together with** `fetch_serial_env` | Form field the serial is submitted in |
 | `fetch_id_url` | no — **but only together with** `fetch_id_pattern` | Where the vendor publishes the per-release download id (`{version}` substituted). Same rule as `fetch_url`: absolute `http(s)://`, `{version}` in the path or query only |
 | `fetch_id_pattern` | no — **but only together with** `fetch_id_url` | Regex over that body with **1 capture group**, the id. `{version}` is substituted **quoted**, so `21.1` matches `21.1` and not `2101` |
-| `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims. Every variable must begin with `BENTOO_FETCH_`; the refusal lists each other name with its field |
+| `fetch_form_env` | no | Form fields whose VALUES come from the [secrets](#secrets) chain, written `field=VARIABLE_NAME` and urlencoded like `fetch_form`. Refused with `fetch_method = "get"`, and refused for a field `fetch_form` or `fetch_serial_field` already claims. Every variable must begin with `BENTOO_FETCH_` and use only letters, digits and underscore; the refusal lists each other name with its field |
 | `fetch_timeout` | no — defaults to 300 | Seconds for the whole download |
 
 ##### When the form asks for a person, not a credential

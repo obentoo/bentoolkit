@@ -1220,7 +1220,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		if first == nil {
 			t.Fatal("Expected error for the unknown fetch_* keys")
 		}
-		if !strings.Contains(first.Error(), "fetch_alpha, fetch_zebra") {
+		if !strings.Contains(first.Error(), `"fetch_alpha", "fetch_zebra"`) {
 			t.Errorf("Expected both keys sorted in the message, got %q", first.Error())
 		}
 		for i := 0; i < 20; i++ {

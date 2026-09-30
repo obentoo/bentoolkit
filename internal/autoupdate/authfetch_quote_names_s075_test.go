@@ -30,7 +30,9 @@ func s075AssertQuotedName(t *testing.T, err error, name string) {
 			t.Errorf("the refusal carries the raw control byte %q: %q", b, msg)
 		}
 	}
-	for _, want := range []string{strconv.Quote(name), strconv.Quote(authFetchSecretPrefix + name)} {
+	// Story 076: a name holding a control character is not a variable name, so
+	// it takes the character refusal rather than a rename suggestion.
+	for _, want := range []string{strconv.Quote(name), authFetchVariableNameRule} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the refusal does not print %s: %q", want, msg)
 		}

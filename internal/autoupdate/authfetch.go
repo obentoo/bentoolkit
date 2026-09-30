@@ -179,8 +179,14 @@ func validateMetaFetch(pkg string, meta map[string]string) error {
 	// fetch_url itself the missing-trigger rule below fires too, and "you wrote
 	// fetch_ur1" is the actionable half of that pair.
 	if len(unknown) > 0 {
+		// Quoted: a quoted TOML key can hold any character, a newline or an
+		// escape sequence included, and this text reaches the terminal.
+		quoted := make([]string, len(unknown))
+		for i, k := range unknown {
+			quoted[i] = strconv.Quote(k)
+		}
 		return fmt.Errorf("package %s: %w: %s (the applier reads only: %s)", pkg, ErrUnknownMetaFetchKey,
-			strings.Join(unknown, ", "), strings.Join(metaFetchKeys, ", "))
+			strings.Join(quoted, ", "), strings.Join(metaFetchKeys, ", "))
 	}
 
 	// A blank fetch_url counts as absent, because that is exactly how
@@ -298,6 +304,26 @@ func checkAuthFetchSecretName(name string) bool {
 	return len(name) > len(authFetchSecretPrefix) && strings.HasPrefix(name, authFetchSecretPrefix)
 }
 
+// isAuthFetchVariableName reports whether name is spelled only with
+// [A-Za-z0-9_]. Checked before the prefix: a name holding anything else can
+// never resolve — no shell exports it and the secrets file is read line by
+// line — and telling it to rename itself to BENTOO_FETCH_<name> would advise a
+// name that cannot resolve either. It also keeps a URL-decoded newline or
+// escape sequence out of the one place such a name used to reach: the
+// missing-secret error.
+func isAuthFetchVariableName(name string) bool {
+	for _, r := range name {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return name != ""
+}
+
+// authFetchVariableNameRule is the tail of every refusal of a name that is not
+// spelled as a variable name.
+const authFetchVariableNameRule = "a variable name may use only letters, digits and underscore"
+
 // parseAuthFetchSpec extracts an authFetchSpec from a package's meta map.
 //
 // It returns (nil, false, nil) when the package defines no authenticated fetch
@@ -349,6 +375,10 @@ func parseAuthFetchSpec(meta map[string]string) (*authFetchSpec, bool, error) {
 	// The serial's variable must be one the user gave to records on purpose.
 	// Refused here, from the name only and before anything is resolved, so no
 	// lookup ever runs for a variable the record was not entitled to name.
+	if spec.serialEnv != "" && !isAuthFetchVariableName(spec.serialEnv) {
+		return nil, false, fmt.Errorf("%w: %s = %q is not a variable name; %s",
+			ErrAuthFetchFailed, metaFetchSerialEnv, spec.serialEnv, authFetchVariableNameRule)
+	}
 	if spec.serialEnv != "" && !checkAuthFetchSecretName(spec.serialEnv) {
 		return nil, false, fmt.Errorf("%w: %s = %q is not a BENTOO_FETCH_ variable; rename it to %q in the record and in the environment or secrets file (a record may only send variables it was given on purpose)",
 			ErrAuthFetchFailed, metaFetchSerialEnv, spec.serialEnv, authFetchSecretPrefix+spec.serialEnv)
@@ -564,12 +594,15 @@ func (s *authFetchSpec) parseFormEnv(meta map[string]string) error {
 	var offenders []string
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		name := fields.Get(field)
-		if !checkAuthFetchSecretName(name) {
+		switch {
+		case !isAuthFetchVariableName(name):
+			offenders = append(offenders, fmt.Sprintf("field %q -> %q (not a variable name: %s)", field, name, authFetchVariableNameRule))
+		case !checkAuthFetchSecretName(name):
 			offenders = append(offenders, fmt.Sprintf("field %q -> %q (rename to %q)", field, name, authFetchSecretPrefix+name))
 		}
 	}
 	if len(offenders) > 0 {
-		return fmt.Errorf("%w: %s names variables that are not BENTOO_FETCH_ variables: %s; rename each in the record and in the environment or secrets file",
+		return fmt.Errorf("%w: %s names variables a record may not send: %s; rename each in the record and in the environment or secrets file",
 			ErrAuthFetchFailed, metaFetchFormEnv, strings.Join(offenders, "; "))
 	}
 	s.formEnv = fields
@@ -632,11 +665,17 @@ func (s *authFetchSpec) resolvedFilename(version string) string {
 func resolveSecret(envName string) (string, error) {
 	v, found, err := secrets.Lookup(envName)
 	if err != nil {
-		return "", fmt.Errorf("%w: resolving %s: %w", ErrAuthFetchSecretMissing, envName, err)
+		return "", fmt.Errorf("%w: resolving %q: %w", ErrAuthFetchSecretMissing, envName, err)
 	}
 	if !found {
-		return "", fmt.Errorf("%w: %s (export %s=... or add it to one of: %s)",
-			ErrAuthFetchSecretMissing, envName, envName, strings.Join(secrets.Paths(), ", "))
+		// The export hint repeats the name unquoted, as a shell line would, so
+		// it is offered only for a name a shell can export.
+		hint := "set it"
+		if isAuthFetchVariableName(envName) {
+			hint = "export " + envName + "=..."
+		}
+		return "", fmt.Errorf("%w: %q (%s or add it to one of: %s)",
+			ErrAuthFetchSecretMissing, envName, hint, strings.Join(secrets.Paths(), ", "))
 	}
 	return v, nil
 }
