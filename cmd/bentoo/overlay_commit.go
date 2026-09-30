@@ -23,13 +23,14 @@ var (
 // newCommitCmd builds `overlay commit`.
 func newCommitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "commit",
-		Short: "Commit staged changes with auto-generated message",
+		Use:         "commit",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Commit staged changes with auto-generated message",
 		Long: `Commit staged changes to the overlay repository.
 If no message is provided with -m, an automatic commit message is generated
 based on the ebuild changes and a confirmation prompt is shown.
 Use -y to skip the confirmation prompt and commit automatically.`,
-		Run: runCommit,
+		RunE: runCommit,
 	}
 	cmd.Flags().StringVarP(&commitMessage, "message", "m", "", "Custom commit message (bypasses auto-generation)")
 	cmd.Flags().BoolVarP(&commitDryRun, "dry-run", "n", false, "Show what would be committed without committing")
@@ -37,11 +38,11 @@ Use -y to skip the confirmation prompt and commit automatically.`,
 	return cmd
 }
 
-func runCommit(cmd *cobra.Command, args []string) {
+func runCommit(cmd *cobra.Command, args []string) error {
 	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	cfg := appCtx.Config
@@ -50,7 +51,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 	user, email, err := cfg.GetGitUser()
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 	// Store in config for commit function
 	cfg.Git.User = user
@@ -60,23 +61,21 @@ func runCommit(cmd *cobra.Command, args []string) {
 	if commitMessage != "" {
 		if err := commitOverlay(cmd, cfg, commitMessage); err != nil {
 			logger.Error("%v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		logger.Info("Changes committed successfully.")
-		return
+		return nil
 	}
 
 	overlayPath := appCtx.OverlayPath
 
 	runner := git.NewGitRunner(overlayPath)
-	// Scoped to this one git call, for the reason commitOverlay gives: the
-	// confirmation prompt below must stay killable by Ctrl-C.
-	statusCtx, stopStatus := signalContext(cmd.Context())
-	entries, err := runner.Status(statusCtx)
-	stopStatus()
+	// The process-wide context (func commandContext): overlay commit is
+	// cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels this git call.
+	entries, err := runner.Status(commandContext(cmd))
 	if err != nil {
 		logger.Error("getting status: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Filter to only staged entries
@@ -90,7 +89,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 
 	if len(stagedEntries) == 0 {
 		logger.Warn("No staged changes to commit.")
-		osExit(0)
+		return nil
 	}
 
 	// Analyze changes and generate message (includes both ebuild packages and
@@ -107,7 +106,7 @@ func runCommit(cmd *cobra.Command, args []string) {
 		for _, e := range stagedEntries {
 			fmt.Printf("  %s %s\n", output.FormatStatus(overlay.StatusLabel(e.Status)), e.FilePath)
 		}
-		return
+		return nil
 	}
 
 	// Show preview and prompt
@@ -118,19 +117,23 @@ func runCommit(cmd *cobra.Command, args []string) {
 	if commitYes {
 		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
 			logger.Error("%v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		logger.Info("Changes committed successfully.")
-		return
+		return nil
 	}
 
 	fmt.Print("Proceed? [y]es / [e]dit / [c]ancel: ")
 
+	// One Ctrl+C at the prompt ends the command (func yieldSignalsToPrompt);
+	// the git calls after it are cancellable again.
 	reader := bufio.NewReader(os.Stdin)
+	restoreSignals := yieldSignalsToPrompt(cmd)
 	input, err := reader.ReadString('\n')
+	restoreSignals()
 	if err != nil {
 		logger.Error("reading input: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	input = strings.TrimSpace(strings.ToLower(input))
@@ -140,48 +143,46 @@ func runCommit(cmd *cobra.Command, args []string) {
 		// Proceed with generated message
 		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
 			logger.Error("%v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		logger.Info("Changes committed successfully.")
 
 	case "e", "edit":
 		// Allow user to enter custom message
 		fmt.Print("Enter commit message: ")
+		restoreSignals = yieldSignalsToPrompt(cmd)
 		customMessage, err := reader.ReadString('\n')
+		restoreSignals()
 		if err != nil {
 			logger.Error("reading input: %v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		customMessage = strings.TrimSpace(customMessage)
 		if customMessage == "" {
 			logger.Warn("Commit cancelled (empty message).")
-			osExit(1)
+			return exitWith(1)
 		}
 		if err := commitOverlay(cmd, cfg, customMessage); err != nil {
 			logger.Error("%v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		logger.Info("Changes committed successfully.")
 
 	case "c", "cancel":
 		logger.Info("Commit cancelled.")
-		osExit(1)
+		return exitWith(1)
 
 	default:
 		logger.Error("Invalid option. Commit cancelled.")
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }
 
-// commitOverlay runs overlay.Commit under a context that SIGINT and SIGTERM
-// cancel (S054-R5.8).
-//
-// The context lives only as long as the git call, not as long as runCommit.
-// While signalContext is registered, a Ctrl-C cancels its context instead of
-// ending the process, so one held across the confirmation prompt would leave
-// that prompt unkillable: the read on stdin would simply keep waiting.
+// commitOverlay runs overlay.Commit under the process-wide context, which the
+// first SIGINT, SIGTERM or SIGHUP cancels while overlay commit runs
+// (S054-R5.8). The first signal also restores the default action, so a
+// confirmation prompt that is waiting on stdin still ends on the second one.
 func commitOverlay(cmd *cobra.Command, cfg *config.Config, message string) error {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
-	return overlay.Commit(ctx, cfg, message)
+	return overlay.Commit(commandContext(cmd), cfg, message)
 }

@@ -13,7 +13,10 @@ import (
 )
 
 // TestSignalContextCancelsOnSIGHUP pins story 054 R4.4: a terminal hang-up
-// cancels a signalContext context exactly as SIGINT and SIGTERM do.
+// cancels the processContext context of a cancellable command exactly as
+// SIGINT and SIGTERM do. (The name predates story 058, which moved the handler
+// from signalContext to processContext; it is kept so existing selectors still
+// find it.)
 //
 // The kernel delivers SIGHUP to the terminal's foreground group only. The
 // children bentoo runs in their own process group (claude, pkgdev, the
@@ -25,18 +28,20 @@ func TestSignalContextCancelsOnSIGHUP(t *testing.T) {
 	// binary. With no handler registered for SIGHUP its default action ends the
 	// process, and the package's run would die with "signal: hangup" naming no
 	// test. A channel of our own registered BEFORE the signal is sent keeps the
-	// process alive whatever signalContext listens for, so the assertion on its
+	// process alive whatever processContext listens for, so the assertion on its
 	// context — not the default action — decides the outcome. The sink also
 	// proves the signal was actually delivered.
 	sink := make(chan os.Signal, 1)
 	signal.Notify(sink, syscall.SIGHUP)
 	t.Cleanup(func() { signal.Stop(sink) })
 
-	ctx, stop := signalContext(context.Background())
+	ctx, stop, policy := processContext()
 	t.Cleanup(stop)
+	// As the root's PersistentPreRunE does for a cancellable command.
+	policy.cancellable.Store(true)
 
 	if err := ctx.Err(); err != nil {
-		t.Fatalf("signalContext returned a context that was already done before any signal: %v", err)
+		t.Fatalf("processContext returned a context that was already done before any signal: %v", err)
 	}
 
 	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
@@ -52,7 +57,7 @@ func TestSignalContextCancelsOnSIGHUP(t *testing.T) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
-		t.Fatal("signalContext's context was not cancelled within 1 s of SIGHUP (R4.4)")
+		t.Fatal("processContext's context was not cancelled within 1 s of SIGHUP (R4.4)")
 	}
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Errorf("ctx.Err() = %v after SIGHUP, want %v", ctx.Err(), context.Canceled)

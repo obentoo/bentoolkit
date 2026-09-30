@@ -58,9 +58,7 @@ func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
 	setReconcileInteractive(t, func() bool { return false }) // never prompt, never write
 
 	captureStdout(t, func() {
-		withExitIntercept(func() {
-			runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
-		})
+		_ = runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
 	})
 
 	return requests.Load()

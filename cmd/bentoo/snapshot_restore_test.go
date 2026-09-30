@@ -12,8 +12,8 @@ import (
 // ---------------------------------------------------------------------------
 // T6.2 — `snapshot restore <id> --target <path> --ship <name> [--yes]` verb.
 //
-// These tests mirror snapshot_apply_test.go / snapshot_run_test.go: they stub
-// osExit (captureExit), inject snapshotRunner = a MockRunner, and write a temp
+// These tests mirror snapshot_apply_test.go / snapshot_run_test.go: they read
+// the handler outcome (exitOf), inject snapshotRunner = a MockRunner, and write a temp
 // snapshot.toml via the shared helpers. They drive the dispatch happy path, the
 // confirm-gate seam (snapshotRestoreConfirm), an unknown --ship, and the missing
 // required --target flag.
@@ -162,7 +162,7 @@ func hasCall(calls []snapshot.RunnerCall, name string, prefix ...string) bool {
 // TestRunSnapshotRestore_ArchiveHappyPath: `restore <id> --target /mnt/r --ship
 // cloud --yes` resolves the archive ship, builds a single-full-link chain, and
 // drives snapshot.Restore — which runs `rclone cat | zstd -d | btrfs receive
-// /mnt/r`. Exit is success (osExit not called).
+// /mnt/r`. Exit is success (the handler returns nil).
 func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
@@ -173,9 +173,7 @@ func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 	if exited {
 		t.Fatalf("restore exited with code %d, want success", code)
@@ -203,9 +201,7 @@ func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 	if exited {
 		t.Fatalf("restore exited with code %d, want success", code)
@@ -217,7 +213,7 @@ func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 
 // TestRunSnapshotRestore_ConfirmDeniedCleanAbort is the R5.4 gate at the verb
 // level: without --yes and a confirm seam that DENIES, the restore is a clean
-// abort — ErrRestoreDeclined is mapped to a non-error exit (osExit NOT called)
+// abort — ErrRestoreDeclined is mapped to a non-error exit (the handler returns nil)
 // and NO destructive subprocess runs.
 func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
@@ -230,9 +226,7 @@ func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 	if exited {
 		t.Fatalf("declined restore exited with code %d; declining is a clean abort, not a failure", code)
@@ -255,9 +249,7 @@ func TestRunSnapshotRestore_ConfirmApprovedProceeds(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 	if exited {
 		t.Fatalf("approved restore exited with code %d, want success", code)
@@ -268,7 +260,7 @@ func TestRunSnapshotRestore_ConfirmApprovedProceeds(t *testing.T) {
 }
 
 // TestRunSnapshotRestore_UnknownShipExits1: a --ship that names no [[ship]] entry
-// fails fast with osExit(1) before any subprocess.
+// fails fast with exit status 1 before any subprocess.
 func TestRunSnapshotRestore_UnknownShipExits1(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
@@ -279,9 +271,7 @@ func TestRunSnapshotRestore_UnknownShipExits1(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 	if !exited || code != 1 {
 		t.Errorf("unknown --ship exit = (%d, %v), want (1, true)", code, exited)
@@ -339,7 +329,7 @@ func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotRestore(snapshotRestoreCmd, []string{"9921"}) })
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"9921"}))
 	})
 	if exited {
 		t.Fatalf("restore --dry-run exited with code %d, want success", code)
@@ -410,9 +400,7 @@ func TestRunSnapshotRestore_TwoSubvolumesWithoutFlagRefusesBeforeAnySubprocess(t
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 
 	if !exited || code != 1 {
@@ -453,9 +441,7 @@ func TestRunSnapshotRestore_SubvolumeFlagPicksThatPrefix(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{id})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}))
 	})
 	if exited {
 		t.Fatalf("restore --subvolume /home exited with code %d, want success", code)
@@ -494,9 +480,7 @@ func TestRunSnapshotRestore_UnknownSubvolumeRefusesBeforeAnySubprocess(t *testin
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 
 	if !exited || code != 1 {
@@ -526,9 +510,7 @@ func TestRunSnapshotRestore_DeployedSingleSubvolumeNeedsNoFlag(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{id})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}))
 	})
 	if exited {
 		t.Fatalf("single-subvolume restore without --subvolume exited with code %d; the deployed configuration must keep working unedited (R5.1)", code)
@@ -568,9 +550,7 @@ func TestRunSnapshotRestore_DryRunOnAmbiguousConfigAlsoRefuses(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() {
-			runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"})
-		})
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
 	})
 
 	if !exited || code != 1 {

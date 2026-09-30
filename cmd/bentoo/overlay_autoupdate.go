@@ -210,8 +210,9 @@ var autoupdateValidateCfg config.ValidateConfig
 // newAutoupdateCmd builds `overlay autoupdate`.
 func newAutoupdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "autoupdate [package]",
-		Short: "Check and apply ebuild version updates",
+		Use:         "autoupdate [package]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Check and apply ebuild version updates",
 		Long: `Automatically check upstream sources for new versions and apply updates.
 
 Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):
@@ -263,7 +264,7 @@ Examples:
                                                   once per registry; without --yes it prints the plan and stops
   bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory
   bentoo overlay autoupdate --apply all --distfiles-cache ""       Never reuse a cached distfile`,
-		Run: runAutoupdate,
+		RunE: runAutoupdate,
 	}
 	cmd.Flags().BoolVar(&autoupdateCheck, "check", false, "Check for updates")
 	cmd.Flags().BoolVar(&autoupdateList, "list", false, "List pending updates")
@@ -431,11 +432,17 @@ func tuiEnabledForApply() bool {
 // capture buffer the failure path still logs (R4.1). finish closes the batch,
 // stops the program, and waits for it to exit so the terminal is restored before
 // the summary is printed.
+//
+// finish is idempotent in both branches (sync.Once): the caller defers it, so
+// every early return closes the batch and restores the terminal, and also calls
+// it once explicitly before the summary, which must print after the TUI is gone.
+// It returns nothing and writes no state, so its order relative to the overlay
+// lock's release does not matter.
 func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) (tui.Reporter, []autoupdate.ApplierOption, func()) {
 	if !tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
 		r.BatchStart(total)
-		return r, []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, func() { r.BatchDone("") }
+		return r, []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, sync.OnceFunc(func() { r.BatchDone("") })
 	}
 
 	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
@@ -465,7 +472,7 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 			return buf.Bytes(), err
 		}),
 	}
-	finish := func() {
+	finish := sync.OnceFunc(func() {
 		r.BatchDone("")
 		prog.Stop()
 		// Wait for the program goroutine to exit so the terminal is restored
@@ -476,11 +483,11 @@ func buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total in
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 			logger.Debug("apply: live TUI program exited with error: %v", err)
 		}
-	}
+	})
 	return r, extra, finish
 }
 
-func runAutoupdate(cmd *cobra.Command, args []string) {
+func runAutoupdate(cmd *cobra.Command, args []string) error {
 	const (
 		minConcurrency = 1
 		maxConcurrency = 100
@@ -491,16 +498,14 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
 	if autoupdateConcurrency < minConcurrency || autoupdateConcurrency > maxConcurrency {
 		logger.Error("--concurrency must be in range [%d, %d], got %d", minConcurrency, maxConcurrency, autoupdateConcurrency)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Validate --timeout up front: a negative value is a typo, and 0 is the
 	// sentinel for "use the configured/default value".
 	if autoupdateTimeout < 0 {
 		logger.Error("--timeout must be >= 0 seconds, got %d", autoupdateTimeout)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Validate --only up front so a typo fails fast rather than silently
@@ -510,8 +515,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		// valid
 	default:
 		logger.Error("--only must be \"bin\" or \"source\", got %q", autoupdateOnly)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// --fix repairs what --lint reports, so without --lint there is nothing for
@@ -522,8 +526,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// repaired when it was never even read.
 	if autoupdateFix && !autoupdateLint {
 		logger.Error("--fix repairs what --lint reports, so it is valid only together with it — run: bentoo overlay autoupdate --lint --fix")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// The same reasoning one flag over: --except names what the migration must
@@ -533,8 +536,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// their pins had been protected by a run that never looked at them.
 	if len(autoupdateExcept) > 0 && !autoupdateMarkAutoDisabledFlag {
 		logger.Error("--except names the entries --mark-auto-disabled must not stamp, so it is valid only together with it — run: bentoo overlay autoupdate --mark-auto-disabled --except <atom>[,<atom>...]")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// --lint and --mark-auto-disabled are both MODES, and the dispatch below is a
@@ -546,15 +548,13 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	// knows was skipped.
 	if autoupdateMarkAutoDisabledFlag && autoupdateLint {
 		logger.Error("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	appCtx, err := loadAppContextNoValidation()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	overlayPath := appCtx.OverlayPath
@@ -563,16 +563,17 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	configDir, err := autoupdateConfigDir()
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
-	// Wire SIGINT/SIGTERM into a context so an in-flight check cancels cleanly.
-	// The Checker threads this context through every outbound HTTP/LLM call, so
-	// the run aborts within ~2 s of a signal (R3.1). See signalContext for the
-	// OQ-1 note on why cmd.Context() alone is not signal-aware.
-	runCtx, stop := signalContext(cmd.Context())
-	defer stop()
+	// The process-wide context (func commandContext): overlay autoupdate is
+	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels
+	// the run. The Checker threads it through every outbound HTTP/LLM call, so
+	// the run aborts within ~2 s of a signal (R3.1), and every child the modes
+	// spawn in their own process group (git, pkgdev, the `claude` CLI, the
+	// unprivileged ebuild) receives it, since no terminal signal reaches them
+	// (story 054, R4.4).
+	runCtx := commandContext(cmd)
 
 	// Compute the autoupdate cache TTL from config (R2.1, R2.2). GetCacheTTL
 	// returns the user-configured value when positive, otherwise the
@@ -594,8 +595,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 	autoupdateValidate, err = resolveAutoupdateValidatePolicy(appCtx.Config, cmd)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	// The same block, unresolved, for the two --llm capabilities: their keys are
 	// tri-state and only mean something next to the flag (S033-R7.2).
@@ -666,13 +666,13 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 			} else {
 				logger.Error("cannot take the overlay lock: %v", err)
 			}
-			osExit(1)
-			return
+			return exitWith(1)
 		}
-		// Released on return and on every osExit inside a mode, including after
-		// SIGINT/SIGTERM cancelled the mode's context (S056-R4.7): os.Exit skips
-		// deferred calls, so the release is also registered with exitProcess.
-		// Release is idempotent, and the defer covers a test's stubbed osExit.
+		// Released by the defer on every return, including after a signal
+		// cancelled the mode's context (S056-R4.7): every mode returns its
+		// outcome and func main ends the process only after this function has
+		// returned. The registration with exitProcess stays as a second net;
+		// Release is idempotent, so the two never conflict.
 		unregister := registerExitCleanup(lock.Release)
 		defer func() {
 			unregister()
@@ -681,29 +681,31 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		sweepStaleTemps(overlayPath, configDir)
 	}
 
-	// Handle different modes
+	// Handle different modes. Each returns its outcome (func exitWith), which
+	// is the command's: the deferred lock release runs before func main maps it
+	// to the exit status.
 	switch {
 	case autoupdateLint:
-		runLint(overlayPath)
+		return runLint(overlayPath)
 	case autoupdateMarkAutoDisabledFlag:
 		// Directly below --lint because it reads and writes the same file for the
 		// same kind of reason: both are registry maintenance rather than a
 		// version scan. The two can never both be true here — the guard above
 		// rejects that combination before any file is opened — so the relative
 		// order of these two cases is documentation, not behaviour.
-		runMarkAutoDisabled(overlayPath)
+		return runMarkAutoDisabled(overlayPath)
 	case autoupdateCheck:
-		runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
+		return runCheck(runCtx, overlayPath, configDir, args, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateList:
-		runList(configDir)
+		return runList(configDir)
 	case autoupdateApply == "all":
-		runApplyAll(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate.LLM)
+		return runApplyAll(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate.LLM)
 	case autoupdateApply != "":
-		runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM)
+		return runApply(runCtx, overlayPath, configDir, autoupdateApply, appCtx.Config.Autoupdate.LLM)
 	case autoupdateReviveList:
-		runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
+		return runReviveList(runCtx, overlayPath, configDir, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateRevive != "":
-		runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
+		return runRevive(runCtx, overlayPath, configDir, autoupdateRevive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case autoupdateClean:
 		// MUST stay below both --apply cases (S027-G6): above them it would
 		// convert every existing `--apply … --clean` invocation into an
@@ -712,10 +714,11 @@ func runAutoupdate(cmd *cobra.Command, args []string) {
 		// The concurrency decision is resolved HERE, where cmd is in scope:
 		// reading autoupdateCmd from inside runSweep would close an
 		// initialization cycle (autoupdateCmd → Run → runSweep → autoupdateCmd).
-		runSweep(runCtx, overlayPath, args, sweepConcurrency(cmd.Flags().Changed("concurrency")))
+		return runSweep(runCtx, overlayPath, args, sweepConcurrency(cmd.Flags().Changed("concurrency")))
 	default:
 		// No flag specified, show help
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
+		return nil
 	}
 }
 
@@ -736,7 +739,7 @@ func resolveHTTPTimeout(cfg *config.Config) time.Duration {
 // positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
-func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
+func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithContext(ctx),
@@ -808,8 +811,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	checker, err := newChecker()
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if len(args) > 0 {
@@ -826,11 +828,10 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 					logger.Warn("failed to disable orphaned package %s: %v", pkg, derr)
 				}
 				logger.Info("%s has no ebuild in the overlay — disabled in packages.toml", pkg)
-				return
+				return nil
 			}
 			logger.Error("failed to check package %s: %v", pkg, err)
-			osExit(1)
-			return
+			return exitWith(1)
 		}
 		// S045-R1.2: the one package this run scanned, as the same report the
 		// batch path builds and through the same render — one element, joined
@@ -849,7 +850,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		const noPlanWasPrinted = false
 		single := checkReport([]autoupdate.CheckResult{*result}, nothingValidated())
 		presentCheckReport(single, noPlanWasPrinted)
-		return
+		return nil
 	}
 
 	// Check all packages. CheckAll never returns a fatal error: every
@@ -946,8 +947,8 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// before reaching here on purpose — see reconcileRegistryAfterCheck.
 	reconcileRegistryAfterCheck(overlayPath)
 
-	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
-	osExit(result.ExitCode())
+	// Return the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
+	return exitWith(result.ExitCode())
 }
 
 // checkRegistryFixerFn and checkInteractiveFn are the seams through which
@@ -1127,7 +1128,7 @@ func reconcileRegistryAfterCheck(overlayPath string) {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
 		// and its exit code says so. The next run proposes the same batch again.
 		logger.Error("reconcile: failed to write %d version pin(s) to packages.toml: %v", len(pins), err)
-		output.Error.Printf("  The registry was NOT updated: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  The registry was NOT updated: %v\n", err)
 		return
 	}
 	output.Success.Printf("  Wrote %d version pin(s) to packages.toml.\n", len(pins))
@@ -1342,15 +1343,16 @@ func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
 }
 
 // runList handles the --list flag
-func runList(configDir string) {
+func runList(configDir string) error {
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
 		logger.Error("failed to load pending list: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	updates := pending.List()
 	displayPendingUpdates(updates)
+	return nil
 }
 
 // runLint handles the --lint flag: it checks the overlay's packages.toml
@@ -1360,7 +1362,7 @@ func runList(configDir string) {
 //
 // With --fix it hands over to runLintFix after the report, which repairs what
 // the rules above can repair and then owns the exit code — see there.
-func runLint(overlayPath string) {
+func runLint(overlayPath string) error {
 	issues, err := autoupdate.LintPackagesConfig(overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
 	// parse — a missing marker is worth reporting alongside the syntax error.
@@ -1371,8 +1373,7 @@ func runLint(overlayPath string) {
 		// --fix adds nothing on this path: a file that does not load cannot be
 		// repaired either, and RepairPackagesConfig refuses to start on one.
 		logger.Error("failed to lint packages.toml: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if len(issues) > 0 {
@@ -1383,16 +1384,15 @@ func runLint(overlayPath string) {
 		// From here the repair owns the verdict: the exit code must describe the
 		// registry as it stands AFTER the run, which the list above no longer
 		// does.
-		runLintFix(overlayPath, issues)
-		return
+		return runLintFix(overlayPath, issues)
 	}
 
 	if len(issues) == 0 {
 		output.Success.Println("packages.toml: record model OK")
-		return
+		return nil
 	}
 	logger.Error("packages.toml: %d issue(s)", len(issues))
-	osExit(1)
+	return exitWith(1)
 }
 
 // printLintTally closes the report with a per-rule count: a registry
@@ -1675,7 +1675,7 @@ func autoupdateStagingRoot() (string, error) {
 // WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
-func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) {
+func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) error {
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
 	// Ctrl-C (which invokes cancel) cancels the in-flight child via
 	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
@@ -1685,6 +1685,10 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
 	// the reporter value itself is not needed at this call site.
 	_, extra, finish := buildApplyReporter(applyCtx, cancel, 1)
+	// Every early return closes the batch and restores the terminal through
+	// this; finish is idempotent (func buildApplyReporter), so the explicit
+	// call before the summary below is the one that does the work there.
+	defer finish()
 
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
@@ -1699,10 +1703,8 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
-		finish()
 		logger.Error("failed to initialize applier: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// The applier's TaskStart now surfaces "applying <pkg>" through the reporter
@@ -1720,11 +1722,11 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 
 	if err != nil {
 		displayApplyResult(result)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	displayApplyResult(result)
+	return nil
 }
 
 // runApplyAll handles `--apply all`: it applies every pending update, reusing a
@@ -1743,7 +1745,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 // package overlaps instead of running one at a time. With --compile they stay
 // serial so the elevated compile step's confirmation prompt and sudo invocation
 // are not interleaved. Both paths live in applyAllPackages.
-func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) {
+func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) error {
 	// Read the pending list up front so the reporter's batch denominator (and the
 	// "nothing to do" short-circuit) are known before the TUI program starts. The
 	// applier built below loads the same pending.json, and Apply mutates it as it
@@ -1752,13 +1754,12 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
 		logger.Error("failed to load pending list: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	updates := pending.List()
 	if len(updates) == 0 {
 		logger.Info("No pending updates to apply")
-		return
+		return nil
 	}
 
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
@@ -1768,6 +1769,10 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	defer cancel()
 
 	_, extra, finish := buildApplyReporter(applyCtx, cancel, len(updates))
+	// Every early return closes the batch and restores the terminal through
+	// this; finish is idempotent (func buildApplyReporter), so the explicit
+	// call before the batch summary below is the one that does the work there.
+	defer finish()
 
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierContext(applyCtx),
@@ -1788,10 +1793,8 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
-		finish()
 		logger.Error("failed to initialize applier: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
@@ -1808,8 +1811,9 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	displayApplyAllResults(results, failures)
 
 	if failures > 0 {
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }
 
 // applyAllPackages applies every pending update through the shared Applier and
@@ -2195,19 +2199,17 @@ func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 // version ::gentoo still carries. It mutates nothing — it only builds a Checker
 // (the same option set as --check) and the ::gentoo provider, then prints the
 // candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
-func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
+func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
@@ -2220,6 +2222,7 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 	}
 
 	displayReviveCandidates(candidates)
+	return nil
 }
 
 // displayReviveCandidates renders the revivable-orphan report as a fixed-width
@@ -2265,12 +2268,11 @@ type reviveOutcome struct {
 // that case aborts ONCE up front with a clear, actionable error. Each package is
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
-func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) {
+func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
@@ -2286,16 +2288,14 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		logger.Info("      provider: local")
 		logger.Info("      path: /var/db/repos/gentoo")
 		logger.Info("(or force a clone-backed provider so the package tree is available on disk)")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
 	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Resolve the target package list: an explicit "category/pkg", or "all"
@@ -2308,7 +2308,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		}
 		if len(candidates) == 0 {
 			output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
-			return
+			return nil
 		}
 		for _, c := range candidates {
 			targets = append(targets, c.Package)
@@ -2328,8 +2328,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
 		logger.Error("failed to initialize pending list: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	reviveOpts := []autoupdate.ApplierOption{
@@ -2347,8 +2346,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
 		logger.Error("failed to initialize applier: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	httpTimeout := resolveHTTPTimeout(cfg)
@@ -2359,12 +2357,13 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 
 	failures := displayReviveSummary(outcomes)
 	if failures > 0 {
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }
 
 // reviveOne performs the full revive for a single package and returns its
-// outcome. It never calls osExit: every failure is captured so the caller can
+// outcome. It never ends the run: every failure is captured so the caller can
 // continue with the remaining targets and exit non-zero at the end.
 //
 // Steps (in order): locate the ::gentoo package dir, pick the highest ::gentoo

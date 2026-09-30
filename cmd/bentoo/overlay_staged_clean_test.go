@@ -347,7 +347,7 @@ func TestStagedClean_PrintsEveryEntryOfThePlan(t *testing.T) {
 	setStagedCleanConfirm(t, false, &calls)
 
 	out := captureStdout(t, func() {
-		runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot)
 	})
 
 	for _, path := range expected {
@@ -383,7 +383,7 @@ func TestStagedClean_AnEmptyPlanSaysWhichEmptinessItIsAndDoesNotPrompt(t *testin
 		setStagedCleanConfirm(t, true, &calls)
 
 		out := strings.ToLower(captureStdout(t, func() {
-			runStagedClean(context.Background(), overlay, empty)
+			_ = runStagedClean(context.Background(), overlay, empty)
 		}))
 
 		if calls != 0 {
@@ -411,7 +411,7 @@ func TestStagedClean_AnEmptyPlanSaysWhichEmptinessItIsAndDoesNotPrompt(t *testin
 		setStagedCleanConfirm(t, true, &calls)
 
 		out := captureStdout(t, func() {
-			runStagedClean(context.Background(), overlay, stagingRoot)
+			_ = runStagedClean(context.Background(), overlay, stagingRoot)
 		})
 		low := strings.ToLower(out)
 
@@ -454,7 +454,7 @@ func TestStagedClean_ADeclinedConfirmationLeavesTheStagingRootByteIdentical(t *t
 	setStagedCleanYes(t, false)
 
 	out := captureStdout(t, func() {
-		runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot)
 	})
 
 	if calls != 1 {
@@ -499,7 +499,7 @@ func TestStagedClean_ANonInteractiveSessionRefusesAndStillPrints(t *testing.T) {
 	setStagedCleanYes(t, false)
 
 	out := captureStdout(t, func() {
-		runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot)
 	})
 
 	if calls != 0 {
@@ -537,7 +537,7 @@ func TestStagedClean_TheAuthorizingFlagWarnsAndProceeds(t *testing.T) {
 	setStagedCleanYes(t, true)
 
 	out := captureStdout(t, func() {
-		runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot)
 	})
 
 	if calls != 0 {

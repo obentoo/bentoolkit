@@ -105,8 +105,8 @@ func TestMissingConfigError(t *testing.T) {
 	// The status command should fail with overlay path not set error
 	// We can't easily test the actual execution without mocking,
 	// but we can verify the command structure is correct
-	if statusCmd.Run == nil {
-		t.Error("status command should have a Run function")
+	if statusCmd.RunE == nil {
+		t.Error("status command should have a RunE function")
 	}
 }
 

@@ -54,7 +54,7 @@ func TestParseRenameArgsRejectsInvalidNewVersion(t *testing.T) {
 // TestRunRenameRejectsInvalidNewVersion pins S050-R4.2: the command exits 1 on
 // such an argument, before the overlay is scanned. The overlay holds a
 // foo-1.1.ebuild the spec WOULD match, so a run that got as far as the preview
-// returns normally in --dry-run mode (exit code -1 here) and, without it, moves
+// returns nil in --dry-run mode (exit code 0 here) and, without it, moves
 // the file; both modes must exit 1 and leave the directory byte-identical.
 func TestRunRenameRejectsInvalidNewVersion(t *testing.T) {
 	for _, v := range invalidRenameVersions {

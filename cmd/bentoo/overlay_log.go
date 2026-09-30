@@ -21,18 +21,18 @@ func newLogCmd() *cobra.Command {
 		Short: "Show commit history",
 		Long:  `Show the commit history of the overlay repository.`,
 		Args:  cobra.NoArgs,
-		Run:   runLog,
+		RunE:  runLog,
 	}
 	cmd.Flags().IntVarP(&logCount, "count", "n", 10, "Number of commits to show")
 	cmd.Flags().BoolVarP(&logOneline, "oneline", "o", false, "Show one line per commit")
 	return cmd
 }
 
-func runLog(cmd *cobra.Command, args []string) {
+func runLog(cmd *cobra.Command, args []string) error {
 	ctx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	overlayPath := ctx.OverlayPath
@@ -56,6 +56,7 @@ func runLog(cmd *cobra.Command, args []string) {
 
 	if err := gitCmd.Run(); err != nil {
 		logger.Error("running git log: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }

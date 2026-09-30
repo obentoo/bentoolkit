@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,8 +32,9 @@ var (
 // newAnalyzeCmd builds `overlay analyze`.
 func newAnalyzeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "analyze [category/package]",
-		Short: "Analyze package and generate autoupdate schema",
+		Use:         "analyze [category/package]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Analyze package and generate autoupdate schema",
 		Long: `Analyze a package to determine the best way to check for upstream versions.
 
 The analyze command uses intelligent analysis to discover data sources and
@@ -47,7 +49,7 @@ Examples:
   bentoo overlay analyze net-misc/foo --no-cache  Bypass caches
   bentoo overlay analyze net-misc/foo --force   Overwrite existing schema
   bentoo overlay analyze net-misc/foo --dry-run Show schema without saving`,
-		Run: runAnalyze,
+		RunE: runAnalyze,
 	}
 	cmd.Flags().StringVar(&analyzeURL, "url", "", "Override URL for analysis")
 	cmd.Flags().StringVar(&analyzeHint, "hint", "", "Provide hint to LLM for guidance")
@@ -58,41 +60,48 @@ Examples:
 	return cmd
 }
 
-func runAnalyze(cmd *cobra.Command, args []string) {
-	ctx, err := loadAppContextNoValidation()
+func runAnalyze(cmd *cobra.Command, args []string) error {
+	appCtx, err := loadAppContextNoValidation()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
-	overlayPath := ctx.OverlayPath
+	overlayPath := appCtx.OverlayPath
 
 	// Determine config directory for autoupdate
 	home, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("failed to get home directory: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 	configDir := filepath.Join(home, ".config", "bentoo", "autoupdate")
 
 	// Validate arguments
 	if !analyzeAll && len(args) == 0 {
 		cmd.Help() //nolint:errcheck // help output failure is not actionable
-		osExit(1)
+		return exitWith(1)
 	}
 
-	// Wire the signals signalContext listens for into a context and hand it to
-	// the analyzer (its HTTP and LLM calls) and to the LLM provider. The `claude`
-	// CLI runs in its own process group, so a Ctrl+C at the terminal no longer
-	// reaches it: without this context an interrupt killed bentoo and left
-	// `claude` running (story 054, R4.3). The handler is released before either
-	// confirmation prompt (see confirmAfterRelease), so a Ctrl+C there still ends
-	// the command. stop is also deferred for the paths that return; the ones that
-	// end in osExit skip it, which is harmless — the process, and with it the
-	// handler, is gone — and under a test's exit intercept the unwinding panic
-	// still runs it.
-	runCtx, stop := signalContext(cmd.Context())
-	defer stop()
+	// The process-wide context (func commandContext): overlay analyze is
+	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels it.
+	// It reaches the analyzer (its HTTP and LLM calls) and the LLM provider. The
+	// `claude` CLI runs in its own process group, so a Ctrl+C at the terminal
+	// never reaches it: without this context an interrupt ended bentoo and left
+	// `claude` running (story 054, R4.3).
+	//
+	// runCtx is the ANALYSIS context, derived from it so that release can end
+	// the analysis before either confirmation prompt (func confirmAfterRelease)
+	// without cancelling the command. release also hands the next signal its
+	// default action (func yieldSignalsToPrompt), so one Ctrl+C at the prompt
+	// ends the command, as it did when release unregistered the handler.
+	ctx := commandContext(cmd)
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	release := func() {
+		cancelRun()
+		yieldSignalsToPrompt(cmd)
+	}
 
 	// Build analyzer options, conditionally injecting an LLM provider. When a
 	// provider is configured but cannot be constructed (e.g. the `claude` CLI is
@@ -102,7 +111,7 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 		autoupdate.WithAnalyzerConfigDir(configDir),
 		autoupdate.WithAnalyzerContext(runCtx),
 	}
-	llmCfg := ctx.Config.Autoupdate.LLM
+	llmCfg := appCtx.Config.Autoupdate.LLM
 	if p, err := newConfiguredLLMProvider(runCtx, llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
 	} else if p != nil {
@@ -113,7 +122,7 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 	analyzer, err := autoupdate.NewAnalyzer(overlayPath, analyzerOpts...)
 	if err != nil {
 		logger.Error("failed to initialize analyzer: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	opts := autoupdate.AnalyzeOptions{
@@ -126,28 +135,28 @@ func runAnalyze(cmd *cobra.Command, args []string) {
 
 	// Handle different modes
 	if analyzeAll {
-		runAnalyzeAll(analyzer, opts, stop)
-	} else {
-		runAnalyzeSingle(analyzer, args[0], opts, stop)
+		return runAnalyzeAll(analyzer, opts, release)
 	}
+	return runAnalyzeSingle(analyzer, args[0], opts, release)
 }
 
-// runAnalyzeSingle handles single package analysis. release unregisters the
-// command's signal handler; it runs before the confirmation prompt.
-func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) {
+// runAnalyzeSingle handles single package analysis and returns the command's
+// exit status (func exitWith). release ends the analysis context; it runs
+// before the confirmation prompt.
+func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Printf("Analyzing %s...\n", pkg)
 
 	result, err := analyzer.Analyze(pkg, opts)
 	if err != nil {
 		displayAnalyzeResult(result)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	displayAnalyzeResult(result)
 
 	// If dry-run, don't save
 	if opts.DryRun {
-		return
+		return nil
 	}
 
 	// If schema was generated, ask for confirmation and save
@@ -159,21 +168,24 @@ func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate
 			output.Warning.Printf("  Ebuild:    %s\n", result.EbuildVersion)
 			if !confirmAfterRelease(release, "Save schema anyway?") {
 				logger.Info("Schema not saved")
-				return
+				return nil
 			}
 		}
 
 		if err := analyzer.SaveSchema(pkg, result.SuggestedSchema); err != nil {
 			logger.Error("failed to save schema: %v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		output.Success.Println("\n✓ Schema saved to packages.toml")
 	}
+	return nil
 }
 
-// runAnalyzeAll handles batch analysis of all packages. release unregisters the
-// command's signal handler; it runs before the confirmation prompt.
-func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) {
+// runAnalyzeAll handles batch analysis of all packages and returns the batch
+// exit status: BatchResult.ExitCode through func exitWith — 0 all ok, 1
+// partial, 2 total failure. release ends the analysis context; it runs before
+// the confirmation prompt.
+func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Println("Analyzing all packages without schema...")
 
 	// AnalyzeAll never returns a fatal error: enumeration and per-package
@@ -189,16 +201,14 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 
 	if len(result.Items) == 0 && !result.HasFailures() {
 		output.Success.Println("All packages already have schemas configured")
-		osExit(result.ExitCode())
-		return
+		return exitWith(result.ExitCode())
 	}
 
 	displayBatchResults(result.Items)
 
 	// If dry-run, don't save; still report the batch outcome.
 	if opts.DryRun {
-		osExit(result.ExitCode())
-		return
+		return exitWith(result.ExitCode())
 	}
 
 	// Count successful analyses
@@ -211,16 +221,14 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 
 	if successful == 0 {
 		output.Warning.Println("No schemas were generated successfully")
-		osExit(result.ExitCode())
-		return
+		return exitWith(result.ExitCode())
 	}
 
 	// Ask for confirmation to save all successful schemas
 	output.Info.Printf("\n%d schema(s) ready to save\n", successful)
 	if !confirmAfterRelease(release, "Save all successful schemas?") {
 		logger.Info("Schemas not saved")
-		osExit(result.ExitCode())
-		return
+		return exitWith(result.ExitCode())
 	}
 
 	// Save all successful schemas
@@ -228,7 +236,7 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 	for _, r := range result.Items {
 		if r.SuggestedSchema != nil && r.Error == nil {
 			if err := analyzer.SaveSchema(r.Package, r.SuggestedSchema); err != nil {
-				output.Error.Printf("Failed to save schema for %s: %v\n", r.Package, err)
+				output.Error.Fprintf(os.Stderr, "Failed to save schema for %s: %v\n", r.Package, err)
 			} else {
 				saved++
 			}
@@ -238,7 +246,7 @@ func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions
 	output.Success.Printf("\n✓ Saved %d schema(s) to packages.toml\n", saved)
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
-	osExit(result.ExitCode())
+	return exitWith(result.ExitCode())
 }
 
 // displayAnalyzeResult formats and displays a single analysis result
@@ -373,11 +381,14 @@ func suggestedComments(pkg string, schema *autoupdate.PackageConfig) string {
 		"parser, plus every caveat a future bump must know."
 }
 
-// confirmAfterRelease releases the command's signal handler, then prompts. While
-// signal.NotifyContext holds SIGINT, a Ctrl+C only cancels a context and a read
-// blocked on stdin never returns; the analysis that context guarded is over by
-// the time a prompt is shown, so releasing it gives Ctrl+C back its default
-// action — ending the command — as it had before story 054 (R4.3).
+// confirmAfterRelease runs release, then prompts. release ends the analysis
+// context (func runAnalyze): the analysis it guarded is over by the time a
+// prompt is shown, so nothing it reached outlives the answer's wait.
+//
+// A Ctrl+C at the prompt is read by the process-wide handler (func
+// processContext). release has already handed the next signal its default
+// action (func yieldSignalsToPrompt), so one Ctrl+C at the prompt ends the
+// command instead of cancelling a context the stdin read never watches.
 func confirmAfterRelease(release func(), prompt string) bool {
 	release()
 	return confirmAction(prompt)

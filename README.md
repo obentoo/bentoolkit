@@ -1256,18 +1256,51 @@ bentoo overlay commit
 
 ### Exit codes
 
-`bentoo overlay autoupdate` reports its outcome through the process exit code so
-it can be wired into scripts and CI:
+Every `bentoo` command reports its outcome through the process exit code, so it
+can be wired into scripts and CI:
 
-| Code | Meaning |
-|------|---------|
-| `0` | Every package was processed successfully. |
-| `1` | Partial failure — at least one package failed **and** at least one succeeded. |
-| `2` | Total failure — no package was processed (or the configuration is invalid). |
+| Situation | Code |
+|-----------|------|
+| Success, including "nothing to do" (`overlay commit` or `overlay staged clean` with nothing staged, `overlay compare` on an overlay with no packages, `overlay autoupdate --list` with nothing pending, `version`) | `0` |
+| Any failure a command reports (configuration, git, scan, lock held, write refused, `snapshot hook` without `--install`/`--uninstall`, `overlay manifest` with nothing to update, `overlay autoupdate --lint` with findings) | `1` |
+| Usage error: unknown command, unknown flag, wrong argument count, unusable `--ui` | `1` |
+| `overlay validate`: an error finding from a deciding gate, or a `--depth` that does not parse | `1` |
+| `overlay validate`: the selector matches nothing, or the run fails for a reason other than an interruption | `2` |
+| `overlay validate` interrupted | `130` |
+| `overlay autoupdate --check` and `overlay analyze --all` batches: every package succeeded | `0` |
+| … partial failure — at least one package failed **and** at least one succeeded | `1` |
+| … total failure — no package was processed (or the configuration is invalid) | `2` |
+| First interrupt (SIGINT/`Ctrl+C`, SIGTERM or SIGHUP) while a cancellable command runs | the code its interrupted run returns — see the list below |
+| First interrupt while any other command runs, or before a command is selected | terminated by the signal (a shell reports 128+n) |
+| Second interrupt while a cancellable command is handling the first | terminated by the signal |
 
-A non-zero exit code is therefore distinguishable: `1` means "some work
-landed", `2` means "nothing landed". The per-package errors that caused a `1`
-or `2` are also printed so the failing packages can be retried individually.
+For a batch, a non-zero exit code is therefore distinguishable: `1` means "some
+work landed", `2` means "nothing landed". The per-package errors that caused a
+`1` or `2` are also printed so the failing packages can be retried individually.
+
+A failure prints its message on stderr; report rows stay on stdout. The usage
+text is printed only for a usage error such as an unknown flag or a wrong
+argument count, not when a command fails.
+
+**Cancellable commands.** These commands stop cleanly on their first interrupt
+(SIGINT, SIGTERM or SIGHUP alike) and return the code below:
+
+| Command | Interrupted by its first signal |
+|---------|---------------------------------|
+| `overlay validate` | exit `130` |
+| `overlay autoupdate` (`--check --force`) | exit `2` |
+| `snapshot status` | exit `0` — the interrupted run renders and returns normally |
+| `distfile fetch`, `overlay add`, `overlay analyze`, `overlay commit`, `overlay manifest`, `overlay pull`, `overlay push`, `overlay status`, `snapshot apply`, `snapshot list`, `snapshot prune`, `snapshot rollback`, `snapshot run` | exit `1` |
+| `notice new`, `notice revise` | exit `1` — measured while the editor is open: the editor is stopped and nothing is written |
+| `overlay compare`, `overlay prune` | may not stop promptly: while an upstream never answers, the HTTP wait ignores the interruption (it was still running 30 s after SIGINT) — a second interrupt terminates it |
+| `overlay staged clean` | waits on no external program; with nothing staged it exits `0` before an interrupt can land |
+| `snapshot restore` | refuses before any wait unless a ship entry is configured; its interrupted exit code has not been measured |
+
+At the confirmation prompts of `overlay commit` and `overlay analyze`, a single
+`Ctrl+C` ends the command. Every command not listed above — including
+`overlay log` and `overlay diff` — is terminated by the first signal. A second
+signal always terminates, even while a cancellable command is still winding
+down.
 
 ### Live output
 

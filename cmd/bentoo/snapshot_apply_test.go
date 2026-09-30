@@ -17,9 +17,7 @@ func TestRunSnapshotApply_RendersConf(t *testing.T) {
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
 	snapshotRunner = &snapshot.MockRunner{}
 
-	code, exited := captureExit(t, func() {
-		runSnapshotApply(snapshotApplyCmd, nil)
-	})
+	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil))
 	if exited {
 		t.Fatalf("apply exited with code %d, want success", code)
 	}
@@ -34,9 +32,7 @@ func TestRunSnapshotApply_InvalidConfigExits1(t *testing.T) {
 	writeSnapshotConfig(t, "[engine]\ndriver = \"zfs\"\nsubvolumes = [\"/home\"]\n")
 	snapshotRunner = &snapshot.MockRunner{}
 
-	code, exited := captureExit(t, func() {
-		runSnapshotApply(snapshotApplyCmd, nil)
-	})
+	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil))
 	if !exited || code != 1 {
 		t.Errorf("apply exit = (%d, %v), want (1, true)", code, exited)
 	}
@@ -51,8 +47,10 @@ func TestRunSnapshotApply_DryRunNoWrite(t *testing.T) {
 	snapshotApplyDryRun = true
 	t.Cleanup(func() { snapshotApplyDryRun = origDryRun })
 
-	code, exited := captureStdoutExit(t, func() {
-		runSnapshotApply(snapshotApplyCmd, nil)
+	var code int
+	var exited bool
+	_ = captureStdout(t, func() {
+		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil))
 	})
 	if exited {
 		t.Fatalf("dry-run exited with code %d", code)
@@ -86,7 +84,7 @@ func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runSnapshotApply(snapshotApplyCmd, nil) })
+		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil))
 	})
 	if exited {
 		t.Fatalf("apply --dry-run exited with code %d, want success", code)
@@ -103,14 +101,4 @@ func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 			t.Errorf("apply --dry-run plan missing %q (008 R2.1); output:\n%s", want, out)
 		}
 	}
-}
-
-// captureStdoutExit combines stdout capture and exit capture for verbs that print
-// then may exit.
-func captureStdoutExit(t *testing.T, fn func()) (code int, exited bool) {
-	t.Helper()
-	_ = captureStdout(t, func() {
-		code, exited = captureExit(t, fn)
-	})
-	return code, exited
 }

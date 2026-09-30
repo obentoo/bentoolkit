@@ -9,10 +9,10 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/version"
 )
 
-// TestVersionCommand tests Requirement 9.1: version command is registered and has a Run function.
+// TestVersionCommand tests Requirement 9.1: version command is registered and has a RunE function.
 func TestVersionCommand(t *testing.T) {
-	if versionCmd.Run == nil {
-		t.Fatal("version command should have a Run function")
+	if versionCmd.RunE == nil {
+		t.Fatal("version command should have a RunE function")
 	}
 	if versionCmd.Use != "version" {
 		t.Errorf("version command Use = %q, want %q", versionCmd.Use, "version")
@@ -34,8 +34,8 @@ func TestVersionInfoOutput(t *testing.T) {
 // TestCompletionCommandRegistration tests Requirement 9.2: completion command is registered
 // with correct valid args for all supported shells.
 func TestCompletionCommandRegistration(t *testing.T) {
-	if completionCmd.Run == nil {
-		t.Fatal("completion command should have a Run function")
+	if completionCmd.RunE == nil {
+		t.Fatal("completion command should have a RunE function")
 	}
 	expectedShells := []string{"bash", "zsh", "fish", "powershell"}
 	for _, shell := range expectedShells {

@@ -37,10 +37,10 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -240,12 +240,19 @@ func newTestCLI(t *testing.T) *testCLI {
 	t.Setenv("BENTOO_UI", "")
 
 	restoreReportFlags(t)
+	restoreAutoupdateFlags(t)
 
 	return &testCLI{t: t, home: home, overlay: overlay}
 }
 
-// restoreReportFlags puts the three report flags back the way it found them when
-// the test ends, the way t.Setenv does for the environment above.
+// restoreReportFlags puts the report flags back the way it found them when the
+// test ends, the way t.Setenv does for the environment above. Its sibling
+// restoreAutoupdateFlags does the same for every other flag of `overlay
+// autoupdate`; newTestCLI calls both, so together they cover every package
+// variable a flag of that command binds — reportFlagGlobals and
+// autoupdateFlagGlobals are the whole set, and
+// TestAutoupdateFlagGlobalsAreAllRestored fails the day a new flag binds one
+// neither lists.
 //
 // # The flags are PACKAGE variables, and that is deliberate rather than an
 // # oversight
@@ -254,9 +261,11 @@ func newTestCLI(t *testing.T) *testCLI {
 // them in PersistentPreRun, but binds --ui, --all and --export straight to the
 // package variables of the same name — see the comment there for why (a publish
 // line naming autoupdateAll would put that identifier outside a renderer
-// Options, which TestAllDoesNotChangeActions forbids). pflag writes the DEFAULT
-// through that pointer at construction, so building a tree resets all three, and
-// a harness that builds one per Run cannot leak flag state INTO the next run.
+// Options, which TestAllDoesNotChangeActions forbids). newAutoupdateCmd
+// binds every one of its own flags but --depth the same way. pflag writes the
+// DEFAULT through that pointer at construction, so building a tree resets them
+// all, and a harness that builds one per Run cannot leak flag state INTO the
+// next run.
 //
 // # What it can leak into is a test that never builds a tree
 //
@@ -269,15 +278,105 @@ func newTestCLI(t *testing.T) *testCLI {
 // landed between them and the previous harness user, having changed neither
 // their assertions nor the code under them.
 //
+// The same hazard reopened once the harness ran handlers in-process through
+// runMain (story 058). TestRunAutoupdate_SignalCancels calls runAutoupdate on
+// the package-level autoupdateCmd and pins only --check, --force and
+// --concurrency; run under -shuffle after the `--lint --fix --yes` row of
+// TestS058AutoupdateRegistryModesKeepTheirExitCodes, it inherited
+// autoupdateLint = true, took the lint path instead of the check, and failed
+// "upstream check never started" (seed 1790717970495027171).
+//
 // Restoring on cleanup closes it at the source. It is not a fix for one
 // ordering — it makes every ordering equivalent, which is the only version of
 // this that stays true as files are added.
 func restoreReportFlags(t *testing.T) {
 	t.Helper()
+	restoreFlagGlobals(t, reportFlagGlobals()...)
+}
 
-	ui, all, export, noTUI := autoupdateUI, autoupdateAll, autoupdateExport, autoupdateNoTUI
+// reportFlagGlobals is every package variable restoreReportFlags puts back:
+// the three report flags newRootCmd declares on the root, plus --no-tui, which
+// outranks --ui and is read beside it by resolveAutoupdateUIMode.
+func reportFlagGlobals() []any {
+	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport, &autoupdateNoTUI}
+}
+
+// restoreAutoupdateFlags puts back, when the test ends, every package variable
+// a flag of `overlay autoupdate` binds — see restoreReportFlags for why a Run
+// can leak them and what the leak broke.
+func restoreAutoupdateFlags(t *testing.T) {
+	t.Helper()
+	restoreFlagGlobals(t, autoupdateFlagGlobals()...)
+}
+
+// autoupdateFlagGlobals is every `&autoupdate…` target of a Flags().*Var call
+// in newAutoupdateCmd (overlay_autoupdate.go), in declaration order.
+// --depth is absent because it binds no package variable: it is read off the
+// command. --no-tui is also in reportFlagGlobals; restoring it twice restores
+// the same snapshot.
+//
+// A new flag bound to a package variable must be added here.
+// TestAutoupdateFlagGlobalsAreAllRestored enforces it.
+func autoupdateFlagGlobals() []any {
+	return []any{
+		&autoupdateCheck,
+		&autoupdateList,
+		&autoupdateApply,
+		&autoupdateForce,
+		&autoupdateCompile,
+		&autoupdateRequireIsolation,
+		&autoupdateClean,
+		&autoupdateConcurrency,
+		&autoupdateTimeout,
+		&autoupdateOnly,
+		&autoupdateReviveList,
+		&autoupdateRevive,
+		&autoupdateRevivable,
+		&autoupdateNoTUI,
+		&autoupdateLint,
+		&autoupdateFix,
+		&autoupdateMarkAutoDisabledFlag,
+		&autoupdateExcept,
+		&autoupdateYes,
+		&autoupdateDistdir,
+		&autoupdateDistfilesCache,
+		&autoupdateNoFetchCache,
+		&autoupdateLLM,
+	}
+}
+
+// restoreFlagGlobals snapshots the variable behind each pointer now and writes
+// the snapshot back on cleanup. A slice is copied, not aliased: pflag's
+// StringSlice appends to the slice it holds on a repeated flag, which could
+// write into the backing array of a snapshot that merely shared it.
+//
+// Every argument must be a non-nil pointer; anything else is a harness defect
+// and fails the test that asked for it rather than restoring nothing.
+func restoreFlagGlobals(t *testing.T, ptrs ...any) {
+	t.Helper()
+
+	type saved struct{ target, value reflect.Value }
+	snapshot := make([]saved, 0, len(ptrs))
+	for _, p := range ptrs {
+		ptr := reflect.ValueOf(p)
+		if ptr.Kind() != reflect.Pointer || ptr.IsNil() {
+			t.Fatalf("restoreFlagGlobals: %T is not a non-nil pointer to a flag variable", p)
+		}
+		target := ptr.Elem()
+		value := reflect.New(target.Type()).Elem()
+		if target.Kind() == reflect.Slice && !target.IsNil() {
+			clone := reflect.MakeSlice(target.Type(), target.Len(), target.Len())
+			reflect.Copy(clone, target)
+			value.Set(clone)
+		} else {
+			value.Set(target)
+		}
+		snapshot = append(snapshot, saved{target: target, value: value})
+	}
 	t.Cleanup(func() {
-		autoupdateUI, autoupdateAll, autoupdateExport, autoupdateNoTUI = ui, all, export, noTUI
+		for _, s := range snapshot {
+			s.target.Set(s.value)
+		}
 	})
 }
 
@@ -301,53 +400,30 @@ func (c *testCLI) Home() string { return c.home }
 //
 // # The status is returned, never exited
 //
-// osExit is replaced with a panic carrying the code, so a failing run is an
-// assertion rather than a dead test binary. A code of 0 means the command
-// returned normally.
+// The run goes through runMain, which returns the code func main would pass to
+// exitProcess, so a failing run is an assertion rather than a dead test binary.
+// A code of 0 means the command succeeded.
 func (c *testCLI) Run(args ...string) (stdout, stderr string, code int) {
 	c.t.Helper()
 
 	readOut := captureStream(c.t, 1, &os.Stdout)
 	readErr := captureStream(c.t, 2, &os.Stderr)
 
-	origExit := osExit
-	osExit = func(status int) { panic(exitSentinel(status)) }
-
 	// fatih/color caches its writer at package init, so redirecting the file
 	// descriptor is not enough to stop it reaching the real terminal.
 	origColorOut, origNoColor := color.Output, color.NoColor
 	color.Output, color.NoColor = os.Stdout, true
 
-	code = func() (status int) {
-		defer func() {
-			osExit = origExit
-			color.Output, color.NoColor = origColorOut, origNoColor
-			if r := recover(); r != nil {
-				if sentinel, ok := r.(exitSentinel); ok {
-					status = int(sentinel)
-					return
-				}
-				panic(r)
-			}
-		}()
+	code = func() int {
+		defer func() { color.Output, color.NoColor = origColorOut, origNoColor }()
 
 		cmd := newRootCmd()
 		cmd.SetArgs(args)
 		cmd.SetOut(os.Stdout)
 		cmd.SetErr(os.Stderr)
-		if err := cmd.Execute(); err != nil {
-			// Printed here because main() prints it there, and for the same
-			// reason: the root sets SilenceErrors (R3.6, sub-task 11.1), so
-			// the program's only error printer is its entry point. Until
-			// then cobra printed this line and the harness could drop the
-			// error without anyone noticing. Dropping it now would leave
-			// stderr EMPTY where the operator reads one sentence — the
-			// opposite error, but the same kind: a harness whose reading of
-			// a refused run does not match the operator's.
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		return 0
+		// The same entry point func main uses: one exit-code mapping, one
+		// printer, one signal context for the harness and the binary.
+		return runMain(cmd)
 	}()
 
 	return readOut(), readErr(), code

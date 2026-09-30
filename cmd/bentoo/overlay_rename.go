@@ -55,7 +55,7 @@ Examples:
   # Force rename even if version-specific files exist
   bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10`,
 		Args: cobra.ExactArgs(3),
-		Run:  runRename,
+		RunE: runRename,
 	}
 	cmd.Flags().BoolVarP(&renameFlags.DryRun, "dry-run", "n", false, "Show what would be renamed without making changes")
 	cmd.Flags().BoolVarP(&renameFlags.Yes, "yes", "y", false, "Skip confirmation prompts (except for global search without --force)")
@@ -64,19 +64,19 @@ Examples:
 	return cmd
 }
 
-func runRename(cmd *cobra.Command, args []string) {
+func runRename(cmd *cobra.Command, args []string) error {
 	// Parse command arguments
 	spec, err := ParseRenameArgs(args)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Load configuration
 	ctx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Convert flags to options
@@ -91,7 +91,7 @@ func runRename(cmd *cobra.Command, args []string) {
 	previewResult, err := overlay.RenamePreview(ctx.Config, spec)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Display any scan warnings
@@ -102,7 +102,7 @@ func runRename(cmd *cobra.Command, args []string) {
 	// No matches found
 	if len(previewResult.Matches) == 0 {
 		logger.Info("No matching ebuilds found")
-		return
+		return nil
 	}
 
 	// Display preview
@@ -115,8 +115,7 @@ func runRename(cmd *cobra.Command, args []string) {
 	if len(previewResult.Collisions) > 0 {
 		err := &overlay.CollisionError{Collisions: previewResult.Collisions}
 		logger.Error("%v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	// Check if confirmation is needed
@@ -134,14 +133,14 @@ func runRename(cmd *cobra.Command, args []string) {
 	// Dry-run mode: don't execute
 	if opts.DryRun {
 		logger.Info("Dry-run mode - no changes made")
-		return
+		return nil
 	}
 
 	// Prompt for confirmation if needed
 	if needsConfirmation {
 		if !promptConfirmation() {
 			logger.Info("Operation cancelled")
-			return
+			return nil
 		}
 	}
 
@@ -149,13 +148,14 @@ func runRename(cmd *cobra.Command, args []string) {
 	result, err := overlay.Rename(ctx.Config, spec, opts)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Display results
 	if result != nil {
 		logger.Info("%s", overlay.FormatRenameResult(result, opts.DryRun))
 	}
+	return nil
 }
 
 // promptConfirmation asks the user to confirm the operation.

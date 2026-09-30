@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -101,8 +102,9 @@ under this command reads, writes or removes anything in the overlay itself.`,
 // newStagedCleanCmd builds `overlay staged clean`.
 func newStagedCleanCmd() *cobra.Command {
 	clean := &cobra.Command{
-		Use:   "clean",
-		Short: "Remove the staged trees no longer worth keeping, and say what stays",
+		Use:         "clean",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Remove the staged trees no longer worth keeping, and say what stays",
 		Long: `Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
 'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and
 report every tree left behind with the reason it stays.
@@ -141,7 +143,7 @@ Examples:
   bentoo overlay staged clean         # print the plan, then ask
   bentoo overlay staged clean --yes   # remove the planned trees unattended`,
 		Args: cobra.NoArgs,
-		Run:  runStagedCleanCmd,
+		RunE: runStagedCleanCmd,
 	}
 	// The one thing a fresh command per call does NOT make fresh: --yes is bound
 	// to a package variable, because the tests set consent directly rather than
@@ -173,27 +175,24 @@ Examples:
 // the working directory, so a run that shrugged off a config failure would be
 // asking "is the staging root inside whatever directory I was launched from".
 // Refusing is the only answer that keeps the check meaning what it says.
-func runStagedCleanCmd(cmd *cobra.Command, _ []string) {
-	// SIGINT/SIGTERM reach the sweep through the context, so an interrupted run
-	// stops between trees instead of finishing the batch first.
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runStagedCleanCmd(cmd *cobra.Command, _ []string) error {
+	// The process-wide context (func commandContext) reaches the sweep, so an
+	// interrupted run stops between trees instead of finishing the batch first.
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
-		output.Error.Printf("  loading config: %v\n", err)
-		osExit(1)
-		return
+		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
+		return exitWith(1)
 	}
 
 	stagingRoot, err := autoupdateStagingRoot()
 	if err != nil {
-		output.Error.Printf("  the staged trees could not be located: %v\n", err)
-		osExit(1)
-		return
+		output.Error.Fprintf(os.Stderr, "  the staged trees could not be located: %v\n", err)
+		return exitWith(1)
 	}
 
-	runStagedClean(ctx, appCtx.OverlayPath, stagingRoot)
+	return runStagedClean(ctx, appCtx.OverlayPath, stagingRoot)
 }
 
 // runStagedClean plans what may leave the staging root, prints it, and — once
@@ -217,7 +216,7 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string) {
 // things the planner and this command already do — the tree must carry the
 // recognition marker, a tree whose deciding gate FAILED is kept, and the whole
 // plan is printed and agreed to before anything is removed.
-func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) {
+func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error {
 	plan, err := validate.PlanStagedSweep(validate.SweepRequest{
 		Overlay:     overlayPath,
 		StagingRoot: stagingRoot,
@@ -226,9 +225,8 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) {
 		// Reported verbatim: the refusal an operator reads has to be the one the
 		// planner reached — "the staging root is inside the overlay" and "the
 		// root could not be walked" are different problems with different fixes.
-		output.Error.Printf("  the staged trees could not be planned: %v\n", err)
-		osExit(1)
-		return
+		output.Error.Fprintf(os.Stderr, "  the staged trees could not be planned: %v\n", err)
+		return exitWith(1)
 	}
 
 	printStagedCleanPlan(plan)
@@ -255,7 +253,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) {
 		} else {
 			output.Info.Println("  Nothing to remove: nothing is staged under this root.")
 		}
-		return
+		return nil
 	}
 
 	// THE ORDER IS THE GUARANTEE, and this early return is where it is spent.
@@ -267,7 +265,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) {
 	// into the loop that deletes, where one wrong branch removes a tree; kept out
 	// here, the worst a wrong branch can do is fail to remove one.
 	if !confirmStagedClean(plan) {
-		return
+		return nil
 	}
 
 	// The plan, unmodified, and this run's own context. ExecuteStagedSweep reads
@@ -279,6 +277,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) {
 	// still whole and reported as a keep naming the interruption.
 	report := validate.ExecuteStagedSweep(ctx, plan)
 	displayStagedCleanReport(report, len(plan.Remove))
+	return nil
 }
 
 // confirmStagedClean takes ONE confirmation covering the whole plan, and is the

@@ -26,6 +26,7 @@ linters:
         - (*github.com/fatih/color.Color).Printf
         - (*github.com/fatih/color.Color).Println
         - (*github.com/fatih/color.Color).Fprintf
+        - (*github.com/fatih/color.Color).Fprintln
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Printf
@@ -43,6 +44,11 @@ linters:
       forbid:
         - pattern: ^fmt\.Print(f|ln)?$
           msg: library code does not print to stdout; return a value or use internal/common/output
+        - pattern: ^os\.Exit$
+          msg: only func main ends the process; a handler returns exitWith(code) or an error
+      # Resolve the package behind an identifier, so a renamed import of os
+      # (`import osx "os"`) cannot hide an os.Exit from the rule above.
+      analyze-types: true
     gosec:
       # G204 (subprocess launched with variable) is intentionally NOT excluded:
       # T6 added ValidateRepoURL/ValidateBranch so every git invocation now runs
@@ -64,6 +70,13 @@ linters:
         linters:
           - forbidigo
         text: "fmt\\.Print"
+      # Scoped to the os.Exit rule's text, so these paths stay under the
+      # fmt.Print rule. main.go is the one place the process ends; misc/ holds
+      # standalone programs; tests end re-exec'd children and TestMain.
+      - path: (^cmd/bentoo/main\.go$|^misc/|_test\.go$)
+        linters:
+          - forbidigo
+        text: "os\\.Exit"
       - path: _test\.go
         linters:
           - errcheck

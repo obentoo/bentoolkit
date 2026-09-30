@@ -9,28 +9,28 @@ import (
 // newStatusCmd builds `overlay status`.
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show the status of changes in the overlay",
-		Long:  `Display the current status of changes in the overlay repository, grouped by category/package.`,
-		Run:   runStatus,
+		Use:         "status",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Show the status of changes in the overlay",
+		Long:        `Display the current status of changes in the overlay repository, grouped by category/package.`,
+		RunE:        runStatus,
 	}
 	return cmd
 }
 
-func runStatus(cmd *cobra.Command, args []string) {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runStatus(cmd *cobra.Command, args []string) error {
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	statuses, err := overlay.Status(ctx, appCtx.Config)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// The library composes the facts; THIS is where they are shown, and the
@@ -47,4 +47,5 @@ func runStatus(cmd *cobra.Command, args []string) {
 	// The text is unchanged, byte for byte, against what this printed off a TTY —
 	// which is every pipe, log and CI run.
 	logger.Info("%s", overlay.FormatStatus(statuses))
+	return nil
 }

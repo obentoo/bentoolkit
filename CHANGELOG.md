@@ -352,7 +352,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertion. Nothing visible changes today, since the error reaches the check
   unwrapped.
 
+- **`overlay manifest` is now cancelled cleanly by SIGHUP.** It stopped
+  cleanly on SIGINT and SIGTERM, but SIGHUP (a closed terminal) killed it
+  mid-run. SIGHUP now cancels it like the other two, and it exits `1`.
+
 ### Changed
+
+- **Failure messages now go to stderr; report rows stay on stdout.** The
+  refusals and failures of `overlay prune`, `overlay autoupdate
+  --mark-auto-disabled`, `overlay validate`, `overlay autoupdate --lint --fix`,
+  the registry update after `overlay autoupdate --check`, `overlay staged
+  clean`, `overlay compare --realign` and `overlay analyze --all` — 23
+  messages, with the hint lines printed beside them — used to be written to
+  stdout. The
+  failure messages of these commands now go to stderr, so a script that reads
+  stdout gets only the report; a row or count inside a report stays on stdout.
+- **A second signal now terminates a cancellable command immediately.** A
+  command that stops cleanly on `Ctrl+C` (SIGINT, SIGTERM or SIGHUP) used to
+  swallow a second signal while it wound down; the second one now ends the
+  process at once. The first signal behaves as before (apart from SIGHUP at
+  `overlay manifest`, under Fixed).
+- **Exit codes and first-signal behaviour are unchanged.** Every command exits
+  with the same code as before in every situation, and the first signal is
+  handled as before: one `Ctrl+C` at the `overlay commit` and `overlay analyze`
+  confirmation prompts still ends the command. The README's "Exit codes"
+  section now documents the whole contract — success, failure, usage error,
+  `overlay validate`'s `1`/`2`/`130`, the batch `0`/`1`/`2` of `overlay
+  autoupdate --check` and `overlay analyze --all`, and what each cancellable
+  command does when interrupted. `notice new` and `notice revise` are
+  cancellable too: a first interrupt while the editor is open stops it, writes
+  nothing and exits `1`, as before; a second one now terminates them at once.
 
 - **`make lint` runs exactly what the CI Lint job runs.** It builds
   golangci-lint v2.13.2 (the CI pin; `make lint-pin-check` fails if the two

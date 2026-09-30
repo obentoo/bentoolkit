@@ -31,12 +31,28 @@ commit and push each repository yourself.`,
 	return cmd
 }
 
+// noticeNewOptions holds the flags of `notice new`. Its run method is the
+// command's RunE: a named handler, as every other command has, so the handler
+// is not an inline closure of the tree's constructor.
+type noticeNewOptions struct {
+	in       notice.Input
+	bodyFile string
+}
+
+func (o *noticeNewOptions) run(cmd *cobra.Command, _ []string) error {
+	// The flags parsed, so any error from here on is about their values or
+	// the files, and the usage block would bury the one line that names the
+	// flag to fix.
+	cmd.SilenceUsage = true
+	return runNoticeNew(cmd, o.in, o.bodyFile)
+}
+
 func newNoticeNewCmd() *cobra.Command {
-	var in notice.Input
-	var bodyFile string
+	var o noticeNewOptions
 	cmd := &cobra.Command{
-		Use:   "new",
-		Short: "Write a new notice to the overlay and the site",
+		Use:         "new",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Write a new notice to the overlay and the site",
 		Long: `Write a new notice. The ID is <published>-<name>. The body comes from
 --body-file, or from $VISUAL / $EDITOR when it is absent.
 
@@ -44,26 +60,20 @@ func newNoticeNewCmd() *cobra.Command {
 being one of <, <=, =, >=, > followed by a version, for example
 --affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			// The flags parsed, so any error from here on is about their
-			// values or the files, and the usage block would bury the one
-			// line that names the flag to fix.
-			cmd.SilenceUsage = true
-			return runNoticeNew(cmd, in, bodyFile)
-		},
+		RunE: o.run,
 	}
 	f := cmd.Flags()
-	f.StringVar(&in.Type, "type", "", "Notice type: security, release, news or announcement")
-	f.StringVar(&in.Severity, "severity", "", "Severity: info, warning or critical")
-	f.StringVar(&in.Title, "title", "", "Title, at most 50 characters")
-	f.StringVar(&in.Summary, "summary", "", "One-line summary, at most 300 characters")
-	f.StringVar(&in.Name, "name", "", "Short name of the ID: at most 20 characters of [a-z0-9+_-]")
+	f.StringVar(&o.in.Type, "type", "", "Notice type: security, release, news or announcement")
+	f.StringVar(&o.in.Severity, "severity", "", "Severity: info, warning or critical")
+	f.StringVar(&o.in.Title, "title", "", "Title, at most 50 characters")
+	f.StringVar(&o.in.Summary, "summary", "", "One-line summary, at most 300 characters")
+	f.StringVar(&o.in.Name, "name", "", "Short name of the ID: at most 20 characters of [a-z0-9+_-]")
 	// StringArray, not StringSlice: a slice flag would split `>=1.0,<1.2.3`
 	// at its commas.
-	f.StringArrayVar(&in.Affects, "affects", nil, "Affected package and version ranges (repeatable; required for security and release)")
-	f.StringVar(&in.Published, "published", "", "Publication date, YYYY-MM-DD (default: today in UTC)")
-	f.StringVar(&in.Author, "author", "", "Author, \"Name <email>\" (default: the configured git user)")
-	f.StringVar(&bodyFile, "body-file", "", "Read the body from this file instead of opening an editor")
+	f.StringArrayVar(&o.in.Affects, "affects", nil, "Affected package and version ranges (repeatable; required for security and release)")
+	f.StringVar(&o.in.Published, "published", "", "Publication date, YYYY-MM-DD (default: today in UTC)")
+	f.StringVar(&o.in.Author, "author", "", "Author, \"Name <email>\" (default: the configured git user)")
+	f.StringVar(&o.bodyFile, "body-file", "", "Read the body from this file instead of opening an editor")
 	return cmd
 }
 
@@ -92,8 +102,7 @@ func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
 		return err
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 	in.Body, err = notice.ReadBody(ctx, bodyFile, os.Getenv, notice.TerminalRunner)
 	if err != nil {
 		return err
@@ -110,31 +119,41 @@ func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
 	return nil
 }
 
+// noticeReviseOptions holds the flags of `notice revise`; its run method is
+// the command's RunE, named for the reason given at noticeNewOptions.
+type noticeReviseOptions struct {
+	changes  notice.Changes
+	bodyFile string
+}
+
+func (o *noticeReviseOptions) run(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true // as in notice new
+	changes := o.changes
+	if !cmd.Flags().Changed("affects") {
+		changes.Affects = nil
+	}
+	return runNoticeRevise(cmd, args[0], changes, o.bodyFile)
+}
+
 func newNoticeReviseCmd() *cobra.Command {
-	var changes notice.Changes
-	var bodyFile string
+	var o noticeReviseOptions
 	cmd := &cobra.Command{
-		Use:   "revise <id>",
-		Short: "Revise a published notice in both repositories",
+		Use:         "revise <id>",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Revise a published notice in both repositories",
 		Long: `Open the notice's current text in $VISUAL / $EDITOR (or read it from
 --body-file) and rewrite the news item and the site file together. The news
 item's Revision goes up by one and the site file's updated becomes now;
 the ID and the publication date stay.`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true // as in notice new
-			if !cmd.Flags().Changed("affects") {
-				changes.Affects = nil
-			}
-			return runNoticeRevise(cmd, args[0], changes, bodyFile)
-		},
+		RunE: o.run,
 	}
 	f := cmd.Flags()
-	f.StringVar(&changes.Severity, "severity", "", "New severity: info, warning or critical")
-	f.StringVar(&changes.Title, "title", "", "New title, at most 50 characters")
-	f.StringVar(&changes.Summary, "summary", "", "New one-line summary, at most 300 characters")
-	f.StringArrayVar(&changes.Affects, "affects", nil, "Replace the affected packages (repeatable; same syntax as notice new)")
-	f.StringVar(&bodyFile, "body-file", "", "Take the new text from this file instead of opening an editor")
+	f.StringVar(&o.changes.Severity, "severity", "", "New severity: info, warning or critical")
+	f.StringVar(&o.changes.Title, "title", "", "New title, at most 50 characters")
+	f.StringVar(&o.changes.Summary, "summary", "", "New one-line summary, at most 300 characters")
+	f.StringArrayVar(&o.changes.Affects, "affects", nil, "Replace the affected packages (repeatable; same syntax as notice new)")
+	f.StringVar(&o.bodyFile, "body-file", "", "Take the new text from this file instead of opening an editor")
 	return cmd
 }
 
@@ -154,8 +173,7 @@ func runNoticeRevise(cmd *cobra.Command, id string, changes notice.Changes, body
 		}
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 	res, err := notice.Revise(ctx, id, changes, app.OverlayPath, sitePath, edit, time.Now())
 	if err != nil {
 		return err

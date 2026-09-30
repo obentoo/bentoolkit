@@ -42,9 +42,9 @@ func newRootCmd() *cobra.Command {
 		// Set on the root and so covering all 30 commands, unlike the
 		// SilenceUsage below: cobra consults the ROOT's copy of both fields
 		// whichever command ran. This one stops cobra printing the error it
-		// is about to return from Execute(), which main.go already prints —
+		// is about to return from Execute(), which func execute already prints —
 		// with both printers live every refusal is stated twice, and R3.6
-		// allows exactly once. main.go is left the single owner.
+		// allows exactly once. func execute is left the single owner.
 		//
 		// It is not the same decision as the one below, because the two
 		// fields silence different things. SilenceUsage governs the usage
@@ -53,7 +53,22 @@ func newRootCmd() *cobra.Command {
 		// the unknown-flag error nothing, which is why it can go where the
 		// other one could not.
 		SilenceErrors: true,
+		// This is the only PersistentPreRun(E) in the tree, and the two
+		// statements that open it depend on that: cobra runs the nearest hook
+		// only, so a second one lower down would take both away from the
+		// commands under it.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// cobra has validated flags and arguments by the time this runs,
+			// so an unknown flag or a wrong argument count still prints the
+			// usage block, while a bad --ui below and every handler failure
+			// print none — the diagnostic alone, as when handlers ended the
+			// process themselves.
+			cmd.SilenceUsage = true
+			// The command is selected now: from here on the first signal
+			// cancels its context only if it declared itself cancellable. A
+			// tree executed without func runMain carries no policy.
+			applySignalPolicy(cmd)
+
 			// Publish this tree's flag values to the package variables the run
 			// functions read, before any of them runs.
 			verbose, quiet, noColor = verboseFlag, quietFlag, noColorFlag
@@ -71,13 +86,6 @@ func newRootCmd() *cobra.Command {
 			// command that renders nothing. The full precedence chain still
 			// runs where the report is produced, from ResolveMode UNCHANGED.
 			if _, _, err := report.ResolveMode(report.ModeInputs{Flag: autoupdateUI}); err != nil {
-				// Scoped to THIS error, not set on the command once and for
-				// all: a bad --ui value is a message the operator can act on
-				// without a flag list, whereas an unknown flag still deserves
-				// the usage block. Setting SilenceUsage on the root would take
-				// it away from both.
-				cmd.SilenceUsage = true
-
 				// Returned, not printed: cobra stops before RunE only if the
 				// error travels back to it. Printing here and continuing would
 				// satisfy the message half of R3.2 and lose the half that

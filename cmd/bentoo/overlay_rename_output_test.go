@@ -13,7 +13,7 @@ import (
 )
 
 // runRenameOutput runs runRename like runRenameObserved does, and returns the
-// exit code (-1 when runRename returned without exiting) and everything the run
+// exit code its returned error maps to (0 for nil) and everything the run
 // printed on stdout and stderr together.
 //
 // Stderr is captured at the file-descriptor level, not by swapping os.Stderr:
@@ -62,7 +62,7 @@ func runRenameOutput(t *testing.T, flags renameFlagsSnapshot, args []string) (in
 			_ = syscall.Dup2(savedErrFD, 2)
 			_ = syscall.Close(savedErrFD)
 		}()
-		code = withExitIntercept(func() { runRename(renameCmd, args) })
+		code = exitCodeFor(runRename(renameCmd, args))
 	}()
 	if err := outW.Close(); err != nil {
 		t.Fatalf("close output writer: %v", err)

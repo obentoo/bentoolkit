@@ -174,9 +174,11 @@ func TestRunSweepRejectsInvalidTarget(t *testing.T) {
 		return false
 	})
 
-	code, exited := captureStdoutExit(t, func() {
-		runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
+	var err error
+	_ = captureStdout(t, func() {
+		err = runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
 	})
+	code, exited := exitOf(err)
 	if !exited || code == 0 {
 		t.Errorf("exit code = %d, exited = %v; want a non-zero exit", code, exited)
 	}
@@ -195,9 +197,11 @@ func TestRunSweepFailsWithoutARegistry(t *testing.T) {
 	}
 	setSweepClean(t, true)
 
-	code, exited := captureStdoutExit(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+	var err error
+	_ = captureStdout(t, func() {
+		err = runSweep(context.Background(), overlayDir, nil, 1)
 	})
+	code, exited := exitOf(err)
 	if !exited || code == 0 {
 		t.Errorf("exit code = %d, exited = %v; want a non-zero exit", code, exited)
 	}

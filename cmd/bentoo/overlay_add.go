@@ -9,29 +9,29 @@ import (
 // newAddCmd builds `overlay add`.
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add [paths...]",
-		Short: "Add files to the staging area",
+		Use:         "add [paths...]",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "Add files to the staging area",
 		Long: `Add files to the Git staging area in the overlay repository.
 If no paths are specified, adds all changes (equivalent to "git add .").`,
-		Run: runAdd,
+		RunE: runAdd,
 	}
 	return cmd
 }
 
-func runAdd(cmd *cobra.Command, args []string) {
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+func runAdd(cmd *cobra.Command, args []string) error {
+	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext()
 	if err != nil {
 		logger.Error("loading config: %v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	result, err := overlay.AddFiles(ctx, appCtx.Config, args...)
 	if err != nil {
 		logger.Error("%v", err)
-		osExit(1)
+		return exitWith(1)
 	}
 
 	// Display errors for individual files
@@ -46,7 +46,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 		statuses, err := overlay.StagedStatus(ctx, appCtx.Config)
 		if err != nil {
 			logger.Error("getting status: %v", err)
-			osExit(1)
+			return exitWith(1)
 		}
 		// Plain text, by the same call runStatus documents at length: the library
 		// composes what was staged, this command shows it, and nothing here
@@ -57,6 +57,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 
 	// Exit with error if there were any failures
 	if result.HasErrors() {
-		osExit(1)
+		return exitWith(1)
 	}
+	return nil
 }

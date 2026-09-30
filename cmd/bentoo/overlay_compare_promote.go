@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -102,7 +103,7 @@ func offerRealignPublish(c realignCandidate, proof realign.Proof, overlayRoot st
 			output.Warning.Printf("    refused: %v\n", err)
 			return
 		}
-		output.Error.Printf("    the write failed after every authority said yes — %v — the package directory needs a human before the overlay publishes itself.\n", err)
+		output.Error.Fprintf(os.Stderr, "    the write failed after every authority said yes — %v — the package directory needs a human before the overlay publishes itself.\n", err)
 		return
 	}
 	output.Success.Printf("    published: the overlay now carries the exact bytes the gates read; it commits and pushes on its own.\n")

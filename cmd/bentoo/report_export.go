@@ -66,7 +66,7 @@ import (
 // R3.5 says an unwritable path must leave the run exiting with the status it
 // would otherwise have had. A function with no result cannot alter one: there is
 // no value for a failed export to travel back through, so the caller's own status
-// reaches osExit untouched — by construction rather than by every caller
+// reaches func main untouched — by construction rather than by every caller
 // remembering to ignore something. An export is an ADDITIONAL copy of an answer
 // already delivered, and a display convenience that could decide whether a run
 // counted as successful would be the tail wagging the dog.

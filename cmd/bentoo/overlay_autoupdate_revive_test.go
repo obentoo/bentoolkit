@@ -443,9 +443,7 @@ func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 	configDir := t.TempDir()
 	cfg := configWithGentooGitHub()
 
-	code := withExitIntercept(func() {
-		runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{})
-	})
+	code := exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{}))
 	if code != 1 {
 		t.Fatalf("runRevive exit code = %d, want 1 (no PackageDirProvider guard)", code)
 	}
@@ -473,10 +471,8 @@ func TestRunReviveList_NoCandidates(t *testing.T) {
 	}
 	cfg := configWithGentooGitHub()
 
-	code := withExitIntercept(func() {
-		runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{})
-	})
-	if code != -1 {
-		t.Fatalf("runReviveList exited with code %d, want no exit", code)
+	code := exitCodeFor(runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}))
+	if code != 0 {
+		t.Fatalf("runReviveList exited with code %d, want 0", code)
 	}
 }

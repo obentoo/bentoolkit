@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -36,7 +37,7 @@ import (
 // declined repair, a refused unattended write and a repair that left the
 // unrepairable findings behind all exit 1, and the pre-commit hook that runs
 // --lint next agrees with what this run just said.
-func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
+func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	result, err := autoupdate.RepairPackagesConfig(overlayPath)
 	if err != nil {
 		// RepairPackagesConfig has written nothing: it returns an error only when
@@ -44,9 +45,8 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// rewrite failed the inertness gate. Both mean report it and change
 		// nothing; neither is a condition to retry around.
 		logger.Error("failed to repair packages.toml: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
-		osExit(1)
-		return
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		return exitWith(1)
 	}
 
 	if !result.Changed {
@@ -59,8 +59,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// moments ago and nothing has been written since, so a second copy would
 		// be the same lines twice in one screen. One sentence ties the two facts
 		// together instead — nothing was repairable, and what remains is why.
-		summarizeUnrepaired(issues)
-		return
+		return summarizeUnrepaired(issues)
 	}
 
 	diff, err := repairDiff(result)
@@ -68,9 +67,8 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// No diff means no review, and no review means no write: this gate exists
 		// to stop a change nobody has seen from being published.
 		logger.Error("failed to render the repair as a diff: %v", err)
-		output.Error.Println("  packages.toml was NOT modified.")
-		osExit(1)
-		return
+		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		return exitWith(1)
 	}
 
 	// The diff comes BEFORE the question, always. A confirmation for a change
@@ -87,8 +85,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// byte-identical by construction rather than by care. Every finding the
 		// lint reported is still there, so the exit code still says so.
 		output.Warning.Println("  packages.toml is unchanged.")
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	if err := result.Write(); err != nil {
@@ -96,9 +93,8 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// "the filesystem refused" and "the rewrite stopped being provably inert
 		// between the diff and now". Either way the registry is untouched.
 		logger.Error("failed to write the repaired packages.toml: %v", err)
-		output.Error.Printf("  The registry was NOT repaired: %v\n", err)
-		osExit(1)
-		return
+		output.Error.Fprintf(os.Stderr, "  The registry was NOT repaired: %v\n", err)
+		return exitWith(1)
 	}
 
 	output.Success.Printf("  Repaired packages.toml: %d change(s) written.\n", totalRepairs(result))
@@ -113,10 +109,9 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.
 		logger.Error("packages.toml was repaired but no longer lints: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
-	reportUnrepaired(remaining)
+	return reportUnrepaired(remaining)
 }
 
 // reportUnrepaired states what the registry says NOW and sets the exit code from
@@ -129,10 +124,10 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) {
 // repaired without knowing where upstream versions itself (R6.1) — so a run that
 // ended on "repaired!" while those remain would imply a clean registry that the
 // next --lint will contradict.
-func reportUnrepaired(remaining []autoupdate.LintIssue) {
+func reportUnrepaired(remaining []autoupdate.LintIssue) error {
 	if len(remaining) == 0 {
 		output.Success.Println("packages.toml: record model OK")
-		return
+		return nil
 	}
 
 	output.Warning.Printf("  %d finding(s) still need a human — --fix does not guess at them:\n", len(remaining))
@@ -140,7 +135,7 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) {
 		output.Warning.Println("    " + issue.String())
 	}
 	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	osExit(1)
+	return exitWith(1)
 }
 
 // summarizeUnrepaired is the NOTHING-WAS-WRITTEN report: the findings are the
@@ -150,17 +145,17 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) {
 // The two facts belong in one sentence. "Nothing to repair" followed by "N
 // issues remain" reads as a contradiction to anyone who does not already know
 // that a rule may carry no repair; said together, the second explains the first.
-func summarizeUnrepaired(remaining []autoupdate.LintIssue) {
+func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 	if len(remaining) == 0 {
 		output.Success.Println("packages.toml: record model OK")
-		return
+		return nil
 	}
 
 	output.Warning.Printf(
 		"  Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.\n",
 		len(remaining))
 	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	osExit(1)
+	return exitWith(1)
 }
 
 // confirmLintRepair is the write gate (R7.3): three gates, in order of how much

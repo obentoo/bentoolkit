@@ -18,38 +18,35 @@ var snapshotListRemote bool
 // newSnapshotListCmd builds `snapshot list`.
 func newSnapshotListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List local snapshots per subvolume",
-		Run:   runSnapshotList,
+		Use:         "list",
+		Annotations: map[string]string{cancellableAnnotation: "true"},
+		Short:       "List local snapshots per subvolume",
+		RunE:        runSnapshotList,
 	}
 	cmd.Flags().BoolVar(&snapshotListRemote, "remote", false,
 		"also list remote snapshots (btrbk targets, restic repository)")
 	return cmd
 }
 
-func runSnapshotList(cmd *cobra.Command, _ []string) {
+func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	cfg, path, err := loadSnapshotConfigLenient()
 	if err != nil {
 		logger.Error("snapshot list: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
-	ctx, stop := signalContext(cmd.Context())
-	defer stop()
+	ctx := commandContext(cmd)
 
 	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot list: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	snaps, err := mgr.List(ctx)
 	if err != nil {
 		logger.Error("snapshot list: %v", err)
-		osExit(1)
-		return
+		return exitWith(1)
 	}
 
 	for _, sv := range mgr.Subvolumes() {
@@ -66,7 +63,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) {
 	// Remote listing is opt-in (008 R5.2): without --remote, neither btrbk
 	// `list backups` nor any restic query runs at all.
 	if !snapshotListRemote {
-		return
+		return nil
 	}
 	for _, g := range mgr.ListRemote(ctx) {
 		if g.Err != nil {
@@ -84,6 +81,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) {
 			fmt.Printf("  %s\n", remoteSnapshotLine(s))
 		}
 	}
+	return nil
 }
 
 // remoteSnapshotLine renders one remote snapshot (008 R5.2): btrbk target

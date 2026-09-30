@@ -29,8 +29,8 @@ func TestDistfileCommandIsRegisteredOnRoot(t *testing.T) {
 	if distfileFetchCmd.CommandPath() != "bentoo distfile fetch" {
 		t.Errorf("command path = %q, want `bentoo distfile fetch`", distfileFetchCmd.CommandPath())
 	}
-	if distfileFetchCmd.Run == nil {
-		t.Error("`distfile fetch` should have a Run function")
+	if distfileFetchCmd.RunE == nil {
+		t.Error("`distfile fetch` should have a RunE function")
 	}
 }
 
@@ -145,14 +145,11 @@ func TestDistfileFetchWritesTheFileEmergeWillLookFor(t *testing.T) {
 	distfileFetchDistdir = dest
 	distfileFetchVersion = ""
 
-	var (
-		code   int
-		exited bool
-	)
+	var code int
 	out := captureStdout(t, func() {
-		code, exited = captureExit(t, func() { runDistfileFetch(cmd, []string{"app-misc/example"}) })
+		code = exitCodeFor(runDistfileFetch(cmd, []string{"app-misc/example"}))
 	})
-	if exited {
+	if code != 0 {
 		t.Fatalf("the run exited with code %d; output: %s", code, out)
 	}
 
@@ -201,15 +198,12 @@ func TestDistfileFetchRefusals(t *testing.T) {
 			distfileFetchDistdir = dest
 			distfileFetchVersion = ""
 
-			var (
-				code   int
-				exited bool
-			)
+			var code int
 			errOut := captureStderr(t, func() {
-				code, exited = captureExit(t, func() { runDistfileFetch(cmd, []string{tc.arg}) })
+				code = exitCodeFor(runDistfileFetch(cmd, []string{tc.arg}))
 			})
-			if !exited || code != 1 {
-				t.Fatalf("exit = (%d, exited=%v), want (1, true)", code, exited)
+			if code != 1 {
+				t.Fatalf("exit = %d, want 1", code)
 			}
 			for _, want := range tc.wantOut {
 				if !strings.Contains(errOut, want) {
