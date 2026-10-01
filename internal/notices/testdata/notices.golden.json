@@ -1,0 +1,109 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "bentoo notices",
+  "home_page_url": "https://obentoo.org/notices/",
+  "feed_url": "https://obentoo.org/notices.json",
+  "language": "en",
+  "_bentoo": {
+    "serial": 1790812800,
+    "expires": "2026-10-31T00:00:00Z"
+  },
+  "items": [
+    {
+      "id": "2026-09-30-foo-cve",
+      "url": "https://obentoo.org/notices/2026-09-30-foo-cve/",
+      "title": "foo 1.2 heap overflow",
+      "summary": "A heap overflow in foo before 1.2.3 lets a crafted file run code.",
+      "content_text": "foo before 1.2.3 overflows a heap buffer while parsing a crafted header.\n\nUpgrade to 1.2.3 or later. Slot 0 is not affected.\n",
+      "date_published": "2026-09-30T00:00:00Z",
+      "date_modified": "2026-09-30T00:00:00Z",
+      "_bentoo": {
+        "type": "security",
+        "severity": "critical",
+        "affects": [
+          {
+            "cp": "dev-libs/foo",
+            "slot": "1",
+            "ranges": [
+              {
+                "op": ">=",
+                "ver": "1.0"
+              },
+              {
+                "op": "<",
+                "ver": "1.2.3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-09-29-bentoolkit-0-32",
+      "url": "https://obentoo.org/notices/2026-09-29-bentoolkit-0-32/",
+      "title": "bentoolkit 0.32 fixes overlay sync",
+      "summary": "bentoolkit before 0.32 can leave the overlay half-synced after an interrupted run.",
+      "content_text": "Versions before 0.32 do not roll back a sync interrupted by a signal.\n\nUpgrade with emerge --oneshot app-portage/bentoolkit.\n",
+      "date_published": "2026-09-29T00:00:00Z",
+      "date_modified": "2026-09-29T00:00:00Z",
+      "_bentoo": {
+        "type": "release",
+        "severity": "warning",
+        "affects": [
+          {
+            "cp": "app-portage/bentoolkit",
+            "ranges": [
+              {
+                "op": "<",
+                "ver": "0.32"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-09-28-edge+case_1",
+      "url": "https://obentoo.org/notices/2026-09-28-edge+case_1/",
+      "title": "Edge case for the feed contract",
+      "summary": "Exercises \"+\" and \"_\" in an id, a \"+\" in a package name, a slot and suffixed versions.",
+      "content_text": "This notice exists to pin the feed contract's edge cases.\n",
+      "date_published": "2026-09-28T00:00:00Z",
+      "date_modified": "2026-09-28T00:00:00Z",
+      "_bentoo": {
+        "type": "news",
+        "severity": "info",
+        "affects": [
+          {
+            "cp": "dev-libs/libfoo+",
+            "slot": "0.1",
+            "ranges": [
+              {
+                "op": ">=",
+                "ver": "1.0_rc1_p2"
+              },
+              {
+                "op": "<",
+                "ver": "1.0b-r0"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-09-27-gui+tray",
+      "url": "https://obentoo.org/notices/2026-09-27-gui+tray/",
+      "title": "bentoo-tray brings notices to the desktop",
+      "summary": "A system tray client now shows bentoo notices for the packages you have installed.",
+      "content_text": "bentoo-tray polls the notices feed and notifies you about the packages you have installed.\n",
+      "date_published": "2026-09-27T00:00:00Z",
+      "date_modified": "2026-09-27T00:00:00Z",
+      "_bentoo": {
+        "type": "announcement",
+        "severity": "info",
+        "affects": []
+      }
+    }
+  ]
+}
