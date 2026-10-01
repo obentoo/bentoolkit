@@ -145,3 +145,23 @@ autoupdate:
 # ----------------------------------------------------------------------------
 # notice:
 #   site_path: ~/Projetos/obentoo.org/coming-soon
+
+# ----------------------------------------------------------------------------
+# tray — o notificador de desktop bentoo-tray.
+#
+# interval            intervalo entre verificações do feed (padrão 6h; mínimo
+#                     1h — um valor menor vira 1h com um aviso).
+# feed_url            o feed de avisos (padrão https://obentoo.org/notices.json;
+#                     só https é aceito).
+# mute                tipos que ficam marcados como não lidos, mas sem
+#                     notificação: release, news, announcement. `security`
+#                     nunca pode ser silenciado e é ignorado com um aviso.
+# downgrade_critical  envia avisos críticos com urgência normal (padrão false).
+# skip_metered        não verifica o feed em conexão tarifada (padrão true).
+# ----------------------------------------------------------------------------
+# tray:
+#   interval: 6h
+#   feed_url: https://obentoo.org/notices.json
+#   mute: [release]
+#   downgrade_critical: false
+#   skip_metered: true

@@ -404,6 +404,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **New dependency: `github.com/godbus/dbus/v5` v5.2.2.** The `bentoo-tray`
+  desktop notifier speaks D-Bus (StatusNotifierItem, dbusmenu, Notifications,
+  the OpenURI portal and NetworkManager); the standard library has no D-Bus
+  client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
+  v5.2.2 was published on 2025-12-29.
 - **Failure messages now go to stderr; report rows stay on stdout.** The
   refusals and failures of `overlay prune`, `overlay autoupdate
   --mark-auto-disabled`, `overlay validate`, `overlay autoupdate --lint --fix`,
