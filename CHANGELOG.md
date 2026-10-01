@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Migration:** a name such as `BENTOO_FETCH_A-B`, resolvable only from the
   secrets file, must be renamed (e.g. `BENTOO_FETCH_A_B`) in the record and
   in the secrets file.
+- **`overlay autoupdate --list` escapes what it prints from the pending
+  list.** It reads the pending-updates file without loading `packages.toml`,
+  so the key check above never sees it: an apply error carries text from
+  outside, and an entry recorded before that check may carry a hostile key.
+  Each field — package, versions, status, error — is now printed quoted when
+  it holds a non-printable character, so it can no longer drive the terminal
+  or forge a line; printable entries print exactly as before.
 - **A `packages.toml` key holding a non-printable character refuses the
   load.** A quoted TOML key can hold an escape sequence, a newline or a
   bidirectional format character (`["cat/x\u001b[2J"]`), and the key is printed
