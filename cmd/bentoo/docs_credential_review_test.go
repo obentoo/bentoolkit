@@ -109,9 +109,9 @@ func TestREADME_StatesWhatBentooBindingProtects(t *testing.T) {
 
 	t.Run("CHANGELOG [Unreleased] Security names the reserved names as BREAKING", func(t *testing.T) {
 		changelog := readRepoDoc(t, "CHANGELOG.md")
-		security := sectionFrom(sectionFrom(changelog, "## [Unreleased]"), "### Security")
+		security := sectionFrom(shippingSection(changelog, "0.32.0"), "### Security")
 		if security == "" {
-			t.Fatal("CHANGELOG [Unreleased] has no ### Security entry")
+			t.Fatal("CHANGELOG [0.32.0] (or [Unreleased] before the cut) has no ### Security entry")
 		}
 		bullets := strings.Split(security, "\n- ")
 		for _, n := range reservedSecretNeedles {
@@ -122,7 +122,7 @@ func TestREADME_StatesWhatBentooBindingProtects(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("CHANGELOG [Unreleased] Security has no BREAKING bullet naming %s", n.label)
+				t.Errorf("CHANGELOG [0.32.0] Security has no BREAKING bullet naming %s", n.label)
 			}
 		}
 	})

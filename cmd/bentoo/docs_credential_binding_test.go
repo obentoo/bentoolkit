@@ -56,14 +56,24 @@ func TestREADME_DocumentsCredentialHostBinding(t *testing.T) {
 
 	t.Run("CHANGELOG records the breaking change", func(t *testing.T) {
 		changelog := readRepoDoc(t, "CHANGELOG.md")
-		unreleased := sectionFrom(changelog, "## [Unreleased]")
-		security := sectionFrom(unreleased, "### Security")
+		security := sectionFrom(shippingSection(changelog, "0.32.0"), "### Security")
 		if security == "" {
-			t.Fatal("CHANGELOG [Unreleased] has no ### Security entry")
+			t.Fatal("CHANGELOG [0.32.0] (or [Unreleased] before the cut) has no ### Security entry")
 		}
 		requireContains(t, "CHANGELOG.md#unreleased-security", security,
 			"BREAKING", "BENTOO_", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN")
 	})
+}
+
+// shippingSection returns the CHANGELOG section of the release that ships an
+// entry: "## [version]" once that release is cut, "## [Unreleased]" before.
+// Pinning a test to [Unreleased] alone breaks it at the very cut that ships
+// the entry, since the cut moves the entry out of [Unreleased].
+func shippingSection(changelog, version string) string {
+	if s := sectionFrom(changelog, "## ["+version+"]"); s != "" {
+		return s
+	}
+	return sectionFrom(changelog, "## [Unreleased]")
 }
 
 // sectionFrom returns the text from heading up to the next heading of the same
