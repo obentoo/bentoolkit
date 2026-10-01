@@ -797,7 +797,7 @@ record that deviates and `--lint --fix` reorders it, so this block and the
 linter cannot disagree.
 
 ```toml
-["category/package"]                # header: quoted, exactly as in the overlay
+["category/package"]                # header: quoted, exactly as in the overlay; printable characters only
 enabled = false                     # ONLY when false. Absent = enabled.
 hold = true                         # ONLY when true. See "enabled vs hold".
 track = "commit"                    # omit for tag/version tracking

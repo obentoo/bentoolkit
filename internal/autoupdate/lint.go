@@ -163,7 +163,7 @@ func (i LintIssue) String() string {
 		loc = fmt.Sprintf("packages.toml:%d", i.Line)
 	}
 	if i.Package != "" {
-		return fmt.Sprintf("%s: [%s] %s: %s", loc, i.Package, i.Rule, i.Message)
+		return fmt.Sprintf("%s: [%s] %s: %s", loc, displayPackageKey(i.Package), i.Rule, i.Message)
 	}
 	return fmt.Sprintf("%s: %s: %s", loc, i.Rule, i.Message)
 }
