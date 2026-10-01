@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 
@@ -633,6 +635,12 @@ func decodePackagesConfig(data []byte) (*PackagesConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse packages.toml: %w", err)
 	}
+	// Before anything else reads a key: every message naming a record prints its
+	// key raw — UnknownKeysError just below included — and a quoted TOML key can
+	// hold an escape sequence or a newline.
+	if err := checkPrintablePackageKeys(fileConfig); err != nil {
+		return nil, err
+	}
 	if unknown := unknownRegistryKeys(md.Undecoded()); len(unknown) > 0 {
 		return nil, &UnknownKeysError{Keys: unknown}
 	}
@@ -646,6 +654,44 @@ func decodePackagesConfig(data []byte) (*PackagesConfig, error) {
 	}
 
 	return config, nil
+}
+
+// checkPrintablePackageKeys refuses a packages.toml whose keys hold a
+// non-printable rune (unicode.IsPrint false: a control character such as ESC or
+// a newline, a format character such as U+202E, a non-ASCII space). A quoted
+// TOML key can hold any of them, and the key is printed raw by every message
+// that names a record — --lint, the sweep, check, apply and `bentoo distfile` —
+// so refusing it at the one decoder every loader shares keeps it from all of
+// them at once. Every offender is named, quoted, in sorted order.
+func checkPrintablePackageKeys(file packagesConfigFile) error {
+	var offenders []string
+	for _, key := range sortedKeys(file) {
+		if !isPrintablePackageKey(key) {
+			offenders = append(offenders, strconv.Quote(key))
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	return fmt.Errorf("packages.toml: %w: %s holds a non-printable character; a key may hold printable characters only",
+		ErrInvalidPackageKey, strings.Join(offenders, ", "))
+}
+
+// isPrintablePackageKey reports whether every rune of key is printable.
+func isPrintablePackageKey(key string) bool {
+	return strings.IndexFunc(key, func(r rune) bool { return !unicode.IsPrint(r) }) < 0
+}
+
+// displayPackageKey returns key as it should appear in output: unchanged when
+// printable, quoted and escaped otherwise. It is for the paths that name a key
+// read from the file's text before the decoder could refuse it — --lint's text
+// scan runs ahead of the parser, and a raw control byte is a syntax error the
+// parser reports only after that scan has named the record.
+func displayPackageKey(key string) string {
+	if isPrintablePackageKey(key) {
+		return key
+	}
+	return strconv.Quote(key)
 }
 
 // tomlTableName returns the table name of a TOML section header line and true

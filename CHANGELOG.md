@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Migration:** a name such as `BENTOO_FETCH_A-B`, resolvable only from the
   secrets file, must be renamed (e.g. `BENTOO_FETCH_A_B`) in the record and
   in the secrets file.
+- **A `packages.toml` key holding a non-printable character refuses the
+  load.** A quoted TOML key can hold an escape sequence, a newline or a
+  bidirectional format character (`["cat/x\u001b[2J"]`), and the key is printed
+  raw by every message that names a record. Such a key now stops the file from
+  loading, with an error naming it quoted, so it can no longer drive the
+  terminal or forge lines in `--lint`, sweep, check, apply or `bentoo distfile`
+  output; `--lint`'s text scan, which runs before the parser, prints it
+  quoted too.
 - **A `packages.toml` key can no longer name a directory outside its
   category.** A key whose category or package half is `.`, `..`, or holds a
   `/`, `\` or NUL byte (`../x`, `cat/..`) used to be joined under the overlay
