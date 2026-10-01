@@ -105,6 +105,10 @@ func newChild(t *testing.T, sessionAddr, systemAddr string, extraEnv map[string]
 		"PATH=" + os.Getenv("PATH"),
 		"DBUS_SESSION_BUS_ADDRESS=" + sessionAddr,
 		"DBUS_SYSTEM_BUS_ADDRESS=" + systemAddr,
+		// Under -cover (CI runs -coverprofile) a child test binary without
+		// GOCOVERDIR prints a plain "warning: GOCOVERDIR not set" line to
+		// stderr, which the key=value assertions would read as the tray's.
+		"GOCOVERDIR=" + t.TempDir(),
 	}
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)

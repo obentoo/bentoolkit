@@ -6,6 +6,7 @@ CLI tools for Bentoo Linux distribution maintainers and developers.
 
 - **overlay**: Bentoo overlay commit management, version comparison, and automated updates
 - **snapshot**: declarative btrfs snapshot management orchestrating `btrbk` (snapshot + ssh replication), `snapper` (timeline + system rollback), and `systemd` timers
+- **bentoo-tray**: a desktop notifier for the overlay's notices — security advisories, releases and news that concern the packages you have installed (see [Desktop Notifications](#desktop-notifications-bentoo-tray))
 
 ## Installation
 
@@ -53,8 +54,8 @@ sudo make install
 ### Build Targets
 
 ```bash
-make build           # Build the binary
-make install         # Install to /usr/local/bin
+make build           # Build bentoo and bentoo-tray
+make install         # Install both to /usr/local/bin, plus bentoo-tray's desktop entry, user unit and icons
 make install-config  # Copy config.example.yaml to ~/.config/bentoo/ (no overwrite)
 make test            # Run tests
 make coverage        # Run tests with coverage report
@@ -1975,6 +1976,101 @@ the on-demand `prune` verb, remote listing (`list --remote`), per-stage `status`
 with the next scheduled run, and the Portage USE-flag mapping for every optional
 backend. grub-btrfs / boot-into-snapshot integration remains a documented
 follow-up.
+
+## Desktop Notifications (bentoo-tray)
+
+`bentoo-tray` is a small session daemon that reads the overlay's notices feed
+(`https://obentoo.org/notices.json`) and the unread bentoo news items, keeps
+the ones that concern the packages installed from the bentoo repository, and
+shows them as desktop notifications and a tray icon with a menu. It is a
+separate binary from `bentoo`; one instance runs per session (it owns the
+session-bus name `org.obentoo.BentooTray`).
+
+### Install
+
+`make install` installs, under `$(DESTDIR)$(PREFIX)` (`PREFIX` defaults to
+`/usr/local`):
+
+| File | Path |
+|---|---|
+| binary | `$(PREFIX)/bin/bentoo-tray` |
+| desktop entry | `$(PREFIX)/share/applications/bentoo-tray.desktop` |
+| systemd user unit | `$(PREFIX)/lib/systemd/user/bentoo-tray.service` |
+| icons | `$(PREFIX)/share/icons/hicolor/scalable/apps/bentoo-tray{,-unread,-critical}.svg` |
+
+```bash
+make build
+sudo make install PREFIX=/usr
+```
+
+### Autostart
+
+Pick one — both start it with the graphical session:
+
+```bash
+# XDG autostart (any desktop)
+cp /usr/share/applications/bentoo-tray.desktop ~/.config/autostart/
+
+# or the systemd user unit (restarts it on failure)
+systemctl --user enable --now bentoo-tray.service
+```
+
+With `PREFIX=/usr/local`, the desktop entry is under
+`/usr/local/share/applications/`.
+
+### GNOME
+
+GNOME has no tray of its own. Notifications work without anything else; to see
+the icon and its menu, install the AppIndicator extension
+(`gnome-shell-extension-appindicator`) and enable it. Without it, `bentoo-tray`
+logs one WARN naming the extension and runs with notifications only. KDE Plasma
+shows the icon natively.
+
+### Configuration
+
+The optional `tray:` section of `~/.config/bentoo/config.yaml`:
+
+```yaml
+tray:
+  interval: 6h            # between feed checks; minimum 1h
+  feed_url: https://obentoo.org/notices.json   # https only
+  mute: [release]         # release, news, announcement — security cannot be muted
+  downgrade_critical: false
+  skip_metered: true      # skip scheduled checks on a metered connection
+```
+
+State (read/unread, the feed's ETag and serial, a pause) lives in
+`$XDG_STATE_HOME/bentoo-notices/state.json`
+(`~/.local/state/bentoo-notices/state.json` by default).
+
+### Logging
+
+`bentoo-tray` logs one key=value event per line to standard error — the
+journal when it runs as the user unit (`journalctl --user -u bentoo-tray`).
+Set the level with `BENTOO_TRAY_LOG_LEVEL` (`debug`, `info` — the default —,
+`warn` or `error`):
+
+```bash
+BENTOO_TRAY_LOG_LEVEL=debug bentoo-tray
+```
+
+Exit codes: `0` on a clean stop (SIGINT, SIGTERM, SIGHUP or Quit) and when an
+instance is already running; `1` on a startup failure (session bus unreachable,
+unreadable state file); `2` when the session bus is lost while running.
+
+### Running the D-Bus tests
+
+The tray's integration tests start private `dbus-daemon`s, so they need
+`dbus-daemon` on `PATH` (`sys-apps/dbus`). Without it they are skipped locally
+and fail when `CI=true`:
+
+```bash
+go test -race ./internal/desktop/... ./cmd/bentoo-tray/...
+CI=true go test -race ./internal/desktop/...   # as CI runs them
+```
+
+The manual desktop matrix (KDE Plasma 6, GNOME with and without the extension)
+is in `misc/tray/E2E-CHECKLIST.md`.
 
 ## License
 

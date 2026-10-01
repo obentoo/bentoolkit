@@ -1,5 +1,6 @@
 # Binário compilado
 /bentoo
+/bentoo-tray
 *.exe
 *.dll
 *.so

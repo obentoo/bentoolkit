@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=bentoo notices
+Comment=Desktop notifications for bentoo overlay notices
+Exec=bentoo-tray
+Icon=bentoo-tray
+Terminal=false
+NoDisplay=false
+Categories=System;
+X-GNOME-UsesNotifications=true
+X-GNOME-Autostart-enabled=true

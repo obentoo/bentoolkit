@@ -1,7 +1,8 @@
 # Bentoolkit Makefile
-# Build, test, and install targets for bentoo CLI
+# Build, test, and install targets for the bentoo CLI and the bentoo-tray notifier
 
 BINARY_NAME := bentoo
+TRAY_BINARY := bentoo-tray
 MODULE := github.com/obentoo/bentoolkit
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -13,7 +14,14 @@ LDFLAGS_DEBUG := -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG
 # Directories
 BUILD_DIR := build
 CMD_DIR := cmd/bentoo
-INSTALL_DIR := /usr/local/bin
+TRAY_CMD_DIR := cmd/bentoo-tray
+PREFIX ?= /usr/local
+INSTALL_DIR := $(PREFIX)/bin
+# bentoo-tray's session files: desktop entry, user unit and scalable icons.
+TRAY_MISC_DIR := misc/tray
+APPLICATIONS_DIR := $(PREFIX)/share/applications
+ICONS_DIR := $(PREFIX)/share/icons/hicolor/scalable/apps
+SYSTEMD_USER_DIR := $(PREFIX)/lib/systemd/user
 
 # User config install (honors XDG_CONFIG_HOME, matching internal/common/config)
 CONFIG_EXAMPLE := config.example.yaml
@@ -57,27 +65,45 @@ FUZZTIME ?= 30s
 .PHONY: all
 all: build
 
-# Build the binary
+# Build the binaries. bentoo-tray is always pure Go (CGO_ENABLED=0): its D-Bus
+# client needs no C library.
 .PHONY: build
 build:
 	mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(TRAY_BINARY) ./$(TRAY_CMD_DIR)
 
 # Build with debug symbols (no stripping)
 .PHONY: build-debug
 build-debug:
 	mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS_DEBUG) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS_DEBUG) -o $(BUILD_DIR)/$(TRAY_BINARY) ./$(TRAY_CMD_DIR)
 
-# Install to system
+# Install to system under DESTDIR/PREFIX: both binaries, plus bentoo-tray's
+# desktop entry, user unit (ExecStart pointing at the installed binary) and its
+# three scalable icons.
 .PHONY: install
 install: build
 	install -Dm755 $(BUILD_DIR)/$(BINARY_NAME) $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
+	install -Dm755 $(BUILD_DIR)/$(TRAY_BINARY) $(DESTDIR)$(INSTALL_DIR)/$(TRAY_BINARY)
+	install -Dm644 $(TRAY_MISC_DIR)/$(TRAY_BINARY).desktop $(DESTDIR)$(APPLICATIONS_DIR)/$(TRAY_BINARY).desktop
+	install -d $(DESTDIR)$(SYSTEMD_USER_DIR)
+	sed 's|@BINDIR@|$(INSTALL_DIR)|g' $(TRAY_MISC_DIR)/$(TRAY_BINARY).service.in > $(DESTDIR)$(SYSTEMD_USER_DIR)/$(TRAY_BINARY).service
+	chmod 644 $(DESTDIR)$(SYSTEMD_USER_DIR)/$(TRAY_BINARY).service
+	@set -eu; for variant in $(TRAY_ICON_VARIANTS); do \
+		install -Dm644 "$(TRAY_ICON_SVG_DIR)/$$variant.svg" "$(DESTDIR)$(ICONS_DIR)/$$variant.svg"; \
+	done
 
 # Uninstall from system
 .PHONY: uninstall
 uninstall:
-	rm -f $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
+	rm -f $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME) $(DESTDIR)$(INSTALL_DIR)/$(TRAY_BINARY)
+	rm -f $(DESTDIR)$(APPLICATIONS_DIR)/$(TRAY_BINARY).desktop
+	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/$(TRAY_BINARY).service
+	@set -eu; for variant in $(TRAY_ICON_VARIANTS); do \
+		rm -f "$(DESTDIR)$(ICONS_DIR)/$$variant.svg"; \
+	done
 
 # Install the example config into the user's config dir.
 # Never overwrites an existing config; writes 0600 as a defensive default (the
@@ -153,12 +179,12 @@ audit: audit-ctx
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f coverage.out coverage.html cov.out coverage*.out $(BINARY_NAME)
+	rm -f coverage.out coverage.html cov.out coverage*.out $(BINARY_NAME) $(TRAY_BINARY)
 	rm -rf $(BUILD_DIR)
 
 # Cross-compilation targets. CGO is disabled so these build on any host without a
-# target C cross-toolchain (bentoo is pure Go); the result is a static binary,
-# which is what we want to ship.
+# target C cross-toolchain (both binaries are pure Go); the result is a static
+# binary, which is what we want to ship.
 .PHONY: build-all
 build-all: build-linux-amd64 build-linux-arm64
 
@@ -166,11 +192,13 @@ build-all: build-linux-amd64 build-linux-arm64
 build-linux-amd64:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(TRAY_BINARY)-linux-amd64 ./$(TRAY_CMD_DIR)
 
 .PHONY: build-linux-arm64
 build-linux-arm64:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./$(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(TRAY_BINARY)-linux-arm64 ./$(TRAY_CMD_DIR)
 
 # Development helpers
 .PHONY: fmt
@@ -239,10 +267,10 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build           Build the binary (default, stripped)"
-	@echo "  build-debug     Build the binary with debug symbols"
-	@echo "  install         Install to $(INSTALL_DIR)"
-	@echo "  uninstall       Remove from $(INSTALL_DIR)"
+	@echo "  build           Build bentoo and bentoo-tray (default, stripped)"
+	@echo "  build-debug     Build both binaries with debug symbols"
+	@echo "  install         Install both binaries to $(INSTALL_DIR) and bentoo-tray's desktop entry, user unit and icons under $(PREFIX)"
+	@echo "  uninstall       Remove everything install put under DESTDIR/PREFIX"
 	@echo "  install-config  Copy config.example.yaml to the user's config dir (no overwrite)"
 	@echo "  test            Run tests with -race in shuffled order (SHUFFLE=<seed> replays an order)"
 	@echo "  coverage        Run tests with coverage report (-race, shuffled)"

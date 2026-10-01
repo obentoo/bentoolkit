@@ -186,6 +186,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bentoo-tray`, a desktop notifier for the overlay's notices.** A new
+  binary reads the notices feed (`https://obentoo.org/notices.json`, JSON Feed
+  1.1 with ETag revalidation, a 1 MiB cap and backoff) and the unread bentoo
+  news items, keeps the notices that concern packages installed from the
+  bentoo repository, and shows them as desktop notifications (Open, Mark as
+  read) and a StatusNotifierItem tray icon with a menu (Check now, Mark all as
+  read, Pause, Quit). Security notices cannot be muted; a first run notifies
+  only applicable security notices. It honours metered and offline
+  connections through NetworkManager, opens notice pages through the desktop
+  portal, logs key=value lines at `BENTOO_TRAY_LOG_LEVEL`, and keeps its state
+  in `$XDG_STATE_HOME/bentoo-notices/state.json`. `make install` adds its
+  desktop entry, a systemd user unit and its icons; configure it in the new
+  `tray:` config section. On GNOME the icon needs
+  `gnome-shell-extension-appindicator`.
+
 - **`bentoo notice new` and `bentoo notice revise` author a notice in both
   places it lives.** One command writes the overlay's GLEP 42 news item
   (`metadata/news/<id>/<id>.en.txt`) and, when the new `notice.site_path` key
