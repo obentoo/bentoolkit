@@ -50,6 +50,22 @@ const busConfig = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Con
 // a CI run.
 func Session(t testing.TB) string {
 	t.Helper()
+	addr, _ := start(t)
+	return addr
+}
+
+// StartKillable starts a private dbus-daemon like Session and also returns
+// its process, for a test that must kill the bus itself to simulate losing
+// it. The daemon is hermetic, skips and fails exactly as Session does, and is
+// killed when t ends; a test that already killed and reaped it is fine.
+func StartKillable(t testing.TB) (addr string, cmd *exec.Cmd) {
+	t.Helper()
+	return start(t)
+}
+
+// start runs the daemon for Session and StartKillable.
+func start(t testing.TB) (string, *exec.Cmd) {
+	t.Helper()
 
 	path, err := exec.LookPath(daemonBinary)
 	if err != nil {
@@ -100,7 +116,7 @@ func Session(t testing.TB) string {
 		_ = cmd.Wait()
 		t.Fatalf("dbustest: reading the address of %s: %v; stderr: %s", path, err, strings.TrimSpace(stderr.String()))
 	}
-	return addr
+	return addr, cmd
 }
 
 // readAddress reads the first line the daemon prints, its bus address.

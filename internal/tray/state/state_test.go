@@ -113,8 +113,8 @@ func TestSave_WritesMode0600WithAFormatField(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("state.json is not JSON: %v", err)
 	}
-	if doc["format"] != float64(1) {
-		t.Errorf("format = %v, want 1", doc["format"])
+	if doc["format"] != float64(2) {
+		t.Errorf("format = %v, want 2", doc["format"])
 	}
 	for _, key := range []string{"etag", "serial", "notices", "pause_until", "failures"} {
 		if _, ok := doc[key]; !ok {
@@ -169,7 +169,7 @@ func TestLoad_DamagedFileIsMovedAsideAndStartsFresh(t *testing.T) {
 	for name, content := range map[string]string{
 		"not json":       "{this is not json",
 		"truncated":      `{"format":1,"etag":"x","notices":{`,
-		"unknown format": `{"format":2,"etag":"\"abc\"","serial":5,"notices":{}}`,
+		"unknown format": `{"format":3,"etag":"\"abc\"","serial":5,"notices":{}}`,
 		"no format":      `{"etag":"\"abc\"","serial":5,"notices":{}}`,
 	} {
 		t.Run(name, func(t *testing.T) {

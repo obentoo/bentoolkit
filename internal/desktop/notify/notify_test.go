@@ -147,9 +147,10 @@ func TestNotify_SendCarriesHintsActionsAndEscapedText(t *testing.T) {
 		t.Errorf("app_name/app_icon/replaces_id/timeout = %q/%q/%d/%d, want bentoo/bentoo-tray/0/-1",
 			c.AppName, c.AppIcon, c.Replaces, c.Timeout)
 	}
-	if c.Summary != "foo &lt;1.2.3&gt; &amp; bar" {
-		t.Errorf("summary = %q, want it escaped", c.Summary)
+	if c.Summary != "foo <1.2.3> & bar" {
+		t.Errorf("summary = %q, want it plain (R6.14)", c.Summary)
 	}
+	// fakeServer advertises body-markup, so the body is escaped (R6.6).
 	if c.Body != "&lt;b&gt;upgrade&lt;/b&gt; &amp; reboot" {
 		t.Errorf("body = %q, want it escaped", c.Body)
 	}

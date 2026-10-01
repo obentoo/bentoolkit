@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"math"
 	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- default scheduling jitter, not a secret
 	"net/url"
 	"strings"
@@ -60,7 +62,8 @@ var (
 )
 
 // Menu item ids, as design.md fixes them and package sni serves them.
-// Notice entries are 1..menuEntries in the order of sni.View.Entries.
+// Notice entries have ids package sni gives them, and their clicks carry the
+// notice in sni.Event.NoticeID.
 const (
 	menuMore          int32 = 100
 	menuCheckNow      int32 = 200
@@ -188,14 +191,14 @@ type App struct {
 	indexURL string
 
 	st state.State
-	// established ends the first run for saving: a first-run state is not
-	// written until a check has accepted a feed (or, with no feed, read the
-	// news), so a session that never got the feed stays a first run (R6.9).
-	established bool
 	// feedItems is the last feed accepted in this process; haveFeed tells an
 	// empty accepted feed from none.
 	feedItems []notices.Notice
 	haveFeed  bool
+	// lastNews holds the IDs of the last complete News.Unread in this
+	// process, nil before one. While a later read is partial or failed, the
+	// feed reconciliation keeps the records it lists (R10.6).
+	lastNews map[string]bool
 
 	view     sni.View
 	iconUp   bool
@@ -330,11 +333,42 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.render()
 
-	delay := schedule.StartupDelay(a.d.Rand())
+	delay := max(schedule.StartupDelay(a.d.Rand()), a.storedWait(now))
 	a.fetchAt = a.d.Clock.After(delay)
 	a.log.Info("bentoo-tray started", "first_check_in", delay, "interval", a.interval,
-		"feed", a.d.Feed != nil, "first_run", !a.st.Saved)
+		"feed", a.d.Feed != nil, "first_run", !a.st.Established)
 	return a.loop(ctx)
+}
+
+// storedWait is how long the stored next fetch asks a new process to wait. A
+// stored next fetch later than the startup delay wins, so a restart (a
+// bus-loss loop under systemd included) cannot refetch before the interval,
+// the backoff or the server's Retry-After (R2.14). It is capped at
+// startupWaitCap, and the stored deadline with it: a saturated Retry-After
+// (~292 years) or a wall clock that later stepped back would otherwise
+// silence the tray across every restart. Within one process a Retry-After is
+// honoured in full (R2.13); only a new process caps it.
+func (a *App) storedWait(now time.Time) time.Duration {
+	wait := a.st.NextFetch.Sub(now)
+	limit := a.startupWaitCap()
+	if wait <= limit {
+		return wait
+	}
+	a.log.Warn("the stored next fetch is too far ahead; capping the wait before the first fetch",
+		"next_fetch", a.st.NextFetch, "cap", limit, "now", now)
+	a.st.NextFetch = now.Add(limit)
+	return limit
+}
+
+// startupWaitCap is max(1.2 x the configured interval, 24h), saturating
+// instead of overflowing for an absurd interval.
+func (a *App) startupWaitCap() time.Duration {
+	const floor = 24 * time.Hour
+	extra := a.interval / 5
+	if a.interval > math.MaxInt64-extra {
+		return math.MaxInt64
+	}
+	return max(a.interval+extra, floor)
 }
 
 // loop is the single select every event goes through.
@@ -474,9 +508,17 @@ func (a *App) fetch(ctx context.Context, kind checkKind) (notModified bool) {
 	}
 	a.skipped = false
 
+	// A first run revalidates nothing: only an accepted 200 ends it (R6.9),
+	// and a 304 never does (R2.12). A stop between a first run's 200 and its
+	// refresh saves that 200's ETag with the first run unfinished; sending it
+	// would get 304s forever and keep every later check a first run.
+	etag := a.st.ETag
+	if !a.st.Established {
+		etag = ""
+	}
 	start := a.d.Clock.Now()
 	fetchCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	res, err := a.d.Feed.Fetch(fetchCtx, a.st.ETag)
+	res, err := a.d.Feed.Fetch(fetchCtx, etag)
 	cancel()
 	elapsed := a.d.Clock.Now().Sub(start)
 	if err != nil {
@@ -499,11 +541,11 @@ func (a *App) fetch(ctx context.Context, kind checkKind) (notModified bool) {
 
 	if ok, reason := acceptFeed(a.st, res.Feed, a.d.Clock.Now()); !ok {
 		a.st.Failures++
-		wait := schedule.Backoff(a.st.Failures, 0)
+		wait := a.retryWait(schedule.Backoff(a.st.Failures, 0))
 		a.log.Warn("feed rejected; keeping the previous notices", "status", res.Status, "bytes", res.Bytes,
 			"duration", elapsed, "outcome", "rejected", "reason", reason, "serial", res.Feed.Serial,
 			"last_serial", a.st.Serial, "expires", res.Feed.Expires, "failures", a.st.Failures, "retry_in", wait)
-		a.fetchAt = a.d.Clock.After(wait)
+		a.scheduleFetch(wait)
 		return false
 	}
 
@@ -511,7 +553,6 @@ func (a *App) fetch(ctx context.Context, kind checkKind) (notModified bool) {
 		"outcome", "accepted", "serial", res.Feed.Serial, "items", len(res.Feed.Items))
 	a.st.Serial, a.st.ETag = res.Feed.Serial, res.ETag
 	a.feedItems, a.haveFeed = res.Feed.Items, true
-	a.established = true
 	a.fetchSucceeded()
 	return false
 }
@@ -553,7 +594,7 @@ func (a *App) fetchFailed(res feed.Result, err error, elapsed time.Duration) {
 		status, bytes, retryAfter = se.Status, max(bytes, se.Bytes), se.RetryAfter
 	}
 	a.st.Failures++
-	wait := schedule.Backoff(a.st.Failures, retryAfter)
+	wait := a.retryWait(schedule.Backoff(a.st.Failures, retryAfter))
 	attrs := []any{"status", status, "bytes", bytes, "duration", elapsed, "outcome", "error",
 		"failures", a.st.Failures, "retry_in", wait}
 	var ie *notices.ItemError
@@ -562,14 +603,32 @@ func (a *App) fetchFailed(res feed.Result, err error, elapsed time.Duration) {
 	}
 	attrs = append(attrs, "error", err)
 	a.log.Warn("feed fetch failed; keeping the previous notices", attrs...)
-	a.fetchAt = a.d.Clock.After(wait)
+	a.scheduleFetch(wait)
+}
+
+// retryWait is the wait after a failed or rejected fetch: the backoff, or the
+// pending deadline when that is later. A failure never moves the next fetch
+// earlier, so a Check now that fails cannot cut short a server's Retry-After
+// (R2.13); a Check now that succeeds still resets the schedule (R2.11).
+func (a *App) retryWait(backoff time.Duration) time.Duration {
+	return max(backoff, a.st.NextFetch.Sub(a.d.Clock.Now()))
 }
 
 // fetchSucceeded resets the backoff and schedules the next regular fetch
 // (R2.2, R2.11).
 func (a *App) fetchSucceeded() {
 	a.st.Failures = 0
-	a.fetchAt = a.d.Clock.After(a.nextInterval())
+	a.scheduleFetch(a.nextInterval())
+}
+
+// scheduleFetch arms the fetch timer for wait after a fetch and stores the
+// deadline in the state, so a restart waits for it too (R2.14). Only the
+// schedules that follow a fetch go through here: a fetch skipped for the
+// network, or a check with no feed configured, imposes no wait on the next
+// process, which still fetches after its startup delay.
+func (a *App) scheduleFetch(wait time.Duration) {
+	a.st.NextFetch = a.d.Clock.Now().Add(wait)
+	a.fetchAt = a.d.Clock.After(wait)
 }
 
 func (a *App) nextInterval() time.Duration {
@@ -590,13 +649,19 @@ func (a *App) refresh(ctx context.Context, notModified bool) {
 			applicable = append(applicable, n)
 		}
 	}
-	a.dropStale(news, applicable, newsOK, pkgsOK)
+	a.reconcile(news, applicable, newsOK, pkgsOK)
 
-	msgs := decideNotifications(&a.st, applicable, !a.st.Saved, a.paused(now), a.d.Config)
+	msgs := decideNotifications(&a.st, applicable, !a.st.Established, a.paused(now), a.d.Config)
+	a.claimSources(merged)
 	a.markSeen(now, merged, notModified)
 	a.st.Prune(now)
-	if a.d.Feed == nil {
-		a.established = true // the news is all there is
+	// The first run ends with the check that accepted a feed (R6.9), or with
+	// the first news read when no feed is configured: the news is all there
+	// is. A news read that failed outright (a missing news-*.unread) recorded
+	// nothing, so it cannot end it; a partial one recorded what it read. The
+	// check that ends it is still a first run.
+	if a.haveFeed || (a.d.Feed == nil && (newsOK || len(news) > 0)) {
+		a.st.Established = true
 	}
 	a.send(ctx, msgs)
 	a.render()
@@ -640,31 +705,85 @@ func (a *App) readPackages(ctx context.Context) (pkgs []pkgdb.Package, ok bool) 
 	return pkgs, true
 }
 
-// dropStale deletes the unread records that no longer belong in the tray.
-// A record keeps no applicability, and decideNotifications and viewFor work
-// from every record, so without this a notice whose package was upgraded or
-// removed, or that the site withdrew, or a news item read with eselect,
-// would stay unread (and, if held, be sent later) until Prune forgets it.
+// Record sources as state.json spells them; a record migrated from format 1
+// has none until a list carries it.
+const (
+	sourceFeed = "feed"
+	sourceNews = "news"
+)
+
+// reconcile deletes the unread records that no longer belong in the tray
+// (R10.6). A record keeps no applicability, and decideNotifications and
+// viewFor work from every record, so without this a notice whose package was
+// upgraded or removed, or that the site withdrew, or a news item read with
+// eselect, would stay unread (and, if held, be sent later) until Prune
+// forgets it.
 //
-// It acts only on what is known to be current: the feed accepted in this
-// process (after a restart and a 304 the feed's items are unknown, so
-// nothing is deleted), a complete package list for "no longer applies", and
-// a complete news read for "in neither source". Read records are kept, so
-// Prune's 90 days still guard against notifying them again.
-func (a *App) dropStale(news, applicable []notices.Notice, newsOK, pkgsOK bool) {
-	if !a.haveFeed {
-		return
-	}
+// Each source decides only about its own records, and only from a list known
+// to be current:
+//   - the feed, once a 200 was accepted in this process (after a restart and
+//     a 304 its items are unknown): a "feed" record it no longer lists goes,
+//     and so does one it lists that no longer applies, given a complete
+//     package list;
+//   - the news, after a complete News.Unread: a "news" record absent from the
+//     unread list goes.
+//
+// A record the other source still lists is kept, so dropping it cannot
+// re-create it as new and notify it again; after a partial or failed news
+// read, "still lists" includes the last complete list read in this process. A migrated record (no source) is
+// left to Prune, and so is every read record: Prune's 90 days still guard
+// against notifying it again.
+func (a *App) reconcile(news, applicable []notices.Notice, newsOK, pkgsOK bool) {
 	inFeed := idSet(a.feedItems)
 	inNews := idSet(news)
 	applies := idSet(applicable)
+	// The news a feed record may still be listed by: the current list when it
+	// is complete; otherwise what it read plus the last complete list, since
+	// the item the read failed on may be one of those. With no complete list
+	// known the feed decides alone.
+	newsKeeps := inNews
+	if newsOK {
+		a.lastNews = inNews
+	} else {
+		newsKeeps = maps.Clone(inNews)
+		maps.Copy(newsKeeps, a.lastNews)
+	}
 	for id, r := range a.st.Notices {
-		if r.Read || inNews[id] {
+		if r.Read {
 			continue
 		}
-		if (inFeed[id] && pkgsOK && !applies[id]) || (!inFeed[id] && newsOK) {
+		var stale bool
+		switch r.Source {
+		case sourceFeed:
+			stale = a.haveFeed && !newsKeeps[id] && (!inFeed[id] || (pkgsOK && !applies[id]))
+		case sourceNews:
+			stale = newsOK && !inNews[id] && !inFeed[id]
+		}
+		if stale {
 			delete(a.st.Notices, id)
 		}
+	}
+}
+
+// claimSources sets the source of every record a list carries: the feed's
+// when the feed lists it, the item in both sources included (R4.3), else the
+// news'. A record keeps "feed" while the feed's items are unknown (after a
+// restart and a 304), since the feed may still list it; a migrated record
+// takes the source of whichever list next carries it, and one that neither
+// carries keeps none (R10.5, R10.6).
+func (a *App) claimSources(merged []notices.Notice) {
+	for _, n := range merged {
+		r, ok := a.st.Notices[n.ID]
+		if !ok {
+			continue
+		}
+		switch {
+		case n.Source == notices.SourceFeed:
+			r.Source = sourceFeed
+		case r.Source == "" || a.haveFeed:
+			r.Source = sourceNews
+		}
+		a.st.Notices[n.ID] = r
 	}
 }
 
@@ -678,15 +797,18 @@ func idSet(ns []notices.Notice) map[string]bool {
 
 // markSeen sets LastSeen for every record present in a source (R10.4). A
 // 304 with no feed in memory (after a restart) confirms the last accepted
-// feed without listing it; every record is then treated as seen, so an
-// unchanged feed never ages its own notices out.
+// feed without listing it; every record the feed may still list (source
+// "feed", or "" for a migrated one) is then treated as seen, so an unchanged
+// feed never ages its own notices out. A "news" record is seen only when the
+// news lists it: a 304 says nothing about the news.
 func (a *App) markSeen(now time.Time, merged []notices.Notice, notModified bool) {
 	if notModified && !a.haveFeed {
 		for id, r := range a.st.Notices {
-			r.LastSeen = now
-			a.st.Notices[id] = r
+			if r.Source == sourceFeed || r.Source == "" {
+				r.LastSeen = now
+				a.st.Notices[id] = r
+			}
 		}
-		return
 	}
 	for _, n := range merged {
 		if r, ok := a.st.Notices[n.ID]; ok {
@@ -888,7 +1010,7 @@ func (a *App) clearPause() bool {
 // releaseHeld sends what a pause held, grouped as any check's (R6.11). A
 // pause set again since (a later click) still holds what it holds.
 func (a *App) releaseHeld(ctx context.Context) {
-	a.send(ctx, decideNotifications(&a.st, nil, !a.st.Saved, a.paused(a.d.Clock.Now()), a.d.Config))
+	a.send(ctx, decideNotifications(&a.st, nil, !a.st.Established, a.paused(a.d.Clock.Now()), a.d.Config))
 	a.render()
 	a.save()
 }
@@ -925,12 +1047,10 @@ func (a *App) onNotification(ctx context.Context, ev notify.Event) {
 // onMenu handles a menu click (R9). It reports whether the user quit.
 func (a *App) onMenu(ctx context.Context, ev sni.Event) (quit bool) {
 	switch id := ev.ItemID; {
-	case id >= 1 && id <= menuEntries:
-		if int(id) > len(a.view.Entries) {
-			a.log.Debug("ignoring a click on a menu entry that is no longer listed", "item", id)
-			return false
-		}
-		a.openNotice(ctx, a.view.Entries[id-1].NoticeID, "")
+	case ev.NoticeID != "":
+		// Resolved by package sni at click time (R9.7): never a position in
+		// a.view, which a check may have re-rendered since the menu was shown.
+		a.openNotice(ctx, ev.NoticeID, "")
 	case id == menuMore:
 		a.openIndex(ctx, "")
 	case id == menuCheckNow:
@@ -947,7 +1067,8 @@ func (a *App) onMenu(ctx context.Context, ev sni.Event) (quit bool) {
 		a.log.Info("quit chosen from the menu")
 		return true
 	default:
-		a.log.Debug("ignoring a click on an unknown menu item", "item", id)
+		// An unknown id, or one whose notice is no longer listed (R9.7).
+		a.log.Debug("ignoring a click on a menu item that lists nothing", "item", id)
 	}
 	return false
 }
@@ -995,7 +1116,8 @@ func (a *App) startOpening(ctx context.Context, id, target, token string) {
 
 // onOpened records an opening's outcome: an opened notice is read (R7.4); a
 // dismissed chooser opened nothing and is not a failure; a refused URL is a
-// WARN naming the notice (R7.3).
+// WARN naming the notice (R7.3); a refusal by the portal's policy opened
+// nothing either, so the notice stays unread, with a WARN naming it (R7.5).
 func (a *App) onOpened(r openResult) {
 	delete(a.openings, r.seq)
 	switch {
@@ -1006,6 +1128,9 @@ func (a *App) onOpened(r openResult) {
 		}
 	case errors.Is(r.err, portal.ErrCancelled):
 		a.log.Info("opening cancelled by the user", "notice", r.noticeID, "url", r.url)
+	case errors.Is(r.err, portal.ErrRefusedByPolicy):
+		a.log.Warn("the desktop portal refused to open the URL by policy; the notice stays unread",
+			"notice", r.noticeID, "url", r.url, "error", r.err)
 	case errors.Is(r.err, portal.ErrURLRefused):
 		a.log.Warn("refused to open a URL that is not https on the feed host", "notice", r.noticeID,
 			"url", r.url, "error", r.err)
@@ -1087,13 +1212,10 @@ func (a *App) render() {
 }
 
 // save writes the state; a failure is retried by the next save, which
-// writes the whole state again. A first run is not written until it is
-// established (see App.established).
+// writes the whole state again. A first run is written too, so its backoff and
+// Retry-After survive a restart (R2.13, R2.14); state.Established, not the
+// file's existence, tells a restarted first run from an established state.
 func (a *App) save() {
-	if !a.st.Saved && !a.established {
-		a.log.Debug("first run: the state is written once a check has read the feed")
-		return
-	}
 	if err := a.d.Store.Save(a.st); err != nil {
 		a.log.Warn("saving the state failed; retrying at the next change", "error", err)
 		return

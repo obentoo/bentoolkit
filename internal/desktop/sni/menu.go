@@ -24,8 +24,10 @@ const (
 	menuTextDirection        = "ltr"
 )
 
-// Menu ids (design.md). Notice entries take 1..maxNoticeEntries in the order
-// of View.Entries.
+// Menu ids (design.md). Notice entries take ids from firstNoticeID upward,
+// one per notice ID, given on first listing and kept for the process lifetime
+// (R9.7): a check that re-renders the menu between show and click must never
+// make a click open another notice.
 const (
 	menuRootID          int32 = 0
 	menuIDMore          int32 = 100
@@ -37,6 +39,8 @@ const (
 	menuIDQuit          int32 = 300
 	// menuIDSeparator is the first separator's id; the others follow it.
 	menuIDSeparator int32 = 900
+	// firstNoticeID is the id of the first notice ever listed.
+	firstNoticeID int32 = 1000
 )
 
 // maxNoticeEntries is how many notices the menu lists (R9.1).
@@ -63,10 +67,12 @@ const (
 const errInvalidArgs = "org.freedesktop.DBus.Error.InvalidArgs"
 
 // menuItem is one entry of the menu below the root. A separator has no label.
+// noticeID is set on notice entries only.
 type menuItem struct {
 	id        int32
 	label     string
 	separator bool
+	noticeID  string
 }
 
 // props returns the item's dbusmenu properties, restricted to names unless
@@ -122,17 +128,50 @@ type menuEvent struct {
 	Timestamp uint32
 }
 
+// noticeIDs gives each notice ID its menu id (R9.7). Ids are never reused,
+// so an id that once named a notice names that notice or nothing.
+type noticeIDs struct {
+	ids  map[string]int32
+	next int32
+}
+
+// newNoticeIDs returns an allocator whose first id is firstNoticeID.
+func newNoticeIDs() *noticeIDs {
+	return &noticeIDs{ids: map[string]int32{}, next: firstNoticeID}
+}
+
+// idOf returns noticeID's menu id, giving it the next one on first sight.
+func (n *noticeIDs) idOf(noticeID string) int32 {
+	if id, ok := n.ids[noticeID]; ok {
+		return id
+	}
+	id := n.next
+	n.ids[noticeID] = id
+	n.next++
+	return id
+}
+
+// given reports whether id was ever given to a notice.
+func (n *noticeIDs) given(id int32) bool {
+	return id >= firstNoticeID && id < n.next
+}
+
 // buildMenu maps a View to the menu (R9.1, R9.3, R9.5): the notices, the
 // count of those not listed, then Check now and Mark all as read, the pause
 // entries or Resume while paused, and Quit last, in groups split by
-// separators. Entries beyond maxNoticeEntries are counted with More.
-func buildMenu(v View) []menuItem {
+// separators. Entries beyond maxNoticeEntries are counted with More. Notice
+// entries take their ids from ids. A notice ID listed twice is listed once:
+// two entries cannot share an id.
+func buildMenu(v View, ids *noticeIDs) []menuItem {
 	var items []menuItem
 	listed := v.Entries[:min(len(v.Entries), maxNoticeEntries)]
-	id := int32(1)
+	seen := make(map[string]bool, len(listed))
 	for _, e := range listed {
-		items = append(items, menuItem{id: id, label: noticeLabel(e)})
-		id++
+		if seen[e.NoticeID] {
+			continue
+		}
+		seen[e.NoticeID] = true
+		items = append(items, menuItem{id: ids.idOf(e.NoticeID), label: noticeLabel(e), noticeID: e.NoticeID})
 	}
 	if more := max(v.More, 0) + len(v.Entries) - len(listed); more > 0 {
 		items = append(items, menuItem{id: menuIDMore, label: messages.Format(messages.MenuMore, more)})
@@ -197,27 +236,47 @@ func (i *Item) menuSnapshot() ([]menuItem, uint32) {
 	return i.menuItems, i.menuRev
 }
 
-// menuChange is what one SetState did to the menu.
+// menuChange is what one SetState did to the menu: the arguments of the
+// ItemsPropertiesUpdated to emit, and the revision LayoutUpdated announces.
 type menuChange struct {
-	old, cur []menuItem
-	rev      uint32
+	updated []itemProperties
+	removed []removedProperties
+	rev     uint32
+}
+
+// servedItems remembers, per menu id, the item as the menu last served it,
+// for the process lifetime. An id that left the menu keeps its entry, so
+// that when it comes back the host is told what changed meanwhile: GNOME
+// keeps an item it fetched until a layout fetch drops it, and while the menu
+// stays closed none does.
+type servedItems map[int32]menuItem
+
+// serve records items as served.
+func (s servedItems) serve(items []menuItem) {
+	for _, m := range items {
+		s[m.id] = m
+	}
 }
 
 // updateMenu replaces the menu with the one v shows. When it differs, the
-// revision goes up and changed is true. i.stateMu must be held, so that
-// revisions are announced in the order they are made.
+// revision goes up, changed is true and c carries the property changes
+// against what each id last served. i.stateMu must be held, so that
+// revisions are announced in the order they are made. Building the menu is
+// done under menuMu because it gives notice ids, which handleEvent reads; it
+// makes no bus call.
 func (i *Item) updateMenu(v View) (c menuChange, changed bool) {
-	items := buildMenu(v)
 	i.menuMu.Lock()
 	defer i.menuMu.Unlock()
-	c.old = i.menuItems
-	if !slices.Equal(items, i.menuItems) {
-		i.menuItems = items
-		i.menuRev++
-		changed = true
+	items := buildMenu(v, i.noticeIDs)
+	if slices.Equal(items, i.menuItems) {
+		return menuChange{rev: i.menuRev}, false
 	}
-	c.cur, c.rev = i.menuItems, i.menuRev
-	return c, changed
+	c.updated, c.removed = propertyChanges(i.menuServed, items)
+	i.menuServed.serve(items)
+	i.menuItems = items
+	i.menuRev++
+	c.rev = i.menuRev
+	return c, true
 }
 
 // removedProperties is one element of ItemsPropertiesUpdated's second
@@ -227,13 +286,16 @@ type removedProperties struct {
 	Props []string
 }
 
-// propertyChanges lists, for every id in both old and cur, the properties
-// whose value changed or appeared, and those that went away. Ids in only one
-// of the two menus are LayoutUpdated's business.
-func propertyChanges(old, cur []menuItem) ([]itemProperties, []removedProperties) {
+// propertyChanges lists, for every id of cur that served once, the
+// properties whose value differs from what it last served or appeared, and
+// those that went away; that includes an id absent from the previous menu
+// and back with another label. An id never served is new to every host and
+// LayoutUpdated's business. Naming an id a host does not hold is harmless:
+// hosts ignore it.
+func propertyChanges(served servedItems, cur []menuItem) ([]itemProperties, []removedProperties) {
 	updated, removed := []itemProperties{}, []removedProperties{}
 	for _, m := range cur {
-		prev, ok := findItem(old, m.id)
+		prev, ok := served[m.id]
 		if !ok || prev == m {
 			continue
 		}
@@ -309,14 +371,15 @@ func (i *Item) unexportMenu() {
 }
 
 // emitMenuChange announces a menu change: ItemsPropertiesUpdated first, for
-// the items that kept their id but not their properties, then LayoutUpdated.
-// Hosts such as GNOME's AppIndicator extension fetch the properties of an
-// item only when its id is new or ItemsPropertiesUpdated names it: without
-// the signal, entry 1 would keep its old title after the notices shift, and
-// a click on it would open the notice now in that position.
+// the items whose properties differ from what their id last served, then
+// LayoutUpdated. Hosts such as GNOME's AppIndicator extension fetch the
+// properties of an item only when its id is new to them or
+// ItemsPropertiesUpdated names it: without the signal, a retitled notice, or
+// one listed again after a retitle while absent, would keep its old label.
+// It does not take menuMu: updateMenu computed c under it.
 func (i *Item) emitMenuChange(c menuChange) {
-	if updated, removed := propertyChanges(c.old, c.cur); len(updated) > 0 || len(removed) > 0 {
-		if err := i.conn.Emit(menuPath, menuIface+".ItemsPropertiesUpdated", updated, removed); err != nil {
+	if len(c.updated) > 0 || len(c.removed) > 0 {
+		if err := i.conn.Emit(menuPath, menuIface+".ItemsPropertiesUpdated", c.updated, c.removed); err != nil {
 			i.log.Warn("emitting a tray menu signal failed", "signal", "ItemsPropertiesUpdated", "revision", c.rev, "error", err)
 		}
 	}
@@ -495,20 +558,26 @@ func (o menuObject) AboutToShowGroup(ids []int32) ([]int32, []int32, *dbus.Error
 	return []int32{}, idErrors, nil
 }
 
-// handleEvent delivers a click on an entry of the current menu. It reports
-// false when the menu has no item id; events on the root or a separator, and
-// events other than a click, are accepted and dropped.
+// handleEvent delivers a click on an entry of the current menu, with the
+// notice the id lists now (R9.7). A click on the id of a notice no longer
+// listed is delivered with an empty NoticeID: the host may still show the
+// previous menu, and the click is the reader's to ignore. It reports false
+// when id is neither in the menu nor ever given to a notice; events on the
+// root or a separator, and events other than a click, are accepted and
+// dropped.
 func (i *Item) handleEvent(id int32, eventID string) bool {
 	if id == menuRootID {
 		return true
 	}
-	items, _ := i.menuSnapshot()
-	m, ok := findItem(items, id)
-	if !ok {
+	i.menuMu.Lock()
+	m, ok := findItem(i.menuItems, id)
+	given := i.noticeIDs.given(id)
+	i.menuMu.Unlock()
+	if !ok && !given {
 		return false
 	}
 	if eventID == eventClicked && !m.separator {
-		i.deliver(Event{ItemID: id})
+		i.deliver(Event{ItemID: id, NoticeID: m.noticeID})
 	}
 	return true
 }

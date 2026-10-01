@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,11 @@ const (
 	errNameHasNoOwner      = "org.freedesktop.DBus.Error.NameHasNoOwner"
 	nameOwnerChangedName   = busIface + "." + memberNameOwnerChanged
 )
+
+// capBodyMarkup is the capability a server advertises when it interprets the
+// body as markup (R6.6). It is matched exactly: a vendor capability that only
+// contains the name does not count.
+const capBodyMarkup = "body-markup"
 
 // What every notification carries on the wire.
 const (
@@ -74,8 +80,10 @@ type Action struct {
 }
 
 // Message is one notification. A summary message has an empty NoticeID.
-// Summary and Body are notice-supplied text and are escaped by Send. Urgency
-// is the spec's urgency hint: 0 low, 1 normal, 2 critical.
+// Summary and Body are notice-supplied plain text: Send passes the summary as
+// is (R6.14) and escapes the body only for a server that advertises
+// body-markup (R6.6). Urgency is the spec's urgency hint: 0 low, 1 normal,
+// 2 critical.
 type Message struct {
 	NoticeID, Summary, Body string
 	Urgency                 byte
@@ -100,6 +108,14 @@ type sentNotification struct {
 	// change with a later sequence means the server that assigned this ID is
 	// gone.
 	seq dbus.Sequence
+}
+
+// capabilities is what one owner of serverName advertised.
+type capabilities struct {
+	// ownerSeq is the Notifier's ownerSeq when they were asked for: they
+	// describe the current server only while it is still the current one.
+	ownerSeq   dbus.Sequence
+	bodyMarkup bool
 }
 
 // serverSignal is a well-formed signal from the notification server.
@@ -133,6 +149,10 @@ type Notifier struct {
 	// order cannot overwrite a newer one.
 	owner    string
 	ownerSeq dbus.Sequence
+	// caps is what the server advertised, nil until it has answered. They are
+	// read in New, again on every change of owner, and by Send whenever they
+	// do not belong to the current owner.
+	caps *capabilities
 	// sent maps a notification ID the server assigned to what was sent.
 	// Signals are broadcast: an ID not in this map belongs to another
 	// application.
@@ -211,8 +231,68 @@ func New(conn *dbus.Conn, log *slog.Logger) (*Notifier, error) {
 		removeMatches(conn, rules)
 		return nil, err
 	}
+	n.refreshCapabilities(n.currentOwnerSeq())
 	go n.read(signals)
 	return n, nil
+}
+
+// currentOwnerSeq returns the sequence of the owner change last applied.
+func (n *Notifier) currentOwnerSeq() dbus.Sequence {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.ownerSeq
+}
+
+// refreshCapabilities asks the server for its capabilities on behalf of the
+// owner recorded at ownerSeq. With no owner, or once a newer owner change has
+// been applied, there is nothing to ask. A failure is logged, and Send asks
+// again before it next needs them.
+func (n *Notifier) refreshCapabilities(ownerSeq dbus.Sequence) {
+	n.mu.Lock()
+	owner, current := n.owner, n.ownerSeq == ownerSeq
+	n.mu.Unlock()
+	if owner == "" || !current {
+		return
+	}
+	ctx, cancel := context.WithTimeout(n.conn.Context(), defaultCallTimeout)
+	defer cancel()
+	if _, err := n.loadCapabilities(ctx, ownerSeq); err != nil {
+		n.log.Warn("notification server capabilities unavailable; asking again at the next notification",
+			"owner", owner, "err", err)
+	}
+}
+
+// loadCapabilities asks the server whether it advertises body-markup and
+// caches the answer for the owner recorded at ownerSeq. An answer that
+// arrives after a newer owner change is returned but not cached: it may
+// describe the server that left.
+func (n *Notifier) loadCapabilities(ctx context.Context, ownerSeq dbus.Sequence) (bool, error) {
+	var caps []string
+	call := n.conn.Object(serverName, serverPath).CallWithContext(ctx, serverIface+".GetCapabilities", 0)
+	if err := call.Store(&caps); err != nil {
+		return false, fmt.Errorf("reading the capabilities of %s: %w", serverName, err)
+	}
+	bodyMarkup := slices.Contains(caps, capBodyMarkup)
+	n.mu.Lock()
+	if n.ownerSeq == ownerSeq {
+		n.caps = &capabilities{ownerSeq: ownerSeq, bodyMarkup: bodyMarkup}
+	}
+	n.mu.Unlock()
+	return bodyMarkup, nil
+}
+
+// bodyMarkup reports whether the current server advertises body-markup,
+// asking it when the cached capabilities belong to an earlier owner or were
+// never read. On a failed read it reports false: the body goes out as plain
+// text, which is what R6.6 prescribes for a server not known to parse markup.
+func (n *Notifier) bodyMarkup(ctx context.Context) (bool, error) {
+	n.mu.Lock()
+	caps, ownerSeq := n.caps, n.ownerSeq
+	n.mu.Unlock()
+	if caps != nil && caps.ownerSeq == ownerSeq {
+		return caps.bodyMarkup, nil
+	}
+	return n.loadCapabilities(ctx, ownerSeq)
 }
 
 // removeMatches undoes AddMatchSignal for rules, best effort: it runs only on
@@ -249,9 +329,10 @@ func (n *Notifier) Events() <-chan Event {
 	return n.events
 }
 
-// Send shows m and returns the ID the server assigned to it. Summary and body
-// are escaped (R6.6); m.Actions are sent in order as key/label pairs (R6.5).
-// Errors name the notice.
+// Send shows m and returns the ID the server assigned to it. The summary is
+// sent as plain text (R6.14); the body is escaped only when the server
+// advertises body-markup, and sent as is otherwise (R6.6). m.Actions are sent
+// in order as key/label pairs (R6.5). Errors name the notice.
 //
 // ctx should carry a deadline: a server that accepts the call and never
 // answers is otherwise waited for up to 25 s. A slow or hung server delays
@@ -271,15 +352,26 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 		defer cancel()
 	}
 
+	body := m.Body
+	markup, capsErr := n.bodyMarkup(ctx)
+	if markup {
+		body = Escape(m.Body)
+	}
+
 	n.mu.Lock()
 	n.inflight++
 	n.mu.Unlock()
 
 	call := n.conn.Object(serverName, serverPath).CallWithContext(ctx, serverIface+".Notify", 0,
-		appName, uint32(0), appIcon, Escape(m.Summary), Escape(m.Body), actions, hints, expireTimeout,
+		appName, uint32(0), appIcon, m.Summary, body, actions, hints, expireTimeout,
 	)
 	var id uint32
 	err := call.Store(&id)
+	if capsErr != nil && err == nil {
+		// The server is there but would not say what it supports.
+		n.log.Warn("notification body sent as plain text: server capabilities unavailable",
+			"notice", m.NoticeID, "err", capsErr)
+	}
 
 	n.mu.Lock()
 	defer n.unlockAndReport()
@@ -485,16 +577,25 @@ func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 	}
 
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if sig.Sequence <= n.ownerSeq {
+		n.mu.Unlock()
 		return
 	}
+	// The cached capabilities now belong to an earlier owner: n.caps.ownerSeq
+	// no longer matches, so they are no longer used.
 	n.owner, n.ownerSeq = newOwner, sig.Sequence
 	for id, s := range n.sent {
 		if s.seq < sig.Sequence {
 			delete(n.sent, id)
 			delete(n.tokens, id)
 		}
+	}
+	n.mu.Unlock()
+
+	if newOwner != "" {
+		// Off the reader: a slow server must not hold up the signals behind
+		// this one.
+		go n.refreshCapabilities(sig.Sequence)
 	}
 }
 
@@ -503,9 +604,11 @@ func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 // values, which notice text never produces.
 var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
-// Escape makes notice-supplied text safe for a notification body or summary
-// (R6.6): & becomes &amp;, < becomes &lt;, > becomes &gt;. Text that already
-// looks like an entity is escaped again, because it is text, not markup.
+// Escape makes notice-supplied text safe for the body of a server that
+// advertises body-markup (R6.6): & becomes &amp;, < becomes &lt;, > becomes
+// &gt;. Text that already looks like an entity is escaped again, because it
+// is text, not markup. The summary is plain text by spec and never escaped
+// (R6.14).
 func Escape(s string) string {
 	return markupEscaper.Replace(s)
 }

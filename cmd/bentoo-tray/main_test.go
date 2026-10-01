@@ -347,9 +347,9 @@ func startTray(t *testing.T, session, system string) *child {
 	return startTrayWithConfig(t, session, system, "", true)
 }
 
-// seedState writes a valid format-1 state.json at mode 0644: a first-run stop
-// writes nothing by design (R6.9, see 8.3), so the App must load this saved
-// state and re-save it, and Save's 0600 proves the file was rewritten.
+// seedState writes a valid format-1 state.json at mode 0644: the App must load
+// this saved state and re-save it at the stop, and Save's 0600 proves the file
+// was rewritten rather than left as seeded.
 func seedState(t *testing.T, c *child) {
 	t.Helper()
 	path := filepath.Join(c.stateHome, "bentoo-notices", "state.json")

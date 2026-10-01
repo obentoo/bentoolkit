@@ -154,7 +154,7 @@ func TestMenu_PausedShowsResumeInPlaceOfPauseEntries(t *testing.T) {
 }
 
 // TestMenu_ListsNoticesThenMoreThenActions is R9.1 and R9.5: the notice
-// entries in the order given (ids 1..n, labelled by title), the "N more"
+// entries in the order given (ids 1000.., labelled by title), the "N more"
 // entry stating the count, the fixed actions, Quit last.
 func TestMenu_ListsNoticesThenMoreThenActions(t *testing.T) {
 	h := newMenu(t)
@@ -168,10 +168,10 @@ func TestMenu_ListsNoticesThenMoreThenActions(t *testing.T) {
 	})
 	_, nodes := h.layout()
 	got := ids(nodes)
-	if len(got) < 3 || got[0] != 1 || got[1] != 2 {
-		t.Fatalf("menu ids = %v, want the notice entries 1 and 2 first", got)
+	if len(got) < 3 || got[0] != 1000 || got[1] != 1001 {
+		t.Fatalf("menu ids = %v, want the notice entries 1000 and 1001 first", got)
 	}
-	for id, title := range map[int32]string{1: "Newest notice", 2: "Older notice"} {
+	for id, title := range map[int32]string{1000: "Newest notice", 1001: "Older notice"} {
 		if n, _ := find(nodes, id); n.label() != title {
 			t.Errorf("entry %d label = %q, want %q", id, n.label(), title)
 		}
@@ -180,7 +180,7 @@ func TestMenu_ListsNoticesThenMoreThenActions(t *testing.T) {
 	if !ok || !strings.Contains(more.label(), "3") {
 		t.Errorf("the more entry = %+v (present %v), want a label stating 3", more.Props, ok)
 	}
-	if slices.Index(got, idMore) < slices.Index(got, 2) {
+	if slices.Index(got, idMore) < slices.Index(got, 1001) {
 		t.Errorf("menu ids = %v: the more entry precedes the notices", got)
 	}
 	for _, id := range []int32{idCheckNow, idMarkAll, idPauseHour, idPauseTmrw, idQuit} {

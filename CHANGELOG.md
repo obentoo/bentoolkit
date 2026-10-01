@@ -18,8 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read, Pause, Quit). Security notices cannot be muted; a first run notifies
   only applicable security notices. It honours metered and offline
   connections through NetworkManager, opens notice pages through the desktop
-  portal, logs key=value lines at `BENTOO_TRAY_LOG_LEVEL`, and keeps its state
-  in `$XDG_STATE_HOME/bentoo-notices/state.json`. `make install` adds its
+  portal (never bypassing a portal that an administrator locked down),
+  logs key=value lines at `BENTOO_TRAY_LOG_LEVEL`, and keeps its state
+  in `$XDG_STATE_HOME/bentoo-notices/state.json` — including when the next
+  check may run, so a restart honours the server's `Retry-After` and the
+  backoff. Notification titles are sent as plain text, and the body is
+  escaped only for a notification server that renders markup. `make install` adds its
   desktop entry, a systemd user unit and its icons; configure it in the new
   `tray:` config section. On GNOME the icon needs
   `gnome-shell-extension-appindicator`.

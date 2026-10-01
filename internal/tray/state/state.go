@@ -1,5 +1,6 @@
 // Package state persists bentoo-tray's state: the feed ETag and serial, the
-// read state of every notice, the pause end and the backoff (S072-R10).
+// read state and source of every notice, the pause end, the backoff and the
+// earliest next fetch (S072-R10).
 package state
 
 import (
@@ -14,8 +15,12 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
-// Format is the state file version this package reads and writes.
-const Format = 1
+// Format is the state file version this package writes.
+const Format = 2
+
+// formatV1 is the previous version, still loaded and migrated (R10.5): it has no
+// next fetch time and no record source.
+const formatV1 = 1
 
 // retention is how long a record absent from both sources is kept (R10.4).
 const retention = 90 * 24 * time.Hour
@@ -33,19 +38,30 @@ type State struct {
 	Notices    map[string]Record `json:"notices"`
 	PauseUntil time.Time         `json:"pause_until"`
 	Failures   int               `json:"failures"`
+	// NextFetch is the earliest time the next fetch may run; zero means none is
+	// scheduled (R10.1, R2.14).
+	NextFetch time.Time `json:"next_fetch"`
+	// Established reports that R6.9's first run is over: a check has accepted
+	// a feed, or read the news when no feed is configured. A state without it
+	// is a first run even once saved, so a first run can persist its backoff
+	// and Retry-After (R2.13, R2.14) without ending. A format 1 file loads
+	// established: it was only ever written after the first run.
+	Established bool `json:"established"`
 	// Saved reports that a file was loaded or written; it is derived, never
-	// stored. A state that was never saved is a first run (R6.9).
+	// stored.
 	Saved bool `json:"-"`
 }
 
 // Record is what is kept per notice. Summary lets a held or failed
-// notification be rebuilt after a 304 or a restart.
+// notification be rebuilt after a 304 or a restart. Source is "feed", "news",
+// or "" for a record migrated from format 1, whose source is unknown.
 type Record struct {
 	Title    string    `json:"title"`
 	Summary  string    `json:"summary"`
 	URL      string    `json:"url"`
 	Severity string    `json:"severity"`
 	Type     string    `json:"type"`
+	Source   string    `json:"source"`
 	Read     bool      `json:"read"`
 	Notified bool      `json:"notified"`
 	LastSeen time.Time `json:"last_seen"`
@@ -72,8 +88,12 @@ func Open(path string) *Store {
 }
 
 // Load reads the state. A missing file is a first run: a fresh state with
-// Saved false. A file that cannot be parsed or has an unknown format is moved
-// to <path>.corrupt-<unix time> and a fresh state is returned together with an
+// Saved and Established false. A format 1 file is loaded with every record's
+// Source left "", Established set (a format 1 tray wrote no state before its
+// first run was over) and Format set to 2 in memory, so the next Save writes
+// format 2 (R10.5). A format 2 file without "established" is a first run. A
+// file that cannot be parsed or carries a format other than 1 or 2 is moved to
+// <path>.corrupt-<unix time> and a fresh state is returned together with an
 // error wrapping ErrCorrupt (R10.3).
 func (s *Store) Load() (State, error) {
 	fresh := State{Format: Format, Notices: map[string]Record{}}
@@ -88,9 +108,13 @@ func (s *Store) Load() (State, error) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return fresh, s.moveAside(err)
 	}
-	if st.Format != Format {
+	if st.Format != Format && st.Format != formatV1 {
 		return fresh, s.moveAside(fmt.Errorf("unknown format %d", st.Format))
 	}
+	if st.Format == formatV1 {
+		st.Established = true
+	}
+	st.Format = Format
 	if st.Notices == nil {
 		st.Notices = map[string]Record{}
 	}

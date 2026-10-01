@@ -237,11 +237,16 @@ type appStore struct {
 	attempts int
 }
 
+// Load returns initial as state.Store.Load would: a format 1 state was written
+// past its first run, so it loads Established (R10.5, R6.9).
 func (s *appStore) Load() (state.State, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.initial
 	st.Notices = maps.Clone(s.initial.Notices)
+	if st.Format == 1 {
+		st.Established = true
+	}
 	return st, nil
 }
 func (s *appStore) Save(st state.State) error {
@@ -830,10 +835,10 @@ func TestApp_MenuNoticeEntryOpensIt(t *testing.T) {
 	h.viewWhere("the notice listed in the menu", func(v sni.View) bool {
 		return len(v.Entries) == 1 && v.Entries[0].NoticeID == fooCVE().ID
 	})
-	h.menu(1)
+	h.icon.events <- sni.Event{ItemID: 1000, NoticeID: fooCVE().ID}
 	h.waitFor("the opener call", func() bool { return len(h.open.opened()) == 1 })
 	if c := h.open.opened()[0]; c.URL != fooCVE().URL {
-		t.Errorf("menu entry 1 opened %q, want %q", c.URL, fooCVE().URL)
+		t.Errorf("menu entry 1000 opened %q, want %q", c.URL, fooCVE().URL)
 	}
 }
 

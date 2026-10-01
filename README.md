@@ -2026,6 +2026,18 @@ the icon and its menu, install the AppIndicator extension
 logs one WARN naming the extension and runs with notifications only. KDE Plasma
 shows the icon natively.
 
+The extension does not show tooltips, so the unread count in the icon's tooltip
+appears on KDE only; on GNOME the orange or red dot on the icon tells you there
+are unread notices.
+
+### Opening a notice
+
+Open (on a notification or a menu entry) goes through the desktop portal, and
+falls back to `xdg-open` when the portal is missing or fails. When an
+administrator has locked down the portal so that it refuses to open links,
+`bentoo-tray` respects that: it does not fall back to `xdg-open`, keeps the
+notice unread and logs a WARN naming it.
+
 ### Configuration
 
 The optional `tray:` section of `~/.config/bentoo/config.yaml`:
@@ -2039,9 +2051,12 @@ tray:
   skip_metered: true      # skip scheduled checks on a metered connection
 ```
 
-State (read/unread, the feed's ETag and serial, a pause) lives in
-`$XDG_STATE_HOME/bentoo-notices/state.json`
-(`~/.local/state/bentoo-notices/state.json` by default).
+State (read/unread, the feed's ETag and serial, a pause, and when the next
+check may run) lives in `$XDG_STATE_HOME/bentoo-notices/state.json`
+(`~/.local/state/bentoo-notices/state.json` by default). Because the next
+check time is kept there, a restart does not check again sooner than the server
+asked (`Retry-After`) or the backoff allows; a wait inherited from a previous
+run is capped at the larger of 1.2 × `interval` and 24 hours.
 
 ### Logging
 

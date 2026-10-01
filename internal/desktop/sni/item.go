@@ -98,9 +98,12 @@ type View struct {
 	More     int
 }
 
-// Event is a click on the menu item ItemID.
+// Event is a click on the menu item ItemID. NoticeID is the notice that item
+// lists at click time; it is empty for the fixed entries and for an id whose
+// notice is no longer listed (R9.7).
 type Event struct {
-	ItemID int32
+	ItemID   int32
+	NoticeID string
 }
 
 // toolTip is the SNI ToolTip property, (sa(iiay)ss): icon name, icon pixmap,
@@ -163,12 +166,16 @@ type Item struct {
 	// props is nil until Start exports the item.
 	props *prop.Properties
 
-	// menuMu guards menuItems and menuRev. It is held only for field access,
-	// so the menu's D-Bus handlers never wait on SetState. menuItems is
-	// replaced, never modified in place.
-	menuMu    sync.Mutex
-	menuItems []menuItem
-	menuRev   uint32
+	// menuMu guards menuItems, menuRev, noticeIDs and menuServed. It is held
+	// only for field access and building the menu, so the menu's D-Bus
+	// handlers never wait on SetState. menuItems is replaced, never modified
+	// in place. menuServed is what each id last served, kept for the process
+	// lifetime like noticeIDs.
+	menuMu     sync.Mutex
+	menuItems  []menuItem
+	menuRev    uint32
+	noticeIDs  *noticeIDs
+	menuServed servedItems
 
 	// mu guards the fields below. It is held only for field access.
 	mu      sync.Mutex
@@ -189,6 +196,10 @@ func New(conn *dbus.Conn, log *slog.Logger, icons IconSet) *Item {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	ids := newNoticeIDs()
+	initial := buildMenu(View{}, ids)
+	served := servedItems{}
+	served.serve(initial)
 	return &Item{
 		conn: conn,
 		log:  log,
@@ -201,8 +212,10 @@ func New(conn *dbus.Conn, log *slog.Logger, icons IconSet) *Item {
 		kick:   make(chan struct{}, 1),
 		cur:    render(View{}),
 		// Revision 1 is the initial menu; hosts read it with GetLayout.
-		menuItems: buildMenu(View{}),
-		menuRev:   1,
+		menuItems:  initial,
+		menuRev:    1,
+		noticeIDs:  ids,
+		menuServed: served,
 	}
 }
 
@@ -457,8 +470,8 @@ func (itemObject) Scroll(_ int32, _ string) *dbus.Error { return nil }
 // Start it only records v. It emits NewIcon and NewAttentionIcon when the
 // variant changes, NewStatus when the status does, NewToolTip when the
 // tooltip does, and ItemsPropertiesUpdated for the entries whose label
-// changed followed by LayoutUpdated, with a higher revision, when the menu
-// does.
+// differs from what their id last served followed by LayoutUpdated, with a
+// higher revision, when the menu does.
 func (i *Item) SetState(v View) {
 	next := render(v)
 

@@ -1,7 +1,6 @@
 package dbusx_test
 
 import (
-	"bufio"
 	"context"
 	"os/exec"
 	"strings"
@@ -128,26 +127,11 @@ func TestOwner_SecondInstanceIsNotAcquiredAndDoesNotQueue(t *testing.T) {
 	}
 }
 
-// startDaemon runs a dedicated dbus-daemon whose process the test can kill.
+// startDaemon runs a dedicated hermetic dbus-daemon whose process the test can
+// kill; like every D-Bus test here it fails instead of skipping in CI.
 func startDaemon(t *testing.T) (string, *exec.Cmd) {
 	t.Helper()
-	if _, err := exec.LookPath("dbus-daemon"); err != nil {
-		t.Skip("dbus-daemon not installed")
-	}
-	cmd := exec.Command("dbus-daemon", "--session", "--nofork", "--print-address=1")
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	line, err := bufio.NewReader(out).ReadString('\n')
-	if err != nil {
-		t.Fatalf("reading the daemon address: %v", err)
-	}
-	return strings.TrimSpace(line), cmd
+	return dbustest.StartKillable(t)
 }
 
 // TestOwner_LostFiresOnlyWhenTheBusGoesAway is R1.5: Lost stays open while the

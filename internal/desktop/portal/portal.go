@@ -74,6 +74,15 @@ var ErrURLRefused = errors.New("URL refused")
 // read (R7.4), and xdg-open is not run: the user chose not to open it.
 var ErrCancelled = errors.New("opening cancelled by the user")
 
+// ErrRefusedByPolicy is returned by Open when the portal refused the call by
+// policy (an administrator's lockdown). Nothing was opened, and xdg-open is
+// not run: that would bypass the policy (R7.5).
+var ErrRefusedByPolicy = errors.New("opening refused by the desktop portal's policy")
+
+// notAllowedError is the D-Bus error name of a policy refusal. It is matched
+// exactly: a name that only resembles it is any other failure (R7.2).
+const notAllowedError = "org.freedesktop.portal.Error.NotAllowed"
+
 // RunFunc runs the program name with args, without a shell.
 type RunFunc func(ctx context.Context, name string, args ...string) error
 
@@ -147,11 +156,12 @@ func New(conn *dbus.Conn, allowedHost string, log *slog.Logger, run func(ctx con
 //
 // xdg-open runs, with the URL as its only argument, only when the portal
 // definitely did not act: the call got a D-Bus error reply (no portal, no
-// such method, lockdown...) or the portal answered the request with a
-// failure (R7.2). It then fails only when xdg-open fails too, with both
-// causes joined. When the portal's fate is unknown (no reply in time), Open
-// returns an error and does not fall back. A dismissed chooser returns
-// ErrCancelled.
+// such method...) or the portal answered the request with a failure (R7.2).
+// It then fails only when xdg-open fails too, with both causes joined. When
+// the portal's fate is unknown (no reply in time), Open returns an error and
+// does not fall back. A dismissed chooser returns ErrCancelled; a refusal by
+// policy (org.freedesktop.portal.Error.NotAllowed) returns ErrRefusedByPolicy
+// and never falls back (R7.5).
 func (o *Opener) Open(ctx context.Context, rawURL, token string) error {
 	target, err := o.check(rawURL)
 	if err != nil {
@@ -162,7 +172,7 @@ func (o *Opener) Open(ctx context.Context, rawURL, token string) error {
 	switch {
 	case portalErr == nil:
 		return nil
-	case errors.Is(portalErr, ErrCancelled):
+	case errors.Is(portalErr, ErrCancelled), errors.Is(portalErr, ErrRefusedByPolicy):
 		return portalErr
 	case !fallback:
 		o.log.Warn("desktop portal did not answer; not running xdg-open, which could open the URL twice",
@@ -262,8 +272,11 @@ func (o *Opener) openURI(ctx context.Context, target, token string) (fallback bo
 	var handle dbus.ObjectPath
 	call := o.conn.Object(portalName, portalPath).CallWithContext(callCtx, openURIMethod, 0, "", target, options)
 	if call.Err != nil {
-		err := fmt.Errorf("opening %s through %s: %w", target, portalName, call.Err)
-		return isErrorReply(call.Err), err
+		name, isReply := errorReplyName(call.Err)
+		if name == notAllowedError {
+			return false, fmt.Errorf("opening %s through %s: %w: %w", target, portalName, ErrRefusedByPolicy, call.Err)
+		}
+		return isReply, fmt.Errorf("opening %s through %s: %w", target, portalName, call.Err)
 	}
 	if err := call.Store(&handle); err != nil {
 		// The portal accepted the call; only its reply is odd. Listening
@@ -336,11 +349,18 @@ func handleToken() string {
 	return "bentoo_" + rand.Text()
 }
 
-// isErrorReply reports whether err is an error reply from the bus or the
-// portal, which means the portal did not act on the call. A cancelled or
-// timed-out call is not: the message may still be delivered and acted on.
-func isErrorReply(err error) bool {
+// errorReplyName reports whether err is an error reply from the bus or the
+// portal, which means the portal did not act on the call, and returns its
+// D-Bus error name. A cancelled or timed-out call is not an error reply: the
+// message may still be delivered and acted on.
+func errorReplyName(err error) (name string, ok bool) {
 	var value dbus.Error
+	if errors.As(err, &value) {
+		return value.Name, true
+	}
 	var pointer *dbus.Error
-	return errors.As(err, &value) || errors.As(err, &pointer)
+	if errors.As(err, &pointer) && pointer != nil {
+		return pointer.Name, true
+	}
+	return "", false
 }
