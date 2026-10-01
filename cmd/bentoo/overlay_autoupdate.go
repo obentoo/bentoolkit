@@ -11,10 +11,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
@@ -1431,6 +1433,18 @@ func printLintTally(issues []autoupdate.LintIssue) {
 	fmt.Println()
 }
 
+// displayPendingField returns s unchanged when every rune is printable, and
+// quoted and escaped otherwise. --list reads the pending-updates file without
+// loading packages.toml, so nothing upstream has checked what it prints: an
+// apply error carries text from outside, and an entry recorded before the
+// packages.toml key check may carry a hostile key.
+func displayPendingField(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return !unicode.IsPrint(r) }) < 0 {
+		return s
+	}
+	return strconv.Quote(s)
+}
+
 // displayPendingUpdates formats and displays pending updates
 func displayPendingUpdates(updates []autoupdate.PendingUpdate) {
 	if len(updates) == 0 {
@@ -1444,13 +1458,13 @@ func displayPendingUpdates(updates []autoupdate.PendingUpdate) {
 
 	for _, u := range updates {
 		statusColor := getStatusColor(u.Status)
-		statusStr := output.Sprintf(statusColor, "[%s]", u.Status)
+		statusStr := output.Sprintf(statusColor, "[%s]", displayPendingField(string(u.Status)))
 
-		output.Package.Printf("  %s\n", u.Package)
-		fmt.Printf("    Version: %s → %s\n", u.CurrentVersion, u.NewVersion)
+		output.Package.Printf("  %s\n", displayPendingField(u.Package))
+		fmt.Printf("    Version: %s → %s\n", displayPendingField(u.CurrentVersion), displayPendingField(u.NewVersion))
 		fmt.Printf("    Status:  %s\n", statusStr)
 		if u.Error != "" {
-			output.Error.Printf("    Error:   %s\n", u.Error)
+			output.Error.Printf("    Error:   %s\n", displayPendingField(u.Error))
 		}
 		fmt.Printf("    Detected: %s\n", u.DetectedAt.Format("2006-01-02 15:04:05"))
 		fmt.Println()
