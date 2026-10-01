@@ -152,7 +152,7 @@ func TestREADME_DocumentsAuthFetchSecretScope(t *testing.T) {
 
 	t.Run("R4.4: CHANGELOG [Unreleased] ### Security carries the BREAKING migration", func(t *testing.T) {
 		changelog := readRepoDoc(t, "CHANGELOG.md")
-		security := s068DocSection(t, s068DocSection(t, changelog, "## [Unreleased]"), "### Security")
+		security := s068DocSection(t, shippingSection(changelog, "0.32.0"), "### Security")
 		for _, bullet := range strings.Split(security, "\n- ") {
 			lower := strings.ToLower(bullet)
 			if strings.Contains(bullet, "BREAKING") && strings.Contains(bullet, "BENTOO_FETCH_") &&
@@ -161,6 +161,6 @@ func TestREADME_DocumentsAuthFetchSecretScope(t *testing.T) {
 				return
 			}
 		}
-		t.Error("no [Unreleased] ### Security bullet marks the BENTOO_FETCH_ refusal (`fetch_serial_env`, `fetch_form_env`) and the header reservation as BREAKING with the rename migration")
+		t.Error("no [0.32.0] ### Security bullet marks the BENTOO_FETCH_ refusal (`fetch_serial_env`, `fetch_form_env`) and the header reservation as BREAKING with the rename migration")
 	})
 }

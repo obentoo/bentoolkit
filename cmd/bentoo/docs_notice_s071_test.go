@@ -2,11 +2,11 @@ package main
 
 // Story 071, sub-task 7.2 (R6.3, Q11): the README documents `bentoo notice`
 // and names only commands that exist; config.example.yaml documents
-// notice.site_path; the changelog's Unreleased section records the commands.
+// notice.site_path; the changelog section that ships 071 (0.32.0) records the
+// commands.
 
 import (
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -47,10 +47,9 @@ func TestDocsNotice_ConfigExampleDocumentsSitePath(t *testing.T) {
 
 func TestDocsNotice_ChangelogUnreleasedRecordsTheCommands(t *testing.T) {
 	changelog := readRepoDoc(t, "CHANGELOG.md")
-	_, rest, ok := strings.Cut(changelog, "## [Unreleased]")
-	if !ok {
-		t.Fatal("CHANGELOG.md has no Unreleased section")
+	section := shippingSection(changelog, "0.32.0")
+	if section == "" {
+		t.Fatal("CHANGELOG.md has neither a [0.32.0] nor an Unreleased section")
 	}
-	unreleased, _, _ := strings.Cut(rest, "\n## [")
-	requireContains(t, "CHANGELOG.md [Unreleased]", unreleased, "bentoo notice")
+	requireContains(t, "CHANGELOG.md [0.32.0]", section, "bentoo notice")
 }
