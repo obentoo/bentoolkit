@@ -11,6 +11,8 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/introspect"
 	"github.com/godbus/dbus/v5/prop"
+
+	"github.com/obentoo/bentoolkit/internal/tray/messages"
 )
 
 // The dbusmenu interface served at menuPath.
@@ -133,7 +135,7 @@ func buildMenu(v View) []menuItem {
 		id++
 	}
 	if more := max(v.More, 0) + len(v.Entries) - len(listed); more > 0 {
-		items = append(items, menuItem{id: menuIDMore, label: fmt.Sprintf(labelMoreFormat, more)})
+		items = append(items, menuItem{id: menuIDMore, label: messages.Format(messages.MenuMore, more)})
 	}
 
 	sep := menuIDSeparator
@@ -145,18 +147,18 @@ func buildMenu(v View) []menuItem {
 		separator()
 	}
 	items = append(items,
-		menuItem{id: menuIDCheckNow, label: labelCheckNow},
-		menuItem{id: menuIDMarkAllRead, label: labelMarkAllRead})
+		menuItem{id: menuIDCheckNow, label: messages.Text(messages.MenuCheckNow)},
+		menuItem{id: menuIDMarkAllRead, label: messages.Text(messages.MenuMarkAllRead)})
 	separator()
 	if v.Paused {
-		items = append(items, menuItem{id: menuIDResume, label: labelResume})
+		items = append(items, menuItem{id: menuIDResume, label: messages.Text(messages.MenuResume)})
 	} else {
 		items = append(items,
-			menuItem{id: menuIDPauseHour, label: labelPauseHour},
-			menuItem{id: menuIDPauseTomorrow, label: labelPauseTomorrow})
+			menuItem{id: menuIDPauseHour, label: messages.Text(messages.MenuPauseHour)},
+			menuItem{id: menuIDPauseTomorrow, label: messages.Text(messages.MenuPauseTomorrow)})
 	}
 	separator()
-	return append(items, menuItem{id: menuIDQuit, label: labelQuit})
+	return append(items, menuItem{id: menuIDQuit, label: messages.Text(messages.MenuQuit)})
 }
 
 // noticeLabel is a notice's menu label: its title, or its ID when the title

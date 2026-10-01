@@ -80,6 +80,10 @@ type Message struct {
 	NoticeID, Summary, Body string
 	Urgency                 byte
 	Actions                 []Action
+	// Covers lists the notice IDs a summary message stands for, so the caller
+	// can mark each of them notified once it is sent. It is empty for a
+	// single-notice message and never sent on the wire: Send ignores it.
+	Covers []string
 }
 
 // Event is an action the user took on a notification this Notifier sent.

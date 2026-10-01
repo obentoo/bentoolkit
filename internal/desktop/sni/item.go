@@ -13,6 +13,8 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/introspect"
 	"github.com/godbus/dbus/v5/prop"
+
+	"github.com/obentoo/bentoolkit/internal/tray/messages"
 )
 
 // The item's own object and the StatusNotifierWatcher it registers with.
@@ -137,7 +139,7 @@ func render(v View) shown {
 	default:
 		s.variant, s.status = variantUnread, statusNeedsAttention
 	}
-	s.tooltip = fmt.Sprintf(tooltipFormat, unread)
+	s.tooltip = messages.Count(messages.TooltipOne, messages.TooltipMany, unread)
 	return s
 }
 
