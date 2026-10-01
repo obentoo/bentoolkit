@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
+	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- startup delay and interval jitter (Deps.Rand), not a secret
 	"net/url"
 	"os"
 	"os/signal"
