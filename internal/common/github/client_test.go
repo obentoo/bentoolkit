@@ -329,6 +329,8 @@ func TestNewClientWithOptionsDefaults(t *testing.T) {
 
 // TestSetCacheDirTildeExpansion tests Req 7.2: tilde expansion in SetCacheDir
 func TestSetCacheDirTildeExpansion(t *testing.T) {
+	// Point HOME at a temp dir so SetCacheDir's MkdirAll never touches the real home.
+	t.Setenv("HOME", t.TempDir())
 	client := NewClient()
 
 	err := client.SetCacheDir("~/some/cache/path")
@@ -347,9 +349,6 @@ func TestSetCacheDirTildeExpansion(t *testing.T) {
 	if client.CacheDir == "" {
 		t.Error("CacheDir should not be empty after SetCacheDir")
 	}
-
-	// Cleanup
-	os.RemoveAll(client.CacheDir)
 }
 
 // TestSetCacheDirEmpty tests Req 7.3: empty string is a no-op
