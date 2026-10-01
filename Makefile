@@ -38,6 +38,15 @@ GOLANGCI_LINT := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 # Extra golangci-lint arguments, e.g. LINT_ARGS="--enable-only misspell".
 LINT_ARGS ?=
 
+# Tray icons: each SVG variant in TRAY_ICON_SVG_DIR is rendered at every size
+# in TRAY_ICON_SIZES into TRAY_ICON_PNG_DIR as <variant>-<size>.png, the names
+# internal/tray/icons embeds. Keep TRAY_ICON_SIZES equal to that package's sizes.
+TRAY_ICON_SVG_DIR := misc/tray/icons
+TRAY_ICON_PNG_DIR := internal/tray/icons/png
+TRAY_ICON_VARIANTS := bentoo-tray bentoo-tray-unread bentoo-tray-critical
+TRAY_ICON_SIZES := 16 22 24 32 48
+RSVG_CONVERT ?= rsvg-convert
+
 # Test order: `on` draws a fresh seed per run; a failing run prints
 # `-test.shuffle <seed>`, and `make test SHUFFLE=<seed>` replays that order.
 SHUFFLE ?= on
@@ -195,6 +204,24 @@ lint-pin-check:
 		echo "golangci-lint pin mismatch: Makefile $(GOLANGCI_LINT_VERSION), ci.yml $$ci"; exit 1; \
 	fi
 
+# Render the tray icon PNGs from their SVG sources. rsvg-convert (librsvg) is
+# an authoring-time tool only: the PNGs are committed, so neither the Go build,
+# CI nor the ebuild needs it. Old PNGs are removed first, so a dropped variant
+# or size cannot linger in the embedded set. Re-run after editing an SVG.
+.PHONY: tray-icons
+tray-icons:
+	@command -v $(RSVG_CONVERT) >/dev/null 2>&1 || { \
+		echo "tray-icons: $(RSVG_CONVERT) not found (install librsvg)"; exit 1; }
+	@set -eu; \
+	mkdir -p $(TRAY_ICON_PNG_DIR); \
+	rm -f $(TRAY_ICON_PNG_DIR)/*.png; \
+	for v in $(TRAY_ICON_VARIANTS); do \
+		for n in $(TRAY_ICON_SIZES); do \
+			$(RSVG_CONVERT) -w "$$n" -h "$$n" -o "$(TRAY_ICON_PNG_DIR)/$$v-$$n.png" "$(TRAY_ICON_SVG_DIR)/$$v.svg"; \
+		done; \
+	done; \
+	echo "tray-icons: rendered $(TRAY_ICON_VARIANTS) at $(TRAY_ICON_SIZES) px into $(TRAY_ICON_PNG_DIR)"
+
 # Tidy dependencies
 .PHONY: tidy
 tidy:
@@ -229,6 +256,7 @@ help:
 	@echo "  fmt             Format code"
 	@echo "  vet             Run go vet"
 	@echo "  lint            Run fmt, vet, and golangci-lint $(GOLANGCI_LINT_VERSION) (the CI pin) for every build tag"
+	@echo "  tray-icons      Render the tray icon PNGs from misc/tray/icons (needs rsvg-convert)"
 	@echo "  tidy            Tidy dependencies"
 	@echo "  check           Run lint, test, and audit"
 	@echo "  help            Show this help"
