@@ -279,7 +279,10 @@ func selectCurrentEbuild(overlayPath, pkg, series string) (ebuildCandidate, erro
 		if err != nil {
 			continue // Skip invalid ebuild files
 		}
-		if !matcher.matches(eb.Version) {
+		// The series names an upstream release line, so it is matched against the
+		// PV: matched against the PVR, an exact `^1\.8\.3$` rejected the line's
+		// own 1.8.3-r1 and every revbump broke the entry.
+		if !matcher.matches(revisionSuffixRegex.ReplaceAllString(eb.Version, "")) {
 			continue
 		}
 		path := filepath.Join(pkgDir, name)

@@ -47,6 +47,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
   v5.2.2 was published on 2025-12-29.
 
+### Fixed
+
+- **`--check <pkg>` and `--apply` honour `hold` and `enabled = false`.** Only
+  the full scan skipped them: an explicit check fetched a held or disabled
+  package and queued its update, and the applier refused held packages but
+  applied disabled ones. A single check now reports the package as skipped
+  without fetching it, and the applier refuses both, keeping the pending entry.
+
+- **`series` is matched against the PV, not the revision.** An exact series
+  such as `^1\.8\.3$` rejected the line's own `1.8.3-r1`, so every revbump
+  broke the entry. Existing `(?:-r[0-9]+)?$` workarounds keep matching.
+
+- **A bump fails when its Manifest misses a DIST entry.** `pkgdev manifest`
+  exiting 0 did not prove every `SRC_URI` file was digested, and a batch bump
+  once shipped 76 ebuilds that could not fetch. After the manifest step,
+  `pkgcheck scan -k MissingManifest` now checks the new version, and a missing
+  distfile fails the apply. When pkgcheck is absent or fails, the apply goes
+  on and a warning says the check did not run.
+
 ## [0.32.0] - 2026-10-01
 
 ### Security

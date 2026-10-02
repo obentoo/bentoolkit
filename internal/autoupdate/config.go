@@ -245,7 +245,8 @@ type PackageConfig struct {
 	SuffixWhen string `toml:"suffix_when,omitempty"`
 
 	// Series restricts the entry to one release line, given as a regex matched
-	// against the version. It narrows BOTH ends of the comparison: which ebuild
+	// against the version — for an overlay ebuild, its PV without the -rN
+	// revision, so a revbump never moves an ebuild out of its line. It narrows BOTH ends of the comparison: which ebuild
 	// in the overlay counts as this entry's current version, and which upstream
 	// candidates survive selection.
 	//
@@ -469,6 +470,23 @@ func (c *PackageConfig) IsEnabled() bool {
 // decision that survives the ebuild's presence in the overlay.
 func (c *PackageConfig) IsHeld() bool {
 	return c.Hold
+}
+
+// refusedBy names the packages.toml key that keeps pkg out of autoupdate —
+// "hold = true" or "enabled = false" — or returns "" when nothing does, including
+// when pkg has no record. Hold is named first because it is the stronger
+// statement: it survives the overlay reconciliation that may clear a disable.
+func refusedBy(configs map[string]PackageConfig, pkg string) string {
+	cfg, ok := configs[pkg]
+	switch {
+	case !ok:
+		return ""
+	case cfg.IsHeld():
+		return "hold = true"
+	case !cfg.IsEnabled():
+		return "enabled = false"
+	}
+	return ""
 }
 
 // PackagesConfig represents the entire packages.toml configuration file.

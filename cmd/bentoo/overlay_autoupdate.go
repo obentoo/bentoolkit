@@ -835,6 +835,10 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 			logger.Error("failed to check package %s: %v", pkg, err)
 			return exitWith(1)
 		}
+		if result.Skipped != "" {
+			logger.Info("%s skipped: %s in packages.toml", pkg, result.Skipped)
+			return nil
+		}
 		// S045-R1.2: the one package this run scanned, as the same report the
 		// batch path builds and through the same render — one element, joined
 		// with the zero validation half because nothing validates here. This
@@ -1998,8 +2002,8 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 	}
 
 	if result.Held {
-		output.Warning.Println("    Status:  Held (hold = true; kept in pending)")
-		output.Info.Println("    Reason:  bumped by hand — drop the hold in packages.toml to automate it")
+		output.Warning.Printf("    Status:  Held (%s; kept in pending)\n", result.HoldReason)
+		output.Info.Printf("    Reason:  bumped by hand — drop %q in packages.toml to automate it\n", result.HoldReason)
 		return
 	}
 
@@ -2454,6 +2458,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	result, err := checker.CheckPackage(pkg, true) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("check failed: %v", err)}
+	}
+	if result.Skipped != "" {
+		return reviveOutcome{pkg: pkg, status: "skipped", detail: fmt.Sprintf("re-enabled, but %s still keeps it out of autoupdate", result.Skipped)}
 	}
 	if !result.HasUpdate {
 		// Seeded base already equals upstream: nothing to bump. The base ebuild is

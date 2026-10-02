@@ -84,6 +84,11 @@ type CheckResult struct {
 	// an informational result rather than a recurring hard failure. When set,
 	// all other fields except Package are zero-valued.
 	Orphaned bool
+	// Skipped names the packages.toml key ("hold = true" or "enabled = false")
+	// that kept CheckPackage from checking the package at all. When set, nothing
+	// was fetched, nothing was written to the cache or pending list, and every
+	// other field except Package is zero-valued.
+	Skipped string
 }
 
 // DefaultOpTimeout is the default per-operation timeout applied to a single
@@ -651,6 +656,15 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	if !exists {
 		result.Error = fmt.Errorf("%w: %s", ErrPackageNotFound, pkg)
 		return result, result.Error
+	}
+
+	// An explicit `--check <pkg>` honours the same two keys CheckAll filters on.
+	// It used to check a held or disabled package like any other and queue its
+	// update in pending.json, so the maintainer's "do not auto-bump" held only
+	// for the full scan.
+	if reason := refusedBy(c.config.Packages, pkg); reason != "" {
+		result.Skipped = reason
+		return result, nil
 	}
 
 	// Get current version from overlay
