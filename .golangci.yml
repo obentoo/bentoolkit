@@ -71,9 +71,10 @@ linters:
           - forbidigo
         text: "fmt\\.Print"
       # Scoped to the os.Exit rule's text, so these paths stay under the
-      # fmt.Print rule. main.go is the one place the process ends; misc/ holds
-      # standalone programs; tests end re-exec'd children and TestMain.
-      - path: (^cmd/bentoo/main\.go$|^misc/|_test\.go$)
+      # fmt.Print rule. Each binary's main.go is the one place its process
+      # ends; misc/ holds standalone programs; tests end re-exec'd children and
+      # TestMain.
+      - path: (^cmd/bentoo(-tray)?/main\.go$|^misc/|_test\.go$)
         linters:
           - forbidigo
         text: "os\\.Exit"

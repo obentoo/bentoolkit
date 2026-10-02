@@ -99,7 +99,22 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      # bentoo-tray's D-Bus integration tests start private dbus-daemons. They
+      # fail (never skip) when CI=true and the daemon is missing, so make sure
+      # it is there instead of relying on the runner image. An image that
+      # already ships it (act's catthehacker/ubuntu, where sudo needs a
+      # password for the non-root user) skips the install.
+      - name: Install dbus-daemon
+        run: |
+          if ! command -v dbus-daemon >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends dbus
+          fi
+          command -v dbus-daemon
+
       - name: Run tests with coverage, race detector and shuffled order
+        env:
+          CI: "true"
         run: go test -race -shuffle=on -v -coverprofile=coverage.out ./...
 
       - name: Report coverage

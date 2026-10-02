@@ -1,0 +1,13 @@
+[Unit]
+Description=bentoo notices tray
+Documentation=https://github.com/obentoo/bentoolkit
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=@BINDIR@/bentoo-tray
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=graphical-session.target

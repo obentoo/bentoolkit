@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bentoo-tray`, a desktop notifier for the overlay's notices.** A new
+  binary reads the notices feed (`https://obentoo.org/notices.json`, JSON Feed
+  1.1 with ETag revalidation, a 1 MiB cap and backoff) and the unread bentoo
+  news items, keeps the notices that concern packages installed from the
+  bentoo repository, and shows them as desktop notifications (Open, Mark as
+  read) and a StatusNotifierItem tray icon with a menu (Check now, Mark all as
+  read, Pause, Quit). Security notices cannot be muted; a first run notifies
+  only applicable security notices. It honours metered and offline
+  connections through NetworkManager, opens notice pages through the desktop
+  portal (never bypassing a portal that an administrator locked down),
+  logs key=value lines at `BENTOO_TRAY_LOG_LEVEL`, and keeps its state
+  in `$XDG_STATE_HOME/bentoo-notices/state.json` — including when the next
+  check may run, so a restart honours the server's `Retry-After` and the
+  backoff. Notification titles are sent as plain text, and the body is
+  escaped only for a notification server that renders markup. `make install` adds its
+  desktop entry, a systemd user unit and its icons; configure it in the new
+  `tray:` config section. On GNOME the icon needs
+  `gnome-shell-extension-appindicator`.
+
+### Changed
+
+- **New dependency: `github.com/godbus/dbus/v5` v5.2.2.** The `bentoo-tray`
+  desktop notifier speaks D-Bus (StatusNotifierItem, dbusmenu, Notifications,
+  the OpenURI portal and NetworkManager); the standard library has no D-Bus
+  client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
+  v5.2.2 was published on 2025-12-29.
+
 ## [0.32.0] - 2026-10-01
 
 ### Security

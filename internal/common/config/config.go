@@ -40,6 +40,8 @@ type Config struct {
 	UI UIConfig `yaml:"ui,omitempty"`
 	// Notice configures `bentoo notice` (S071-R4, R6.1).
 	Notice NoticeConfig `yaml:"notice,omitempty"`
+	// Tray configures bentoo-tray (S072-R11.1).
+	Tray TrayConfig `yaml:"tray,omitempty"`
 }
 
 // NoticeConfig is the `notice:` block: where `bentoo notice` writes the site
@@ -398,6 +400,7 @@ type probeConfig struct {
 	Repositories map[string]legacyRepo `yaml:"repositories,omitempty"`
 	UI           UIConfig              `yaml:"ui,omitempty"`
 	Notice       NoticeConfig          `yaml:"notice,omitempty"`
+	Tray         TrayConfig            `yaml:"tray,omitempty"`
 	GitHub       struct {
 		Token string `yaml:"token"`
 	} `yaml:"github"`
