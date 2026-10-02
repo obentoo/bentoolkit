@@ -1524,6 +1524,25 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 	return autoupdate.WithApplierFixer(fixer)
 }
 
+// applierGentooPathOption carries the ::gentoo tree into every Applier this
+// command builds, so the bump can re-read the copy it is about to rename past.
+//
+// One helper rather than four copies for the same reason applierDistfileOptions
+// is one: a mode that silently missed it would go back to renaming our ebuild
+// forward with nothing watching, which is precisely the failure this option
+// exists to catch and which looks like working software.
+//
+// BENTOO_GENTOO_REPO overrides the path; empty disables the check. The default
+// is where portage puts it, so the common case needs no configuration - a check
+// nobody has to switch on is a check that is actually on.
+func applierGentooPathOption() autoupdate.ApplierOption {
+	path := os.Getenv("BENTOO_GENTOO_REPO")
+	if path == "" {
+		path = "/var/db/repos/gentoo"
+	}
+	return autoupdate.WithApplierGentooPath(path)
+}
+
 // applierDistfileOptions carries the resolved distfile directories into every
 // Applier this command builds, so --apply, --apply all and --revive all reach
 // the Manifest step with the same two directories (S030-R1.3). One helper rather
@@ -1710,6 +1729,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
+	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, applierValidateOptions(configDir)...)
 	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
@@ -1797,6 +1817,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		autoupdate.WithApplierPendingList(pending),
 		applierFixerOption(llmCfg),
 	}
+	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, applierDistfileOptions()...)
 	opts = append(opts, applierValidateOptions(configDir)...)
 	// One Applier serves the whole batch, so the two agents are constructed ONCE

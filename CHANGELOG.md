@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A bump warns when ::gentoo ships the version it leaves behind, and its
+  copy differs.** A bump copies our own ebuild forward and never reads
+  ::gentoo, so every fix the distribution made to that revision was dropped in
+  silence — a parity audit of the overlay traced 40 findings to it (mesa's
+  `RUST_MIN_VER`, modemmanager's gobject-introspection floor). `--check` and
+  `--apply` now print a stage line naming both files when ::gentoo ships the
+  exact version being left behind and the two differ. It never blocks or
+  changes the bump, and stays silent when ::gentoo lacks that version or the
+  copies are identical. The tree is `/var/db/repos/gentoo`; `BENTOO_GENTOO_REPO`
+  overrides it, and an empty value switches the check off.
+
 - **`bentoo-tray`, a desktop notifier for the overlay's notices.** A new
   binary reads the notices feed (`https://obentoo.org/notices.json`, JSON Feed
   1.1 with ETag revalidation, a 1 MiB cap and backoff) and the unread bentoo

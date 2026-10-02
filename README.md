@@ -1246,6 +1246,23 @@ Authentication is hybrid, selected by `llm.bare`:
 
 > **Cost note.** `sonnet` in login/subscription mode is billed per call (a large page context of ~74k tokens is roughly $0.09+/call). The cheap path is `--bare` + an API key. Set a conservative `max_budget_usd` when running `--check` across many packages. If the `claude` CLI is missing or not authenticated, both `analyze` and `--check` log a Warn and fall back (heuristic schema / skip extraction) — they never fail because of the LLM.
 
+#### When ::gentoo ships the version being bumped
+
+A bump copies the overlay's own ebuild to the new version; it never reads
+::gentoo. So when ::gentoo ships the exact version being left behind and its
+copy differs from ours, `--check` and `--apply` print a stage line naming both
+files, for example:
+
+```text
+::gentoo also ships 26.3.0 and its copy differs — the bump carried OUR 26.3.0 forward without re-reading it; diff /var/db/repos/gentoo/media-libs/mesa/mesa-26.3.0.ebuild …
+```
+
+It is advisory: it never blocks or changes the bump. It stays silent when
+::gentoo does not ship that version (most of the overlay is ahead by design) and
+when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
+set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
+check off.
+
 #### Example Autoupdate Workflow
 
 ```bash
