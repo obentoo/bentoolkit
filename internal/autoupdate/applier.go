@@ -1423,6 +1423,10 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	if err != nil {
 		return candidatePaths{}, err
 	}
+	// The same advisory prepareInOverlay gives, on the path --apply and --check
+	// actually take once a staging root is configured; wired into the overlay
+	// path alone it never reached a real bump.
+	a.warnIfGentooDiverges(pkg, currentVersion)
 	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
 		return candidatePaths{}, err
 	}
