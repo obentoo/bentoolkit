@@ -62,6 +62,13 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 	if err := checkUpstreamValues(pkg, update); err != nil {
 		return checkSkipped(pkg, newVersion, fmt.Sprintf("%v, so no gate was run for %s", err, pkg))
 	}
+	// Requirements after the value check, as in Apply: an invalid replayed
+	// version is refused above and never reported as a wait.
+	if waiting, err := a.unmetRequirements(pkg, update); err != nil {
+		return checkSkipped(pkg, newVersion, fmt.Sprintf("%v, so no gate was run for %s", err, pkg))
+	} else if len(waiting) > 0 {
+		return checkSkipped(pkg, newVersion, fmt.Sprintf("waiting for %s, so no gate was run for %s", strings.Join(waiting, ", "), pkg))
+	}
 	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
 
 	currentVersion, err := a.resolveCurrentVersion(pkg)
