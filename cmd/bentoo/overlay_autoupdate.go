@@ -2444,6 +2444,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	if err := autoupdate.EnablePackagesInConfig(overlayPath, []string{pkg}); err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("re-enable in packages.toml failed: %v", err)}
 	}
+	// The shared Applier loaded packages.toml before this entry was enabled;
+	// without this its stale enabled = false would refuse the bump below.
+	applier.MarkReenabled(pkg)
 
 	// Build a FRESH Checker so it loads the now re-enabled packages.toml, then
 	// check the package (force=true to bypass cache) to populate the pending list
@@ -2486,6 +2489,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
 		}
 		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
+	}
+	if applyResult != nil && applyResult.Held {
+		return reviveOutcome{pkg: pkg, status: "skipped", detail: "held (" + applyResult.HoldReason + "); the bump stays pending"}
 	}
 	if applyResult != nil && applyResult.Obsolete {
 		return reviveOutcome{pkg: pkg, status: "skipped", detail: applyResult.ObsoleteReason}
