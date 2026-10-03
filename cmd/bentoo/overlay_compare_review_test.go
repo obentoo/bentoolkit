@@ -194,7 +194,7 @@ func annotateFixture(t *testing.T) (*overlay.CompareReport, provider.Provider, o
 		Divergence:    map[string]overlay.Divergence{"kde-plasma/spectacle": {}},
 	}
 
-	report, err := overlay.CompareWithProvider([]overlay.PackageInfo{
+	report, err := overlay.CompareWithProvider(t.Context(), []overlay.PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 	}, prov, opts)
 	if err != nil {
@@ -244,7 +244,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		// The same claim stated where it costs a panic to be wrong: the whole
 		// annotate pass, run with what the constructor returned.
 		report, prov, opts := annotateFixture(t)
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 		if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 			t.Errorf("a run with no reviewer annotated %+v, want the zero note", got)
 		}
@@ -555,7 +555,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		report, prov, opts := annotateFixture(t)
 		reviewer := reviewerOver(t, &fakeAsker{reply: "sorry, I could not tell"})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 			t.Errorf("a malformed reply annotated %+v, want the zero note", got)
@@ -574,7 +574,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 			report, prov, opts := annotateFixture(t)
 			reviewer := reviewerOver(t, &fakeAsker{reply: tc.reply})
 
-			overlay.AnnotateReviews(report, reviewer, prov, opts)
+			overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 			if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 				t.Errorf("%s was attached as %+v, want the zero note", tc.name, got)
@@ -590,7 +590,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		report, prov, opts := annotateFixture(t)
 		reviewer := reviewerOver(t, &fakeAsker{reply: forged})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		// The adapter hands the reply back VERBATIM. Flattening belongs to the
 		// renderer (oneLine, compare.go), which is where every note passes —
@@ -648,7 +648,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		}
 		reviewer := reviewerOver(t, &fakeAsker{reply: string(encoded)})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		if got := report.Results[0].Review; got != want {
 			t.Errorf("the finding carries %+v, want %+v", got, want)

@@ -57,7 +57,7 @@ func TestCompareCarriesVerdict(t *testing.T) {
 		},
 	}
 
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

@@ -57,7 +57,7 @@ func comparedThree(t *testing.T) *CompareReport {
 		{Category: "cat", Package: "absent", LatestVersion: "1.0"},
 	}
 
-	report, err := CompareWithProvider(pkgs, prov, CompareOptions{IncludeSynced: true, IncludeNotInRemote: true})
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, CompareOptions{IncludeSynced: true, IncludeNotInRemote: true})
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned an error: %v", err)
 	}

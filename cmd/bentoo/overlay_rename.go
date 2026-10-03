@@ -145,7 +145,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute rename operation
-	result, err := overlay.Rename(ctx.Config, spec, opts)
+	result, err := overlay.Rename(commandContext(cmd), ctx.Config, spec, opts)
 	if err != nil {
 		logger.Error("%v", err)
 		return exitWith(1)

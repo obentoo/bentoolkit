@@ -58,7 +58,7 @@ func TestReviewReadingAFailedReviewIsNotAnUnaskedOne(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("claude: context deadline exceeded")}
 
-	AnnotateReviews(report, rev, prov, opts)
+	AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 	for _, atom := range reviewedAtoms {
 		got := resultFor(t, report, atom).Reading
@@ -84,7 +84,7 @@ func TestReviewReadingAnUnusableAnswerFailsLikeAnError(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: ReviewNote{Summary: "  "}}
 
-	AnnotateReviews(report, rev, prov, opts)
+	AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 	for _, atom := range reviewedAtoms {
 		if got := resultFor(t, report, atom).Reading; got != ReadingFailed {
@@ -109,7 +109,7 @@ func TestReviewReadingARefusedPairSaysSo(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}
 
-	AnnotateReviews(report, rev, prov, opts)
+	AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 	refused := resultFor(t, report, "net-libs/nodejs")
 	if refused.Verified != NotVerified {
@@ -135,7 +135,7 @@ func TestReviewReadingAnUnaskedPackageStaysUnasked(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}
 
-	AnnotateReviews(report, rev, prov, opts)
+	AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 	for _, atom := range []string{"app-editors/zed", "dev-libs/libixion"} {
 		if got := resultFor(t, report, atom).Reading; got != ReadingNotRequested {
@@ -170,14 +170,14 @@ func TestReviewReadingACachedAnswerIsStillARead(t *testing.T) {
 
 	first, prov, opts := reviewFixtureIn(t, shared)
 	warm := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}
-	AnnotateReviews(first, warm, prov, opts)
+	AnnotateReviews(t.Context(), first, warm, prov, opts)
 	if len(warm.calls) == 0 {
 		t.Fatal("the fixture is wrong: the first run asked the model nothing, so there is no cache entry for the second to hit")
 	}
 
 	second, prov2, opts2 := reviewFixtureIn(t, shared)
 	cold := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("the model must not be asked twice for one unchanged pair")}
-	AnnotateReviews(second, cold, prov2, opts2)
+	AnnotateReviews(t.Context(), second, cold, prov2, opts2)
 
 	if len(cold.calls) != 0 {
 		t.Fatalf("the second run submitted %v, so it did not read from the cache and this case proves nothing about the cached route", cold.atoms())
@@ -206,7 +206,7 @@ func TestReviewReadingNoOutcomeReachesTheOperatorAsAWarning(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("claude: exit status 1")}
 
-	AnnotateReviews(report, rev, prov, opts)
+	AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 	for _, atom := range reviewedAtoms {
 		if named := warningsNaming(warnings(), atom); len(named) != 0 {

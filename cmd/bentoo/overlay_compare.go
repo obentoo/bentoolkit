@@ -352,7 +352,6 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		// asked for a review (D1).
 		IncludeNotInRemote: compareRealign,
 		Concurrency:        compareConcurrency,
-		Ctx:                ctx,
 		Divergence:         divergence,
 		OverlayPath:        overlayPath,
 		ProgressCallback: func(done, total uint64) {
@@ -370,7 +369,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		opts.Redact = []string{resolvedToken}
 	}
 
-	report, err := overlay.CompareWithProvider(scanResult.Packages, prov, opts)
+	report, err := overlay.CompareWithProvider(ctx, scanResult.Packages, prov, opts)
 	if err != nil {
 		// Check if it's a rate limit error and suggest --clone
 		if strings.Contains(err.Error(), "rate limit") && !compareClone {
@@ -463,7 +462,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// instead of two conditions that could disagree. Nothing here can fail the
 	// run: every way of not getting a reading costs one warning and the report is
 	// printed unchanged.
-	overlay.AnnotateReviews(report, compareDivergenceReviewer(compareNoReview, reviewBudget), prov, opts)
+	overlay.AnnotateReviews(ctx, report, compareDivergenceReviewer(compareNoReview, reviewBudget), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
 	// divergence still justified, and what would replace it if not (R4.1, R4.2).
@@ -484,7 +483,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	if realignRan {
 		reviewer := compareRealignReviewer(compareNoReview, reviewBudget)
 		realignJudged = reviewer != nil
-		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
+		overlay.AnnotateRealignVerdicts(ctx, report, reviewer, prov, opts)
 	}
 
 	// Whether each proposed realignment still BUILDS, proved the way a bump is

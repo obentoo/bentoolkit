@@ -144,10 +144,9 @@ func runManifest(cmd *cobra.Command, args []string) error {
 		DistfilesCache: manifestFlags.DistfilesCache,
 		Reporter:       reporter,
 		Summary:        manifestLiveSummary,
-		Ctx:            runCtx,
 	}
 
-	result := overlay.RegenerateManifests(ctx.OverlayPath, targets, opts)
+	result := overlay.RegenerateManifests(runCtx, ctx.OverlayPath, targets, opts)
 
 	// Tear the UI down (stop the program, restore the terminal) before any
 	// further logging or exit so the summary is not swallowed by the TUI.
