@@ -111,6 +111,25 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 }
 
+// TestSelectCurrentEbuildSeriesIgnoresRevision pins that a series is matched
+// against the PV: an exact `^1\.8\.3$` must keep selecting its line after a
+// revbump to 1.8.3-r1, and still keep the next line out.
+func TestSelectCurrentEbuildSeriesIgnoresRevision(t *testing.T) {
+	overlay := t.TempDir()
+	pkg := "net-dns/bind-tools"
+	for _, v := range []string{"1.8.3-r1", "1.9.0"} {
+		createTestEbuild(t, overlay, pkg, v)
+	}
+
+	got, err := selectCurrentEbuild(overlay, pkg, `^1\.8\.3$`)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if got.Version != "1.8.3-r1" {
+		t.Fatalf("got %q, want %q", got.Version, "1.8.3-r1")
+	}
+}
+
 // TestSelectVersionSeries pins that upstream selection stays inside the line:
 // an index listing both series must not let the stable entry pick the testing
 // release.
