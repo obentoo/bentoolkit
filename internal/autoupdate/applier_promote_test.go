@@ -1045,20 +1045,25 @@ func TestApplierPromote_ValidationSourceIsOneOfTwoKnownValues(t *testing.T) {
 // route no verdict-side guard can cover — nothing is validated in this run, so
 // there is no gate list to inspect and nothing for PromotionDecision to refuse.
 func TestApplierPromote_AnInterruptedRunPublishesNothingOnTheReusePath(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// The operator's Ctrl-C lands once Apply is under way: TaskStart fires after
+	// Apply's own done-context check, and the reuse branch runs no gate between
+	// there and the published write. Cancelling BEFORE the call would stop Apply
+	// at that entry check and never reach the guard this test is about.
+	started := &cancelOnTaskStart{recordingReporter: &recordingReporter{}, cancel: cancel}
 	applier, overlayDir, pkg, _, pins := promoteFixture(t,
-		WithExecCommand(mockExecCommandSuccess))
+		WithExecCommand(mockExecCommandSuccess),
+		WithApplierReporter(started))
 
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
 	before := hashOverlayTree(t, overlayDir)
 
-	// The operator's Ctrl-C, landing before Apply reaches the reuse branch. The
-	// tree really is proved and really does match: everything about this bump is
-	// publishable EXCEPT that the run was stopped.
-	cancel()
-
 	result, err := applier.Apply(ctx, pkg, false)
 
+	if !started.fired {
+		t.Fatal("Apply never reached TaskStart, so the cancel did not land inside the run; the reuse-path guard was not exercised")
+	}
 	if err == nil || result.Success {
 		t.Fatal("an interrupted run promoted a bump from a retained tree; a cancelled context must never reach the published overlay")
 	}
@@ -1448,4 +1453,18 @@ func TestApplierPromote_ARecordNamingAProducerThisVersionDoesNotKnowIsRefusedToo
 			"refusal is unattributable to the operator, or ReadStageRecord stopped passing an unknown producer "+
 			"through verbatim and rewrote it to a name this run chose (R5.1)", result.DepthReason, unknownProducer)
 	}
+}
+
+// cancelOnTaskStart is a reporter that cancels the run's context the moment
+// Apply announces the package — after Apply's entry check, before any stage.
+type cancelOnTaskStart struct {
+	*recordingReporter
+	cancel context.CancelFunc
+	fired  bool
+}
+
+func (r *cancelOnTaskStart) TaskStart(id, label string) {
+	r.recordingReporter.TaskStart(id, label)
+	r.fired = true
+	r.cancel()
 }
