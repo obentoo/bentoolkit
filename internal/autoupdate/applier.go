@@ -296,6 +296,13 @@ type Applier struct {
 	// warning at the moment of the rename puts it in front of the one person
 	// who does, while the bump is still in their hands.
 	gentooPath string
+
+	// reenabled holds packages re-enabled in packages.toml after this Applier
+	// loaded it (--revive enables an orphan's entry, then applies it). Their
+	// enabled = false snapshot in configs is stale and must not refuse the bump.
+	// Guarded by reenabledMu: revives run concurrently on one Applier.
+	reenabledMu sync.Mutex
+	reenabled   map[string]bool
 	// pending manages pending updates
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
@@ -847,7 +854,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// enabled = false is refused here for the same reason: CheckAll skips a
 	// disabled entry, but an update already in pending.json — recorded before
 	// the disable, or by an explicit check — would otherwise still be applied.
-	if reason := refusedBy(a.configs, pkg); reason != "" {
+	if reason := a.refusal(pkg); reason != "" {
 		result.Held = true
 		result.HoldReason = reason
 		if update, found := a.pending.Get(pkg); found {
@@ -3227,4 +3234,29 @@ func copyTree(src, dst string) error {
 		}
 		return nil
 	})
+}
+
+// MarkReenabled tells the Applier that pkg's entry was re-enabled in
+// packages.toml after the Applier loaded it, so its stale enabled = false no
+// longer refuses the bump. hold = true still does.
+func (a *Applier) MarkReenabled(pkg string) {
+	a.reenabledMu.Lock()
+	defer a.reenabledMu.Unlock()
+	if a.reenabled == nil {
+		a.reenabled = make(map[string]bool)
+	}
+	a.reenabled[pkg] = true
+}
+
+// refusal is refusedBy with the run's re-enables applied.
+func (a *Applier) refusal(pkg string) string {
+	reason := refusedBy(a.configs, pkg)
+	if reason == "enabled = false" {
+		a.reenabledMu.Lock()
+		defer a.reenabledMu.Unlock()
+		if a.reenabled[pkg] {
+			return ""
+		}
+	}
+	return reason
 }
