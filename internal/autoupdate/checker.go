@@ -51,6 +51,11 @@ var (
 	// breaker — rather than on what the record asked for. Nothing in the record
 	// is wrong, so the interactive registry repair must not offer to rewrite it.
 	ErrUpstreamUnreachable = errors.New("upstream unreachable")
+	// ErrRequirementUnresolved is returned (wrapped) when a record's `requires`
+	// entry could not be captured for the detected version. The bump is held,
+	// like an unresolved aux value: a pending entry with a partial requirement
+	// set could not be told apart from a complete one.
+	ErrRequirementUnresolved = errors.New("requirement unresolved")
 	// ErrBaseVersionUnresolved is returned when an entry declares where its base
 	// version lives (base_from, or commit_version_pattern) and that source yields
 	// nothing. It is deliberately fatal for the check: falling back to the
@@ -811,7 +816,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		}
 
 		if result.HasUpdate {
-			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, ""); err != nil {
+			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, "", nil); err != nil {
 				if result.Error == nil {
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -834,9 +839,12 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 			if result.HasUpdate {
 				sha := c.resolveAuxSHA(&pkgConfig, result)
 				aux := c.resolveAuxValue(&pkgConfig, result)
+				reqs, reqErr := c.resolveRequirements(pkg, &pkgConfig, result)
 				if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
 					result.Error = errors.Join(result.Error, held)
-				} else if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux); err != nil {
+				} else if reqErr != nil {
+					result.Error = errors.Join(result.Error, reqErr)
+				} else if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux, reqs); err != nil {
 					// Log but don't fail the check
 					result.Error = fmt.Errorf("failed to add to pending: %w", err)
 				}
@@ -869,11 +877,14 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 	if result.HasUpdate {
 		sha := c.resolveAuxSHA(&pkgConfig, result)
 		aux := c.resolveAuxValue(&pkgConfig, result)
+		reqs, reqErr := c.resolveRequirements(pkg, &pkgConfig, result)
 		if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
 			// Joined, not overwritten: result.Error may already hold the cache
 			// write error, in which case the helper did not record its own cause.
 			result.Error = errors.Join(result.Error, held)
-		} else if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux); err != nil {
+		} else if reqErr != nil {
+			result.Error = errors.Join(result.Error, reqErr)
+		} else if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux, reqs); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -1267,14 +1278,16 @@ func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparab
 // commitHash is non-empty only for track="commit" packages or version-tracked
 // packages with commit_sha_path; auxValue is non-empty only for packages with
 // aux_var/aux_pattern. Both are stored in PendingUpdate so the applier can
-// substitute the corresponding variable in the copied ebuild.
-func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxValue string) error {
+// substitute the corresponding variable in the copied ebuild. requires carries
+// the versions captured for the record's `requires` entries (nil without any).
+func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxValue string, requires map[string]string) error {
 	update := PendingUpdate{
 		Package:        pkg,
 		CurrentVersion: currentVersion,
 		NewVersion:     newVersion,
 		CommitHash:     commitHash,
 		AuxValue:       auxValue,
+		Requires:       requires,
 		Status:         StatusPending,
 		DetectedAt:     time.Now(),
 	}
@@ -1367,6 +1380,58 @@ func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) strin
 		return ""
 	}
 	return strings.TrimSpace(string(m[1]))
+}
+
+// resolveRequirements captures the version of every package record pkg
+// requires, from the release its own version came from. It returns nil, nil for
+// a record without `requires`.
+//
+// Each entry's pattern is applied to the record's own url — a body-cache hit,
+// since the version was parsed from it this run — or to the entry's url, with
+// "{version}" replaced by the detected version and no credential header sent.
+// The record's own url is read even when `mirrors` served the version, so a
+// primary that is down holds the bump rather than reading another page. Any
+// entry that cannot be captured fails the whole set: the caller then holds the
+// bump instead of queueing a partial requirement set.
+func (c *Checker) resolveRequirements(pkg string, cfg *PackageConfig, result *CheckResult) (map[string]string, error) {
+	if len(cfg.Requires) == 0 {
+		return nil, nil
+	}
+	atoms := make([]string, 0, len(cfg.Requires))
+	for atom := range cfg.Requires {
+		atoms = append(atoms, atom)
+	}
+	sort.Strings(atoms)
+
+	captured := make(map[string]string, len(atoms))
+	for _, atom := range atoms {
+		spec := cfg.Requires[atom]
+		source, headers := cfg.URL, cfg.Headers
+		if spec.URL != "" {
+			source = strings.ReplaceAll(spec.URL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+			headers = nonCredentialHeaders(cfg.Headers)
+		}
+		content, err := c.fetchContent(source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
+		if err != nil {
+			return nil, fmt.Errorf("%w for %s requiring %s: fetching %s: %w", ErrRequirementUnresolved, pkg, atom, hostForError(source), err)
+		}
+		pattern := strings.ReplaceAll(spec.Pattern, versionPlaceholder, regexp.QuoteMeta(result.UpstreamVersion))
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("%w for %s requiring %s: pattern %q: %w", ErrRequirementUnresolved, pkg, atom, spec.Pattern, err)
+		}
+		m := re.FindSubmatch(content)
+		if len(m) < 2 {
+			return nil, fmt.Errorf("%w for %s requiring %s: pattern %q matched nothing in %s for version %s",
+				ErrRequirementUnresolved, pkg, atom, spec.Pattern, hostForError(source), result.UpstreamVersion)
+		}
+		version := strings.TrimSpace(string(m[1]))
+		if !ebuild.IsValidVersion(version) {
+			return nil, fmt.Errorf("%w for %s requiring %s: captured %q is not a Gentoo version", ErrRequirementUnresolved, pkg, atom, version)
+		}
+		captured[atom] = version
+	}
+	return captured, nil
 }
 
 // extractSnapshotBase strips the _p<date> or _pre<date> suffix from a Gentoo

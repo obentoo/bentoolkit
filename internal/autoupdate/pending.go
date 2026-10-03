@@ -69,6 +69,12 @@ type PendingUpdate struct {
 	// (e.g. "esr-bb24"). When non-empty, Apply substitutes the aux_var assignment
 	// in the copied ebuild with this value.
 	AuxValue string `json:"aux_value,omitempty"`
+	// Requires maps each package the record requires ("dev-lang/dart") to the
+	// version captured for it from the same upstream release ("3.14.0"). Empty
+	// for a record without `requires`, and absent from entries written before
+	// the field existed — the applier treats that absence on a record that does
+	// declare requires as "not captured", never as "no requirement".
+	Requires map[string]string `json:"requires,omitempty"`
 	// Status is the current status of this update
 	Status UpdateStatus `json:"status"`
 	// DetectedAt is when this update was first detected
