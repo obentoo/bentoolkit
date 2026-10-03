@@ -2387,6 +2387,27 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 	output.Info.Println("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate")
 }
 
+// reviveApplierOptions is the option set the --revive Applier is built with.
+// It is a function so the revive wiring can be tested as it ships.
+func reviveApplierOptions(ctx context.Context, overlayPath, configDir string, pending *autoupdate.PendingList) []autoupdate.ApplierOption {
+	reviveOpts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierContext(ctx),
+		autoupdate.WithApplierClean(autoupdateClean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPendingList(pending),
+	}
+	reviveOpts = append(reviveOpts, applierDistfileOptions()...)
+	// The ::gentoo tree too, as on the apply paths: a revived package whose
+	// `requires` is met only by ::gentoo would otherwise always read as waiting.
+	reviveOpts = append(reviveOpts, applierGentooPathOption())
+	// R3 reaches the revive path through the same option block as the two apply
+	// paths, which is what keeps a second entry point from growing a second,
+	// gate-free way into the published overlay.
+	reviveOpts = append(reviveOpts, applierValidateOptions(configDir)...)
+
+	return reviveOpts
+}
+
 // reviveOutcome records the result of reviving a single package so runRevive can
 // print an aggregate summary without aborting on the first failure.
 type reviveOutcome struct {
@@ -2467,20 +2488,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		return exitWith(1)
 	}
 
-	reviveOpts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(ctx),
-		autoupdate.WithApplierClean(autoupdateClean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		autoupdate.WithApplierPendingList(pending),
-	}
-	reviveOpts = append(reviveOpts, applierDistfileOptions()...)
-	// The ::gentoo tree too, as on the apply paths: a revived package whose
-	// `requires` is met only by ::gentoo would otherwise always read as waiting.
-	reviveOpts = append(reviveOpts, applierGentooPathOption())
-	// R3 reaches the revive path through the same option block as the two apply
-	// paths, which is what keeps a second entry point from growing a second,
-	// gate-free way into the published overlay.
-	reviveOpts = append(reviveOpts, applierValidateOptions(configDir)...)
+	reviveOpts := reviveApplierOptions(ctx, overlayPath, configDir, pending)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
@@ -2544,6 +2552,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	if err := autoupdate.EnablePackagesInConfig(overlayPath, []string{pkg}); err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("re-enable in packages.toml failed: %v", err)}
 	}
+	// The shared Applier loaded packages.toml before this entry was enabled;
+	// without this its stale enabled = false would refuse the bump below.
+	applier.MarkReenabled(pkg)
 
 	// Build a FRESH Checker so it loads the now re-enabled packages.toml, then
 	// check the package (force=true to bypass cache) to populate the pending list
@@ -2586,6 +2597,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
 		}
 		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
+	}
+	if applyResult != nil && applyResult.Held {
+		return reviveOutcome{pkg: pkg, status: "skipped", detail: "held (" + applyResult.HoldReason + "); the bump stays pending"}
 	}
 	if applyResult != nil && len(applyResult.Waiting) > 0 {
 		return reviveOutcome{pkg: pkg, status: "waiting", detail: "waiting for " + strings.Join(applyResult.Waiting, ", ")}
