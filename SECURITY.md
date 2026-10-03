@@ -137,8 +137,8 @@ refused call's input) instead of being retried with more.
   `$XDG_CONFIG_HOME/bentoo/secrets` (else `~/.config/bentoo/secrets`) and of
   `/etc/bentoo/secrets`; an agent that can edit is also denied `Edit` of both.
 - **WebFetch host rule.** WebFetch is granted only as `WebFetch(domain:<host>)`
-  for the package's upstream hosts — the hosts of its registry `url` and
-  `fallback_url`, and, for the manifest fixer, of the http(s) URLs `pkgdev`
+  for the package's upstream hosts — the hosts of its registry `url`,
+  `mirrors` and `fallback_url`, and, for the manifest fixer, of the http(s) URLs `pkgdev`
   printed — plus `github.com`, `codeload.github.com` and
   `objects.githubusercontent.com`. A host that is not a lowercase DNS name is
   dropped with a warning, so a value in `packages.toml` or in `pkgdev` output
