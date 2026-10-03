@@ -168,6 +168,9 @@ func renderTOMLValue(v reflect.Value) (string, bool) {
 		return strconv.FormatInt(v.Int(), 10), true
 
 	case reflect.Map:
+		if v.Type() == reflect.TypeFor[map[string]RequireSpec]() {
+			return tomlRequiresTable(v.Interface().(map[string]RequireSpec)), true
+		}
 		if v.Type().Key().Kind() != reflect.String || v.Type().Elem().Kind() != reflect.String {
 			return "", false
 		}
@@ -186,6 +189,30 @@ func renderTOMLValue(v reflect.Value) (string, bool) {
 	}
 
 	return "", false
+}
+
+// tomlRequiresTable renders a record's `requires` as ONE inline line, nested
+// tables included, for the reason tomlInlineTable gives: a sub-table header
+// would be read by the record scanner as a new record. Outer keys are sorted and
+// each entry's keys come in a fixed order — pattern, url, pin, an empty url
+// omitted — so two saves of the same config produce the same bytes.
+func tomlRequiresTable(m map[string]RequireSpec) string {
+	atoms := make([]string, 0, len(m))
+	for atom := range m {
+		atoms = append(atoms, atom)
+	}
+	sort.Strings(atoms)
+	parts := make([]string, 0, len(atoms))
+	for _, atom := range atoms {
+		spec := m[atom]
+		fields := []string{"pattern = " + tomlString(spec.Pattern)}
+		if spec.URL != "" {
+			fields = append(fields, "url = "+tomlString(spec.URL))
+		}
+		fields = append(fields, "pin = "+tomlString(spec.Pin))
+		parts = append(parts, tomlString(atom)+" = { "+strings.Join(fields, ", ")+" }")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // tomlInlineTable renders a string map as a one-line inline table, the shape the

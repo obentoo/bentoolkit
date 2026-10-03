@@ -63,7 +63,7 @@ var CanonicalFieldOrder = []string{
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
 	"headers", "timeout", "meta", "type", "patched", "series",
-	"aux_var", "aux_pattern", "aux_url", "revision", "version",
+	"aux_var", "aux_pattern", "aux_url", "requires", "revision", "version",
 	"fallback_url", "fallback_parser", "fallback_pattern", "llm_prompt",
 	"versions_path", "versions_selector",
 	"comments",

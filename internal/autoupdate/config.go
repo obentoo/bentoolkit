@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -425,6 +426,17 @@ type PackageConfig struct {
 	// scope. Requires aux_var and aux_pattern.
 	AuxURL string `toml:"aux_url,omitempty"`
 
+	// Requires declares the packages this record pins at a version upstream
+	// publishes beside its own: dev-lang/flutter bundles one Dart SDK per
+	// release and its ebuild pins ~dev-lang/dart-<that version>. Keyed by the
+	// required "category/package" — no version, slot or label. At check time
+	// each entry's pattern captures the required version, and the applier then
+	// rewrites the pinned atom in the new ebuild, or waits while that version is
+	// in neither the overlay nor ::gentoo. Written as an inline table:
+	//
+	//	requires = { "dev-lang/dart" = { pattern = '…"{version}"…"([^"]+)"', pin = "~" } }
+	Requires map[string]RequireSpec `toml:"requires,omitempty"`
+
 	// Revision is the -rN suffix to attach to the PV of a freshly bumped ebuild.
 	// It exists for packages that ship several SLOTs out of one directory and use
 	// the revision to tell them apart, which is how ::gentoo handles
@@ -472,6 +484,91 @@ type PackageConfig struct {
 	// setPackagesEnabled scans for `[section]` headers and a line that looks like
 	// one would end the record early.
 	Comments string `toml:"comments,omitempty"`
+}
+
+// RequireSpec is one entry of a record's `requires` table.
+//
+// It is a struct rather than a map so the strict decoder sees inside it: a typo
+// such as `form = …` is an unknown key that fails the load, where a
+// map[string]string would swallow it and the entry would silently lose a field.
+type RequireSpec struct {
+	// Pattern is a regex with exactly one capture group yielding the required
+	// version. "{version}" is replaced by the detected version (quoted), which
+	// anchors the capture to the release object that version came from.
+	Pattern string `toml:"pattern"`
+	// URL is where Pattern is applied; empty means the record's own url. A
+	// "{version}" placeholder is allowed in the path or query only.
+	URL string `toml:"url,omitempty"`
+	// Pin is the dependency operator the ebuild uses for the required package:
+	// "~", "=" or ">=".
+	Pin string `toml:"pin"`
+}
+
+// requirePins are the operators a `requires` entry may declare.
+var requirePins = []string{"~", "=", ">="}
+
+// validateRequires checks every `requires` entry of record pkg.
+func validateRequires(pkg string, cfg *PackageConfig) error {
+	if len(cfg.Requires) == 0 {
+		return nil
+	}
+	selfCat, selfName, _ := splitPkgAtom(pkg)
+	atoms := make([]string, 0, len(cfg.Requires))
+	for atom := range cfg.Requires {
+		atoms = append(atoms, atom)
+	}
+	sort.Strings(atoms)
+	for _, atom := range atoms {
+		spec := cfg.Requires[atom]
+		if err := requireAtomError(atom); err != nil {
+			return fmt.Errorf("package %s: requires key %q: %w", pkg, atom, err)
+		}
+		if atom == selfCat+"/"+selfName {
+			return fmt.Errorf("package %s: requires its own package %q", pkg, atom)
+		}
+		sample := strings.ReplaceAll(spec.Pattern, versionPlaceholder, regexp.QuoteMeta("0.0.0"))
+		re, err := regexp.Compile(sample)
+		switch {
+		case spec.Pattern == "":
+			return fmt.Errorf("package %s: requires %s: pattern is empty", pkg, atom)
+		case err != nil:
+			return fmt.Errorf("package %s: requires %s: invalid pattern %q: %w", pkg, atom, spec.Pattern, err)
+		case re.NumSubexp() != 1:
+			return fmt.Errorf("package %s: requires %s: pattern %q has %d capture groups, want exactly 1", pkg, atom, spec.Pattern, re.NumSubexp())
+		}
+		if !slices.Contains(requirePins, spec.Pin) {
+			return fmt.Errorf("package %s: requires %s: pin %q is not one of %s", pkg, atom, spec.Pin, strings.Join(requirePins, ", "))
+		}
+		if spec.URL != "" {
+			switch urlTemplateFault(spec.URL) {
+			case templateNotHTTP:
+				return fmt.Errorf("package %s: requires %s: url %q is not an absolute http(s) URL with a host", pkg, atom, spec.URL)
+			case templatePlaceholderInHost:
+				return fmt.Errorf("package %s: requires %s: url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, atom, spec.URL)
+			}
+		}
+	}
+	return nil
+}
+
+// requireAtomError says why atom is not a plain "category/package": a slot, a
+// label, an operator or a trailing version all name something narrower than a
+// package, and the pin is the record's to declare, not the key's.
+func requireAtomError(atom string) error {
+	if strings.ContainsAny(atom, ":@~<>=!") {
+		return errors.New("must be a plain category/package, with no operator, slot or label")
+	}
+	if strings.Count(atom, "/") != 1 {
+		return errors.New("must be category/package")
+	}
+	_, name, err := parsePkgAtom(atom)
+	if err != nil {
+		return err
+	}
+	if i := strings.LastIndexByte(name, '-'); i >= 0 && ebuild.IsValidVersion(name[i+1:]) {
+		return fmt.Errorf("carries a version (%s); the version is captured, not declared", name[i+1:])
+	}
+	return nil
 }
 
 // IsEnabled reports whether the checker should process this package. An absent
@@ -1490,6 +1587,9 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if _, err := regexp.Compile(cfg.AuxPattern); err != nil {
 			return fmt.Errorf("package %s: invalid aux_pattern %q: %w", pkg, cfg.AuxPattern, err)
 		}
+	}
+	if err := validateRequires(pkg, cfg); err != nil {
+		return err
 	}
 	if cfg.AuxURL != "" {
 		if cfg.AuxPattern == "" {
