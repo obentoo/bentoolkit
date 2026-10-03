@@ -298,7 +298,7 @@ func restoreReportFlags(t *testing.T) {
 // the three report flags newRootCmd declares on the root, plus --no-tui, which
 // outranks --ui and is read beside it by resolveAutoupdateUIMode.
 func reportFlagGlobals() []any {
-	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport, &autoupdateNoTUI}
+	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport, &autoupdateNoTUI, &overlayFlag}
 }
 
 // restoreAutoupdateFlags puts back, when the test ends, every package variable
