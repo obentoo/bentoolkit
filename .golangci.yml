@@ -13,6 +13,7 @@ linters:
     - misspell
     - bodyclose
     - contextcheck
+    - containedctx
     - errorlint
     - usetesting
     - tparallel
@@ -82,6 +83,8 @@ linters:
         linters:
           - errcheck
           - gosec
+          # A test table carrying a context per case is idiomatic.
+          - containedctx
 
 formatters:
   enable:
