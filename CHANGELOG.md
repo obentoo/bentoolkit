@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
   v5.2.2 was published on 2025-12-29.
 
+### Fixed
+
+- **Ctrl-C now stops `overlay autoupdate --apply all` and in-flight network
+  calls.** A cancelled `--apply all` used to keep dispatching every queued
+  package, each one copying and rewriting an ebuild before it failed and rolled
+  back; it now starts no package after the cancel and reports each package it
+  never began as a failure, so the exit status stays non-zero. The Claude API,
+  OpenAI and Ollama requests, the GitHub rate-limit lookup and the host
+  `portageq distdir` query now end within seconds of a cancel instead of running
+  to their own timeouts. `overlay analyze` now applies its 60 s LLM timeout,
+  which caps a slow local Ollama model below Ollama's own 120 s.
+
 ## [0.32.0] - 2026-10-01
 
 ### Security

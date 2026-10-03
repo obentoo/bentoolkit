@@ -72,7 +72,7 @@ func TestApplyAllPackagesContinuesPastRejectedValue(t *testing.T) {
 				t.Fatalf("NewApplier: %v", err)
 			}
 
-			results, failures := applyAllPackages(applier, updates, false, concurrency)
+			results, failures := applyAllPackages(t.Context(), applier, updates, false, concurrency)
 
 			if failures != 1 {
 				t.Errorf("failures = %d, want exactly 1 (the rejected package)", failures)

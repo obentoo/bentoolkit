@@ -1824,8 +1824,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
-	//nolint:contextcheck // TODO(059 5.1): applyAllPackages takes no ctx yet; 5.1 adds it, passes applyCtx here, and deletes this directive.
-	results, failures := applyAllPackages(applier, updates, autoupdateCompile, autoupdateConcurrency)
+	results, failures := applyAllPackages(applyCtx, applier, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyAllResults prints cleanly.
@@ -1861,12 +1860,14 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // each Apply's file work is scoped to its own package directory, and workers
 // write results to distinct slice indices — so beyond the atomic failure tally
 // no additional locking is needed.
-func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
-	// TODO(059 5.1): applyAllPackages takes no ctx yet, so the batch runs under
-	// an unbound context and a SIGINT/SIGTERM no longer reaches its Apply calls.
-	// Sub-task 5.1 adds the ctx parameter, has runApplyAll pass applyCtx, and
-	// deletes this line.
-	ctx := context.TODO()
+//
+// Cancellation (audit B8): every Apply receives ctx, and an Apply on a done ctx
+// returns at once with a failed result wrapping ctx.Err() before it touches the
+// overlay. So once ctx ends, every package not yet begun still gets its own
+// non-nil result, in input order, and counts as a failure — no package after
+// the cancel is applied, and the loop needs no second check or early break
+// (a break would leave nil results).
+func applyAllPackages(ctx context.Context, applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
 	results := make([]*autoupdate.ApplyResult, len(updates))
 
 	// Serial when the compile step will prompt and escalate, and — since story
