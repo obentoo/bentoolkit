@@ -2380,6 +2380,9 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		autoupdate.WithApplierPendingList(pending),
 	}
 	reviveOpts = append(reviveOpts, applierDistfileOptions()...)
+	// The ::gentoo tree too, as on the apply paths: a revived package whose
+	// `requires` is met only by ::gentoo would otherwise always read as waiting.
+	reviveOpts = append(reviveOpts, applierGentooPathOption())
 	// R3 reaches the revive path through the same option block as the two apply
 	// paths, which is what keeps a second entry point from growing a second,
 	// gate-free way into the published overlay.
@@ -2490,6 +2493,9 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 		}
 		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
 	}
+	if applyResult != nil && len(applyResult.Waiting) > 0 {
+		return reviveOutcome{pkg: pkg, status: "waiting", detail: "waiting for " + strings.Join(applyResult.Waiting, ", ")}
+	}
 	if applyResult != nil && applyResult.Obsolete {
 		return reviveOutcome{pkg: pkg, status: "skipped", detail: applyResult.ObsoleteReason}
 	}
@@ -2511,7 +2517,9 @@ func displayReviveSummary(outcomes []reviveOutcome) int {
 		case "revived":
 			revived++
 			output.Success.Printf("  ✓ %s: %s\n", o.pkg, o.detail)
-		case "skipped":
+		case "skipped", "waiting":
+			// A waiting revive is not a failure: the entry is re-enabled and its
+			// bump stays pending until the required version exists.
 			skipped++
 			output.Warning.Printf("  - %s: %s\n", o.pkg, o.detail)
 		default:

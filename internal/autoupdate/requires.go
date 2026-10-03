@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -91,8 +93,9 @@ func requirementMet(overlayPath, gentooPath, atom, pin, version string) (bool, e
 // ">=" or "<=" and "~" never matches inside the "!~" blocker. The old version
 // must be followed by a slot ":", a USE "[", a "*", whitespace, a quote, a ")"
 // or the end of the line, and must itself be a Gentoo version, so a package
-// whose name merely extends the atom's (dart-sdk, dart2) never matches. Comment
-// lines are left alone. version is upstream-controlled text on its way into
+// whose name merely extends the atom's (dart-sdk, dart2) never matches. Shell
+// comments are left alone — a whole comment line and a trailing "# …" alike —
+// while a "#" inside a quoted, possibly multi-line, string is text, as in bash. version is upstream-controlled text on its way into
 // bash, so it is refused unless it is a Gentoo version.
 func rewritePinnedAtoms(src []byte, atom, pin, version string) ([]byte, int, error) {
 	if !exactVersion(version) {
@@ -102,13 +105,12 @@ func rewritePinnedAtoms(src []byte, atom, pin, version string) ([]byte, int, err
 
 	lines := bytes.SplitAfter(src, []byte("\n"))
 	count := 0
+	var quote byte // the open quote carried across lines: 0, '"' or '\''
 	for i, line := range lines {
-		if trimmed := bytes.TrimLeft(line, " \t"); bytes.HasPrefix(trimmed, []byte("#")) {
-			continue
-		}
+		code := line[:shellCodeEnd(line, &quote)]
 		var out []byte
 		last := 0
-		for _, m := range re.FindAllSubmatchIndex(line, -1) {
+		for _, m := range re.FindAllSubmatchIndex(code, -1) {
 			start, end := m[2], m[3]
 			if end < len(line) && !bytes.ContainsAny(line[end:end+1], ":[* \t\r\n\"')") {
 				continue
@@ -126,4 +128,91 @@ func rewritePinnedAtoms(src []byte, atom, pin, version string) ([]byte, int, err
 		}
 	}
 	return bytes.Join(lines, nil), count, nil
+}
+
+// unmetRequirements returns, as atoms ("~dev-lang/dart-3.14.0"), the
+// requirements of pkg's pending bump that neither the overlay nor ::gentoo
+// satisfies yet. A record without `requires` has none. A record that declares
+// some while the pending entry carries no captured version for one of them
+// returns ErrRequirementsNotCaptured: an absent capture is never read as "no
+// requirement". A presence scan that cannot read a directory is returned as is.
+func (a *Applier) unmetRequirements(pkg string, update *PendingUpdate) ([]string, error) {
+	cfg, ok := a.configs[pkg]
+	if !ok || len(cfg.Requires) == 0 {
+		return nil, nil
+	}
+	var waiting []string
+	for _, atom := range slices.Sorted(maps.Keys(cfg.Requires)) {
+		pin := cfg.Requires[atom].Pin
+		version, captured := update.Requires[atom]
+		if !captured || version == "" {
+			return nil, fmt.Errorf("%w (%s has no captured version for %s)", ErrRequirementsNotCaptured, pkg, atom)
+		}
+		met, err := requirementMet(a.overlayPath, a.gentooPath, atom, pin, version)
+		if err != nil {
+			return nil, fmt.Errorf("checking %s's requirement %s%s-%s: %w", pkg, pin, atom, version, err)
+		}
+		if !met {
+			waiting = append(waiting, pin+atom+"-"+version)
+		}
+	}
+	return waiting, nil
+}
+
+// rewriteRequirementPins points every pinned atom of each required package in
+// the candidate ebuild at the version captured for it. A record that declares a
+// pin the ebuild does not carry fails with ErrRequirementPinNotFound. The file
+// is rewritten once, atomically, keeping its mode.
+func (a *Applier) rewriteRequirementPins(ebuildPath, pkg string, update *PendingUpdate) error {
+	cfg := a.configs[pkg]
+	if len(cfg.Requires) == 0 {
+		return nil
+	}
+	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: the candidate path candidateIn built from a confined package key and a validated version
+	if err != nil {
+		return fmt.Errorf("reading %s to rewrite its requirement pins: %w", ebuildPath, err)
+	}
+	updated := content
+	for _, atom := range slices.Sorted(maps.Keys(cfg.Requires)) {
+		pin := cfg.Requires[atom].Pin
+		var n int
+		updated, n, err = rewritePinnedAtoms(updated, atom, pin, update.Requires[atom])
+		if err != nil {
+			return fmt.Errorf("rewriting %s%s in %s: %w", pin, atom, filepath.Base(ebuildPath), err)
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: %s%s in %s", ErrRequirementPinNotFound, pin, atom, filepath.Base(ebuildPath))
+		}
+	}
+	if bytes.Equal(updated, content) {
+		return nil
+	}
+	if err := replaceEbuildKeepingMode(ebuildPath, string(updated)); err != nil {
+		return fmt.Errorf("writing %s after rewriting its requirement pins: %w", ebuildPath, err)
+	}
+	return nil
+}
+
+// shellCodeEnd returns where the code part of one ebuild line ends: at the
+// first "#" that starts a word outside quotes, or at the end of the line. quote
+// carries the open quote across lines, since DEPEND="…" spans many; it is
+// updated over the code part only. A backslash escapes the next byte outside
+// single quotes, as in bash.
+func shellCodeEnd(line []byte, quote *byte) int {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case c == '\\' && *quote != '\'':
+			i++
+		case *quote != 0:
+			if c == *quote {
+				*quote = 0
+			}
+		case c == '"' || c == '\'':
+			*quote = c
+		case c == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t'):
+			return i
+		}
+	}
+	return len(line)
 }

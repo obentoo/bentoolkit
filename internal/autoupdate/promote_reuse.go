@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -102,7 +104,7 @@ func (a *Applier) stagedInputsFor(pkg, currentVersion string, update *PendingUpd
 
 	return stagedInputs{
 		ebuild:        validate.DigestBytes(body),
-		substitutions: substitutionDigest(a.configs[pkg].AuxVar, update),
+		substitutions: substitutionDigest(a.configs[pkg], update),
 		distfile:      distfile,
 	}, nil
 }
@@ -117,13 +119,29 @@ func (a *Applier) stagedInputsFor(pkg, currentVersion string, update *PendingUpd
 // from the pending entry and the registry, so both runs can compute them without
 // touching the staged tree at all.
 //
-// A bump declaring neither answers the empty string, which is the ordinary case
-// and keeps the record free of a digest of nothing.
-func substitutionDigest(auxVar string, update *PendingUpdate) string {
-	if update == nil || (update.CommitHash == "" && update.AuxValue == "") {
+// The requirement pins are one of them: the pinned atom is rewritten to the
+// captured version, so a tree staged before `requires` was declared, before its
+// pin changed, or with another captured version must not be promoted as it
+// stands. Each requirement is digested as atom, pin and captured version.
+//
+// A bump declaring none of them answers the empty string, which is the ordinary
+// case and keeps the record free of a digest of nothing.
+func substitutionDigest(cfg PackageConfig, update *PendingUpdate) string {
+	if update == nil || (update.CommitHash == "" && update.AuxValue == "" && len(cfg.Requires) == 0 && len(update.Requires) == 0) {
 		return ""
 	}
-	return validate.DigestBytes([]byte("commit=" + update.CommitHash + "\naux=" + auxVar + "=" + update.AuxValue + "\n"))
+	text := "commit=" + update.CommitHash + "\naux=" + cfg.AuxVar + "=" + update.AuxValue + "\n"
+	atoms := slices.Sorted(maps.Keys(cfg.Requires))
+	for atom := range update.Requires {
+		if _, declared := cfg.Requires[atom]; !declared {
+			atoms = append(atoms, atom)
+		}
+	}
+	slices.Sort(atoms)
+	for _, atom := range atoms {
+		text += "requires=" + atom + "=" + cfg.Requires[atom].Pin + ":" + update.Requires[atom] + "\n"
+	}
+	return validate.DigestBytes([]byte(text))
 }
 
 // publishedDistfileDigest reduces the DIST entries of a published package

@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -84,6 +86,19 @@ var (
 	// CommitHash is not 40 lowercase hex — the only form substituteCommitHash
 	// can find again on the next bump.
 	ErrInvalidCommitHash = errors.New("invalid commit hash for ebuild")
+	// ErrInvalidRequiredVersion is returned (wrapped) when a version captured
+	// for a `requires` entry and replayed from pending.json is not a Gentoo
+	// version as written. It is about to be written into bash, so the bump fails
+	// before anything is staged or copied.
+	ErrInvalidRequiredVersion = errors.New("invalid required version for ebuild")
+	// ErrRequirementsNotCaptured marks a pending entry of a record that declares
+	// `requires` but carries no captured version for one of them — an entry
+	// queued before the record declared it, or by an older release. The bump
+	// waits until `--check` captures the requirement.
+	ErrRequirementsNotCaptured = errors.New("requirements not captured; re-run --check to capture them")
+	// ErrRequirementPinNotFound is returned (wrapped) when the record declares a
+	// pin the new ebuild does not carry: the registry and the ebuild disagree.
+	ErrRequirementPinNotFound = errors.New("pinned requirement not found in ebuild")
 )
 
 // auxValueRe and commitHashRe are the shapes an upstream-supplied value must
@@ -195,6 +210,12 @@ type ApplyResult struct {
 	// field: both are a maintainer's "do not auto-bump", and HoldReason names
 	// which of the two keys said so.
 	Held bool
+	// Waiting lists the requirements a bump is waiting for, as atoms
+	// ("~dev-lang/dart-3.14.0"), or the instruction to re-run --check when the
+	// pending entry predates them. Like Held it is NOT a failure (Success false,
+	// Error nil) and the pending entry is kept: the bump applies once the
+	// required version is in the overlay or ::gentoo.
+	Waiting []string
 	// HoldReason is the packages.toml key that refused the package
 	// ("hold = true" or "enabled = false"). Empty unless Held is true.
 	HoldReason string
@@ -934,6 +955,24 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, newVersion))
 	}
 
+	// Requirements are gated after the captured values were checked above, so an
+	// invalid replayed version fails as such and is never turned into a wait, and
+	// after the obsolete prune, so an entry the overlay already passed is pruned
+	// rather than left waiting forever. Nothing has been written yet.
+	if waiting, err := a.unmetRequirements(pkg, update); err != nil {
+		if !errors.Is(err, ErrRequirementsNotCaptured) {
+			result.Error = err
+			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
+				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
+			}
+			return result, result.Error
+		}
+		result.Waiting = []string{err.Error()}
+		return result, nil
+	} else if len(waiting) > 0 {
+		result.Waiting = waiting
+		return result, nil
+	}
 	// R2/R2.2/R2.7: how deep this bump is validated, and on whose authority.
 	// Resolved HERE, before anything is staged, for two reasons: the report can
 	// then name the depth even for a bump whose tree was never built, and every
@@ -1496,7 +1535,7 @@ func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpda
 			return fmt.Errorf("failed to substitute aux var: %w", err)
 		}
 	}
-	return nil
+	return a.rewriteRequirementPins(ebuildPath, pkg, update)
 }
 
 // applySummary derives the short, one-line summary handed to the reporter's
@@ -1982,6 +2021,11 @@ func replaceEbuildKeepingMode(ebuildPath, content string) error {
 func checkUpstreamValues(pkg string, update *PendingUpdate) error {
 	if update.AuxValue != "" && !auxValueRe.MatchString(update.AuxValue) {
 		return fmt.Errorf("%w for %s: %q", ErrInvalidAuxValue, pkg, update.AuxValue)
+	}
+	for _, atom := range slices.Sorted(maps.Keys(update.Requires)) {
+		if v := update.Requires[atom]; !exactVersion(v) {
+			return fmt.Errorf("%w for %s requiring %s: %q", ErrInvalidRequiredVersion, pkg, atom, v)
+		}
 	}
 	if update.CommitHash != "" && !commitHashRe.MatchString(update.CommitHash) {
 		return fmt.Errorf("%w for %s: %q", ErrInvalidCommitHash, pkg, update.CommitHash)

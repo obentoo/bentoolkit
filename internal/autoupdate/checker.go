@@ -1429,6 +1429,9 @@ func (c *Checker) resolveRequirements(pkg string, cfg *PackageConfig, result *Ch
 		if !ebuild.IsValidVersion(version) {
 			return nil, fmt.Errorf("%w for %s requiring %s: captured %q is not a Gentoo version", ErrRequirementUnresolved, pkg, atom, version)
 		}
+		if spec.Pin == "~" && revisionSuffixRegex.MatchString(version) {
+			return nil, fmt.Errorf("%w for %s requiring %s: captured %q carries a revision, which a ~ pin cannot match", ErrRequirementUnresolved, pkg, atom, version)
+		}
 		captured[atom] = version
 	}
 	return captured, nil
