@@ -412,9 +412,18 @@ type PackageConfig struct {
 	AuxVar string `toml:"aux_var,omitempty"`
 
 	// AuxPattern is a regex with one capture group, applied to the SAME response
-	// body used for version detection, that yields the value for AuxVar. Set
-	// together with aux_var.
+	// body used for version detection — or to aux_url's when set — that yields
+	// the value for AuxVar. Set together with aux_var.
 	AuxPattern string `toml:"aux_pattern,omitempty"`
+
+	// AuxURL is where aux_pattern reads AuxVar's value when it is not on the
+	// version page: a build id in latest.txt (jdtls MY_BUILD), a pin in the
+	// release's Cargo.lock or package.json, a tag's commit. "{version}" is
+	// replaced by the detected upstream version, and may appear only in the path
+	// or query, so an upstream value cannot choose the host. Credential headers
+	// are not sent to it: like a mirror, it is outside the record's credential
+	// scope. Requires aux_var and aux_pattern.
+	AuxURL string `toml:"aux_url,omitempty"`
 
 	// Revision is the -rN suffix to attach to the PV of a freshly bumped ebuild.
 	// It exists for packages that ship several SLOTs out of one directory and use
@@ -1480,6 +1489,17 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	if cfg.AuxPattern != "" {
 		if _, err := regexp.Compile(cfg.AuxPattern); err != nil {
 			return fmt.Errorf("package %s: invalid aux_pattern %q: %w", pkg, cfg.AuxPattern, err)
+		}
+	}
+	if cfg.AuxURL != "" {
+		if cfg.AuxPattern == "" {
+			return fmt.Errorf("package %s: aux_url requires aux_var and aux_pattern", pkg)
+		}
+		switch urlTemplateFault(cfg.AuxURL) {
+		case templateNotHTTP:
+			return fmt.Errorf("package %s: aux_url %q is not an absolute http(s) URL with a host", pkg, cfg.AuxURL)
+		case templatePlaceholderInHost:
+			return fmt.Errorf("package %s: aux_url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, cfg.AuxURL)
 		}
 	}
 

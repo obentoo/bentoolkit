@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`aux_url` in `packages.toml`.** `aux_pattern` can read `aux_var`'s value
+  from a URL other than the version page: jdtls's build id in `latest.txt`,
+  codex's `RUSTY_V8_TAG` in the release's `Cargo.lock`, a TypeScript pin in a
+  `package.json`. `{version}` in it is replaced by the detected version and is
+  accepted only in the path or query, so an upstream value cannot choose the
+  host. Credential headers are not sent there.
+
 - **`mirrors` in `packages.toml`.** A record can list URLs that serve the same
   content as `url`. When `url` fails, each mirror is probed in order with the
   whole record, `script` records included, before `fallback_url`. Credential

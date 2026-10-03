@@ -1319,7 +1319,12 @@ func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) strin
 	if cfg.AuxPattern == "" {
 		return ""
 	}
-	content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
+	source, headers := cfg.URL, cfg.Headers
+	if cfg.AuxURL != "" {
+		source = strings.ReplaceAll(cfg.AuxURL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+		headers = nonCredentialHeaders(cfg.Headers)
+	}
+	content, err := c.fetchContent(source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to fetch aux value: %w", err)
@@ -1337,7 +1342,7 @@ func (c *Checker) resolveAuxValue(cfg *PackageConfig, result *CheckResult) strin
 	m := re.FindSubmatch(content)
 	if len(m) < 2 {
 		if result.Error == nil {
-			result.Error = fmt.Errorf("aux_pattern %q matched no capture group in %s", cfg.AuxPattern, cfg.URL)
+			result.Error = fmt.Errorf("aux_pattern %q matched no capture group in %s", cfg.AuxPattern, source)
 		}
 		return ""
 	}
