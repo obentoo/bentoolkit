@@ -1258,6 +1258,16 @@ Authentication is hybrid, selected by `llm.bare`:
 
 > **Cost note.** `sonnet` in login/subscription mode is billed per call (a large page context of ~74k tokens is roughly $0.09+/call). The cheap path is `--bare` + an API key. Set a conservative `max_budget_usd` when running `--check` across many packages. If the `claude` CLI is missing or not authenticated, both `analyze` and `--check` log a Warn and fall back (heuristic schema / skip extraction) — they never fail because of the LLM.
 
+#### Files named for the old version
+
+A bump renames the ebuild and nothing in `files/`. When the ebuild builds a
+`${FILESDIR}` path from a version variable (`${P}`, `${PV}`, `${PF}`, `${MY_P}`,
+`${MY_PV}`) and `files/` holds a file named for the version being left behind,
+`--check` and `--apply` print a stage line naming the file and the name the new
+ebuild will look for. It does not rename: the previous ebuild may still use
+the old name, and a copy the new ebuild never reads is litter. Like the
+::gentoo advisory, it never blocks the bump.
+
 #### The md5-cache after a bump
 
 When the overlay keeps `metadata/md5-cache`, a successful `--apply` runs

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A bump warns about `files/` named for the old version.** A patch named
+  with the old `${P}` made the new ebuild die in `src_prepare`. When the ebuild
+  builds `${FILESDIR}` paths from a version variable and such a file exists,
+  `--check` and `--apply` now name it and the name the new ebuild will look
+  for. They warn rather than rename, because the previous ebuild may still
+  read the old name.
+
 - **`--apply` regenerates the bumped package's md5-cache.** A bump left the
   previous version's `metadata/md5-cache` entry behind and wrote none for the
   new one, and the overlay once held 548 orphaned entries. After a successful
