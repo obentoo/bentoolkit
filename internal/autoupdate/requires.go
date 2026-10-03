@@ -279,3 +279,21 @@ func pendingSatisfies(entries []PendingUpdate, atom, pin, version string) bool {
 	}
 	return false
 }
+
+// PackageAtom returns the "category/package" a package key names, dropping any
+// ":slot" and "@label", and "" for a key that is not an atom. The --apply all
+// planner uses it to match a pending entry against another entry's requirement.
+func PackageAtom(key string) string {
+	cat, name, ok := splitPkgAtom(key)
+	if !ok {
+		return ""
+	}
+	return cat + "/" + name
+}
+
+// RequirePin returns the pin operator pkg's record declares for atom, and false
+// when the record does not (any more) require it.
+func (a *Applier) RequirePin(pkg, atom string) (string, bool) {
+	spec, ok := a.configs[pkg].Requires[atom]
+	return spec.Pin, ok
+}

@@ -1886,7 +1886,29 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // no additional locking is needed.
 func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
 	results := make([]*autoupdate.ApplyResult, len(updates))
+	serial := compile || applier.SerialApplyRequired(updates)
 
+	// Story 079: a bump that requires another pending bump runs in a later
+	// wave, after the one it requires has finished, so the requirement gate of
+	// the later wave sees what the earlier one published. A batch with no
+	// `requires` is a single wave and runs exactly as before.
+	pins := func(pkg, atom string) string {
+		pin, ok := applier.RequirePin(pkg, atom)
+		if !ok {
+			logger.Warn("%s no longer requires %s in packages.toml; not ordering it after that package", pkg, atom)
+		}
+		return pin
+	}
+	failures := 0
+	for _, wave := range applyWaves(updates, pins) {
+		failures += applyWave(applier, updates, wave, results, compile, serial, concurrency)
+	}
+	return results, failures
+}
+
+// applyWave applies the entries of updates named by wave, writing each result
+// at its original index in results, and returns how many failed.
+func applyWave(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, wave []int, results []*autoupdate.ApplyResult, compile, serial bool, concurrency int) int {
 	// Serial when the compile step will prompt and escalate, and — since story
 	// 033 — when ANY of these bumps resolves to a depth that starts a build
 	// (D14). The second rule has nothing to do with prompts: concurrent builds
@@ -1894,19 +1916,19 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 	// one gst configure, and a worker pool multiplies that on a machine that was
 	// never asked. Depths none and options keep the pool, which is every run whose
 	// bumps are revisions and patches.
-	if compile || applier.SerialApplyRequired(updates) {
+	if serial {
 		failures := 0
-		for i, u := range updates {
-			// `compile`, not a literal true: this branch is now reached for two
+		for _, i := range wave {
+			// `compile`, not a literal true: this branch is reached for two
 			// different reasons, and a depth-driven serial run must not acquire the
 			// privileged compile step the operator never asked for.
-			result, err := applier.Apply(u.Package, compile)
+			result, err := applier.Apply(updates[i].Package, compile)
 			if err != nil {
 				failures++
 			}
 			results[i] = result
 		}
-		return results, failures
+		return failures
 	}
 
 	// Concurrent path: a bounded worker pool over an index queue. Workers write
@@ -1915,13 +1937,13 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 	if jobs < 1 {
 		jobs = 1
 	}
-	if jobs > len(updates) {
-		jobs = len(updates)
+	if jobs > len(wave) {
+		jobs = len(wave)
 	}
 
 	var failures int64
-	queue := make(chan int, len(updates))
-	for i := range updates {
+	queue := make(chan int, len(wave))
+	for _, i := range wave {
 		queue <- i
 	}
 	close(queue)
@@ -1941,8 +1963,60 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		}()
 	}
 	wg.Wait()
+	return int(failures)
+}
 
-	return results, int(failures)
+// applyWaves orders a batch into waves of indices into updates, each wave to
+// complete before the next starts. Entry B depends on entry A when A's atom is a
+// key of B.Requires and A's new version satisfies the pin B's record declares
+// for it (pins answers that operator; "" adds no edge). Kahn's algorithm, in
+// input order; entries left in a cycle form one final wave, where the
+// requirement gate refuses whatever is still unmet.
+func applyWaves(updates []autoupdate.PendingUpdate, pins func(pkg, atom string) string) [][]int {
+	n := len(updates)
+	dependents := make([][]int, n)
+	indegree := make([]int, n)
+	for b, ub := range updates {
+		for atom, want := range ub.Requires {
+			pin := pins(ub.Package, atom)
+			if pin == "" {
+				continue
+			}
+			for a, ua := range updates {
+				if a != b && autoupdate.PackageAtom(ua.Package) == atom && autoupdate.VersionSatisfies(pin, ua.NewVersion, want) {
+					dependents[a] = append(dependents[a], b)
+					indegree[b]++
+				}
+			}
+		}
+	}
+
+	done := make([]bool, n)
+	var waves [][]int
+	for remaining := n; remaining > 0; {
+		var wave []int
+		for i := range updates {
+			if !done[i] && indegree[i] == 0 {
+				wave = append(wave, i)
+			}
+		}
+		if len(wave) == 0 { // a cycle: everything left runs last, together
+			for i := range updates {
+				if !done[i] {
+					wave = append(wave, i)
+				}
+			}
+		}
+		for _, i := range wave {
+			done[i] = true
+			for _, d := range dependents[i] {
+				indegree[d]--
+			}
+		}
+		remaining -= len(wave)
+		waves = append(waves, wave)
+	}
+	return waves
 }
 
 // displayApplyAllResults renders the per-package outcomes of `--apply all`
@@ -1952,12 +2026,14 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 		displayApplyResult(result)
 	}
 
-	applied, obsolete, held := 0, 0, 0
+	applied, obsolete, held, waiting := 0, 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
 		case r.Obsolete:
 			obsolete++
+		case len(r.Waiting) > 0:
+			waiting++
 		case r.Held:
 			held++
 		case r.Success:
@@ -1973,6 +2049,9 @@ func displayApplyAllResults(results []*autoupdate.ApplyResult, failures int) {
 	}
 	if held > 0 {
 		output.Warning.Printf("  Held:     %d (hold = true; kept in pending)\n", held)
+	}
+	if waiting > 0 {
+		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
 	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
@@ -2004,6 +2083,14 @@ func displayApplyResult(result *autoupdate.ApplyResult) {
 		output.Warning.Println("    Status:  Obsolete (pruned from pending)")
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
+		}
+		return
+	}
+
+	if len(result.Waiting) > 0 {
+		output.Warning.Println("    Status:  Waiting (kept in pending)")
+		for _, w := range result.Waiting {
+			output.Info.Printf("    Waiting: %s\n", w)
 		}
 		return
 	}

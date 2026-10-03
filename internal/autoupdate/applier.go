@@ -1578,6 +1578,8 @@ func applySummary(result *ApplyResult) string {
 		return summary
 	case result.Obsolete:
 		return result.ObsoleteReason
+	case len(result.Waiting) > 0:
+		return "waiting for " + strings.Join(result.Waiting, ", ")
 	case result.Held:
 		return "held (" + result.HoldReason + ")"
 	}
