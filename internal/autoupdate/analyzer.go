@@ -17,6 +17,7 @@ import (
 
 	"github.com/antchfx/xpath"
 
+	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
@@ -260,7 +261,10 @@ func WithAnalyzerLLMTimeout(d time.Duration) AnalyzerOption {
 // NewAnalyzer creates a new analyzer instance for the given overlay.
 func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) {
 	// Determine config directory
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "bentoo", "autoupdate")
+	configDir, err := appconfig.AutoupdateDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolving the autoupdate state directory: %w", err)
+	}
 
 	analyzer := &Analyzer{
 		overlayPath: overlayPath,

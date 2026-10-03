@@ -112,6 +112,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
 	root.PersistentFlags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress non-error output")
 	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
+	root.PersistentFlags().StringVar(&overlayFlag, "overlay", "", "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so")
 
 	// These three bind straight to their package variables, unlike --verbose,
 	// --quiet and --no-color above. Two reasons: pflag writes the default

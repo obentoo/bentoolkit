@@ -1687,11 +1687,11 @@ const stagingDirName = "staging"
 // `overlay validate --depth` and `overlay autoupdate --apply` cannot come to
 // disagree about which directory that is.
 func autoupdateConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := config.AutoupdateDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", fmt.Errorf("failed to resolve the autoupdate state directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "bentoo", "autoupdate"), nil
+	return dir, nil
 }
 
 // autoupdateStagingRoot is the directory staged trees are prepared under.
