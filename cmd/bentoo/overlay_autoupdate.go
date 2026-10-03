@@ -785,6 +785,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 		opts = append(opts, autoupdate.WithLLMClient(p))
 	}
 	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
+	opts = append(opts, autoupdate.WithGentooPath(gentooRepoPath()))
 
 	// Progress feedback: CheckAll fans out concurrently and otherwise prints
 	// nothing until the final table, so show a live [pct%] done/total counter on
@@ -1540,11 +1541,17 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 // is where portage puts it, so the common case needs no configuration - a check
 // nobody has to switch on is a check that is actually on.
 func applierGentooPathOption() autoupdate.ApplierOption {
-	path := os.Getenv("BENTOO_GENTOO_REPO")
-	if path == "" {
-		path = "/var/db/repos/gentoo"
+	return autoupdate.WithApplierGentooPath(gentooRepoPath())
+}
+
+// gentooRepoPath is the ::gentoo tree: BENTOO_GENTOO_REPO, else where Portage
+// puts it. The check report reads it too, to tell a required version that
+// ::gentoo already ships from one nothing provides.
+func gentooRepoPath() string {
+	if path := os.Getenv("BENTOO_GENTOO_REPO"); path != "" {
+		return path
 	}
-	return autoupdate.WithApplierGentooPath(path)
+	return "/var/db/repos/gentoo"
 }
 
 // applierDistfileOptions carries the resolved distfile directories into every

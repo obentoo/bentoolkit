@@ -1,6 +1,9 @@
 package report
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Sections is the autoupdate check's report as structure: what it says, in
 // order, with every value at full length and not one decision about how it will
@@ -116,6 +119,7 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 			continue
 		}
 		state, detail := scanState(scanned)
+		detail = withRequirementLines(detail, scanned.Requirements)
 		s.Rows.Rows = append(s.Rows.Rows, Row{
 			Cells:  []string{scanned.Package, scanned.Type, scanned.CurrentVersion, scanned.CandidateVersion, state},
 			Detail: detail,
@@ -462,6 +466,25 @@ func scanState(result PackageResult) (state, detail string) {
 	default:
 		return "up to date" + cacheTag(result), ""
 	}
+}
+
+// withRequirementLines appends one line per requirement to a row's detail,
+// worded by its state, so a bump waiting on another package says so under its
+// own row before anyone tries to apply it.
+func withRequirementLines(detail string, reqs []Requirement) string {
+	lines := make([]string, 0, len(reqs)+1)
+	if detail != "" {
+		lines = append(lines, detail)
+	}
+	for _, r := range reqs {
+		switch r.State {
+		case "missing":
+			lines = append(lines, fmt.Sprintf("waits for %s-%s (not detected)", r.Package, r.Version))
+		default:
+			lines = append(lines, fmt.Sprintf("requires %s-%s (%s)", r.Package, r.Version, r.State))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // cacheTag marks an answer that came from cache rather than from upstream, which

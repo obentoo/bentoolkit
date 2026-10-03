@@ -216,3 +216,66 @@ func shellCodeEnd(line []byte, quote *byte) int {
 	}
 	return len(line)
 }
+
+// settleRequirements fills result.Requirements for the versions captured in
+// reqs: present when the overlay or ::gentoo satisfies the pin, pending when a
+// pending entry of that package will, missing otherwise. A presence scan that
+// cannot read a repository is joined into result.Error and that requirement
+// gets no state.
+func (c *Checker) settleRequirements(pkg string, cfg *PackageConfig, reqs map[string]string, result *CheckResult) {
+	if len(reqs) == 0 {
+		return
+	}
+	entries := c.pending.List()
+	for _, atom := range slices.Sorted(maps.Keys(reqs)) {
+		pin, version := cfg.Requires[atom].Pin, reqs[atom]
+		met, err := requirementMet(c.overlayPath, c.gentooPath, atom, pin, version)
+		if err != nil {
+			result.Error = errors.Join(result.Error, fmt.Errorf("%s requiring %s: %w", pkg, atom, err))
+			continue
+		}
+		state := RequirementMissing
+		switch {
+		case met:
+			state = RequirementPresent
+		case pendingSatisfies(entries, atom, pin, version):
+			state = RequirementPending
+		}
+		result.Requirements = append(result.Requirements, RequirementState{Package: atom, Version: version, State: state})
+	}
+}
+
+// resettleMissing re-reads the pending list once and turns every missing
+// requirement that a pending entry now satisfies into pending. CheckAll calls it
+// after every worker has joined, because the required package may have been
+// checked, and queued, after the package that requires it.
+func (c *Checker) resettleMissing(results []CheckResult) {
+	var entries []PendingUpdate
+	loaded := false
+	for i := range results {
+		for j, req := range results[i].Requirements {
+			if req.State != RequirementMissing {
+				continue
+			}
+			if !loaded {
+				entries, loaded = c.pending.List(), true
+			}
+			pin := c.config.Packages[results[i].Package].Requires[req.Package].Pin
+			if pendingSatisfies(entries, req.Package, pin, req.Version) {
+				results[i].Requirements[j].State = RequirementPending
+			}
+		}
+	}
+}
+
+// pendingSatisfies reports whether a pending entry of atom — keyed with or
+// without a ":slot" or "@label" — bumps to a version meeting pin and version.
+func pendingSatisfies(entries []PendingUpdate, atom, pin, version string) bool {
+	for _, e := range entries {
+		cat, name, ok := splitPkgAtom(e.Package)
+		if ok && cat+"/"+name == atom && VersionSatisfies(pin, e.NewVersion, version) {
+			return true
+		}
+	}
+	return false
+}

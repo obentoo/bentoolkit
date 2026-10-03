@@ -104,7 +104,29 @@ type CheckResult struct {
 	// was fetched, nothing was written to the cache or pending list, and every
 	// other field except Package is zero-valued.
 	Skipped string
+	// Requirements is the state of each `requires` entry captured for this
+	// update, in atom order; nil for a record without requires or a bump that
+	// was held.
+	Requirements []RequirementState
 }
+
+// RequirementState is whether the version a bump requires is available yet.
+type RequirementState struct {
+	// Package is the required "category/package".
+	Package string
+	// Version is the version captured for it.
+	Version string
+	// State is "present" (the overlay or ::gentoo satisfies the pin), "pending"
+	// (a pending entry of that package will) or "missing" (neither).
+	State string
+}
+
+// The three values RequirementState.State takes.
+const (
+	RequirementPresent = "present"
+	RequirementPending = "pending"
+	RequirementMissing = "missing"
+)
 
 // DefaultOpTimeout is the default per-operation timeout applied to a single
 // outbound HTTP fetch when no explicit timeout is configured on the Checker.
@@ -304,6 +326,10 @@ type Checker struct {
 	// hostSlots caps the requests in flight to one host (DefaultPerHostConcurrency
 	// unless WithPerHostConcurrency says otherwise). Nil means no cap.
 	hostSlots *hostSlots
+
+	// gentooPath is the ::gentoo tree a requirement may be satisfied by. Empty
+	// means the overlay alone is consulted.
+	gentooPath string
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -494,6 +520,15 @@ func WithCacheTTL(d time.Duration) CheckerOption {
 			return fmt.Errorf("checker cache TTL must be positive, got %v", d)
 		}
 		c.cacheTTL = d
+		return nil
+	}
+}
+
+// WithGentooPath sets the ::gentoo tree consulted, after the overlay, when the
+// check report decides whether a required version is present.
+func WithGentooPath(path string) CheckerOption {
+	return func(c *Checker) error {
+		c.gentooPath = path
 		return nil
 	}
 }
@@ -840,6 +875,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 				sha := c.resolveAuxSHA(&pkgConfig, result)
 				aux := c.resolveAuxValue(&pkgConfig, result)
 				reqs, reqErr := c.resolveRequirements(pkg, &pkgConfig, result)
+				c.settleRequirements(pkg, &pkgConfig, reqs, result)
 				if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
 					result.Error = errors.Join(result.Error, held)
 				} else if reqErr != nil {
@@ -878,6 +914,7 @@ func (c *Checker) CheckPackage(pkg string, force bool) (*CheckResult, error) {
 		sha := c.resolveAuxSHA(&pkgConfig, result)
 		aux := c.resolveAuxValue(&pkgConfig, result)
 		reqs, reqErr := c.resolveRequirements(pkg, &pkgConfig, result)
+		c.settleRequirements(pkg, &pkgConfig, reqs, result)
 		if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
 			// Joined, not overwritten: result.Error may already hold the cache
 			// write error, in which case the helper did not record its own cause.
@@ -2472,6 +2509,12 @@ func (c *Checker) CheckAll(force bool) BatchResult[CheckResult] {
 			warnLogf("failed to auto-disable %d orphaned package(s) in packages.toml: %v", len(orphaned), err)
 		}
 	}
+
+	// A requirement found missing by one worker may be pending by now: the
+	// required package can have been checked, and queued, after the package
+	// that requires it. Settle again against the final pending list so the
+	// report never depends on check order.
+	c.resettleMissing(results)
 
 	// Deterministic final ordering, independent of completion order.
 	sort.Slice(results, func(i, j int) bool {

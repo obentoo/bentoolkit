@@ -236,6 +236,9 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 		if result.Error != nil {
 			fact.Error = result.Error.Error()
 		}
+		for _, req := range result.Requirements {
+			fact.Requirements = append(fact.Requirements, report.Requirement{Package: req.Package, Version: req.Version, State: req.State})
+		}
 		facts = append(facts, fact)
 	}
 
