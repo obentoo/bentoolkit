@@ -66,6 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distfile fails the apply. When pkgcheck is absent or fails, the apply goes
   on and a warning says the check did not run.
 
+- **`fallback_url` probes like the primary source.** The fallback kept only
+  the parser fields, so it lost the record's `timeout`, its custom
+  `User-Agent` and its `series`/`suffix`. With `select = max`, that let the
+  fallback return a version outside the series and fail the whole check.
+  The fallback now keeps `timeout`, `series`, `suffix`, `suffix_when` and
+  every header except the credential-bearing ones (`Authorization`,
+  `X-Api-Key`, `X-Auth-Token`, `Private-Token`), which stay with the primary
+  host.
+
+- **A network failure no longer offers "Fix registry?".** Timeouts, TLS EOF,
+  exhausted retries and an open circuit breaker now also wrap the new
+  `ErrUpstreamUnreachable`, and the interactive LLM repair skips them, so a
+  distracted "y" cannot rewrite a record that was correct. A host that does
+  not resolve is still offered, since that is usually a mistyped `url`.
+
 ## [0.32.0] - 2026-10-01
 
 ### Security
