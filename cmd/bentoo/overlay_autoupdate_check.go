@@ -527,7 +527,6 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	}
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
 	}
@@ -546,9 +545,6 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		return nothingValidated(), true
 	}
 
-	//nolint:contextcheck // ctx is propagated into every spawned child through
-	// WithApplierContext (a.ctx); Validate takes no ctx parameter, by the same
-	// single-source wiring Apply uses.
 	finished := runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
 		// The ceiling one confirmation covered. It travels per entry so a
 		// reviewer's raise is held against what the operator approved rather than
@@ -559,7 +555,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		if err != nil {
 			ceiling = validate.DepthNone
 		}
-		return applier.Validate(entry.Package, ceiling)
+		return applier.Validate(ctx, entry.Package, ceiling)
 	})
 
 	return finished, true

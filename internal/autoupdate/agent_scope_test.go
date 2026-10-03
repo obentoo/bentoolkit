@@ -274,7 +274,7 @@ func TestManifestFix_UpstreamHostsFromConfigAndError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	_, _ = applier.Apply(pkg, false) // pkgdev keeps failing; only the agent's argv matters here
+	_, _ = applier.Apply(t.Context(), pkg, false) // pkgdev keeps failing; only the agent's argv matters here
 
 	if spy.spawns() != 1 {
 		t.Fatalf("the manifest fixer spawned %d agents, want 1", spy.spawns())

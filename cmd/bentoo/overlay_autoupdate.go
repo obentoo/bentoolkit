@@ -428,7 +428,7 @@ func tuiEnabledForApply() bool {
 //
 // TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
 // cancel — cancelling the apply context, which kills the in-flight child
-// (WithApplierContext) and triggers the existing orphan rollback (R5.1/R5.2). The
+// (Apply runs under it) and triggers the existing orphan rollback (R5.1/R5.2). The
 // extra options also route the in-UI y/n confirm (R4.2) and release the terminal
 // for the compile step's sudo/doas prompt while teeing the child's output to a
 // capture buffer the failure path still logs (R4.1). finish closes the batch,
@@ -1507,9 +1507,9 @@ func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
 // (e.g. the `claude` CLI is absent) is logged as a Warn and --apply proceeds with
 // its original fail-fast manifest behaviour.
 //
-// The fixer needs no context of its own here: the Applier threads its own
-// signal-aware context (WithApplierContext) into FixManifest, so a SIGINT/SIGTERM
-// already cancels an in-flight agent process.
+// The fixer needs no context of its own here: Apply threads the context it is
+// given into FixManifest, so a SIGINT/SIGTERM already cancels an in-flight agent
+// process.
 func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 	fixer, err := newConfiguredManifestFixer(llmCfg)
 	if err != nil {
@@ -1699,14 +1699,14 @@ func autoupdateStagingRoot() (string, error) {
 	return filepath.Join(dir, stagingDirName), nil
 }
 
-// runApply handles the --apply flag. ctx is threaded into the Applier via
-// WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
+// runApply handles the --apply flag. ctx is passed to Apply so a SIGINT/SIGTERM
+// cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
 func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) error {
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
-	// Ctrl-C (which invokes cancel) cancels the in-flight child via
-	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
+	// under it and triggers the existing orphan rollback (R5.1/R5.2).
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1719,7 +1719,6 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	defer finish()
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
@@ -1740,10 +1739,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	// (the plain backend prints a START line; the TUI shows the task), so the
 	// previous output.Info Printf is intentionally gone.
 
-	//nolint:contextcheck // applyCtx is propagated into Apply's spawned processes
-	// via WithApplierContext (a.ctx) — the deliberate single-source wiring derived
-	// from signal.NotifyContext. Apply takes no ctx param by design.
-	result, err := applier.Apply(pkg, autoupdateCompile)
+	result, err := applier.Apply(applyCtx, pkg, autoupdateCompile)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyResult prints to a clean line.
@@ -1759,9 +1755,9 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 }
 
 // runApplyAll handles `--apply all`: it applies every pending update, reusing a
-// single Applier so the pending list and logs directory are loaded once. ctx is
-// threaded into the Applier via WithApplierContext so a SIGINT/SIGTERM cancels
-// the in-flight `pkgdev manifest` or compile child process (R1.1, R1.2).
+// single Applier so the pending list and logs directory are loaded once. ctx
+// bounds every Apply so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
+// or compile child process (R1.1, R1.2).
 //
 // The package list is snapshotted up front: Apply mutates the underlying
 // pending list (a successful apply deletes its entry), so iterating over the
@@ -1792,8 +1788,8 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	}
 
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
-	// Ctrl-C (which invokes cancel) cancels the in-flight child via
-	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
+	// under it and triggers the existing orphan rollback (R5.1/R5.2).
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1804,7 +1800,6 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	defer finish()
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
@@ -1829,9 +1824,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
-	//nolint:contextcheck // applyCtx reaches each Apply's spawned processes via
-	// WithApplierContext (a.ctx) — Apply takes no ctx param by design, so the
-	// manifest chain is cancelled through a.ctx rather than parameter propagation.
+	//nolint:contextcheck // TODO(059 5.1): applyAllPackages takes no ctx yet; 5.1 adds it, passes applyCtx here, and deletes this directive.
 	results, failures := applyAllPackages(applier, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
@@ -1869,6 +1862,11 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // write results to distinct slice indices — so beyond the atomic failure tally
 // no additional locking is needed.
 func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
+	// TODO(059 5.1): applyAllPackages takes no ctx yet, so the batch runs under
+	// an unbound context and a SIGINT/SIGTERM no longer reaches its Apply calls.
+	// Sub-task 5.1 adds the ctx parameter, has runApplyAll pass applyCtx, and
+	// deletes this line.
+	ctx := context.TODO()
 	results := make([]*autoupdate.ApplyResult, len(updates))
 
 	// Serial when the compile step will prompt and escalate, and — since story
@@ -1884,7 +1882,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 			// `compile`, not a literal true: this branch is now reached for two
 			// different reasons, and a depth-driven serial run must not acquire the
 			// privileged compile step the operator never asked for.
-			result, err := applier.Apply(u.Package, compile)
+			result, err := applier.Apply(ctx, u.Package, compile)
 			if err != nil {
 				failures++
 			}
@@ -1916,7 +1914,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				result, err := applier.Apply(updates[i].Package, false)
+				result, err := applier.Apply(ctx, updates[i].Package, false)
 				results[i] = result
 				if err != nil {
 					atomic.AddInt64(&failures, 1)
@@ -2360,7 +2358,6 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	reviveOpts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		autoupdate.WithApplierPendingList(pending),
@@ -2457,8 +2454,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 
 	// Bump to the upstream version using the existing apply flow (honours
 	// --compile and --clean exactly as runApply does).
-	//nolint:contextcheck // ctx is propagated into Apply's spawned processes via WithApplierContext.
-	applyResult, err := applier.Apply(pkg, autoupdateCompile)
+	applyResult, err := applier.Apply(ctx, pkg, autoupdateCompile)
 	if err != nil {
 		detail := err.Error()
 		if applyResult != nil && applyResult.LogPath != "" {

@@ -50,6 +50,7 @@ func (f *countingBuildFixer) FixBuild(context.Context, BuildFixRequest) (BuildFi
 type compileHarness struct {
 	applier  *Applier
 	cand     candidatePaths
+	ctx      context.Context
 	cancel   context.CancelFunc
 	fixer    *countingBuildFixer
 	logsDir  string
@@ -96,6 +97,7 @@ func newCompileHarness(t *testing.T, script string) *compileHarness {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	h.ctx = ctx
 	h.cancel = cancel
 
 	seam := func(ctx context.Context, name string, _ ...string) *exec.Cmd {
@@ -114,7 +116,6 @@ func newCompileHarness(t *testing.T, script string) *compileHarness {
 	a, err := NewApplier(overlayDir, filepath.Join(tmp, "config"),
 		WithExecCommand(seam),
 		WithApplierRunAttached(runner),
-		WithApplierContext(ctx),
 		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 		WithApplierBuildFixer(h.fixer),
@@ -141,7 +142,7 @@ func (h *compileHarness) runInterrupted(t *testing.T, during func(childPID int))
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		logPath, err := h.applier.runCompile(h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
+		logPath, err := h.applier.runCompile(h.ctx, h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
 		done <- compileOutcome{logPath, err}
 	}()
 	t.Cleanup(func() {
@@ -206,7 +207,7 @@ func TestCompileInterruptedNeverInvokesTheFixer(t *testing.T) {
 	// the fixer, so the fixture can reach it and zero calls below means refusal.
 	t.Run("a genuine failure still reaches the fixer", func(t *testing.T) {
 		h := newCompileHarness(t, failingCompile)
-		_, err := h.applier.runCompile(h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
+		_, err := h.applier.runCompile(t.Context(), h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
 		if !errors.Is(err, ErrCompileFailed) {
 			t.Errorf("a genuine compile failure = %v, want ErrCompileFailed", err)
 		}

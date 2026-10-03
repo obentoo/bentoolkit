@@ -150,8 +150,8 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 // The injected `pkgdev` is a stub script placed on PATH that exec's `sleep`,
 // so the spawned child is killed by exec.CommandContext as soon as runApply's
 // context is cancelled by the process-wide signal handler (func
-// setProcessSignalContext). Without runApply threading runCtx
-// into NewApplier via WithApplierContext (T1.2), the SIGTERM would not reach
+// setProcessSignalContext). Without runApply passing its context to
+// Apply (T1.2), the SIGTERM would not reach
 // the spawned process and the test would time out — making this a true
 // integration check of the CLI wire.
 //

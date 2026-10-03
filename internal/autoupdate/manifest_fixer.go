@@ -668,7 +668,7 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixRequest) (ManifestFixResult, error) {
 	// Derive the per-call deadline from the caller's context so a cancelled parent
 	// (SIGINT/deadline, threaded in from the Applier) kills the in-flight `claude`
-	// process. Callers always supply a non-nil context (the Applier passes a.ctx).
+	// process. Callers always supply a non-nil context (Apply passes the context it was given).
 	runCtx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 

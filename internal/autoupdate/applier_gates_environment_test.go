@@ -281,7 +281,7 @@ func TestRecordedPreconditionDeclinesTheGate(t *testing.T) {
 		t.Fatalf("SetPrecondition: %v", err)
 	}
 
-	gates, err := env.applier.runBuildGates(env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
+	gates, err := env.applier.runBuildGates(t.Context(), env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
 	if err != nil {
 		t.Fatalf("runBuildGates: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestASatisfiedPreconditionRunsTheGateAgain(t *testing.T) {
 	if err := env.cache.SetPrecondition(env.pkg, env.key); err != nil {
 		t.Fatalf("SetPrecondition: %v", err)
 	}
-	first, err := env.applier.runBuildGates(env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
+	first, err := env.applier.runBuildGates(t.Context(), env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
 	if err != nil {
 		t.Fatalf("run one: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestASatisfiedPreconditionRunsTheGateAgain(t *testing.T) {
 		t.Fatalf("opening the key: %v", err)
 	}
 
-	second, err := env.applier.runBuildGates(env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
+	second, err := env.applier.runBuildGates(t.Context(), env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
 	if err != nil {
 		t.Fatalf("run two: %v", err)
 	}

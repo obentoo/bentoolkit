@@ -19,10 +19,10 @@ import (
 // changed. The whole argument — what is dropped from runManifest and why, where
 // the private directory is created, and who removes it — lives on
 // runStagedManifestIn below.
-func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) (string, error) {
+func (s *sweeper) runStagedManifest(ctx context.Context, stagedPkgDir, pkg, version string) (string, error) {
 	// An empty supplied distdir means "create one", and that is the entire
 	// difference between the two entry points.
-	return s.runStagedManifestIn("", stagedPkgDir, pkg, version)
+	return s.runStagedManifestIn(ctx, "", stagedPkgDir, pkg, version)
 }
 
 // runStagedManifestIn regenerates the Manifest of a STAGED package directory —
@@ -154,7 +154,7 @@ func (s *sweeper) runStagedManifest(stagedPkgDir, pkg, version string) (string, 
 // directory is known, the caller must be able to remove it whatever went wrong
 // next. Only the failures above the point it becomes known return "" — which on
 // the supplied path is no failure at all, since it is known on entry.
-func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, version string) (string, error) {
+func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stagedPkgDir, pkg, version string) (string, error) {
 	// These two return suppliedDistdir rather than a literal "": on the ordinary
 	// path it IS "", byte for byte what they always returned, and on the supplied
 	// path the directory is known before the first check runs, so there is no
@@ -175,7 +175,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 		// (PORTAGE_TMPDIR) and a test must be able to answer it without a portageq on
 		// the machine running the suite. "" is a valid answer and means os.TempDir(),
 		// which is what os.MkdirTemp already means by an empty root.
-		sandboxRoot := fixSandboxRoot()
+		sandboxRoot := fixSandboxRoot(ctx)
 		var err error
 		distdir, err = os.MkdirTemp(sandboxRoot, "bentoo-staged-distfiles-")
 		if err != nil {
@@ -200,7 +200,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 		manifestNames := distfiles.ParseManifestDistFilenames(filepath.Join(stagedPkgDir, "Manifest"))
 		expected := s.expectedDistfiles(pkg, stagedPkgDir, pkgName, manifestNames, []string{version})
 		if len(expected) > 0 {
-			for _, src := range s.stagedDistfileSources(distdir) {
+			for _, src := range s.stagedDistfileSources(ctx, distdir) {
 				s.reportPrepopulated(pkg, src, distfiles.PrepopulateFromCache(distdir, src, expected))
 			}
 		}
@@ -213,7 +213,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 	// distdir — private either way, this call's or the caller's — and it needs no
 	// cleanup branch of its own for the same reason nothing else here does: the
 	// returned path carries it to the caller, whose removal covers every path.
-	if err := s.prefetchAuthDistfile(pkg, version, distdir); err != nil {
+	if err := s.prefetchAuthDistfile(ctx, pkg, version, distdir); err != nil {
 		return distdir, fmt.Errorf("%w: staged manifest for %s-%s: %w", ErrManifestFailed, pkg, version, err)
 	}
 
@@ -221,7 +221,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 	// fetch must not hang a gate forever, and cancelling either the parent
 	// (SIGINT) or this child (timeout) stops pkgdev and every process it
 	// started, within procgroup.GracePeriod (S054-R2.2, S054-R2.3).
-	ctx, cancel := context.WithTimeout(s.ctx, manifestTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 
 	// `--force` ONLY where the caller supplied the directory. There it is the
@@ -238,7 +238,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 	// pkgdev discovers the ebuild from its own working directory, so cmd.Dir is
 	// what decides WHICH package is manifested. Anything but the staged directory
 	// here would manifest the published one — the opposite of what staging is for.
-	cmd := s.execCommand(ctx, "pkgdev", args...)
+	cmd := s.execCommand(opCtx, "pkgdev", args...)
 	cmd.Dir = stagedPkgDir
 	// Group mode, for the reason runManifest gives: pkgdev's fetchers hold the
 	// output pipe, so stopping pkgdev alone would leave the gate waiting on them.
@@ -281,7 +281,7 @@ func (s *sweeper) runStagedManifestIn(suppliedDistdir, stagedPkgDir, pkg, versio
 // distdir itself is excluded, and so is a duplicate: linking a directory into
 // itself is the case ResolveCache already refuses, and doing the host twice
 // would report the same reuse twice.
-func (s *sweeper) stagedDistfileSources(distdir string) []string {
+func (s *sweeper) stagedDistfileSources(ctx context.Context, distdir string) []string {
 	var out []string
 	seen := map[string]bool{distdir: true}
 	add := func(dir string) {
@@ -293,7 +293,7 @@ func (s *sweeper) stagedDistfileSources(distdir string) []string {
 	}
 
 	add(distfiles.ResolveCache(s.distfilesCache, distdir))
-	if host, ok := distfiles.Locate(s.distdir, s.configuredDistdir); ok {
+	if host, ok := distfiles.Locate(ctx, s.distdir, s.configuredDistdir); ok {
 		add(host)
 	}
 	return out

@@ -346,7 +346,7 @@ func TestCleanPackageDirLeavesOtherSeries(t *testing.T) {
 		t.Fatalf("resolveCurrentVersion = %q, want %q", current, "26.2.6.1")
 	}
 
-	if _, err := applier.cleanPackageDir(key, "26.2.6.1"); err != nil {
+	if _, err := applier.cleanPackageDir(t.Context(), key, "26.2.6.1"); err != nil {
 		t.Fatalf("cleanPackageDir: %v", err)
 	}
 
