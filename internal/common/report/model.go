@@ -229,9 +229,10 @@ type PackageResult struct {
 	// behaviour.
 	Error string `json:"error"`
 	// Requirements is the state of each package this bump requires (the
-	// record's `requires`), in atom order. Absent for a record without them, so
-	// the report of every other package is byte-identical to before.
-	Requirements []Requirement `json:"requirements,omitempty"`
+	// record's `requires`), in atom order, and empty for a record without them.
+	// Always a key, like every field here: an absent key could not be told from
+	// an unanswered one.
+	Requirements []Requirement `json:"requirements"`
 }
 
 // Requirement is one package a bump requires and whether its version is

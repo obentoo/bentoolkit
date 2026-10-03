@@ -220,15 +220,17 @@ func TestRequiresReportJSONCarriesRequirements(t *testing.T) {
 	}
 }
 
-// TestRequiresReportJSONOmitsEmptyRequirements — R3.5: a package without
-// requirements marshals exactly as before, with no "requirements" key.
-func TestRequiresReportJSONOmitsEmptyRequirements(t *testing.T) {
-	out, err := json.Marshal(report.PackageResult{Package: "dev-lang/flutter", CurrentVersion: "3.47.0", CandidateVersion: "3.48.0", HasUpdate: true})
+// TestRequiresReportJSONEmptyRequirementsIsAKey — R3.5 as amended: the report
+// package's JSON contract (TestJSONDropsNoField) makes every field a key, so a
+// package without requirements carries an explicit "requirements" key rather
+// than none — an absent key could not be told from an unanswered one.
+func TestRequiresReportJSONEmptyRequirementsIsAKey(t *testing.T) {
+	out, err := json.Marshal(report.PackageResult{Package: "dev-lang/flutter", CurrentVersion: "3.47.0", CandidateVersion: "3.48.0", HasUpdate: true, Requirements: []report.Requirement{}})
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
 	}
-	if strings.Contains(string(out), "requirements") {
-		t.Errorf("a package without requirements marshals a \"requirements\" key: %s", out)
+	if !strings.Contains(string(out), `"requirements":[]`) {
+		t.Errorf("a package without requirements does not carry \"requirements\":[]: %s", out)
 	}
 }
 
