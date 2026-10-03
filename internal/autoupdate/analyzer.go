@@ -150,11 +150,6 @@ type Analyzer struct {
 	rateLimiter *RateLimiter
 	// configDir is the directory for storing cache files
 	configDir string
-	// ctx is the parent context for all outbound HTTP/LLM calls. It is set via
-	// WithAnalyzerContext and originates in cmd/ (signal.NotifyContext), so a
-	// SIGINT or deadline cancels every in-flight request. Defaults to
-	// context.Background().
-	ctx context.Context
 	// opTimeout bounds a single outbound HTTP operation. Defaults to
 	// DefaultOpTimeout.
 	opTimeout time.Duration
@@ -164,8 +159,9 @@ type Analyzer struct {
 	// analyzeFn is the per-package analysis AnalyzeAll runs in each worker.
 	// NewAnalyzer binds it to Analyze; it is a seam for in-package tests only,
 	// which replace it to hold, count or panic inside a worker (story 054,
-	// S054-R6.1 to S054-R6.4). No option sets it.
-	analyzeFn func(pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)
+	// S054-R6.1 to S054-R6.4). No option sets it. The ctx it receives is the
+	// AnalyzeAll call's own.
+	analyzeFn func(ctx context.Context, pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)
 }
 
 // AnalyzerOption is a functional option for configuring Analyzer.
@@ -219,20 +215,6 @@ func WithAnalyzerPackagesConfig(config *PackagesConfig) AnalyzerOption {
 	}
 }
 
-// WithAnalyzerContext sets the parent context for the analyzer. The context
-// threads through every outbound HTTP and LLM call, so cancelling it (e.g. on
-// SIGINT or a deadline) aborts all in-flight requests. A nil context is
-// rejected.
-func WithAnalyzerContext(ctx context.Context) AnalyzerOption {
-	return func(a *Analyzer) error {
-		if ctx == nil {
-			return errors.New("analyzer context must not be nil")
-		}
-		a.ctx = ctx
-		return nil
-	}
-}
-
 // WithAnalyzerOpTimeout sets the per-operation timeout used to derive a child
 // context for each outbound HTTP fetch. A non-positive duration is rejected.
 func WithAnalyzerOpTimeout(d time.Duration) AnalyzerOption {
@@ -265,7 +247,6 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 	analyzer := &Analyzer{
 		overlayPath: overlayPath,
 		configDir:   configDir,
-		ctx:         context.Background(), // SAFE: default parent; replaced by WithAnalyzerContext when cmd/ wires signal.NotifyContext
 		opTimeout:   DefaultOpTimeout,
 		llmTimeout:  DefaultLLMTimeout,
 	}
@@ -319,8 +300,10 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 	return analyzer, nil
 }
 
-// Analyze analyzes a single package and suggests a schema.
-func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, error) {
+// Analyze analyzes a single package and suggests a schema. Every fetch and
+// LLM call it makes is bounded by a child of ctx, so cancelling ctx (e.g. on
+// SIGINT) aborts the analysis in flight.
+func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions) (*AnalyzeResult, error) {
 	result := &AnalyzeResult{
 		Package: pkg,
 	}
@@ -339,7 +322,7 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 			result.SuggestedSchema = cachedSchema
 			result.FromCache = true
 			// Still need to validate the cached schema
-			return a.validateResult(result, opts)
+			return a.validateResult(ctx, result, opts)
 		}
 	}
 
@@ -362,14 +345,14 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 	var lastErr error
 	for _, source := range sources {
 		// Fetch content from data source
-		content, err := a.fetchContent(source)
+		content, err := a.fetchContent(ctx, source)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 
 		// Analyze content with LLM (if available)
-		schema, err := a.analyzeContent(content, meta, opts.Hint, &source)
+		schema, err := a.analyzeContent(ctx, content, meta, opts.Hint, &source)
 		if err != nil {
 			lastErr = err
 			continue
@@ -397,7 +380,7 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 		}
 
 		// Validate the schema
-		return a.validateResult(result, opts)
+		return a.validateResult(ctx, result, opts)
 	}
 
 	// All sources failed
@@ -410,7 +393,7 @@ func (a *Analyzer) Analyze(pkg string, opts AnalyzeOptions) (*AnalyzeResult, err
 }
 
 // validateResult validates the suggested schema against the ebuild version.
-func (a *Analyzer) validateResult(result *AnalyzeResult, opts AnalyzeOptions) (*AnalyzeResult, error) {
+func (a *Analyzer) validateResult(ctx context.Context, result *AnalyzeResult, opts AnalyzeOptions) (*AnalyzeResult, error) {
 	if result.SuggestedSchema == nil {
 		return result, result.Error
 	}
@@ -426,7 +409,7 @@ func (a *Analyzer) validateResult(result *AnalyzeResult, opts AnalyzeOptions) (*
 	}
 
 	// Fetch content for validation
-	content, err := a.fetchContentFromURL(result.SuggestedSchema.URL)
+	content, err := a.fetchContentFromURL(ctx, result.SuggestedSchema.URL)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to fetch content for validation: %w", err)
 		return result, result.Error
@@ -448,31 +431,37 @@ func (a *Analyzer) validateResult(result *AnalyzeResult, opts AnalyzeOptions) (*
 }
 
 // fetchContent fetches content from a data source with rate limiting.
-// The rate-limit wait is bounded by a child of the Analyzer's parent context
-// (set via WithAnalyzerContext), so a cancelled parent aborts the wait.
-func (a *Analyzer) fetchContent(source DataSource) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, a.opTimeout)
+// The rate-limit wait is bounded by a child of the caller's ctx, so a
+// cancelled ctx aborts the wait. RateLimiter.WaitHTTP reports a cancelled wait
+// as ErrRateLimitExceeded alone, dropping the context's error; a wait that
+// failed on a done context is therefore reported with that context's error as
+// its cause, so errors.Is(err, context.Canceled) and
+// errors.Is(err, context.DeadlineExceeded) hold for every caller.
+func (a *Analyzer) fetchContent(ctx context.Context, source DataSource) ([]byte, error) {
+	opCtx, cancel := context.WithTimeout(ctx, a.opTimeout)
 	defer cancel()
 
 	// Apply rate limiting
-	if err := a.rateLimiter.WaitHTTPForURL(ctx, source.URL); err != nil {
-		return nil, fmt.Errorf("rate limit error: %w", err)
+	if err := a.rateLimiter.WaitHTTPForURL(opCtx, source.URL); err != nil {
+		if ctxErr := opCtx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("fetch from %s cancelled during the rate-limit wait: %w", source.URL, ctxErr)
+		}
+		return nil, fmt.Errorf("rate limit error for %s: %w", source.URL, err)
 	}
 
-	return a.fetchContentFromURL(source.URL)
+	return a.fetchContentFromURL(ctx, source.URL)
 }
 
 // fetchContentFromURL fetches content from a URL. The request is bounded by a
-// child of the Analyzer's parent context (set via WithAnalyzerContext) with the
-// configured per-operation timeout, so a cancelled parent context or an expired
-// deadline aborts the in-flight HTTP call.
-func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, a.opTimeout)
+// child of the caller's ctx with the configured per-operation timeout, so a
+// cancelled ctx or an expired deadline aborts the in-flight HTTP call.
+func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte, error) {
+	opCtx, cancel := context.WithTimeout(ctx, a.opTimeout)
 	defer cancel()
 
-	resp, err := a.httpClient.GetWithContext(ctx, url)
+	resp, err := a.httpClient.GetWithContext(opCtx, url)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("HTTP request to %s failed: %w", url, err)
 	}
 	defer resp.Body.Close()
 
@@ -495,18 +484,25 @@ func (a *Analyzer) fetchContentFromURL(url string) ([]byte, error) {
 }
 
 // analyzeContent analyzes content and generates a schema.
-func (a *Analyzer) analyzeContent(content []byte, meta *EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
+// The LLM call, and its rate-limit wait, are bounded by a child of the
+// caller's ctx with the configured LLM timeout.
+func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
 	// If LLM client is available, use it for analysis
 	if a.llmClient != nil {
-		ctx, cancel := context.WithTimeout(a.ctx, a.llmTimeout)
+		opCtx, cancel := context.WithTimeout(ctx, a.llmTimeout)
 		defer cancel()
 
 		// Apply LLM rate limiting
-		if err := a.rateLimiter.WaitLLM(ctx); err != nil {
+		if err := a.rateLimiter.WaitLLM(opCtx); err != nil {
+			// WaitLLM drops the context's error, as WaitHTTP does (see
+			// fetchContent); restore it as the cause.
+			if ctxErr := opCtx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("LLM analysis of %s cancelled during the rate-limit wait: %w", meta.Package, ctxErr)
+			}
 			return nil, fmt.Errorf("LLM rate limit error: %w", err)
 		}
 
-		analysis, err := a.llmClient.AnalyzeContent(ctx, content, meta, hint)
+		analysis, err := a.llmClient.AnalyzeContent(opCtx, content, meta, hint)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrAnalysisFailed, err)
 		}
@@ -633,7 +629,7 @@ func detectJSONPath(content []byte) string {
 //   - a slot is taken BEFORE a worker goroutine starts, so at most 3 analyses
 //     run at once and a package still waiting for its turn holds no goroutine
 //     (S054-R6.1);
-//   - once the analyzer's context (WithAnalyzerContext) is done, no package
+//   - once ctx is done, no package
 //     that has not yet taken a slot is started: each is recorded in Failures
 //     with an error wrapping the context's error, and the analyses already
 //     running are left to finish (S054-R6.2);
@@ -646,7 +642,7 @@ func detectJSONPath(content []byte) string {
 // Every write to the shared BatchResult is mutex-guarded, and it is returned
 // only after every worker goroutine has joined (wg.Wait), so callers may
 // safely invoke its methods (ExitCode, FormatFailures) on the returned value.
-func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
+func (a *Analyzer) AnalyzeAll(ctx context.Context, opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 	batch := BatchResult[AnalyzeResult]{
 		Items:    []AnalyzeResult{},
 		Failures: make(map[string]error),
@@ -684,15 +680,15 @@ func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 	// whenever a slot happened to be free. The second read gives such a slot
 	// back; the first skips the wait altogether once the context is done.
 	acquireSlot := func() error {
-		if err := a.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		select {
-		case <-a.ctx.Done():
-			return a.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		case sem <- struct{}{}:
 		}
-		if err := a.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			<-sem
 			return err
 		}
@@ -723,7 +719,7 @@ func (a *Analyzer) AnalyzeAll(opts AnalyzeOptions) BatchResult[AnalyzeResult] {
 				}
 			}()
 
-			result, err := a.analyzeFn(pkg, opts)
+			result, err := a.analyzeFn(ctx, pkg, opts)
 			if err != nil {
 				recordFailure(pkg, err)
 				return
@@ -952,9 +948,10 @@ func (a *Analyzer) Cache() *AnalysisCache {
 	return a.cache
 }
 
-// FetchContent fetches content from a data source (exported for testing).
-func (a *Analyzer) FetchContent(source DataSource) ([]byte, string, error) {
-	content, err := a.fetchContent(source)
+// FetchContent fetches content from a data source (exported for testing). The
+// fetch is bounded by ctx.
+func (a *Analyzer) FetchContent(ctx context.Context, source DataSource) ([]byte, string, error) {
+	content, err := a.fetchContent(ctx, source)
 	if err != nil {
 		return nil, "", err
 	}

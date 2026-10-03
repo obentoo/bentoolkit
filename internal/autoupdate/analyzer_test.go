@@ -157,7 +157,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 				NoCache: true, // Disable cache to ensure fresh analysis
 			}
 
-			result, _ := analyzer.Analyze("app-misc/test", opts)
+			result, _ := analyzer.Analyze(t.Context(), "app-misc/test", opts)
 
 			// The suggested schema should use the provided URL
 			// Even if validation fails, the schema URL should be set correctly
@@ -409,7 +409,7 @@ HOMEPAGE="https://example.com"
 				NoCache: true, // Disable cache to ensure fresh analysis
 			}
 
-			analyzer.Analyze("app-misc/test", opts)
+			analyzer.Analyze(t.Context(), "app-misc/test", opts)
 
 			// Content should have been fetched
 			return contentFetched
@@ -459,7 +459,7 @@ HOMEPAGE="https://example.com"
 				ContentType: ContentTypeJSON,
 			}
 
-			content, contentType, err := analyzer.FetchContent(source)
+			content, contentType, err := analyzer.FetchContent(t.Context(), source)
 			if err != nil {
 				return false
 			}
@@ -520,7 +520,7 @@ HOMEPAGE="`+server.URL+`"
 				NoCache: true, // Disable cache to ensure fresh analysis
 			}
 
-			analyzer.Analyze("app-misc/test", opts)
+			analyzer.Analyze(t.Context(), "app-misc/test", opts)
 
 			// Should have made at least one request
 			return requestCount >= 1
@@ -610,7 +610,7 @@ HOMEPAGE="https://example.com"
 	}
 
 	// Analyze without force
-	result, err := analyzer.Analyze("app-misc/test", AnalyzeOptions{})
+	result, err := analyzer.Analyze(t.Context(), "app-misc/test", AnalyzeOptions{})
 
 	if err == nil {
 		t.Error("Expected error for existing schema")
@@ -665,7 +665,7 @@ HOMEPAGE="https://example.com"
 	}
 
 	// Analyze with force
-	result, _ := analyzer.Analyze("app-misc/test", AnalyzeOptions{
+	result, _ := analyzer.Analyze(t.Context(), "app-misc/test", AnalyzeOptions{
 		URL:     server.URL,
 		Force:   true,
 		NoCache: true,
@@ -726,7 +726,7 @@ KEYWORDS="~amd64"
 				t.Fatalf("NewAnalyzer failed: %v", err)
 			}
 
-			result, err := analyzer.Analyze("app-misc/test", AnalyzeOptions{
+			result, err := analyzer.Analyze(t.Context(), "app-misc/test", AnalyzeOptions{
 				URL:     server.URL,
 				NoCache: true,
 			})
@@ -1034,7 +1034,7 @@ HOMEPAGE="`+server.URL+`"
 			opts := AnalyzeOptions{
 				NoCache: true,
 			}
-			batch := analyzer.AnalyzeAll(opts)
+			batch := analyzer.AnalyzeAll(t.Context(), opts)
 
 			// Mark processed packages: both successes (Items) and failures.
 			for _, result := range batch.Items {
@@ -1154,7 +1154,7 @@ func analyzeAllThroughBarrier(t *testing.T, analyzer *Analyzer, opts AnalyzeOpti
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = analyzer.AnalyzeAll(opts)
+		_ = analyzer.AnalyzeAll(t.Context(), opts)
 	}()
 	barrier.openOnceArrived(t, "analyzer requests", int64(want))
 	waitReturned(t, "AnalyzeAll", done)
@@ -1223,7 +1223,7 @@ func TestAnalyzeAll_ReturnsBatchResult(t *testing.T) {
 		t.Fatalf("NewAnalyzer: %v", err)
 	}
 
-	batch := analyzer.AnalyzeAll(AnalyzeOptions{NoCache: true})
+	batch := analyzer.AnalyzeAll(t.Context(), AnalyzeOptions{NoCache: true})
 
 	if len(batch.Items) != 2 {
 		t.Errorf("expected 2 successful items, got %d", len(batch.Items))
@@ -2087,7 +2087,7 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 		t.Fatalf("NewAnalyzer: %v", err)
 	}
 
-	result, err := analyzer.Analyze("app-misc/test", AnalyzeOptions{
+	result, err := analyzer.Analyze(t.Context(), "app-misc/test", AnalyzeOptions{
 		URL:   server.URL,
 		Force: true,
 	})
@@ -2264,7 +2264,7 @@ func TestFetchContentFromURL_ViaHelper(t *testing.T) {
 				t.Fatalf("NewAnalyzer failed: %v", err)
 			}
 
-			content, err := analyzer.fetchContentFromURL(server.URL)
+			content, err := analyzer.fetchContentFromURL(t.Context(), server.URL)
 
 			if !tt.wantErr {
 				if err != nil {

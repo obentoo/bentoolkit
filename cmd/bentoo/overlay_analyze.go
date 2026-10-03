@@ -109,7 +109,6 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
 	analyzerOpts := []autoupdate.AnalyzerOption{
 		autoupdate.WithAnalyzerConfigDir(configDir),
-		autoupdate.WithAnalyzerContext(runCtx),
 	}
 	llmCfg := appCtx.Config.Autoupdate.LLM
 	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
@@ -135,18 +134,18 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 
 	// Handle different modes
 	if analyzeAll {
-		return runAnalyzeAll(analyzer, opts, release)
+		return runAnalyzeAll(runCtx, analyzer, opts, release)
 	}
-	return runAnalyzeSingle(analyzer, args[0], opts, release)
+	return runAnalyzeSingle(runCtx, analyzer, args[0], opts, release)
 }
 
 // runAnalyzeSingle handles single package analysis and returns the command's
-// exit status (func exitWith). release ends the analysis context; it runs
-// before the confirmation prompt.
-func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
+// exit status (func exitWith). ctx is the analysis context; release ends it,
+// and runs before the confirmation prompt.
+func runAnalyzeSingle(ctx context.Context, analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Printf("Analyzing %s...\n", pkg)
 
-	result, err := analyzer.Analyze(pkg, opts)
+	result, err := analyzer.Analyze(ctx, pkg, opts)
 	if err != nil {
 		displayAnalyzeResult(result)
 		return exitWith(1)
@@ -183,14 +182,14 @@ func runAnalyzeSingle(analyzer *autoupdate.Analyzer, pkg string, opts autoupdate
 
 // runAnalyzeAll handles batch analysis of all packages and returns the batch
 // exit status: BatchResult.ExitCode through func exitWith — 0 all ok, 1
-// partial, 2 total failure. release ends the analysis context; it runs before
-// the confirmation prompt.
-func runAnalyzeAll(analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
+// partial, 2 total failure. ctx is the analysis context; release ends it, and
+// runs before the confirmation prompt.
+func runAnalyzeAll(ctx context.Context, analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Println("Analyzing all packages without schema...")
 
 	// AnalyzeAll never returns a fatal error: enumeration and per-package
 	// failures are all captured in the BatchResult.
-	result := analyzer.AnalyzeAll(opts)
+	result := analyzer.AnalyzeAll(ctx, opts)
 
 	// Emit one stderr line per failure. FormatFailures is called only after
 	// every AnalyzeAll worker goroutine has joined, so the output is

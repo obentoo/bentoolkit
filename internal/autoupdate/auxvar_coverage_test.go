@@ -1,7 +1,6 @@
 package autoupdate
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -223,7 +222,7 @@ func TestExtractPackageAtom(t *testing.T) {
 // TestOptionSetters exercises the small functional-option closures that are
 // otherwise only wired from cmd/ (and so show as uncovered): the checker's
 // config dir and rate limiter, the applier's packages config, and the analyzer's
-// context and timeouts. Construction is allowed to fail (e.g. analyzer config
+// timeouts. Construction is allowed to fail (e.g. analyzer config
 // loading) — the options still run inside the constructor's apply loop, which is
 // the point.
 func TestOptionSetters(t *testing.T) {
@@ -246,7 +245,6 @@ func TestOptionSetters(t *testing.T) {
 	// The analyzer constructor may fail to load a packages config from an empty
 	// overlay; that is fine — the option closures already ran.
 	_, _ = NewAnalyzer(t.TempDir(),
-		WithAnalyzerContext(context.Background()),
 		WithAnalyzerOpTimeout(2*time.Second),
 		WithAnalyzerLLMTimeout(3*time.Second),
 	)
