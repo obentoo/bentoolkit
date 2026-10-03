@@ -269,7 +269,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 
 	// Check rate limit for GitHub provider - block if exhausted
 	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
-		remaining, resetTime, err := ghProv.GetRateLimitInfo()
+		remaining, resetTime, err := ghProv.GetRateLimitInfo(ctx)
 		if err == nil {
 			switch {
 			case remaining == 0:
@@ -463,7 +463,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// instead of two conditions that could disagree. Nothing here can fail the
 	// run: every way of not getting a reading costs one warning and the report is
 	// printed unchanged.
-	overlay.AnnotateReviews(report, compareDivergenceReviewer(ctx, compareNoReview, reviewBudget), prov, opts)
+	overlay.AnnotateReviews(report, compareDivergenceReviewer(compareNoReview, reviewBudget), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
 	// divergence still justified, and what would replace it if not (R4.1, R4.2).
@@ -482,7 +482,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// was judged and none objected".
 	realignJudged := false
 	if realignRan {
-		reviewer := compareRealignReviewer(ctx, compareNoReview, reviewBudget)
+		reviewer := compareRealignReviewer(compareNoReview, reviewBudget)
 		realignJudged = reviewer != nil
 		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
 	}

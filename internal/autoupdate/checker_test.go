@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -1718,14 +1719,14 @@ type fakeLLMProvider struct {
 	gotPrompt  string
 }
 
-func (f *fakeLLMProvider) ExtractVersion(content []byte, prompt string) (string, error) {
+func (f *fakeLLMProvider) ExtractVersion(_ context.Context, content []byte, prompt string) (string, error) {
 	f.called = true
 	f.gotContent = content
 	f.gotPrompt = prompt
 	return f.version, f.err
 }
 
-func (f *fakeLLMProvider) AnalyzeContent(_ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (f *fakeLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return &SchemaAnalysis{ParserType: "json"}, nil
 }
 

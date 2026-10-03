@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -1888,8 +1889,10 @@ type patternLLMStub struct {
 	analysis *SchemaAnalysis
 }
 
-func (s *patternLLMStub) ExtractVersion(_ []byte, _ string) (string, error) { return "", nil }
-func (s *patternLLMStub) AnalyzeContent(_ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (s *patternLLMStub) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
+	return "", nil
+}
+func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return s.analysis, nil
 }
 func (s *patternLLMStub) GetModel() string { return "pattern-stub" }

@@ -205,7 +205,7 @@ func TestRealignReviewWrapperDoesNotBlameTheEbuilds(t *testing.T) {
 func realignReviewerOverAsker(t *testing.T, asker claudeAsker) overlay.RealignReviewer {
 	t.Helper()
 	stubClaudeAsker(t, func() (claudeAsker, error) { return asker, nil })
-	reviewer, err := newRealignReviewer(context.Background(), cmdReviewBudget)
+	reviewer, err := newRealignReviewer(cmdReviewBudget)
 	if err != nil {
 		t.Fatalf("newRealignReviewer returned %v, want nil", err)
 	}

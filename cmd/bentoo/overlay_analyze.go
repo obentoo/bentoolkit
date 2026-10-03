@@ -112,7 +112,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		autoupdate.WithAnalyzerContext(runCtx),
 	}
 	llmCfg := appCtx.Config.Autoupdate.LLM
-	if p, err := newConfiguredLLMProvider(runCtx, llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		analyzerOpts = append(analyzerOpts, autoupdate.WithAnalyzerLLMClient(p))

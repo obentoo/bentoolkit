@@ -128,11 +128,6 @@ type ClaudeCodeClient struct {
 	// timeout bounds a single CLI invocation (S003-R7.3). Defaults to
 	// DefaultClaudeCodeTimeout.
 	timeout time.Duration
-	// ctx is the parent context for spawned CLI processes. Defaults to
-	// context.Background(); a cancelled parent (or the per-call timeout) stops
-	// the child and every process it started, through procgroup.Group
-	// (S003-R7.1, story 054 R4.1).
-	ctx context.Context
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
@@ -158,23 +153,6 @@ type ClaudeCodeOption func(*ClaudeCodeClient)
 func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) ClaudeCodeOption {
 	return func(c *ClaudeCodeClient) {
 		c.execCommand = fn
-	}
-}
-
-// WithClaudeCodeContext sets the parent context threaded into every spawned CLI
-// process, so cancelling it (e.g. on SIGINT or a deadline) stops the in-flight
-// `claude` process and everything it started. A nil context is ignored, leaving
-// the default context.Background().
-//
-// Since story 054 the child runs in its own process group, so a Ctrl+C typed at
-// the terminal no longer reaches it directly: this context is the only way an
-// interrupt does. A caller that can be interrupted should pass the context its
-// signal handler cancels.
-func WithClaudeCodeContext(ctx context.Context) ClaudeCodeOption {
-	return func(c *ClaudeCodeClient) {
-		if ctx != nil {
-			c.ctx = ctx
-		}
 	}
 }
 
@@ -311,8 +289,8 @@ func childEnv(bareMode bool, apiKeyEnv, key string, extra agentEnvExtra) []strin
 
 // NewClaudeCodeClient constructs a ClaudeCodeClient from configuration (S003-R1, S003-R1.1,
 // S003-R7.3, AD6). It resolves the model (defaulting to sonnet) and the auth mode,
-// applies defaults (exec.CommandContext seam, context.Background,
-// DefaultClaudeCodeTimeout), then applies any options. If the `claude` CLI is
+// applies defaults (exec.CommandContext seam, DefaultClaudeCodeTimeout), then
+// applies any options. If the `claude` CLI is
 // not on PATH it returns ErrClaudeCodeUnavailable (S003-R6.1) so callers can
 // fall back.
 //
@@ -362,11 +340,10 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 		bareMode:     resolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultClaudeCodeTimeout,
-		ctx:          context.Background(), // SAFE: default parent; replaced by WithClaudeCodeContext when a caller wires a cancellable context.
 		execCommand:  exec.CommandContext,
 	}
 
-	// Apply options AFTER defaults so they can override the seam, context, and
+	// Apply options AFTER defaults so they can override the seam and the
 	// timeout.
 	for _, opt := range opts {
 		opt(c)
@@ -485,8 +462,8 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 // result string (S003-R1.2, S003-R2.4, S003-R7, S003-R7.1).
 //
 // Page content is piped on stdin (AD8); the instruction travels in -p. The call
-// is bound to a child context derived from c.ctx with c.timeout, so a cancelled
-// parent or an elapsed timeout stops the child and its descendants, and run
+// is bound to a child context derived from the caller's ctx with c.timeout, so a
+// cancelled parent or an elapsed timeout stops the child and its descendants, and run
 // returns within procgroup.GracePeriod of it (S003-R7.1, story 054 R4.1). In
 // bare mode the API key is injected ONLY through the child environment (never
 // argv/logs — S003-R2.1, S003-R2.4). stdout and stderr are captured separately.
@@ -503,8 +480,13 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 // duration alongside that outcome as one Info line through the package's
 // infoLogf sink, so the cost of a `claude` call is recoverable from a run's own
 // output without instrumenting for it again (S048-R2.1, S048-R5.1).
-func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string) (string, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
+//
+// The client stores no context: each call spawns its child from a context
+// derived from the ctx it was given, so one client can serve calls with
+// different lifetimes and a call that was cancelled cannot end the next one
+// (story 059, R3.3).
+func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content []byte, schema string) (string, error) {
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	// The child runs in a private 0700 directory made for this one invocation
@@ -522,14 +504,14 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 		}
 	}()
 
-	cmd := c.execCommand(ctx, "claude", c.buildArgs(instruction, schema != "", schema)...)
+	cmd := c.execCommand(callCtx, "claude", c.buildArgs(instruction, schema != "", schema)...)
 	cmd.Dir = dir
 
 	// GROUP MODE (story 054, R4.1). exec.CommandContext alone stops only the
 	// direct child, and a helper the CLI started inherits the stdout pipe: Wait
 	// does not return while that helper runs, so a budget of seconds lasted as
 	// long as the helper did. The child now leads its own process group. When
-	// ctx is done the whole group gets SIGTERM, whatever is left of it gets
+	// callCtx is done the whole group gets SIGTERM, whatever is left of it gets
 	// SIGKILL procgroup.GracePeriod later, and Wait returns within that grace
 	// even if a descendant left the group and still holds the pipe.
 	//
@@ -537,7 +519,7 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	// the child out of the terminal's foreground group, which is safe here for
 	// the reason procgroup names: stdin is the piped content below, never the
 	// terminal, so the child cannot stop on SIGTTIN. The cost is that a Ctrl+C
-	// typed at the terminal reaches the child only through c.ctx.
+	// typed at the terminal reaches the child only through the caller's ctx.
 	procgroup.Group(cmd)
 
 	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
@@ -567,9 +549,9 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 	// it sends whoever reads it looking for a broken CLI. Reading the context
 	// afterwards would print that noise first and reach the cause too late to
 	// say it (S048-R1.1). It is also why group mode cannot turn a deadline into
-	// a non-zero exit: whatever signal ended the group, ctx.Err() outranks it in
+	// a non-zero exit: whatever signal ended the group, callCtx.Err() outranks it in
 	// classifyClaudeFailure (story 054, R4.2).
-	ctxErr := ctx.Err()
+	ctxErr := callCtx.Err()
 
 	// The elapsed time is taken at the same boundary and for a related reason:
 	// what S048-R2.1 asks to record is what the CLI COST, not what this function
@@ -632,7 +614,7 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 			// already done ended this run from OUTSIDE — cancelled, or out of a
 			// budget of its own — and this client's budget is then not what
 			// elapsed, so quoting it would quote a number that never ran out.
-			endedBy := c.ctx.Err()
+			endedBy := ctx.Err()
 			if endedBy == nil && errors.Is(ctxErr, context.DeadlineExceeded) {
 				// S048-R1.1: the budget is read from the client's own field —
 				// the value ACTUALLY in force — and never from the package
@@ -705,7 +687,7 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 // instruction travels in -p while content is piped on stdin (AD8), the child
 // environment is resolved by childEnv — which in non-bare mode STRIPS every
 // inherited API key so the CLI falls back to its own logged-in session — and the
-// invocation is bound to c.ctx with c.timeout. All three are unexported, so a
+// invocation is bound to the caller's ctx with c.timeout. All three are unexported, so a
 // second call site spelling its own exec.Command would be a second, divergent
 // answer to each of them.
 //
@@ -716,8 +698,8 @@ func (c *ClaudeCodeClient) run(instruction string, content []byte, schema string
 // Its one production caller today is the divergence-review adapter in
 // cmd/bentoo/overlay_compare_review.go, which asks for a three-field JSON object
 // describing how two ebuilds differ.
-func (c *ClaudeCodeClient) AskJSON(instruction string, content []byte, schema string) (string, error) {
-	return c.run(instruction, content, schema)
+func (c *ClaudeCodeClient) AskJSON(ctx context.Context, instruction string, content []byte, schema string) (string, error) {
+	return c.run(ctx, instruction, content, schema)
 }
 
 // buildVersionInstruction builds the static instruction for version extraction.
@@ -737,11 +719,12 @@ func buildClaudeCodeVersionInstruction(prompt string) string {
 // ExtractVersion extracts a version string from content using the `claude` CLI
 // (S003-R1.2). The content is piped on stdin; only a static instruction (plus the
 // caller's optional prompt) travels in -p. The envelope result is normalized via
-// the shared cleanVersionString helper.
-func (c *ClaudeCodeClient) ExtractVersion(content []byte, prompt string) (string, error) {
+// the shared cleanVersionString helper. The child is spawned from a context
+// derived from ctx (story 059, R3.3).
+func (c *ClaudeCodeClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
 	instruction := buildClaudeCodeVersionInstruction(prompt)
 
-	result, err := c.run(instruction, content, "")
+	result, err := c.run(ctx, instruction, content, "")
 	if err != nil {
 		return "", err
 	}
@@ -843,11 +826,12 @@ func stripJSONFences(text string) string {
 //     parse that (S003-R3.3).
 //  3. If both attempts fail, return the resulting error.
 //
-// Page content is piped on stdin on both attempts.
-func (c *ClaudeCodeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+// Page content is piped on stdin on both attempts, and both children are
+// spawned from contexts derived from ctx (story 059, R3.3).
+func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Attempt 1: structured request with --json-schema.
 	structuredInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, false)
-	result, err := c.run(structuredInstruction, content, claudeCodeSchemaJSON)
+	result, err := c.run(ctx, structuredInstruction, content, claudeCodeSchemaJSON)
 	if err == nil {
 		if analysis, parseErr := parseSchemaAnalysis(stripJSONFences(result)); parseErr == nil {
 			return analysis, nil
@@ -858,7 +842,7 @@ func (c *ClaudeCodeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, 
 
 	// Attempt 2 (fallback, S003-R3.3): retry without a schema, asking for raw JSON.
 	fallbackInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, true)
-	fallbackResult, fallbackErr := c.run(fallbackInstruction, content, "")
+	fallbackResult, fallbackErr := c.run(ctx, fallbackInstruction, content, "")
 	if fallbackErr != nil {
 		return nil, fmt.Errorf("claude-code schema analysis failed (structured: %v; fallback: %w)", err, fallbackErr) //nolint:errorlint // secondary error is context: the structured attempt's failure is superseded by the fallback's, which is the cause
 	}

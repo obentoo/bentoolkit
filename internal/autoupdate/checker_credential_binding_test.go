@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -163,7 +164,7 @@ type cbCountingLLM struct {
 	calls atomic.Int64
 }
 
-func (l *cbCountingLLM) ExtractVersion([]byte, string) (string, error) {
+func (l *cbCountingLLM) ExtractVersion(context.Context, []byte, string) (string, error) {
 	l.calls.Add(1)
 	return "9.9.9", nil
 }

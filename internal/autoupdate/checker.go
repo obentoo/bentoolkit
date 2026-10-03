@@ -1734,7 +1734,7 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 		// Fetch content from primary URL for LLM
 		content, err := c.fetchContent(cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 		if err == nil {
-			version, err = c.llmClient.ExtractVersion(content, cfg.LLMPrompt)
+			version, err = c.llmClient.ExtractVersion(c.ctx, content, cfg.LLMPrompt)
 			if err == nil {
 				return version, nil
 			}

@@ -122,7 +122,7 @@ func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 		capture := filepath.Join(t.TempDir(), "child.txt")
 		seam, spy := agentSeam(privateDirScript(capture, okEnvelope))
 		c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-		if _, err := c.run("instr", []byte("content"), ""); err != nil {
+		if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}
 		if got := flagValues(spy.args, "--tools"); len(got) != 1 || got[0] != "" {
@@ -147,7 +147,7 @@ func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 	stuck := `[ "$(pwd -P)" = "` + cwd + `" ] || { mkdir -p locked/inner && : > locked/inner/f && chmod 0500 locked; }; ` + printEnvelopeScript(okEnvelope)
 	seam, spy := agentSeam(stuck)
 	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-	_, runErr := c.run("instr", []byte("content"), "")
+	_, runErr := c.run(t.Context(), "instr", []byte("content"), "")
 	dir := spy.last().Dir
 	if dir != "" && dir != cwd {
 		t.Cleanup(func() {
@@ -173,7 +173,7 @@ func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 	t.Setenv("TMPDIR", absent)
 	seam, spy = agentSeam(printEnvelopeScript(okEnvelope))
 	c = newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatal("run succeeded although its private directory could not be created (R2.9)")
 	}

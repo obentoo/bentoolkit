@@ -506,7 +506,7 @@ func (a *Analyzer) analyzeContent(content []byte, meta *EbuildMetadata, hint str
 			return nil, fmt.Errorf("LLM rate limit error: %w", err)
 		}
 
-		analysis, err := a.llmClient.AnalyzeContent(content, meta, hint)
+		analysis, err := a.llmClient.AnalyzeContent(ctx, content, meta, hint)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrAnalysisFailed, err)
 		}
