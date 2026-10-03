@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mirrors` in `packages.toml`.** A record can list URLs that serve the same
+  content as `url`. When `url` fails, each mirror is probed in order with the
+  whole record, `script` records included, before `fallback_url`. Credential
+  headers stay with `url`. A check fails as a network failure only when every
+  source failed in transport; if `url` answered with something the record
+  cannot read, the record is still blamed and the registry repair is offered.
+
 - **A bump warns when ::gentoo ships the version it leaves behind, and its
   copy differs.** A bump copies our own ebuild forward and never reads
   ::gentoo, so every fix the distribution made to that revision was dropped in

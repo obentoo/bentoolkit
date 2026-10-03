@@ -4,6 +4,7 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -146,6 +147,15 @@ type PackageConfig struct {
 	// reading under which an absent field changes nothing for the 411 records that
 	// predate this field.
 	Patched string `toml:"patched,omitempty"`
+	// Mirrors lists alternative URLs serving the same content as url, tried in
+	// order when the one before them fails and before fallback_url. Each is
+	// probed with the whole record — parser, script, series, select — with
+	// url swapped out, so a record needs nothing else to use them. Credential
+	// headers never reach a mirror: like fallback_url, a mirror is outside the
+	// record's credential scope. Only the version fetch uses them; base_url,
+	// the auxiliary reads (commit_sha_path, aux_pattern) and track = "commit"
+	// still read url alone.
+	Mirrors []string `toml:"mirrors,omitempty"`
 	// FallbackURL is an alternative URL to try if primary fails
 	FallbackURL string `toml:"fallback_url,omitempty"`
 	// FallbackParser is the parser type for the fallback URL
@@ -1470,6 +1480,16 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	if cfg.AuxPattern != "" {
 		if _, err := regexp.Compile(cfg.AuxPattern); err != nil {
 			return fmt.Errorf("package %s: invalid aux_pattern %q: %w", pkg, cfg.AuxPattern, err)
+		}
+	}
+
+	for _, m := range cfg.Mirrors {
+		u, err := url.Parse(m)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("package %s: mirror %q is not an absolute http(s) URL", pkg, m)
+		}
+		if m == cfg.URL {
+			return fmt.Errorf("package %s: mirror %q repeats url", pkg, m)
 		}
 	}
 

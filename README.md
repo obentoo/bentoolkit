@@ -1142,7 +1142,8 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 
 | Field | Description |
 |-------|-------------|
-| `fallback_url` | Secondary URL to try if the primary fails |
+| `mirrors` | List of URLs serving the same content as `url`, tried in order when the one before fails and before `fallback_url`. Each is probed with the whole record (parser, `script`, `series`, `select`…) with `url` swapped. Credential headers are never sent to a mirror. Only the version fetch uses them: `base_url`, `commit_sha_path`, `aux_pattern` and `track = "commit"` still read `url`. A failure counts as a network failure (no registry repair offered) only when every source failed in transport. |
+| `fallback_url` | Secondary URL to try if the primary fails. It keeps the record's `timeout`, `series`, `suffix`, `suffix_when` and non-credential headers |
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
 | `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
@@ -1459,7 +1460,7 @@ is a different host. A record that pairs a variable with any other host is
 message naming the header, the variable and the host — and the rest of the
 batch runs normally. The refusal is decided from the variable's *name*, so it
 happens whether or not the variable is set on the machine running the check.
-A refused package does not try its `fallback_url` or the LLM stage.
+A refused package does not try its `mirrors`, its `fallback_url` or the LLM stage.
 
 **Redirects.** When an upstream redirects to another host, the credential
 headers (`Authorization`, `X-Api-Key`, `X-Auth-Token`, `Private-Token`) are

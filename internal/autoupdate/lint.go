@@ -58,7 +58,7 @@ const recordEndMarker = "# END"
 // Treat it as read-only; canonicalFieldRank below is built from it once.
 var CanonicalFieldOrder = []string{
 	"enabled", "disabled_by", "hold", "track",
-	"url", "parser", "path", "pattern", "selector", "xpath", "script",
+	"url", "mirrors", "parser", "path", "pattern", "selector", "xpath", "script",
 	"transform", "select", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",

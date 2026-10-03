@@ -1742,11 +1742,13 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 	// the script handles in JS — see ValidatePackageConfig). It has no fallback
 	// or LLM stage: the script is the single source of truth.
 	if cfg.Parser == "script" {
-		return c.parseLive(cfg)
+		return c.probeWithMirrors(cfg, c.parseLive)
 	}
 
-	// Try primary URL
-	version, err := c.fetchAndParse(cfg.URL, cfg)
+	// Try primary URL, then its mirrors
+	version, err := c.probeWithMirrors(cfg, func(m *PackageConfig) (string, error) {
+		return c.fetchAndParse(m.URL, m)
+	})
 	if err == nil {
 		return version, nil
 	}
@@ -1787,6 +1789,67 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 	return "", fmt.Errorf("all version extraction methods failed: %w", primaryErr)
 }
 
+// nonCredentialHeaders returns headers without the credential-bearing ones
+// (isAllowedHeaderName), literal value or ${VAR} alike, for a request to a host
+// outside the record's credential scope: a mirror or the fallback_url.
+func nonCredentialHeaders(headers map[string]string) map[string]string {
+	var out map[string]string
+	for name, value := range headers {
+		if isAllowedHeaderName(name) || containsCRLF(name) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(headers))
+		}
+		out[name] = value
+	}
+	return out
+}
+
+// probeWithMirrors runs probe against cfg and then, while it keeps failing,
+// against each of cfg.Mirrors in order, returning the first version found.
+//
+// A mirror is the same record with url swapped and its credential headers
+// dropped. A credential refusal on url stops the chain: it is a verdict on the
+// record, not a failed source (S052-R2.2). When every source failed, the error
+// is a transport failure only if every attempt was one — a mirror timing out
+// must not hide that url itself answered with something the record cannot
+// read, which is the record's fault and the registry repair's business.
+func (c *Checker) probeWithMirrors(cfg *PackageConfig, probe func(*PackageConfig) (string, error)) (string, error) {
+	version, err := probe(cfg)
+	if err == nil || len(cfg.Mirrors) == 0 || errors.Is(err, ErrCredentialHostMismatch) {
+		return version, err
+	}
+
+	errs := []error{err}
+	for _, mirror := range cfg.Mirrors {
+		mc := *cfg
+		mc.URL = mirror
+		mc.Headers = nonCredentialHeaders(cfg.Headers)
+		mc.Mirrors = nil
+		v, merr := probe(&mc)
+		if merr == nil {
+			warnLogf("%s unavailable (%v); version read from mirror %s", hostForError(cfg.URL), err, hostForError(mirror))
+			return v, nil
+		}
+		errs = append(errs, fmt.Errorf("mirror %s: %w", hostForError(mirror), merr))
+	}
+
+	for i, e := range errs {
+		if isUpstreamUnreachable(e) {
+			continue
+		}
+		var others []string
+		for j, o := range errs {
+			if j != i {
+				others = append(others, o.Error())
+			}
+		}
+		return "", fmt.Errorf("%w (also failed: %s)", e, strings.Join(others, "; "))
+	}
+	return "", errors.Join(errs...)
+}
+
 // fallbackConfig derives the config fetchAndParse runs the fallback URL with.
 // It swaps in the fallback parser and pattern and keeps everything else that
 // shapes the fetch or the answer, so the fallback is the same probe pointed at
@@ -1802,16 +1865,6 @@ func (c *Checker) fetchUpstreamVersionRaw(pkg string, cfg *PackageConfig) (strin
 //     fallback host is deliberately outside the record's credential scope (see
 //     packageCredentialScope).
 func fallbackConfig(cfg *PackageConfig, pattern string) *PackageConfig {
-	var headers map[string]string
-	for name, value := range cfg.Headers {
-		if isAllowedHeaderName(name) || containsCRLF(name) {
-			continue
-		}
-		if headers == nil {
-			headers = make(map[string]string, len(cfg.Headers))
-		}
-		headers[name] = value
-	}
 	return &PackageConfig{
 		Parser:     cfg.FallbackParser,
 		Path:       cfg.Path,
@@ -1820,7 +1873,7 @@ func fallbackConfig(cfg *PackageConfig, pattern string) *PackageConfig {
 		XPath:      cfg.XPath,
 		Transform:  cfg.Transform,
 		Select:     cfg.Select,
-		Headers:    headers,
+		Headers:    nonCredentialHeaders(cfg.Headers),
 		Timeout:    cfg.Timeout,
 		Series:     cfg.Series,
 		Suffix:     cfg.Suffix,
