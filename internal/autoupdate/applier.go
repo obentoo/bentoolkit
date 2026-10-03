@@ -174,6 +174,10 @@ type ApplyResult struct {
 	// line labelled "Clean:", so reusing it would blame the wrong step for a
 	// registry failure. Empty when the pin was recorded.
 	RegistryWarning string
+	// MetadataCacheWarning records a non-fatal failure to regenerate the
+	// package's metadata/md5-cache entries after the bump. Empty on success,
+	// and when the overlay keeps no md5-cache.
+	MetadataCacheWarning string
 	// Obsolete indicates the pending entry no longer corresponds to anything to
 	// apply: the package was removed from the overlay, or the overlay is already
 	// at/beyond the target version. The entry is pruned from pending.json and
@@ -1302,6 +1306,13 @@ func (a *Applier) completeApply(pkg, newVersion string, result *ApplyResult) {
 			warnLogf("clean: %v", err)
 			result.CleanWarning = err.Error()
 		}
+	}
+
+	// Last, so it sees the directory as --clean left it: the new version gets
+	// its md5-cache entry and every removed version loses its own.
+	if err := a.regenMetadataCache(pkg, newVersion); err != nil {
+		warnLogf("md5-cache: %v", err)
+		result.MetadataCacheWarning = err.Error()
 	}
 }
 

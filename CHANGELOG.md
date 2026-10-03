@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--apply` regenerates the bumped package's md5-cache.** A bump left the
+  previous version's `metadata/md5-cache` entry behind and wrote none for the
+  new one, and the overlay once held 548 orphaned entries. After a successful
+  apply, `egencache` now runs for that package against the checkout, which also
+  removes the entries of versions `--clean` deleted. A failure is a warning and
+  keeps the bump.
+
 - **`--overlay <path>`, and the current checkout is used.** Every command took
   the overlay from `overlay.path` alone, so `--lint` in a worktree reported
   green on the main checkout it actually read. `--overlay` now chooses the

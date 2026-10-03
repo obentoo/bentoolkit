@@ -1258,6 +1258,17 @@ Authentication is hybrid, selected by `llm.bare`:
 
 > **Cost note.** `sonnet` in login/subscription mode is billed per call (a large page context of ~74k tokens is roughly $0.09+/call). The cheap path is `--bare` + an API key. Set a conservative `max_budget_usd` when running `--check` across many packages. If the `claude` CLI is missing or not authenticated, both `analyze` and `--check` log a Warn and fall back (heuristic schema / skip extraction) — they never fail because of the LLM.
 
+#### The md5-cache after a bump
+
+When the overlay keeps `metadata/md5-cache`, a successful `--apply` runs
+`egencache --update` for the bumped package against the checkout (through
+`--repositories-configuration`, never the synced copy Portage reads). The new
+version gets its entry, and versions whose ebuild is gone, `--clean` included,
+lose theirs. It needs `egencache` and `::gentoo` at `BENTOO_GENTOO_REPO` (default
+`/var/db/repos/gentoo`). A failure is printed on a `Cache:` line and never
+undoes the bump; that includes a missing entry after `egencache` exited 0,
+which it does when it fails on a version.
+
 #### When ::gentoo ships the version being bumped
 
 A bump copies the overlay's own ebuild to the new version; it never reads
