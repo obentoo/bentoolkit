@@ -73,7 +73,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 			}
 
 			// Check all packages
-			batch := checker.CheckAll(false)
+			batch := checker.CheckAll(t.Context(), false)
 
 			// Verify we got exactly N results across Items and Failures.
 			total := len(batch.Items) + len(batch.Failures)
@@ -133,7 +133,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 			}
 
 			// Check single package
-			result, err := checker.CheckPackage(targetPkg, false)
+			result, err := checker.CheckPackage(t.Context(), targetPkg, false)
 			if err != nil {
 				t.Logf("CheckPackage failed: %v", err)
 				return false
@@ -205,7 +205,7 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			}
 
 			// Check package
-			result, err := checker.CheckPackage(pkgName, true)
+			result, err := checker.CheckPackage(t.Context(), pkgName, true)
 			if err != nil {
 				t.Logf("CheckPackage failed: %v", err)
 				return false
@@ -283,7 +283,7 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			}
 
 			// Check package
-			result, err := checker.CheckPackage(pkgName, true)
+			result, err := checker.CheckPackage(t.Context(), pkgName, true)
 			if err != nil {
 				t.Logf("CheckPackage failed: %v", err)
 				return false
@@ -566,7 +566,7 @@ func TestCheckPackageNotFound(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage("nonexistent/pkg", false)
+	result, err := checker.CheckPackage(t.Context(), "nonexistent/pkg", false)
 	if err == nil {
 		t.Error("Expected error for non-existent package")
 	}
@@ -599,7 +599,7 @@ func TestCheckPackageNoEbuild(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage("test-cat/test-pkg", false)
+	result, err := checker.CheckPackage(t.Context(), "test-cat/test-pkg", false)
 	if err == nil {
 		t.Error("Expected error for missing ebuild")
 	}
@@ -642,7 +642,7 @@ func TestCheckPackageUsesCache(t *testing.T) {
 	}
 
 	// Check without force - should use cache
-	result, err := checker.CheckPackage(pkgName, false)
+	result, err := checker.CheckPackage(t.Context(), pkgName, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestCheckPackageBypassesCache(t *testing.T) {
 	}
 
 	// Check with force - should bypass cache
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestCheckPackageDetectsUpdate(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -792,7 +792,7 @@ func TestCheckPackageNoUpdate(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -837,7 +837,7 @@ func TestCheckPackageNotComparable(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -890,7 +890,7 @@ func TestCheckPackageStripsVPrefix(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestCheckPackageHTMLParser(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1004,7 +1004,7 @@ func TestFetchContentRateLimitNotChargedToOpTimeout(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("fetch failed despite a healthy server (rate-limit wait charged to opTimeout?): %v", err)
 	}
@@ -1049,7 +1049,7 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	total := len(batch.Items) + len(batch.Failures)
 	if total != 3 {
@@ -1099,7 +1099,7 @@ func TestCheckAll_SkipsDisabledPackages(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if total := len(batch.Items) + len(batch.Failures); total != 1 {
 		t.Errorf("Expected 1 result (disabled package skipped), got %d (Items=%d, Failures=%d)",
@@ -1164,7 +1164,7 @@ func TestCheckAll_ReturnsBatchResult(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if len(batch.Items) != 2 {
 		t.Errorf("expected 2 successful items, got %d", len(batch.Items))
@@ -1225,7 +1225,7 @@ func TestCheckAll_ErrorsOnStderr(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if len(batch.Failures) != 3 {
 		t.Fatalf("expected 3 failures, got %d", len(batch.Failures))
@@ -1324,7 +1324,7 @@ func TestCheckPackageAddsToPending(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	_, err = checker.CheckPackage(pkgName, true)
+	_, err = checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1378,7 +1378,7 @@ func TestCheckPackageUpdatesCache(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	_, err = checker.CheckPackage(pkgName, true)
+	_, err = checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1505,7 +1505,7 @@ func TestFetchUpstreamVersionFallback(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1819,7 +1819,7 @@ func TestFetchUpstreamVersion_UsesProviderWhenParseFails(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -1887,7 +1887,7 @@ func TestNewChecker_NoProviderConfigured_WarnsAndSkipsLLM(t *testing.T) {
 
 	// The check must not crash on the nil llmClient and should succeed via the
 	// normal json parse (LLM extraction skipped).
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

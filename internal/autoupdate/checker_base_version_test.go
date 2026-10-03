@@ -101,7 +101,7 @@ func TestBaseFromNone_KeepsTheEbuildBase(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "0_pre20260718", cfg, body, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestBaseFromNone_FetchesNoBaseSource(t *testing.T) {
 	}
 	createTestEbuild(t, overlayDir, pkg, "0_p20260711")
 
-	if _, err := checker.CheckPackage(pkg, true); err != nil {
+	if _, err := checker.CheckPackage(t.Context(), pkg, true); err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
 	if versionHits != 0 {
@@ -195,7 +195,7 @@ func TestBaseFromFile_RaisesBase(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "26.2.0_pre20260730", cfg, body, mesaVersionFile)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestBaseFromFile_MultilineFile(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "1.14.0_pre20260729", cfg, body, zedCargoToml)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBaseFromFile_NeverDowngrades(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "26.4.0_pre20260730", cfg, body, mesaVersionFile)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestBaseFromFile_PatternMatchesNothing_IsFatal(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "26.2.0_pre20260730", cfg, body, mesaVersionFile)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err == nil {
 		t.Fatal("CheckPackage: expected an error, got nil")
 	}
@@ -303,7 +303,7 @@ func TestBaseFromFile_CapturesNonVersion_IsFatal(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "26.2.0_pre20260730", cfg, body, mesaVersionFile)
-	_, err := checker.CheckPackage(pkg, true)
+	_, err := checker.CheckPackage(t.Context(), pkg, true)
 	if !errors.Is(err, ErrBaseVersionUnresolved) {
 		t.Fatalf("error = %v, want ErrBaseVersionUnresolved", err)
 	}
@@ -325,7 +325,7 @@ func TestBaseFromFile_FetchFails_IsFatal(t *testing.T) {
 
 	// Empty version file → the handler 404s.
 	checker := newBaseFileChecker(t, pkg, "26.2.0_pre20260730", cfg, body, "")
-	_, err := checker.CheckPackage(pkg, true)
+	_, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err == nil {
 		t.Fatal("CheckPackage: expected an error when the version file is unreachable")
 	}
@@ -350,7 +350,7 @@ func TestCommitVersionPattern_MatchesNothing_IsFatal(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "1.4.354_p20260730", cfg, body, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err == nil {
 		t.Fatal("CheckPackage: expected an error, got nil")
 	}
@@ -379,7 +379,7 @@ func TestCommitVersionPattern_StillWorksWhenItMatches(t *testing.T) {
 	)
 
 	checker := newBaseFileChecker(t, pkg, "1.4.357_p20260722", cfg, body, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

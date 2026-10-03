@@ -120,14 +120,14 @@ func TestHighestVersion(t *testing.T) {
 func TestReviveCheckerOptions(t *testing.T) {
 	pinReviveConcurrency(t)
 
-	opts := reviveCheckerOptions(context.Background(), t.TempDir(), 0, 0, config.LLMConfig{})
+	opts := reviveCheckerOptions(t.TempDir(), 0, 0, config.LLMConfig{})
 	if len(opts) == 0 {
 		t.Fatal("reviveCheckerOptions returned an empty option set")
 	}
 
 	// A positive cacheTTL appends WithCacheTTL, so the set must be at least as
 	// large as the TTL-less one.
-	withTTL := reviveCheckerOptions(context.Background(), t.TempDir(), 1, 0, config.LLMConfig{})
+	withTTL := reviveCheckerOptions(t.TempDir(), 1, 0, config.LLMConfig{})
 	if len(withTTL) < len(opts) {
 		t.Errorf("reviveCheckerOptions with cacheTTL produced fewer options (%d) than without (%d)",
 			len(withTTL), len(opts))

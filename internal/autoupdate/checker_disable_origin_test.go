@@ -404,7 +404,7 @@ path = "version"
 				t.Fatalf("NewChecker: %v", err)
 			}
 
-			res := checker.CheckAll(false)
+			res := checker.CheckAll(t.Context(), false)
 
 			if got := checker.Config().Packages[pkg]; got.IsEnabled() != tc.wantEnabled {
 				t.Errorf("in memory: enabled = %v, want %v", got.IsEnabled(), tc.wantEnabled)
@@ -454,7 +454,7 @@ path = "version"
 				t.Fatalf("NewChecker: %v", err)
 			}
 
-			res := checker.CheckAll(false)
+			res := checker.CheckAll(t.Context(), false)
 
 			held := checker.Config().Packages[pkg]
 			if held.IsEnabled() {
@@ -504,7 +504,7 @@ path = "version"
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
-	checker.CheckAll(false)
+	checker.CheckAll(t.Context(), false)
 
 	if len(reported) != 1 {
 		t.Fatalf("the run reported %d times, want exactly 1 — R1.4 asks for one line per run: %v", len(reported), reported)
@@ -543,7 +543,7 @@ path = "version"
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
-	checker.CheckAll(false)
+	checker.CheckAll(t.Context(), false)
 
 	if len(reported) != 0 {
 		t.Errorf("a run that froze nothing still reported: %v", reported)

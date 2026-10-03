@@ -162,7 +162,7 @@ loop:
 			reverted++
 			continue
 		}
-		checkRes, checkErr := c.CheckPackage(pkg, true) //nolint:contextcheck // ctx is injected via autoupdate.WithContext in newChecker's opts
+		checkRes, checkErr := c.CheckPackage(ctx, pkg, true)
 
 		// Pass = no error AND a version was extracted. A benign cache/pending
 		// warning leaves checkErr nil with UpstreamVersion set (checker.go success

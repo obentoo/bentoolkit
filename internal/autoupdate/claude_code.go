@@ -139,8 +139,8 @@ var _ LLMProvider = (*ClaudeCodeClient)(nil)
 // ClaudeCodeOption is a functional option for configuring ClaudeCodeClient.
 //
 // The option constructors are named with a ClaudeCode prefix to avoid colliding
-// with the package-level WithExecCommand (ApplierOption) and WithContext
-// (CheckerOption) already defined in this package.
+// with the package-level WithExecCommand (ApplierOption) already defined in this
+// package.
 type ClaudeCodeOption func(*ClaudeCodeClient)
 
 // WithClaudeCodeExecCommand overrides the context-aware exec.Command factory used

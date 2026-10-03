@@ -744,7 +744,6 @@ func resolveHTTPTimeout(cfg *config.Config) time.Duration {
 func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
-		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		// Per-request HTTP timeout (flag > config > 30s default). The Checker
 		// derives the larger per-operation budget so the retry attempts fit.
@@ -819,9 +818,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	if len(args) > 0 {
 		// Check specific package
 		pkg := args[0]
-		// ctx is threaded into the Checker via WithContext above, so every
-		// outbound request observes it; CheckPackage takes no ctx parameter.
-		result, err := checker.CheckPackage(pkg, autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+		result, err := checker.CheckPackage(ctx, pkg, autoupdateForce)
 		if err != nil {
 			// A removed ebuild is not a hard error: auto-disable the orphaned
 			// entry and report it as info so repeated runs stay quiet.
@@ -856,9 +853,8 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	}
 
 	// Check all packages. CheckAll never returns a fatal error: every
-	// per-package failure is captured in the BatchResult. ctx is threaded
-	// into the Checker via WithContext above; CheckAll takes no ctx parameter.
-	result := checker.CheckAll(autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	// per-package failure is captured in the BatchResult.
+	result := checker.CheckAll(ctx, autoupdateForce)
 
 	// Clear the progress line before rendering results so the counter does not
 	// bleed into the table. Mirrors `overlay compare`'s clear step.
@@ -904,8 +900,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// ::gentoo), reusing the checker --check already built. Read-only and
 	// best-effort — it never changes the check's exit code.
 	if autoupdateRevivable {
-		//nolint:contextcheck // ctx is already injected into checker via autoupdate.WithContext above
-		reportRevivableOrphans(checker, cfg)
+		reportRevivableOrphans(ctx, checker, cfg)
 	}
 
 	// S033-R9.1: put every pending update through the gates at its resolved
@@ -1329,7 +1324,7 @@ func confirmRegistryWrite(divs []autoupdate.Divergence, writable int) bool {
 // is read-only and best-effort — a provider-resolution failure warns and returns
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
-func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
+func reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Warn("revivable-orphan scan skipped: %v", err)
@@ -1337,7 +1332,7 @@ func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	candidates, ferr := checker.FindRevivableOrphans(prov)
+	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 	if ferr != nil {
 		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
 	}
@@ -2140,17 +2135,16 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 }
 
 // reviveCheckerOptions builds the Checker option set shared by the revive modes.
-// It mirrors runCheck's option set exactly — config dir, context, concurrency,
+// It mirrors runCheck's option set exactly — config dir, concurrency,
 // type filter, tuned rate limiter, cache TTL, fetch-body sharing, and the same
 // LLM wiring (with the err-first nil guard) — so a revived package's upstream
 // check behaves identically to a normal --check. The GitHub token is not an
 // option: NewChecker resolves it itself from GITHUB_TOKEN/GH_TOKEN via the
 // secrets chain. The progress callback is omitted: the revive paths drive
 // single-package CheckPackage calls, which never fire it.
-func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
+func reviveCheckerOptions(configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
-		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		autoupdate.WithTypeFilter(autoupdateOnly),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
@@ -2235,7 +2229,7 @@ func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 // (the same option set as --check) and the ::gentoo provider, then prints the
 // candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
 func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		return exitWith(1)
@@ -2248,10 +2242,9 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	// FindRevivableOrphans threads ctx into every upstream/gentoo lookup via the
-	// Checker (WithContext) and the provider. Soft per-package errors are returned
+	// FindRevivableOrphans threads ctx into every upstream and ::gentoo lookup. Soft per-package errors are returned
 	// alongside the candidates, so a partial scan still reports what it found.
-	candidates, err := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	candidates, err := checker.FindRevivableOrphans(ctx, prov)
 	if err != nil {
 		logger.Warn("revive scan completed with soft errors: %v", err)
 	}
@@ -2327,7 +2320,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		return exitWith(1)
@@ -2337,7 +2330,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	// (every candidate FindRevivableOrphans reports).
 	var targets []string
 	if target == "all" {
-		candidates, ferr := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+		candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 		if ferr != nil {
 			logger.Warn("revive scan completed with soft errors: %v", ferr)
 		}
@@ -2447,11 +2440,11 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	// It shares the applier's pending list so the entry CheckPackage writes is
 	// visible to Apply below (same in-memory map, same process).
 	checker, err := autoupdate.NewChecker(overlayPath,
-		append(reviveCheckerOptions(ctx, configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
+		append(reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
 	}
-	result, err := checker.CheckPackage(pkg, true) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	result, err := checker.CheckPackage(ctx, pkg, true)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("check failed: %v", err)}
 	}

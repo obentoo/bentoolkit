@@ -112,7 +112,7 @@ func TestFetchDedupEndToEnd(t *testing.T) {
 		// force = true: --force means "ignore the persisted version cache" and
 		// must NOT disable deduplication — a body fetched seconds ago in this run
 		// is already as fresh as --force can make it (UB7).
-		batch := checker.CheckAll(true)
+		batch := checker.CheckAll(t.Context(), true)
 
 		if len(batch.Failures) != 0 {
 			t.Fatalf("the run reported failures: %v", batch.Failures)
@@ -159,7 +159,7 @@ func TestFetchDedupEndToEnd(t *testing.T) {
 		srv := newDedupCountingServer(t)
 		checker := buildDedupRegistry(t, srv, sharers, WithFetchCache(false))
 
-		batch := checker.CheckAll(true)
+		batch := checker.CheckAll(t.Context(), true)
 
 		if len(batch.Failures) != 0 {
 			t.Fatalf("the run reported failures: %v", batch.Failures)

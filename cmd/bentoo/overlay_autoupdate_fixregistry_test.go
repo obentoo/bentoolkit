@@ -119,7 +119,6 @@ func newRegfixHarness(t *testing.T) *regfixHarness {
 	newChecker := func() (*autoupdate.Checker, error) {
 		return autoupdate.NewChecker(overlayDir,
 			autoupdate.WithConfigDir(configDir),
-			autoupdate.WithContext(context.Background()),
 			autoupdate.WithConcurrency(autoupdate.DefaultConcurrency),
 		)
 	}

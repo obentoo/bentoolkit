@@ -39,7 +39,7 @@ func TestResolveAuxValue_NoMatch(t *testing.T) {
 	cfg := &PackageConfig{URL: server.URL, AuxPattern: `(esr-bb[0-9]+)`}
 	result := &CheckResult{}
 
-	if got := c.resolveAuxValue(cfg, result); got != "" {
+	if got := c.resolveAuxValue(t.Context(), cfg, result); got != "" {
 		t.Errorf("expected empty value on no-match, got %q", got)
 	}
 	if result.Error == nil {
@@ -52,7 +52,7 @@ func TestResolveAuxValue_NoMatch(t *testing.T) {
 func TestResolveAuxValue_EmptyPattern(t *testing.T) {
 	c := newAuxTestChecker(t)
 	result := &CheckResult{}
-	if got := c.resolveAuxValue(&PackageConfig{URL: "http://unused"}, result); got != "" {
+	if got := c.resolveAuxValue(t.Context(), &PackageConfig{URL: "http://unused"}, result); got != "" {
 		t.Errorf("expected empty value for empty aux_pattern, got %q", got)
 	}
 	if result.Error != nil {
@@ -69,7 +69,7 @@ func TestResolveAuxValue_FetchError(t *testing.T) {
 
 	c := newAuxTestChecker(t)
 	result := &CheckResult{}
-	if got := c.resolveAuxValue(&PackageConfig{URL: url, AuxPattern: `(x)`}, result); got != "" {
+	if got := c.resolveAuxValue(t.Context(), &PackageConfig{URL: url, AuxPattern: `(x)`}, result); got != "" {
 		t.Errorf("expected empty value on fetch error, got %q", got)
 	}
 	if result.Error == nil {
@@ -84,7 +84,7 @@ func TestResolveAuxSHA(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(&PackageConfig{}, result); got != "" || result.Error != nil {
+		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{}, result); got != "" || result.Error != nil {
 			t.Errorf("empty path: got %q err %v", got, result.Error)
 		}
 	})
@@ -98,7 +98,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		t.Cleanup(server.Close)
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(&PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != sha {
+		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != sha {
 			t.Errorf("success: got %q, want %q (err %v)", got, sha, result.Error)
 		}
 	})
@@ -110,7 +110,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		t.Cleanup(server.Close)
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(&PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != "" {
+		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != "" {
 			t.Errorf("parse error: expected empty, got %q", got)
 		}
 		if result.Error == nil {
@@ -124,7 +124,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		server.Close()
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(&PackageConfig{URL: url, CommitSHAPath: "commitSha"}, result); got != "" {
+		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: url, CommitSHAPath: "commitSha"}, result); got != "" {
 			t.Errorf("fetch error: expected empty, got %q", got)
 		}
 		if result.Error == nil {

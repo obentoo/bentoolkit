@@ -129,7 +129,7 @@ func BenchmarkCheckAll_Speedup(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		batch := checker.CheckAll(true)
+		batch := checker.CheckAll(b.Context(), true)
 		if total := len(batch.Items) + len(batch.Failures); total != numPkgs {
 			b.Fatalf("CheckAll produced %d results, want %d", total, numPkgs)
 		}
@@ -166,7 +166,7 @@ func TestBenchmarkSpeedup(t *testing.T) {
 	var batch BatchResult[CheckResult]
 	go func() {
 		defer close(done)
-		batch = checker.CheckAll(true)
+		batch = checker.CheckAll(t.Context(), true)
 	}()
 
 	var peak int64

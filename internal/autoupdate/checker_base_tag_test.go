@@ -116,7 +116,7 @@ func TestBaseFromTag_HighestOfFamily(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.354_p20260727", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestBaseFromTag_ExactTagYieldsBareVersion(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.357_p20260722", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestBaseFromTag_ExactButOlderTagStaysSnapshot(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.356_p20260722", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestBaseFromTag_PreSuffixNeverCollapses(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.14.0_pre20260729", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestBaseFromTag_AnnotatedTagIsNotAnExactMatch(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.357_p20260722", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestBaseFromTag_GitLabListing(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.38.1_pre20260720", tagCfg(), commits, tags, "")
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestBaseFromTag_NoMatchingTagIsFatal(t *testing.T) {
 	cfg.BaseTagPattern = `^vulkan-sdk-([0-9.]+)$`
 
 	checker := newTagChecker(t, pkg, "1.4.350.0_p20260730", cfg, commits, tags, "")
-	_, err := checker.CheckPackage(pkg, true)
+	_, err := checker.CheckPackage(t.Context(), pkg, true)
 	if !errors.Is(err, ErrBaseVersionUnresolved) {
 		t.Fatalf("error = %v, want ErrBaseVersionUnresolved", err)
 	}
@@ -279,7 +279,7 @@ func TestCommitTrack_SameSHAIsNoUpdate(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.358", tagCfg(), commits, tags, testSHA40)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestCommitTrack_DifferentSHAStillUpdates(t *testing.T) {
 	)
 
 	checker := newTagChecker(t, pkg, "1.4.358", tagCfg(), commits, tags, testSHA40b)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestCommitTrack_SameSHAButBaseCorrectionStillUpdates(t *testing.T) {
 
 	// Ebuild pinned to the SAME commit the check resolves, but at the old base.
 	checker := newTagChecker(t, pkg, "1.4.354_p20260731", tagCfg(), commits, tags, testSHA40)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

@@ -186,7 +186,7 @@ func TestCheckAll_Parallel_RespectsLimit(t *testing.T) {
 		WithConcurrency(concurrency),
 	)
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if total := len(batch.Items) + len(batch.Failures); total != numPkgs {
 		t.Fatalf("CheckAll produced %d results, want %d (Items=%d, Failures=%d)",
@@ -249,7 +249,7 @@ func TestCheckAll_PanicRecovery(t *testing.T) {
 
 	// The defining assertion: this call returns normally — the panic in one
 	// worker did not crash the process.
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if total := len(batch.Items) + len(batch.Failures); total != numPkgs {
 		t.Fatalf("CheckAll produced %d results, want %d", total, numPkgs)
@@ -302,7 +302,7 @@ func TestProgressCallback_Monotonic(t *testing.T) {
 		WithProgressCallback(cb),
 	)
 
-	checker.CheckAll(true)
+	checker.CheckAll(t.Context(), true)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -360,7 +360,7 @@ func TestCheckAll_ResultsSorted(t *testing.T) {
 		t.Fatalf("NewChecker failed: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if len(batch.Items) != len(names) {
 		t.Fatalf("got %d items, want %d", len(batch.Items), len(names))
@@ -402,7 +402,6 @@ func TestCheckAll_ContextCancelMidFlight(t *testing.T) {
 	checker, _ := buildParallelChecker(t, numPkgs, server.URL,
 		WithRateLimiter(rl),
 		WithConcurrency(concurrency),
-		WithContext(ctx),
 		WithOpTimeout(10*time.Second),
 	)
 
@@ -413,7 +412,7 @@ func TestCheckAll_ContextCancelMidFlight(t *testing.T) {
 	outcome := make(chan checkAllOutcome, 1)
 	go func() {
 		start := time.Now()
-		b := checker.CheckAll(true)
+		b := checker.CheckAll(ctx, true)
 		outcome <- checkAllOutcome{batch: b, elapsed: time.Since(start)}
 	}()
 
