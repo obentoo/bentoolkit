@@ -1385,6 +1385,13 @@ bentoo overlay compare --concurrency=20
 A value outside the valid range **fails fast** with a clear error *before any
 package work begins* — so a typo in the flag never starts a partial run.
 
+`--concurrency` counts packages, not connections. During `--check`, at most
+**6 requests are in flight to any one host**, whatever `--concurrency` says,
+so a host that stops answering is not buried under a pile of hung requests.
+Waiting for a slot does not count against a request's timeout. Records that
+run the same `script` on the same `url` (fragment included) share one browser
+navigation per run, the way identical HTTP reads already share one fetch.
+
 ### Timeouts
 
 Each upstream fetch is bounded by a **per-request** timeout (the cap on a single
