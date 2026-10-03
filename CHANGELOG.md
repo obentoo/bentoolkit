@@ -70,6 +70,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`--check` caps requests per host, and script records share a
+  navigation.** `--concurrency` bounded packages, not connections, so a host
+  that stopped answering could hold as many hung requests as the run had
+  workers. At most 6 are now in flight per host. Records running the same
+  `script` on the same `url` (libreoffice and libreoffice-l10n) each opened
+  their own browser; they now share one evaluation per run.
+
 - **The autoupdate state follows `XDG_CONFIG_HOME`.** `config.yaml` honoured
   it, but `pending.json` and the version cache were hard-coded under
   `~/.config`. A run with a temporary `XDG_CONFIG_HOME` therefore read a
