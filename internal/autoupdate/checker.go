@@ -516,6 +516,15 @@ func WithGentooPath(path string) CheckerOption {
 	}
 }
 
+// WithPerHostConcurrency caps the requests in flight to one host at n; n < 1
+// removes the cap.
+func WithPerHostConcurrency(n int) CheckerOption {
+	return func(c *Checker) error {
+		c.hostSlots = newHostSlots(n)
+		return nil
+	}
+}
+
 // WithFetchCache turns per-run deduplication of upstream response bodies on or
 // off. It is ON by default (S024-R7.2) — NewChecker builds a cache in its struct
 // literal — so the only reason to pass this option at all is to turn it OFF.
@@ -536,15 +545,6 @@ func WithGentooPath(path string) CheckerOption {
 //
 // It cannot fail: a bool has no invalid value. The error in the return type is
 // the CheckerOption signature, not a possibility.
-// WithPerHostConcurrency caps the requests in flight to one host at n; n < 1
-// removes the cap.
-func WithPerHostConcurrency(n int) CheckerOption {
-	return func(c *Checker) error {
-		c.hostSlots = newHostSlots(n)
-		return nil
-	}
-}
-
 func WithFetchCache(enabled bool) CheckerOption {
 	return func(c *Checker) error {
 		if !enabled {
