@@ -30,12 +30,9 @@ func withFakeGentoo(t *testing.T, fake provider.Provider) {
 // line runRevive prints before each Revive, then the summary, as the format
 // strings stood before story 060 (1462803).
 func TestRunRevive_SkipPath(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly, origCompile, origClean := autoupdateOnly, autoupdateCompile, autoupdateClean
-	autoupdateOnly, autoupdateCompile, autoupdateClean = "", false, false
-	t.Cleanup(func() {
-		autoupdateOnly, autoupdateCompile, autoupdateClean = origOnly, origCompile, origClean
-	})
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only, auOpts.compile, auOpts.clean = "", false, false
 
 	const ver = "1.2.3"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -58,7 +55,7 @@ func TestRunRevive_SkipPath(t *testing.T) {
 
 	var code int
 	stdout := captureStdout(t, func() {
-		code = exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
+		code = exitCodeFor(testAutoupdateRun(auOpts).runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
 			&config.Config{}, config.LLMConfig{}))
 	})
 	if code != 0 {
@@ -81,10 +78,9 @@ func TestRunRevive_SkipPath(t *testing.T) {
 // displayReviveCandidates prints the populated table. No exit, no network for the
 // gentoo lookup (the fake answers it).
 func TestRunReviveList_WithCandidate(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly := autoupdateOnly
-	autoupdateOnly = ""
-	t.Cleanup(func() { autoupdateOnly = origOnly })
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only = ""
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("version 2.0.0\n"))
@@ -100,7 +96,7 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 	}
 	withFakeGentoo(t, fake)
 
-	code := exitCodeFor(runReviveList(context.Background(), overlay, configDir, 0,
+	code := exitCodeFor(testAutoupdateRun(auOpts).runReviveList(context.Background(), overlay, configDir, 0,
 		&config.Config{}, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runReviveList exit code = %d, want 0", code)
@@ -113,12 +109,9 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 // the same pass. The check has no active packages, so it exits 0; the report
 // runs via the injected fake provider (no network for the gentoo lookup).
 func TestRunCheck_Revivable(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly, origForce, origRevivable := autoupdateOnly, autoupdateForce, autoupdateRevivable
-	autoupdateOnly, autoupdateForce, autoupdateRevivable = "", true, true
-	t.Cleanup(func() {
-		autoupdateOnly, autoupdateForce, autoupdateRevivable = origOnly, origForce, origRevivable
-	})
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only, auOpts.force, auOpts.revivable = "", true, true
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("version 2.0.0\n"))
@@ -134,7 +127,7 @@ func TestRunCheck_Revivable(t *testing.T) {
 	}
 	withFakeGentoo(t, fake)
 
-	code := exitCodeFor(runCheck(context.Background(), overlay, configDir, nil, 0,
+	code := exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), overlay, configDir, nil, 0,
 		&config.Config{}, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runCheck --revivable exit code = %d, want 0 (no active packages, report is read-only)", code)

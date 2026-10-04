@@ -213,6 +213,7 @@ type cobraCommandUnderTest struct{ Use, Short, Long string }
 // deletions. So: a subcommand of its own, and the autoupdate command gains
 // nothing.
 func TestStagedClean_IsRegisteredAsItsOwnSubcommandAndMovesNothing(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	cmd := stagedCleanCmd(t)
 
 	if cmd.Short == "" || cmd.Long == "" {
@@ -224,7 +225,7 @@ func TestStagedClean_IsRegisteredAsItsOwnSubcommandAndMovesNothing(t *testing.T)
 	// invocation that already does something else, or an existing `--apply … `
 	// run silently becomes a sweep of the shared staging root.
 	for _, name := range []string{"clean-staging", "staged-clean", "clean-staged"} {
-		if autoupdateCmd.Flags().Lookup(name) != nil {
+		if auCmd.Flags().Lookup(name) != nil {
 			t.Errorf("`overlay autoupdate` grew a --%s flag; the staged-tree cleanup is a standalone subcommand "+
 				"precisely so that no existing invocation can be converted into a whole-root sweep (D1, R6.2)", name)
 		}

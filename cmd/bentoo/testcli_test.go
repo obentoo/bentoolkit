@@ -46,6 +46,9 @@ import (
 	"testing"
 
 	"github.com/fatih/color"
+	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/spf13/cobra"
 )
 
 // TestTestCLIRunReturnsStdoutStderrAndStatus is the harness's own first
@@ -240,19 +243,15 @@ func newTestCLI(t *testing.T) *testCLI {
 	t.Setenv("BENTOO_UI", "")
 
 	restoreReportFlags(t)
-	restoreAutoupdateFlags(t)
 
 	return &testCLI{t: t, home: home, overlay: overlay}
 }
 
 // restoreReportFlags puts the report flags back the way it found them when the
-// test ends, the way t.Setenv does for the environment above. Its sibling
-// restoreAutoupdateFlags does the same for every other flag of `overlay
-// autoupdate`; newTestCLI calls both, so together they cover every package
-// variable a flag of that command binds — reportFlagGlobals and
-// autoupdateFlagGlobals are the whole set, and
-// TestAutoupdateFlagGlobalsAreAllRestored fails the day a new flag binds one
-// neither lists.
+// test ends, the way t.Setenv does for the environment above. Every other
+// flag of `overlay autoupdate` binds a field of the autoupdateOptions its own
+// tree allocates (story 060, R5.1), so no Run can leak one into a later test
+// and there is nothing else to restore.
 //
 // # The flags are PACKAGE variables, and that is deliberate rather than an
 // # oversight
@@ -269,7 +268,7 @@ func newTestCLI(t *testing.T) *testCLI {
 //
 // # What it can leak into is a test that never builds a tree
 //
-// resolveAutoupdateUIMode reads autoupdateUI and autoupdateNoTUI directly, so a
+// manifestUsesTUI and resolveAutoupdateUIMode read autoupdateUI directly, so a
 // test calling autoupdateUsesTUI or manifestUsesTUI with no CLI at all reads
 // whatever the last `Run(..., "--ui=plain")` in the package left behind. That
 // makes such a test's result depend on which file sorts before it, which is not
@@ -280,7 +279,7 @@ func newTestCLI(t *testing.T) *testCLI {
 //
 // The same hazard reopened once the harness ran handlers in-process through
 // runMain (story 058). TestRunAutoupdate_SignalCancels calls runAutoupdate on
-// the package-level autoupdateCmd and pins only --check, --force and
+// the package-level autoupdate command variable (removed by story 060) and pins only --check, --force and
 // --concurrency; run under -shuffle after the `--lint --fix --yes` row of
 // TestS058AutoupdateRegistryModesKeepTheirExitCodes, it inherited
 // autoupdateLint = true, took the lint path instead of the check, and failed
@@ -295,54 +294,28 @@ func restoreReportFlags(t *testing.T) {
 }
 
 // reportFlagGlobals is every package variable restoreReportFlags puts back:
-// the three report flags newRootCmd declares on the root, plus --no-tui, which
-// outranks --ui and is read beside it by resolveAutoupdateUIMode.
+// the three report flags newRootCmd declares on the root. --no-tui, which
+// outranks --ui, is no longer one of them: it is a field of autoupdateOptions
+// and reaches resolveAutoupdateUIMode as a parameter (story 060).
 func reportFlagGlobals() []any {
-	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport, &autoupdateNoTUI}
+	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport}
 }
 
-// restoreAutoupdateFlags puts back, when the test ends, every package variable
-// a flag of `overlay autoupdate` binds — see restoreReportFlags for why a Run
-// can leak them and what the leak broke.
-func restoreAutoupdateFlags(t *testing.T) {
-	t.Helper()
-	restoreFlagGlobals(t, autoupdateFlagGlobals()...)
-}
-
-// autoupdateFlagGlobals is every `&autoupdate…` target of a Flags().*Var call
-// in newAutoupdateCmd (overlay_autoupdate.go), in declaration order.
-// --depth is absent because it binds no package variable: it is read off the
-// command. --no-tui is also in reportFlagGlobals; restoring it twice restores
-// the same snapshot.
-//
-// A new flag bound to a package variable must be added here.
-// TestAutoupdateFlagGlobalsAreAllRestored enforces it.
-func autoupdateFlagGlobals() []any {
-	return []any{
-		&autoupdateCheck,
-		&autoupdateList,
-		&autoupdateApply,
-		&autoupdateForce,
-		&autoupdateCompile,
-		&autoupdateRequireIsolation,
-		&autoupdateClean,
-		&autoupdateConcurrency,
-		&autoupdateTimeout,
-		&autoupdateOnly,
-		&autoupdateReviveList,
-		&autoupdateRevive,
-		&autoupdateRevivable,
-		&autoupdateNoTUI,
-		&autoupdateLint,
-		&autoupdateFix,
-		&autoupdateMarkAutoDisabledFlag,
-		&autoupdateExcept,
-		&autoupdateYes,
-		&autoupdateDistdir,
-		&autoupdateDistfilesCache,
-		&autoupdateNoFetchCache,
-		&autoupdateLLM,
+// testAutoupdateOptions returns an autoupdateOptions holding every flag's
+// default, as a freshly built `overlay autoupdate` would bind it. A test that
+// calls runAutoupdate or a mode method directly starts from it and sets only
+// the fields it means to exercise.
+func testAutoupdateOptions() *autoupdateOptions {
+	return &autoupdateOptions{
+		concurrency:    autoupdate.DefaultConcurrency,
+		distfilesCache: distfiles.DefaultCache,
 	}
+}
+
+// testAutoupdateRun wraps o in the run runAutoupdate would hand a mode, with
+// every resolved value at its zero (nothing configured).
+func testAutoupdateRun(o *autoupdateOptions) *autoupdateRun {
+	return &autoupdateRun{opts: o}
 }
 
 // restoreFlagGlobals snapshots the variable behind each pointer now and writes
@@ -486,4 +459,12 @@ func captureStream(t *testing.T, fd int, std **os.File) func() string {
 		_ = r.Close()
 		return out
 	}
+}
+
+// testAutoupdateCmd builds a fresh tree and returns its `overlay autoupdate`
+// command. It replaces the package-level command variable story 060 removed: a
+// test that needs the *cobra.Command — to set a signal context on it, or to
+// read its flags — gets one no other test shares.
+func testAutoupdateCmd() *cobra.Command {
+	return subCommand(subCommand(newRootCmd(), "overlay"), "autoupdate")
 }

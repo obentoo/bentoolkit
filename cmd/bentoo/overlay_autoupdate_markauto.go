@@ -42,8 +42,8 @@ import (
 // in the state the operator asked for? 0 only when it is — so a declined
 // migration, a refused unattended write, an exclusion list with a typo in it and
 // a plan that did not fully land all exit 1.
-func runMarkAutoDisabled(overlayPath string) error {
-	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, autoupdateExcept)
+func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
+	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, ar.opts.except)
 	if err != nil {
 		// Nothing has been written: the plan only reads. A registry that does not
 		// load cannot be migrated either, and failing here is the cheapest place
@@ -82,7 +82,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 		return nil
 	}
 
-	if !confirmAutoDisableMigration(plan) {
+	if !ar.confirmAutoDisableMigration(plan) {
 		// Return WITHOUT calling MarkAutoDisabled: the file is never opened, so
 		// it stays byte-identical by construction rather than by care. The
 		// entries above are still frozen, so the exit code still says so.
@@ -90,7 +90,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 		return exitWith(1)
 	}
 
-	marked, err := autoupdate.MarkAutoDisabled(overlayPath, autoupdateExcept)
+	marked, err := autoupdate.MarkAutoDisabled(overlayPath, ar.opts.except)
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		logger.Error("failed to record the automatic origin: %v", err)
@@ -159,10 +159,10 @@ func printAutoDisableGroup(style *color.Color, heading string, pkgs []string) {
 // It reports whether the migration may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
+func (ar *autoupdateRun) confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
 	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
 		output.Warning.Printf("  --yes given: stamping %d entry(ies) without a prompt.\n", len(plan.Mark))

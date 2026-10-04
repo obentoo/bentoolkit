@@ -402,7 +402,7 @@ func depthDistributionLine(plan validationPlan) string {
 // exists because a build costs hours; a plan that cannot start one has nothing
 // to ask about, and a gate that asks anyway teaches the operator to answer
 // without reading — which is how every confirmation gate dies.
-func confirmValidationRun(plan validationPlan) bool {
+func (ar *autoupdateRun) confirmValidationRun(plan validationPlan) bool {
 	builds := plan.building()
 	if builds == 0 {
 		return true
@@ -410,7 +410,7 @@ func confirmValidationRun(plan validationPlan) bool {
 
 	deepest := plan.deepest()
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		output.Warning.Printf("  --yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.\n",
 			len(plan.Entries), builds, deepest)
 		output.Warning.Printf("  Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.\n",
@@ -481,8 +481,8 @@ func confirmValidationRun(plan validationPlan) bool {
 // setVersionsForCheck, is never called — from here or from anywhere. The applier
 // built below runs Validate and never Apply: promotion, the version pin and the
 // `--clean` sweep all live in Apply, which this path does not reach.
-func runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Run, bool) {
-	if !autoupdateLLM {
+func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Run, bool) {
+	if !ar.opts.llm {
 		return nothingValidated(), false
 	}
 
@@ -509,7 +509,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		}
 	}
 
-	plan := planValidation(updates, autoupdateValidate.Policy, autoupdateValidate.Depth,
+	plan := planValidation(updates, ar.validate.Policy, ar.validate.Depth,
 		func(update autoupdate.PendingUpdate) string { return tier[update.Package] })
 
 	// Printed here rather than left to runValidationCheck, because the
@@ -518,7 +518,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	// not repeated.
 	printValidationPrice(plan)
 	plan.Printed = true
-	if !confirmValidationRun(plan) {
+	if !ar.confirmValidationRun(plan) {
 		// Nothing was validated, so there is no half to hand back. The plan is on
 		// screen either way, though, which is what the second value reports: the
 		// operator has just read it and answered no, and a false here would ask
@@ -531,9 +531,9 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierGentooPathOption())
-	opts = append(opts, applierDistfileOptions()...)
-	opts = append(opts, applierValidateOptions(configDir)...)
-	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
+	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(ar.opts.llm, llmCfg, ar.validateCfg)...)
 
 	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
 	// a read-only check has no business owning that switch even by accident.
@@ -708,7 +708,7 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 // carve-out (S045-R3.3) and a file that records "this run scanned nothing" is
 // the absence carried honestly (S045-R4.3). No file at all would be
 // indistinguishable from a command that never ran.
-func presentCheckReport(run report.Run, planPrinted bool) {
+func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// This command's own facts, read back out of the run that carries them: the
 	// three decisions below — whether to render at all, whether to point at
 	// `--list`, whether to announce the registry write — are all about packages,
@@ -748,7 +748,7 @@ func presentCheckReport(run report.Run, planPrinted bool) {
 		content := report.SectionOptions{ShowAll: autoupdateAll, SkipPlan: planPrinted}
 		device := render.Options{}
 
-		mode := reportModeOrPlain(autoupdateUIConfig)
+		mode := reportModeOrPlain(ar.uiConfig, ar.opts.noTUI, uiIsTerminal)
 
 		// The sections are built ONCE, here, and every mode below is handed the
 		// same slice — which is what makes "the three modes differ in

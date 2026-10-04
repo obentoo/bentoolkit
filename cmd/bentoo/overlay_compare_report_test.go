@@ -778,7 +778,7 @@ func TestPresentCompareReport(t *testing.T) {
 		// The half that matters: an unusable ambient mode is a typo in a shell
 		// profile, and it must not become "your comparison did not run".
 		comparePresentGlobals(t, "sideways", false, "")
-		if got := reportModeOrPlain(cfg); got != report.ModePlain {
+		if got := reportModeOrPlain(cfg, false, uiIsTerminal); got != report.ModePlain {
 			// Non-vacuity: if this value were ACCEPTED, the render below would
 			// prove nothing about the fallback.
 			t.Fatalf("reportModeOrPlain(%q) = %q, want the plain fallback", "sideways", got)

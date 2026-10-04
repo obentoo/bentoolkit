@@ -169,12 +169,12 @@ func configuredUIMode(cfg *config.Config) string {
 //
 // A nil config is read as "nothing configured" rather than as a failure; see
 // configuredUIMode.
-func resolveAutoupdateUIMode(cfg *config.Config) (report.Mode, error) {
+func resolveAutoupdateUIMode(cfg *config.Config, noTUI bool, isTerminal func() bool) (report.Mode, error) {
 	mode, warning, err := resolveUIMode(uiInputs{
 		Flag:        autoupdateUI,
-		NoTUI:       autoupdateNoTUI,
+		NoTUI:       noTUI,
 		Config:      configuredUIMode(cfg),
-		Interactive: uiIsTerminal(),
+		Interactive: isTerminal(),
 	})
 	if err != nil {
 		return "", err
@@ -273,8 +273,8 @@ func resolveAutoupdateUIMode(cfg *config.Config) (report.Mode, error) {
 // file called this shape "already correct" while the run died over the same key
 // on the way in; nothing about that file said otherwise, and only asking here
 // rather than deciding there could have caught it.
-func reportModeOrPlain(cfg *config.Config) report.Mode {
-	mode, err := resolveAutoupdateUIMode(cfg)
+func reportModeOrPlain(cfg *config.Config, noTUI bool, isTerminal func() bool) report.Mode {
+	mode, err := resolveAutoupdateUIMode(cfg, noTUI, isTerminal)
 	if err != nil {
 		logger.Warn("%v — this report is rendered in plain instead", err)
 		return report.ModePlain
@@ -311,22 +311,6 @@ func modeUsesLiveRegion(mode report.Mode) bool {
 	}
 }
 
-// autoupdateUIConfig is the configuration the apply path resolves its renderer
-// against, captured once by runAutoupdate.
-//
-// It exists because the gate is reached from buildApplyReporter, which runApply
-// and runApplyAll call, and none of those three carries a *config.Config — they
-// take the one sub-struct they needed. Threading the whole config down for a
-// display question would change three signatures on a path this story is
-// otherwise not touching, so the value is parked here instead, beside the other
-// decisions runAutoupdate resolves once and hands down the same way
-// (autoupdateDirs, autoupdateValidate, autoupdateValidateCfg).
-//
-// nil is a legal value and reads as "nothing configured". That is what makes a
-// binary that never ran runAutoupdate — every test binary, for one — behave
-// exactly as it did before this key existed (S044-R3.7).
-var autoupdateUIConfig *config.Config
-
 // autoupdateUsesTUI is the `--apply` path's live-region gate, read as a boolean
 // from the mode this run resolved to (S046-R3.3).
 //
@@ -339,8 +323,8 @@ var autoupdateUIConfig *config.Config
 // It shares resolveAutoupdateUIMode with everything else this command renders,
 // which is the point: one resolution, so the report and the apply progress
 // cannot disagree about which renderer this run is using.
-func autoupdateUsesTUI(cfg *config.Config) bool {
-	mode, err := resolveAutoupdateUIMode(cfg)
+func (ar *autoupdateRun) autoupdateUsesTUI() bool {
+	mode, err := resolveAutoupdateUIMode(ar.uiConfig, ar.opts.noTUI, uiIsTerminal)
 	if err != nil {
 		// Reachable, and only from the two AMBIENT sources. S044-R3.9 stops an
 		// unusable --ui and says nothing about the other two; the root has
@@ -394,7 +378,7 @@ func autoupdateUsesTUI(cfg *config.Config) bool {
 // NoTUI stays at zero, for the half that did NOT expire. --no-tui is declared
 // on `overlay autoupdate` alone, by the decision recorded in `func newRootCmd`
 // in root.go — the comment beginning "--no-tui deliberately stays on
-// autoupdate", beside the persistent-flag registration — so autoupdateNoTUI
+// autoupdate", beside the persistent-flag registration — so the --no-tui option
 // holds whatever THAT command was given. Reading it here
 // would still be exactly the cross-command leak this comment has always
 // described.
@@ -404,11 +388,11 @@ func autoupdateUsesTUI(cfg *config.Config) bool {
 // this identical to the tui.Enabled(tui.Options{}) it replaces (S046-R3.7).
 //
 // A nil config reads as "nothing configured" here too; see configuredUIMode.
-func manifestUsesTUI(cfg *config.Config) bool {
+func manifestUsesTUI(cfg *config.Config, isTerminal func() bool) bool {
 	mode, warning, err := resolveUIMode(uiInputs{
 		Flag:        autoupdateUI,
 		Config:      configuredUIMode(cfg),
-		Interactive: uiIsTerminal(),
+		Interactive: isTerminal(),
 	})
 	if err != nil {
 		// What reaches here is an AMBIENT mode alone, and only one that

@@ -28,11 +28,9 @@ func setSweepExecutor(t *testing.T, fn func(context.Context, string, autoupdate.
 	sweepExecutorFn = fn
 }
 
-func setSweepClean(t *testing.T, v bool) {
+func setSweepClean(t *testing.T, auOpts *autoupdateOptions, v bool) {
 	t.Helper()
-	orig := autoupdateClean
-	t.Cleanup(func() { autoupdateClean = orig })
-	autoupdateClean = v
+	auOpts.clean = v
 }
 
 // sweepOverlayFixture writes an overlay with one directory holding residue and
@@ -153,9 +151,9 @@ func TestSweepRoutingKeepsApplyClean(t *testing.T) {
 		t.Fatalf("read source: %v", err)
 	}
 	text := string(src)
-	applyAll := strings.Index(text, `case autoupdateApply == "all":`)
-	applyOne := strings.Index(text, `case autoupdateApply != "":`)
-	clean := strings.Index(text, "case autoupdateClean:")
+	applyAll := strings.Index(text, `case ar.opts.apply == "all":`)
+	applyOne := strings.Index(text, `case ar.opts.apply != "":`)
+	clean := strings.Index(text, "case ar.opts.clean:")
 	if applyAll < 0 || applyOne < 0 || clean < 0 {
 		t.Fatal("the routing switch no longer has the expected cases")
 	}
@@ -167,8 +165,9 @@ func TestSweepRoutingKeepsApplyClean(t *testing.T) {
 // TestRunSweepRejectsInvalidTarget: R1.4 — a typo fails loudly, before any file
 // is touched, rather than reading as "nothing to clean".
 func TestRunSweepRejectsInvalidTarget(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
-	setSweepClean(t, true)
+	setSweepClean(t, auOpts, true)
 	setSweepConfirm(t, func(string) bool {
 		t.Fatal("a confirmation was asked for an invalid target")
 		return false
@@ -176,7 +175,7 @@ func TestRunSweepRejectsInvalidTarget(t *testing.T) {
 
 	var err error
 	_ = captureStdout(t, func() {
-		err = runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
+		err = testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
 	})
 	code, exited := exitOf(err)
 	if !exited || code == 0 {
@@ -191,15 +190,16 @@ func TestRunSweepRejectsInvalidTarget(t *testing.T) {
 // and "no entry claims this" is the state in which nothing may be removed.
 // Failing beats an empty batch that reads as "nothing to clean".
 func TestRunSweepFailsWithoutARegistry(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := filepath.Join(t.TempDir(), "overlay")
 	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	setSweepClean(t, true)
+	setSweepClean(t, auOpts, true)
 
 	var err error
 	_ = captureStdout(t, func() {
-		err = runSweep(context.Background(), overlayDir, nil, 1)
+		err = testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	code, exited := exitOf(err)
 	if !exited || code == 0 {
@@ -210,9 +210,10 @@ func TestRunSweepFailsWithoutARegistry(t *testing.T) {
 // TestRunSweepDeclinedRemovesNothing: R3.3 — the executor is never entered, so
 // the overlay is byte-identical by construction rather than by care.
 func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
-	setSweepClean(t, true)
-	setReconcileYes(t, false)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true })
 	setSweepConfirm(t, func(string) bool { return false })
 	setSweepExecutor(t, func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport {
@@ -221,7 +222,7 @@ func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") || !residueExists(t, overlayDir, "2.0.0") {
@@ -236,9 +237,10 @@ func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
 // used to print help, so a script may already pass it. Making it act must not
 // make that script delete anything.
 func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
-	setSweepClean(t, true)
-	setReconcileYes(t, false)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return false })
 	setSweepConfirm(t, func(string) bool {
 		t.Fatal("a piped run was prompted")
@@ -250,7 +252,7 @@ func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") {
@@ -264,9 +266,10 @@ func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
 // TestRunSweepWithYesProceedsUnprompted: R3.4 — an explicit, in-so-many-words
 // approval works from a pipe, a cron job or a CI step.
 func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
-	setSweepClean(t, true)
-	setReconcileYes(t, true)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, true)
 	setReconcileInteractive(t, func() bool { return false })
 	setSweepConfirm(t, func(string) bool {
 		t.Fatal("--yes still prompted")
@@ -290,7 +293,7 @@ func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !ran {
 		t.Fatal("--yes did not reach the executor")
@@ -307,9 +310,10 @@ func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
 // regression this catches — it is how a batch gate decays into the click-through
 // the story set out to avoid, and it would pass every other test in this file.
 func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixtureMultiDir(t)
-	setSweepClean(t, true)
-	setReconcileYes(t, false)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true })
 
 	var prompts int
@@ -325,7 +329,7 @@ func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
 	})
 
 	captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if dirsInBatch < 2 {
@@ -343,9 +347,10 @@ func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
 // the opposite of what they were just shown. The ebuild is unclaimed; it is
 // protected.
 func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixtureHeldOnly(t)
-	setSweepClean(t, true)
-	setReconcileYes(t, false)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return false })
 	setSweepConfirm(t, func(string) bool {
 		t.Fatal("a batch with nothing to remove must not prompt")
@@ -357,7 +362,7 @@ func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !strings.Contains(out, "test-cat/held") {
@@ -371,13 +376,14 @@ func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
 // TestRunSweepNothingToDoDoesNotPrompt: R3.5 — asking "remove 0 files?" would
 // train the operator to say yes.
 func TestRunSweepNothingToDoDoesNotPrompt(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	// Remove the residue so the plan is empty.
 	if err := os.Remove(filepath.Join(overlayDir, "test-cat", "residue", "residue-1.0.0.ebuild")); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	setSweepClean(t, true)
-	setReconcileYes(t, false)
+	setSweepClean(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true })
 	setSweepConfirm(t, func(string) bool {
 		t.Fatal("an empty plan asked for confirmation")
@@ -385,7 +391,7 @@ func TestRunSweepNothingToDoDoesNotPrompt(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !strings.Contains(out, "Nothing to sweep") {
 		t.Errorf("an empty plan did not say so:\n%s", out)

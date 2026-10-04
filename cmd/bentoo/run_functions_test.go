@@ -266,70 +266,54 @@ func TestRunAnalyzeAll(t *testing.T) {
 
 // TestRunAutoupdateNoFlag tests runAutoupdate with no flags (shows help, no exit).
 func TestRunAutoupdateNoFlag(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	setupTestHome(t)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = false
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = false
+	auOpts.list = false
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // TestRunAutoupdateList tests runAutoupdate with --list flag.
 func TestRunAutoupdateList(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	setupTestHome(t)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = false
-	autoupdateList = true
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = false
+	auOpts.list = true
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // TestRunAutoupdateCheck tests runAutoupdate with --check flag.
 func TestRunAutoupdateCheck(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	setupTestHome(t)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // TestRunAutoupdateApply tests runAutoupdate with --apply flag.
 func TestRunAutoupdateApply(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	setupTestHome(t)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = false
-	autoupdateList = false
-	autoupdateApply = "net-misc/foo"
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = false
+	auOpts.list = false
+	auOpts.apply = "net-misc/foo"
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // ---- runCommit ----
@@ -872,40 +856,32 @@ parser = "github"
 
 // TestRunAutoupdateCheckWithConfig tests runAutoupdate --check with a packages.toml.
 func TestRunAutoupdateCheckWithConfig(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // TestRunAutoupdateCheckSpecificPkg tests runAutoupdate --check with a specific package arg.
 func TestRunAutoupdateCheckSpecificPkg(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"})
+	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts)
 }
 
 // ---- runCompare with packages in overlay ----
@@ -988,6 +964,8 @@ func TestRunAnalyzeWithTildePath(t *testing.T) {
 
 // TestRunAutoupdateWithTildePath tests runAutoupdate when overlay path starts with ~.
 func TestRunAutoupdateWithTildePath(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	tmpHome := t.TempDir()
 	overlayDir := filepath.Join(tmpHome, "overlay")
 	for _, sub := range []string{"profiles", "metadata"} {
@@ -1002,17 +980,11 @@ func TestRunAutoupdateWithTildePath(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = false
-	autoupdateList = true
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = false
+	auOpts.list = true
+	auOpts.apply = ""
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // ---- runStatus success path ----
@@ -1042,6 +1014,8 @@ func TestRunPushDryRunWithGitRepo(t *testing.T) {
 
 // TestRunAutoupdateEmptyOverlayPath tests runAutoupdate exits(1) when overlay path is empty.
 func TestRunAutoupdateEmptyOverlayPath(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	tmpHome := t.TempDir()
 	configDir := filepath.Join(tmpHome, ".config", "bentoo")
 	_ = os.MkdirAll(configDir, 0755)
@@ -1052,17 +1026,11 @@ func TestRunAutoupdateEmptyOverlayPath(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
-	code := exitCodeFor(runAutoupdate(autoupdateCmd, nil))
+	code := exitCodeFor(runAutoupdate(auCmd, nil, auOpts))
 	if code != 1 {
 		t.Errorf("runAutoupdate with empty overlay path should exit(1), got exit(%d)", code)
 	}
@@ -1095,43 +1063,35 @@ func TestRunAnalyzeEmptyOverlayPath(t *testing.T) {
 
 // TestRunCheckWithPackagesConfig tests runCheck when packages.toml exists in overlay.
 func TestRunCheckWithPackagesConfig(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	overlayDir := setupTestHome(t)
 
 	// Put packages.toml in the correct location: overlay/.autoupdate/packages.toml
 	setupAutoupdateConfig(t, overlayDir)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
 	// Will fail at HTTP level (no real network), but gets past NewChecker
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // TestRunCheckSpecificPkgWithConfig tests runCheck with a specific package and packages.toml.
 func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	overlayDir := setupTestHome(t)
 
 	setupAutoupdateConfig(t, overlayDir)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = true
-	autoupdateList = false
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = true
+	auOpts.list = false
+	auOpts.apply = ""
 
 	// Pass a specific package arg — will fail at HTTP but covers the args > 0 branch
-	_ = runAutoupdate(autoupdateCmd, []string{"app-misc/testpkg"})
+	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts)
 }
 
 // ---- runPull with fetch failure ----
@@ -1391,20 +1351,16 @@ func TestRunCommitWithMessageSuccess(t *testing.T) {
 
 // TestRunListSuccessPath tests runList when pending list loads successfully.
 func TestRunListSuccessPath(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	setupTestHome(t)
 
-	origCheck, origList, origApply := autoupdateCheck, autoupdateList, autoupdateApply
-	autoupdateCheck = false
-	autoupdateList = true
-	autoupdateApply = ""
-	defer func() {
-		autoupdateCheck = origCheck
-		autoupdateList = origList
-		autoupdateApply = origApply
-	}()
+	auOpts.check = false
+	auOpts.list = true
+	auOpts.apply = ""
 
 	// runList loads pending list from configDir — should succeed with empty list
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 }
 
 // ---- runPull divergence path ----

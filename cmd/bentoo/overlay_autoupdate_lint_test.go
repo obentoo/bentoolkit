@@ -27,6 +27,7 @@ func writeLintRegistry(t *testing.T, content string) string {
 
 // TestRunLintClean pins that a registry obeying the record model exits 0.
 func TestRunLintClean(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, `["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
@@ -37,7 +38,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 # END
 `)
 
-	if code := exitCodeFor(runLint(dir)); code != 0 {
+	if code := exitCodeFor(testAutoupdateRun(auOpts).runLint(dir)); code != 0 {
 		t.Fatalf("clean registry exited with %d, want 0", code)
 	}
 }
@@ -47,6 +48,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 // stranded BETWEEN two records — the same block at the top of the file would be
 // the file header, which the model allows.
 func TestRunLintReportsAndExits(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, `["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
@@ -68,7 +70,7 @@ pnpm — npm package, stable channel.
 # END
 `)
 
-	if code := exitCodeFor(runLint(dir)); code != 1 {
+	if code := exitCodeFor(testAutoupdateRun(auOpts).runLint(dir)); code != 1 {
 		t.Fatalf("got exit %d, want 1", code)
 	}
 }
@@ -78,6 +80,7 @@ pnpm — npm package, stable channel.
 // gate. Without this the restored ~112-line header of the real overlay would
 // fail a pre-commit hook.
 func TestRunLintFileHeaderIsClean(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, `# Bentoo Autoupdate Package Configuration
 # Every record obeys the field order documented here.
 
@@ -91,7 +94,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 # END
 `)
 
-	if code := exitCodeFor(runLint(dir)); code != 0 {
+	if code := exitCodeFor(testAutoupdateRun(auOpts).runLint(dir)); code != 0 {
 		t.Fatalf("file header exited with %d, want 0", code)
 	}
 }
@@ -99,7 +102,8 @@ claude-code — npm dist-tags.latest is the stable channel.
 // TestRunLintMissingRegistry pins that a missing packages.toml is an error, not
 // a silent pass — a lint that quietly succeeds on nothing is worse than none.
 func TestRunLintMissingRegistry(t *testing.T) {
-	if code := exitCodeFor(runLint(t.TempDir())); code != 1 {
+	auOpts := testAutoupdateOptions()
+	if code := exitCodeFor(testAutoupdateRun(auOpts).runLint(t.TempDir())); code != 1 {
 		t.Fatalf("got exit %d, want 1", code)
 	}
 }
@@ -157,11 +161,9 @@ tracked — commit-tracked with no base source: no repair can guess one.
 // setLintFix pins --fix for one test and restores it afterwards. Like --yes it
 // is a process global whose default is a publish-safety property, so it is never
 // left mutated for the next test.
-func setLintFix(t *testing.T, v bool) {
+func setLintFix(t *testing.T, auOpts *autoupdateOptions, v bool) {
 	t.Helper()
-	orig := autoupdateFix
-	t.Cleanup(func() { autoupdateFix = orig })
-	autoupdateFix = v
+	auOpts.fix = v
 }
 
 // readLintRegistry returns the fixture's packages.toml bytes, so a test can
@@ -178,11 +180,11 @@ func readLintRegistry(t *testing.T, overlayDir string) []byte {
 // runLintCapturing runs runLint over overlayDir and returns the exit status its
 // returned outcome maps to (func exitCodeFor) together with everything it
 // printed.
-func runLintCapturing(t *testing.T, overlayDir string) (int, string) {
+func runLintCapturing(t *testing.T, auOpts *autoupdateOptions, overlayDir string) (int, string) {
 	t.Helper()
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runLint(overlayDir))
+		code = exitCodeFor(testAutoupdateRun(auOpts).runLint(overlayDir))
 	})
 	return code, out
 }
@@ -196,6 +198,8 @@ func runLintCapturing(t *testing.T, overlayDir string) (int, string) {
 // reach the mode switch, fall through to its default branch, print the help and
 // NOT exit at all. Exit 1 can therefore only come from the guard.
 func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	tmpHome := t.TempDir()
 	cfgDir := filepath.Join(tmpHome, ".config", "bentoo")
 	if err := os.MkdirAll(cfgDir, 0o750); err != nil {
@@ -218,24 +222,21 @@ func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
 	// Every flag runAutoupdate validates before the mode switch, pinned so this
 	// test cannot fail (or pass) on another test's leftovers.
 	origLint, origFix, origConc, origTimeout, origOnly, origApply, origCheck :=
-		autoupdateLint, autoupdateFix, autoupdateConcurrency, autoupdateTimeout,
-		autoupdateOnly, autoupdateApply, autoupdateCheck
+		auOpts.lint, auOpts.fix, auOpts.concurrency, auOpts.timeout, auOpts.only, auOpts.apply, auOpts.check
 	t.Cleanup(func() {
-		autoupdateLint, autoupdateFix, autoupdateConcurrency, autoupdateTimeout,
-			autoupdateOnly, autoupdateApply, autoupdateCheck =
-			origLint, origFix, origConc, origTimeout, origOnly, origApply, origCheck
+		auOpts.lint, auOpts.fix, auOpts.concurrency, auOpts.timeout, auOpts.only, auOpts.apply, auOpts.check = origLint, origFix, origConc, origTimeout, origOnly, origApply, origCheck
 	})
-	autoupdateLint = false // the whole point: --fix on its own
-	autoupdateFix = true
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	autoupdateTimeout = 0
-	autoupdateOnly = ""
-	autoupdateApply = ""
-	autoupdateCheck = false
+	auOpts.lint = false // the whole point: --fix on its own
+	auOpts.fix = true
+	auOpts.concurrency = autoupdate.DefaultConcurrency
+	auOpts.timeout = 0
+	auOpts.only = ""
+	auOpts.apply = ""
+	auOpts.check = false
 
 	var code int
 	captureStdout(t, func() {
-		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
+		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts))
 	})
 
 	if code != 1 {
@@ -249,15 +250,16 @@ func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
 // reading a fake stdin. A mock write seam would pass here even if the gate were
 // deleted.
 func TestAutoupdateLintFixDeclineLeavesRegistryByteIdentical(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 	before := readLintRegistry(t, dir)
 
-	setLintFix(t, true)
-	setReconcileYes(t, false)
+	setLintFix(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true }) // pretend a terminal
 	feedStdin(t, "n\n")
 
-	code, out := runLintCapturing(t, dir)
+	code, out := runLintCapturing(t, auOpts, dir)
 
 	after := readLintRegistry(t, dir)
 	if !bytes.Equal(before, after) {
@@ -290,10 +292,11 @@ func TestAutoupdateLintFixDeclineLeavesRegistryByteIdentical(t *testing.T) {
 // It also pins the honesty of the summary: the one finding no repair can guess
 // survives, is named, and keeps the exit code non-zero.
 func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 
-	setLintFix(t, true)
-	setReconcileYes(t, true)
+	setLintFix(t, auOpts, true)
+	setReconcileYes(t, auOpts, true)
 	setReconcileInteractive(t, func() bool {
 		t.Error("--yes must not consult the TTY probe: it is an explicit approval")
 		return false
@@ -304,7 +307,7 @@ func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
 	})
 	feedStdin(t, "n\n") // the trap: reading this would decline
 
-	code, out := runLintCapturing(t, dir)
+	code, out := runLintCapturing(t, auOpts, dir)
 	got := string(readLintRegistry(t, dir))
 
 	if !strings.Contains(out, "--yes given") {
@@ -355,18 +358,19 @@ func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
 // it — the confirm seam is a tripwire, because prompting a pipe is how
 // `yes | bentoo …` publishes a rewrite nobody read.
 func TestAutoupdateLintFixNonTTYWithoutYesWritesNothing(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 	before := readLintRegistry(t, dir)
 
-	setLintFix(t, true)
-	setReconcileYes(t, false)
+	setLintFix(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return false }) // piped / CI
 	setReconcileConfirm(t, func(string) bool {
 		t.Error("a non-interactive run must not prompt")
 		return true
 	})
 
-	code, out := runLintCapturing(t, dir)
+	code, out := runLintCapturing(t, auOpts, dir)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a non-interactive run wrote to packages.toml (R7.3)\nbefore:\n%s\nafter:\n%s", before, after)
@@ -387,6 +391,7 @@ func TestAutoupdateLintFixNonTTYWithoutYesWritesNothing(t *testing.T) {
 // question that teaches an operator to answer yes without reading, and the one
 // prompt here that has to survive that habit is the one that publishes.
 func TestAutoupdateLintFixCleanRegistryDoesNotPrompt(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, `["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
 parser = "json"
@@ -398,8 +403,8 @@ claude-code — npm dist-tags.latest is the stable channel.
 `)
 	before := readLintRegistry(t, dir)
 
-	setLintFix(t, true)
-	setReconcileYes(t, false)
+	setLintFix(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool {
 		t.Error("nothing changes, so nothing may be confirmed")
 		return false
@@ -409,7 +414,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 		return true
 	})
 
-	code, out := runLintCapturing(t, dir)
+	code, out := runLintCapturing(t, auOpts, dir)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a no-op repair rewrote packages.toml\nbefore:\n%s\nafter:\n%s", before, after)
@@ -432,6 +437,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 // contradiction besides ("nothing to repair" / "2 issues remain"). One line ties
 // them together instead.
 func TestAutoupdateLintFixNothingRepairableSaysItOnce(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	// track = "commit" with no base_from: reported by legacy-base, which carries
 	// no repair on purpose (R6.1).
 	dir := writeLintRegistry(t, `["sci-ml/ik_llama-cpp"]
@@ -447,14 +453,14 @@ ik_llama-cpp — commit-tracked, base version left to the ebuild.
 `)
 	before := readLintRegistry(t, dir)
 
-	setLintFix(t, true)
-	setReconcileYes(t, false)
+	setLintFix(t, auOpts, true)
+	setReconcileYes(t, auOpts, false)
 	setReconcileConfirm(t, func(string) bool {
 		t.Error("a repair that changes nothing must not prompt")
 		return true
 	})
 
-	code, out := runLintCapturing(t, dir)
+	code, out := runLintCapturing(t, auOpts, dir)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a no-op repair rewrote packages.toml\nbefore:\n%s\nafter:\n%s", before, after)

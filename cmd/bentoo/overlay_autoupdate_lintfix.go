@@ -37,7 +37,7 @@ import (
 // declined repair, a refused unattended write and a repair that left the
 // unrepairable findings behind all exit 1, and the pre-commit hook that runs
 // --lint next agrees with what this run just said.
-func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
+func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	result, err := autoupdate.RepairPackagesConfig(overlayPath)
 	if err != nil {
 		// RepairPackagesConfig has written nothing: it returns an error only when
@@ -80,7 +80,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	fmt.Println()
 	printRepairSummary(result)
 
-	if !confirmLintRepair(result) {
+	if !ar.confirmLintRepair(result) {
 		// Return WITHOUT calling Write: the file is never opened, so it stays
 		// byte-identical by construction rather than by care. Every finding the
 		// lint reported is still there, so the exit code still says so.
@@ -163,10 +163,10 @@ func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 // It reports whether the repair may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func confirmLintRepair(result *autoupdate.RepairResult) bool {
+func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool {
 	repairs := totalRepairs(result)
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
 		output.Warning.Printf("  --yes given: writing %d repair(s) without a prompt.\n", repairs)

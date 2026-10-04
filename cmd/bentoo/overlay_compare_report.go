@@ -921,7 +921,7 @@ func compareOneLine(s string) string {
 // sentences from the same field. This function is back to the three steps
 // `func presentManifestReport` takes, which is what S047-R1.2 asked of it.
 func presentCompareReport(cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg)
+	mode := reportModeOrPlain(cfg, false, uiIsTerminal)
 	content := report.SectionOptions{ShowAll: autoupdateAll}
 	if err := renderCheckReportIn(mode, run.Sections(content), render.Options{}); err != nil {
 		logger.Warn("the report could not be rendered: %v", err)

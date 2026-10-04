@@ -356,7 +356,7 @@ func presentValidateReport(rep validate.Report, complete, asJSON bool, diag io.W
 	// to stdout is about THE REPORT — a SKIPPED line and the reason beside it
 	// have to be read together — and this is not the report. It is a fact about
 	// the display, which is why the design puts it on stderr for every producer.
-	_ = reportModeOrPlain(validateReportConfig())
+	_ = reportModeOrPlain(validateReportConfig(), false, uiIsTerminal)
 
 	if asJSON {
 		renderValidateJSON(run, diag)

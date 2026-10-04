@@ -43,7 +43,7 @@ var (
 //
 // concurrency is resolved by the caller — see sweepConcurrency below for why it
 // is not read from the flag here.
-func runSweep(ctx context.Context, overlayPath string, args []string, concurrency int) error {
+func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args []string, concurrency int) error {
 	// A sweep with no registry has no claims, and "no entry claims this" is the
 	// state in which planSweep refuses to remove anything. Failing loudly here
 	// is the honest outcome: the alternative is an empty batch that reads as
@@ -84,7 +84,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 		return nil
 	}
 
-	if !confirmSweep(batch) {
+	if !ar.confirmSweep(batch) {
 		return nil
 	}
 
@@ -94,8 +94,8 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 		// The same two directories every other mode uses, resolved once in
 		// runAutoupdate (S030-R1.3). A standalone sweep regenerates Manifests
 		// too, so it downloads distfiles too.
-		autoupdate.WithSweepDistdir(autoupdateDirs.Distdir, autoupdateDirs.ConfiguredDistdir),
-		autoupdate.WithSweepDistfilesCache(autoupdateDirs.Cache),
+		autoupdate.WithSweepDistdir(ar.dirs.Distdir, ar.dirs.ConfiguredDistdir),
+		autoupdate.WithSweepDistfilesCache(ar.dirs.Cache),
 	)
 	displaySweepReport(report)
 	return nil
@@ -117,12 +117,12 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 // delete files, on an assumption the story itself flagged and never checked. An
 // operator who has verified it can still say so with --concurrency.
 //
-// flagWasSet is passed in rather than read from autoupdateCmd here: that command
-// value is initialised with a RunE func that reaches this file, so touching it
-// from this package closes an initialization cycle.
-func sweepConcurrency(flagWasSet bool) int {
+// flagWasSet is passed in rather than read off the command here: runAutoupdate
+// holds the *cobra.Command, and Flags().Changed is the one question it answers
+// that a zero value in autoupdateOptions cannot.
+func (ar *autoupdateRun) sweepConcurrency(flagWasSet bool) int {
 	if flagWasSet {
-		return autoupdateConcurrency
+		return ar.opts.concurrency
 	}
 	return 1
 }
@@ -234,7 +234,7 @@ func keptLines(keep map[string]string) []string {
 // interactive terminal is asked; anything else prints the plan and removes
 // nothing. registryPromptIsInteractive requires BOTH a stdin and a stdout TTY,
 // so `yes | bentoo overlay autoupdate --clean` cannot answer for a human.
-func confirmSweep(batch autoupdate.SweepBatch) bool {
+func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 	dirs := 0
 	for _, d := range batch.Dirs {
 		if len(d.Remove) > 0 {
@@ -242,7 +242,7 @@ func confirmSweep(batch autoupdate.SweepBatch) bool {
 		}
 	}
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		output.Warning.Printf("  --yes given: removing %d ebuild(s) without a prompt.\n", batch.TotalRemove)
 		return true
 	}

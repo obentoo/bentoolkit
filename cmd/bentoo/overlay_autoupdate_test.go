@@ -67,6 +67,7 @@ func writeExitTestPackagesConfig(t *testing.T, overlayDir, serverURL string, pkg
 // runCheck returns its outcome (story 058); func exitCodeFor maps it to the
 // exit status.
 func TestCLI_ExitCodes(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	// Local server returns a valid version payload so a package whose path
 	// matches ("version") succeeds on the first HTTP try (no retries needed).
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -133,22 +134,18 @@ func TestCLI_ExitCodes(t *testing.T) {
 
 			// Force = true bypasses the cache so every package performs a
 			// real check; args nil selects the check-all path.
-			origForce := autoupdateForce
-			autoupdateForce = true
-			defer func() { autoupdateForce = origForce }()
+			auOpts.force = true
 
-			// runCheck reads autoupdateConcurrency via WithConcurrency, which
+			// runCheck reads the concurrency option via WithConcurrency, which
 			// rejects values outside [1, 100]; pin a valid value for the test.
-			origConc := autoupdateConcurrency
-			autoupdateConcurrency = autoupdate.DefaultConcurrency
-			defer func() { autoupdateConcurrency = origConc }()
+			auOpts.concurrency = autoupdate.DefaultConcurrency
 
 			// cacheTTL = 0 → runCheck skips WithCacheTTL and the Checker
 			// uses its default 1-hour TTL (R2.2). This test does not
 			// exercise cache freshness; force=true bypasses the cache.
 			// Zero config.LLMConfig{} (Provider == "") → no LLM provider is
 			// wired and the exit-code contract is unaffected.
-			code := exitCodeFor(runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{}))
+			code := exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{}))
 			if code != tt.wantExit {
 				t.Errorf("runCheck exit code = %d, want %d", code, tt.wantExit)
 			}
@@ -165,6 +162,8 @@ func TestCLI_ExitCodes(t *testing.T) {
 // path (loadAppContextNoValidation → GetCacheTTL → time.Duration → WithCacheTTL)
 // is exercised, not just the inner constructor.
 func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	// Stub HTTP server returning a valid JSON version payload.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -202,19 +201,13 @@ func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
 		t.Fatalf("mkdir autoupdate config dir: %v", err)
 	}
 
-	// Pin CLI flag globals to run --check once.
-	origCheck, origForce, origApply, origConc :=
-		autoupdateCheck, autoupdateForce, autoupdateApply, autoupdateConcurrency
-	autoupdateCheck = true
-	autoupdateForce = true // ensure a fresh upstream fetch
-	autoupdateApply = ""
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	defer func() {
-		autoupdateCheck, autoupdateForce, autoupdateApply, autoupdateConcurrency =
-			origCheck, origForce, origApply, origConc
-	}()
+	// Pin the options to run --check once.
+	auOpts.check = true
+	auOpts.force = true // ensure a fresh upstream fetch
+	auOpts.apply = ""
+	auOpts.concurrency = autoupdate.DefaultConcurrency
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts)
 
 	// Reload the cache with the SAME TTL the config declared (60 s). If the
 	// TTL had not reached the writer, the entry written above would have been
@@ -262,6 +255,7 @@ func TestAutoupdateCommandExists(t *testing.T) {
 
 // TestAutoupdateCommandFlags tests that all required flags are present
 func TestAutoupdateCommandFlags(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	tests := []struct {
 		name     string
 		flagName string
@@ -275,7 +269,7 @@ func TestAutoupdateCommandFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			flag := autoupdateCmd.Flags().Lookup(tt.flagName)
+			flag := auCmd.Flags().Lookup(tt.flagName)
 			if flag == nil {
 				t.Errorf("autoupdate command should have --%s flag", tt.flagName)
 			}
@@ -285,27 +279,30 @@ func TestAutoupdateCommandFlags(t *testing.T) {
 
 // TestAutoupdateCommandDescription tests command descriptions
 func TestAutoupdateCommandDescription(t *testing.T) {
-	if autoupdateCmd.Short == "" {
+	auCmd := testAutoupdateCmd()
+	if auCmd.Short == "" {
 		t.Error("autoupdate command should have a short description")
 	}
-	if autoupdateCmd.Long == "" {
+	if auCmd.Long == "" {
 		t.Error("autoupdate command should have a long description")
 	}
 }
 
 // TestAutoupdateCommandRun tests that the RunE function is set
 func TestAutoupdateCommandRun(t *testing.T) {
-	if autoupdateCmd.RunE == nil {
+	auCmd := testAutoupdateCmd()
+	if auCmd.RunE == nil {
 		t.Error("autoupdate command should have a RunE function")
 	}
 }
 
 // TestAutoupdateFlagTypes tests that flags have correct types
 func TestAutoupdateFlagTypes(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	// Boolean flags
 	boolFlags := []string{"check", "list", "force", "compile"}
 	for _, flagName := range boolFlags {
-		flag := autoupdateCmd.Flags().Lookup(flagName)
+		flag := auCmd.Flags().Lookup(flagName)
 		if flag == nil {
 			t.Errorf("flag %s should exist", flagName)
 			continue
@@ -318,7 +315,7 @@ func TestAutoupdateFlagTypes(t *testing.T) {
 	// String flags
 	stringFlags := []string{"apply"}
 	for _, flagName := range stringFlags {
-		flag := autoupdateCmd.Flags().Lookup(flagName)
+		flag := auCmd.Flags().Lookup(flagName)
 		if flag == nil {
 			t.Errorf("flag %s should exist", flagName)
 			continue
@@ -331,6 +328,7 @@ func TestAutoupdateFlagTypes(t *testing.T) {
 
 // TestAutoupdateUsageContainsExamples tests that usage contains examples
 func TestAutoupdateUsageContainsExamples(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	examples := []string{
 		"--check",
 		"--list",
@@ -340,13 +338,13 @@ func TestAutoupdateUsageContainsExamples(t *testing.T) {
 	}
 
 	for _, example := range examples {
-		if !strings.Contains(autoupdateCmd.Long, example) {
+		if !strings.Contains(auCmd.Long, example) {
 			t.Errorf("autoupdate long description should contain example with %s", example)
 		}
 	}
 
 	// The bulk-apply form must be documented so users discover it.
-	if !strings.Contains(autoupdateCmd.Long, "--apply all") {
+	if !strings.Contains(auCmd.Long, "--apply all") {
 		t.Error("autoupdate long description should document '--apply all'")
 	}
 }
@@ -555,11 +553,9 @@ func stalePinCount(divs []autoupdate.Divergence) int {
 // setReconcileYes pins the --yes flag for one test and restores it after. The
 // flag is a process global and its default is a publish-safety property, so it
 // is never left mutated.
-func setReconcileYes(t *testing.T, v bool) {
+func setReconcileYes(t *testing.T, auOpts *autoupdateOptions, v bool) {
 	t.Helper()
-	orig := autoupdateYes
-	t.Cleanup(func() { autoupdateYes = orig })
-	autoupdateYes = v
+	auOpts.yes = v
 }
 
 func setReconcileInteractive(t *testing.T, fn func() bool) {
@@ -607,18 +603,17 @@ func feedStdin(t *testing.T, answer string) {
 
 // pinCheckFlags pins every autoupdate flag runCheck reads to a known state, so
 // a test never inherits another test's globals.
-func pinCheckFlags(t *testing.T) {
+func pinCheckFlags(t *testing.T, auOpts *autoupdateOptions) {
 	t.Helper()
 	origForce, origConc, origOnly, origRevivable, origQuiet :=
-		autoupdateForce, autoupdateConcurrency, autoupdateOnly, autoupdateRevivable, quiet
+		auOpts.force, auOpts.concurrency, auOpts.only, auOpts.revivable, quiet
 	t.Cleanup(func() {
-		autoupdateForce, autoupdateConcurrency, autoupdateOnly, autoupdateRevivable, quiet =
-			origForce, origConc, origOnly, origRevivable, origQuiet
+		auOpts.force, auOpts.concurrency, auOpts.only, auOpts.revivable, quiet = origForce, origConc, origOnly, origRevivable, origQuiet
 	})
-	autoupdateForce = true // no cache: every package really checks
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	autoupdateOnly = ""
-	autoupdateRevivable = false
+	auOpts.force = true // no cache: every package really checks
+	auOpts.concurrency = autoupdate.DefaultConcurrency
+	auOpts.only = ""
+	auOpts.revivable = false
 	quiet = true // silence the \r progress counter so captured output is readable
 }
 
@@ -626,14 +621,15 @@ func pinCheckFlags(t *testing.T) {
 // answer must leave packages.toml exactly as it was — proven on the bytes, with
 // the REAL writer still wired and the REAL confirmAction reading a fake stdin.
 func TestAutoupdateReconcileDeclineLeavesRegistryByteIdentical(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 	before := f.readRegistry(t)
 
-	setReconcileYes(t, false)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true }) // pretend a terminal
 	feedStdin(t, "n\n")
 
-	out := captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	after := f.readRegistry(t)
 	if !bytes.Equal(before, after) {
@@ -654,9 +650,10 @@ func TestAutoupdateReconcileDeclineLeavesRegistryByteIdentical(t *testing.T) {
 // a run that consulted stdin at all would decline and write nothing; and the
 // TTY probe is a tripwire, so a run that even asked whether it may prompt fails.
 func TestAutoupdateReconcileYesWritesWithoutReadingStdin(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 
-	setReconcileYes(t, true)
+	setReconcileYes(t, auOpts, true)
 	setReconcileInteractive(t, func() bool {
 		t.Error("--yes must not consult the TTY probe: it is an explicit approval")
 		return false
@@ -667,7 +664,7 @@ func TestAutoupdateReconcileYesWritesWithoutReadingStdin(t *testing.T) {
 	})
 	feedStdin(t, "n\n") // the trap: reading this would decline
 
-	captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	if got := f.pins(t)["app-editors/neovim"]; got != "0.11.1" {
 		t.Errorf("--yes did not write the pin: app-editors/neovim version = %q, want %q", got, "0.11.1")
@@ -680,6 +677,7 @@ func TestAutoupdateReconcileYesWritesWithoutReadingStdin(t *testing.T) {
 // ebuild the UnclaimedEbuild finding is asking a human to look at (its Key is a
 // bare atom that coincides with a real registry key). Only StalePin is writable.
 func TestAutoupdateReconcileWritesOnlyStalePins(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 
 	// Guard the fixture itself: if Reconcile ever stopped producing all three
@@ -695,8 +693,8 @@ func TestAutoupdateReconcileWritesOnlyStalePins(t *testing.T) {
 		}
 	}
 
-	setReconcileYes(t, true)
-	captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	setReconcileYes(t, auOpts, true)
+	captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	got := f.pins(t)
 	want := map[string]string{
@@ -724,6 +722,7 @@ func TestAutoupdateReconcileWritesOnlyStalePins(t *testing.T) {
 // count — not the total number of divergences. The real confirmAction is used,
 // so the assertion is on the text a human actually sees.
 func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 
 	divs := f.divergences(t)
@@ -732,11 +731,11 @@ func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
 		t.Fatalf("fixture cannot distinguish the two counts: %d writable of %d divergences", writable, len(divs))
 	}
 
-	setReconcileYes(t, false)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return true })
 	feedStdin(t, "n\n") // decline: this test is about the text, not the write
 
-	out := captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	wantPrompt := fmt.Sprintf("Write %d version pin(s) to packages.toml?", writable)
 	if !strings.Contains(out, wantPrompt) {
@@ -764,17 +763,18 @@ func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
 // TestAutoupdateReconcileNoDivergencesPrintsNothing pins the quiet path: with
 // the registry already matching the overlay, the reconciliation is invisible.
 func TestAutoupdateReconcileNoDivergencesPrintsNothing(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := newReconcileFixture(t, []reconcileEntry{
 		{key: "app-editors/neovim", pin: "0.11.1", ebuilds: []string{"0.11.1"}},
 	})
 
-	setReconcileYes(t, false)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool {
 		t.Error("nothing diverges, so nothing may be confirmed")
 		return false
 	})
 
-	out := captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 	if out != "" {
 		t.Errorf("an in-sync registry printed a reconciliation report:\n%s", out)
 	}
@@ -784,11 +784,12 @@ func TestAutoupdateReconcileNoDivergencesPrintsNothing(t *testing.T) {
 // clause end-to-end through runCheck: a non-interactive run reports the
 // divergences, writes nothing, and still exits 0.
 func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := checkableFixture(t)
 	before := f.readRegistry(t)
 
-	pinCheckFlags(t)
-	setReconcileYes(t, false)
+	pinCheckFlags(t, auOpts)
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return false }) // piped / CI
 	setReconcileConfirm(t, func(string) bool {
 		t.Error("a non-interactive run must not prompt")
@@ -797,7 +798,7 @@ func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+		code = exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
 			&config.Config{}, config.LLMConfig{}))
 	})
 
@@ -820,11 +821,12 @@ func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
 // the check that already succeeded still exits 0 — the pins are bookkeeping on
 // top of a check, not part of its verdict.
 func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := checkableFixture(t)
 	before := f.readRegistry(t)
 
-	pinCheckFlags(t)
-	setReconcileYes(t, true)
+	pinCheckFlags(t, auOpts)
+	setReconcileYes(t, auOpts, true)
 	wantErr := errors.New("packages.toml is read-only")
 	var calls int
 	setReconcileWriter(t, func(string, map[string]string) error {
@@ -838,7 +840,7 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 	var errOut string
 	out := captureStdout(t, func() {
 		errOut = captureStderr(t, func() {
-			code = exitCodeFor(runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+			code = exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
 				&config.Config{}, config.LLMConfig{}))
 		})
 	})
@@ -864,17 +866,18 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 // confirmation, one write call carrying the whole batch — not one call per
 // entry, which would make a partially-written registry reachable.
 func TestAutoupdateReconcileBatchIsOneCallForEveryEntry(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 	writable := stalePinCount(f.divergences(t))
 
-	setReconcileYes(t, true)
+	setReconcileYes(t, auOpts, true)
 	var batches []map[string]string
 	setReconcileWriter(t, func(_ string, pins map[string]string) error {
 		batches = append(batches, pins)
 		return nil
 	})
 
-	captureStdout(t, func() { reconcileRegistryAfterCheck(f.overlayDir) })
+	captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	if len(batches) != 1 {
 		t.Fatalf("the writer was called %d times, want 1 (design D4)", len(batches))
@@ -888,7 +891,8 @@ func TestAutoupdateReconcileBatchIsOneCallForEveryEntry(t *testing.T) {
 // directly. A --yes that defaulted to true would make every scripted --check a
 // release; this is cheap to assert and expensive to get wrong.
 func TestAutoupdateYesFlagDefaultsToFalse(t *testing.T) {
-	flag := autoupdateCmd.Flags().Lookup("yes")
+	auCmd := testAutoupdateCmd()
+	flag := auCmd.Flags().Lookup("yes")
 	if flag == nil {
 		t.Fatal("autoupdate command should have a --yes flag")
 	}
@@ -910,6 +914,7 @@ func TestAutoupdateYesFlagDefaultsToFalse(t *testing.T) {
 // gives, per kept version, the registry entry that claims it — and says which
 // RULE kept a version no entry claims, rather than leaving it unexplained.
 func TestAutoupdateApplyCleanReportNamesClaimingEntry(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:    "media-plugins/gst-plugins-vpx",
 		OldVersion: "1.28.4",
@@ -924,7 +929,7 @@ func TestAutoupdateApplyCleanReportNamesClaimingEntry(t *testing.T) {
 		CleanedOldVersion: "1.28.4",
 	}
 
-	out := captureStdout(t, func() { displayApplyResult(result) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).displayApplyResult(result) })
 
 	for version, key := range map[string]string{
 		"1.28.5": "media-plugins/gst-plugins-vpx@stable",
@@ -954,6 +959,7 @@ func TestAutoupdateApplyCleanReportNamesClaimingEntry(t *testing.T) {
 // TestAutoupdateApplyCleanReportKeepsLegacySingleRemovalLine pins the common
 // case: one ebuild swept still reads exactly as it did before this story.
 func TestAutoupdateApplyCleanReportKeepsLegacySingleRemovalLine(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:           "net-misc/rclone",
 		OldVersion:        "1.71.0",
@@ -964,7 +970,7 @@ func TestAutoupdateApplyCleanReportKeepsLegacySingleRemovalLine(t *testing.T) {
 		CleanKept:         map[string]string{"1.71.1": "net-misc/rclone"},
 	}
 
-	out := captureStdout(t, func() { displayApplyResult(result) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).displayApplyResult(result) })
 
 	if !strings.Contains(out, "Removed: rclone-1.71.0.ebuild (old version)") {
 		t.Errorf("the single-removal line changed wording; got:\n%s", out)
@@ -980,6 +986,7 @@ func TestAutoupdateApplyCleanReportKeepsLegacySingleRemovalLine(t *testing.T) {
 // this IS the blocked-entry line, and printing a second one would name the same
 // entry twice.
 func TestAutoupdateApplyCleanReportNamesPinlessEntryWhenBlocked(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	const pinless = "media-plugins/gst-plugins-vpx@dev"
 	result := &autoupdate.ApplyResult{
 		Package:    "media-plugins/gst-plugins-vpx",
@@ -991,7 +998,7 @@ func TestAutoupdateApplyCleanReportNamesPinlessEntryWhenBlocked(t *testing.T) {
 			"(would have removed: 1.28.3, 1.28.4)", pinless),
 	}
 
-	out := captureStdout(t, func() { displayApplyResult(result) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).displayApplyResult(result) })
 
 	if !strings.Contains(out, pinless) {
 		t.Errorf("a blocked clean does not name the pinless entry (R6.2); got:\n%s", out)
@@ -1013,6 +1020,7 @@ func TestAutoupdateApplyCleanReportNamesPinlessEntryWhenBlocked(t *testing.T) {
 // the pin is written on every successful apply while the sweep only runs under
 // --clean, so blaming the clean step would point at a step that never ran.
 func TestAutoupdateApplyReportPrintsRegistryWarningUnderItsOwnLabel(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:         "net-misc/rclone",
 		OldVersion:      "1.71.0",
@@ -1021,7 +1029,7 @@ func TestAutoupdateApplyReportPrintsRegistryWarningUnderItsOwnLabel(t *testing.T
 		RegistryWarning: `could not record version = "1.71.1" for net-misc/rclone: disk full`,
 	}
 
-	out := captureStdout(t, func() { displayApplyResult(result) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).displayApplyResult(result) })
 
 	if !strings.Contains(out, "Registry: could not record version") {
 		t.Errorf("RegistryWarning is not printed under its own label; got:\n%s", out)

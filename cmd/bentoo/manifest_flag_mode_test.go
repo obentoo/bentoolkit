@@ -23,7 +23,7 @@ import (
 //
 // The other half did NOT expire, and the third test below pins it: --no-tui
 // stays on `overlay autoupdate` alone (root.go:122-124), so reading
-// autoupdateNoTUI here would be exactly the cross-command leak the comment
+// the --no-tui option here would be exactly the cross-command leak the comment
 // describes. NoTUI staying at zero is the intended contract, not an oversight.
 //
 // # Every name carries the TestManifestFlagMode prefix
@@ -42,12 +42,12 @@ import (
 // directly, so a test that leaves one set decides the result of whichever file
 // sorts after it. Restoring is not politeness here; it is what keeps every
 // ordering equivalent.
-func manifestFlagModeSetUI(t *testing.T, ui string, noTUI bool) {
+func manifestFlagModeSetUI(t *testing.T, auOpts *autoupdateOptions, ui string, noTUI bool) {
 	t.Helper()
 
 	restoreReportFlags(t)
 	autoupdateUI = ui
-	autoupdateNoTUI = noTUI
+	auOpts.noTUI = noTUI
 
 	// Empty is "not set" for all three, per resolveUIMode's own convention.
 	t.Setenv("BENTOO_UI", "")
@@ -62,12 +62,13 @@ func manifestFlagModeSetUI(t *testing.T, ui string, noTUI bool) {
 // off one, the Interactive input degrades the mode to plain anyway and the two
 // answers agree by accident.
 func TestManifestFlagModePlainTurnsTheLiveRegionOff(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	defer stubUIIsTerminal(true)()
-	manifestFlagModeSetUI(t, "plain", false)
+	manifestFlagModeSetUI(t, auOpts, "plain", false)
 
 	cfg := &config.Config{} // no ui block: --ui is the only source that speaks
 
-	if manifestUsesTUI(cfg) {
+	if manifestUsesTUI(cfg, uiIsTerminal) {
 		t.Error("overlay manifest --ui=plain still started the live region on a terminal — the operator asked for the mode whose help text promises no escape sequence at all and got them anyway (R3.3)")
 	}
 }
@@ -76,19 +77,20 @@ func TestManifestFlagModePlainTurnsTheLiveRegionOff(t *testing.T) {
 // must be READ, not merely obeyed when it says off. A gate hard-wired to false
 // would satisfy the test above and fail this one.
 func TestManifestFlagModeInlineTurnsTheLiveRegionOn(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	defer stubUIIsTerminal(true)()
-	manifestFlagModeSetUI(t, "inline", false)
+	manifestFlagModeSetUI(t, auOpts, "inline", false)
 
 	cfg := &config.Config{}
 
-	if !manifestUsesTUI(cfg) {
+	if !manifestUsesTUI(cfg, uiIsTerminal) {
 		t.Error("overlay manifest --ui=inline left the live region off on a terminal — the flag is not being read, it is being ignored in one direction (R3.3)")
 	}
 }
 
 // TestManifestFlagModeNoTUIDoesNotReachAManifestRun pins the half of the
 // original comment that is STILL TRUE. --no-tui is declared on `overlay
-// autoupdate` alone; a manifest run never parses it, so autoupdateNoTUI holds
+// autoupdate` alone; a manifest run never parses it, so the --no-tui option holds
 // another command's answer and must not be read here.
 //
 // The autoupdate assertion is what stops this being a vacuous pass. Both
@@ -97,15 +99,16 @@ func TestManifestFlagModeInlineTurnsTheLiveRegionOn(t *testing.T) {
 // measured difference between two commands rather than a flag that did nothing
 // to anybody.
 func TestManifestFlagModeNoTUIDoesNotReachAManifestRun(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	defer stubUIIsTerminal(true)()
-	manifestFlagModeSetUI(t, "inline", true)
+	manifestFlagModeSetUI(t, auOpts, "inline", true)
 
 	cfg := &config.Config{}
 
-	if autoupdateUsesTUI(cfg) {
+	if (&autoupdateRun{opts: auOpts, uiConfig: cfg}).autoupdateUsesTUI() {
 		t.Fatal("the premise is wrong: --no-tui did not turn the live region off on the command that declares it, so this test cannot tell a leak from a flag that does nothing")
 	}
-	if !manifestUsesTUI(cfg) {
+	if !manifestUsesTUI(cfg, uiIsTerminal) {
 		t.Error("--no-tui, which only `overlay autoupdate` declares, turned a manifest run's live region off — that is a cross-command leak: the manifest run never parsed the flag it just obeyed (R3.3)")
 	}
 }

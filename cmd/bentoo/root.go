@@ -200,7 +200,9 @@ func subCommand(parent *cobra.Command, name string) *cobra.Command {
 // package's existing tests in the same change. Nothing in production reads them
 // — production goes through rootCmd — and a later story can delete this block
 // once the tests it serves are moved onto the harness newRootCmd now makes
-// possible. `overlay prune` has no variable here because nothing references one.
+// possible. `overlay prune` has no variable here because nothing references one,
+// and `overlay autoupdate` has none since story 060 moved its tests onto
+// testAutoupdateCmd.
 //
 // Go orders these by dependency, not by line: rootCmd is built first, then the
 // four below it, then their children.
@@ -211,19 +213,18 @@ var (
 	versionCmd    = subCommand(rootCmd, "version")
 	completionCmd = subCommand(rootCmd, "completion")
 
-	addCmd        = subCommand(overlayCmd, "add")
-	analyzeCmd    = subCommand(overlayCmd, "analyze")
-	autoupdateCmd = subCommand(overlayCmd, "autoupdate")
-	commitCmd     = subCommand(overlayCmd, "commit")
-	compareCmd    = subCommand(overlayCmd, "compare")
-	diffCmd       = subCommand(overlayCmd, "diff")
-	initCmd       = subCommand(overlayCmd, "init")
-	logCmd        = subCommand(overlayCmd, "log")
-	manifestCmd   = subCommand(overlayCmd, "manifest")
-	pullCmd       = subCommand(overlayCmd, "pull")
-	pushCmd       = subCommand(overlayCmd, "push")
-	renameCmd     = subCommand(overlayCmd, "rename")
-	statusCmd     = subCommand(overlayCmd, "status")
+	addCmd      = subCommand(overlayCmd, "add")
+	analyzeCmd  = subCommand(overlayCmd, "analyze")
+	commitCmd   = subCommand(overlayCmd, "commit")
+	compareCmd  = subCommand(overlayCmd, "compare")
+	diffCmd     = subCommand(overlayCmd, "diff")
+	initCmd     = subCommand(overlayCmd, "init")
+	logCmd      = subCommand(overlayCmd, "log")
+	manifestCmd = subCommand(overlayCmd, "manifest")
+	pullCmd     = subCommand(overlayCmd, "pull")
+	pushCmd     = subCommand(overlayCmd, "push")
+	renameCmd   = subCommand(overlayCmd, "rename")
+	statusCmd   = subCommand(overlayCmd, "status")
 
 	distfileFetchCmd = subCommand(distfileCmd, "fetch")
 

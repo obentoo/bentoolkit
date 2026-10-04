@@ -69,7 +69,7 @@ import (
 var confirmStagedCleanFn = confirmAction
 
 // stagedCleanYes is this subcommand's own --yes, and it is deliberately not
-// autoupdateYes.
+// the --yes option of `overlay autoupdate`.
 //
 // That variable is `overlay autoupdate --yes`, whose consent covers deletions
 // from the published overlay. Sharing it would let one operator's --yes on one

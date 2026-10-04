@@ -36,29 +36,28 @@ func (f *fakeReviveProvider) GetName() string   { return "fake" }
 func (f *fakeReviveProvider) SupportsAPI() bool { return true }
 func (f *fakeReviveProvider) Close() error      { return nil }
 
-// pinReviveConcurrency pins autoupdateConcurrency to a valid value for the
+// pinReviveConcurrency pins the concurrency option to a valid value for the
 // duration of the test. reviveCheckerOptions feeds it into WithConcurrency,
 // which rejects values outside [1, 100].
-func pinReviveConcurrency(t *testing.T) {
+func pinReviveConcurrency(t *testing.T, auOpts *autoupdateOptions) {
 	t.Helper()
-	orig := autoupdateConcurrency
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	t.Cleanup(func() { autoupdateConcurrency = orig })
+	auOpts.concurrency = autoupdate.DefaultConcurrency
 }
 
 // TestReviveCheckerOptions asserts the shared option builder returns a non-empty
 // option set for a zero LLM config (no provider configured).
 func TestReviveCheckerOptions(t *testing.T) {
-	pinReviveConcurrency(t)
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
 
-	opts := reviveCheckerOptions(t.TempDir(), 0, 0, config.LLMConfig{})
+	opts := testAutoupdateRun(auOpts).reviveCheckerOptions(t.TempDir(), 0, 0, config.LLMConfig{})
 	if len(opts) == 0 {
 		t.Fatal("reviveCheckerOptions returned an empty option set")
 	}
 
 	// A positive cacheTTL appends WithCacheTTL, so the set must be at least as
 	// large as the TTL-less one.
-	withTTL := reviveCheckerOptions(t.TempDir(), 1, 0, config.LLMConfig{})
+	withTTL := testAutoupdateRun(auOpts).reviveCheckerOptions(t.TempDir(), 1, 0, config.LLMConfig{})
 	if len(withTTL) < len(opts) {
 		t.Errorf("reviveCheckerOptions with cacheTTL produced fewer options (%d) than without (%d)",
 			len(withTTL), len(opts))
@@ -199,14 +198,15 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 // directory, so runRevive logs guidance and exits 1 BEFORE any checker, seed, or
 // applier.Apply work. Fully binary-free (no clone, no pkgdev).
 func TestRunRevive_NoPackageDirProvider(t *testing.T) {
-	pinReviveConcurrency(t)
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
 	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
 	configDir := t.TempDir()
 	cfg := configWithGentooGitHub()
 
-	code := exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{}))
+	code := exitCodeFor(testAutoupdateRun(auOpts).runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0, cfg, config.LLMConfig{}))
 	if code != 1 {
 		t.Fatalf("runRevive exit code = %d, want 1 (no PackageDirProvider guard)", code)
 	}
@@ -218,7 +218,8 @@ func TestRunRevive_NoPackageDirProvider(t *testing.T) {
 // displayReviveCandidates prints the "nothing to revive" note. No exit, no
 // binary. resolveGentooProvider's success path is exercised here too.
 func TestRunReviveList_NoCandidates(t *testing.T) {
-	pinReviveConcurrency(t)
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
 	setupTestHome(t)
 
 	overlay := setupTestOverlay(t)
@@ -234,7 +235,7 @@ func TestRunReviveList_NoCandidates(t *testing.T) {
 	}
 	cfg := configWithGentooGitHub()
 
-	code := exitCodeFor(runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}))
+	code := exitCodeFor(testAutoupdateRun(auOpts).runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runReviveList exited with code %d, want 0", code)
 	}

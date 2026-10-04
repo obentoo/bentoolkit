@@ -141,6 +141,7 @@ func TestLegacyTranscriptionIsAnchored(t *testing.T) {
 // so this compares the new path against the real old one instead of against
 // somebody's recollection of it.
 func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	for _, tty := range []bool{true, false} {
 		t.Run(map[bool]string{true: "on a terminal", false: "off a terminal"}[tty], func(t *testing.T) {
 			defer stubUIIsTerminal(tty)()
@@ -148,10 +149,10 @@ func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
 			legacy := legacyEnabled(tty)
 			cfg := &config.Config{} // no ui block at all
 
-			if got := manifestUsesTUI(cfg); got != legacy {
+			if got := manifestUsesTUI(cfg, uiIsTerminal); got != legacy {
 				t.Errorf("overlay manifest: new path says %v, tui.Enabled says %v (R3.7)", got, legacy)
 			}
-			if got := autoupdateUsesTUI(cfg); got != legacy {
+			if got := (&autoupdateRun{opts: auOpts, uiConfig: cfg}).autoupdateUsesTUI(); got != legacy {
 				t.Errorf("autoupdate --apply: new path says %v, tui.Enabled says %v (R3.7)", got, legacy)
 			}
 		})
@@ -163,6 +164,7 @@ func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
 // NO_COLOR configured nothing about ui.mode, so this story must leave them
 // exactly where they were.
 func TestNoConfigMatchesLegacyBehaviourUnderTheOptOuts(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	for _, env := range []string{"NO_COLOR", "BENTOO_NO_TUI"} {
 		t.Run(env, func(t *testing.T) {
 			t.Setenv(env, "1")
@@ -173,10 +175,10 @@ func TestNoConfigMatchesLegacyBehaviourUnderTheOptOuts(t *testing.T) {
 			}
 
 			cfg := &config.Config{}
-			if manifestUsesTUI(cfg) {
+			if manifestUsesTUI(cfg, uiIsTerminal) {
 				t.Errorf("overlay manifest turned the TUI on for an operator who set %s (R3.7)", env)
 			}
-			if autoupdateUsesTUI(cfg) {
+			if (&autoupdateRun{opts: auOpts, uiConfig: cfg}).autoupdateUsesTUI() {
 				t.Errorf("autoupdate --apply turned the TUI on for an operator who set %s (R3.7)", env)
 			}
 		})
@@ -191,12 +193,12 @@ func TestManifestInheritsUIMode(t *testing.T) {
 	defer stubUIIsTerminal(true)()
 
 	plain := &config.Config{UI: config.UIConfig{Mode: "plain"}}
-	if manifestUsesTUI(plain) {
+	if manifestUsesTUI(plain, uiIsTerminal) {
 		t.Error("ui.mode: plain did not reach overlay manifest — it is still deciding on its own (S044-R3.8)")
 	}
 
 	inline := &config.Config{UI: config.UIConfig{Mode: "inline"}}
-	if !manifestUsesTUI(inline) {
+	if !manifestUsesTUI(inline, uiIsTerminal) {
 		t.Error("ui.mode: inline did not turn the manifest TUI on")
 	}
 }
@@ -206,14 +208,15 @@ func TestManifestInheritsUIMode(t *testing.T) {
 // alternate screen is a different piece of work, and doing it by accident here
 // would take over the terminal during a build.
 func TestFullscreenDoesNotReachTheApplyPath(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	defer stubUIIsTerminal(true)()
 
 	cfg := &config.Config{UI: config.UIConfig{Mode: "fullscreen"}}
 
-	if !autoupdateUsesTUI(cfg) {
+	if !(&autoupdateRun{opts: auOpts, uiConfig: cfg}).autoupdateUsesTUI() {
 		t.Error("ui.mode: fullscreen turned the apply-path live region off entirely")
 	}
-	if !manifestUsesTUI(cfg) {
+	if !manifestUsesTUI(cfg, uiIsTerminal) {
 		t.Error("ui.mode: fullscreen turned the manifest live region off entirely")
 	}
 }

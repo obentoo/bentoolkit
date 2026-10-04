@@ -215,7 +215,7 @@ func chooseManifestReporter(cfg *config.Config, dryRun bool, ctx context.Context
 	if dryRun {
 		return tui.Noop(), func() {}
 	}
-	if manifestUsesTUI(cfg) {
+	if manifestUsesTUI(cfg, uiIsTerminal) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
 		return r, func() { prog.Stop(); _ = prog.Wait() }

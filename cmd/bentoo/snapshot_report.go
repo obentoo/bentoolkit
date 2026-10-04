@@ -295,7 +295,7 @@ func snapshotReportConfig() *config.Config {
 // mid-write is no reason to also withhold the file, which may be the only copy
 // left — and on a timer-driven run it usually is.
 func presentSnapshotReport(cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg)
+	mode := reportModeOrPlain(cfg, false, uiIsTerminal)
 
 	// Two questions, kept apart. What the report should SAY — list every step
 	// that succeeded, or count them — is report.SectionOptions, answered here

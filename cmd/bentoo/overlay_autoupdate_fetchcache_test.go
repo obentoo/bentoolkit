@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -16,15 +15,6 @@ import (
 // Story 024 / task 3.1 — the --no-fetch-cache escape hatch (S024-R7.1, R7.2)
 // =============================================================================
 
-// pinNoFetchCache pins the process-global flag for one test and restores it,
-// so a test never leaks the un-deduplicated mode into the rest of the suite.
-func pinNoFetchCache(t *testing.T, v bool) {
-	t.Helper()
-	orig := autoupdateNoFetchCache
-	t.Cleanup(func() { autoupdateNoFetchCache = orig })
-	autoupdateNoFetchCache = v
-}
-
 // runFetchCacheCheck drives the REAL --check path over a two-record registry in
 // which both records declare the same URL, and returns how many requests the
 // server actually received.
@@ -33,6 +23,7 @@ func pinNoFetchCache(t *testing.T, v bool) {
 // to change how many requests go out and nothing else, so any weaker check
 // (exit code, output text) would pass with the flag unwired.
 func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
+	auOpts := testAutoupdateOptions()
 	t.Helper()
 
 	var requests atomic.Int64
@@ -52,13 +43,13 @@ func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
 		writeExitTestEbuild(t, overlayDir, pkg, "0.9.0")
 	}
 
-	pinCheckFlags(t) // force = true, sane concurrency, quiet
-	pinNoFetchCache(t, noFetchCache)
-	setReconcileYes(t, false)
+	pinCheckFlags(t, auOpts) // force = true, sane concurrency, quiet
+	auOpts.noFetchCache = noFetchCache
+	setReconcileYes(t, auOpts, false)
 	setReconcileInteractive(t, func() bool { return false }) // never prompt, never write
 
 	captureStdout(t, func() {
-		_ = runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
+		_ = testAutoupdateRun(auOpts).runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
 	})
 
 	return requests.Load()
@@ -69,11 +60,12 @@ func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
 // behaviour so a suspicious result can be compared against an un-deduplicated
 // run.
 func TestNoFetchCacheFlag(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	// -------------------------------------------------------------------------
 	// S024-R7.2 — the default is "deduplicate". The flag is an opt-OUT.
 	// -------------------------------------------------------------------------
 	t.Run("the flag is registered as a bool defaulting to false", func(t *testing.T) {
-		f := autoupdateCmd.Flags().Lookup("no-fetch-cache")
+		f := auCmd.Flags().Lookup("no-fetch-cache")
 		if f == nil {
 			t.Fatal("autoupdate has no --no-fetch-cache flag")
 		}
@@ -87,17 +79,15 @@ func TestNoFetchCacheFlag(t *testing.T) {
 	})
 
 	t.Run("the bare flag sets the switch", func(t *testing.T) {
-		orig := autoupdateNoFetchCache
-		t.Cleanup(func() {
-			autoupdateNoFetchCache = orig
-			_ = autoupdateCmd.Flags().Set("no-fetch-cache", strconv.FormatBool(orig))
-		})
-
-		if err := autoupdateCmd.ParseFlags([]string{"--no-fetch-cache"}); err != nil {
+		// A fresh tree: its flags are bound to an autoupdateOptions of its own,
+		// so parsing it cannot leak into any other test (S060-R5.1). The flag's
+		// Value reads back through the pointer it was bound to.
+		cmd := newAutoupdateCmd()
+		if err := cmd.ParseFlags([]string{"--no-fetch-cache"}); err != nil {
 			t.Fatalf("parsing --no-fetch-cache failed: %v", err)
 		}
-		if !autoupdateNoFetchCache {
-			t.Error("--no-fetch-cache parsed but the switch stayed false; the flag is not bound to the variable")
+		if got := cmd.Flags().Lookup("no-fetch-cache").Value.String(); got != "true" {
+			t.Errorf("--no-fetch-cache parsed but the switch reads %q; the flag is not bound to the options", got)
 		}
 	})
 
