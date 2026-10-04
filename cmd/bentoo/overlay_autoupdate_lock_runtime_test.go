@@ -71,10 +71,9 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
 
 	fixer := &lockProbingFixer{lockPath: filepath.Join(overlayDir, ".autoupdate.bentoo-lock")}
-	oldFixerFn, oldInteractive := checkRegistryFixerFn, checkInteractiveFn
-	checkRegistryFixerFn = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
-	checkInteractiveFn = func() bool { return true }
-	t.Cleanup(func() { checkRegistryFixerFn, checkInteractiveFn = oldFixerFn, oldInteractive })
+	td := defaultDeps()
+	td.checkRegistryFixer = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+	td.checkInteractive = func() bool { return true }
 
 	// The prompt reads os.Stdin: answer "y" to the one package offered.
 	r, w, err := os.Pipe()
@@ -91,7 +90,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 
 	auOpts.check, auOpts.force, auOpts.concurrency = true, true, autoupdate.DefaultConcurrency
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, td)
 
 	fixer.mu.Lock()
 	defer fixer.mu.Unlock()
@@ -142,7 +141,7 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(auCmd, nil, auOpts)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	select {

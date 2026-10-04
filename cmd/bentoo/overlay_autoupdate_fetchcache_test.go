@@ -23,6 +23,7 @@ import (
 // to change how many requests go out and nothing else, so any weaker check
 // (exit code, output text) would pass with the flag unwired.
 func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	t.Helper()
 
@@ -46,10 +47,10 @@ func runFetchCacheCheck(t *testing.T, noFetchCache bool) int64 {
 	pinCheckFlags(t, auOpts) // force = true, sane concurrency, quiet
 	auOpts.noFetchCache = noFetchCache
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return false }) // never prompt, never write
+	setReconcileInteractive(td, func() bool { return false }) // never prompt, never write
 
 	captureStdout(t, func() {
-		_ = testAutoupdateRun(auOpts).runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
+		_ = testAutoupdateRunWith(auOpts, td).runCheck(context.Background(), overlayDir, configDir, nil, 0, &config.Config{}, config.LLMConfig{})
 	})
 
 	return requests.Load()
@@ -82,7 +83,7 @@ func TestNoFetchCacheFlag(t *testing.T) {
 		// A fresh tree: its flags are bound to an autoupdateOptions of its own,
 		// so parsing it cannot leak into any other test (S060-R5.1). The flag's
 		// Value reads back through the pointer it was bound to.
-		cmd := newAutoupdateCmd()
+		cmd := newAutoupdateCmd(defaultDeps())
 		if err := cmd.ParseFlags([]string{"--no-fetch-cache"}); err != nil {
 			t.Fatalf("parsing --no-fetch-cache failed: %v", err)
 		}

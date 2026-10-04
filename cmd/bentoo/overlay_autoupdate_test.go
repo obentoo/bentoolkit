@@ -207,7 +207,7 @@ func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
 	auOpts.apply = ""
 	auOpts.concurrency = autoupdate.DefaultConcurrency
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 
 	// Reload the cache with the SAME TTL the config declared (60 s). If the
 	// TTL had not reached the writer, the entry written above would have been
@@ -558,26 +558,13 @@ func setReconcileYes(t *testing.T, auOpts *autoupdateOptions, v bool) {
 	auOpts.yes = v
 }
 
-func setReconcileInteractive(t *testing.T, fn func() bool) {
-	t.Helper()
-	orig := registryPromptIsInteractive
-	t.Cleanup(func() { registryPromptIsInteractive = orig })
-	registryPromptIsInteractive = fn
-}
+// setReconcileInteractive, setReconcileConfirm and setReconcileWriter
+// substitute a seam on the test's own deps, so nothing needs restoring.
+func setReconcileInteractive(d *deps, fn func() bool) { d.registryPromptIsInteractive = fn }
 
-func setReconcileConfirm(t *testing.T, fn func(string) bool) {
-	t.Helper()
-	orig := confirmRegistryWriteFn
-	t.Cleanup(func() { confirmRegistryWriteFn = orig })
-	confirmRegistryWriteFn = fn
-}
+func setReconcileConfirm(d *deps, fn func(string) bool) { d.confirmRegistryWrite = fn }
 
-func setReconcileWriter(t *testing.T, fn func(string, map[string]string) error) {
-	t.Helper()
-	orig := registryWriterFn
-	t.Cleanup(func() { registryWriterFn = orig })
-	registryWriterFn = fn
-}
+func setReconcileWriter(d *deps, fn func(string, map[string]string) error) { d.registryWriter = fn }
 
 // feedStdin replaces os.Stdin with a regular file holding answer, so the REAL
 // confirmAction can be exercised. A regular file is deliberately not a
@@ -621,15 +608,16 @@ func pinCheckFlags(t *testing.T, auOpts *autoupdateOptions) {
 // answer must leave packages.toml exactly as it was — proven on the bytes, with
 // the REAL writer still wired and the REAL confirmAction reading a fake stdin.
 func TestAutoupdateReconcileDeclineLeavesRegistryByteIdentical(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 	before := f.readRegistry(t)
 
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true }) // pretend a terminal
+	setReconcileInteractive(td, func() bool { return true }) // pretend a terminal
 	feedStdin(t, "n\n")
 
-	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRunWith(auOpts, td).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	after := f.readRegistry(t)
 	if !bytes.Equal(before, after) {
@@ -650,21 +638,22 @@ func TestAutoupdateReconcileDeclineLeavesRegistryByteIdentical(t *testing.T) {
 // a run that consulted stdin at all would decline and write nothing; and the
 // TTY probe is a tripwire, so a run that even asked whether it may prompt fails.
 func TestAutoupdateReconcileYesWritesWithoutReadingStdin(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 
 	setReconcileYes(t, auOpts, true)
-	setReconcileInteractive(t, func() bool {
+	setReconcileInteractive(td, func() bool {
 		t.Error("--yes must not consult the TTY probe: it is an explicit approval")
 		return false
 	})
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("--yes must not prompt: stdin was read")
 		return false
 	})
 	feedStdin(t, "n\n") // the trap: reading this would decline
 
-	captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
+	captureStdout(t, func() { testAutoupdateRunWith(auOpts, td).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	if got := f.pins(t)["app-editors/neovim"]; got != "0.11.1" {
 		t.Errorf("--yes did not write the pin: app-editors/neovim version = %q, want %q", got, "0.11.1")
@@ -722,6 +711,7 @@ func TestAutoupdateReconcileWritesOnlyStalePins(t *testing.T) {
 // count — not the total number of divergences. The real confirmAction is used,
 // so the assertion is on the text a human actually sees.
 func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 
@@ -732,10 +722,10 @@ func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
 	}
 
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true })
+	setReconcileInteractive(td, func() bool { return true })
 	feedStdin(t, "n\n") // decline: this test is about the text, not the write
 
-	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRunWith(auOpts, td).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	wantPrompt := fmt.Sprintf("Write %d version pin(s) to packages.toml?", writable)
 	if !strings.Contains(out, wantPrompt) {
@@ -763,18 +753,19 @@ func TestAutoupdateReconcilePromptStatesWritableCount(t *testing.T) {
 // TestAutoupdateReconcileNoDivergencesPrintsNothing pins the quiet path: with
 // the registry already matching the overlay, the reconciliation is invisible.
 func TestAutoupdateReconcileNoDivergencesPrintsNothing(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := newReconcileFixture(t, []reconcileEntry{
 		{key: "app-editors/neovim", pin: "0.11.1", ebuilds: []string{"0.11.1"}},
 	})
 
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool {
+	setReconcileInteractive(td, func() bool {
 		t.Error("nothing diverges, so nothing may be confirmed")
 		return false
 	})
 
-	out := captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
+	out := captureStdout(t, func() { testAutoupdateRunWith(auOpts, td).reconcileRegistryAfterCheck(f.overlayDir) })
 	if out != "" {
 		t.Errorf("an in-sync registry printed a reconciliation report:\n%s", out)
 	}
@@ -784,21 +775,22 @@ func TestAutoupdateReconcileNoDivergencesPrintsNothing(t *testing.T) {
 // clause end-to-end through runCheck: a non-interactive run reports the
 // divergences, writes nothing, and still exits 0.
 func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := checkableFixture(t)
 	before := f.readRegistry(t)
 
 	pinCheckFlags(t, auOpts)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return false }) // piped / CI
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return false }) // piped / CI
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("a non-interactive run must not prompt")
 		return true
 	})
 
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+		code = exitCodeFor(testAutoupdateRunWith(auOpts, td).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
 			&config.Config{}, config.LLMConfig{}))
 	})
 
@@ -821,6 +813,7 @@ func TestAutoupdateReconcileNonTTYWithoutYesWritesNothing(t *testing.T) {
 // the check that already succeeded still exits 0 — the pins are bookkeeping on
 // top of a check, not part of its verdict.
 func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := checkableFixture(t)
 	before := f.readRegistry(t)
@@ -829,7 +822,7 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 	setReconcileYes(t, auOpts, true)
 	wantErr := errors.New("packages.toml is read-only")
 	var calls int
-	setReconcileWriter(t, func(string, map[string]string) error {
+	setReconcileWriter(td, func(string, map[string]string) error {
 		calls++
 		return wantErr
 	})
@@ -840,7 +833,7 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 	var errOut string
 	out := captureStdout(t, func() {
 		errOut = captureStderr(t, func() {
-			code = exitCodeFor(testAutoupdateRun(auOpts).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
+			code = exitCodeFor(testAutoupdateRunWith(auOpts, td).runCheck(context.Background(), f.overlayDir, t.TempDir(), nil, 0,
 				&config.Config{}, config.LLMConfig{}))
 		})
 	})
@@ -866,18 +859,19 @@ func TestAutoupdateReconcileWriteFailureIsReportedNotSwallowed(t *testing.T) {
 // confirmation, one write call carrying the whole batch — not one call per
 // entry, which would make a partially-written registry reachable.
 func TestAutoupdateReconcileBatchIsOneCallForEveryEntry(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	f := allClassesFixture(t)
 	writable := stalePinCount(f.divergences(t))
 
 	setReconcileYes(t, auOpts, true)
 	var batches []map[string]string
-	setReconcileWriter(t, func(_ string, pins map[string]string) error {
+	setReconcileWriter(td, func(_ string, pins map[string]string) error {
 		batches = append(batches, pins)
 		return nil
 	})
 
-	captureStdout(t, func() { testAutoupdateRun(auOpts).reconcileRegistryAfterCheck(f.overlayDir) })
+	captureStdout(t, func() { testAutoupdateRunWith(auOpts, td).reconcileRegistryAfterCheck(f.overlayDir) })
 
 	if len(batches) != 1 {
 		t.Fatalf("the writer was called %d times, want 1 (design D4)", len(batches))
@@ -1112,7 +1106,7 @@ func TestRegistryPromptIsInteractive(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			swapStdio(t, tc.stdin(t), tc.stdout(t))
-			if got := registryPromptIsInteractive(); got != tc.want {
+			if got := defaultDeps().registryPromptIsInteractive(); got != tc.want {
 				t.Errorf("registryPromptIsInteractive() = %v, want %v", got, tc.want)
 			}
 		})

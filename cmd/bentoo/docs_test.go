@@ -194,7 +194,7 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 		},
 		{
 			where: "overlay validate --depth",
-			text:  newValidateCmd().Flags().Lookup("depth").Usage,
+			text:  newValidateCmd(defaultDeps()).Flags().Lookup("depth").Usage,
 			intro: dash, tail: flagTail,
 		},
 		{
@@ -207,7 +207,7 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 		},
 		{
 			where: "overlay validate --help (Long)",
-			text:  newValidateCmd().Long,
+			text:  newValidateCmd(defaultDeps()).Long,
 			// The Long carries an em dash of its own, paragraphs earlier, so it
 			// names the phrase that actually introduces ITS list — and its closing
 			// phrase differs from the flags' by one word.

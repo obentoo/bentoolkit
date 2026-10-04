@@ -294,8 +294,8 @@ func snapshotReportConfig() *config.Config {
 // The two are independent answers to the same report. A terminal that went away
 // mid-write is no reason to also withhold the file, which may be the only copy
 // left — and on a timer-driven run it usually is.
-func presentSnapshotReport(cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg, false, uiIsTerminal)
+func presentSnapshotReport(d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
 
 	// Two questions, kept apart. What the report should SAY — list every step
 	// that succeeded, or count them — is report.SectionOptions, answered here

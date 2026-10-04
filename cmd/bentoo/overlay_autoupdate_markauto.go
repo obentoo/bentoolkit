@@ -22,8 +22,8 @@ import (
 // print the whole plan, gate the write, and only then stamp.
 //
 // The gates are story 021's, not a third set: the same --yes flag, the same
-// registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
-// same confirmRegistryWriteFn seam that guard the post-check version pins and
+// deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
+// same deps.confirmRegistryWrite seam that guard the post-check version pins and
 // the lint repair. Three idioms for "may I publish?" in one command would be two
 // too many.
 //
@@ -168,7 +168,7 @@ func (ar *autoupdateRun) confirmAutoDisableMigration(plan *autoupdate.AutoDisabl
 		output.Warning.Printf("  --yes given: stamping %d entry(ies) without a prompt.\n", len(plan.Mark))
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		// The plan above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
@@ -179,7 +179,7 @@ func (ar *autoupdateRun) confirmAutoDisableMigration(plan *autoupdate.AutoDisabl
 	// ONE question covering the whole plan, not one per record: the operator is
 	// approving the migration they just read.
 	fmt.Println()
-	return confirmRegistryWriteFn(fmt.Sprintf(
+	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)",
 		len(plan.Mark), len(plan.Excluded)))
 }

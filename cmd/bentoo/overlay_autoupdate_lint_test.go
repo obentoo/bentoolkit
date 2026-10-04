@@ -180,11 +180,11 @@ func readLintRegistry(t *testing.T, overlayDir string) []byte {
 // runLintCapturing runs runLint over overlayDir and returns the exit status its
 // returned outcome maps to (func exitCodeFor) together with everything it
 // printed.
-func runLintCapturing(t *testing.T, auOpts *autoupdateOptions, overlayDir string) (int, string) {
+func runLintCapturing(t *testing.T, auOpts *autoupdateOptions, overlayDir string, d *deps) (int, string) {
 	t.Helper()
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(testAutoupdateRun(auOpts).runLint(overlayDir))
+		code = exitCodeFor(testAutoupdateRunWith(auOpts, d).runLint(overlayDir))
 	})
 	return code, out
 }
@@ -236,7 +236,7 @@ func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
 
 	var code int
 	captureStdout(t, func() {
-		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts))
+		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, defaultDeps()))
 	})
 
 	if code != 1 {
@@ -250,16 +250,17 @@ func TestAutoupdateLintFixWithoutLintIsRejected(t *testing.T) {
 // reading a fake stdin. A mock write seam would pass here even if the gate were
 // deleted.
 func TestAutoupdateLintFixDeclineLeavesRegistryByteIdentical(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 	before := readLintRegistry(t, dir)
 
 	setLintFix(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true }) // pretend a terminal
+	setReconcileInteractive(td, func() bool { return true }) // pretend a terminal
 	feedStdin(t, "n\n")
 
-	code, out := runLintCapturing(t, auOpts, dir)
+	code, out := runLintCapturing(t, auOpts, dir, td)
 
 	after := readLintRegistry(t, dir)
 	if !bytes.Equal(before, after) {
@@ -292,22 +293,23 @@ func TestAutoupdateLintFixDeclineLeavesRegistryByteIdentical(t *testing.T) {
 // It also pins the honesty of the summary: the one finding no repair can guess
 // survives, is named, and keeps the exit code non-zero.
 func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 
 	setLintFix(t, auOpts, true)
 	setReconcileYes(t, auOpts, true)
-	setReconcileInteractive(t, func() bool {
+	setReconcileInteractive(td, func() bool {
 		t.Error("--yes must not consult the TTY probe: it is an explicit approval")
 		return false
 	})
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("--yes must not prompt: stdin was read")
 		return false
 	})
 	feedStdin(t, "n\n") // the trap: reading this would decline
 
-	code, out := runLintCapturing(t, auOpts, dir)
+	code, out := runLintCapturing(t, auOpts, dir, td)
 	got := string(readLintRegistry(t, dir))
 
 	if !strings.Contains(out, "--yes given") {
@@ -358,19 +360,20 @@ func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
 // it — the confirm seam is a tripwire, because prompting a pipe is how
 // `yes | bentoo …` publishes a rewrite nobody read.
 func TestAutoupdateLintFixNonTTYWithoutYesWritesNothing(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, lintFixMessyRegistry)
 	before := readLintRegistry(t, dir)
 
 	setLintFix(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return false }) // piped / CI
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return false }) // piped / CI
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("a non-interactive run must not prompt")
 		return true
 	})
 
-	code, out := runLintCapturing(t, auOpts, dir)
+	code, out := runLintCapturing(t, auOpts, dir, td)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a non-interactive run wrote to packages.toml (R7.3)\nbefore:\n%s\nafter:\n%s", before, after)
@@ -391,6 +394,7 @@ func TestAutoupdateLintFixNonTTYWithoutYesWritesNothing(t *testing.T) {
 // question that teaches an operator to answer yes without reading, and the one
 // prompt here that has to survive that habit is the one that publishes.
 func TestAutoupdateLintFixCleanRegistryDoesNotPrompt(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	dir := writeLintRegistry(t, `["dev-util/claude-code"]
 url = "https://registry.npmjs.org/@anthropic-ai/claude-code"
@@ -405,16 +409,16 @@ claude-code — npm dist-tags.latest is the stable channel.
 
 	setLintFix(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool {
+	setReconcileInteractive(td, func() bool {
 		t.Error("nothing changes, so nothing may be confirmed")
 		return false
 	})
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("a repair that changes nothing must not prompt")
 		return true
 	})
 
-	code, out := runLintCapturing(t, auOpts, dir)
+	code, out := runLintCapturing(t, auOpts, dir, td)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a no-op repair rewrote packages.toml\nbefore:\n%s\nafter:\n%s", before, after)
@@ -437,6 +441,7 @@ claude-code — npm dist-tags.latest is the stable channel.
 // contradiction besides ("nothing to repair" / "2 issues remain"). One line ties
 // them together instead.
 func TestAutoupdateLintFixNothingRepairableSaysItOnce(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	// track = "commit" with no base_from: reported by legacy-base, which carries
 	// no repair on purpose (R6.1).
@@ -455,12 +460,12 @@ ik_llama-cpp — commit-tracked, base version left to the ebuild.
 
 	setLintFix(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileConfirm(t, func(string) bool {
+	setReconcileConfirm(td, func(string) bool {
 		t.Error("a repair that changes nothing must not prompt")
 		return true
 	})
 
-	code, out := runLintCapturing(t, auOpts, dir)
+	code, out := runLintCapturing(t, auOpts, dir, td)
 
 	if after := readLintRegistry(t, dir); !bytes.Equal(before, after) {
 		t.Errorf("a no-op repair rewrote packages.toml\nbefore:\n%s\nafter:\n%s", before, after)

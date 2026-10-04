@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -34,14 +33,12 @@ import (
 // and pushes within minutes, so a declaration this program wrote would be
 // published before anyone could read it.
 
-// reviewWarnf emits the one warning this file is allowed to print: a reviewer
-// that was asked for and could not be built.
-//
-// It is a package var for the same narrow reason internal/overlay's warnLogf is
-// one — logger binds its io.Writer at first use and exposes no setter
-// (logger.go's `func Default`), so without a seam the only way to assert on this
-// line would be to read the process's stderr. Production never assigns it.
-var reviewWarnf = logger.Warn
+// The one warning this file is allowed to print — a reviewer that was asked
+// for and could not be built — goes through the reviewWarnf field of deps
+// (deps.go), for the same narrow reason internal/overlay's warnLogf is a seam:
+// logger binds its io.Writer at first use and exposes no setter (logger.go's
+// `func Default`), so without a seam the only way to assert on this line would
+// be to read the process's stderr. Production wires logger.Warn.
 
 // claudeAsker is the slice of *autoupdate.ClaudeCodeClient this adapter uses: one
 // schema-constrained round trip. Declaring it here rather than holding the
@@ -56,7 +53,8 @@ type claudeAsker interface {
 	AskJSON(ctx context.Context, instruction string, content []byte, schema string) (string, error)
 }
 
-// newClaudeAsker builds the real client. It is a var so tests can script the CLI
+// newClaudeCodeAsker builds the real client, and is the default of the
+// newClaudeAsker field of deps. It is a seam so tests can script the CLI
 // without one being installed, and so a test can prove that `--no-review`
 // reaches it ZERO times — R5.6 is a claim about a process that never starts, and
 // the only way to assert something did not happen is to have the thing that
@@ -92,7 +90,7 @@ type claudeAsker interface {
 //
 // It takes NO context: the client stores none (story 059), and each AskJSON
 // call receives the context of the review that makes it.
-var newClaudeAsker = func(budget time.Duration) (claudeAsker, error) {
+func newClaudeCodeAsker(budget time.Duration) (claudeAsker, error) {
 	client, err := autoupdate.NewClaudeCodeClient(reviewLLMConfig(),
 		autoupdate.WithClaudeCodeTimeout(budget))
 	if err != nil {
@@ -136,16 +134,16 @@ func reviewLLMConfig() autoupdate.LLMConfig {
 // and is not getting one, which is worth a line — and then the run proceeds
 // without commentary, because the report they asked for is already complete
 // without it.
-func compareDivergenceReviewer(noReview bool, budget time.Duration) overlay.DivergenceReviewer {
+func compareDivergenceReviewer(noReview bool, budget time.Duration, d *deps) overlay.DivergenceReviewer {
 	if noReview {
 		return nil
 	}
 
-	reviewer, err := newDivergenceReviewer(budget)
+	reviewer, err := newDivergenceReviewer(budget, d)
 	if err != nil {
 		// The error is an ARGUMENT and never a format string: it may carry the
 		// CLI's own text.
-		reviewWarnf("the divergence review could not be started (%v); the report is unchanged apart from carrying no commentary", err)
+		d.reviewWarnf("the divergence review could not be started (%v); the report is unchanged apart from carrying no commentary", err)
 		return nil
 	}
 	return reviewer
@@ -169,8 +167,8 @@ func compareDivergenceReviewer(noReview bool, budget time.Duration) overlay.Dive
 //
 // The BUDGET is threaded into the client, and this function does nothing with
 // it but carry it to the seam (S048-R4.1).
-func newDivergenceReviewer(budget time.Duration) (overlay.DivergenceReviewer, error) {
-	asker, err := newClaudeAsker(budget)
+func newDivergenceReviewer(budget time.Duration, d *deps) (overlay.DivergenceReviewer, error) {
+	asker, err := d.newClaudeAsker(budget)
 	if err != nil {
 		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
 			return nil, nil

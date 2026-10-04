@@ -92,7 +92,7 @@ func seedForAmbientCheck(t *testing.T) *testCLI {
 
 	c := newTestCLI(t)
 	seedCheckOverlay(t, c, "1.0.0", "2.0.0", "app-misc/jq", "dev-lang/go")
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 	return c
 }
 
@@ -380,7 +380,7 @@ func TestAutoupdateAmbientModeLeavesAnUnrelatedFailureItsOwnStatusAndMessage(t *
 	requireLoggerOutputIsReadable(t)
 
 	control := newTestCLI(t)
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(control.deps, false)
 	_, controlErr, controlCode := control.Run("overlay", "autoupdate", "--check")
 	if controlCode == 0 {
 		t.Fatalf("the control run succeeded over an overlay with no registry — this fixture exists to produce a failure that has nothing to do with rendering (stderr: %q)", controlErr)
@@ -390,7 +390,7 @@ func TestAutoupdateAmbientModeLeavesAnUnrelatedFailureItsOwnStatusAndMessage(t *
 	}
 
 	c := newTestCLI(t)
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 	t.Setenv("BENTOO_UI", "bogus")
 	_, stderr, code := c.Run("overlay", "autoupdate", "--check")
 

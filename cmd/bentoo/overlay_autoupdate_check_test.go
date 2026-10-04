@@ -227,14 +227,16 @@ func TestCheckRun_PublishesNothingOnAnyPath(t *testing.T) {
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var promoted []string
-	origSet := setVersionsForCheck
-	setVersionsForCheck = func(overlayPath string, pins map[string]string) error {
+	// runValidationCheck takes no deps, so it cannot reach any publisher at
+	// all: the stub below stays wired as the observable form of R9.2, and a
+	// future signature that threads deps into the check must hand it td.
+	td := defaultDeps()
+	td.setVersionsForCheck = func(overlayPath string, pins map[string]string) error {
 		for pkg := range pins {
 			promoted = append(promoted, pkg)
 		}
 		return nil
 	}
-	t.Cleanup(func() { setVersionsForCheck = origSet })
 
 	outcomes := map[string]validate.Outcome{
 		"media-plugins/gst-plugins-qt6": validate.OutcomeFailed,
@@ -487,12 +489,11 @@ func TestCheckRun_AnEscalationInsideTheConfirmedDepthRunsWithoutFuss(t *testing.
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var prompts int
-	origConfirm := confirmSweepFn
-	confirmSweepFn = func(string) bool { prompts++; return true }
-	t.Cleanup(func() { confirmSweepFn = origConfirm })
+	td := defaultDeps()
+	td.confirmSweep = func(string) bool { prompts++; return true }
 
 	_ = captureStdout(t, func() {
-		if !testAutoupdateRun(auOpts).confirmValidationRun(plan) {
+		if !testAutoupdateRunWith(auOpts, td).confirmValidationRun(plan) {
 			t.Fatal("--yes did not approve the run")
 		}
 		runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {

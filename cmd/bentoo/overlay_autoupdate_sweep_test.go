@@ -14,18 +14,10 @@ import (
 // Standalone sweep — CLI wiring (S027 task 5)
 // =============================================================================
 
-func setSweepConfirm(t *testing.T, fn func(string) bool) {
-	t.Helper()
-	orig := confirmSweepFn
-	t.Cleanup(func() { confirmSweepFn = orig })
-	confirmSweepFn = fn
-}
+func setSweepConfirm(d *deps, fn func(string) bool) { d.confirmSweep = fn }
 
-func setSweepExecutor(t *testing.T, fn func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport) {
-	t.Helper()
-	orig := sweepExecutorFn
-	t.Cleanup(func() { sweepExecutorFn = orig })
-	sweepExecutorFn = fn
+func setSweepExecutor(d *deps, fn func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport) {
+	d.sweepExecutor = fn
 }
 
 func setSweepClean(t *testing.T, auOpts *autoupdateOptions, v bool) {
@@ -165,17 +157,18 @@ func TestSweepRoutingKeepsApplyClean(t *testing.T) {
 // TestRunSweepRejectsInvalidTarget: R1.4 — a typo fails loudly, before any file
 // is touched, rather than reading as "nothing to clean".
 func TestRunSweepRejectsInvalidTarget(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	setSweepClean(t, auOpts, true)
-	setSweepConfirm(t, func(string) bool {
+	setSweepConfirm(td, func(string) bool {
 		t.Fatal("a confirmation was asked for an invalid target")
 		return false
 	})
 
 	var err error
 	_ = captureStdout(t, func() {
-		err = testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
+		err = testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, []string{"no-such-category"}, 1)
 	})
 	code, exited := exitOf(err)
 	if !exited || code == 0 {
@@ -210,19 +203,20 @@ func TestRunSweepFailsWithoutARegistry(t *testing.T) {
 // TestRunSweepDeclinedRemovesNothing: R3.3 — the executor is never entered, so
 // the overlay is byte-identical by construction rather than by care.
 func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true })
-	setSweepConfirm(t, func(string) bool { return false })
-	setSweepExecutor(t, func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport {
+	setReconcileInteractive(td, func() bool { return true })
+	setSweepConfirm(td, func(string) bool { return false })
+	setSweepExecutor(td, func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport {
 		t.Fatal("the executor ran after the confirmation was declined")
 		return autoupdate.SweepReport{}
 	})
 
 	out := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") || !residueExists(t, overlayDir, "2.0.0") {
@@ -237,22 +231,23 @@ func TestRunSweepDeclinedRemovesNothing(t *testing.T) {
 // used to print help, so a script may already pass it. Making it act must not
 // make that script delete anything.
 func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return false })
-	setSweepConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return false })
+	setSweepConfirm(td, func(string) bool {
 		t.Fatal("a piped run was prompted")
 		return true
 	})
-	setSweepExecutor(t, func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport {
+	setSweepExecutor(td, func(context.Context, string, autoupdate.SweepBatch, ...autoupdate.SweepOption) autoupdate.SweepReport {
 		t.Fatal("a piped run reached the executor")
 		return autoupdate.SweepReport{}
 	})
 
 	out := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !residueExists(t, overlayDir, "1.0.0") {
@@ -266,18 +261,19 @@ func TestRunSweepNonInteractiveWithoutYesRemovesNothing(t *testing.T) {
 // TestRunSweepWithYesProceedsUnprompted: R3.4 — an explicit, in-so-many-words
 // approval works from a pipe, a cron job or a CI step.
 func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, true)
-	setReconcileInteractive(t, func() bool { return false })
-	setSweepConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return false })
+	setSweepConfirm(td, func(string) bool {
 		t.Fatal("--yes still prompted")
 		return true
 	})
 
 	var ran bool
-	setSweepExecutor(t, func(_ context.Context, _ string, batch autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
+	setSweepExecutor(td, func(_ context.Context, _ string, batch autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
 		ran = true
 		if batch.TotalRemove != 1 {
 			t.Errorf("TotalRemove = %d, want 1", batch.TotalRemove)
@@ -293,7 +289,7 @@ func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !ran {
 		t.Fatal("--yes did not reach the executor")
@@ -310,26 +306,27 @@ func TestRunSweepWithYesProceedsUnprompted(t *testing.T) {
 // regression this catches — it is how a batch gate decays into the click-through
 // the story set out to avoid, and it would pass every other test in this file.
 func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixtureMultiDir(t)
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true })
+	setReconcileInteractive(td, func() bool { return true })
 
 	var prompts int
-	setSweepConfirm(t, func(string) bool {
+	setSweepConfirm(td, func(string) bool {
 		prompts++
 		return true
 	})
 
 	var dirsInBatch int
-	setSweepExecutor(t, func(_ context.Context, _ string, batch autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
+	setSweepExecutor(td, func(_ context.Context, _ string, batch autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
 		dirsInBatch = len(batch.Dirs)
 		return autoupdate.SweepReport{}
 	})
 
 	captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if dirsInBatch < 2 {
@@ -347,22 +344,23 @@ func TestRunSweepPromptsExactlyOnceForTheBatch(t *testing.T) {
 // the opposite of what they were just shown. The ebuild is unclaimed; it is
 // protected.
 func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixtureHeldOnly(t)
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return false })
-	setSweepConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return false })
+	setSweepConfirm(td, func(string) bool {
 		t.Fatal("a batch with nothing to remove must not prompt")
 		return false
 	})
-	setSweepExecutor(t, func(_ context.Context, _ string, _ autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
+	setSweepExecutor(td, func(_ context.Context, _ string, _ autoupdate.SweepBatch, _ ...autoupdate.SweepOption) autoupdate.SweepReport {
 		t.Fatal("the executor must not run when nothing is removable")
 		return autoupdate.SweepReport{}
 	})
 
 	out := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 
 	if !strings.Contains(out, "test-cat/held") {
@@ -376,6 +374,7 @@ func TestRunSweepReportsHeldInsteadOfClaimingEverythingIsClaimed(t *testing.T) {
 // TestRunSweepNothingToDoDoesNotPrompt: R3.5 — asking "remove 0 files?" would
 // train the operator to say yes.
 func TestRunSweepNothingToDoDoesNotPrompt(t *testing.T) {
+	td := defaultDeps()
 	auOpts := testAutoupdateOptions()
 	overlayDir := sweepOverlayFixture(t)
 	// Remove the residue so the plan is empty.
@@ -384,14 +383,14 @@ func TestRunSweepNothingToDoDoesNotPrompt(t *testing.T) {
 	}
 	setSweepClean(t, auOpts, true)
 	setReconcileYes(t, auOpts, false)
-	setReconcileInteractive(t, func() bool { return true })
-	setSweepConfirm(t, func(string) bool {
+	setReconcileInteractive(td, func() bool { return true })
+	setSweepConfirm(td, func(string) bool {
 		t.Fatal("an empty plan asked for confirmation")
 		return false
 	})
 
 	out := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).runSweep(context.Background(), overlayDir, nil, 1)
+		testAutoupdateRunWith(auOpts, td).runSweep(context.Background(), overlayDir, nil, 1)
 	})
 	if !strings.Contains(out, "Nothing to sweep") {
 		t.Errorf("an empty plan did not say so:\n%s", out)

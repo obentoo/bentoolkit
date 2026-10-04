@@ -152,7 +152,7 @@ func s056RunCapturingFDs(t *testing.T, auOpts *autoupdateOptions) (code int, out
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		err := runAutoupdate(auCmd, nil, auOpts)
+		err := runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 		// Since story 060 a single-line failure is returned (func failWith)
 		// and func execute prints it. This harness bypasses execute, so it
 		// prints the cause the way execute does: inside the redirect, after

@@ -43,26 +43,20 @@ import (
 // plan-only path is complete; the --apply path (confirmation, execution,
 // registry edit, exit codes) is wired into runPrune's marked tail.
 
-// prunePlannerFn, pruneExecutorFn and confirmPruneFn are the seams the CLI tests
-// drive, defaulting to the real implementations so a caller that supplies none
+// The prunePlanner, pruneExecutor and confirmPrune fields of deps (deps.go)
+// are the seams the CLI tests drive, defaulting to the real implementations so a caller that supplies none
 // gets production behaviour. Same shape as the sweep's seam
-// (`var sweepPlannerFn` in overlay_autoupdate_sweep.go), and for the same
+// (the `sweepPlanner` field of deps in deps.go), and for the same
 // reason: a test has to be
 // able to prove that the executor was NOT REACHED, which is only observable if
 // reaching it goes through a replaceable name.
-// pruneInteractiveFn is the fourth seam, and it exists because the thing it
+// The pruneInteractive field is the fourth seam, and it exists because the thing it
 // reports cannot be faked from a test at all: stdinIsTerminal asks the operating
 // system whether stdin is a character device, and under `go test` the answer is
 // always no. Without a seam, every interactive requirement — R6.1's confirmation
 // and R4.4's refusal to accept one from a script — would be untestable in the
 // only direction that matters, since the non-interactive answer is the one the
 // runner hands out for free.
-var (
-	prunePlannerFn     = overlay.PlanPrune
-	pruneExecutorFn    = overlay.ExecutePrune
-	confirmPruneFn     = confirmAction
-	pruneInteractiveFn = stdinIsTerminal
-)
 
 var (
 	// pruneApply is --apply: without it the command plans and prints, and the
@@ -105,7 +99,7 @@ var (
 const pruneNoLocalTreeRefusal = "no local ::gentoo tree; re-run with --clone or a local provider"
 
 // newPruneCmd builds `overlay prune`.
-func newPruneCmd() *cobra.Command {
+func newPruneCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "prune [category[/package]]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -157,7 +151,9 @@ Examples:
   bentoo overlay prune --apply                  # carry the plan out
   bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runPruneCmd,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPruneCmd(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&pruneApply, "apply", false, "Carry out the plan (default: plan only, remove nothing)")
 	cmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)")
@@ -170,7 +166,7 @@ Examples:
 // can be decided without them lives in runPrune, which takes both as parameters
 // so the whole flow is drivable from a test — the same split runRevive and
 // runSweep use.
-func runPruneCmd(cmd *cobra.Command, args []string) error {
+func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 	// The process-wide context (func commandContext): overlay prune is
 	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP reaches the
 	// comparison and an interrupted run stops looking at packages instead of
@@ -183,7 +179,7 @@ func runPruneCmd(cmd *cobra.Command, args []string) error {
 		return exitWith(1)
 	}
 
-	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config)
+	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config, d)
 }
 
 // runPrune plans what may leave the overlay, prints it, and — with --apply —
@@ -233,7 +229,7 @@ func runPruneCmd(cmd *cobra.Command, args []string) error {
 // not cost a network round trip before it is reported. The scan is also the
 // authority the target is checked against: it is the set of packages that
 // actually exist here.
-func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config) error {
+func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config, d *deps) error {
 	fmt.Println()
 	output.Header.Println("Overlay Prune")
 	fmt.Println()
@@ -277,7 +273,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		return nil
 	}
 
-	prov, err := resolveGentooProviderFn(cfg)
+	prov, err := d.resolveGentooProvider(cfg)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  %v\n", err)
 		return exitWith(1)
@@ -347,7 +343,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		RegistryKeys:   registryKeys,
 	}
 
-	batch := prunePlannerFn(report.Results, prov, opts)
+	batch := d.prunePlanner(report.Results, prov, opts)
 	displayPrunePlan(batch, pruneKeepRegistry)
 
 	eligible := pruneEligibleCount(batch)
@@ -370,14 +366,14 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// Consent produces a BATCH, not a permission slip: consent.authorised holds
 	// only the plans a confirmation covered, so a declined or unaskable batch has
 	// no representation on the path to the executor (R6.3).
-	consent := gatherPruneConsent(batch)
+	consent := gatherPruneConsent(batch, d)
 
 	// The executor is not called at all when consent covered nothing. That guard is
 	// not what makes the run safe — an empty batch removes nothing either way — it
 	// is what keeps the run from claiming to have tried.
 	var results []overlay.PruneResult
 	if consent.approved > 0 {
-		results = pruneExecutorFn(consent.authorised, opts)
+		results = d.pruneExecutor(consent.authorised, opts)
 	}
 	removed, failed := reportPruneOutcome(results, consent)
 
@@ -487,15 +483,15 @@ func (c *pruneConsent) record(answer pruneConsentAnswer, plans []overlay.PrunePl
 // Eligible is the authorisation and the bucket is not — the same rule
 // ExecutePrune follows — so every bucket is filtered through eligiblePrunePlans
 // rather than trusted wholesale.
-func gatherPruneConsent(batch overlay.PruneBatch) pruneConsent {
+func gatherPruneConsent(batch overlay.PruneBatch, d *deps) pruneConsent {
 	var consent pruneConsent
 
 	if identical := eligiblePrunePlans(batch.Identical); len(identical) > 0 {
-		consent.authorised.Identical = consent.record(confirmIdenticalPrune(len(identical)), identical)
+		consent.authorised.Identical = consent.record(confirmIdenticalPrune(len(identical), d), identical)
 	}
 
 	if diverging := eligiblePrunePlans(batch.Diverging); len(diverging) > 0 {
-		consent.authorised.Diverging = consent.record(confirmDivergingPrune(diverging), diverging)
+		consent.authorised.Diverging = consent.record(confirmDivergingPrune(diverging, d), diverging)
 	}
 
 	// The refused bucket is never asked about and never authorised: no flag on this
@@ -543,12 +539,12 @@ func eligiblePrunePlans(plans []overlay.PrunePlan) []overlay.PrunePlan {
 // The prompt is a count rather than a list. The plan above printed every package
 // with its files and its registry entries, in full and without truncation, and
 // repeating it into a y/N line would push the question itself off the screen.
-func confirmIdenticalPrune(n int) pruneConsentAnswer {
+func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 	if pruneYes {
 		output.Warning.Printf("  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n", n)
 		return pruneConsentGiven
 	}
-	if !pruneInteractiveFn() {
+	if !d.pruneInteractive() {
 		// R6.2, all three clauses: the plan is already on screen because it is
 		// printed before this runs, nothing is removed, and the caller returns
 		// non-zero. A prompt written to a terminal nobody is watching does not become
@@ -560,7 +556,7 @@ func confirmIdenticalPrune(n int) pruneConsentAnswer {
 
 	fmt.Println()
 	output.Warning.Println("  These package directories are deleted from the overlay, which auto-commits and publishes within minutes.")
-	if !confirmPruneFn(fmt.Sprintf("Remove %d package(s) ::gentoo already provides?", n)) {
+	if !d.confirmPrune(fmt.Sprintf("Remove %d package(s) ::gentoo already provides?", n)) {
 		return pruneConsentDeclined
 	}
 	return pruneConsentGiven
@@ -585,8 +581,8 @@ func confirmIdenticalPrune(n int) pruneConsentAnswer {
 // R4.2. "Discard 8 packages?" and "discard the wayland patch in kwin?" are the
 // same sentence to an operator who cannot see the list, and only one of them can
 // be answered.
-func confirmDivergingPrune(plans []overlay.PrunePlan) pruneConsentAnswer {
-	if !pruneInteractiveFn() {
+func confirmDivergingPrune(plans []overlay.PrunePlan, d *deps) pruneConsentAnswer {
+	if !d.pruneInteractive() {
 		output.Warning.Printf("  Not an interactive terminal: %d diverging package(s) were NOT removed.\n", len(plans))
 		output.Info.Println("  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away.")
 		output.Info.Println("  Re-run '--apply --include-patched' from a terminal to answer for these.")
@@ -595,7 +591,7 @@ func confirmDivergingPrune(plans []overlay.PrunePlan) pruneConsentAnswer {
 
 	fmt.Println()
 	output.Warning.Println("  The packages below carry work that is not in ::gentoo. Removing them destroys it — there is no copy upstream to restore it from.")
-	if !confirmPruneFn(divergingPrunePrompt(plans)) {
+	if !d.confirmPrune(divergingPrunePrompt(plans)) {
 		return pruneConsentDeclined
 	}
 	return pruneConsentGiven

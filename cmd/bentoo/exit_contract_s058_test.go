@@ -57,11 +57,12 @@ func s058Env(t *testing.T) *testCLI {
 	return c
 }
 
-// s058Execute runs one invocation of a fresh tree through execute, the
-// production mapping and printer, and returns both streams and the exit code.
+// s058Execute runs one invocation of a fresh tree, built from d, through
+// execute, the production mapping and printer, and returns both streams and the
+// exit code.
 // Nothing intercepts an exit here: the code has to come back as a returned
 // error, which is the whole point of the story.
-func s058Execute(t *testing.T, ctx context.Context, args ...string) (stdout, stderr string, code int) {
+func s058Execute(t *testing.T, ctx context.Context, d *deps, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	// The package logger captures its writer once; bind it to the real stderr
 	// descriptor before that descriptor is redirected into a pipe.
@@ -83,7 +84,10 @@ func s058Execute(t *testing.T, ctx context.Context, args ...string) (stdout, std
 	}
 	defer restore()
 
-	root := newRootCmd()
+	// newRootCmdWith only builds the tree; ctx reaches the run through execute
+	// below. contextcheck follows the RunE closure into runAutoupdate and
+	// cannot see that.
+	root := newRootCmdWith(d) //nolint:contextcheck // ctx is passed by execute, not at construction
 	root.SetArgs(args)
 	code = execute(ctx, root, os.Stderr)
 	restore()
@@ -161,7 +165,7 @@ func s058RunRows(t *testing.T, rows []s058Row) {
 			if row.ctx != nil {
 				ctx = row.ctx(t)
 			}
-			stdout, stderr, code := s058Execute(t, ctx, args...)
+			stdout, stderr, code := s058Execute(t, ctx, c.deps, args...)
 			s058CheckRow(t, row, args, stdout, stderr, code)
 			if row.after != nil {
 				row.after(t, c, stdout, stderr)
@@ -416,8 +420,8 @@ func TestS058ExecuteOnTheRealTreeRejectsUsageOnce(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s058Env(t)
-			stdout, stderr, code := s058Execute(t, context.Background(), tc.args...)
+			c := s058Env(t)
+			stdout, stderr, code := s058Execute(t, context.Background(), c.deps, tc.args...)
 			if code != 1 {
 				t.Errorf("exit %d, want 1\nstderr:\n%s", code, stderr)
 			}

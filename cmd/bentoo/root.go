@@ -29,6 +29,13 @@ import (
 // Run and so is invisible to their readers (overlay_compare.go, which reads
 // verbose, and overlay_autoupdate.go, which reads quiet).
 func newRootCmd() *cobra.Command {
+	return newRootCmdWith(defaultDeps())
+}
+
+// newRootCmdWith builds the same tree as newRootCmd with d as its dependencies.
+// d reaches every constructor that owns a seam, so a test that substitutes a
+// field of its own d changes this tree alone (story 060, R6.1, R6.5).
+func newRootCmdWith(d *deps) *cobra.Command {
 	var (
 		verboseFlag bool
 		quietFlag   bool
@@ -136,16 +143,17 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(newDistfileCmd())
 	root.AddCommand(newNoticeCmd())
-	root.AddCommand(newOverlayCmd())
-	root.AddCommand(newSnapshotCmd())
+	root.AddCommand(newOverlayCmd(d))
+	root.AddCommand(newSnapshotCmd(d))
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newCompletionCmd())
 
 	return root
 }
 
-// newOverlayCmd builds `overlay` and registers every command under it.
-func newOverlayCmd() *cobra.Command {
+// newOverlayCmd builds `overlay` and registers every command under it, handing
+// d to each child that reaches a seam.
+func newOverlayCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "overlay",
 		Short: "Manage the Bentoo overlay repository",
@@ -155,20 +163,20 @@ func newOverlayCmd() *cobra.Command {
 	cmd.AddCommand(
 		newAddCmd(),
 		newAnalyzeCmd(),
-		newAutoupdateCmd(),
+		newAutoupdateCmd(d),
 		newCommitCmd(),
-		newCompareCmd(),
+		newCompareCmd(d),
 		newDiffCmd(),
 		newInitCmd(),
 		newLogCmd(),
-		newManifestCmd(),
-		newPruneCmd(),
+		newManifestCmd(d),
+		newPruneCmd(d),
 		newPullCmd(),
 		newPushCmd(),
 		newRenameCmd(),
-		newStagedCmd(),
+		newStagedCmd(d),
 		newStatusCmd(),
-		newValidateCmd(),
+		newValidateCmd(d),
 	)
 
 	return cmd

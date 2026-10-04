@@ -763,7 +763,7 @@ func TestPresentCompareReport(t *testing.T) {
 
 		comparePresentGlobals(t, "plain", false, "")
 		stdout := captureStdout(t, func() {
-			presentCompareReport(cfg, comparePresentRun(&comparePresentPayload{}))
+			presentCompareReport(defaultDeps(), cfg, comparePresentRun(&comparePresentPayload{}))
 		})
 		if !strings.Contains(stdout, "Overlay comparison") {
 			t.Errorf("the resolved plain mode printed no report; stdout = %q", stdout)
@@ -778,13 +778,13 @@ func TestPresentCompareReport(t *testing.T) {
 		// The half that matters: an unusable ambient mode is a typo in a shell
 		// profile, and it must not become "your comparison did not run".
 		comparePresentGlobals(t, "sideways", false, "")
-		if got := reportModeOrPlain(cfg, false, uiIsTerminal); got != report.ModePlain {
+		if got := reportModeOrPlain(cfg, false, defaultDeps().uiIsTerminal); got != report.ModePlain {
 			// Non-vacuity: if this value were ACCEPTED, the render below would
 			// prove nothing about the fallback.
 			t.Fatalf("reportModeOrPlain(%q) = %q, want the plain fallback", "sideways", got)
 		}
 		stdout = captureStdout(t, func() {
-			presentCompareReport(cfg, comparePresentRun(&comparePresentPayload{}))
+			presentCompareReport(defaultDeps(), cfg, comparePresentRun(&comparePresentPayload{}))
 		})
 		if !strings.Contains(stdout, "Overlay comparison") {
 			t.Errorf("an unusable mode cost the operator the report; stdout = %q", stdout)
@@ -796,7 +796,7 @@ func TestPresentCompareReport(t *testing.T) {
 			payload := &comparePresentPayload{}
 			comparePresentGlobals(t, "plain", all, "")
 			captureStdout(t, func() {
-				presentCompareReport(&config.Config{}, comparePresentRun(payload))
+				presentCompareReport(defaultDeps(), &config.Config{}, comparePresentRun(payload))
 			})
 
 			if len(payload.asked) != 1 {
@@ -843,7 +843,7 @@ func TestPresentCompareReport(t *testing.T) {
 			t.Fatal("a closed stdout rendered without error; this subtest would assert nothing")
 		}
 
-		presentCompareReport(&config.Config{}, run)
+		presentCompareReport(defaultDeps(), &config.Config{}, run)
 
 		data, err := os.ReadFile(exportPath)
 		if err != nil {
@@ -862,7 +862,7 @@ func TestPresentCompareReport(t *testing.T) {
 		comparePresentGlobals(t, "plain", false, exportPath)
 
 		stdout := captureStdout(t, func() {
-			presentCompareReport(&config.Config{}, comparePresentRun(&comparePresentPayload{}))
+			presentCompareReport(defaultDeps(), &config.Config{}, comparePresentRun(&comparePresentPayload{}))
 		})
 		if !strings.Contains(stdout, "dev-lang/rust 1.0.0 vs 1.1.0") {
 			t.Errorf("an unwritable export cost the operator the report; stdout = %q", stdout)

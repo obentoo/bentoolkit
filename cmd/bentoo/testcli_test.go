@@ -193,6 +193,19 @@ type testCLI struct {
 	t       *testing.T
 	home    string
 	overlay string
+	// deps is what every Run builds its tree with: defaultDeps(), then each
+	// withDeps option in order (story 060, R6.1).
+	deps *deps
+}
+
+// testCLIOption configures a testCLI before its first Run.
+type testCLIOption func(*testCLI)
+
+// withDeps substitutes dependencies for every tree this harness builds. The
+// function receives the harness's own deps value, so a substitution never
+// reaches the production defaults or another harness.
+func withDeps(set func(*deps)) testCLIOption {
+	return func(c *testCLI) { set(c.deps) }
 }
 
 // newTestCLI prepares an isolated home, a real overlay directory and a config
@@ -202,7 +215,7 @@ type testCLI struct {
 // Every failure below is a t.Fatal naming what could not be prepared. A harness
 // that half-configures itself produces green tests that assert nothing, which is
 // worse than a red one.
-func newTestCLI(t *testing.T) *testCLI {
+func newTestCLI(t *testing.T, opts ...testCLIOption) *testCLI {
 	t.Helper()
 
 	home := t.TempDir()
@@ -244,7 +257,11 @@ func newTestCLI(t *testing.T) *testCLI {
 
 	restoreReportFlags(t)
 
-	return &testCLI{t: t, home: home, overlay: overlay}
+	c := &testCLI{t: t, home: home, overlay: overlay, deps: defaultDeps()}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // restoreReportFlags puts the report flags back the way it found them when the
@@ -313,9 +330,16 @@ func testAutoupdateOptions() *autoupdateOptions {
 }
 
 // testAutoupdateRun wraps o in the run runAutoupdate would hand a mode, with
-// every resolved value at its zero (nothing configured).
+// the production dependencies and every resolved value at its zero (nothing
+// configured). A test substitutes a seam on the returned run's deps.
 func testAutoupdateRun(o *autoupdateOptions) *autoupdateRun {
-	return &autoupdateRun{opts: o}
+	return testAutoupdateRunWith(o, defaultDeps())
+}
+
+// testAutoupdateRunWith is testAutoupdateRun with the test's own deps, for a
+// test that substitutes a seam before calling a mode method.
+func testAutoupdateRunWith(o *autoupdateOptions, d *deps) *autoupdateRun {
+	return &autoupdateRun{opts: o, deps: d}
 }
 
 // restoreFlagGlobals snapshots the variable behind each pointer now and writes
@@ -390,7 +414,7 @@ func (c *testCLI) Run(args ...string) (stdout, stderr string, code int) {
 	code = func() int {
 		defer func() { color.Output, color.NoColor = origColorOut, origNoColor }()
 
-		cmd := newRootCmd()
+		cmd := newRootCmdWith(c.deps)
 		cmd.SetArgs(args)
 		cmd.SetOut(os.Stdout)
 		cmd.SetErr(os.Stderr)

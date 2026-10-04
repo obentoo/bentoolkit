@@ -15,12 +15,13 @@ func TestRunSnapshotRun_SuccessPersistsResult(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	writeSnapshotConfig(t, validSnapshotTOML)
 	stateDir := redirectStateDir(t)
-	snapshotRunner = &snapshot.MockRunner{} // btrbk run/clean succeed (nil,nil)
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{} // btrbk run/clean succeed (nil,nil)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("run exited with code %d, want success", code)
@@ -38,7 +39,8 @@ func TestRunSnapshotRun_DryRunPrintsPlanZeroExec(t *testing.T) {
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
 	stateDir := redirectStateDir(t)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	origDryRun := snapshotRunDryRun
 	snapshotRunDryRun = true
@@ -47,7 +49,7 @@ func TestRunSnapshotRun_DryRunPrintsPlanZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("run --dry-run exited with code %d, want success", code)
@@ -77,7 +79,8 @@ func TestRunSnapshotRun_FailureExitsNonZero(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	writeSnapshotConfig(t, validSnapshotTOML)
 	redirectStateDir(t)
-	snapshotRunner = &snapshot.MockRunner{
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("btrfs: subvolume not found")
 		},
@@ -86,7 +89,7 @@ func TestRunSnapshotRun_FailureExitsNonZero(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil))
+		code, exited = exitOf(runSnapshotRun(snapshotRunCmd, nil, td))
 	})
 	if !exited || code != 1 {
 		t.Errorf("run exit = (%d, %v), want (1, true) on pipeline failure", code, exited)

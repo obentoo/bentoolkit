@@ -13,9 +13,9 @@ import (
 // T6.2 — `snapshot restore <id> --target <path> --ship <name> [--yes]` verb.
 //
 // These tests mirror snapshot_apply_test.go / snapshot_run_test.go: they read
-// the handler outcome (exitOf), inject snapshotRunner = a MockRunner, and write a temp
+// the handler outcome (exitOf), inject a MockRunner as deps.snapshotRunner, and write a temp
 // snapshot.toml via the shared helpers. They drive the dispatch happy path, the
-// confirm-gate seam (snapshotRestoreConfirm), an unknown --ship, and the missing
+// confirm-gate seam (deps.snapshotRestoreConfirm), an unknown --ship, and the missing
 // required --target flag.
 // ---------------------------------------------------------------------------
 
@@ -136,13 +136,9 @@ func restoreCatSource(remote, subvolume, id string) string {
 	return remote + "/" + snapshot.ArchivePrefix(subvolume) + "/" + snapshot.ArchiveObjectLeaf(id)
 }
 
-// stubRestoreConfirm installs a confirm seam returning decision and restores the
-// previous value after the test.
-func stubRestoreConfirm(t *testing.T, decision bool) {
-	t.Helper()
-	orig := snapshotRestoreConfirm
-	snapshotRestoreConfirm = func(string) bool { return decision }
-	t.Cleanup(func() { snapshotRestoreConfirm = orig })
+// stubRestoreConfirm makes d's restore confirm seam return decision.
+func stubRestoreConfirm(d *deps, decision bool) {
+	d.snapshotRestoreConfirm = func(string) bool { return decision }
 }
 
 // hasCall reports whether calls contains an invocation of name whose first args
@@ -167,13 +163,14 @@ func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 	if exited {
 		t.Fatalf("restore exited with code %d, want success", code)
@@ -195,13 +192,14 @@ func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "restic")
 	writeSnapshotConfig(t, restoreTOMLRestic)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 	if exited {
 		t.Fatalf("restore exited with code %d, want success", code)
@@ -219,14 +217,15 @@ func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false) // no --yes → confirm gate
-	stubRestoreConfirm(t, false)                 // operator declines
+	stubRestoreConfirm(td, false)                // operator declines
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 	if exited {
 		t.Fatalf("declined restore exited with code %d; declining is a clean abort, not a failure", code)
@@ -242,14 +241,15 @@ func TestRunSnapshotRestore_ConfirmApprovedProceeds(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false)
-	stubRestoreConfirm(t, true) // operator approves
+	stubRestoreConfirm(td, true) // operator approves
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 	if exited {
 		t.Fatalf("approved restore exited with code %d, want success", code)
@@ -265,13 +265,14 @@ func TestRunSnapshotRestore_UnknownShipExits1(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "does-not-exist", true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 	if !exited || code != 1 {
 		t.Errorf("unknown --ship exit = (%d, %v), want (1, true)", code, exited)
@@ -314,13 +315,12 @@ func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "restic")
 	writeSnapshotConfig(t, restoreTOMLRestic)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setRestoreFlags(t, "/mnt/r", "cloud", false)
 	confirmCalled := false
-	origConfirm := snapshotRestoreConfirm
-	snapshotRestoreConfirm = func(string) bool { confirmCalled = true; return false }
-	t.Cleanup(func() { snapshotRestoreConfirm = origConfirm })
+	td.snapshotRestoreConfirm = func(string) bool { confirmCalled = true; return false }
 
 	origDryRun := snapshotRestoreDryRun
 	snapshotRestoreDryRun = true
@@ -329,7 +329,7 @@ func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"9921"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"9921"}, td))
 	})
 	if exited {
 		t.Fatalf("restore --dry-run exited with code %d, want success", code)
@@ -393,14 +393,15 @@ func TestRunSnapshotRestore_TwoSubvolumesWithoutFlagRefusesBeforeAnySubprocess(t
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true) // --yes: the confirm gate cannot be the reason nothing ran
 	setRestoreSubvolume(t, "")                  // the operator passed no --subvolume
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 
 	if !exited || code != 1 {
@@ -432,7 +433,8 @@ func TestRunSnapshotRestore_SubvolumeFlagPicksThatPrefix(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
 	setRestoreSubvolume(t, "/home")
 
@@ -441,7 +443,7 @@ func TestRunSnapshotRestore_SubvolumeFlagPicksThatPrefix(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}, td))
 	})
 	if exited {
 		t.Fatalf("restore --subvolume /home exited with code %d, want success", code)
@@ -473,14 +475,15 @@ func TestRunSnapshotRestore_UnknownSubvolumeRefusesBeforeAnySubprocess(t *testin
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
 	setRestoreSubvolume(t, "/var")
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 
 	if !exited || code != 1 {
@@ -501,7 +504,8 @@ func TestRunSnapshotRestore_DeployedSingleSubvolumeNeedsNoFlag(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveDeployed)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
 	setRestoreSubvolume(t, "") // exactly the deployed invocation: no --subvolume
 
@@ -510,7 +514,7 @@ func TestRunSnapshotRestore_DeployedSingleSubvolumeNeedsNoFlag(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{id}, td))
 	})
 	if exited {
 		t.Fatalf("single-subvolume restore without --subvolume exited with code %d; the deployed configuration must keep working unedited (R5.1)", code)
@@ -539,7 +543,8 @@ func TestRunSnapshotRestore_DryRunOnAmbiguousConfigAlsoRefuses(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false)
 	setRestoreSubvolume(t, "")
 
@@ -550,7 +555,7 @@ func TestRunSnapshotRestore_DryRunOnAmbiguousConfigAlsoRefuses(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}))
+		code, exited = exitOf(runSnapshotRestore(snapshotRestoreCmd, []string{"home.2026"}, td))
 	})
 
 	if !exited || code != 1 {
@@ -593,4 +598,4 @@ func TestRunSnapshotRestore_SubvolumeFlagRegisteredAndOptional(t *testing.T) {
 
 // Compile-time check: the package-level confirm seam is assignable to
 // snapshot.RestoreOptions.Confirm (the unexported confirmFunc type).
-var _ = snapshot.RestoreOptions{Confirm: snapshotRestoreConfirm}
+var _ = snapshot.RestoreOptions{Confirm: defaultDeps().snapshotRestoreConfirm}

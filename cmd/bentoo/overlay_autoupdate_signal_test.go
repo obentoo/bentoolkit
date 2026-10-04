@@ -107,7 +107,7 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(auCmd, nil, auOpts)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	// Wait until in-flight work has genuinely started before signalling.
@@ -226,7 +226,7 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(auCmd, nil, auOpts)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	// Signal only once runApply has copied the ebuild and spawned the stub
@@ -254,10 +254,10 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	select {
 	case <-done:
 		if elapsed := time.Since(signalAt); elapsed > 2*time.Second {
-			t.Errorf("runAutoupdate(--apply) returned %v after SIGTERM; want <= 2s (R1.1)", elapsed)
+			t.Errorf("runAutoupdate(--apply, defaultDeps()) returned %v after SIGTERM; want <= 2s (R1.1)", elapsed)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("runAutoupdate(--apply) did not return within 5s of SIGTERM; signal cancellation is not wired to runApply")
+		t.Fatal("runAutoupdate(--apply, defaultDeps()) did not return within 5s of SIGTERM; signal cancellation is not wired to runApply")
 	}
 
 	// The orphan ebuild from copyEbuild must have been rolled back (R1.3).

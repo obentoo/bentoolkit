@@ -50,14 +50,14 @@ import (
 // the moment either is redirected. Here the plan and the reason beside each
 // entry are what an operator approves, so they have to arrive together.
 
-// confirmStagedCleanFn is the confirmation seam the CLI tests drive, defaulting
-// to the real prompt so a caller that supplies nothing gets production
-// behaviour. Same shape as `var sweepPlannerFn` in overlay_autoupdate_sweep.go
+// The confirmation seam the CLI tests drive is the confirmStagedClean field
+// of deps (deps.go), defaulting to the real prompt so a caller that supplies
+// nothing gets production behaviour. Same shape as the `sweepPlanner` field of deps in deps.go
 // and for the same
 // reason: a test has to be able to prove the executor was NOT REACHED, and that
 // is only observable if reaching it goes through a replaceable name.
 //
-// It is not confirmSweepFn. That seam belongs to the overlay sweep, whose
+// It is not deps.confirmSweep. That seam belongs to the overlay sweep, whose
 // prompt covers a published deletion; one seam shared by two commands would let
 // a test pinning either one answer for the other.
 //
@@ -66,7 +66,6 @@ import (
 // matters is that this command's idea of "a tree that may be removed" is the
 // validate package's idea of it — and an inline fake plan would assert the
 // opposite of that.
-var confirmStagedCleanFn = confirmAction
 
 // stagedCleanYes is this subcommand's own --yes, and it is deliberately not
 // the --yes option of `overlay autoupdate`.
@@ -83,7 +82,7 @@ var stagedCleanYes bool
 // It is a constructor rather than a package-level var, following
 // `func newValidateCmd` in overlay_validate.go: a fresh command per call means one test's flag
 // state can never survive into the next.
-func newStagedCmd() *cobra.Command {
+func newStagedCmd(d *deps) *cobra.Command {
 	staged := &cobra.Command{
 		Use:   "staged",
 		Short: "Work with the staged trees the build gates prepare outside the overlay",
@@ -95,12 +94,12 @@ A staged tree is a scratch copy of the overlay, built outside it so that a gate
 can compile a candidate without ever writing to the published tree. Nothing
 under this command reads, writes or removes anything in the overlay itself.`,
 	}
-	staged.AddCommand(newStagedCleanCmd())
+	staged.AddCommand(newStagedCleanCmd(d))
 	return staged
 }
 
 // newStagedCleanCmd builds `overlay staged clean`.
-func newStagedCleanCmd() *cobra.Command {
+func newStagedCleanCmd(d *deps) *cobra.Command {
 	clean := &cobra.Command{
 		Use:         "clean",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -143,7 +142,9 @@ Examples:
   bentoo overlay staged clean         # print the plan, then ask
   bentoo overlay staged clean --yes   # remove the planned trees unattended`,
 		Args: cobra.NoArgs,
-		RunE: runStagedCleanCmd,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStagedCleanCmd(cmd, args, d)
+		},
 	}
 	// The one thing a fresh command per call does NOT make fresh: --yes is bound
 	// to a package variable, because the tests set consent directly rather than
@@ -175,7 +176,7 @@ Examples:
 // the working directory, so a run that shrugged off a config failure would be
 // asking "is the staging root inside whatever directory I was launched from".
 // Refusing is the only answer that keeps the check meaning what it says.
-func runStagedCleanCmd(cmd *cobra.Command, _ []string) error {
+func runStagedCleanCmd(cmd *cobra.Command, _ []string, d *deps) error {
 	// The process-wide context (func commandContext) reaches the sweep, so an
 	// interrupted run stops between trees instead of finishing the batch first.
 	ctx := commandContext(cmd)
@@ -192,7 +193,7 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string) error {
 		return exitWith(1)
 	}
 
-	return runStagedClean(ctx, appCtx.OverlayPath, stagingRoot)
+	return runStagedClean(ctx, appCtx.OverlayPath, stagingRoot, d)
 }
 
 // runStagedClean plans what may leave the staging root, prints it, and — once
@@ -216,7 +217,7 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string) error {
 // things the planner and this command already do — the tree must carry the
 // recognition marker, a tree whose deciding gate FAILED is kept, and the whole
 // plan is printed and agreed to before anything is removed.
-func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error {
+func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *deps) error {
 	plan, err := validate.PlanStagedSweep(validate.SweepRequest{
 		Overlay:     overlayPath,
 		StagingRoot: stagingRoot,
@@ -264,7 +265,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error 
 	// it. Handing consent to the executor as a parameter would move the guarantee
 	// into the loop that deletes, where one wrong branch removes a tree; kept out
 	// here, the worst a wrong branch can do is fail to remove one.
-	if !confirmStagedClean(plan) {
+	if !confirmStagedClean(plan, d) {
 		return nil
 	}
 
@@ -296,7 +297,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error 
 // their machine is clean when it is full of trees (R2.2). That is the same
 // defect S027-R7.1 corrected one directory over, arriving by a different route.
 //
-// registryPromptIsInteractive is reused rather than re-derived, and it requires
+// deps.registryPromptIsInteractive is reused rather than re-derived, and it requires
 // BOTH stdin and stdout to be terminals. Either half alone leaves a hole:
 // confirmAction reads os.Stdin, so `yes | bentoo overlay staged clean` would
 // answer for a human who is not there, and with stdout redirected the plan this
@@ -305,12 +306,12 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string) error 
 // ONE prompt for the whole plan, never one per tree. A question asked per tree is
 // answered by reflex from the third one on, which turns a careful operator into a
 // rubber stamp — and the line they stop reading is the one that was wrong.
-func confirmStagedClean(plan validate.StagedSweepPlan) bool {
+func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	if stagedCleanYes {
 		output.Warning.Printf("  --yes given: removing %d staged tree(s) without a prompt.\n", len(plan.Remove))
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !d.registryPromptIsInteractive() {
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing removed.")
 		output.Info.Printf("  Re-run with --yes to remove these %d staged tree(s) unattended.\n", len(plan.Remove))
 		return false
@@ -322,7 +323,7 @@ func confirmStagedClean(plan validate.StagedSweepPlan) bool {
 	// published deletion `overlay autoupdate --clean` asks about — but a tree
 	// somebody was about to open is just as gone.
 	output.Warning.Println("  These directories are deleted from disk. Nothing in the overlay is read, written or removed.")
-	return confirmStagedCleanFn(fmt.Sprintf(
+	return d.confirmStagedClean(fmt.Sprintf(
 		"Remove %d staged tree(s) from %s?", len(plan.Remove), plan.StagingRoot))
 }
 

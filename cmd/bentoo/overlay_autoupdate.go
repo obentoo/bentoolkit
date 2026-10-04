@@ -158,7 +158,10 @@ type autoupdateOptions struct {
 // it is never stored in a package variable and holds no context.Context
 // (containedctx): the run context is a parameter of each mode that needs one.
 type autoupdateRun struct {
-	opts        *autoupdateOptions
+	opts *autoupdateOptions
+	// deps is the tree's dependencies: every seam a mode reaches is read
+	// through it, never through a package variable (story 060, C6).
+	deps        *deps
 	dirs        autoupdateDistfileDirs
 	validate    autoupdateValidatePolicy
 	validateCfg config.ValidateConfig
@@ -214,8 +217,9 @@ type autoupdateValidatePolicy struct {
 	RequireProof     bool
 }
 
-// newAutoupdateCmd builds `overlay autoupdate`.
-func newAutoupdateCmd() *cobra.Command {
+// newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
+// every run of this command reads its seams through autoupdateRun.deps.
+func newAutoupdateCmd(d *deps) *cobra.Command {
 	// One options value per tree, never shared: see autoupdateOptions.
 	o := &autoupdateOptions{}
 	cmd := &cobra.Command{
@@ -276,7 +280,9 @@ Examples:
 		// A method value bound to this tree's own options, not a closure:
 		// contextcheck follows a closure's call into runAutoupdate and would ask
 		// every newRootCmd caller for a context it has no use for.
-		RunE: o.runE,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAutoupdate(cmd, args, o, d)
+		},
 	}
 	cmd.Flags().BoolVar(&o.check, "check", false, "Check for updates")
 	cmd.Flags().BoolVar(&o.list, "list", false, "List pending updates")
@@ -499,13 +505,10 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	return r, extra, finish
 }
 
-// runE is the RunE of the `overlay autoupdate` tree that allocated o.
-func (o *autoupdateOptions) runE(cmd *cobra.Command, args []string) error {
-	return runAutoupdate(cmd, args, o)
-}
-
-func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions) error {
-	ar := &autoupdateRun{opts: o}
+// runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the
+// tree that allocated it, and d that tree's dependencies.
+func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *deps) error {
+	ar := &autoupdateRun{opts: o, deps: d}
 	const (
 		minConcurrency = 1
 		maxConcurrency = 100
@@ -651,7 +654,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions) erro
 	// resolved after this.
 	ar.uiConfig = appCtx.Config
 
-	if _, err := resolveAutoupdateUIMode(appCtx.Config, o.noTUI, uiIsTerminal); err != nil {
+	if _, err := resolveAutoupdateUIMode(appCtx.Config, o.noTUI, ar.deps.uiIsTerminal); err != nil {
 		// Debug, not Error, and that is R3.6 rather than indifference. The
 		// refusal is stated once per run, at Warn, by whoever produces a report
 		// — presentCheckReport, through reportModeOrPlain — naming the source,
@@ -887,12 +890,12 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// treated as absent — never box a nil pointer (AD9). When the gate is false
 	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
 	// code below are exactly as before this story (R7.x / R10.1).
-	fixer, ferr := checkRegistryFixerFn(llmCfg)
+	fixer, ferr := ar.deps.checkRegistryFixer(llmCfg)
 	if ferr != nil {
 		logger.Warn("LLM registry fixer unavailable; --check will not offer registry repair: %v", ferr)
 		fixer = nil
 	}
-	if fixer != nil && checkInteractiveFn() {
+	if fixer != nil && ar.deps.checkInteractive() {
 		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
 			logger.Warn("registry-fix prompt ended with an error: %v", perr)
 		}
@@ -903,7 +906,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// ::gentoo), reusing the checker --check already built. Read-only and
 	// best-effort — it never changes the check's exit code.
 	if ar.opts.revivable {
-		reportRevivableOrphans(ctx, checker, cfg)
+		ar.reportRevivableOrphans(ctx, checker, cfg)
 	}
 
 	// S033-R9.1: put every pending update through the gates at its resolved
@@ -950,16 +953,6 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// Return the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	return exitWith(result.ExitCode())
 }
-
-// checkRegistryFixerFn and checkInteractiveFn are the seams through which
-// runCheck builds the LLM registry fixer and asks whether stdin is interactive —
-// the same shape as pruneInteractiveFn. Without them the registry-fix loop, and
-// the overlay lock it must run under (S056-R4.6), could only be reached from a
-// terminal with a configured claude CLI.
-var (
-	checkRegistryFixerFn = newConfiguredRegistryFixer
-	checkInteractiveFn   = stdinIsTerminal
-)
 
 // autoupdateNeedsOverlayLock reports whether the selected mode writes the
 // overlay or its registry and so must hold the overlay lock. It mirrors the
@@ -1021,44 +1014,6 @@ func stdinIsTerminal() bool {
 // ---------------------------------------------------------------------------
 // Post-check registry reconciliation (S021-R3.2, R3.3, R3.4)
 // ---------------------------------------------------------------------------
-
-// registryWriterFn is the seam through which the post-check reconciliation
-// writes packages.toml.
-//
-// It is a variable for the test that matters most: the one that must prove
-// NOTHING was written can keep the REAL writer wired and compare the file's
-// bytes before and after, instead of asserting against a mock that would pass
-// even if the guard were removed. The failure-path test swaps it for a stub.
-var registryWriterFn = autoupdate.SetPackageVersions
-
-// confirmRegistryWriteFn is the y/N seam. It defaults to confirmAction — the
-// single confirmation helper this package already uses — which reads os.Stdin
-// and answers "no" on any read error, so an EOF is a decline rather than an
-// accident.
-var confirmRegistryWriteFn = confirmAction
-
-// registryPromptIsInteractive reports whether this process may ASK before
-// writing the registry, and it deliberately requires BOTH streams to be
-// terminals.
-//
-// R3.4 is worded in terms of stdout, and output.IsTerminal is that check: with
-// stdout redirected the operator never sees the divergence list, so a prompt
-// there asks for blind consent to a published diff.
-//
-// stdin matters just as much, and R3.4's literal reading misses it:
-// confirmAction reads os.Stdin, so `yes | bentoo overlay autoupdate --check`
-// or a CI step with a heredoc on stdin would answer "y" with no human present —
-// the exact unattended publish this gate exists to prevent. stdinIsTerminal
-// (the probe story 014 already uses for its own prompt) is what proves someone
-// is there to answer.
-//
-// Requiring both is therefore strictly more conservative than R3.4, never less:
-// every run R3.4 refuses is refused here too, plus the piped-stdin one it does
-// not name. A run that lands in the refused set is not blocked, only made
-// explicit — it writes with --yes.
-var registryPromptIsInteractive = func() bool {
-	return stdinIsTerminal() && output.IsTerminal()
-}
 
 // reconcileRegistryAfterCheck is the post-check reconciliation: it compares the
 // whole registry against the overlay, prints the three classes of disagreement,
@@ -1124,7 +1079,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 
 	// D4: one call, the whole batch. SetPackageVersions does one read and one
 	// atomic rename, so a partially-written registry is never reachable.
-	if err := registryWriterFn(overlayPath, pins); err != nil {
+	if err := ar.deps.registryWriter(overlayPath, pins); err != nil {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
 		// and its exit code says so. The next run proposes the same batch again.
 		logger.Error("reconcile: failed to write %d version pin(s) to packages.toml: %v", len(pins), err)
@@ -1275,7 +1230,7 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 		output.Warning.Printf("  --yes given: writing %d version pin(s) without a prompt.\n", writable)
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		// R3.4: the divergences above ARE the report; this run writes nothing.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
 		output.Info.Printf("  Re-run with --yes to write these %d version pin(s) unattended.\n", writable)
@@ -1283,7 +1238,7 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 	}
 	// R3.2: ONE question covering every divergence above, not one per entry.
 	fmt.Println()
-	return confirmRegistryWriteFn(fmt.Sprintf(
+	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)", writable, len(divs)))
 }
 
@@ -1292,8 +1247,8 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 // is read-only and best-effort — a provider-resolution failure warns and returns
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
-func reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
-	prov, err := resolveGentooProviderFn(cfg)
+func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
+	prov, err := ar.deps.resolveGentooProvider(cfg)
 	if err != nil {
 		logger.Warn("revivable-orphan scan skipped: %v", err)
 		return
@@ -2045,12 +2000,6 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 	return opts
 }
 
-// resolveGentooProviderFn is the seam the revive flows use to obtain the
-// ::gentoo provider. It points at resolveGentooProvider in production and is
-// overridable in tests so the flows can be driven with an on-disk fake (a
-// provider.PackageDirProvider) instead of resolving the real gentoo repo.
-var resolveGentooProviderFn = resolveGentooProvider
-
 // resolveGentooProvider resolves the ::gentoo provider the revive flow seeds
 // from, mirroring `overlay compare`'s provider-resolution idiom: config repos >
 // registry, with the GitHub token resolved from GITHUB_TOKEN/GH_TOKEN via the
@@ -2105,7 +2054,7 @@ func (ar *autoupdateRun) runReviveList(ctx context.Context, overlayPath, configD
 		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
-	prov, err := resolveGentooProviderFn(cfg)
+	prov, err := ar.deps.resolveGentooProvider(cfg)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -2158,7 +2107,7 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
 func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
-	prov, err := resolveGentooProviderFn(cfg)
+	prov, err := ar.deps.resolveGentooProvider(cfg)
 	if err != nil {
 		return failWith(1, err)
 	}

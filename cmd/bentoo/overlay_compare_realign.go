@@ -321,16 +321,16 @@ func realignIsTree(path string) bool {
 // nothing is constructed, no PATH is consulted and no process is spawned.
 //
 // _Requirements: R4, R4.1_
-func compareRealignReviewer(noReview bool, budget time.Duration) overlay.RealignReviewer {
+func compareRealignReviewer(noReview bool, budget time.Duration, d *deps) overlay.RealignReviewer {
 	if noReview {
 		return nil
 	}
 
-	reviewer, err := newRealignReviewer(budget)
+	reviewer, err := newRealignReviewer(budget, d)
 	if err != nil {
 		// The error is an ARGUMENT and never a format string: it may carry the
 		// CLI's own text.
-		reviewWarnf("the realignment review could not be started (%v); every divergence is reported without a verdict and the rest of the report is unchanged", err)
+		d.reviewWarnf("the realignment review could not be started (%v); every divergence is reported without a verdict and the rest of the report is unchanged", err)
 		return nil
 	}
 	return reviewer
@@ -350,8 +350,8 @@ func compareRealignReviewer(noReview bool, budget time.Duration) overlay.Realign
 // than two that could disagree — and so the operator's configured budget bounds
 // this review and the divergence review as the same number, carried through here
 // and read from nothing local (S048-R4.1).
-func newRealignReviewer(budget time.Duration) (overlay.RealignReviewer, error) {
-	asker, err := newClaudeAsker(budget)
+func newRealignReviewer(budget time.Duration, d *deps) (overlay.RealignReviewer, error) {
+	asker, err := d.newClaudeAsker(budget)
 	if err != nil {
 		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
 			return nil, nil

@@ -23,8 +23,8 @@ import (
 // only then let RepairResult.Write re-run the inertness gate and rename the file.
 //
 // The gates are story 021's, not a second set: the same --yes flag, the same
-// registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
-// same confirmRegistryWriteFn seam that guard the post-check version pins. Two
+// deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
+// same deps.confirmRegistryWrite seam that guard the post-check version pins. Two
 // idioms for "may I publish?" in one command is one too many.
 
 // runLintFix is the --fix half of runLint. issues is what the lint above
@@ -172,7 +172,7 @@ func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool
 		output.Warning.Printf("  --yes given: writing %d repair(s) without a prompt.\n", repairs)
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		// The diff above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
@@ -183,7 +183,7 @@ func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool
 	// ONE question covering the whole diff, not one per record: the operator is
 	// approving the rewrite they just read.
 	fmt.Println()
-	return confirmRegistryWriteFn(fmt.Sprintf(
+	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Write %d repair(s) to packages.toml? (the diff above is the whole change)", repairs))
 }
 

@@ -47,19 +47,13 @@ import (
 // goes to stderr instead — a warning printed into the document would break the
 // `| jq` the flag exists for.
 
-// validateRunnerFn is the seam the CLI tests drive, defaulting to the real
-// runner. Same shape as overlay_prune.go's seams and for the reason that file
-// states: a test has to be able to prove the runner was NOT REACHED, and that
-// is only observable if reaching it goes through a replaceable name.
-var validateRunnerFn = validate.Run
-
 // newValidateCmd builds the command.
 //
 // It is a constructor rather than a package-level var, and its flags are read
 // off the returned command rather than bound to package variables, so two
 // commands never share flag state. A test drives a fresh one per case and one
 // case's --json cannot survive into the next.
-func newValidateCmd() *cobra.Command {
+func newValidateCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "validate [category[/package]]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -111,7 +105,9 @@ Examples:
   bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir
   bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runValidate,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runValidate(cmd, args, d)
+		},
 	}
 	// NO BACK-QUOTE IN THE SENTENCE BELOW, and that is load-bearing rather than
 	// stylistic: pflag reads the first back-quoted substring of a usage string as
@@ -161,7 +157,7 @@ Examples:
 // command's tests from depending on the host having a configured overlay, which
 // is one of three environment couplings this repository has had to remove from
 // its suite.
-func runValidate(cmd *cobra.Command, args []string) error {
+func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	// The process-wide context (func commandContext): overlay validate is
 	// cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels the run.
 	ctx := commandContext(cmd)
@@ -266,7 +262,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		stagedManifest = publishedManifestBytes
 	}
 
-	report, err := validateRunnerFn(ctx, validate.Options{
+	report, err := d.validateRunner(ctx, validate.Options{
 		Overlay:  overlayPath,
 		Distdir:  distdir,
 		Selector: selector,
@@ -295,7 +291,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			// and this branch is reached precisely because it did not — so the
 			// exported document says so in the key every kind of run answers,
 			// beside the diagnostic below that only a human reads.
-			presentValidateReport(report, false, asJSON, diag)
+			presentValidateReport(d, report, false, asJSON, diag)
 			_, _ = fmt.Fprintf(diag, "  %v\n", err)
 			// 128 + SIGINT, the shell's own convention — and deliberately NOT 2.
 			// Report.ExitCode documents 2 as "the selector matched nothing", and
@@ -308,7 +304,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return exitWith(2)
 	}
 
-	presentValidateReport(report, true, asJSON, diag)
+	presentValidateReport(d, report, true, asJSON, diag)
 	// The status is the RUN's, computed from what the gates said. It is read
 	// after the export deliberately and is unaffected by it: exportReport
 	// returns nothing, so a path that could not be written has no value to

@@ -11,7 +11,6 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
-	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
@@ -123,17 +122,6 @@ func resolveUIMode(in uiInputs) (report.Mode, string, error) {
 	}
 	return mode, warning, nil
 }
-
-// uiIsTerminal is the package seam for the stdout-TTY stat: the ONE point where
-// this package asks "is stdout a terminal?", so a test can answer it.
-//
-// It mirrors internal/common/tui's own isTerminal seam deliberately, and for
-// the same reason. R3.7 is a statement about behaviour ON a terminal and OFF
-// one; a `go test` binary writes to a pipe, so it is only ever off one. Without
-// a seam the on-a-terminal half of the requirement cannot be checked at all —
-// and that is the half that decides whether an operator who configured nothing
-// still gets the live region they have always had.
-var uiIsTerminal = output.IsTerminal
 
 // configuredUIMode reads ui.mode out of a configuration that may not exist.
 //
@@ -324,7 +312,7 @@ func modeUsesLiveRegion(mode report.Mode) bool {
 // which is the point: one resolution, so the report and the apply progress
 // cannot disagree about which renderer this run is using.
 func (ar *autoupdateRun) autoupdateUsesTUI() bool {
-	mode, err := resolveAutoupdateUIMode(ar.uiConfig, ar.opts.noTUI, uiIsTerminal)
+	mode, err := resolveAutoupdateUIMode(ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
 	if err != nil {
 		// Reachable, and only from the two AMBIENT sources. S044-R3.9 stops an
 		// unusable --ui and says nothing about the other two; the root has

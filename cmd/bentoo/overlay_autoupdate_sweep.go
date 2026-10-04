@@ -12,15 +12,6 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
-// sweepPlannerFn and sweepExecutorFn are the seams the CLI tests drive. Both
-// default to the real implementations, so a caller that supplies neither gets
-// production behaviour.
-var (
-	sweepPlannerFn  = autoupdate.PlanOverlaySweep
-	sweepExecutorFn = autoupdate.ExecuteOverlaySweep
-	confirmSweepFn  = confirmAction
-)
-
 // runSweep is `bentoo overlay autoupdate --clean` with no `--apply`: it sweeps
 // the package directories holding an ebuild no registry entry claims.
 //
@@ -58,7 +49,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		target = args[0]
 	}
 
-	batch, err := sweepPlannerFn(overlayPath, cfg.Packages, target)
+	batch, err := ar.deps.sweepPlanner(overlayPath, cfg.Packages, target)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -88,7 +79,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		return nil
 	}
 
-	report := sweepExecutorFn(ctx, overlayPath, batch,
+	report := ar.deps.sweepExecutor(ctx, overlayPath, batch,
 		autoupdate.WithSweepConcurrency(concurrency),
 		autoupdate.WithSweepPackagesConfig(cfg.Packages),
 		// The same two directories every other mode uses, resolved once in
@@ -232,7 +223,7 @@ func keptLines(keep map[string]string) []string {
 // The three gates, in order of how much they trust the caller: --yes deletes
 // unattended because the operator asked for that in so many words; an
 // interactive terminal is asked; anything else prints the plan and removes
-// nothing. registryPromptIsInteractive requires BOTH a stdin and a stdout TTY,
+// nothing. deps.registryPromptIsInteractive requires BOTH a stdin and a stdout TTY,
 // so `yes | bentoo overlay autoupdate --clean` cannot answer for a human.
 func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 	dirs := 0
@@ -246,7 +237,7 @@ func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 		output.Warning.Printf("  --yes given: removing %d ebuild(s) without a prompt.\n", batch.TotalRemove)
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing removed.")
 		output.Info.Printf("  Re-run with --yes to remove these %d ebuild(s) unattended.\n", batch.TotalRemove)
 		return false
@@ -254,7 +245,7 @@ func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 
 	fmt.Println()
 	output.Warning.Println("  These ebuilds are deleted from the overlay, which auto-commits and publishes.")
-	return confirmSweepFn(fmt.Sprintf(
+	return ar.deps.confirmSweep(fmt.Sprintf(
 		"Remove %d ebuild(s) from %d director(ies)?", batch.TotalRemove, dirs))
 }
 

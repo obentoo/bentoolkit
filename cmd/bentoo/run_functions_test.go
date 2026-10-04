@@ -176,7 +176,7 @@ func TestRunPull(t *testing.T) {
 func TestRunCompareUnknownRepo(t *testing.T) {
 	setupTestHome(t)
 
-	code := exitCodeFor(runCompare(compareCmd, []string{"nonexistent-repo-xyz"}))
+	code := exitCodeFor(runCompare(compareCmd, []string{"nonexistent-repo-xyz"}, defaultDeps()))
 	if code != 1 {
 		t.Errorf("runCompare with unknown repo should exit(1), got exit(%d)", code)
 	}
@@ -197,7 +197,7 @@ func TestRunCompareDefaultRepo(t *testing.T) {
 		compareTimeout = origTimeout
 	}()
 
-	_ = runCompare(compareCmd, nil)
+	_ = runCompare(compareCmd, nil, defaultDeps())
 }
 
 // TestRunCompareWithRepoArg tests runCompare with explicit repo arg.
@@ -208,7 +208,7 @@ func TestRunCompareWithRepoArg(t *testing.T) {
 	compareTimeout = 1
 	defer func() { compareTimeout = origTimeout }()
 
-	_ = runCompare(compareCmd, []string{"gentoo"})
+	_ = runCompare(compareCmd, []string{"gentoo"}, defaultDeps())
 }
 
 // ---- runAnalyze ----
@@ -274,7 +274,7 @@ func TestRunAutoupdateNoFlag(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // TestRunAutoupdateList tests runAutoupdate with --list flag.
@@ -287,7 +287,7 @@ func TestRunAutoupdateList(t *testing.T) {
 	auOpts.list = true
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // TestRunAutoupdateCheck tests runAutoupdate with --check flag.
@@ -300,7 +300,7 @@ func TestRunAutoupdateCheck(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // TestRunAutoupdateApply tests runAutoupdate with --apply flag.
@@ -313,7 +313,7 @@ func TestRunAutoupdateApply(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = "net-misc/foo"
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // ---- runCommit ----
@@ -677,7 +677,7 @@ repositories:
 	compareTimeout = 1
 	defer func() { compareTimeout = origTimeout }()
 
-	_ = runCompare(compareCmd, []string{"localrepo"})
+	_ = runCompare(compareCmd, []string{"localrepo"}, defaultDeps())
 }
 
 // setupTestHomeWithGitRepo creates a temp HOME with a valid config AND an initialized git repo.
@@ -866,7 +866,7 @@ func TestRunAutoupdateCheckWithConfig(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // TestRunAutoupdateCheckSpecificPkg tests runAutoupdate --check with a specific package arg.
@@ -881,7 +881,7 @@ func TestRunAutoupdateCheckSpecificPkg(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts)
+	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts, defaultDeps())
 }
 
 // ---- runCompare with packages in overlay ----
@@ -913,7 +913,7 @@ func TestRunCompareWithPackages(t *testing.T) {
 	defer func() { compareTimeout = origTimeout; compareNoCache = origNoCache }()
 
 	// Use a local git repo as provider to avoid network
-	_ = runCompare(compareCmd, []string{"gentoo"})
+	_ = runCompare(compareCmd, []string{"gentoo"}, defaultDeps())
 }
 
 // ---- runAnalyzeAll non-dry-run path ----
@@ -984,7 +984,7 @@ func TestRunAutoupdateWithTildePath(t *testing.T) {
 	auOpts.list = true
 	auOpts.apply = ""
 
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // ---- runStatus success path ----
@@ -1030,7 +1030,7 @@ func TestRunAutoupdateEmptyOverlayPath(t *testing.T) {
 	auOpts.list = false
 	auOpts.apply = ""
 
-	code := exitCodeFor(runAutoupdate(auCmd, nil, auOpts))
+	code := exitCodeFor(runAutoupdate(auCmd, nil, auOpts, defaultDeps()))
 	if code != 1 {
 		t.Errorf("runAutoupdate with empty overlay path should exit(1), got exit(%d)", code)
 	}
@@ -1075,7 +1075,7 @@ func TestRunCheckWithPackagesConfig(t *testing.T) {
 	auOpts.apply = ""
 
 	// Will fail at HTTP level (no real network), but gets past NewChecker
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // TestRunCheckSpecificPkgWithConfig tests runCheck with a specific package and packages.toml.
@@ -1091,7 +1091,7 @@ func TestRunCheckSpecificPkgWithConfig(t *testing.T) {
 	auOpts.apply = ""
 
 	// Pass a specific package arg — will fail at HTTP but covers the args > 0 branch
-	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts)
+	_ = runAutoupdate(auCmd, []string{"app-misc/testpkg"}, auOpts, defaultDeps())
 }
 
 // ---- runPull with fetch failure ----
@@ -1360,7 +1360,7 @@ func TestRunListSuccessPath(t *testing.T) {
 	auOpts.apply = ""
 
 	// runList loads pending list from configDir — should succeed with empty list
-	_ = runAutoupdate(auCmd, nil, auOpts)
+	_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 }
 
 // ---- runPull divergence path ----
@@ -1471,7 +1471,7 @@ func TestRunCompareGitHubRateLimitPath(t *testing.T) {
 	defer func() { compareTimeout = origTimeout; compareNoCache = origNoCache }()
 
 	// Use gentoo (GitHub provider) — will hit rate limit check, then fail at API
-	_ = runCompare(compareCmd, []string{"gentoo"})
+	_ = runCompare(compareCmd, []string{"gentoo"}, defaultDeps())
 }
 
 // ---- runDiff and runLog error paths ----
@@ -1671,5 +1671,5 @@ repositories:
 	defer func() { compareTimeout = origTimeout }()
 
 	// Compare with local git repo — will clone and compare, likely all up-to-date
-	_ = runCompare(compareCmd, []string{"localrepo"})
+	_ = runCompare(compareCmd, []string{"localrepo"}, defaultDeps())
 }
