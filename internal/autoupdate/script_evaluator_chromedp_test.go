@@ -1,4 +1,4 @@
-//go:build chromedp && !playwright
+//go:build chromedp
 
 // Integration test for the chromedp-backed liveEvaluator. Built and run only
 // with `-tags chromedp` because it launches a headless Chrome, so it stays out
@@ -60,11 +60,10 @@ func libreofficeLikeSite() *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-// TestChromedpEvaluator_Integration verifies the chromedp backend reaches parity
-// with the Playwright one: post-render DOM access, Promise auto-await (the case
-// the Playwright file's comment claimed a raw chromedp.Evaluate could not
-// handle — WithAwaitPromise closes that gap), the real multi-step libreoffice.js
-// logic, and the non-string-result guard.
+// TestChromedpEvaluator_Integration verifies what the script parser needs from
+// its browser backend: post-render DOM access, Promise auto-await
+// (WithAwaitPromise makes chromedp.Evaluate resolve a returned Promise), the
+// real multi-step libreoffice.js logic, and the non-string-result guard.
 func TestChromedpEvaluator_Integration(t *testing.T) {
 	eval := newIntegrationEvaluator(t)
 	srv := libreofficeLikeSite()

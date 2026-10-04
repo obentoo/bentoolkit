@@ -2062,8 +2062,8 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 // per-host rate limiter exactly like fetchContent, then evaluates the script
 // against the rendered page under a child context bounded by opTimeout.
 //
-// The headless-browser backend is opt-in: in a binary built without the
-// `playwright` tag, newLiveEvaluator returns ErrScriptSupportNotBuilt and this
+// The chromedp headless-browser backend is opt-in: in a binary built without
+// the `chromedp` tag, newLiveEvaluator returns ErrScriptSupportNotBuilt and this
 // surfaces as the package's check error.
 //
 // A fresh evaluator is created per call and closed afterward (if it implements
