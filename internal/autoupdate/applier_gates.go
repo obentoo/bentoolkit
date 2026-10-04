@@ -186,7 +186,7 @@ func (a *Applier) resolvedPackageType(pkg, currentVersion string) string {
 //     here no longer exists (design D4).
 //
 // The value rides the per-CALL Options built from cand and is never a field on
-// Applier (S037-D7): applyAllPackages runs applies concurrently, and a seam stored
+// Applier (S037-D7): ApplyAll runs applies concurrently, and a seam stored
 // once would hand package A's archive names to package B — story 035's D2, with
 // names in place of a directory.
 func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, version string) []validate.GateResult {

@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -1101,7 +1100,7 @@ func reconcileRegistryAfterCheck(overlayPath string) {
 		return
 	}
 
-	pins := stalePinBatch(divs)
+	pins := autoupdate.StalePinBatch(divs)
 	displayDivergences(divs, len(pins))
 
 	if len(pins) == 0 {
@@ -1130,41 +1129,6 @@ func reconcileRegistryAfterCheck(overlayPath string) {
 	}
 	output.Success.Printf("  Wrote %d version pin(s) to packages.toml.\n", len(pins))
 	output.Info.Println("  Review the diff before it is published: 'bentoo overlay diff'")
-}
-
-// stalePinBatch builds the write batch, and is the ONLY place a Divergence
-// becomes something written to the registry.
-//
-// It switches on Kind because the three classes are not interchangeable, and
-// mapping all of them to Key -> Disk corrupts the registry in two distinct ways:
-//
-//   - NoEbuild carries an empty Disk, so writing it would ERASE the entry's pin
-//     — and an entry with no pin blocks its whole directory's next --clean;
-//   - UnclaimedEbuild's Key is a bare "category/package" atom, not a registry
-//     key, and the two routinely coincide (net-misc/rclone is both). Writing it
-//     would point that entry's pin at the stray ebuild the finding is asking a
-//     human to delete: the exact opposite of the intent.
-//
-// A future fourth kind falls through unwritten, which is the safe direction.
-func stalePinBatch(divs []autoupdate.Divergence) map[string]string {
-	pins := make(map[string]string, len(divs))
-	for _, d := range divs {
-		switch d.Kind {
-		case autoupdate.StalePin:
-			// The only writable class: Key is a registry key and Disk is a
-			// version that exists on disk (UB4).
-			pins[d.Key] = d.Disk
-		case autoupdate.UnclaimedEbuild:
-			// Report only: the repair is a sweep or a new entry, both human
-			// decisions.
-		case autoupdate.NoEbuild:
-			// Report only: there is no version on disk to record.
-		}
-	}
-	if len(pins) == 0 {
-		return nil
-	}
-	return pins
 }
 
 // displayDivergences prints the three classes grouped, then the batch summary
@@ -1769,7 +1733,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 // --concurrency, so the slow, network-bound `pkgdev manifest` step of each
 // package overlaps instead of running one at a time. With --compile they stay
 // serial so the elevated compile step's confirmation prompt and sudo invocation
-// are not interleaved. Both paths live in applyAllPackages.
+// are not interleaved. Both paths live in (*autoupdate.Applier).ApplyAll.
 func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) error {
 	// Read the pending list up front so the reporter's batch denominator (and the
 	// "nothing to do" short-circuit) are known before the TUI program starts. The
@@ -1824,7 +1788,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
-	results, failures := applyAllPackages(applyCtx, applier, updates, autoupdateCompile, autoupdateConcurrency)
+	results, failures := applier.ApplyAll(applyCtx, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyAllResults prints cleanly.
@@ -1836,96 +1800,6 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 		return exitWith(1)
 	}
 	return nil
-}
-
-// applyAllPackages applies every pending update through the shared Applier and
-// returns the per-package results in input order plus the number of hard
-// failures (an Apply returning a non-nil error). It is the concurrency seam of
-// runApplyAll.
-//
-// It runs serially for either of two reasons. With compile == true the compile
-// step prompts for confirmation and runs under sudo, and interleaving those
-// across goroutines would scramble the prompts. Since story 033 it is also
-// serial when any of these bumps resolves to a validation depth above `options`
-// (D14) — a rule about machine resources rather than about prompts, and the
-// reason it is asked of the Applier: the depth a bump gets is the applier's
-// decision, and a second copy of that logic here would be a copy that drifts.
-//
-// Otherwise the applies are dispatched across a bounded worker pool (mirroring
-// overlay.RegenerateManifests) so each Apply's slow, network-bound `pkgdev
-// manifest` step overlaps. concurrency caps the live workers and is clamped to
-// [1, len(updates)].
-//
-// Concurrency safety: the Applier's pending list and reporter are mutex-guarded,
-// each Apply's file work is scoped to its own package directory, and workers
-// write results to distinct slice indices — so beyond the atomic failure tally
-// no additional locking is needed.
-//
-// Cancellation (audit B8): every Apply receives ctx, and an Apply on a done ctx
-// returns at once with a failed result wrapping ctx.Err() before it touches the
-// overlay. So once ctx ends, every package not yet begun still gets its own
-// non-nil result, in input order, and counts as a failure — no package after
-// the cancel is applied, and the loop needs no second check or early break
-// (a break would leave nil results).
-func applyAllPackages(ctx context.Context, applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
-	results := make([]*autoupdate.ApplyResult, len(updates))
-
-	// Serial when the compile step will prompt and escalate, and — since story
-	// 033 — when ANY of these bumps resolves to a depth that starts a build
-	// (D14). The second rule has nothing to do with prompts: concurrent builds
-	// contend for CPU and for space under PORTAGE_TMPDIR, measured at 60 MB for
-	// one gst configure, and a worker pool multiplies that on a machine that was
-	// never asked. Depths none and options keep the pool, which is every run whose
-	// bumps are revisions and patches.
-	if compile || applier.SerialApplyRequired(updates) {
-		failures := 0
-		for i, u := range updates {
-			// `compile`, not a literal true: this branch is now reached for two
-			// different reasons, and a depth-driven serial run must not acquire the
-			// privileged compile step the operator never asked for.
-			result, err := applier.Apply(ctx, u.Package, compile)
-			if err != nil {
-				failures++
-			}
-			results[i] = result
-		}
-		return results, failures
-	}
-
-	// Concurrent path: a bounded worker pool over an index queue. Workers write
-	// results[i] at distinct indices (no lock) and tally failures atomically.
-	jobs := concurrency
-	if jobs < 1 {
-		jobs = 1
-	}
-	if jobs > len(updates) {
-		jobs = len(updates)
-	}
-
-	var failures int64
-	queue := make(chan int, len(updates))
-	for i := range updates {
-		queue <- i
-	}
-	close(queue)
-
-	var wg sync.WaitGroup
-	for w := 0; w < jobs; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range queue {
-				result, err := applier.Apply(ctx, updates[i].Package, false)
-				results[i] = result
-				if err != nil {
-					atomic.AddInt64(&failures, 1)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-
-	return results, int(failures)
 }
 
 // displayApplyAllResults renders the per-package outcomes of `--apply all`
@@ -2278,14 +2152,6 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 	output.Info.Println("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate")
 }
 
-// reviveOutcome records the result of reviving a single package so runRevive can
-// print an aggregate summary without aborting on the first failure.
-type reviveOutcome struct {
-	pkg    string
-	status string // "revived", "skipped", or "failed"
-	detail string // human-facing note (e.g. the apply error or skip reason)
-}
-
 // runRevive handles --revive <pkg|all>: it resurrects each target orphan by
 // seeding the current ::gentoo ebuild into the overlay, re-enabling the entry,
 // and bumping it to the upstream version via the normal CheckPackage+Apply flow.
@@ -2304,10 +2170,11 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	// The revive seed copies the ::gentoo package dir off disk; an API-only
-	// provider cannot do that. Detect it ONCE before the loop and bail with an
-	// actionable hint (mirrors `overlay compare`'s local-repo guidance).
-	pdp, ok := prov.(provider.PackageDirProvider)
-	if !ok {
+	// provider cannot do that. Detect it ONCE, before the checker, the orphan scan
+	// and the applier, and bail with an actionable hint (mirrors `overlay
+	// compare`'s local-repo guidance). Kept ahead of `--revive all`'s orphan scan
+	// so its "Nothing to revive" exit 0 can never mask the hint and exit 1.
+	if err := autoupdate.CanRevive(prov); err != nil {
 		logger.Error("the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.")
 		logger.Info("Configure a local gentoo repository in ~/.config/bentoo/config.yaml:")
 		logger.Info("  repositories:")
@@ -2319,7 +2186,8 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
+	httpTimeout := resolveHTTPTimeout(cfg)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		return exitWith(1)
@@ -2375,10 +2243,24 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 		return exitWith(1)
 	}
 
-	httpTimeout := resolveHTTPTimeout(cfg)
-	outcomes := make([]reviveOutcome, 0, len(targets))
+	// Each target is re-checked on a FRESH Checker so it loads the re-enabled
+	// packages.toml; it shares the applier's pending list so the entry
+	// CheckPackage writes is visible to Apply (same in-memory map, same process).
+	newChecker := func() (*autoupdate.Checker, error) {
+		return autoupdate.NewChecker(overlayPath,
+			append(reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
+	}
+	reviver, err := autoupdate.NewReviver(overlayPath, applier, prov, newChecker,
+		autoupdate.WithReviveCompile(autoupdateCompile))
+	if err != nil {
+		logger.Error("%v", err)
+		return exitWith(1)
+	}
+
+	outcomes := make([]autoupdate.ReviveOutcome, 0, len(targets))
 	for _, pkg := range targets {
-		outcomes = append(outcomes, reviveOne(ctx, pkg, overlayPath, configDir, cacheTTL, httpTimeout, llmCfg, prov, pdp, applier, pending))
+		output.Info.Printf("Reviving %s...\n", pkg)
+		outcomes = append(outcomes, reviver.Revive(ctx, pkg))
 	}
 
 	failures := displayReviveSummary(outcomes)
@@ -2388,115 +2270,26 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	return nil
 }
 
-// reviveOne performs the full revive for a single package and returns its
-// outcome. It never ends the run: every failure is captured so the caller can
-// continue with the remaining targets and exit non-zero at the end.
-//
-// Steps (in order): locate the ::gentoo package dir, pick the highest ::gentoo
-// version, seed it into the overlay, re-enable the entry in packages.toml BEFORE
-// checking (so the checker won't skip it), CheckPackage(force=true) to populate
-// pending with the upstream version, then Apply (honouring --compile / --clean).
-func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig, prov provider.Provider, pdp provider.PackageDirProvider, applier *autoupdate.Applier, pending *autoupdate.PendingList) reviveOutcome {
-	output.Info.Printf("Reviving %s...\n", pkg)
-
-	category, pkgName, ok := splitPackage(pkg)
-	if !ok {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("invalid package name %q (want category/package)", pkg)}
-	}
-
-	// On-disk ::gentoo package dir to seed from.
-	srcDir, err := pdp.LocalPackagePath(category, pkgName)
-	if err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo package dir lookup failed: %v", err)}
-	}
-
-	// Highest ::gentoo version is the base ebuild we copy in.
-	versions, err := prov.GetPackageVersions(ctx, category, pkgName)
-	if err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("gentoo version lookup failed: %v", err)}
-	}
-	gentooVersion := highestVersion(versions)
-	if gentooVersion == "" {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: "no comparable gentoo version found"}
-	}
-
-	// Seed the ::gentoo ebuild (+ metadata.xml / files/) into the overlay.
-	// SeedFromGentoo takes the full "category/package" (it splits internally).
-	if err := applier.SeedFromGentoo(pkg, srcDir, gentooVersion); err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("seed from gentoo failed: %v", err)}
-	}
-
-	// Re-enable the entry BEFORE checking: the checker skips disabled entries, so
-	// a still-disabled package would never produce a pending update.
-	if err := autoupdate.EnablePackagesInConfig(overlayPath, []string{pkg}); err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("re-enable in packages.toml failed: %v", err)}
-	}
-
-	// Build a FRESH Checker so it loads the now re-enabled packages.toml, then
-	// check the package (force=true to bypass cache) to populate the pending list
-	// with the upstream version (+ aux_var/commit values via the existing paths).
-	// It shares the applier's pending list so the entry CheckPackage writes is
-	// visible to Apply below (same in-memory map, same process).
-	checker, err := autoupdate.NewChecker(overlayPath,
-		append(reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
-	if err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
-	}
-	result, err := checker.CheckPackage(ctx, pkg, true)
-	if err != nil {
-		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("check failed: %v", err)}
-	}
-	if !result.HasUpdate {
-		// Seeded base already equals upstream: nothing to bump. The base ebuild is
-		// in place and the entry re-enabled, so normal --check will track it going
-		// forward.
-		return reviveOutcome{pkg: pkg, status: "skipped", detail: fmt.Sprintf("gentoo %s already current with upstream %s", gentooVersion, result.UpstreamVersion)}
-	}
-
-	// Bump to the upstream version using the existing apply flow (honours
-	// --compile and --clean exactly as runApply does).
-	applyResult, err := applier.Apply(ctx, pkg, autoupdateCompile)
-	if err != nil {
-		detail := err.Error()
-		if applyResult != nil && applyResult.LogPath != "" {
-			detail = fmt.Sprintf("%v (log: %s)", err, applyResult.LogPath)
-		}
-		// S033-R3.6: a revive whose bump failed kept its staged tree exactly like any
-		// other failed apply, and this outcome line is the only report the operator
-		// gets for it — displayApplyResult never runs on this path. A tree named in no
-		// report is a tree found only by going looking for it.
-		if applyResult != nil && applyResult.StagedPath != "" {
-			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
-		}
-		return reviveOutcome{pkg: pkg, status: "failed", detail: detail}
-	}
-	if applyResult != nil && applyResult.Obsolete {
-		return reviveOutcome{pkg: pkg, status: "skipped", detail: applyResult.ObsoleteReason}
-	}
-
-	return reviveOutcome{pkg: pkg, status: "revived", detail: fmt.Sprintf("%s → %s", gentooVersion, result.UpstreamVersion)}
-}
-
 // displayReviveSummary prints per-package revive outcomes followed by an
 // aggregate (revived / skipped / failed) and returns the failure count so the
 // caller can set the exit code.
-func displayReviveSummary(outcomes []reviveOutcome) int {
+func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 	fmt.Println()
 	output.Header.Println("Revive Summary")
 	fmt.Println()
 
 	var revived, skipped, failed int
 	for _, o := range outcomes {
-		switch o.status {
-		case "revived":
+		switch o.Status {
+		case autoupdate.ReviveRevived:
 			revived++
-			output.Success.Printf("  ✓ %s: %s\n", o.pkg, o.detail)
-		case "skipped":
+			output.Success.Printf("  ✓ %s: %s\n", o.Package, o.Detail)
+		case autoupdate.ReviveSkipped:
 			skipped++
-			output.Warning.Printf("  - %s: %s\n", o.pkg, o.detail)
+			output.Warning.Printf("  - %s: %s\n", o.Package, o.Detail)
 		default:
 			failed++
-			output.Error.Printf("  ✗ %s: %s\n", o.pkg, o.detail)
+			output.Error.Printf("  ✗ %s: %s\n", o.Package, o.Detail)
 		}
 	}
 
@@ -2513,30 +2306,4 @@ func displayReviveSummary(outcomes []reviveOutcome) int {
 	}
 
 	return failed
-}
-
-// splitPackage splits a packages.toml key into its "category" and "package"
-// components, returning ok=false for any value that is not two non-empty
-// segments. It delegates to the checker/applier's own helper so a ":slot"
-// suffix ("net-libs/webkit-gtk:4.1") is dropped here exactly as it is there —
-// the slot is part of the key's identity, never of a filesystem path.
-func splitPackage(pkg string) (category, name string, ok bool) {
-	return autoupdate.SplitPackageKey(pkg)
-}
-
-// highestVersion returns the highest valid version from versions using the same
-// Gentoo-aware ordering the checker uses to pick the highest ebuild. Unparseable
-// entries are skipped; "" means no comparable version was found.
-func highestVersion(versions []string) string {
-	var best string
-	for _, v := range versions {
-		v = strings.TrimSpace(v)
-		if !ebuild.IsValidVersion(v) {
-			continue
-		}
-		if best == "" || ebuild.CompareVersions(v, best) > 0 {
-			best = v
-		}
-	}
-	return best
 }

@@ -567,6 +567,41 @@ func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
 	return divs
 }
 
+// StalePinBatch builds the write batch, and is the ONLY place a Divergence
+// becomes something written to the registry.
+//
+// It switches on Kind because the three classes are not interchangeable, and
+// mapping all of them to Key -> Disk corrupts the registry in two distinct ways:
+//
+//   - NoEbuild carries an empty Disk, so writing it would ERASE the entry's pin
+//     — and an entry with no pin blocks its whole directory's next --clean;
+//   - UnclaimedEbuild's Key is a bare "category/package" atom, not a registry
+//     key, and the two routinely coincide (net-misc/rclone is both). Writing it
+//     would point that entry's pin at the stray ebuild the finding is asking a
+//     human to delete: the exact opposite of the intent.
+//
+// A future fourth kind falls through unwritten, which is the safe direction.
+func StalePinBatch(divs []Divergence) map[string]string {
+	pins := make(map[string]string, len(divs))
+	for _, d := range divs {
+		switch d.Kind {
+		case StalePin:
+			// The only writable class: Key is a registry key and Disk is a
+			// version that exists on disk (UB4).
+			pins[d.Key] = d.Disk
+		case UnclaimedEbuild:
+			// Report only: the repair is a sweep or a new entry, both human
+			// decisions.
+		case NoEbuild:
+			// Report only: there is no version on disk to record.
+		}
+	}
+	if len(pins) == 0 {
+		return nil
+	}
+	return pins
+}
+
 // unclaimedIn returns one UnclaimedEbuild per non-live ebuild in atom's package
 // directory that no entry of that atom accounts for.
 //

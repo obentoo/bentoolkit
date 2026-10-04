@@ -23,8 +23,12 @@ func withFakeGentoo(t *testing.T, fake provider.Provider) {
 
 // TestRunRevive_SkipPath drives runRevive's full post-guard path with an on-disk
 // fake ::gentoo provider: a single target whose seeded ::gentoo version already
-// equals upstream, so reviveOne returns "skipped" and runRevive exits cleanly
-// (no failures). This never reaches applier.Apply / `pkgdev manifest`.
+// equals upstream, so autoupdate.Reviver returns "skipped" and runRevive exits
+// cleanly (no failures). This never reaches applier.Apply / `pkgdev manifest`.
+//
+// Its stdout is pinned byte for byte (U3): the per-target "Reviving <pkg>..."
+// line runRevive prints before each Revive, then the summary, as the format
+// strings stood before story 060 (1462803).
 func TestRunRevive_SkipPath(t *testing.T) {
 	pinReviveConcurrency(t)
 	origOnly, origCompile, origClean := autoupdateOnly, autoupdateCompile, autoupdateClean
@@ -52,10 +56,22 @@ func TestRunRevive_SkipPath(t *testing.T) {
 	}
 	withFakeGentoo(t, fake)
 
-	code := exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
-		&config.Config{}, config.LLMConfig{}))
+	var code int
+	stdout := captureStdout(t, func() {
+		code = exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
+			&config.Config{}, config.LLMConfig{}))
+	})
 	if code != 0 {
 		t.Fatalf("runRevive exit code = %d, want 0 (skip path)", code)
+	}
+	const want = "Reviving dev-test/foo...\n" +
+		"\nRevive Summary\n\n" +
+		"  - dev-test/foo: gentoo 1.2.3 already current with upstream 1.2.3\n" +
+		"\n" +
+		"  Revived: 0\n" +
+		"  Skipped: 1\n"
+	if stdout != want {
+		t.Errorf("runRevive stdout differs (U3)\ngot:\n%q\nwant:\n%q", stdout, want)
 	}
 }
 
