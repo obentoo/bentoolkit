@@ -36,11 +36,34 @@ func checkFetchURLTemplates(fetchURL, idURL string) error {
 // checkFetchURLTemplate checks one template; key names it in the error, so the
 // contributor is told which line of the record to fix.
 func checkFetchURLTemplate(key, template string) error {
+	switch urlTemplateFault(template) {
+	case templateNotHTTP:
+		return fmt.Errorf("%w: %s=%q is not an absolute http(s) URL with a host", ErrAuthFetchFailed, key, template)
+	case templatePlaceholderInHost:
+		return fmt.Errorf("%w: %s=%q puts a placeholder in the scheme or host; %s and %s may appear only in the path or query, where an upstream value cannot choose the host",
+			ErrAuthFetchFailed, key, template, idPlaceholder, versionPlaceholder)
+	}
+	return nil
+}
+
+// templateFault is what urlTemplateFault found wrong with a URL template.
+type templateFault int
+
+const (
+	templateOK templateFault = iota
+	templateNotHTTP
+	templatePlaceholderInHost
+)
+
+// urlTemplateFault applies the rule checkFetchURLTemplate documents — an
+// absolute http(s) URL whose scheme and authority hold no placeholder — and
+// says which half failed, so each caller words its own error.
+func urlTemplateFault(template string) templateFault {
 	u, err := url.Parse(template)
 	// url.Parse lowercases the scheme, so HTTPS:// is accepted as https://.
 	// Opaque is set for "http:vendor.test" — a scheme with no authority.
 	if err != nil || u.Opaque != "" || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return fmt.Errorf("%w: %s=%q is not an absolute http(s) URL with a host", ErrAuthFetchFailed, key, template)
+		return templateNotHTTP
 	}
 
 	// The head is everything up to where the path, query or fragment begins:
@@ -53,8 +76,7 @@ func checkFetchURLTemplate(key, template string) error {
 		end = authority + i
 	}
 	if strings.ContainsAny(template[:end], "{}") {
-		return fmt.Errorf("%w: %s=%q puts a placeholder in the scheme or host; %s and %s may appear only in the path or query, where an upstream value cannot choose the host",
-			ErrAuthFetchFailed, key, template, idPlaceholder, versionPlaceholder)
+		return templatePlaceholderInHost
 	}
-	return nil
+	return templateOK
 }
