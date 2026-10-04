@@ -78,7 +78,7 @@ being one of <, <=, =, >=, > followed by a version, for example
 }
 
 func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
-	app, err := loadAppContext()
+	app, err := loadAppContext(cmd)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ the ID and the publication date stay.`,
 }
 
 func runNoticeRevise(cmd *cobra.Command, id string, changes notice.Changes, bodyFile string) error {
-	app, err := loadAppContext()
+	app, err := loadAppContext(cmd)
 	if err != nil {
 		return err
 	}

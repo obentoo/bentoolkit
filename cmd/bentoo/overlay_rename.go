@@ -73,7 +73,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load configuration
-	ctx, err := loadAppContext()
+	ctx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

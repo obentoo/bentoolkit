@@ -181,7 +181,7 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string, d *deps) error {
 	// interrupted run stops between trees instead of finishing the batch first.
 	ctx := commandContext(cmd)
 
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
 		return exitWith(1)

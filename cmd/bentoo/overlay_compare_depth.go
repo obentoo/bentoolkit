@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/obentoo/bentoolkit/internal/realign"
@@ -414,8 +415,12 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// one, and taking a second answer for the same question is how a run proves
 	// one overlay and reports on another.
 	var requireIsolation bool
-	if appCtx, cerr := loadAppContextNoValidation(); cerr == nil {
-		requireIsolation = appCtx.Config.Autoupdate.Validate.GetRequireIsolation()
+	// The config alone: no overlay selection runs here, so the run's "using the
+	// overlay checkout at …" notice is not repeated for a path this ignores.
+	if cfg, cerr := config.Load(); cerr == nil {
+		if _, perr := cfg.GetOverlayPathNoValidation(); perr == nil {
+			requireIsolation = cfg.Autoupdate.Validate.GetRequireIsolation()
+		}
 	}
 
 	// A build gate that FAILED says so on its own, but the reason upstream broke

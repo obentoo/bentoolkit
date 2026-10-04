@@ -177,7 +177,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// start (R3.1).
 	ctx := commandContext(cmd)
 
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

@@ -211,7 +211,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	// the shipped behaviour of both commands with the key unset — the run is not
 	// refused over a missing config file, it simply carries no policy to apply.
 	var requireIsolation bool
-	if appCtx, err := loadAppContextNoValidation(); err == nil {
+	if appCtx, err := loadAppContextNoValidation(cmd); err == nil {
 		overlayPath = appCtx.OverlayPath
 		requireIsolation = appCtx.Config.Autoupdate.Validate.GetRequireIsolation()
 	}

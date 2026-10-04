@@ -327,6 +327,21 @@ func ConfigPaths() ([]string, error) {
 	}, nil
 }
 
+// AutoupdateDir is where `overlay autoupdate` and `overlay analyze` keep their
+// state: the pending list, the version cache, retained logs and staged trees.
+// It sits beside config.yaml and follows the same rule — $XDG_CONFIG_HOME,
+// else ~/.config — so a temporary XDG_CONFIG_HOME that points a run at another
+// overlay also keeps that run's state away from the real one. It used to be
+// hard-coded under $HOME, and a scratch run's pending entries landed in the
+// user's live pending.json.
+func AutoupdateDir() (string, error) {
+	paths, err := ConfigPaths()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(paths[0]), "autoupdate"), nil
+}
+
 // DefaultConfigPath returns the default config file path (XDG standard)
 func DefaultConfigPath() (string, error) {
 	paths, err := ConfigPaths()

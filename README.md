@@ -120,6 +120,14 @@ autoupdate:
 
 The tool will automatically use your `~/.gitconfig` settings for user name and email if available.
 
+**Which overlay a run uses.** `--overlay <path>` wins. Without it, a run
+started inside another checkout of the configured overlay — a git worktree or
+a second clone, recognised by the same `profiles/repo_name` — works on that
+checkout and says so in an INFO line. Otherwise `overlay.path` applies. The
+autoupdate state (`pending.json`, the version cache, logs, staged trees) lives
+in `$XDG_CONFIG_HOME/bentoo/autoupdate` (else `~/.config/bentoo/autoupdate`),
+beside `config.yaml`, and is shared by every checkout.
+
 ### Secrets
 
 bentoo never stores secrets in `config.yaml` or `snapshot.toml`. Every secret it

@@ -120,7 +120,7 @@ Examples:
 func runDistfileFetch(cmd *cobra.Command, args []string) error {
 	ctx := commandContext(cmd)
 
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		output.PrintError("loading config: %v", err)
 		return exitWith(1)

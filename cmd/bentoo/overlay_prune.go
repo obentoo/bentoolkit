@@ -173,7 +173,7 @@ func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 	// finishing the scan first.
 	ctx := commandContext(cmd)
 
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
 		return exitWith(1)

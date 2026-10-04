@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
@@ -506,7 +507,10 @@ func WithFetchCache(enabled bool) CheckerOption {
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Determine config directory
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "bentoo", "autoupdate")
+	configDir, err := appconfig.AutoupdateDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolving the autoupdate state directory: %w", err)
+	}
 
 	checker := &Checker{
 		overlayPath: overlayPath,

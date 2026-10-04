@@ -566,7 +566,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		return failWith(1, fmt.Errorf("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other"))
 	}
 
-	appCtx, err := loadAppContextNoValidation()
+	appCtx, err := loadAppContextNoValidation(cmd)
 	if err != nil {
 		return failWith(1, fmt.Errorf("loading config: %w", err))
 	}
@@ -1602,11 +1602,11 @@ const stagingDirName = "staging"
 // `overlay validate --depth` and `overlay autoupdate --apply` cannot come to
 // disagree about which directory that is.
 func autoupdateConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := config.AutoupdateDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", fmt.Errorf("failed to resolve the autoupdate state directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "bentoo", "autoupdate"), nil
+	return dir, nil
 }
 
 // autoupdateStagingRoot is the directory staged trees are prepared under.

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -61,7 +60,7 @@ Examples:
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
-	appCtx, err := loadAppContextNoValidation()
+	appCtx, err := loadAppContextNoValidation(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)
@@ -70,12 +69,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	overlayPath := appCtx.OverlayPath
 
 	// Determine config directory for autoupdate
-	home, err := os.UserHomeDir()
+	configDir, err := autoupdateConfigDir()
 	if err != nil {
-		logger.Error("failed to get home directory: %v", err)
+		logger.Error("%v", err)
 		return exitWith(1)
 	}
-	configDir := filepath.Join(home, ".config", "bentoo", "autoupdate")
 
 	// Validate arguments
 	if !analyzeAll && len(args) == 0 {

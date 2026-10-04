@@ -108,7 +108,7 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	ctx, err := loadAppContext()
+	ctx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

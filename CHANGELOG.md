@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--overlay <path>`, and the current checkout is used.** Every command took
+  the overlay from `overlay.path` alone, so `--lint` in a worktree reported
+  green on the main checkout it actually read. `--overlay` now chooses the
+  overlay for one run. Without it, a run started inside another checkout of
+  the same overlay (same `profiles/repo_name`) uses that checkout and logs
+  that it did.
+
 - **`aux_url` in `packages.toml`.** `aux_pattern` can read `aux_var`'s value
   from a URL other than the version page: jdtls's build id in `latest.txt`,
   codex's `RUSTY_V8_TAG` in the release's `Cargo.lock`, a TypeScript pin in a
@@ -62,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v5.2.2 was published on 2025-12-29.
 
 ### Fixed
+
+- **The autoupdate state follows `XDG_CONFIG_HOME`.** `config.yaml` honoured
+  it, but `pending.json` and the version cache were hard-coded under
+  `~/.config`. A run with a temporary `XDG_CONFIG_HOME` therefore read a
+  scratch overlay and still wrote into the real pending list.
 
 - **`--check <pkg>` and `--apply` honour `hold` and `enabled = false`.** Only
   the full scan skipped them: an explicit check fetched a held or disabled

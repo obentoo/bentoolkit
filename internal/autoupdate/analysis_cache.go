@@ -83,7 +83,7 @@ func WithAnalysisCacheNowFunc(fn func() time.Time) AnalysisCacheOption {
 // The configDir should be the bentoo config directory (e.g., ~/.config/bentoo/autoupdate).
 func NewAnalysisCache(configDir string, opts ...AnalysisCacheOption) (*AnalysisCache, error) {
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0o750); err != nil { //nolint:gosec // G703: configDir is the user's autoupdate config directory ($HOME/.config/bentoo/autoupdate or the caller's WithConfigDir override), the user's own environment
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create analysis cache directory: %w", err)
 	}
 
