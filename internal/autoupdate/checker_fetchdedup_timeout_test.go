@@ -2,7 +2,6 @@ package autoupdate
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,7 +74,6 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	limiter := &recordingRateLimiter{}
 	checker := newRateLimitTestChecker(t, server.URL,
 		WithRateLimiter(limiter),
-		WithContext(context.Background()),
 	)
 
 	var leaderErr, followerErr error
@@ -85,7 +83,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, leaderErr = checker.fetchContent(server.URL, nil, credentialScope{}, leaderBudget)
+		_, leaderErr = checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, leaderBudget)
 	}()
 
 	select {
@@ -97,7 +95,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		followerBody, followerErr = checker.fetchContent(server.URL, nil, credentialScope{}, followerBudget)
+		followerBody, followerErr = checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, followerBudget)
 	}()
 
 	// Prove the follower genuinely JOINED the in-flight fetch. Without this the

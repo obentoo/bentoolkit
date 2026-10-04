@@ -140,7 +140,7 @@ func TestGoldenGstInheritIsFoundWithNoModel(t *testing.T) {
 	overlayRoot, prov, pkg := goldenPair(t, "media-libs", "gst-plugins-qt6", "1.29.2", "1.26.11", goldenGstOurs, goldenGstBaseline)
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
 
-	report, err := CompareWithProvider([]PackageInfo{pkg}, prov, opts)
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -259,7 +259,7 @@ func TestGoldenNodejsIsNotProposedForWholesaleRealignment(t *testing.T) {
 	overlayRoot, prov, pkg := goldenPair(t, "net-libs", "nodejs", "26.7.0", "26.7.0", goldenNodejsOurs, goldenNodejsBaseline)
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
 
-	report, err := CompareWithProvider([]PackageInfo{pkg}, prov, opts)
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

@@ -61,7 +61,7 @@ var reviewCacheDirFor = defaultReviewCacheDir
 //
 // _Requirements: R5.1, R5.2, R5.3, R5.4, R5.5, R5.8, S047-R3.3, S047-R3.4,
 // S047-R4.1, S047-R4.2_
-func AnnotateReviews(report *CompareReport, reviewer DivergenceReviewer, prov provider.Provider, opts CompareOptions) {
+func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer DivergenceReviewer, prov provider.Provider, opts CompareOptions) {
 	if report == nil || reviewer == nil {
 		return
 	}
@@ -117,10 +117,6 @@ func AnnotateReviews(report *CompareReport, reviewer DivergenceReviewer, prov pr
 	// and R5.5's "exceeds its timeout" needs none — an expired deadline surfaces
 	// as an error from ReviewDivergence and is handled below with every other
 	// error.
-	ctx := opts.Ctx
-	if ctx == nil {
-		ctx = context.Background() // SAFE: CompareOptions.Ctx is an additive field; nil means "no cancellation requested", exactly as CompareWithProvider reads it
-	}
 
 	// ONE cache for the run. Two would warn twice about the same broken file, and
 	// the "once per run" guard inside a reviewCache is scoped to the value.
@@ -289,7 +285,7 @@ func reviewNoteSpeaks(note ReviewNote) bool {
 //
 // The CONTEXT is the caller's. A review is a network round trip behind a CLI, so
 // a cancelled compare must abort it rather than hold the run open — the same
-// spine CompareOptions.Ctx carries through the comparison itself.
+// spine CompareWithProvider's ctx carries through the comparison itself.
 //
 // A nil DivergenceReviewer is not an error anywhere. It is how `--no-review`
 // (R5.6) and an absent `claude` CLI (R5.5) reach one no-op path instead of two.

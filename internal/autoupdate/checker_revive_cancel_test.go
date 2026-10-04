@@ -13,8 +13,8 @@ import (
 )
 
 // TestFindRevivableOrphansStopsOnCancel pins R7.3 end to end: the ::gentoo
-// lookup FindRevivableOrphans makes must carry the Checker's own stored context
-// (WithContext), so cancelling THAT context — and nothing else — ends an
+// lookup FindRevivableOrphans makes must carry the context passed to that call
+// (its ctx parameter), so cancelling THAT context — and nothing else — ends an
 // in-flight lookup within 1 s. The package is a genuine orphan (disabled, no
 // ebuild) whose upstream answers, so the scan reaches the provider lookup; the
 // provider is the real GitHub provider pointed at a host that never answers.
@@ -58,7 +58,6 @@ func TestFindRevivableOrphansStopsOnCancel(t *testing.T) {
 			pkg: {Parser: "json", Path: "version", URL: upstream.URL, Enabled: boolPtr(false)},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithContext(ctx),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -70,7 +69,7 @@ func TestFindRevivableOrphansStopsOnCancel(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		got, err := checker.FindRevivableOrphans(prov)
+		got, err := checker.FindRevivableOrphans(ctx, prov)
 		done <- outcome{got, err}
 	}()
 
@@ -85,7 +84,7 @@ func TestFindRevivableOrphansStopsOnCancel(t *testing.T) {
 	select {
 	case res = <-done:
 	case <-time.After(time.Second):
-		t.Fatal("FindRevivableOrphans still running 1s after the Checker's context was cancelled: the ::gentoo lookup does not carry c.ctx")
+		t.Fatal("FindRevivableOrphans still running 1s after the call's context was cancelled: the ::gentoo lookup does not carry the call's ctx")
 	}
 	if len(res.got) != 0 {
 		t.Errorf("candidates = %+v, want none from a cancelled lookup", res.got)

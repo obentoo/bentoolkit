@@ -61,8 +61,8 @@ func validateDocumentKeys(t *testing.T, source string, body []byte) []string {
 // TestValidateExportJSONFlagProducesTheEnvelope pins the half a consumer meets
 // first: the document `--json` writes to stdout is the envelope, root and all.
 func TestValidateExportJSONFlagProducesTheEnvelope(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
 	c := newTestCLI(t)
+	stubValidateRunner(c.deps, mixedReport())
 
 	stdout, stderr, _ := c.Run("overlay", "validate", "--json")
 	if strings.Contains(stderr, "unknown flag") {
@@ -92,13 +92,12 @@ func TestValidateExportJSONFlagProducesTheEnvelope(t *testing.T) {
 // timestamp or an ordering that differed between them would make a byte
 // comparison fail for a reason that has nothing to do with the requirement.
 func TestValidateExportMatchesTheJSONFlagShape(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
-
 	fromFlag := newTestCLI(t)
+	stubValidateRunner(fromFlag.deps, mixedReport())
 	stdout, _, flagCode := fromFlag.Run("overlay", "validate", "--json")
 
-	stubValidateRunner(t, mixedReport())
 	toFile := newTestCLI(t)
+	stubValidateRunner(toFile.deps, mixedReport())
 	path := filepath.Join(t.TempDir(), "validate.json")
 	_, _, exportCode := toFile.Run("overlay", "validate", "--export="+path)
 
@@ -128,12 +127,12 @@ func TestValidateExportWriteFailurePreservesTheExitStatus(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
 
-	stubValidateRunner(t, mixedReport())
 	plain := newTestCLI(t)
+	stubValidateRunner(plain.deps, mixedReport())
 	plainOut, _, plainCode := plain.Run("overlay", "validate")
 
-	stubValidateRunner(t, mixedReport())
 	failing := newTestCLI(t)
+	stubValidateRunner(failing.deps, mixedReport())
 	unwritable := filepath.Join(readOnly, "validate.json")
 	failedOut, failedStderr, failedCode := failing.Run("overlay", "validate", "--export="+unwritable)
 
@@ -242,8 +241,8 @@ func omissionGaps(body string) []string {
 func exportValidateTo(t *testing.T, rep validate.Report, name string) string {
 	t.Helper()
 
-	stubValidateRunner(t, rep)
 	c := newTestCLI(t)
+	stubValidateRunner(c.deps, rep)
 	path := filepath.Join(t.TempDir(), name)
 
 	_, stderr, _ := c.Run("overlay", "validate", "--export="+path)
@@ -401,8 +400,8 @@ const validateExportJSONBeforeTheDeclaration = `{
 // measures what must not move, and a green here only means something because the
 // two cases above are red.
 func TestValidateExportJSONIsUnchangedByTheDeclaration(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
 	c := newTestCLI(t)
+	stubValidateRunner(c.deps, mixedReport())
 	path := filepath.Join(t.TempDir(), "validate.json")
 
 	_, stderr, _ := c.Run("overlay", "validate", "--export="+path)

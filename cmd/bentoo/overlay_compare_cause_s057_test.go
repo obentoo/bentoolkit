@@ -110,11 +110,11 @@ func s057Compare(t *testing.T, withLookupError bool, rev overlay.DivergenceRevie
 		prov.errs["s057/limited"] = errS057Limited
 		pkgs = append(pkgs, overlay.PackageInfo{Category: "s057", Package: "limited", LatestVersion: "1.0"})
 	}
-	rep, err := overlay.CompareWithProvider(pkgs, prov, opts)
+	rep, err := overlay.CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v", err)
 	}
-	overlay.AnnotateReviews(rep, rev, prov, opts)
+	overlay.AnnotateReviews(t.Context(), rep, rev, prov, opts)
 	return rep, prov, opts
 }
 
@@ -250,7 +250,7 @@ func TestCompareRealignNoteCountsPerCause(t *testing.T) {
 		},
 		notes: map[string]overlay.RealignNote{"s057/t3": {Justified: true, Why: " "}},
 	}
-	overlay.AnnotateRealignVerdicts(rep, rev, prov, opts)
+	overlay.AnnotateRealignVerdicts(t.Context(), rep, rev, prov, opts)
 	if rep.RealignAsked != 5 || rep.RealignNoVerdict != 3 {
 		t.Fatalf("the fixture is wrong: RealignAsked %d, RealignNoVerdict %d; want 5 and 3", rep.RealignAsked, rep.RealignNoVerdict)
 	}

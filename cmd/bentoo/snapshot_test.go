@@ -63,9 +63,9 @@ func writeSnapshotConfig(t *testing.T, content string) (dir, path string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	origPath, origRunner := snapshotConfigPath, snapshotRunner
+	origPath := snapshotConfigPath
 	snapshotConfigPath = path
-	t.Cleanup(func() { snapshotConfigPath, snapshotRunner = origPath, origRunner })
+	t.Cleanup(func() { snapshotConfigPath = origPath })
 	return dir, path
 }
 

@@ -70,7 +70,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 	t.Run("a bare DeadlineExceeded is other, neither cancelled nor timed out", func(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		err := fmt.Errorf("the divergence review failed: %w", context.DeadlineExceeded)
-		AnnotateReviews(report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
+		AnnotateReviews(t.Context(), report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
 		for _, atom := range reviewedAtoms {
 			s057AssertFailed(t, resultFor(t, report, atom), "other", err.Error())
 		}
@@ -80,7 +80,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 	t.Run("a sentence that says it ran out of time, without the sentinel, is other", func(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		err := errors.New("the divergence review failed: LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered")
-		AnnotateReviews(report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
+		AnnotateReviews(t.Context(), report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
 		for _, atom := range reviewedAtoms {
 			s057AssertFailed(t, resultFor(t, report, atom), "other", err.Error())
 		}
@@ -95,7 +95,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(req ReviewRequest) (ReviewNote, error) {
 			return ReviewNote{}, errs[req.Category+"/"+req.Package]
 		}}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 		s057AssertFailed(t, resultFor(t, report, "kde-plasma/kwin"), "timed out", errs["kde-plasma/kwin"].Error())
 		s057AssertFailed(t, resultFor(t, report, "kde-plasma/spectacle"), "could not start", errs["kde-plasma/spectacle"].Error())
 	})
@@ -104,13 +104,12 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
-		opts.Ctx = ctx
 		first := fmt.Errorf("the divergence review failed: %w", ErrReviewExitedNonZero)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(ReviewRequest) (ReviewNote, error) {
 			cancel() // Ctrl-C arrives while the first review is failing on its own
 			return ReviewNote{}, first
 		}}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(ctx, report, rev, prov, opts)
 		if n := len(rev.calls); n != 1 {
 			t.Fatalf("the reviewer was called %d times, want 1: the fixture needs the second package to be stopped by the context", n)
 		}
@@ -123,9 +122,8 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		opts.Ctx = ctx
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(ctx, report, rev, prov, opts)
 		for _, atom := range reviewedAtoms {
 			s057AssertFailed(t, resultFor(t, report, atom), "cancelled", "-")
 		}
@@ -139,7 +137,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 			t.Fatalf("the fixture is wrong: removing %s: %v", ours, err)
 		}
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 		s057AssertFailed(t, resultFor(t, report, "kde-plasma/kwin"), "ebuild unreadable", "-")
 		ok := resultFor(t, report, "kde-plasma/spectacle")
 		if ok.Reading != ReadingDone {
@@ -154,7 +152,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 	t.Run("a reply that parsed and says nothing is empty or unusable reply", func(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: ReviewNote{Summary: "  "}}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 		for _, atom := range reviewedAtoms {
 			s057AssertFailed(t, resultFor(t, report, atom), "empty or unusable reply", "-")
 		}
@@ -176,7 +174,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 		t.Run("a wrapped sentinel gives "+tc.word, func(t *testing.T) {
 			report, prov, opts := reviewFixture(t)
 			err := fmt.Errorf("the divergence review failed: %w", tc.err)
-			AnnotateReviews(report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
+			AnnotateReviews(t.Context(), report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
 			for _, atom := range reviewedAtoms {
 				s057AssertFailed(t, resultFor(t, report, atom), tc.word, err.Error())
 			}
@@ -186,7 +184,7 @@ func TestReviewFailureRecordsEachCause(t *testing.T) {
 
 	t.Run("a review that was read carries no cause and no text", func(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
-		AnnotateReviews(report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}, prov, opts)
+		AnnotateReviews(t.Context(), report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewReadingUsableNote}, prov, opts)
 		for _, r := range report.Results {
 			if w := s057ReviewWord(r.ReviewFailure); s057IsReviewWord(w) || r.FailureText != "" {
 				t.Errorf("%s/%s (Reading %d) carries cause %q text %q, want neither", r.Category, r.Package, r.Reading, w, r.FailureText)
@@ -215,7 +213,7 @@ func TestReviewFailureTextIsRedacted(t *testing.T) {
 	report, prov, opts := reviewFixture(t)
 	opts.Redact = []string{tok, "", "out"} // "out" is part of the cause word; the cause must survive it
 	err := fmt.Errorf("the divergence review failed: %w: token %s was sent, then %s again", ErrReviewTimedOut, tok, tok)
-	AnnotateReviews(report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
+	AnnotateReviews(t.Context(), report, &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: err}, prov, opts)
 
 	want := strings.ReplaceAll(strings.ReplaceAll(err.Error(), tok, "***"), "out", "***")
 	for _, atom := range reviewedAtoms {

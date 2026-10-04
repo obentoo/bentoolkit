@@ -75,7 +75,7 @@ func holdAuxConfig(url string) PackageConfig {
 // exactly wantPending (nil = no entry at all).
 func checkAndExpectHeld(t *testing.T, c *Checker, pkg string, force bool, wantFromCache bool, wantPending *PendingUpdate) {
 	t.Helper()
-	result, _ := c.CheckPackage(pkg, force)
+	result, _ := c.CheckPackage(t.Context(), pkg, force)
 	if result == nil {
 		t.Fatal("CheckPackage returned no result")
 	}
@@ -192,7 +192,7 @@ func TestCheckPackage_HeldBumpResolvesOnNextCheck(t *testing.T) {
 
 	srv.set(http.StatusOK, holdPageWithAux)
 	c := holdChecker(t, overlayDir, configDir, holdPkg, holdAuxConfig(srv.srv.URL))
-	result, _ := c.CheckPackage(holdPkg, false)
+	result, _ := c.CheckPackage(t.Context(), holdPkg, false)
 	if result == nil || !result.FromCache || !result.HasUpdate {
 		t.Fatalf("fixture: want a cache-hit check that sees the update, got %+v", result)
 	}

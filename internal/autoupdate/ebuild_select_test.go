@@ -188,7 +188,7 @@ pattern = 'webkitgtk-([0-9.]+)\.tar\.xz'
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	batch := checker.CheckAll(true)
+	batch := checker.CheckAll(t.Context(), true)
 
 	if len(batch.Failures) != 1 {
 		t.Errorf("expected the slot typo to be reported as a failure, got %d failures and %d results",

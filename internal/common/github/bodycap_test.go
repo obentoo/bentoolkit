@@ -71,7 +71,7 @@ func TestGitHubClientBodyCapped(t *testing.T) {
 // TestGitHubClientRateLimitBodyCapped pins R5.1 for GetRateLimitInfo.
 func TestGitHubClientRateLimitBodyCapped(t *testing.T) {
 	c := newCappedClient(hugeBodyServer(t, http.StatusOK, overCap).URL)
-	_, _, err := c.GetRateLimitInfo()
+	_, _, err := c.GetRateLimitInfo(t.Context())
 	if !errors.Is(err, httputil.ErrResponseTooLarge) {
 		t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 	}

@@ -15,8 +15,8 @@ import (
 
 // Story 054, R6: AnalyzeAll is a bounded, cancellable, panic-safe pool with
 // sorted Items. The per-package work goes through the analyzer's analyzeFn
-// seam (func(pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)), which
-// defaults to Analyze.
+// seam (func(ctx context.Context, pkg string, opts AnalyzeOptions)
+// (*AnalyzeResult, error)), which defaults to Analyze.
 
 func analyzeAllFixture(t *testing.T, n int, opts ...AnalyzerOption) (*Analyzer, []string) {
 	t.Helper()
@@ -40,10 +40,10 @@ func analyzeAllFixture(t *testing.T, n int, opts ...AnalyzerOption) (*Analyzer, 
 	return a, pkgs
 }
 
-func runAnalyzeAll(t *testing.T, a *Analyzer) BatchResult[AnalyzeResult] {
+func runAnalyzeAll(t *testing.T, ctx context.Context, a *Analyzer) BatchResult[AnalyzeResult] {
 	t.Helper()
 	done := make(chan BatchResult[AnalyzeResult], 1)
-	go func() { done <- a.AnalyzeAll(AnalyzeOptions{NoCache: true}) }()
+	go func() { done <- a.AnalyzeAll(ctx, AnalyzeOptions{NoCache: true}) }()
 	select {
 	case b := <-done:
 		return b
@@ -61,7 +61,7 @@ func TestAnalyzeAllBoundsGoroutines(t *testing.T) {
 	gate := make(chan struct{})
 	inFlight := make(chan struct{}, len(pkgs))
 	var cur, peak atomic.Int32
-	a.analyzeFn = func(pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
+	a.analyzeFn = func(_ context.Context, pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
 		n := cur.Add(1)
 		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
 		}
@@ -73,7 +73,7 @@ func TestAnalyzeAllBoundsGoroutines(t *testing.T) {
 
 	base := runtime.NumGoroutine()
 	done := make(chan BatchResult[AnalyzeResult], 1)
-	go func() { done <- a.AnalyzeAll(AnalyzeOptions{NoCache: true}) }()
+	go func() { done <- a.AnalyzeAll(t.Context(), AnalyzeOptions{NoCache: true}) }()
 	for range 3 {
 		select {
 		case <-inFlight:
@@ -103,13 +103,13 @@ func TestAnalyzeAllCancelledStartsNothing(t *testing.T) {
 	t.Run("cancelled before the call", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		a, pkgs := analyzeAllFixture(t, 5, WithAnalyzerContext(ctx))
+		a, pkgs := analyzeAllFixture(t, 5)
 		var calls atomic.Int32
-		a.analyzeFn = func(pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
+		a.analyzeFn = func(_ context.Context, pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
 			calls.Add(1)
 			return &AnalyzeResult{Package: pkg}, nil
 		}
-		b := runAnalyzeAll(t, a)
+		b := runAnalyzeAll(t, ctx, a)
 		if n := calls.Load(); n != 0 {
 			t.Errorf("Analyze called %d times on a cancelled context", n)
 		}
@@ -124,18 +124,18 @@ func TestAnalyzeAllCancelledStartsNothing(t *testing.T) {
 	t.Run("cancelled mid-flight", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		a, pkgs := analyzeAllFixture(t, 8, WithAnalyzerContext(ctx))
+		a, pkgs := analyzeAllFixture(t, 8)
 		gate := make(chan struct{})
 		started := make(chan struct{}, len(pkgs))
 		var calls atomic.Int32
-		a.analyzeFn = func(pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
+		a.analyzeFn = func(_ context.Context, pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
 			calls.Add(1)
 			started <- struct{}{}
 			<-gate
 			return &AnalyzeResult{Package: pkg}, nil
 		}
 		done := make(chan BatchResult[AnalyzeResult], 1)
-		go func() { done <- a.AnalyzeAll(AnalyzeOptions{NoCache: true}) }()
+		go func() { done <- a.AnalyzeAll(ctx, AnalyzeOptions{NoCache: true}) }()
 		for range 3 {
 			<-started
 		}
@@ -160,13 +160,13 @@ func TestAnalyzeAllCancelledStartsNothing(t *testing.T) {
 func TestAnalyzeAllRecoversPanic(t *testing.T) {
 	a, pkgs := analyzeAllFixture(t, 4)
 	victim := pkgs[1]
-	a.analyzeFn = func(pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
+	a.analyzeFn = func(_ context.Context, pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
 		if pkg == victim {
 			panic("boom")
 		}
 		return &AnalyzeResult{Package: pkg}, nil
 	}
-	b := runAnalyzeAll(t, a)
+	b := runAnalyzeAll(t, t.Context(), a)
 	err := b.Failures[victim]
 	if err == nil || !strings.Contains(err.Error(), "panic: boom") {
 		t.Errorf("Failures[%q] = %v, want one reading \"panic: boom\"", victim, err)
@@ -184,7 +184,7 @@ func TestAnalyzeAllSortsItems(t *testing.T) {
 		finished[p] = make(chan struct{})
 	}
 	var mu sync.Mutex
-	a.analyzeFn = func(pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
+	a.analyzeFn = func(_ context.Context, pkg string, _ AnalyzeOptions) (*AnalyzeResult, error) {
 		for i, p := range pkgs { // pkgs[i] waits for pkgs[i+1]: reverse completion
 			if p == pkg && i+1 < len(pkgs) {
 				<-finished[pkgs[i+1]]
@@ -195,7 +195,7 @@ func TestAnalyzeAllSortsItems(t *testing.T) {
 		close(finished[pkg])
 		return &AnalyzeResult{Package: pkg}, nil
 	}
-	b := runAnalyzeAll(t, a)
+	b := runAnalyzeAll(t, t.Context(), a)
 	var got []string
 	for _, it := range b.Items {
 		got = append(got, it.Package)

@@ -71,7 +71,7 @@ func TestMirrorsServeWhenURLFails(t *testing.T) {
 		Mirrors: []string{notFound.URL, good.URL},
 	})
 
-	result, err := c.CheckPackage(pkg, true)
+	result, err := c.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestMirrorsAllUnreachableIsATransportFailure(t *testing.T) {
 			URL: deadURL(t), Parser: "json", Path: "version",
 			Mirrors: []string{deadURL(t)},
 		})
-		_, err := c.CheckPackage(pkg, true)
+		_, err := c.CheckPackage(t.Context(), pkg, true)
 		if !errors.Is(err, ErrUpstreamUnreachable) {
 			t.Fatalf("err = %v, want ErrUpstreamUnreachable", err)
 		}
@@ -115,7 +115,7 @@ func TestMirrorsAllUnreachableIsATransportFailure(t *testing.T) {
 			URL: page.URL, Parser: "json", Path: "version",
 			Mirrors: []string{deadURL(t)},
 		})
-		_, err := c.CheckPackage(pkg, true)
+		_, err := c.CheckPackage(t.Context(), pkg, true)
 		if err == nil || errors.Is(err, ErrUpstreamUnreachable) {
 			t.Fatalf("err = %v, want a record failure that is not ErrUpstreamUnreachable", err)
 		}
@@ -183,7 +183,7 @@ func TestMirrorsScriptParser(t *testing.T) {
 		URL: master, Parser: "script", Script: "document.title",
 		Mirrors: []string{fau, osuosl},
 	})
-	result, err := c.CheckPackage(pkg, true)
+	result, err := c.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

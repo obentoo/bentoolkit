@@ -79,7 +79,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 		},
 		{
 			// R1.3: a held entry whose directory is gone lands in the no-ebuild
-			// class, which stalePinBatch never writes — so the missing ebuild
+			// class, which StalePinBatch never writes — so the missing ebuild
 			// cannot erase the pin the entry still carries.
 			name: "a held entry with no ebuild is a no-ebuild divergence (R1.3)",
 			dirs: map[string][]sweepEbuild{},

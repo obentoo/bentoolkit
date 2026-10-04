@@ -32,7 +32,7 @@ import (
 // liveArchive locates the real tarball in the host's distdir, or skips.
 func liveArchive(t *testing.T, name string) string {
 	t.Helper()
-	dir, found := distfiles.Locate("", "")
+	dir, found := distfiles.Locate(t.Context(), "", "")
 	if !found {
 		t.Skipf("no distdir on this host; %s cannot be read", name)
 	}

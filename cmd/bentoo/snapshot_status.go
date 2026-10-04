@@ -15,17 +15,19 @@ import (
 )
 
 // newSnapshotStatusCmd builds `snapshot status`.
-func newSnapshotStatusCmd() *cobra.Command {
+func newSnapshotStatusCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
 		Short:       "Show the last run, timer state, and free space",
-		RunE:        runSnapshotStatus,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotStatus(cmd, args, d)
+		},
 	}
 	return cmd
 }
 
-func runSnapshotStatus(cmd *cobra.Command, _ []string) error {
+func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 	cfg, _, err := loadSnapshotConfigLenient()
 	if err != nil {
 		logger.Error("snapshot status: %v", err)
@@ -53,8 +55,8 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string) error {
 
 	// Timer state and next scheduled run (008 R5.1). TimerNextRun is
 	// best-effort; an empty result maps to a clean "unknown".
-	output.PrintInfo("timer: %s", snapshot.TimerState(ctx, snapshotRunner))
-	next := snapshot.TimerNextRun(ctx, snapshotRunner)
+	output.PrintInfo("timer: %s", snapshot.TimerState(ctx, d.snapshotRunner))
+	next := snapshot.TimerNextRun(ctx, d.snapshotRunner)
 	if next == "" {
 		next = "unknown"
 	}

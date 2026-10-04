@@ -131,7 +131,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) error {
 	// after tens of megabytes have been transferred. Nothing is passed as the
 	// configured rung, so the precedence is --distdir, then the host's own
 	// answer, then Portage's documented default.
-	dir, err := distfiles.Resolve(distfileFetchDistdir, "")
+	dir, err := distfiles.Resolve(ctx, distfileFetchDistdir, "")
 	if err != nil {
 		output.PrintError("%v", err)
 		return exitWith(1)

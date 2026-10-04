@@ -26,7 +26,7 @@ exit 1
 // messages. The start marker lies ~208 KB before the end, far outside any tail.
 func TestSavedCompileLogKeepsTheWholeTranscript(t *testing.T) {
 	h := newCompileHarness(t, hugeFailingCompile)
-	if _, err := h.applier.runCompile(h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{}); err == nil {
+	if _, err := h.applier.runCompile(t.Context(), h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{}); err == nil {
 		t.Fatal("a compile that exits 1 succeeded")
 	}
 

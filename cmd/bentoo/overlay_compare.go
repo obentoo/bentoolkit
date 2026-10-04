@@ -71,7 +71,7 @@ var (
 )
 
 // newCompareCmd builds `overlay compare`.
-func newCompareCmd() *cobra.Command {
+func newCompareCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "compare [repository]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -120,7 +120,9 @@ Examples:
   bentoo overlay compare --no-review        # Contact no model
   bentoo overlay compare --realign          # Review against the ::gentoo baseline`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runCompare,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCompare(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&compareClone, "clone", false, "Use git clone instead of API")
 	cmd.Flags().StringVar(&compareCacheDir, "cache-dir", "", "Directory to cache data")
@@ -146,7 +148,7 @@ Examples:
 	return cmd
 }
 
-func runCompare(cmd *cobra.Command, args []string) error {
+func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
 	// with a clear message and a non-zero exit (R4.2).
 	if compareConcurrency < 1 || compareConcurrency > 100 {
@@ -269,7 +271,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 
 	// Check rate limit for GitHub provider - block if exhausted
 	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
-		remaining, resetTime, err := ghProv.GetRateLimitInfo()
+		remaining, resetTime, err := ghProv.GetRateLimitInfo(ctx)
 		if err == nil {
 			switch {
 			case remaining == 0:
@@ -352,7 +354,6 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		// asked for a review (D1).
 		IncludeNotInRemote: compareRealign,
 		Concurrency:        compareConcurrency,
-		Ctx:                ctx,
 		Divergence:         divergence,
 		OverlayPath:        overlayPath,
 		ProgressCallback: func(done, total uint64) {
@@ -370,7 +371,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		opts.Redact = []string{resolvedToken}
 	}
 
-	report, err := overlay.CompareWithProvider(scanResult.Packages, prov, opts)
+	report, err := overlay.CompareWithProvider(ctx, scanResult.Packages, prov, opts)
 	if err != nil {
 		// Check if it's a rate limit error and suggest --clone
 		if strings.Contains(err.Error(), "rate limit") && !compareClone {
@@ -463,7 +464,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// instead of two conditions that could disagree. Nothing here can fail the
 	// run: every way of not getting a reading costs one warning and the report is
 	// printed unchanged.
-	overlay.AnnotateReviews(report, compareDivergenceReviewer(ctx, compareNoReview, reviewBudget), prov, opts)
+	overlay.AnnotateReviews(ctx, report, compareDivergenceReviewer(compareNoReview, reviewBudget, d), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
 	// divergence still justified, and what would replace it if not (R4.1, R4.2).
@@ -482,9 +483,9 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// was judged and none objected".
 	realignJudged := false
 	if realignRan {
-		reviewer := compareRealignReviewer(ctx, compareNoReview, reviewBudget)
+		reviewer := compareRealignReviewer(compareNoReview, reviewBudget, d)
 		realignJudged = reviewer != nil
-		overlay.AnnotateRealignVerdicts(report, reviewer, prov, opts)
+		overlay.AnnotateRealignVerdicts(ctx, report, reviewer, prov, opts)
 	}
 
 	// Whether each proposed realignment still BUILDS, proved the way a bump is
@@ -509,7 +510,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// says no is an answer, and the one non-zero condition is decided below by
 	// exitOnSkippedBaseline over a field nothing here writes.
 	if realignRan && compareDepth != "" {
-		proveRealignments(ctx, report, overlayPath)
+		proveRealignments(ctx, report, overlayPath, d)
 	}
 
 	// The report's FINDINGS, re-established now that every annotation pass has
@@ -607,7 +608,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	// on that package's own entry (S047-R6.1). Both reach the terminal and every
 	// export through one code path, which is what they did not do while they were
 	// appended to the sections after the fact.
-	presentCompareReport(cfg, buildCompareReport(report, repoInfo.Name, unfiltered,
+	presentCompareReport(d, cfg, buildCompareReport(report, repoInfo.Name, unfiltered,
 		compareRunNotes(report, realignRan, realignJudged, compareNoReview)...))
 
 	// The ONE non-zero condition (R7.5, D9): the review could not locate a

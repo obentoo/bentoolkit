@@ -129,9 +129,6 @@ func TestNewClaudeCodeClient_Defaults(t *testing.T) {
 	if c.timeout != DefaultClaudeCodeTimeout {
 		t.Errorf("expected default timeout == DefaultClaudeCodeTimeout (%v), got %v", DefaultClaudeCodeTimeout, c.timeout)
 	}
-	if c.ctx == nil {
-		t.Error("expected ctx to default to a non-nil context")
-	}
 }
 
 func TestNewClaudeCodeClient_WithExecCommandOverridesSeam(t *testing.T) {
@@ -149,23 +146,18 @@ func TestNewClaudeCodeClient_WithExecCommandOverridesSeam(t *testing.T) {
 	}
 
 	// Invoke the seam indirectly through run to prove the override took effect.
-	_, _ = c.run("instr", []byte("content"), "")
+	_, _ = c.run(t.Context(), "instr", []byte("content"), "")
 	if !called {
 		t.Error("WithClaudeCodeExecCommand seam was not used by run()")
 	}
 }
 
-func TestNewClaudeCodeClient_WithTimeoutAndContext(t *testing.T) {
+// The client stores no context since story 059 (each call passes its own), so
+// the constructor tests cover the timeout option only.
+func TestNewClaudeCodeClient_WithTimeout(t *testing.T) {
 	stubLookPathFound(t)
 
-	type ctxKey string
-	const k ctxKey = "marker"
-	parent := context.WithValue(context.Background(), k, "v")
-
-	c, err := NewClaudeCodeClient(LLMConfig{},
-		WithClaudeCodeTimeout(5*time.Minute),
-		WithClaudeCodeContext(parent),
-	)
+	c, err := NewClaudeCodeClient(LLMConfig{}, WithClaudeCodeTimeout(5*time.Minute))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeClient: %v", err)
 	}
@@ -173,18 +165,14 @@ func TestNewClaudeCodeClient_WithTimeoutAndContext(t *testing.T) {
 	if c.timeout != 5*time.Minute {
 		t.Errorf("expected timeout 5m, got %v", c.timeout)
 	}
-	if got := c.ctx.Value(k); got != "v" {
-		t.Errorf("expected custom parent context to be stored, got value %v", got)
-	}
 }
 
-func TestNewClaudeCodeClient_IgnoresNilContextAndNonPositiveTimeout(t *testing.T) {
+func TestNewClaudeCodeClient_IgnoresNonPositiveTimeout(t *testing.T) {
 	stubLookPathFound(t)
 
 	c, err := NewClaudeCodeClient(LLMConfig{},
 		WithClaudeCodeTimeout(0),
 		WithClaudeCodeTimeout(-1*time.Second),
-		WithClaudeCodeContext(nil), //nolint:staticcheck // SA1012: this test deliberately verifies nil-context handling
 	)
 	if err != nil {
 		t.Fatalf("NewClaudeCodeClient: %v", err)
@@ -192,9 +180,6 @@ func TestNewClaudeCodeClient_IgnoresNilContextAndNonPositiveTimeout(t *testing.T
 
 	if c.timeout != DefaultClaudeCodeTimeout {
 		t.Errorf("non-positive timeout should be ignored; want %v, got %v", DefaultClaudeCodeTimeout, c.timeout)
-	}
-	if c.ctx == nil {
-		t.Error("nil context should be ignored, leaving a non-nil default")
 	}
 }
 
@@ -414,7 +399,7 @@ func TestRun_SuccessEnvelopeReturnsResult(t *testing.T) {
 	seam, _ := scriptedSeam(`printf '%s' '{"type":"result","is_error":false,"result":"1.2.3"}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	out, err := c.run("instr", []byte("content"), "")
+	out, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
@@ -427,7 +412,7 @@ func TestRun_IsErrorEnvelopeReturnsError(t *testing.T) {
 	seam, _ := scriptedSeam(`printf '%s' '{"type":"result","is_error":true,"subtype":"budget_exceeded","errors":["over budget","try later"]}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatal("expected error for is_error envelope")
 	}
@@ -441,7 +426,7 @@ func TestRun_NonZeroExitReturnsErrorWithStderr(t *testing.T) {
 	seam, _ := scriptedSeam(`printf 'boom on stderr' 1>&2; exit 7`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatal("expected error for non-zero exit")
 	}
@@ -454,7 +439,7 @@ func TestRun_MalformedJSONStdoutReturnsError(t *testing.T) {
 	seam, _ := scriptedSeam(`printf '%s' 'this is not json'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatal("expected error for malformed JSON stdout")
 	}
@@ -468,7 +453,7 @@ func TestRun_ContentGoesToStdinNotArgv(t *testing.T) {
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
 	const secretContent = "UNIQUE-PAGE-CONTENT-MARKER-9173"
-	if _, err := c.run("the-instruction", []byte(secretContent), ""); err != nil {
+	if _, err := c.run(t.Context(), "the-instruction", []byte(secretContent), ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -507,7 +492,7 @@ func TestRun_BareInjectsKeyViaEnv_NotArgsNorErrors(t *testing.T) {
 	seam, cap := scriptedSeam(script)
 	c := newTestClient(t, LLMConfig{Bare: "auto", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatal("expected error (script exits 3)")
 	}
@@ -552,7 +537,7 @@ func TestRun_NonBareDoesNotAddBareNorInjectKey(t *testing.T) {
 	// bare=false → not bare even though a key env is configured & populated.
 	c := newTestClient(t, LLMConfig{Bare: "false", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
 
-	out, err := c.run("instr", []byte("content"), "")
+	out, err := c.run(t.Context(), "instr", []byte("content"), "")
 
 	// --bare must be absent from argv when not bare.
 	if argsContain(cap.args, "--bare") {
@@ -585,7 +570,6 @@ func TestRun_ContextCancellationKillsChild(t *testing.T) {
 	defer cancel()
 	c, err := NewClaudeCodeClient(LLMConfig{},
 		WithClaudeCodeExecCommand(seam),
-		WithClaudeCodeContext(parent),
 		WithClaudeCodeTimeout(30*time.Second), // long, so cancellation (not timeout) is what aborts
 	)
 	if err != nil {
@@ -595,7 +579,7 @@ func TestRun_ContextCancellationKillsChild(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, runErr := c.run("instr", []byte("content"), "")
+		_, runErr := c.run(parent, "instr", []byte("content"), "")
 		done <- runErr
 	}()
 
@@ -636,7 +620,7 @@ func TestRun_TimeoutKillsChild(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, runErr := c.run("instr", []byte("content"), "")
+		_, runErr := c.run(t.Context(), "instr", []byte("content"), "")
 		done <- runErr
 	}()
 
@@ -661,7 +645,7 @@ func TestExtractVersion_CleansResult(t *testing.T) {
 	seam, _ := scriptedSeam(`printf '%s' '{"type":"result","is_error":false,"result":"v1.2.3"}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	got, err := c.ExtractVersion([]byte("content"), "")
+	got, err := c.ExtractVersion(t.Context(), []byte("content"), "")
 	if err != nil {
 		t.Fatalf("ExtractVersion: %v", err)
 	}
@@ -674,7 +658,7 @@ func TestExtractVersion_EmptyResultErrors(t *testing.T) {
 	seam, _ := scriptedSeam(`printf '%s' '{"type":"result","is_error":false,"result":"   "}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.ExtractVersion([]byte("content"), "")
+	_, err := c.ExtractVersion(t.Context(), []byte("content"), "")
 	if !errors.Is(err, ErrLLMEmptyResponse) {
 		t.Errorf("expected ErrLLMEmptyResponse for empty result, got %v", err)
 	}
@@ -691,7 +675,7 @@ func TestExtractVersion_PromptAppendedToInstruction(t *testing.T) {
 	// instruction wording, so the argv-absence assertion tests the real
 	// invariant (page payload absent from argv) without false positives.
 	const payloadMarker = "PAGE-PAYLOAD-MARKER-55012"
-	if _, err := c.ExtractVersion([]byte(payloadMarker), "prefer the latest stable tag"); err != nil {
+	if _, err := c.ExtractVersion(t.Context(), []byte(payloadMarker), "prefer the latest stable tag"); err != nil {
 		t.Fatalf("ExtractVersion: %v", err)
 	}
 
@@ -720,7 +704,7 @@ func TestAnalyzeContent_StructuredPath(t *testing.T) {
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
 	meta := &EbuildMetadata{Package: "dev-foo/bar", Version: "1.0.0", Homepage: "https://example.com"}
-	got, err := c.AnalyzeContent([]byte("content"), meta, "look at the API")
+	got, err := c.AnalyzeContent(t.Context(), []byte("content"), meta, "look at the API")
 	if err != nil {
 		t.Fatalf("AnalyzeContent: %v", err)
 	}
@@ -745,7 +729,7 @@ func TestAnalyzeContent_StripsMarkdownFences(t *testing.T) {
 	seam, _ := scriptedSeam(`cat >/dev/null; printf '%s' '{"type":"result","is_error":false,"result":` + jsonQuote(fenced) + `}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	got, err := c.AnalyzeContent([]byte("content"), nil, "")
+	got, err := c.AnalyzeContent(t.Context(), []byte("content"), nil, "")
 	if err != nil {
 		t.Fatalf("AnalyzeContent (fenced): %v", err)
 	}
@@ -781,7 +765,7 @@ func TestAnalyzeContent_FallbackWhenStructuredErrors(t *testing.T) {
 		t.Fatalf("NewClaudeCodeClient: %v", err)
 	}
 
-	got, err := c.AnalyzeContent([]byte("content"), nil, "")
+	got, err := c.AnalyzeContent(t.Context(), []byte("content"), nil, "")
 	if err != nil {
 		t.Fatalf("AnalyzeContent fallback: %v", err)
 	}
@@ -805,7 +789,7 @@ func TestAnalyzeContent_BothFail(t *testing.T) {
 	seam, _ := scriptedSeam(`cat >/dev/null; printf 'always broken' 1>&2; exit 5`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.AnalyzeContent([]byte("content"), nil, "")
+	_, err := c.AnalyzeContent(t.Context(), []byte("content"), nil, "")
 	if err == nil {
 		t.Fatal("expected error when both structured and fallback runs fail")
 	}
@@ -819,7 +803,7 @@ func TestAnalyzeContent_InvalidResultInBothFails(t *testing.T) {
 	seam, _ := scriptedSeam(`cat >/dev/null; printf '%s' '{"type":"result","is_error":false,"result":"not a schema"}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	_, err := c.AnalyzeContent([]byte("content"), nil, "")
+	_, err := c.AnalyzeContent(t.Context(), []byte("content"), nil, "")
 	if err == nil {
 		t.Fatal("expected error when the result cannot be parsed as a schema in either attempt")
 	}

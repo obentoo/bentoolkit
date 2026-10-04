@@ -19,7 +19,7 @@ var (
 )
 
 // newSnapshotPruneCmd builds `snapshot prune`.
-func newSnapshotPruneCmd() *cobra.Command {
+func newSnapshotPruneCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "prune",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -31,7 +31,9 @@ plus the GFS retention sweep on every archive ship's rclone remote.
 --ship NAME scopes the prune to that one destination: the engine-local prune is
 skipped and only the named ship's remote is pruned. Recorded incremental parents
 are never deleted — each is the base of its subvolume's next incremental send.`,
-		RunE: runSnapshotPrune,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotPrune(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&snapshotPruneDryRun, "dry-run", false,
 		"print the prune actions that would run, without executing them")
@@ -43,7 +45,7 @@ are never deleted — each is the base of its subvolume's next incremental send.
 // runSnapshotPrune applies the [engine.retention] policy on demand (008 R3.1):
 // the engine-native prune per subvolume plus the remote GFS per archive ship,
 // honoring --dry-run and --ship scoping (008 R3.2).
-func runSnapshotPrune(cmd *cobra.Command, _ []string) error {
+func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	// Prune is destructive: load AND validate the config (drivers + deps) so an
 	// unknown driver or missing binary fails fast before any subprocess (G3).
 	cfg, path, err := loadSnapshotConfig()
@@ -75,13 +77,13 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string) error {
 	// -c btrbk.conf), so ensure it exists — mirroring `run`. Skipped under
 	// --ship scoping, where the engine-local prune does not run at all.
 	if snapshotPruneShip == "" {
-		if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
+		if err := snapshot.WriteEngineConfig(ctx, cfg, path, d.snapshotRunner); err != nil {
 			logger.Error("snapshot prune: render engine config: %v", err)
 			return exitWith(1)
 		}
 	}
 
-	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot prune: %v", err)
 		return exitWith(1)

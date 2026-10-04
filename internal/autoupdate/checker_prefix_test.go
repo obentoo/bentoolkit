@@ -48,7 +48,7 @@ func TestCheckPackageStripsUpstreamTagPrefix(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := checker.CheckPackage(pkgName, true)
+	result, err := checker.CheckPackage(t.Context(), pkgName, true)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCheckPackageStoresStrippedVersionInPending(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if _, err := checker.CheckPackage(pkgName, true); err != nil {
+	if _, err := checker.CheckPackage(t.Context(), pkgName, true); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
