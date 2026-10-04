@@ -1366,6 +1366,7 @@ func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, updat
 	// being consulted, so it is the moment to say so. Advisory only: it never
 	// returns an error and never blocks the bump.
 	a.warnIfGentooDiverges(pkg, currentVersion)
+	a.warnIfFilesNameOldVersion(pkg, currentVersion, newVersion)
 
 	cand, err := publishedCandidate(a.overlayPath, pkg, newVersion)
 	if err != nil {
@@ -1451,6 +1452,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	// actually take once a staging root is configured; wired into the overlay
 	// path alone it never reached a real bump.
 	a.warnIfGentooDiverges(pkg, currentVersion)
+	a.warnIfFilesNameOldVersion(pkg, currentVersion, newVersion)
 	if err := a.applySubstitutions(cand.ebuildPath, pkg, update); err != nil {
 		return candidatePaths{}, err
 	}
