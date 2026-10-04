@@ -54,7 +54,7 @@ func init() {
 // browserCtx is the shared browser; each Evaluate derives a fresh tab from it.
 type chromedpEvaluator struct {
 	allocCancel   context.CancelFunc
-	browserCtx    context.Context
+	browserCtx    context.Context //nolint:containedctx // a chromedp browser is a context by that library's design; each tab must descend from it
 	browserCancel context.CancelFunc
 	opTimeout     time.Duration
 }

@@ -211,7 +211,7 @@ func TestUndeclaredDivergenceCaveatPrintsOncePerSection(t *testing.T) {
 		"app-editors/vim": {"1.0"},
 	}}
 
-	report, err := CompareWithProvider([]PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{
 		{Category: "app-editors", Package: "zed", LatestVersion: "1.0"},
 		{Category: "app-editors", Package: "vim", LatestVersion: "1.0"},
 	}, prov, CompareOptions{IncludeSynced: true, OverlayPath: overlayRoot, Divergence: silent})
@@ -341,7 +341,7 @@ func TestProvedAuthorshipReachesTheRenderedReport(t *testing.T) {
 		},
 	}
 
-	report, err := CompareWithProvider([]PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 		{Category: "kde-plasma", Package: "kwin", LatestVersion: "6.7.4"},
 	}, prov, opts)

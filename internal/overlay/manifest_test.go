@@ -132,7 +132,7 @@ func TestRegenerateManifests_DryRun(t *testing.T) {
 		{Category: "app-misc", Package: "hello"},
 		{Category: "dev-libs", Package: "foo"},
 	}
-	got := RegenerateManifests("/nonexistent", targets, &ManifestOptions{DryRun: true}).Updates
+	got := RegenerateManifests(t.Context(), "/nonexistent", targets, &ManifestOptions{DryRun: true}).Updates
 	if len(got) != 2 {
 		t.Fatalf("RegenerateManifests() dry-run got %d, want 2", len(got))
 	}
@@ -155,7 +155,7 @@ func TestRegenerateManifests_PkgdevMissing(t *testing.T) {
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
 	targets := []ManifestUpdate{{Category: "app-misc", Package: "hello"}}
-	got := RegenerateManifests(overlayPath, targets, &ManifestOptions{Keep: true}).Updates
+	got := RegenerateManifests(t.Context(), overlayPath, targets, &ManifestOptions{Keep: true}).Updates
 	if len(got) != 1 || got[0].Success {
 		t.Fatalf("expected single failed update, got %+v", got)
 	}
@@ -181,7 +181,7 @@ func TestRegenerateManifests_RestoresBackupOnFailure(t *testing.T) {
 	targets := []ManifestUpdate{{Category: "app-misc", Package: "hello"}}
 	// pkgdev missing -> failure occurs before backup is even taken (error
 	// short-circuits at LookPath). Manifest must remain intact regardless.
-	got := RegenerateManifests(overlayPath, targets, &ManifestOptions{}).Updates
+	got := RegenerateManifests(t.Context(), overlayPath, targets, &ManifestOptions{}).Updates
 	if len(got) != 1 || got[0].Success {
 		t.Fatalf("expected single failed update, got %+v", got)
 	}
@@ -205,7 +205,7 @@ func TestRegenerateManifests_RestoresBackupOnFailure(t *testing.T) {
 // internal/common/distfiles/distfiles_test.go.
 
 func TestRegenerateManifests_NoTargets(t *testing.T) {
-	got := RegenerateManifests("/anywhere", nil, nil).Updates
+	got := RegenerateManifests(t.Context(), "/anywhere", nil, nil).Updates
 	if len(got) != 0 {
 		t.Errorf("RegenerateManifests(nil) = %+v, want empty", got)
 	}
@@ -243,7 +243,7 @@ func TestFormatManifestResult_MixedResults(t *testing.T) {
 }
 
 func TestRegenerateManifestsForScope_NoConfig(t *testing.T) {
-	_, err := RegenerateManifestsForScope(nil, ManifestScope{}, nil)
+	_, err := RegenerateManifestsForScope(t.Context(), nil, ManifestScope{}, nil)
 	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("RegenerateManifestsForScope(nil) error = %v, want ErrOverlayPathNotSet", err)
 	}
@@ -254,7 +254,7 @@ func TestRegenerateManifestsForScope_DryRun(t *testing.T) {
 	createRenameTestEbuild(t, overlayPath, "app-misc", "hello", "1.0.0")
 
 	cfg := &config.Config{Overlay: config.OverlayConfig{Path: overlayPath}}
-	res, err := RegenerateManifestsForScope(cfg, ManifestScope{}, &ManifestOptions{DryRun: true})
+	res, err := RegenerateManifestsForScope(t.Context(), cfg, ManifestScope{}, &ManifestOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("RegenerateManifestsForScope() error = %v", err)
 	}

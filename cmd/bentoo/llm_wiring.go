@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -39,29 +38,29 @@ func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
 //
 // This helper is shared by the analyze wiring (T4) and the --check wiring (T5),
 // so it stays general: the only policy it encodes is the empty-provider
-// short-circuit and the context below; every other decision (which provider,
-// defaults) lives in autoupdate.NewLLMProvider via the existing
-// llmConfigToAutoupdate mapper.
+// short-circuit; every other decision (which provider, defaults) lives in
+// autoupdate.NewLLMProvider via the existing llmConfigToAutoupdate mapper.
 //
-// # Why claude-code takes the caller's context
+// # Where the caller's context goes
 //
 // The `claude` CLI runs in its own process group (story 054), so a Ctrl+C or a
 // hang-up at the terminal no longer reaches it: the kernel signals the
-// terminal's foreground group only. ctx — the command's context (func commandContext) — is then
-// the only way an interrupt stops that child and everything it started (R4.3).
-// The HTTP providers take no context here; their constructors do not accept one.
+// terminal's foreground group only. The command's context (func commandContext)
+// is then the only way an interrupt stops that child and everything it started
+// (R4.3). Since story 059 no provider stores a context: each ExtractVersion and
+// AnalyzeContent call takes its caller's, so this helper takes none.
 //
 // On a construction failure the claude-code branch returns a TRUE nil, never
 // the nil *ClaudeCodeClient boxed into the interface: every caller gates on the
 // error first, and a boxed nil would make a `p != nil` check lie (the same
 // discipline as newConfiguredBuildFixer below). The error travels unwrapped, as
 // it did through NewLLMProvider; each caller's Warn line names the provider.
-func newConfiguredLLMProvider(ctx context.Context, c config.LLMConfig) (autoupdate.LLMProvider, error) {
+func newConfiguredLLMProvider(c config.LLMConfig) (autoupdate.LLMProvider, error) {
 	switch c.Provider {
 	case "":
 		return nil, nil
 	case "claude-code":
-		client, err := autoupdate.NewClaudeCodeClient(llmConfigToAutoupdate(c), autoupdate.WithClaudeCodeContext(ctx))
+		client, err := autoupdate.NewClaudeCodeClient(llmConfigToAutoupdate(c))
 		if err != nil {
 			return nil, err
 		}

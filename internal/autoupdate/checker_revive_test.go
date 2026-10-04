@@ -78,7 +78,7 @@ func TestFindRevivableOrphans_UpstreamNewer(t *testing.T) {
 		pkg: {"1.4.0", "1.5.0"},
 	}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFindRevivableOrphans_PresentSkipped(t *testing.T) {
 	createTestEbuild(t, overlayDir, pkg, "1.6.0")
 	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.5.0"}}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestFindRevivableOrphans_UpstreamNotNewer(t *testing.T) {
 		pkg: {"1.5.0"},
 	}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestFindRevivableOrphans_EnabledSkipped(t *testing.T) {
 		pkg: {"1.0.0"},
 	}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestFindRevivableOrphans_NotInGentoo(t *testing.T) {
 	// Empty version map => provider returns ErrNotFound for every package.
 	prov := &fakeProvider{versions: map[string][]string{}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: unexpected error for ErrNotFound: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestFindRevivableOrphans_SeriesNoMatchSkipped(t *testing.T) {
 	createTestEbuild(t, overlayDir, pkg, "1.28.7")
 	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.28.7"}}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("a series matching nothing must not be a soft error: %v", err)
 	}
@@ -279,7 +279,7 @@ KEYWORDS="~amd64"
 `)
 	prov := &fakeProvider{versions: map[string][]string{atom: {"24.9.0"}}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("a slot matching nothing must not be a soft error: %v", err)
 	}

@@ -244,7 +244,7 @@ func TestChildEnv_OnlyAllowListedNamesCross(t *testing.T) {
 
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
 	c := newTestClient(t, LLMConfig{Bare: "false", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
-	if _, err := c.run("instr", []byte("content"), ""); err != nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestChildEnv_AmbientKeyYieldsOneResolvedEntry(t *testing.T) {
 	if !c.bareMode {
 		t.Fatal("precondition: a resolved key with api_key_env set must select bare mode")
 	}
-	if _, err := c.run("instr", []byte("content"), ""); err != nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	env := spy.last().Env
@@ -295,7 +295,7 @@ func TestChildEnv_AmbientKeyYieldsOneResolvedEntry(t *testing.T) {
 	// Converse: bare forced on, no key resolved.
 	seam2, spy2 := agentSeam(printEnvelopeScript(okEnvelope))
 	c2 := newTestClient(t, LLMConfig{Bare: "true"}, WithClaudeCodeExecCommand(seam2))
-	if _, err := c2.run("instr", []byte("content"), ""); err != nil {
+	if _, err := c2.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 		t.Fatalf("run (bare, no key): %v", err)
 	}
 	if got := envValuesOf(spy2.last().Env, "ANTHROPIC_API_KEY"); len(got) != 0 {
@@ -326,7 +326,7 @@ func TestChildEnv_NeverNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClaudeCodeClient: %v", err)
 	}
-	if _, err := c.run("instr", []byte("content"), ""); err != nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	cmd := spy.last()
@@ -451,7 +451,7 @@ func TestAgentEnv_TextClientCarriesNoSecret(t *testing.T) {
 	setHostileParentEnv(t)
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
 	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-	if _, err := c.run("instr", []byte("content"), ""); err != nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	assertCleanAgentEnv(t, "text client", spy.last(), false)

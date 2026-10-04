@@ -74,7 +74,7 @@ func unstartableSeam() func(ctx context.Context, name string, arg ...string) *ex
 func runUnderBudget(t *testing.T, seam func(ctx context.Context, name string, arg ...string) *exec.Cmd, budget time.Duration) string {
 	t.Helper()
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(budget))
-	_, err := c.run("instr", []byte("content"), "")
+	_, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err == nil {
 		t.Fatalf("the invocation returned no error, so there is no failure message to read")
 	}

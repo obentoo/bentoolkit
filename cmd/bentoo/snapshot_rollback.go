@@ -15,16 +15,10 @@ var (
 	// snapshotRollbackDryRun is --dry-run: print the destructive action without
 	// performing it — no subprocess and no confirm prompt (008 R2.3).
 	snapshotRollbackDryRun bool
-	// snapshotRollbackConfirm is the confirm seam. nil (the default) makes
-	// snapshot.Rollback fall back to its own stdin y/N prompt (defaultConfirmFunc);
-	// tests override it to inject a yes/no decision without terminal I/O. A plain
-	// func(string) bool is assignable to RollbackOptions.Confirm (the unexported
-	// confirmFunc type) from package main.
-	snapshotRollbackConfirm func(string) bool
 )
 
 // newSnapshotRollbackCmd builds `snapshot rollback`.
-func newSnapshotRollbackCmd() *cobra.Command {
+func newSnapshotRollbackCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "rollback <id>",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -36,7 +30,9 @@ for any other engine. It is DESTRUCTIVE — snapper makes a read-write copy of
 snapshot <id> the new default subvolume, so the system boots into it on the next
 reboot — and prompts for confirmation unless --yes is given.`,
 		Args: cobra.ExactArgs(1),
-		RunE: runSnapshotRollback,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotRollback(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVarP(&snapshotRollbackYes, "yes", "y", false,
 		"skip the destructive-rollback confirmation prompt")
@@ -45,7 +41,7 @@ reboot — and prompts for confirmation unless --yes is given.`,
 	return cmd
 }
 
-func runSnapshotRollback(cmd *cobra.Command, args []string) error {
+func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 	id := args[0]
 
 	// Rollback is destructive: load AND validate the config (drivers + deps) so an
@@ -65,8 +61,8 @@ func runSnapshotRollback(cmd *cobra.Command, args []string) error {
 
 	opts := snapshot.RollbackOptions{
 		Yes:     snapshotRollbackYes,
-		Confirm: snapshotRollbackConfirm,
-		Run:     snapshotRunner,
+		Confirm: d.snapshotRollbackConfirm,
+		Run:     d.snapshotRunner,
 	}
 
 	ctx := commandContext(cmd)

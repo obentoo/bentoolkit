@@ -2,7 +2,6 @@ package autoupdate
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,11 +45,11 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
-		first, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		first, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("first fetchContent returned an unexpected error: %v", err)
 		}
-		second, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		second, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("second fetchContent returned an unexpected error: %v", err)
 		}
@@ -84,11 +83,11 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
-		if _, err := checker.fetchContent(server.URL, map[string]string{"Range": "bytes=0-15"},
+		if _, err := checker.fetchContent(t.Context(), server.URL, map[string]string{"Range": "bytes=0-15"},
 			credentialScope{}, checker.operationTimeout(nil)); err != nil {
 			t.Fatalf("the Range read returned an unexpected error: %v", err)
 		}
-		if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
+		if _, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 			t.Fatalf("the full read returned an unexpected error: %v", err)
 		}
 
@@ -123,7 +122,6 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL,
 			WithRateLimiter(limiter),
-			WithContext(context.Background()),
 		)
 
 		bodies := make([][]byte, readers)
@@ -133,7 +131,7 @@ func TestCheckerFetchDedup(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				bodies[i], errs[i] = checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+				bodies[i], errs[i] = checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 			}(i)
 		}
 		barrier.openWhen(t, fmt.Sprintf("%d follower(s) to join the leader's in-flight fetch", readers-1),
@@ -181,11 +179,11 @@ func TestCheckerFetchDedup(t *testing.T) {
 		limiter := &recordingRateLimiter{}
 		checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(limiter))
 
-		if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err == nil {
+		if _, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err == nil {
 			t.Fatal("expected the first read to fail on the 404, got nil")
 		}
 
-		body, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		body, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		if err != nil {
 			t.Fatalf("the second read returned %v; a cached FAILURE would have poisoned this identity (S024-R3.2)", err)
 		}

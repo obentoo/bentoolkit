@@ -289,7 +289,7 @@ func TestRename(t *testing.T) {
 		Force:      false,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -332,7 +332,7 @@ func TestRenameDryRun(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -379,7 +379,7 @@ func TestRenameWithVersionFilesBlocking(t *testing.T) {
 		NoManifest: true,
 	}
 
-	_, err := Rename(cfg, spec, opts)
+	_, err := Rename(t.Context(), cfg, spec, opts)
 	if err == nil {
 		t.Error("Rename() should return error when version files detected without --force")
 	}
@@ -417,7 +417,7 @@ func TestRenameWithVersionFilesForce(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() with --force error = %v", err)
 	}
@@ -451,7 +451,7 @@ func TestRenameWithConflictBlocking(t *testing.T) {
 		NoManifest: true,
 	}
 
-	_, err := Rename(cfg, spec, opts)
+	_, err := Rename(t.Context(), cfg, spec, opts)
 	if err == nil {
 		t.Error("Rename() should return error when conflict detected without --force")
 	}
@@ -486,7 +486,7 @@ func TestRenameWithConflictForce(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() with --force error = %v", err)
 	}
@@ -665,7 +665,7 @@ func TestRenameNoMatches(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -698,7 +698,7 @@ func TestRenameMultipleEbuilds(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -790,7 +790,7 @@ func TestRenameGlobalSearch(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -824,7 +824,7 @@ func TestRenameWithRevision(t *testing.T) {
 		NoManifest: true,
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -859,7 +859,7 @@ func TestRenameInvalidOverlayPath(t *testing.T) {
 
 	opts := &RenameOptions{NoManifest: true}
 
-	_, err := Rename(cfg, spec, opts)
+	_, err := Rename(t.Context(), cfg, spec, opts)
 	if !errors.Is(err, ErrOverlayPathNotSet) {
 		t.Errorf("Rename() error = %v, want ErrOverlayPathNotSet", err)
 	}
@@ -882,7 +882,7 @@ func TestRenameInvalidPattern(t *testing.T) {
 
 	opts := &RenameOptions{NoManifest: true}
 
-	_, err := Rename(cfg, spec, opts)
+	_, err := Rename(t.Context(), cfg, spec, opts)
 	if err == nil {
 		t.Error("Rename() expected error for invalid pattern")
 	}
@@ -1167,7 +1167,7 @@ func TestRenameWithManifestUpdate(t *testing.T) {
 		NoManifest: false, // Enable manifest update
 	}
 
-	result, err := Rename(cfg, spec, opts)
+	result, err := Rename(t.Context(), cfg, spec, opts)
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}

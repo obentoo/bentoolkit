@@ -90,7 +90,7 @@ func writeVerifyEbuild(t *testing.T, root, category, pkg, version, body string) 
 // with a check on the finding's Kind.
 func verifyRun(t *testing.T, overlayRoot string, prov provider.Provider, pkg PackageInfo, div map[string]Divergence) (CompareResult, []Finding) {
 	t.Helper()
-	report, err := CompareWithProvider([]PackageInfo{pkg}, prov, CompareOptions{
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, CompareOptions{
 		IncludeSynced:      true,
 		IncludeNotInRemote: true,
 		OverlayPath:        overlayRoot,

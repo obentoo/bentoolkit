@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -185,10 +186,10 @@ func (a *Applier) resolvedPackageType(pkg, currentVersion string) string {
 //     here no longer exists (design D4).
 //
 // The value rides the per-CALL Options built from cand and is never a field on
-// Applier (S037-D7): applyAllPackages runs applies concurrently, and a seam stored
+// Applier (S037-D7): ApplyAll runs applies concurrently, and a seam stored
 // once would hand package A's archive names to package B — story 035's D2, with
 // names in place of a directory.
-func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []validate.GateResult {
+func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, version string) []validate.GateResult {
 	if !cand.staged {
 		return nil
 	}
@@ -202,7 +203,7 @@ func (a *Applier) runStaticGates(cand candidatePaths, pkg, version string) []val
 		opts.DistNames = publishedDistNames(a.overlayPath, pkg, version)
 	}
 
-	report, err := validate.Run(a.ctx, opts)
+	report, err := validate.Run(ctx, opts)
 	if err != nil {
 		// Unstamped, and the cause is genuinely not one thing (S040-R1.5).
 		// validate.Run returns an error for a run the operator INTERRUPTED — the
@@ -447,14 +448,14 @@ func refusalWithFindings(reason string, gates []validate.GateResult) error {
 // as a skipped gate rather than surfaced as the apply's failure, because an
 // advisory capability that broke must not stop a bump the deterministic gates
 // would have passed.
-func (a *Applier) reviewBump(cand candidatePaths, pkg, oldVersion, newVersion string, floor validate.DepthDecision, gates *[]validate.GateResult) validate.DepthDecision {
+func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldVersion, newVersion string, floor validate.DepthDecision, gates *[]validate.GateResult) validate.DepthDecision {
 	if a.reviewer == nil || !cand.staged {
 		return floor
 	}
 
 	a.reporter.TaskStage(pkg, "review")
-	oldArchive, newArchive := a.reviewArchives(cand, pkg, oldVersion, newVersion)
-	report, err := a.reviewer.ReviewBump(a.ctx, BumpReviewRequest{
+	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
+	report, err := a.reviewer.ReviewBump(ctx, BumpReviewRequest{
 		Package:    pkg,
 		OldVersion: oldVersion,
 		NewVersion: newVersion,
@@ -519,8 +520,8 @@ func (a *Applier) reviewBump(cand candidatePaths, pkg, oldVersion, newVersion st
 // version's from the PUBLISHED package directory, which is the only place that
 // still describes it, and the candidate's from the staged tree, which is the only
 // place that describes it yet.
-func (a *Applier) reviewArchives(cand candidatePaths, pkg, oldVersion, newVersion string) (oldArchive, newArchive string) {
-	distdir, ok := distfiles.Locate(a.distdir, a.configuredDistdir)
+func (a *Applier) reviewArchives(ctx context.Context, cand candidatePaths, pkg, oldVersion, newVersion string) (oldArchive, newArchive string) {
+	distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir)
 	if !ok {
 		return "", ""
 	}
@@ -655,7 +656,7 @@ func candidateDeclinedGates(depth validate.Depth, reason string) []validate.Gate
 // fail the apply rather than promote on a list of skips. It is also exactly what
 // the shipped compile gate already does with a failing child, and a generalised
 // gate must not be more permissive than the gate it generalises.
-func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth validate.Depth, result *ApplyResult) ([]validate.GateResult, error) {
+func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, version string, depth validate.Depth, result *ApplyResult) ([]validate.GateResult, error) {
 	if !cand.staged || depth <= validate.DepthOptions {
 		// Below DepthPatches nothing is built, so there is no build gate to
 		// report — an empty list, not a hollow pass. It is the same threshold
@@ -687,7 +688,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 	}
 
 	deps := a.buildDeps(nil)
-	satisfied, missing, err := validate.DependenciesSatisfied(a.ctx, cand.repoRoot, pkg, version, deps)
+	satisfied, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, deps)
 	switch {
 	case err != nil:
 		// UNDETERMINED. The caller still skips, but must NOT name a missing
@@ -718,7 +719,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 	// deliberately reports a failing build as gates plus a nil error, so the only
 	// place the exit status is observable is the runner this applier supplies.
 	var attempt buildAttempt
-	deps.RunAttached = a.recordingRunner(&attempt)
+	deps.RunAttached = a.recordingRunner(ctx, &attempt)
 
 	req := validate.BuildRequest{
 		StagedRoot:       cand.repoRoot,
@@ -739,7 +740,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 		// read.
 		Distdir: a.staticGateDistdir(cand),
 	}
-	gates, err := validate.RunBuildGates(a.ctx, req, deps)
+	gates, err := validate.RunBuildGates(ctx, req, deps)
 	if err != nil {
 		// The REQUEST could not be attempted — a malformed atom, no version, no
 		// staged tree. Reporting it as a failed bump would blame the ebuild for a
@@ -750,7 +751,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 		return gates, nil
 	}
 
-	fixed, fixErr := a.repairBuildGatesAndRerun(cand, pkg, version, req, deps, attempt, result)
+	fixed, fixErr := a.repairBuildGatesAndRerun(ctx, cand, pkg, version, req, deps, attempt, result)
 	if fixErr != nil {
 		return gates, fixErr
 	}
@@ -763,7 +764,7 @@ func (a *Applier) runBuildGates(cand candidatePaths, pkg, version string, depth 
 // It is a seam and not a field because the capture is scoped to ONE call: the
 // build runs at most once per invocation, and a shared field would make the
 // attribution of a concurrent apply depend on which package finished last.
-func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byte, error) {
+func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(cmd *exec.Cmd) ([]byte, error) {
 	return func(cmd *exec.Cmd) ([]byte, error) {
 		output, err := a.runAttached(cmd)
 		// The build runs in procgroup's group mode, whose WaitDelay also runs
@@ -778,7 +779,7 @@ func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byt
 			// says nothing about the ebuild, so it is never labelled a compile
 			// failure. RunBuildGates returns the interrupt as its own error before
 			// anything reads this attempt; the label stays honest regardless.
-			if ctxErr := a.ctx.Err(); ctxErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
 				into.err = fmt.Errorf("the build was interrupted, so it says nothing about this ebuild: %w", ctxErr)
 				return output, err
 			}
@@ -800,7 +801,7 @@ func (a *Applier) recordingRunner(into *buildAttempt) func(cmd *exec.Cmd) ([]byt
 // is only what is re-run — RunBuildGates rather than one privileged `ebuild
 // compile` — and that difference is the point: R8.2 says the gate that decides is
 // the gate that failed.
-func (a *Applier) repairBuildGatesAndRerun(cand candidatePaths, pkg, version string, req validate.BuildRequest, deps validate.BuildDeps, first buildAttempt, result *ApplyResult) ([]validate.GateResult, error) {
+func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePaths, pkg, version string, req validate.BuildRequest, deps validate.BuildDeps, first buildAttempt, result *ApplyResult) ([]validate.GateResult, error) {
 	// The free rung: the transcript this run already holds. Reported to every
 	// operator, LLM or not, because the verdict is a fact about the failure and
 	// not about the configuration.
@@ -814,8 +815,8 @@ func (a *Applier) repairBuildGatesAndRerun(cand candidatePaths, pkg, version str
 	// The paid rungs, now that the alternative is a full agent invocation.
 	paid := buildFaultEvidence{
 		transcript:  first.transcript,
-		deps:        a.buildDependencyAnswer(cand, pkg, version),
-		buildTmpdir: fixSandboxRoot(),
+		deps:        a.buildDependencyAnswer(ctx, cand, pkg, version),
+		buildTmpdir: fixSandboxRoot(ctx),
 	}
 	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, paid); machineErr != nil {
 		return nil, machineErr
@@ -827,7 +828,7 @@ func (a *Applier) repairBuildGatesAndRerun(cand candidatePaths, pkg, version str
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
-	fixRes, fixErr := a.buildFixer.FixBuild(a.ctx, BuildFixRequest{
+	fixRes, fixErr := a.buildFixer.FixBuild(ctx, BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
 		Gate:       gate,
@@ -852,8 +853,8 @@ func (a *Applier) repairBuildGatesAndRerun(cand candidatePaths, pkg, version str
 	// the agent's account of what it did.
 	a.reporter.TaskStage(pkg, "re-check")
 	var second buildAttempt
-	deps.RunAttached = a.recordingRunner(&second)
-	gates, err := validate.RunBuildGates(a.ctx, req, deps)
+	deps.RunAttached = a.recordingRunner(ctx, &second)
+	gates, err := validate.RunBuildGates(ctx, req, deps)
 	if err != nil {
 		return nil, fmt.Errorf("re-running the build gates for %s-%s after the LLM fix: %w", pkg, version, err)
 	}
@@ -1060,8 +1061,8 @@ func (a *Applier) refuseUnproved(gates []validate.GateResult, pkg, version strin
 // So the rule is enforced where the overlay is WRITTEN rather than where the
 // verdict is reached. A future route that manufactures a promotable gate list
 // out of a cancellation is then merely wrong, not publishing.
-func (a *Applier) refuseOnInterrupt(pkg, version string) error {
-	ctxErr := a.ctx.Err()
+func (a *Applier) refuseOnInterrupt(ctx context.Context, pkg, version string) error {
+	ctxErr := ctx.Err()
 	if ctxErr == nil {
 		return nil
 	}
