@@ -85,7 +85,7 @@ func realignFixture(t *testing.T) (*CompareReport, *localRootedFakeProvider, Com
 		versions: map[string][]string{"media-libs/gst-plugins-qt6": {"1.29.2"}},
 	}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
-	report, err := CompareWithProvider([]PackageInfo{{
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{{
 		Category:      "media-libs",
 		Package:       "gst-plugins-qt6",
 		Versions:      []string{"1.29.2"},
@@ -192,7 +192,7 @@ func TestRealignVerdictAnnotatesWhatItIsGiven(t *testing.T) {
 		BaselineText: realignBaseline,
 	}}
 
-	AnnotateRealignVerdicts(report, rev, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), report, rev, prov, opts)
 
 	if rev.calls != 1 {
 		t.Fatalf("the reviewer was called %d times, want 1 (one call per package, D7): %v", rev.calls, rev.seen)
@@ -245,7 +245,7 @@ func TestRealignVerdictUnreachableModelSaysSo(t *testing.T) {
 
 	// No error return by construction: an unreachable model is exit 0, and a
 	// pass that handed the caller an error would invite an exit code (D9).
-	AnnotateRealignVerdicts(report, rev, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), report, rev, prov, opts)
 
 	for _, r := range report.Results {
 		if r.RealignVerdict != "" {
@@ -283,13 +283,13 @@ func TestRealignVerdictSecondRunMakesNoCall(t *testing.T) {
 	report, prov, opts := realignFixture(t)
 	rev := &realignFakeReviewer{note: RealignNote{Justified: true, Why: "the qt6 option list is still ours to carry"}}
 
-	AnnotateRealignVerdicts(report, rev, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), report, rev, prov, opts)
 	if rev.calls != 1 {
 		t.Fatalf("the first pass made %d calls, want 1", rev.calls)
 	}
 
 	// A second report over the SAME files: same content, same key, no question.
-	second, err := CompareWithProvider([]PackageInfo{{
+	second, err := CompareWithProvider(t.Context(), []PackageInfo{{
 		Category:      "media-libs",
 		Package:       "gst-plugins-qt6",
 		Versions:      []string{"1.29.2"},
@@ -298,7 +298,7 @@ func TestRealignVerdictSecondRunMakesNoCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
-	AnnotateRealignVerdicts(second, rev, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), second, rev, prov, opts)
 
 	if rev.calls != 1 {
 		t.Errorf("the reviewer was called %d times over two runs of unchanged content, want 1 — the cache keys on the two files' bytes (D7)", rev.calls)

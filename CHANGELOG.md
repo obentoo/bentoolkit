@@ -107,6 +107,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distracted "y" cannot rewrite a record that was correct. A host that does
   not resolve is still offered, since that is usually a mistyped `url`.
 
+- **Ctrl-C now stops `overlay autoupdate --apply all` and in-flight network
+  calls.** A cancelled `--apply all` used to keep dispatching every queued
+  package, each one copying and rewriting an ebuild before it failed and rolled
+  back; it now starts no package after the cancel and reports each package it
+  never began as a failure, so the exit status stays non-zero. The Claude API,
+  OpenAI and Ollama requests, the GitHub rate-limit lookup and the host
+  `portageq distdir` query now end within seconds of a cancel instead of running
+  to their own timeouts. `overlay analyze` now applies its 60 s LLM timeout,
+  which caps a slow local Ollama model below Ollama's own 120 s.
+
 ## [0.32.0] - 2026-10-01
 
 ### Security

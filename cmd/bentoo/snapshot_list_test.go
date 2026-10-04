@@ -67,13 +67,14 @@ func setListRemote(t *testing.T, remote bool) {
 func TestRunSnapshotList_RemoteIncludesBtrbkTargetsAndRestic(t *testing.T) {
 	writeSnapshotConfig(t, listTOMLRemote)
 	mr := remoteListMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setListRemote(t, true)
 
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("list --remote exited with code %d", code)
@@ -102,13 +103,14 @@ func TestRunSnapshotList_RemoteIncludesBtrbkTargetsAndRestic(t *testing.T) {
 func TestRunSnapshotList_WithoutRemoteSkipsRemoteQueries(t *testing.T) {
 	writeSnapshotConfig(t, listTOMLRemote)
 	mr := remoteListMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setListRemote(t, false)
 
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("list exited with code %d", code)
@@ -135,7 +137,8 @@ func TestRunSnapshotList_RendersSnapshots(t *testing.T) {
 	// list is lenient (no Validate), so no PATH stubs are needed.
 	writeSnapshotConfig(t, validSnapshotTOML)
 	sample := "/.snapshots/home.20260608T120000\n/.snapshots/home.20260607T120000\n"
-	snapshotRunner = &snapshot.MockRunner{
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte(sample), nil
 		},
@@ -144,7 +147,7 @@ func TestRunSnapshotList_RendersSnapshots(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil))
+		code, exited = exitOf(runSnapshotList(snapshotListCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("list exited with code %d", code)

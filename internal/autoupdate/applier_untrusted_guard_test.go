@@ -147,7 +147,7 @@ func TestApplyAcceptsWellFormedAuxValue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newUntrustedFixture(t, tc.update)
 			a := f.applier(t)
-			result, err := a.Apply(f.pkg, false)
+			result, err := a.Apply(t.Context(), f.pkg, false)
 			if err != nil {
 				t.Fatalf("Apply refused a well-formed value: %v", err)
 			}

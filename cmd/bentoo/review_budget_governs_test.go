@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -73,32 +72,30 @@ type reviewBudgetCase struct {
 	why             string
 }
 
-// captureReviewBudget replaces the construction seam both review paths share and
-// returns every budget it was handed during the run.
+// captureReviewBudget replaces, on d, the construction seam both review paths
+// share and returns every budget it was handed during the run.
 //
 // The asker it returns FAILS every request, which is what keeps this guard about
 // the budget and nothing else: the review is attempted, it does not return, the
 // run warns and prints its report, and no model, CLI or PATH is involved.
 //
 // NOTE for sub-task 3.3: the assignment below is the new seam signature — the
-// budget arrives as a time.Duration beside the context. If the signature lands
-// in another shape, this line moves with the other five consumers, and what it
-// asserts is unchanged.
-func captureReviewBudget(t *testing.T) func() []time.Duration {
-	t.Helper()
+// budget arrives as a time.Duration, and since story 059 no context beside it.
+// If the signature lands in another shape, this line moves with the other five
+// consumers, and what it asserts is unchanged.
+func captureReviewBudget(d *deps) func() []time.Duration {
 	var handed []time.Duration
-	previous := newClaudeAsker
-	newClaudeAsker = func(_ context.Context, budget time.Duration) (claudeAsker, error) {
+	d.newClaudeAsker = func(budget time.Duration) (claudeAsker, error) {
 		handed = append(handed, budget)
 		return &fakeAsker{err: errors.New("this asker exists to be counted, never to answer")}, nil
 	}
-	t.Cleanup(func() { newClaudeAsker = previous })
 	return func() []time.Duration { return handed }
 }
 
 // runCompareWithAutoupdateBlock writes a world whose config carries the given
-// `autoupdate:` block (or none at all) and runs the shipped command over it.
-func runCompareWithAutoupdateBlock(t *testing.T, autoupdateBlock string) {
+// `autoupdate:` block (or none at all) and runs the shipped command over it,
+// built from d.
+func runCompareWithAutoupdateBlock(t *testing.T, autoupdateBlock string, d *deps) {
 	t.Helper()
 
 	home := t.TempDir()
@@ -141,7 +138,7 @@ func runCompareWithAutoupdateBlock(t *testing.T, autoupdateBlock string) {
 	t.Setenv("PATH", t.TempDir())
 
 	realignFlags(t, false, false)
-	realignRun(t, nil)
+	realignRunWith(t, nil, d)
 }
 
 // TestAbsentReviewKeyRunsOnTheConfigDefaultBudget pins WHICH constant governs a
@@ -192,8 +189,9 @@ func TestAbsentReviewKeyRunsOnTheConfigDefaultBudget(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			handed := captureReviewBudget(t)
-			runCompareWithAutoupdateBlock(t, tc.autoupdateBlock)
+			td := defaultDeps()
+			handed := captureReviewBudget(td)
+			runCompareWithAutoupdateBlock(t, tc.autoupdateBlock, td)
 
 			budgets := handed()
 			// The vacuity guard: an assertion over an empty slice passes, and a

@@ -6,20 +6,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	// snapshotConfigPath is the --config persistent flag; empty means resolve via
-	// the snapshot.toml search path.
-	snapshotConfigPath string
-	// snapshotRunner is the subprocess seam threaded into the snapshot package.
-	// nil selects the production execRunner; tests inject a MockRunner.
-	snapshotRunner snapshot.Runner
-)
+// snapshotConfigPath is the --config persistent flag; empty means resolve via
+// the snapshot.toml search path.
+var snapshotConfigPath string
 
 // newSnapshotCmd builds `snapshot`.
 //
 // It also registers every command under it, following the rule the tree is
 // built by: a parent's constructor registers its own children.
-func newSnapshotCmd() *cobra.Command {
+func newSnapshotCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "snapshot",
 		Short: "Manage btrfs snapshots (btrbk + systemd)",
@@ -38,14 +33,14 @@ Examples:
 		"path to snapshot.toml (default: /etc/bentoo, then XDG)")
 
 	cmd.AddCommand(
-		newSnapshotApplyCmd(),
+		newSnapshotApplyCmd(d),
 		newSnapshotHookCmd(),
-		newSnapshotListCmd(),
-		newSnapshotPruneCmd(),
-		newSnapshotRestoreCmd(),
-		newSnapshotRollbackCmd(),
-		newSnapshotRunCmd(),
-		newSnapshotStatusCmd(),
+		newSnapshotListCmd(d),
+		newSnapshotPruneCmd(d),
+		newSnapshotRestoreCmd(d),
+		newSnapshotRollbackCmd(d),
+		newSnapshotRunCmd(d),
+		newSnapshotStatusCmd(d),
 	)
 
 	return cmd

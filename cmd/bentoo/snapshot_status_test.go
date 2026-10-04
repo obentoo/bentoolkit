@@ -38,12 +38,13 @@ func TestRunSnapshotStatus_PerStageTimersAndSpace(t *testing.T) {
 			return []byte("enabled\n"), nil
 		},
 	}
-	snapshotRunner = mock
+	td := defaultDeps()
+	td.snapshotRunner = mock
 
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil))
+		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("status exited with code %d", code)
@@ -96,12 +97,13 @@ func TestRunSnapshotStatus_ReadsResultAndTimer(t *testing.T) {
 			return []byte("enabled\n"), nil
 		},
 	}
-	snapshotRunner = mock
+	td := defaultDeps()
+	td.snapshotRunner = mock
 
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil))
+		code, exited = exitOf(runSnapshotStatus(snapshotStatusCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("status exited with code %d", code)

@@ -23,11 +23,12 @@ import (
 //
 // Since the `claude` child runs in its own process group, a Ctrl+C typed at the
 // terminal no longer reaches it: the kernel sends SIGINT to the terminal's
-// foreground group only. The context handed to newConfiguredLLMProvider is then
+// foreground group only. The context handed to the provider's call is then
 // the ONLY way an interrupt stops that child, so cancelling it must stop the
-// whole group within 6 s. Before this task the helper took no context and the
-// client ran under context.Background(): a cancel changed nothing and the call
-// waited out the CLI's 120 s budget.
+// whole group within 6 s. Before story 054 the client ran under
+// context.Background(): a cancel changed nothing and the call waited out the
+// CLI's 120 s budget. Since story 059 the provider stores no context, so the
+// one that counts is the one passed to ExtractVersion.
 //
 // The two converses run as subtests so the sub-task's `-run` gate, which names
 // this test only, cannot pass without them.
@@ -47,7 +48,7 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	p, err := newConfiguredLLMProvider(ctx, config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
 	if err != nil {
 		t.Fatalf("newConfiguredLLMProvider(claude-code) with a stub claude on PATH: %v", err)
 	}
@@ -60,7 +61,7 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 	var gotErr error
 	go func() {
 		defer close(finished)
-		gotVersion, gotErr = p.ExtractVersion([]byte("<html>foo-1.2.3.tar.gz</html>"), "")
+		gotVersion, gotErr = p.ExtractVersion(ctx, []byte("<html>foo-1.2.3.tar.gz</html>"), "")
 	}()
 	// Failure-path hygiene: if the context never reaches the client, cancel()
 	// stops nothing, so the stub's group is killed here instead of outliving
@@ -84,7 +85,7 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 	case <-finished:
 	case <-time.After(6 * time.Second):
 		t.Fatal("the provider call was still running 6 s after its context was cancelled: " +
-			"the context given to newConfiguredLLMProvider does not reach the claude client (R4.3)")
+			"the context given to ExtractVersion does not reach the claude client (R4.3)")
 	}
 	t.Logf("provider call returned %v after the cancel", time.Since(cancelledAt).Round(time.Millisecond))
 
@@ -120,7 +121,7 @@ func testClaudeProviderLiveContextAnswers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	p, err := newConfiguredLLMProvider(ctx, config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
 	if err != nil {
 		t.Fatalf("newConfiguredLLMProvider(claude-code) with a stub claude on PATH: %v", err)
 	}
@@ -128,7 +129,7 @@ func testClaudeProviderLiveContextAnswers(t *testing.T) {
 		t.Fatal("newConfiguredLLMProvider(claude-code) returned no provider and no error")
 	}
 
-	got, err := p.ExtractVersion([]byte("<html>foo-1.2.3.tar.gz</html>"), "")
+	got, err := p.ExtractVersion(ctx, []byte("<html>foo-1.2.3.tar.gz</html>"), "")
 	if err != nil {
 		t.Fatalf("ExtractVersion with a live context: %v", err)
 	}
@@ -144,7 +145,7 @@ func testClaudeProviderLiveContextAnswers(t *testing.T) {
 func testClaudeProviderAbsentIsATrueNil(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	p, err := newConfiguredLLMProvider(context.Background(), config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
 	if !errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
 		t.Fatalf("newConfiguredLLMProvider(claude-code) with no claude on PATH: error = %v, want %v",
 			err, autoupdate.ErrClaudeCodeUnavailable)

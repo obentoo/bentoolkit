@@ -27,7 +27,7 @@ func assertRefusedBeforeWriting(t *testing.T, update PendingUpdate, value string
 			a := f.applier(t, extra...)
 			before := snapshotTree(t, f.overlayDir)
 
-			result, err := a.Apply(f.pkg, false)
+			result, err := a.Apply(t.Context(), f.pkg, false)
 			if err == nil {
 				t.Fatalf("Apply accepted %q", value)
 			}

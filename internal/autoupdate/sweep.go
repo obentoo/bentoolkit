@@ -55,9 +55,6 @@ var resolveDistdir = distfiles.Resolve
 type sweeper struct {
 	// overlayPath is the overlay root every path is built from.
 	overlayPath string
-	// ctx is the parent context for spawned commands, so a SIGINT kills an
-	// in-flight `pkgdev manifest`.
-	ctx context.Context
 	// execCommand builds the command to run (injectable for tests).
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
 	// reporter receives the manifest step's streamed output.
@@ -84,10 +81,6 @@ type sweeper struct {
 
 // sweeperOption configures a sweeper at construction.
 type sweeperOption func(*sweeper)
-
-func withSweeperContext(ctx context.Context) sweeperOption {
-	return func(s *sweeper) { s.ctx = ctx }
-}
 
 func withSweeperExec(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) sweeperOption {
 	return func(s *sweeper) { s.execCommand = fn }
@@ -126,9 +119,9 @@ func withSweeperDistfilesCache(dir string) sweeperOption {
 //
 // The normalisation is not test scaffolding, it is the production contract. A
 // sweeper built outside NewApplier — which is the whole point of this type —
-// arrives with a nil ctx and a nil execCommand unless a caller remembers every
-// option, and both panic on the first Manifest run rather than failing with an
-// error. A suite that only ever constructs one through a fully-populated helper
+// arrives with a nil execCommand and a nil reporter unless a caller remembers
+// every option, and both panic on the first Manifest run rather than failing
+// with an error. A suite that only ever constructs one through a fully-populated helper
 // never sees it (S027-G5).
 func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 	s := &sweeper{overlayPath: overlayPath}
@@ -136,9 +129,6 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 		if opt != nil {
 			opt(s)
 		}
-	}
-	if s.ctx == nil {
-		s.ctx = context.Background() // SAFE: default parent; replaced by withSweeperContext, which every production caller passes
 	}
 	if s.execCommand == nil {
 		s.execCommand = exec.CommandContext
@@ -172,7 +162,7 @@ func (s *sweeper) ebuildPath(pkg, version string) string {
 //
 // Every failure returns the plan as executed so far, so a caller can report what
 // really happened rather than what was intended.
-func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersions ...string) (sweepPlan, error) {
+func (s *sweeper) execute(ctx context.Context, pkg string, plan sweepPlan, manifestVersions ...string) (sweepPlan, error) {
 	// Remove is ascending, so a sweep cut short by a failure still hands back an
 	// ascending prefix of what it intended.
 	planned := plan.Remove
@@ -203,7 +193,7 @@ func (s *sweeper) execute(pkg string, plan sweepPlan, manifestVersions ...string
 	if len(removed) == 0 {
 		return plan, nil
 	}
-	if err := s.runManifest(pkg, manifestVersions...); err != nil {
+	if err := s.runManifest(ctx, pkg, manifestVersions...); err != nil {
 		return plan, fmt.Errorf("removed %s from %s but failed to regenerate the Manifest: %w",
 			strings.Join(removed, ", "), pkg, err)
 	}
@@ -499,7 +489,7 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 // moved aside is absent, and the file that appears under it next is ours to
 // clean up. Release AFTER the cleanup, because releasing earlier reopens the
 // window the record depends on.
-func (s *sweeper) runManifest(pkg string, versions ...string) error {
+func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...string) error {
 	// Parse package name
 	category, pkgName, ok := splitPkgAtom(pkg)
 	if !ok {
@@ -521,7 +511,7 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// absent from any cache AND from the package's current Manifest, so nothing
 	// can vouch for whatever is sitting under it. That was never a reason for the
 	// directory to be temporary — it is a reason to check the file.
-	dir, err := resolveDistdir(s.distdir, s.configuredDistdir)
+	dir, err := resolveDistdir(ctx, s.distdir, s.configuredDistdir)
 	if err != nil {
 		// dir.Path is the directory that could not be prepared. It is carried
 		// for the diagnostic and is never used as a directory (S030-R1.4).
@@ -543,7 +533,7 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// quarantine and the record/cleanup pair have a window between looking and
 	// acting. The claim is all-or-nothing and is held for the whole pkgdev
 	// invocation (S030-R2.4).
-	lock, err := distfiles.LockFetch(s.ctx, distdir, expected)
+	lock, err := distfiles.LockFetch(ctx, distdir, expected)
 	if err != nil {
 		return fmt.Errorf("%w: claiming the distfiles for %s in %s: %w", ErrManifestFailed, pkg, distdir, err)
 	}
@@ -605,7 +595,7 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// fails later takes its own download away again instead of leaving an
 	// undigested file in the host's DISTDIR.
 	for _, version := range versions {
-		if err := s.prefetchAuthDistfile(pkg, version, distdir); err != nil {
+		if err := s.prefetchAuthDistfile(ctx, pkg, version, distdir); err != nil {
 			s.cleanupFailedFetch(pkg, distdir, scope)
 			return err
 		}
@@ -617,16 +607,16 @@ func (s *sweeper) runManifest(pkg string, versions ...string) error {
 	// (timeout) stops pkgdev and every process it started (group mode, below),
 	// so the step returns within manifestTimeout plus procgroup.GracePeriod
 	// (S054-R2.3).
-	ctx, cancel := context.WithTimeout(s.ctx, manifestTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 
 	// Run pkgdev manifest from the package directory.
-	cmd := s.execCommand(ctx, "pkgdev", "manifest", "--distdir", distdir)
+	cmd := s.execCommand(opCtx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgDir
 	// Group mode (S054-R2.1). pkgdev's fetchers inherit the output pipe below,
 	// and exec.CommandContext alone stops pkgdev and nothing under it, so a
 	// cancelled run used to last as long as the slowest download. Group gives
-	// pkgdev a process group of its own, sends the whole group SIGTERM when ctx
+	// pkgdev a process group of its own, sends the whole group SIGTERM when opCtx
 	// is done and SIGKILL to whatever is left GracePeriod later, and stops Wait
 	// waiting on the pipe by then. It owns cmd.Cancel, cmd.WaitDelay and the
 	// group fields of cmd.SysProcAttr, so nothing here sets them. cmd.Stdin
@@ -767,9 +757,9 @@ func (s *sweeper) cleanupFailedFetch(pkg, distdir string, scope distfiles.FetchS
 // prefetchAuthDistfile downloads a serial-gated distfile into distdir when the
 // package's [meta] block configures an authenticated fetch. It is a no-op for
 // packages without that config (the overwhelming majority) and when no config
-// was supplied at all. The download is bounded by the parent context so SIGINT
-// cancels it, and the serial never appears in logs.
-func (s *sweeper) prefetchAuthDistfile(pkg, version, distdir string) error {
+// was supplied at all. The download is bounded by ctx, the caller's context, so
+// SIGINT cancels it, and the serial never appears in logs.
+func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdir string) error {
 	cfg, ok := s.configs[pkg]
 	if !ok {
 		return nil
@@ -792,7 +782,7 @@ func (s *sweeper) prefetchAuthDistfile(pkg, version, distdir string) error {
 	logger.Info("authenticated fetch: downloading %s distfile for %s (%s)",
 		pkg, version, provenance)
 
-	dest, err := spec.fetchDistfile(s.ctx, version, distdir)
+	dest, err := spec.fetchDistfile(ctx, version, distdir)
 	if err != nil {
 		return err
 	}
@@ -1115,7 +1105,6 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 	}
 
 	s := newSweeper(overlayPath,
-		withSweeperContext(ctx),
 		withSweeperExec(o.execCommand),
 		withSweeperReporter(o.reporter),
 		withSweeperConfigs(o.configs),
@@ -1166,19 +1155,7 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 				results[i] = SweepDirResult{Atom: dir.Atom, Kept: dir.Keep, Err: ctx.Err()}
 				return
 			}
-			// Why the directive on the next line is safe: the sweeper was
-			// built with THIS ctx (withSweeperContext above), so runManifest
-			// derives its deadline from it and a cancellation still kills the
-			// spawned pkgdev. The linter cannot see a context carried on a
-			// struct, which is the same shape Applier uses.
-			//
-			// This justification is deliberately NOT written as a second
-			// `nolint` line. A directive golangci-lint recognises has no space
-			// after the slashes and separates its reason with `//`, so a
-			// `// nolint:... —` line suppresses nothing; leaving one here would
-			// read as the suppression and invite deleting the inline directive
-			// that actually does the work.
-			results[i] = sweepOneDir(s, dir) //nolint:contextcheck // s was built with this ctx (withSweeperContext), so cancellation still reaches runManifest; see above
+			results[i] = sweepOneDir(ctx, s, dir)
 		}(i, dir)
 	}
 	wg.Wait()
@@ -1200,7 +1177,7 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 
 // sweepOneDir executes a single directory's plan, choosing the versions the
 // Manifest step pre-fetches.
-func sweepOneDir(s *sweeper, dir SweepDirPlan) SweepDirResult {
+func sweepOneDir(ctx context.Context, s *sweeper, dir SweepDirPlan) SweepDirResult {
 	kept := survivingVersions(dir.Keep)
 	if len(kept) == 0 {
 		// Nothing would remain. The floor rule (S021-R4.3) makes this
@@ -1216,7 +1193,7 @@ func sweepOneDir(s *sweeper, dir SweepDirPlan) SweepDirResult {
 	}
 
 	plan := sweepPlan{Keep: dir.Keep, Remove: dir.Remove}
-	executed, err := s.execute(dir.Atom, plan, kept...)
+	executed, err := s.execute(ctx, dir.Atom, plan, kept...)
 	return SweepDirResult{
 		Atom:    dir.Atom,
 		Removed: executed.Remove,

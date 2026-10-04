@@ -614,9 +614,10 @@ func (c *RetryableHTTPClient) executeRequest(req *http.Request) (*http.Response,
 	return result.(*http.Response), nil
 }
 
-// Get performs an HTTP GET request with retry logic.
-func (c *RetryableHTTPClient) Get(url string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+// Get performs an HTTP GET request with retry logic. The request is bound to
+// ctx, so cancelling it aborts the attempt in flight and any retry wait.
+func (c *RetryableHTTPClient) Get(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

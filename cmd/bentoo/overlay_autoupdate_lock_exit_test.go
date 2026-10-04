@@ -57,8 +57,9 @@ func TestHelperS056ProductionExitChild(t *testing.T) {
 // only once the lock is held), runs the child and returns its exit code, its
 // output and the overlay.
 func s056RunProductionExitChild(t *testing.T, role string) (code int, out, overlay, witness string) {
+	auOpts := testAutoupdateOptions()
 	t.Helper()
-	overlay, _ = s056AutoupdateEnv(t)
+	overlay, _ = s056AutoupdateEnv(t, auOpts)
 	witness = filepath.Join(overlay, ".autoupdate", ".packages.toml.bentoo-"+strconv.Itoa(s056DeadPID(t))+"-exitwitness")
 	if err := os.WriteFile(witness, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)

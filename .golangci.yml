@@ -13,11 +13,13 @@ linters:
     - misspell
     - bodyclose
     - contextcheck
+    - containedctx
     - errorlint
     - usetesting
     - tparallel
     - forbidigo
     - nolintlint
+    - gochecknoglobals
 
   settings:
     errcheck:
@@ -78,10 +80,33 @@ linters:
         linters:
           - forbidigo
         text: "os\\.Exit"
+      # gochecknoglobals guards cmd/bentoo's production code only (story 060,
+      # R8.1, R8.2): every other package, and every test file, is out of its
+      # scope.
+      - path-except: ^cmd/bentoo/
+        linters:
+          - gochecknoglobals
+      - path: _test\.go$
+        linters:
+          - gochecknoglobals
+      # The baseline: the package-level variables cmd/bentoo still holds after
+      # story 060 — the other commands' flags, the root persistent flags, the
+      # legacy command lookups, the exit-cleanup registry and processSignals.
+      # This list ONLY SHRINKS: a later story removes a name when it removes
+      # the variable, and a new global is a lint failure, never a new name
+      # here (R8.4). Re-derive it with
+      #   golangci-lint run --enable-only gochecknoglobals ./cmd/bentoo/
+      # after deleting this rule.
+      - path: ^cmd/bentoo/
+        linters:
+          - gochecknoglobals
+        text: '^(addCmd|analyzeAll|analyzeCmd|analyzeDryRun|analyzeForce|analyzeHint|analyzeNoCache|analyzeURL|autoupdateAll|autoupdateExport|autoupdateUI|commitCmd|commitDryRun|commitMessage|commitYes|compareCacheDir|compareCauseOrder|compareClone|compareCmd|compareConcurrency|compareDepth|compareNoCache|compareNoReview|compareOnlyOutdated|compareOnlyPatched|compareOnlyRedundant|compareRealign|compareSync|compareTimeout|compareToken|compareYes|completionCmd|diffCmd|diffStaged|distfileCmd|distfileFetchCmd|distfileFetchDistdir|distfileFetchVersion|exitCleanupNext|exitCleanups|exitCleanupsMu|initCmd|logCmd|logCount|logOneline|manifestCmd|manifestFlags|noColor|overlayCmd|processSignals|pruneApply|pruneIncludePatched|pruneKeepRegistry|pruneYes|pullCmd|pullDryRun|pullMerge|pullRebase|pushCmd|pushDryRun|quiet|renameCmd|renameFlags|rootCmd|snapshotApplyCmd|snapshotApplyDryRun|snapshotCmd|snapshotConfigPath|snapshotHookCmd|snapshotHookInstall|snapshotHookUninstall|snapshotListCmd|snapshotListRemote|snapshotPruneCmd|snapshotPruneDryRun|snapshotPruneShip|snapshotRestoreCmd|snapshotRestoreDryRun|snapshotRestoreShip|snapshotRestoreSubvolume|snapshotRestoreTarget|snapshotRestoreYes|snapshotRollbackCmd|snapshotRollbackDryRun|snapshotRollbackYes|snapshotRunCmd|snapshotRunDryRun|snapshotStatusCmd|stagedCleanYes|statusCmd|uiDowngradeReported|verbose|versionCmd) is a global variable$'
       - path: _test\.go
         linters:
           - errcheck
           - gosec
+          # A test table carrying a context per case is idiomatic.
+          - containedctx
 
 formatters:
   enable:

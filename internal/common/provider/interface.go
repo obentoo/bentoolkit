@@ -44,8 +44,9 @@ type Provider interface {
 }
 
 // PackageDirProvider is implemented by providers that expose an on-disk package
-// directory (git clone / local tree). The revive flow type-asserts to it; an
-// API-only provider simply does not implement it, which is the "API-only" signal.
+// directory (git clone / local tree). The revive flow type-asserts to it
+// (autoupdate.CanRevive); an API-only provider simply does not implement it,
+// which is the "API-only" signal.
 type PackageDirProvider interface {
 	LocalPackagePath(category, pkg string) (string, error)
 }

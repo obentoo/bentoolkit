@@ -41,7 +41,7 @@ func TestFindRevivableOrphans_InvalidNameSoftError(t *testing.T) {
 	})
 	prov := &fakeProvider{versions: map[string][]string{}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err == nil {
 		t.Fatal("expected soft error for invalid package name, got nil")
 	}
@@ -77,7 +77,7 @@ func TestFindRevivableOrphans_UpstreamFetchSoftError(t *testing.T) {
 	// so the package is dropped before the provider is consulted.
 	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.0.0"}}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err == nil {
 		t.Fatal("expected soft error for failed upstream fetch, got nil")
 	}
@@ -103,7 +103,7 @@ func TestFindRevivableOrphans_GentooLookupSoftError(t *testing.T) {
 	sentinel := errors.New("boom: gentoo backend unavailable")
 	prov := &errProvider{err: sentinel}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err == nil {
 		t.Fatal("expected soft error for gentoo lookup failure, got nil")
 	}
@@ -133,7 +133,7 @@ func TestFindRevivableOrphans_GentooMaxEmptySkipped(t *testing.T) {
 		pkg: {"not-a-version", "also-junk", ""},
 	}}
 
-	got, err := checker.FindRevivableOrphans(prov)
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
 	if err != nil {
 		t.Fatalf("FindRevivableOrphans: unexpected error: %v", err)
 	}

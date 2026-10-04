@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -126,7 +127,7 @@ func TestCheckAll_CredentialMismatchFailsOnlyThatPackage(t *testing.T) {
 		"app-misc/own":  regexPkg(srv.URL+"/own", map[string]string{"X-Api-Key": "${BENTOO_T}"}),
 	}, client)
 
-	res := checker.CheckAll(true)
+	res := checker.CheckAll(t.Context(), true)
 
 	failure, ok := res.Failures["app-misc/leak"]
 	if !ok {
@@ -163,7 +164,7 @@ type cbCountingLLM struct {
 	calls atomic.Int64
 }
 
-func (l *cbCountingLLM) ExtractVersion([]byte, string) (string, error) {
+func (l *cbCountingLLM) ExtractVersion(context.Context, []byte, string) (string, error) {
 	l.calls.Add(1)
 	return "9.9.9", nil
 }
@@ -185,7 +186,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 		map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}), "https://api.github.com/repos/o/r/releases/latest")
 	cfg.LLMPrompt = "extract the version"
 
-	version, err := checker.fetchUpstreamVersionRaw("app-misc/leak", &cfg)
+	version, err := checker.fetchUpstreamVersionRaw(t.Context(), "app-misc/leak", &cfg)
 	if !errors.Is(err, ErrCredentialHostMismatch) {
 		t.Fatalf("fetchUpstreamVersionRaw = (%q, %v); want errors.Is(err, ErrCredentialHostMismatch)", version, err)
 	}
@@ -206,7 +207,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 			WithHTTPClient(fake2), WithRateLimiter(&recordingRateLimiter{}))
 		cfg2 := withFallback(regexPkg("https://api.github.com/repos/o/r/nomatch",
 			map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}), "https://api.github.com/repos/o/r/releases/latest")
-		v, err := c2.fetchUpstreamVersionRaw("app-misc/ok", &cfg2)
+		v, err := c2.fetchUpstreamVersionRaw(t.Context(), "app-misc/ok", &cfg2)
 		if err != nil || v != "2.0.0" {
 			t.Fatalf("fetchUpstreamVersionRaw = (%q, %v); want (2.0.0, nil) from the fallback", v, err)
 		}

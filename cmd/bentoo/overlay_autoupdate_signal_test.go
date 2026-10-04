@@ -24,8 +24,8 @@ import (
 // installs no signal handler of its own since story 058 — it reads this
 // context through func commandContext — so a test that signals its own process
 // without it would meet the default action and kill the test binary. The
-// command is a package-level tree shared with other tests, so the cleanup
-// hands it back a plain context.
+// cleanup hands the command back a plain context, so a caller that reuses its
+// tree after the test sees no stale signal policy.
 func setProcessSignalContext(t *testing.T, cmd *cobra.Command) {
 	t.Helper()
 	ctx, stop, policy := processContext()
@@ -49,6 +49,8 @@ func setProcessSignalContext(t *testing.T, cmd *cobra.Command) {
 //
 // Skipped on Windows: SIGTERM and syscall.Kill have no portable semantics there.
 func TestRunAutoupdate_SignalCancels(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM / syscall.Kill is not portable on Windows")
 	}
@@ -94,22 +96,18 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 	}
 
 	// Pin the autoupdate flag globals to a known state for this run.
-	origCheck, origForce, origConc := autoupdateCheck, autoupdateForce, autoupdateConcurrency
-	autoupdateCheck = true // select the --check path
-	autoupdateForce = true // bypass cache so every pkg hits the server
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	defer func() {
-		autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc
-	}()
+	auOpts.check = true // select the --check path
+	auOpts.force = true // bypass cache so every pkg hits the server
+	auOpts.concurrency = autoupdate.DefaultConcurrency
 
-	setProcessSignalContext(t, autoupdateCmd)
+	setProcessSignalContext(t, auCmd)
 
 	// Run the command in a goroutine; runAutoupdate returns its outcome, so the
 	// goroutine returns normally.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(autoupdateCmd, nil)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	// Wait until in-flight work has genuinely started before signalling.
@@ -150,14 +148,16 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 // The injected `pkgdev` is a stub script placed on PATH that exec's `sleep`,
 // so the spawned child is killed by exec.CommandContext as soon as runApply's
 // context is cancelled by the process-wide signal handler (func
-// setProcessSignalContext). Without runApply threading runCtx
-// into NewApplier via WithApplierContext (T1.2), the SIGTERM would not reach
+// setProcessSignalContext). Without runApply passing its context to
+// Apply (T1.2), the SIGTERM would not reach
 // the spawned process and the test would time out — making this a true
 // integration check of the CLI wire.
 //
 // Skipped on Windows: SIGTERM, /bin/sh, and the PATH-based stub have no
 // portable semantics there.
 func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM / syscall.Kill / /bin/sh stub is not portable on Windows")
 	}
@@ -207,14 +207,11 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 		t.Fatalf("pending.Add: %v", err)
 	}
 
-	// Pin globals for this run.
-	origCheck, origApply, origCompile, origConc :=
-		autoupdateCheck, autoupdateApply, autoupdateCompile, autoupdateConcurrency
-	origDistdir := autoupdateDistdir
-	autoupdateCheck = false
-	autoupdateApply = pkg
-	autoupdateCompile = false
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
+	// Pin the options for this run.
+	auOpts.check = false
+	auOpts.apply = pkg
+	auOpts.compile = false
+	auOpts.concurrency = autoupdate.DefaultConcurrency
 	// Name a distdir. Unset, the manifest step resolves the HOST's one
 	// (S030-R1.2) and the pre-flight refuses it on any machine where
 	// /var/cache/distfiles is absent and uncreatable — a CI runner, a
@@ -222,19 +219,14 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	// what THIS test measures: the apply would fail in milliseconds, having
 	// never spawned the blocking `pkgdev` stub, so runAutoupdate would return
 	// before the SIGTERM below is sent and the test would measure nothing.
-	autoupdateDistdir = t.TempDir()
-	defer func() {
-		autoupdateCheck, autoupdateApply, autoupdateCompile, autoupdateConcurrency =
-			origCheck, origApply, origCompile, origConc
-		autoupdateDistdir = origDistdir
-	}()
+	auOpts.distdir = t.TempDir()
 
-	setProcessSignalContext(t, autoupdateCmd)
+	setProcessSignalContext(t, auCmd)
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(autoupdateCmd, nil)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	// Signal only once runApply has copied the ebuild and spawned the stub
@@ -262,10 +254,10 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	select {
 	case <-done:
 		if elapsed := time.Since(signalAt); elapsed > 2*time.Second {
-			t.Errorf("runAutoupdate(--apply) returned %v after SIGTERM; want <= 2s (R1.1)", elapsed)
+			t.Errorf("runAutoupdate(--apply, defaultDeps()) returned %v after SIGTERM; want <= 2s (R1.1)", elapsed)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("runAutoupdate(--apply) did not return within 5s of SIGTERM; signal cancellation is not wired to runApply")
+		t.Fatal("runAutoupdate(--apply, defaultDeps()) did not return within 5s of SIGTERM; signal cancellation is not wired to runApply")
 	}
 
 	// The orphan ebuild from copyEbuild must have been rolled back (R1.3).

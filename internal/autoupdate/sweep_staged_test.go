@@ -185,7 +185,7 @@ func stagedManifestFixture(t *testing.T, fail bool) *stagedManifestEnv {
 	// The sandbox root the private distdir is created under, answered by the
 	// test rather than by the host.
 	origRoot := fixSandboxRoot
-	fixSandboxRoot = func() string { return sandboxRoot }
+	fixSandboxRoot = func(context.Context) string { return sandboxRoot }
 	t.Cleanup(func() { fixSandboxRoot = origRoot })
 
 	calls := &[]stagedManifestCall{}
@@ -231,7 +231,7 @@ func pkgdevCall(t *testing.T, calls []stagedManifestCall) stagedManifestCall {
 func TestRunStagedManifest_RunsInsideTheStagedTree(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 
-	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestRunStagedManifest_RunsInsideTheStagedTree(t *testing.T) {
 func TestRunStagedManifest_UsesAPrivateDistdir(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 
-	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -277,7 +277,7 @@ func TestRunStagedManifest_LeavesTheHostDistdirByteIdentical(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
 
@@ -331,7 +331,7 @@ func TestRunStagedManifest_HostDistdirSurvivesAFETCHINGRun(t *testing.T) {
 
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	distdir, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	distdir, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 	if err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestRunStagedManifest_HostDistdirSurvivesAFailedRun(t *testing.T) {
 	env := stagedManifestFixture(t, true)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	if _, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err == nil {
+	if _, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err == nil {
 		t.Fatal("runStagedManifest reported success although pkgdev exited non-zero")
 	}
 
@@ -414,7 +414,7 @@ func TestRunStagedManifest_HandsTheDistdirToTheCaller(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := stagedManifestFixture(t, tc.fail)
 
-			distdir, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+			distdir, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 			if tc.fail && err == nil {
 				t.Fatal("a failing pkgdev reported success")
 			}
@@ -474,7 +474,7 @@ func TestRunStagedManifest_HandsTheDistdirToTheCaller(t *testing.T) {
 func TestRunStagedManifest_ErrorNamesThePackage(t *testing.T) {
 	env := stagedManifestFixture(t, true)
 
-	_, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	_, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 
 	if err == nil {
 		t.Fatal("a failing pkgdev produced no error")

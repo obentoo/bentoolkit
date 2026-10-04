@@ -151,7 +151,7 @@ func TestApplyManifestFix_RecheckFailureNamesRefusedTools(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewApplier: %v", err)
 		}
-		_, applyErr := applier.Apply(pkg, false)
+		_, applyErr := applier.Apply(t.Context(), pkg, false)
 		if spy.spawns() != 1 {
 			t.Fatalf("the fixer spawned %d agents, want 1", spy.spawns())
 		}

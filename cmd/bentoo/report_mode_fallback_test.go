@@ -142,7 +142,7 @@ func manifestUnderAmbientMode(t *testing.T, uiEnv string) (stdout, stderr string
 		writeExitTestEbuild(t, c.Overlay(), pkg, "1.0.0")
 	}
 	t.Setenv("BENTOO_UI", uiEnv)
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 
 	stdout, stderr, code = c.Run("overlay", "manifest", "--dry-run")
 	if strings.Contains(stderr, "unknown flag") {
@@ -214,12 +214,10 @@ func snapshotUnderAmbientMode(t *testing.T, uiEnv string) (stdout, stderr string
 	_, configPath := writeSnapshotConfig(t, validSnapshotTOML)
 	redirectStateDir(t)
 
-	original := snapshotRunner
-	snapshotRunner = &snapshot.MockRunner{}
-	t.Cleanup(func() { snapshotRunner = original })
+	c.deps.snapshotRunner = &snapshot.MockRunner{}
 
 	t.Setenv("BENTOO_UI", uiEnv)
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 
 	stdout, stderr, code = c.Run("snapshot", "--config="+configPath, "run")
 	if strings.Contains(stderr, "unknown flag") {
@@ -274,7 +272,7 @@ func TestAmbientModeRefusalCoversTheConfiguredSourceToo(t *testing.T) {
 	for _, pkg := range []string{"app-misc/jq", "dev-lang/go"} {
 		writeExitTestEbuild(t, c.Overlay(), pkg, "1.0.0")
 	}
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 
 	configPath := filepath.Join(c.Home(), ".config", "bentoo", "config.yaml")
 	existing, err := os.ReadFile(configPath)
@@ -367,7 +365,7 @@ func manifestUnderDowngrade(t *testing.T) (stderr string) {
 	t.Setenv("BENTOO_UI", "fullscreen")
 	t.Setenv("BENTOO_NO_TUI", "")
 	t.Setenv("NO_COLOR", "")
-	t.Cleanup(stubUIIsTerminal(false))
+	stubUIIsTerminal(c.deps, false)
 
 	was := uiDowngradeReported.Swap(false)
 	t.Cleanup(func() { uiDowngradeReported.Store(was) })

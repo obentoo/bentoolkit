@@ -59,7 +59,7 @@ func TestCompareLookupStopsOnCancel(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		r, err := CompareWithProvider(pkgs, prov, CompareOptions{Ctx: ctx, Concurrency: 1, IncludeSynced: true}) //nolint:contextcheck // ctx is injected via CompareOptions.Ctx
+		r, err := CompareWithProvider(ctx, pkgs, prov, CompareOptions{Concurrency: 1, IncludeSynced: true})
 		done <- outcome{r, err}
 	}()
 

@@ -15,9 +15,10 @@ func TestRunSnapshotApply_RendersConf(t *testing.T) {
 	// path is covered by the snapshot package's Apply test.
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
-	snapshotRunner = &snapshot.MockRunner{}
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{}
 
-	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil))
+	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	if exited {
 		t.Fatalf("apply exited with code %d, want success", code)
 	}
@@ -30,9 +31,10 @@ func TestRunSnapshotApply_RendersConf(t *testing.T) {
 func TestRunSnapshotApply_InvalidConfigExits1(t *testing.T) {
 	// Unknown driver fails the enum check before detection, so no PATH stubs.
 	writeSnapshotConfig(t, "[engine]\ndriver = \"zfs\"\nsubvolumes = [\"/home\"]\n")
-	snapshotRunner = &snapshot.MockRunner{}
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{}
 
-	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil))
+	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	if !exited || code != 1 {
 		t.Errorf("apply exit = (%d, %v), want (1, true)", code, exited)
 	}
@@ -41,7 +43,8 @@ func TestRunSnapshotApply_InvalidConfigExits1(t *testing.T) {
 func TestRunSnapshotApply_DryRunNoWrite(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
-	snapshotRunner = &snapshot.MockRunner{}
+	td := defaultDeps()
+	td.snapshotRunner = &snapshot.MockRunner{}
 
 	origDryRun := snapshotApplyDryRun
 	snapshotApplyDryRun = true
@@ -50,7 +53,7 @@ func TestRunSnapshotApply_DryRunNoWrite(t *testing.T) {
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil))
+		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("dry-run exited with code %d", code)
@@ -75,7 +78,8 @@ func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "systemctl")
 	dir, _ := writeSnapshotConfig(t, applyScheduleTOML)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	origDryRun := snapshotApplyDryRun
 	snapshotApplyDryRun = true
@@ -84,7 +88,7 @@ func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil))
+		code, exited = exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("apply --dry-run exited with code %d, want success", code)

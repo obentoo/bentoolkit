@@ -111,7 +111,7 @@ func TestCompileOnce_SudoCarriesTheResolvedDistdirAsAnAssignment(t *testing.T) {
 	spy := &privilegedCompileSpy{}
 	applier, cand := privilegedCompileApplier(t, spy, distdir)
 
-	attempt := applier.compileOnce(cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
+	attempt := applier.compileOnce(t.Context(), cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
 	if attempt.err != nil {
 		t.Fatalf("compileOnce reported a failure the stubbed runner never produced: %v", attempt.err)
 	}
@@ -150,7 +150,7 @@ func TestCompileOnce_NoResolvedDistdirAddsNothing(t *testing.T) {
 	spy := &privilegedCompileSpy{}
 	applier, cand := privilegedCompileApplier(t, spy, "")
 
-	applier.compileOnce(cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
+	applier.compileOnce(t.Context(), cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
 
 	if got := assignmentIn(spy.args); got != "" {
 		t.Errorf("the child was handed %q although this run resolved no distdir; an invented default would "+
@@ -171,7 +171,7 @@ func TestCompileOnce_DoasIsNeverHandedAnAssignment(t *testing.T) {
 	spy := &privilegedCompileSpy{}
 	applier, cand := privilegedCompileApplier(t, spy, "/var/cache/distfiles-run")
 
-	applier.compileOnce(cand, "media-plugins/gst-plugins-qt6", "1.29.2", "doas")
+	applier.compileOnce(t.Context(), cand, "media-plugins/gst-plugins-qt6", "1.29.2", "doas")
 
 	if got := assignmentIn(spy.args); got != "" {
 		t.Fatalf("doas was handed %q; it has no argument form for an environment assignment and would try to "+
@@ -191,7 +191,7 @@ func TestCompileOnce_ThePrivilegeSurfaceIsNoWiderThanToday(t *testing.T) {
 	spy := &privilegedCompileSpy{}
 	applier, cand := privilegedCompileApplier(t, spy, "/var/cache/distfiles-run")
 
-	applier.compileOnce(cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
+	applier.compileOnce(t.Context(), cand, "media-plugins/gst-plugins-qt6", "1.29.2", "sudo")
 
 	if spy.cmd == nil {
 		t.Fatal("no command was captured")

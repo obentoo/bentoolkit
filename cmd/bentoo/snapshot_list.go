@@ -16,19 +16,21 @@ import (
 var snapshotListRemote bool
 
 // newSnapshotListCmd builds `snapshot list`.
-func newSnapshotListCmd() *cobra.Command {
+func newSnapshotListCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "list",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
 		Short:       "List local snapshots per subvolume",
-		RunE:        runSnapshotList,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotList(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&snapshotListRemote, "remote", false,
 		"also list remote snapshots (btrbk targets, restic repository)")
 	return cmd
 }
 
-func runSnapshotList(cmd *cobra.Command, _ []string) error {
+func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 	cfg, path, err := loadSnapshotConfigLenient()
 	if err != nil {
 		logger.Error("snapshot list: %v", err)
@@ -37,7 +39,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 
 	ctx := commandContext(cmd)
 
-	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot list: %v", err)
 		return exitWith(1)

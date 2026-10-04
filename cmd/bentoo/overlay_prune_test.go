@@ -179,30 +179,26 @@ func setOverlayPruneFlags(t *testing.T, apply, includePatched, keepRegistry, yes
 }
 
 // setOverlayPruneExecutor replaces the removal seam.
-func setOverlayPruneExecutor(t *testing.T, fn func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult) {
+func setOverlayPruneExecutor(t *testing.T, d *deps, fn func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult) {
 	t.Helper()
-	orig := pruneExecutorFn
-	t.Cleanup(func() { pruneExecutorFn = orig })
-	pruneExecutorFn = fn
+	d.pruneExecutor = fn
 }
 
 // setOverlayPruneConfirm replaces the confirmation seam.
-func setOverlayPruneConfirm(t *testing.T, fn func(string) bool) {
+func setOverlayPruneConfirm(t *testing.T, d *deps, fn func(string) bool) {
 	t.Helper()
-	orig := confirmPruneFn
-	t.Cleanup(func() { confirmPruneFn = orig })
-	confirmPruneFn = fn
+	d.confirmPrune = fn
 }
 
 // forbidOverlayPruneRemoval wires both the executor and the confirmation to fail the
 // test if they are reached at all.
-func forbidOverlayPruneRemoval(t *testing.T) {
+func forbidOverlayPruneRemoval(t *testing.T, d *deps) {
 	t.Helper()
-	setOverlayPruneExecutor(t, func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult {
+	setOverlayPruneExecutor(t, d, func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult {
 		t.Error("the executor ran on a plan-only invocation; R1.1 is supposed to hold because the executor is UNREACHABLE without --apply, not because the batch happened to be empty")
 		return nil
 	})
-	setOverlayPruneConfirm(t, func(string) bool {
+	setOverlayPruneConfirm(t, d, func(string) bool {
 		t.Error("a confirmation was requested on a plan-only invocation")
 		return false
 	})
@@ -216,10 +212,11 @@ func forbidOverlayPruneRemoval(t *testing.T) {
 //
 // _Requirements: R1.1_
 func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := overlayPruneFixture(t, pruneStockEbuild, pruneStockEbuild, []string{prunedAtom}, false)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, false, false, false, false)
-	forbidOverlayPruneRemoval(t)
+	forbidOverlayPruneRemoval(t, td)
 
 	pkgDir := filepath.Join(overlayPath, prunedCat, prunedPkg)
 	registry := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
@@ -229,7 +226,7 @@ func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
 	})
 
 	if _, err := os.Stat(pkgDir); err != nil {
@@ -260,17 +257,18 @@ func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
 //
 // _Requirements: R2.6, R1.5_
 func TestPruneAPIOnlyProviderRefusesEverythingWithReason(t *testing.T) {
+	td := defaultDeps()
 	overlayPath := setupTestOverlay(t)
 	pkgDir := writePruneCmdPackage(t, overlayPath, prunedCat, prunedPkg, prunedVer, pruneStockEbuild)
 	writePruneRegistryEntries(t, overlayPath, []string{prunedAtom}, false)
 
-	withFakeGentoo(t, &fakePruneAPIOnly{versions: map[string][]string{prunedAtom: {prunedVer}}})
+	withFakeGentoo(td, &fakePruneAPIOnly{versions: map[string][]string{prunedAtom: {prunedVer}}})
 	setOverlayPruneFlags(t, false, false, false, false)
-	forbidOverlayPruneRemoval(t)
+	forbidOverlayPruneRemoval(t, td)
 
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td))
 	})
 
 	if code > 0 {
@@ -298,19 +296,20 @@ func TestPruneAPIOnlyProviderRefusesEverythingWithReason(t *testing.T) {
 //
 // _Requirements: R1.3_
 func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
+	td := defaultDeps()
 	const typo = "app-editrs/zed"
 
 	overlayPath, prov := overlayPruneFixture(t, pruneStockEbuild, pruneStockEbuild, []string{prunedAtom}, false)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, false, false, false, false)
-	forbidOverlayPruneRemoval(t)
+	forbidOverlayPruneRemoval(t, td)
 
 	// The error is a diagnostic, so it is read on stderr (story 058, R3.3).
 	var code int
 	var errOut string
 	_ = captureStdout(t, func() {
 		errOut = captureStderr(t, func() {
-			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}))
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}, td))
 		})
 	})
 
@@ -335,14 +334,15 @@ func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
 //
 // _Requirements: R1.4, R5.2_
 func TestPrunePlanListsFilesAndRegistryKeys(t *testing.T) {
+	td := defaultDeps()
 	keys := []string{prunedAtom, prunedAtom + "@stable"}
 	overlayPath, prov := overlayPruneFixture(t, pruneStockEbuild, pruneStockEbuild, keys, false)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, false, false, false, false)
-	forbidOverlayPruneRemoval(t)
+	forbidOverlayPruneRemoval(t, td)
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
 	})
 
 	for _, want := range []string{
@@ -390,6 +390,7 @@ func TestPrunePlanListsFilesAndRegistryKeys(t *testing.T) {
 //
 // _Requirements: R1.5, R2.5_
 func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
+	td := defaultDeps()
 	overlayPath := setupTestOverlay(t)
 	pkgDir := writePruneCmdPackage(t, overlayPath, prunedCat, prunedPkg, prunedVer, pruneStockEbuild)
 
@@ -399,15 +400,15 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 	// No .autoupdate/packages.toml is written at all, so LoadPackagesConfig fails
 	// with ErrPackagesConfigNotFound — the same failure a malformed file produces,
 	// reached without depending on any particular parse error.
-	withFakeGentoo(t, &fakePruneGentoo{
+	withFakeGentoo(td, &fakePruneGentoo{
 		root:     gentooRoot,
 		versions: map[string][]string{prunedAtom: {prunedVer}},
 	})
 	setOverlayPruneFlags(t, false, false, false, false)
-	forbidOverlayPruneRemoval(t)
+	forbidOverlayPruneRemoval(t, td)
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
 	})
 
 	if strings.Contains(out, "would be removed") {
@@ -450,13 +451,14 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 //
 // _Requirements: R1.5, R2.6_
 func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *testing.T) {
+	td := defaultDeps()
 	run := func(t *testing.T, overlayPath string, prov provider.Provider) string {
 		t.Helper()
-		withFakeGentoo(t, prov)
+		withFakeGentoo(td, prov)
 		setOverlayPruneFlags(t, false, false, false, false)
-		forbidOverlayPruneRemoval(t)
+		forbidOverlayPruneRemoval(t, td)
 		return captureStdout(t, func() {
-			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{})
+			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
 		})
 	}
 
@@ -493,13 +495,13 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		// the afternoon fixing something that was never broken.
 		overlayPath := setupTestOverlay(t)
 
-		withFakeGentoo(t, &fakePruneAPIOnly{})
+		withFakeGentoo(td, &fakePruneAPIOnly{})
 		setOverlayPruneFlags(t, false, false, false, false)
-		forbidOverlayPruneRemoval(t)
+		forbidOverlayPruneRemoval(t, td)
 
 		var code int
 		empty = captureStdout(t, func() {
-			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td))
 		})
 
 		if code > 0 {

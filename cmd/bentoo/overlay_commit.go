@@ -39,7 +39,7 @@ Use -y to skip the confirmation prompt and commit automatically.`,
 }
 
 func runCommit(cmd *cobra.Command, args []string) error {
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

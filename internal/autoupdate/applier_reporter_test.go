@@ -87,7 +87,7 @@ func TestApplierReporterSuccessEventOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(pkg, false)
+	res, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil || res == nil || !res.Success {
 		t.Fatalf("apply failed: err=%v result=%+v", err, res)
 	}
@@ -122,7 +122,7 @@ func TestApplierReporterFailThenFixEventOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(pkg, false)
+	res, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil || res == nil || !res.Success || !res.Fixed {
 		t.Fatalf("apply (fix) failed: err=%v result=%+v", err, res)
 	}
@@ -157,7 +157,7 @@ func TestApplierReporterNoopUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewApplier: %v", err)
 		}
-		res, err := applier.Apply(pkg, false)
+		res, err := applier.Apply(t.Context(), pkg, false)
 		if err != nil || res == nil || !res.Success {
 			t.Fatalf("apply failed: err=%v result=%+v", err, res)
 		}
@@ -212,7 +212,7 @@ func TestApplierManifestStreamsTaskLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(pkg, false)
+	res, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil || res == nil || !res.Success {
 		t.Fatalf("apply failed: err=%v result=%+v", err, res)
 	}
@@ -256,7 +256,7 @@ func TestApplierManifestErrorStringPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, _ := applier.Apply(pkg, false)
+	res, _ := applier.Apply(t.Context(), pkg, false)
 	if res == nil || res.Success || res.Error == nil {
 		t.Fatalf("expected a manifest failure, got %+v", res)
 	}
@@ -304,7 +304,7 @@ func TestApplierCompileLogPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, _ := applier.Apply(pkg, true)
+	res, _ := applier.Apply(t.Context(), pkg, true)
 	if res == nil || res.Success {
 		t.Fatalf("expected a compile failure, got %+v", res)
 	}

@@ -123,10 +123,9 @@ func TestRunManifestCancelStopsPkgdevGroup(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := manifestSweeper(t, overlayDir, distdir, "",
-		withSweeperContext(ctx), withSweeperExec(pkgdevGroupSeam(fifo)))
+	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(pkgdevGroupSeam(fifo)))
 
-	done := manifestAsync(t, func() error { return s.runManifest(pkg, "2.0.0") })
+	done := manifestAsync(t, func() error { return s.runManifest(ctx, pkg, "2.0.0") })
 	grandchild := readGrandchildPID(t, fifo)
 
 	stoppedAt := time.Now()
@@ -147,11 +146,10 @@ func TestRunStagedManifestCancelStopsPkgdevGroup(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := newSweeper(filepath.Join(t.TempDir(), "overlay"),
-		withSweeperContext(ctx), withSweeperExec(pkgdevGroupSeam(fifo)))
+	s := newSweeper(filepath.Join(t.TempDir(), "overlay"), withSweeperExec(pkgdevGroupSeam(fifo)))
 
 	done := manifestAsync(t, func() error {
-		_, err := s.runStagedManifestIn(supplied, stagedPkg, "test-cat/test-pkg", "2.0.0")
+		_, err := s.runStagedManifestIn(ctx, supplied, stagedPkg, "test-cat/test-pkg", "2.0.0")
 		return err
 	})
 	grandchild := readGrandchildPID(t, fifo)
@@ -173,11 +171,10 @@ func TestRunManifestDeadlineStopsPkgdevGroup(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	s := manifestSweeper(t, overlayDir, distdir, "",
-		withSweeperContext(ctx), withSweeperExec(pkgdevGroupSeam(fifo)))
+	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(pkgdevGroupSeam(fifo)))
 
 	start := time.Now()
-	done := manifestAsync(t, func() error { return s.runManifest(pkg, "2.0.0") })
+	done := manifestAsync(t, func() error { return s.runManifest(ctx, pkg, "2.0.0") })
 	grandchild := readGrandchildPID(t, fifo)
 
 	assertManifestStopped(t, done, start.Add(200*time.Millisecond), grandchild, "R2.3")
