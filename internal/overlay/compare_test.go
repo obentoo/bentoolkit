@@ -62,7 +62,7 @@ func TestCompare(t *testing.T) {
 		IncludeNotInRemote: false,
 	}
 
-	report, err := Compare(localPackages, client, opts)
+	report, err := Compare(t.Context(), localPackages, client, opts)
 	if err != nil {
 		t.Fatalf("Compare failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestCompareWithAllResults(t *testing.T) {
 		IncludeSynced: true,
 	}
 
-	report, err := Compare(localPackages, client, opts)
+	report, err := Compare(t.Context(), localPackages, client, opts)
 	if err != nil {
 		t.Fatalf("Compare failed: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestCompareNewerInLocal(t *testing.T) {
 		OnlyOutdated: false,
 	}
 
-	report, err := Compare(localPackages, client, opts)
+	report, err := Compare(t.Context(), localPackages, client, opts)
 	if err != nil {
 		t.Fatalf("Compare failed: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestCompareProgressCallback(t *testing.T) {
 		},
 	}
 
-	_, err := Compare(localPackages, client, opts)
+	_, err := Compare(t.Context(), localPackages, client, opts)
 	if err != nil {
 		t.Fatalf("Compare failed: %v", err)
 	}
@@ -378,7 +378,7 @@ func compareThroughBarrier(t *testing.T, pkgs []PackageInfo, prov *fakeProvider,
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		report, err = CompareWithProvider(pkgs, prov, opts)
+		report, err = CompareWithProvider(t.Context(), pkgs, prov, opts)
 	}()
 	barrier.openOnceArrived(t, "provider calls", int64(want))
 	waitReturned(t, "CompareWithProvider", done)
@@ -497,7 +497,7 @@ func TestCompareWithProvider_Parallel(t *testing.T) {
 }
 
 // TestCompareWithProvider_ContextCancel verifies the T9 cancellation contract
-// is preserved under the parallel implementation: cancelling opts.Ctx stops
+// is preserved under the parallel implementation: cancelling the ctx argument stops
 // dispatch and the partial report is returned together with the context error.
 func TestCompareWithProvider_ContextCancel(t *testing.T) {
 	const numPkgs = 200
@@ -518,11 +518,11 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 	defer cancel()
 
 	const concurrency = 5
-	opts := CompareOptions{Concurrency: concurrency, IncludeSynced: true, Ctx: ctx}
+	opts := CompareOptions{Concurrency: concurrency, IncludeSynced: true}
 
 	// Cancel once dispatch has begun: the first provider call is the event
 	// that says so, rather than a guess at how long reaching it takes.
-	report, err := compareCancelledOnceDispatched(t, pkgs, prov, opts, cancel)
+	report, err := compareCancelledOnceDispatched(t, ctx, pkgs, prov, opts, cancel)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
@@ -547,7 +547,7 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 // then calls cancel, so the cancellation lands mid-scan however slowly the
 // host reaches the first package. It fails the test when dispatch never begins
 // or the run does not return within signalWaitDeadline of the cancel.
-func compareCancelledOnceDispatched(t *testing.T, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, cancel context.CancelFunc) (*CompareReport, error) {
+func compareCancelledOnceDispatched(t *testing.T, ctx context.Context, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, cancel context.CancelFunc) (*CompareReport, error) {
 	t.Helper()
 	type result struct {
 		report *CompareReport
@@ -556,7 +556,7 @@ func compareCancelledOnceDispatched(t *testing.T, pkgs []PackageInfo, prov *fake
 	resc := make(chan result, 1)
 	var returned atomic.Bool
 	go func() {
-		report, err := CompareWithProvider(pkgs, prov, opts)
+		report, err := CompareWithProvider(ctx, pkgs, prov, opts)
 		returned.Store(true)
 		resc <- result{report, err}
 	}()
@@ -586,7 +586,7 @@ func TestCompareWithProvider_ContextCancelledUpfront(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before the call
 
-	report, err := CompareWithProvider(pkgs, prov, CompareOptions{Ctx: ctx})
+	report, err := CompareWithProvider(ctx, pkgs, prov, CompareOptions{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}

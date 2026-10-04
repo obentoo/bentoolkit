@@ -38,7 +38,7 @@ import (
 func TestCheckPath_ReadsWhatTheRunFetched(t *testing.T) {
 	sandbox := t.TempDir()
 	prev := fixSandboxRoot
-	fixSandboxRoot = func() string { return sandbox }
+	fixSandboxRoot = func(context.Context) string { return sandbox }
 	t.Cleanup(func() { fixSandboxRoot = prev })
 
 	applier, _, overlayDir, _ := goldenApplyFixtureWith(t, goldenFixtureOpts{
@@ -48,7 +48,7 @@ func TestCheckPath_ReadsWhatTheRunFetched(t *testing.T) {
 	const pkg = "media-plugins/gst-plugins-qt6"
 
 	before := hashOverlayTree(t, overlayDir)
-	result := applier.Validate(pkg, validate.DepthOptions)
+	result := applier.Validate(t.Context(), pkg, validate.DepthOptions)
 
 	// The option gate must have an OPINION. Before this story it reported
 	// SKIPPED — "the only distfile present does not belong to version 1.29.2" —
@@ -240,7 +240,7 @@ func TestCheckPath_WriteFreeGateParityBetweenCheckAndApply(t *testing.T) {
 	// The check driver.
 	checker, checkOverlay, pkg, _ := parityGateFixture(t)
 	beforeCheck := hashOverlayTree(t, checkOverlay)
-	res := checker.Validate(pkg, validate.DepthOptions)
+	res := checker.Validate(t.Context(), pkg, validate.DepthOptions)
 
 	var options *validate.GateResult
 	for i := range res.Gates {
@@ -273,7 +273,7 @@ func TestCheckPath_WriteFreeGateParityBetweenCheckAndApply(t *testing.T) {
 	// The apply driver, same input shape, fresh fixture.
 	applier, applyOverlay, pkg2, _ := parityGateFixture(t)
 	before := hashOverlayTree(t, applyOverlay)
-	result, _ := applier.Apply(pkg2, false)
+	result, _ := applier.Apply(t.Context(), pkg2, false)
 
 	if result.Success {
 		t.Fatal("the apply PUBLISHED the bump the check just failed; --check and --apply must produce the " +
@@ -340,7 +340,7 @@ func TestCheckPath_UnproducibleNamesSkipNamesThePackage(t *testing.T) {
 		t.Fatalf("creating applier: %v", err)
 	}
 
-	res := applier.Validate(pkg, validate.DepthOptions)
+	res := applier.Validate(t.Context(), pkg, validate.DepthOptions)
 	var options *validate.GateResult
 	for i := range res.Gates {
 		if res.Gates[i].Gate == validate.GateOptions {
@@ -362,7 +362,7 @@ func TestCheckPath_UnproducibleNamesSkipNamesThePackage(t *testing.T) {
 }
 
 // TestApplyGates_ConcurrentAppliesKeepSeamValuesPerBump is R3.4, in the shape
-// applyAllPackages actually runs: two bumps, one applier, concurrent applies.
+// ApplyAll actually runs: two bumps, one applier, concurrent applies.
 // Package A's gate must answer from A's names (FAILED — its archive dropped
 // aalib and libcaca) and package B's from B's (PASS — its archive declares
 // exactly what its ebuild passes). A seam value parked on an Applier field
@@ -430,11 +430,11 @@ func TestApplyGates_ConcurrentAppliesKeepSeamValuesPerBump(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		resultA, _ = applier.Apply(pkgA, false)
+		resultA, _ = applier.Apply(t.Context(), pkgA, false)
 	}()
 	go func() {
 		defer wg.Done()
-		resultB, _ = applier.Apply(pkgB, false)
+		resultB, _ = applier.Apply(t.Context(), pkgB, false)
 	}()
 	wg.Wait()
 

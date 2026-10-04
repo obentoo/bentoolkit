@@ -75,10 +75,11 @@ func mixedReport() validate.Report {
 // TestRender_TextNamesEverySkipReason is the rule the story turns on: a skip
 // nobody can read is a pass.
 func TestRender_TextNamesEverySkipReason(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{})
+		_ = runValidate(newValidateCmd(td), []string{}, td)
 	})
 
 	for _, want := range []string{
@@ -103,10 +104,11 @@ func TestRender_TextNamesEverySkipReason(t *testing.T) {
 // each one stopped: "permission denied" against the configure gate and "not
 // Meson" against the option gate call for different work.
 func TestRender_TextNamesTheGateBesideItsReason(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{})
+		_ = runValidate(newValidateCmd(td), []string{}, td)
 	})
 
 	for _, want := range []string{
@@ -124,7 +126,8 @@ func TestRender_TextNamesTheGateBesideItsReason(t *testing.T) {
 // taken from one favoured gate. The shipped renderer tallied res.Options alone,
 // which is how a configure failure would have printed as a pass.
 func TestRender_TextTallyIsTheWorstGatePerEbuild(t *testing.T) {
-	stubValidateRunner(t, validate.Report{
+	td := defaultDeps()
+	stubValidateRunner(td, validate.Report{
 		Overlay: "/var/db/repos/bentoo",
 		Results: []validate.EbuildResult{{
 			Package: "media-plugins/gst-plugins-qt6",
@@ -144,7 +147,7 @@ func TestRender_TextTallyIsTheWorstGatePerEbuild(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runValidate(newValidateCmd(), []string{}))
+		code, exited = exitOf(runValidate(newValidateCmd(td), []string{}, td))
 	})
 
 	if !strings.Contains(out, "1 ebuilds: 1 failed, 0 passed, 0 skipped") {
@@ -158,10 +161,11 @@ func TestRender_TextTallyIsTheWorstGatePerEbuild(t *testing.T) {
 // TestRender_JsonIsOneDocument is R5.8. One document, not a stream — a caller
 // piping this into `jq` must not have to reassemble it.
 func TestRender_JsonIsOneDocument(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{"--json"})
+		_ = runValidate(newValidateCmd(td), []string{"--json"}, td)
 	})
 
 	var doc map[string]any
@@ -186,10 +190,11 @@ func TestRender_JsonIsOneDocument(t *testing.T) {
 // test rewritten to expect fewer keys would have hidden the difference between
 // the migration that happened and one that also lost something.
 func TestRender_JsonKeysAreTheContract(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{"--json"})
+		_ = runValidate(newValidateCmd(td), []string{"--json"}, td)
 	})
 
 	var doc map[string]any
@@ -257,10 +262,11 @@ func TestRender_JsonKeysAreTheContract(t *testing.T) {
 // document that carried one of them would be the shipped defect with a new key
 // name.
 func TestRender_JsonCarriesEveryGatesOwnReason(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{"--json"})
+		_ = runValidate(newValidateCmd(td), []string{"--json"}, td)
 	})
 
 	// The `payload` hop is story 046's sub-task 8.1: the model moved one level
@@ -303,10 +309,11 @@ func TestRender_JsonCarriesEveryGatesOwnReason(t *testing.T) {
 // PASS whose evidence is not printed cannot be audited, which is the complaint
 // this story answers — it would be a poor joke to reproduce it here.
 func TestRender_JsonCarriesTheEvidence(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	out := captureStdout(t, func() {
-		_ = runValidate(newValidateCmd(), []string{"--json"})
+		_ = runValidate(newValidateCmd(td), []string{"--json"}, td)
 	})
 
 	if !strings.Contains(out, "gst-plugins-good-1.29.2/meson.options") {
@@ -317,7 +324,8 @@ func TestRender_JsonCarriesTheEvidence(t *testing.T) {
 // TestRender_ExitCodeMatchesTheRenderedOutcomes keeps the two from drifting: a
 // report that prints a failure and exits 0 is worse than no report.
 func TestRender_ExitCodeMatchesTheRenderedOutcomes(t *testing.T) {
-	stubValidateRunner(t, mixedReport())
+	td := defaultDeps()
+	stubValidateRunner(td, mixedReport())
 
 	// runValidate returns its exit status (story 058) and func exitOf reads it
 	// inside captureStdout; nothing panics, so the `out = captureStdout(…)`
@@ -327,7 +335,7 @@ func TestRender_ExitCodeMatchesTheRenderedOutcomes(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runValidate(newValidateCmd(), []string{}))
+		code, exited = exitOf(runValidate(newValidateCmd(td), []string{}, td))
 	})
 
 	if !exited {

@@ -97,10 +97,9 @@ func TestCompareReportInterrupted(t *testing.T) {
 		defer cancel()
 
 		// Cancel once the first provider call shows dispatch has begun.
-		report, err := compareCancelledOnceDispatched(t, pkgs, prov, CompareOptions{
+		report, err := compareCancelledOnceDispatched(t, ctx, pkgs, prov, CompareOptions{
 			Concurrency:   5,
 			IncludeSynced: true,
-			Ctx:           ctx,
 		}, cancel)
 
 		if !errors.Is(err, context.Canceled) {
@@ -129,7 +128,7 @@ func TestCompareReportInterrupted(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancelled before the call
 
-		report, err := CompareWithProvider(pkgs, prov, CompareOptions{Ctx: ctx})
+		report, err := CompareWithProvider(ctx, pkgs, prov, CompareOptions{})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("CompareWithProvider returned err = %v; want context.Canceled", err)
 		}
@@ -164,8 +163,7 @@ func TestCompareReportInterrupted(t *testing.T) {
 			{Category: "cat", Package: "broken", LatestVersion: "1.0"},
 		}
 
-		report, err := CompareWithProvider(pkgs, prov, CompareOptions{
-			Ctx: context.Background(),
+		report, err := CompareWithProvider(t.Context(), pkgs, prov, CompareOptions{
 			// IncludeSynced and IncludeNotInRemote both left false.
 		})
 		if err != nil {

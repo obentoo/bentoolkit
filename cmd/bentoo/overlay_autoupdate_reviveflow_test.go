@@ -11,27 +11,25 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
-// withFakeGentoo overrides the resolveGentooProviderFn seam so the revive flows
-// resolve the given fake instead of the real ::gentoo repository, restoring it
-// when the test ends.
-func withFakeGentoo(t *testing.T, fake provider.Provider) {
-	t.Helper()
-	orig := resolveGentooProviderFn
-	resolveGentooProviderFn = func(*config.Config) (provider.Provider, error) { return fake, nil }
-	t.Cleanup(func() { resolveGentooProviderFn = orig })
+// withFakeGentoo substitutes d's resolveGentooProvider so the revive flows
+// resolve the given fake instead of the real ::gentoo repository.
+func withFakeGentoo(d *deps, fake provider.Provider) {
+	d.resolveGentooProvider = func(*config.Config) (provider.Provider, error) { return fake, nil }
 }
 
 // TestRunRevive_SkipPath drives runRevive's full post-guard path with an on-disk
 // fake ::gentoo provider: a single target whose seeded ::gentoo version already
-// equals upstream, so reviveOne returns "skipped" and runRevive exits cleanly
-// (no failures). This never reaches applier.Apply / `pkgdev manifest`.
+// equals upstream, so autoupdate.Reviver returns "skipped" and runRevive exits
+// cleanly (no failures). This never reaches applier.Apply / `pkgdev manifest`.
+//
+// Its stdout is pinned byte for byte (U3): the per-target "Reviving <pkg>..."
+// line runRevive prints before each Revive, then the summary, as the format
+// strings stood before story 060 (1462803).
 func TestRunRevive_SkipPath(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly, origCompile, origClean := autoupdateOnly, autoupdateCompile, autoupdateClean
-	autoupdateOnly, autoupdateCompile, autoupdateClean = "", false, false
-	t.Cleanup(func() {
-		autoupdateOnly, autoupdateCompile, autoupdateClean = origOnly, origCompile, origClean
-	})
+	td := defaultDeps()
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only, auOpts.compile, auOpts.clean = "", false, false
 
 	const ver = "1.2.3"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -50,12 +48,24 @@ func TestRunRevive_SkipPath(t *testing.T) {
 		versions: map[string][]string{"dev-test/foo": {ver}},
 		dir:      srcDir,
 	}
-	withFakeGentoo(t, fake)
+	withFakeGentoo(td, fake)
 
-	code := exitCodeFor(runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
-		&config.Config{}, config.LLMConfig{}))
+	var code int
+	stdout := captureStdout(t, func() {
+		code = exitCodeFor(testAutoupdateRunWith(auOpts, td).runRevive(context.Background(), overlay, configDir, "dev-test/foo", 0,
+			&config.Config{}, config.LLMConfig{}))
+	})
 	if code != 0 {
 		t.Fatalf("runRevive exit code = %d, want 0 (skip path)", code)
+	}
+	const want = "Reviving dev-test/foo...\n" +
+		"\nRevive Summary\n\n" +
+		"  - dev-test/foo: gentoo 1.2.3 already current with upstream 1.2.3\n" +
+		"\n" +
+		"  Revived: 0\n" +
+		"  Skipped: 1\n"
+	if stdout != want {
+		t.Errorf("runRevive stdout differs (U3)\ngot:\n%q\nwant:\n%q", stdout, want)
 	}
 }
 
@@ -65,10 +75,10 @@ func TestRunRevive_SkipPath(t *testing.T) {
 // displayReviveCandidates prints the populated table. No exit, no network for the
 // gentoo lookup (the fake answers it).
 func TestRunReviveList_WithCandidate(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly := autoupdateOnly
-	autoupdateOnly = ""
-	t.Cleanup(func() { autoupdateOnly = origOnly })
+	td := defaultDeps()
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only = ""
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("version 2.0.0\n"))
@@ -82,9 +92,9 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 	fake := &fakeReviveProvider{
 		versions: map[string][]string{"dev-test/foo": {"1.0.0"}}, // gentoo older than upstream 2.0.0
 	}
-	withFakeGentoo(t, fake)
+	withFakeGentoo(td, fake)
 
-	code := exitCodeFor(runReviveList(context.Background(), overlay, configDir, 0,
+	code := exitCodeFor(testAutoupdateRunWith(auOpts, td).runReviveList(context.Background(), overlay, configDir, 0,
 		&config.Config{}, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runReviveList exit code = %d, want 0", code)
@@ -97,12 +107,10 @@ func TestRunReviveList_WithCandidate(t *testing.T) {
 // the same pass. The check has no active packages, so it exits 0; the report
 // runs via the injected fake provider (no network for the gentoo lookup).
 func TestRunCheck_Revivable(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly, origForce, origRevivable := autoupdateOnly, autoupdateForce, autoupdateRevivable
-	autoupdateOnly, autoupdateForce, autoupdateRevivable = "", true, true
-	t.Cleanup(func() {
-		autoupdateOnly, autoupdateForce, autoupdateRevivable = origOnly, origForce, origRevivable
-	})
+	td := defaultDeps()
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
+	auOpts.only, auOpts.force, auOpts.revivable = "", true, true
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("version 2.0.0\n"))
@@ -116,9 +124,9 @@ func TestRunCheck_Revivable(t *testing.T) {
 	fake := &fakeReviveProvider{
 		versions: map[string][]string{"dev-test/foo": {"1.0.0"}}, // gentoo older than upstream
 	}
-	withFakeGentoo(t, fake)
+	withFakeGentoo(td, fake)
 
-	code := exitCodeFor(runCheck(context.Background(), overlay, configDir, nil, 0,
+	code := exitCodeFor(testAutoupdateRunWith(auOpts, td).runCheck(context.Background(), overlay, configDir, nil, 0,
 		&config.Config{}, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runCheck --revivable exit code = %d, want 0 (no active packages, report is read-only)", code)

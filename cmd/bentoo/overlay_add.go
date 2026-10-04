@@ -22,7 +22,7 @@ If no paths are specified, adds all changes (equivalent to "git add .").`,
 func runAdd(cmd *cobra.Command, args []string) error {
 	ctx := commandContext(cmd)
 
-	appCtx, err := loadAppContext()
+	appCtx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

@@ -55,7 +55,7 @@ func s057CompareDeclared(t *testing.T) *overlay.CompareReport {
 		base.versions["s057/"+name] = []string{"1.0"}
 		pkgs = append(pkgs, overlay.PackageInfo{Category: "s057", Package: name, Versions: []string{"1.0"}, LatestVersion: "1.0"})
 	}
-	rep, err := overlay.CompareWithProvider(pkgs, prov, opts)
+	rep, err := overlay.CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v", err)
 	}

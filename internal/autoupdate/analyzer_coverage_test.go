@@ -12,8 +12,10 @@ import (
 // stubLLMProvider is a minimal LLMProvider for option testing
 type stubLLMProvider struct{}
 
-func (s *stubLLMProvider) ExtractVersion(_ []byte, _ string) (string, error) { return "", nil }
-func (s *stubLLMProvider) AnalyzeContent(_ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (s *stubLLMProvider) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return &SchemaAnalysis{ParserType: "json"}, nil
 }
 func (s *stubLLMProvider) GetModel() string { return "stub" }

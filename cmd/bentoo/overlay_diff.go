@@ -35,7 +35,7 @@ func gitDiffFoundDifferences(err error) bool {
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
-	ctx, err := loadAppContext()
+	ctx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

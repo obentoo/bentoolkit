@@ -360,7 +360,7 @@ func TestResolveReturnsErrorRatherThanFallingBackWhenUnwritable(t *testing.T) {
 		locked := makeUnwritableDir(t)
 		stubPortageqOutput(t, locked+"\n")
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		t.Cleanup(dir.Cleanup)
 
 		if err == nil {
@@ -415,7 +415,7 @@ func TestResolveReturnsErrorRatherThanFallingBackWhenUnwritable(t *testing.T) {
 		fallback := filepath.Join(t.TempDir(), "host-distdir")
 		call := stubPortageqOutput(t, fallback+"\n")
 
-		dir, err := Resolve(locked, "")
+		dir, err := Resolve(t.Context(), locked, "")
 
 		if err == nil {
 			t.Fatalf("Resolve(%q, \"\") error = nil for an unwritable explicit distdir", locked)
@@ -441,7 +441,7 @@ func TestResolveReturnsErrorRatherThanFallingBackWhenUnwritable(t *testing.T) {
 		writable := t.TempDir()
 		stubPortageqOutput(t, writable+"\n")
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		t.Cleanup(dir.Cleanup)
 
 		if err != nil {

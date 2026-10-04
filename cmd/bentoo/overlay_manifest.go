@@ -25,7 +25,7 @@ type ManifestFlags struct {
 var manifestFlags ManifestFlags
 
 // newManifestCmd builds `overlay manifest`.
-func newManifestCmd() *cobra.Command {
+func newManifestCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "manifest [<category> | <category>/<package>]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -84,7 +84,9 @@ Examples:
   # Disable the system distfiles cache lookup
   bentoo overlay manifest --distfiles-cache ""`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runManifest,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runManifest(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
 	cmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
@@ -94,7 +96,7 @@ Examples:
 	return cmd
 }
 
-func runManifest(cmd *cobra.Command, args []string) error {
+func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 	arg := ""
 	if len(args) == 1 {
 		arg = args[0]
@@ -106,7 +108,7 @@ func runManifest(cmd *cobra.Command, args []string) error {
 		return exitWith(1)
 	}
 
-	ctx, err := loadAppContext()
+	ctx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)
@@ -134,7 +136,7 @@ func runManifest(cmd *cobra.Command, args []string) error {
 	// race with its rendering.
 	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
 
-	reporter, finishUI := chooseManifestReporter(ctx.Config, manifestFlags.DryRun, runCtx, cancel)
+	reporter, finishUI := chooseManifestReporter(d, ctx.Config, manifestFlags.DryRun, runCtx, cancel)
 
 	opts := &overlay.ManifestOptions{
 		Keep:           manifestFlags.Keep,
@@ -144,10 +146,9 @@ func runManifest(cmd *cobra.Command, args []string) error {
 		DistfilesCache: manifestFlags.DistfilesCache,
 		Reporter:       reporter,
 		Summary:        manifestLiveSummary,
-		Ctx:            runCtx,
 	}
 
-	result := overlay.RegenerateManifests(ctx.OverlayPath, targets, opts)
+	result := overlay.RegenerateManifests(runCtx, ctx.OverlayPath, targets, opts)
 
 	// Tear the UI down (stop the program, restore the terminal) before any
 	// further logging or exit so the summary is not swallowed by the TUI.
@@ -172,7 +173,7 @@ func runManifest(cmd *cobra.Command, args []string) error {
 	// stdout — rendering first would draw it into a frame the TUI then redraws
 	// over. This is the point in the run where the terminal has been handed
 	// back, so it is the first point the report may be drawn.
-	presentManifestReport(ctx.Config, buildManifestReport(&result, opts.DryRun))
+	presentManifestReport(d, ctx.Config, buildManifestReport(&result, opts.DryRun))
 
 	if opts.DryRun {
 		return nil
@@ -212,11 +213,11 @@ func runManifest(cmd *cobra.Command, args []string) error {
 // Dry-run skips the reporter entirely since there are no pkgdev invocations to
 // track. The returned func tears the UI down and must be called before any
 // post-run logging or exit; for the non-TUI paths it is a no-op.
-func chooseManifestReporter(cfg *config.Config, dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
+func chooseManifestReporter(d *deps, cfg *config.Config, dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
 	if dryRun {
 		return tui.Noop(), func() {}
 	}
-	if manifestUsesTUI(cfg) {
+	if manifestUsesTUI(cfg, d.uiIsTerminal) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
 		return r, func() { prog.Stop(); _ = prog.Wait() }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 const (
@@ -93,7 +94,7 @@ func s056DeadPID(t *testing.T) int {
 // s056AutoupdateEnv builds a HOME with a bentoo config pointing at a fresh
 // overlay holding an empty registry, and selects `--check`. It returns the
 // overlay and the autoupdate config dir.
-func s056AutoupdateEnv(t *testing.T) (overlay, configDir string) {
+func s056AutoupdateEnv(t *testing.T, auOpts *autoupdateOptions) (overlay, configDir string) {
 	t.Helper()
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".config", "bentoo")
@@ -114,25 +115,24 @@ func s056AutoupdateEnv(t *testing.T) (overlay, configDir string) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
 	oLint, oFix, oConc, oTimeout, oOnly, oApply, oCheck, oList :=
-		autoupdateLint, autoupdateFix, autoupdateConcurrency, autoupdateTimeout,
-		autoupdateOnly, autoupdateApply, autoupdateCheck, autoupdateList
+		auOpts.lint, auOpts.fix, auOpts.concurrency, auOpts.timeout, auOpts.only, auOpts.apply, auOpts.check, auOpts.list
 	t.Cleanup(func() {
-		autoupdateLint, autoupdateFix, autoupdateConcurrency, autoupdateTimeout,
-			autoupdateOnly, autoupdateApply, autoupdateCheck, autoupdateList =
-			oLint, oFix, oConc, oTimeout, oOnly, oApply, oCheck, oList
+		auOpts.lint, auOpts.fix, auOpts.concurrency, auOpts.timeout, auOpts.only, auOpts.apply, auOpts.check, auOpts.list = oLint, oFix, oConc, oTimeout, oOnly, oApply, oCheck, oList
 	})
-	autoupdateLint, autoupdateFix, autoupdateList = false, false, false
-	autoupdateConcurrency = autoupdate.DefaultConcurrency
-	autoupdateTimeout, autoupdateOnly, autoupdateApply = 0, "", ""
-	autoupdateCheck = true
+	auOpts.lint, auOpts.fix, auOpts.list = false, false, false
+	auOpts.concurrency = autoupdate.DefaultConcurrency
+	auOpts.timeout, auOpts.only, auOpts.apply = 0, "", ""
+	auOpts.check = true
 	return overlay, filepath.Join(home, ".config", "bentoo", "autoupdate")
 }
 
-// s056RunCapturingFDs runs runAutoupdate with fds 1 and 2 pointed at a file.
+// s056RunCapturingFDs runs runAutoupdate with fds 1 and 2 pointed at a file,
+// and prints a returned failWith cause there as func execute would.
 // The logger holds the os.Stderr it saw first, so swapping the variable would
 // miss its lines; redirecting the descriptor does not.
-func s056RunCapturingFDs(t *testing.T) (code int, out string) {
+func s056RunCapturingFDs(t *testing.T, auOpts *autoupdateOptions) (code int, out string) {
 	t.Helper()
+	auCmd := testAutoupdateCmd()
 	f, err := os.CreateTemp(t.TempDir(), "out")
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,15 @@ func s056RunCapturingFDs(t *testing.T) (code int, out string) {
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
+		err := runAutoupdate(auCmd, nil, auOpts, defaultDeps())
+		// Since story 060 a single-line failure is returned (func failWith)
+		// and func execute prints it. This harness bypasses execute, so it
+		// prints the cause the way execute does: inside the redirect, after
+		// the handler's deferred calls have run.
+		if st, bare := err.(*exitStatus); bare && st.cause != nil { //nolint:errorlint // the same identity test as func execute
+			logger.Error("%v", st.cause)
+		}
+		code = exitCodeFor(err)
 	}()
 	data, _ := os.ReadFile(f.Name())
 	return code, string(data)
@@ -161,7 +169,8 @@ func s056RunCapturingFDs(t *testing.T) (code int, out string) {
 // TestAutoupdateOverlayLock_SecondRunExitsNamingPathAndPID: R4.1 + R4.4 — the
 // "second run blocked" half.
 func TestAutoupdateOverlayLock_SecondRunExitsNamingPathAndPID(t *testing.T) {
-	overlay, _ := s056AutoupdateEnv(t)
+	auOpts := testAutoupdateOptions()
+	overlay, _ := s056AutoupdateEnv(t, auOpts)
 	oldWait, oldPoll := filelock.Wait, filelock.Poll
 	filelock.Wait, filelock.Poll = 300*time.Millisecond, 10*time.Millisecond
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
@@ -169,7 +178,7 @@ func TestAutoupdateOverlayLock_SecondRunExitsNamingPathAndPID(t *testing.T) {
 	lockPath := filepath.Join(overlay, ".autoupdate.bentoo-lock")
 	pid := s056StartOverlayHolder(t, lockPath)
 
-	code, out := s056RunCapturingFDs(t)
+	code, out := s056RunCapturingFDs(t, auOpts)
 	if code != 1 {
 		t.Errorf("a second --check while pid %d holds the overlay lock exited %d, want 1", pid, code)
 	}
@@ -184,7 +193,8 @@ func TestAutoupdateOverlayLock_SecondRunExitsNamingPathAndPID(t *testing.T) {
 // — the hostile half: a lock file left by a dead run neither blocks this run
 // (the bound is a minute) nor survives it.
 func TestAutoupdateOverlayLock_DeadHolderIsReapedAndReleasedOnReturn(t *testing.T) {
-	overlay, _ := s056AutoupdateEnv(t)
+	auOpts := testAutoupdateOptions()
+	overlay, _ := s056AutoupdateEnv(t, auOpts)
 	oldWait, oldPoll := filelock.Wait, filelock.Poll
 	filelock.Wait, filelock.Poll = time.Minute, 10*time.Millisecond
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
@@ -194,7 +204,7 @@ func TestAutoupdateOverlayLock_DeadHolderIsReapedAndReleasedOnReturn(t *testing.
 		t.Fatal(err)
 	}
 	start := time.Now()
-	_, out := s056RunCapturingFDs(t)
+	_, out := s056RunCapturingFDs(t, auOpts)
 	if elapsed := time.Since(start); elapsed > 30*time.Second {
 		t.Errorf("the run took %v: it waited on a dead holder's lock", elapsed)
 	}
@@ -212,7 +222,8 @@ func TestAutoupdateOverlayLock_DeadHolderIsReapedAndReleasedOnReturn(t *testing.
 // config dir are removed with one WARN line each; live ones and nested config
 // entries stay. The lock file is gone after the run returns (R4.7).
 func TestAutoupdateOverlayLock_SweepsDeadTemps(t *testing.T) {
-	overlay, configDir := s056AutoupdateEnv(t)
+	auOpts := testAutoupdateOptions()
+	overlay, configDir := s056AutoupdateEnv(t, auOpts)
 	dead := strconv.Itoa(s056DeadPID(t))
 	self := strconv.Itoa(os.Getpid())
 	remove := []string{
@@ -235,7 +246,7 @@ func TestAutoupdateOverlayLock_SweepsDeadTemps(t *testing.T) {
 		}
 	}
 
-	_, out := s056RunCapturingFDs(t)
+	_, out := s056RunCapturingFDs(t, auOpts)
 
 	for _, p := range remove {
 		if _, err := os.Lstat(p); err == nil {

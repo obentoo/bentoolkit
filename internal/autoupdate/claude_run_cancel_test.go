@@ -32,7 +32,6 @@ func TestRunClaudeDeadlineStopsTheGroup(t *testing.T) {
 	}
 	c, err := NewClaudeCodeClient(LLMConfig{},
 		WithClaudeCodeExecCommand(seam),
-		WithClaudeCodeContext(context.Background()),
 		WithClaudeCodeTimeout(200*time.Millisecond),
 	)
 	if err != nil {
@@ -42,7 +41,7 @@ func TestRunClaudeDeadlineStopsTheGroup(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, runErr := c.run("instr", []byte("content"), "")
+		_, runErr := c.run(t.Context(), "instr", []byte("content"), "")
 		done <- runErr
 	}()
 	raw, err := os.ReadFile(fifo)

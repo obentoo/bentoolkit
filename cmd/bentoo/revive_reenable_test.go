@@ -14,13 +14,11 @@ import (
 )
 
 // TestReviveAppliesAfterReenable guards the revive path against the stale
-// enabled = false the shared Applier loaded before reviveOne re-enabled the
+// enabled = false the shared Applier loaded before the Reviver re-enabled the
 // entry: "revived" must mean the new ebuild was written.
 func TestReviveAppliesAfterReenable(t *testing.T) {
-	pinReviveConcurrency(t)
-	origOnly, origCompile, origClean := autoupdateOnly, autoupdateCompile, autoupdateClean
-	autoupdateOnly, autoupdateCompile, autoupdateClean = "", false, false
-	t.Cleanup(func() { autoupdateOnly, autoupdateCompile, autoupdateClean = origOnly, origCompile, origClean })
+	auOpts := testAutoupdateOptions()
+	pinReviveConcurrency(t, auOpts)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
@@ -52,10 +50,21 @@ func TestReviveAppliesAfterReenable(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	out := reviveOne(context.Background(), "dev-test/foo", overlay, configDir, 0, 0,
-		config.LLMConfig{}, fake, fake, applier, pending)
-	if out.status != "revived" {
-		t.Fatalf("status = %q (%s), want revived", out.status, out.detail)
+	// Wired as runRevive wires it: a fresh Checker per target, sharing the
+	// applier's pending list.
+	newChecker := func() (*autoupdate.Checker, error) {
+		return autoupdate.NewChecker(overlay,
+			append(testAutoupdateRun(auOpts).reviveCheckerOptions(configDir, 0, 0, config.LLMConfig{}),
+				autoupdate.WithPendingList(pending))...)
+	}
+	reviver, err := autoupdate.NewReviver(overlay, applier, fake, newChecker)
+	if err != nil {
+		t.Fatalf("NewReviver: %v", err)
+	}
+
+	out := reviver.Revive(t.Context(), "dev-test/foo")
+	if out.Status != autoupdate.ReviveRevived {
+		t.Fatalf("status = %q (%s), want revived", out.Status, out.Detail)
 	}
 	if _, err := os.Stat(filepath.Join(overlay, "dev-test", "foo", "foo-1.3.0.ebuild")); err != nil {
 		t.Errorf("revive reported success but wrote no foo-1.3.0.ebuild: %v", err)

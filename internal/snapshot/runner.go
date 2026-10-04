@@ -308,7 +308,7 @@ func defaultRunner() Runner { return execRunner{} }
 //   - execRunner is unexported, so nothing outside internal/snapshot can build
 //     a reporting Runner by hand. This constructor is that capability's export.
 //   - What 047 has to write is one assignment at the caller. cmd/bentoo's
-//     `var snapshotRunner` in snapshot.go is nil in production and already reaches
+//     `deps.snapshotRunner` field is nil in production and already reaches
 //     every driver through NewManager, newEngine, newShipper and newScheduler,
 //     so NewReportingRunner(rep, id) there is what turns a snapshot run's
 //     subprocesses into stage/done events.

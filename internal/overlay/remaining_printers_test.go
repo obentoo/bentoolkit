@@ -205,7 +205,7 @@ func TestRealignVerdictsReachTheCallerAsFacts(t *testing.T) {
 	}}
 
 	out := captureOverlayStdout(t, func() {
-		AnnotateRealignVerdicts(report, reviewer, prov, opts)
+		AnnotateRealignVerdicts(t.Context(), report, reviewer, prov, opts)
 	})
 
 	if strings.TrimSpace(out) != "" {

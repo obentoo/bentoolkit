@@ -23,8 +23,8 @@ import (
 // only then let RepairResult.Write re-run the inertness gate and rename the file.
 //
 // The gates are story 021's, not a second set: the same --yes flag, the same
-// registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
-// same confirmRegistryWriteFn seam that guard the post-check version pins. Two
+// deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
+// same deps.confirmRegistryWrite seam that guard the post-check version pins. Two
 // idioms for "may I publish?" in one command is one too many.
 
 // runLintFix is the --fix half of runLint. issues is what the lint above
@@ -37,7 +37,7 @@ import (
 // declined repair, a refused unattended write and a repair that left the
 // unrepairable findings behind all exit 1, and the pre-commit hook that runs
 // --lint next agrees with what this run just said.
-func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
+func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	result, err := autoupdate.RepairPackagesConfig(overlayPath)
 	if err != nil {
 		// RepairPackagesConfig has written nothing: it returns an error only when
@@ -80,7 +80,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	fmt.Println()
 	printRepairSummary(result)
 
-	if !confirmLintRepair(result) {
+	if !ar.confirmLintRepair(result) {
 		// Return WITHOUT calling Write: the file is never opened, so it stays
 		// byte-identical by construction rather than by care. Every finding the
 		// lint reported is still there, so the exit code still says so.
@@ -108,8 +108,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	if err != nil {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.
-		logger.Error("packages.toml was repaired but no longer lints: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("packages.toml was repaired but no longer lints: %w", err))
 	}
 	return reportUnrepaired(remaining)
 }
@@ -134,8 +133,7 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) error {
 	for _, issue := range remaining {
 		output.Warning.Println("    " + issue.String())
 	}
-	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	return exitWith(1)
+	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
 
 // summarizeUnrepaired is the NOTHING-WAS-WRITTEN report: the findings are the
@@ -154,8 +152,7 @@ func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 	output.Warning.Printf(
 		"  Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.\n",
 		len(remaining))
-	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	return exitWith(1)
+	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
 
 // confirmLintRepair is the write gate (R7.3): three gates, in order of how much
@@ -166,16 +163,16 @@ func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 // It reports whether the repair may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func confirmLintRepair(result *autoupdate.RepairResult) bool {
+func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool {
 	repairs := totalRepairs(result)
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
 		output.Warning.Printf("  --yes given: writing %d repair(s) without a prompt.\n", repairs)
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		// The diff above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
@@ -186,7 +183,7 @@ func confirmLintRepair(result *autoupdate.RepairResult) bool {
 	// ONE question covering the whole diff, not one per record: the operator is
 	// approving the rewrite they just read.
 	fmt.Println()
-	return confirmRegistryWriteFn(fmt.Sprintf(
+	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Write %d repair(s) to packages.toml? (the diff above is the whole change)", repairs))
 }
 

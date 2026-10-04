@@ -79,7 +79,7 @@ func TestManifestEmitsParityEvents(t *testing.T) {
 
 	rec := &recManifestReporter{}
 	targets := []ManifestUpdate{{Category: "c", Package: "a"}, {Category: "c", Package: "b"}}
-	RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rec})
+	RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rec})
 
 	ev := rec.snap()
 	if !mfHas(ev, "batchstart:2") {
@@ -119,7 +119,7 @@ func TestManifestPlainNoANSI(t *testing.T) {
 	var buf bytes.Buffer
 	rep := tui.NewPlainReporter(&buf, 0)
 	targets := []ManifestUpdate{{Category: "c", Package: "a"}}
-	RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rep})
+	RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Reporter: rep})
 
 	out := buf.String()
 	if strings.ContainsRune(out, 0x1b) {
@@ -139,7 +139,7 @@ func TestManifestReporterNotInvokedWhenPkgdevMissing(t *testing.T) {
 
 	rec := &recManifestReporter{}
 	targets := []ManifestUpdate{{Category: "c", Package: "a"}, {Category: "c", Package: "b"}}
-	updates := RegenerateManifests(t.TempDir(), targets, &ManifestOptions{Reporter: rec, Jobs: 2, Keep: true}).Updates
+	updates := RegenerateManifests(t.Context(), t.TempDir(), targets, &ManifestOptions{Reporter: rec, Jobs: 2, Keep: true}).Updates
 
 	if len(updates) != 2 {
 		t.Fatalf("got %d updates, want 2", len(updates))
@@ -160,7 +160,7 @@ func TestWorkerPool_PreservesInputOrder(t *testing.T) {
 	for i := range targets {
 		targets[i] = ManifestUpdate{Category: "cat", Package: fmt.Sprintf("pkg-%d", i)}
 	}
-	got := RegenerateManifests("/nonexistent", targets, &ManifestOptions{DryRun: true, Jobs: 8}).Updates
+	got := RegenerateManifests(t.Context(), "/nonexistent", targets, &ManifestOptions{DryRun: true, Jobs: 8}).Updates
 	if len(got) != len(targets) {
 		t.Fatalf("got %d updates, want %d", len(got), len(targets))
 	}
@@ -216,7 +216,7 @@ func TestManifestSummaryIsRelayedNotComposed(t *testing.T) {
 		// output happened to match "1 ok, 1 failed" would pass this test against
 		// a package that had gone on writing that sentence itself.
 		spy := &summarySpy{}
-		RegenerateManifests(overlay, targets, &ManifestOptions{
+		RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{
 			Jobs: 1, Keep: true, Reporter: spy,
 			Summary: func(result ManifestResult) string {
 				return fmt.Sprintf("the caller's words over %d/%d", result.Ok(), result.Failed())
@@ -237,7 +237,7 @@ func TestManifestSummaryIsRelayedNotComposed(t *testing.T) {
 		stubPkgdev(t, true)
 
 		spy := &summarySpy{}
-		RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Keep: true, Reporter: spy})
+		RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Keep: true, Reporter: spy})
 
 		closed, summary := spy.close()
 		if !closed {

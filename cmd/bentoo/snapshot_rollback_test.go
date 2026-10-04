@@ -11,8 +11,8 @@ import (
 // Story 007 T2.1 — `snapshot rollback <id>` verb (R3, R6.1).
 //
 // Mirrors snapshot_restore_test.go: the outcome read through exitOf, a
-// MockRunner injected as snapshotRunner, temp snapshot.toml via the shared
-// helpers, and the confirm gate driven through the snapshotRollbackConfirm
+// MockRunner injected as deps.snapshotRunner, temp snapshot.toml via the shared
+// helpers, and the confirm gate driven through the deps.snapshotRollbackConfirm
 // seam. Rollback is snapper-specific: a non-snapper engine is refused (R3.3).
 // ---------------------------------------------------------------------------
 
@@ -41,14 +41,11 @@ func setRollbackFlags(t *testing.T, yes bool) {
 	t.Cleanup(func() { snapshotRollbackYes = origYes })
 }
 
-// stubRollbackConfirm installs a confirm seam returning decision, recording
-// whether it was consulted, and restores the previous seam after the test.
-func stubRollbackConfirm(t *testing.T, decision bool) *bool {
-	t.Helper()
+// stubRollbackConfirm installs a confirm seam returning decision on d, the
+// deps the run under test is given, recording whether it was consulted.
+func stubRollbackConfirm(d *deps, decision bool) *bool {
 	called := false
-	orig := snapshotRollbackConfirm
-	snapshotRollbackConfirm = func(string) bool { called = true; return decision }
-	t.Cleanup(func() { snapshotRollbackConfirm = orig })
+	d.snapshotRollbackConfirm = func(string) bool { called = true; return decision }
 	return &called
 }
 
@@ -58,13 +55,14 @@ func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRollbackFlags(t, true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}, td))
 	})
 	if exited {
 		t.Fatalf("rollback exited with code %d, want success", code)
@@ -86,14 +84,15 @@ func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRollbackFlags(t, false) // no --yes → confirm gate
-	stubRollbackConfirm(t, false)
+	stubRollbackConfirm(td, false)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}, td))
 	})
 	if exited {
 		t.Fatalf("declined rollback exited with code %d; declining is a clean abort", code)
@@ -109,14 +108,15 @@ func TestRunSnapshotRollback_ConfirmApprovedProceeds(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRollbackFlags(t, false)
-	called := stubRollbackConfirm(t, true)
+	called := stubRollbackConfirm(td, true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}, td))
 	})
 	if exited {
 		t.Fatalf("approved rollback exited with code %d, want success", code)
@@ -136,14 +136,15 @@ func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	writeSnapshotConfig(t, rollbackTOMLBtrbk)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 	setRollbackFlags(t, false)
-	called := stubRollbackConfirm(t, true)
+	called := stubRollbackConfirm(td, true)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}, td))
 	})
 	if !exited || code != 1 {
 		t.Errorf("non-snapper rollback exit = (%d, %v), want (1, true)", code, exited)
@@ -163,10 +164,11 @@ func TestRunSnapshotRollback_DryRunPrintsActionsZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
 	mr := &snapshot.MockRunner{}
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setRollbackFlags(t, false)
-	called := stubRollbackConfirm(t, false)
+	called := stubRollbackConfirm(td, false)
 
 	origDryRun := snapshotRollbackDryRun
 	snapshotRollbackDryRun = true
@@ -175,7 +177,7 @@ func TestRunSnapshotRollback_DryRunPrintsActionsZeroExec(t *testing.T) {
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}))
+		code, exited = exitOf(runSnapshotRollback(snapshotRollbackCmd, []string{"42"}, td))
 	})
 	if exited {
 		t.Fatalf("rollback --dry-run exited with code %d, want success", code)

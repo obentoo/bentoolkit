@@ -269,7 +269,7 @@ func TestGitHubProvider_GetRateLimitInfo(t *testing.T) {
 	prov, _ := NewGitHubProvider(repoInfo)
 	prov.BaseURL = server.URL
 
-	remaining, resetTime, err := prov.GetRateLimitInfo()
+	remaining, resetTime, err := prov.GetRateLimitInfo(t.Context())
 	if err != nil {
 		t.Fatalf("GetRateLimitInfo failed: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestGitHubProvider_GetRateLimitInfoInvalidJSON(t *testing.T) {
 	prov, _ := NewGitHubProvider(repoInfo)
 	prov.BaseURL = server.URL
 
-	_, _, err := prov.GetRateLimitInfo()
+	_, _, err := prov.GetRateLimitInfo(t.Context())
 	if err == nil {
 		t.Fatal("Expected parse error, got nil")
 	}

@@ -96,7 +96,7 @@ func TestApplySlottedPackageWritesSlotRevision(t *testing.T) {
 	const slotKey = "net-libs/webkit-gtk:4.1"
 	applier, overlayDir := newWebkitSlotApplier(t, slotKey, 410, "2.52.5")
 
-	result, err := applier.Apply(slotKey, false)
+	result, err := applier.Apply(t.Context(), slotKey, false)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestApplySlottedPackageWithoutRevisionIsBlocked(t *testing.T) {
 	const slotKey = "net-libs/webkit-gtk:4.1"
 	applier, overlayDir := newWebkitSlotApplier(t, slotKey, 0, "2.52.5")
 
-	result, err := applier.Apply(slotKey, false)
+	result, err := applier.Apply(t.Context(), slotKey, false)
 	if err == nil {
 		t.Fatalf("Apply succeeded, want failure (result: %+v)", result)
 	}

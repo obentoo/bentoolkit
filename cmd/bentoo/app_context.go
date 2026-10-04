@@ -7,11 +7,28 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/spf13/cobra"
 )
 
-// overlayFlag is the global --overlay value: the overlay to work on for this
-// run, outranking both the current directory and overlay.path.
-var overlayFlag string
+// overlayFlagName is the root persistent flag naming the overlay to work on for
+// this run, outranking both the current directory and overlay.path. It is read
+// off the running command (overlayFlagValue), never kept in a package variable:
+// cmd/bentoo holds no new globals (story 060, R8.4).
+const overlayFlagName = "overlay"
+
+// overlayFlagValue returns --overlay as the running command sees it: the root
+// declares it persistent, so every subcommand inherits it. A command built
+// outside the root tree (or a nil one) has no such flag and gets "".
+func overlayFlagValue(cmd *cobra.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	f := cmd.Flag(overlayFlagName)
+	if f == nil {
+		return ""
+	}
+	return f.Value.String()
+}
 
 // appContext holds shared CLI dependencies loaded once per command invocation.
 type appContext struct {
@@ -21,12 +38,12 @@ type appContext struct {
 
 // loadAppContext loads config and validates the overlay path.
 // Use for commands that require a valid, existing overlay directory.
-func loadAppContext() (*appContext, error) {
+func loadAppContext(cmd *cobra.Command) (*appContext, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
-	selectOverlay(cfg)
+	selectOverlay(cfg, overlayFlagValue(cmd))
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
@@ -37,12 +54,12 @@ func loadAppContext() (*appContext, error) {
 // loadAppContextNoValidation loads config and resolves the overlay path
 // without validating the overlay directory structure.
 // Use for commands like analyze and autoupdate that work with unconfigured overlays.
-func loadAppContextNoValidation() (*appContext, error) {
+func loadAppContextNoValidation(cmd *cobra.Command) (*appContext, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
-	selectOverlay(cfg)
+	selectOverlay(cfg, overlayFlagValue(cmd))
 	overlayPath, err := cfg.GetOverlayPathNoValidation()
 	if err != nil {
 		return nil, err
@@ -62,9 +79,9 @@ func loadAppContextNoValidation() (*appContext, error) {
 // checkout and reporting green on code it never read. It only ever moves to a
 // checkout of the configured overlay, never to an unrelated repository, and it
 // says so at INFO, because the run is then not acting where the config says.
-func selectOverlay(cfg *config.Config) {
-	if overlayFlag != "" {
-		cfg.Overlay.Path = overlayFlag
+func selectOverlay(cfg *config.Config, flag string) {
+	if flag != "" {
+		cfg.Overlay.Path = flag
 		return
 	}
 	if p, ok := overlayCheckoutAtCwd(cfg.Overlay.Path); ok {

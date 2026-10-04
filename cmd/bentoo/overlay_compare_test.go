@@ -287,8 +287,15 @@ func realignFlags(t *testing.T, realign, noReview bool) {
 // bytes, and the byte-identical promise is about the report.
 func realignRun(t *testing.T, args []string) (stdout string, code int) {
 	t.Helper()
+	return realignRunWith(t, args, defaultDeps())
+}
+
+// realignRunWith is realignRun over the given deps, for a test that
+// substitutes a seam: the substitution reaches exactly this run.
+func realignRunWith(t *testing.T, args []string, d *deps) (stdout string, code int) {
+	t.Helper()
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runCompare(compareCmd, args))
+		code = exitCodeFor(runCompare(compareCmd, args, d))
 	})
 	if i := strings.LastIndex(out, "\r"); i >= 0 {
 		out = out[i+1:]
@@ -352,13 +359,12 @@ func realignShippedPayload(t *testing.T, fx realignFixture) (report.CompareRun, 
 	opts := overlay.CompareOptions{
 		IncludeSynced: true, // what runCompare sets when --only-outdated is off
 		Concurrency:   compareConcurrency,
-		Ctx:           context.Background(),
 		OverlayPath:   fx.overlayPath,
 		// IncludeNotInRemote is deliberately ABSENT. D1: switching it on
 		// unconditionally would give the Bentoo-only packages rows they do not
 		// have today.
 	}
-	rep, err := overlay.CompareWithProvider(scan.Packages, prov, opts)
+	rep, err := overlay.CompareWithProvider(t.Context(), scan.Packages, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -366,7 +372,7 @@ func realignShippedPayload(t *testing.T, fx realignFixture) (report.CompareRun, 
 	// The reviewer is nil because PATH holds no `claude`, which is also the
 	// state the captured run is in.
 	overlay.AnnotateAuthorship(rep, prov, opts)
-	overlay.AnnotateReviews(rep, nil, prov, opts)
+	overlay.AnnotateReviews(t.Context(), rep, nil, prov, opts)
 
 	return compareComparePayload(t, buildCompareReport(rep, "gentoo", nil)), rep
 }
@@ -691,8 +697,8 @@ func TestCompareRealignAgainstAnotherRepositoryRefusesBeforeLooking(t *testing.T
 //	func compareDepthPreflight(depthFlag string, realign bool) error
 //	type realignPlan struct{ Atoms []string; Depth string }
 //	func realignPlanLines(plan realignPlan) []string
-//	func confirmRealignPlan(plan realignPlan) bool
-//	var realignProve = realign.Prove   // seam: no build runs in a test
+//	func confirmRealignPlan(plan realignPlan, d *deps) bool
+//	deps.realignProve = realign.Prove   // seam: no build runs in a test
 //
 // `realignPlanLines` is a pure line builder and `confirmRealignPlan` is the
 // three-gate decision, split exactly as overlay_compare_summary_test.go explains
@@ -700,8 +706,8 @@ func TestCompareRealignAgainstAnotherRepositoryRefusesBeforeLooking(t *testing.T
 // so splitting the decision from the emission is cheaper than capturing a stream
 // and leaves the emission trivial enough to read.
 //
-// `realignProve` is a package-level seam over the prover, restored with
-// t.Cleanup. Driving the real one would mean a real `ebuild … clean compile` —
+// `realignProve` is a deps seam over the prover, substituted on the test's own
+// deps value. Driving the real one would mean a real `ebuild … clean compile` —
 // a network fetch, a writable DISTDIR and portage on the host — which this
 // story's constraints forbid a test to need. What the seam makes assertable is
 // the thing 7.3 actually owns: WHEN the first build starts relative to the plan,
@@ -723,13 +729,10 @@ func realignDepthFlags(t *testing.T, depth string, yes bool) {
 }
 
 // realignStubProver replaces the prover with one that announces itself and
-// reports a clean proof, and returns a pointer to the call count.
-func realignStubProver(t *testing.T) *int {
-	t.Helper()
+// reports a clean proof on d, and returns a pointer to the call count.
+func realignStubProver(d *deps) *int {
 	calls := 0
-	orig := realignProve
-	t.Cleanup(func() { realignProve = orig })
-	realignProve = func(ctx context.Context, p realign.Proposal, opts realign.Options) (realign.Proof, error) {
+	d.realignProve = func(ctx context.Context, p realign.Proposal, opts realign.Options) (realign.Proof, error) {
 		calls++
 		// Written to stdout so it lands in the same captured stream as the
 		// plan; the assertion is about their order in that one stream.
@@ -842,9 +845,10 @@ func TestRealignPlanIsPrintedBeforeTheFirstBuild(t *testing.T) {
 	realignSetup(t, true, true)
 	realignFlags(t, true, false)
 	realignDepthFlags(t, "configure", true)
-	calls := realignStubProver(t)
+	td := defaultDeps()
+	calls := realignStubProver(td)
 
-	out, code := realignRun(t, nil)
+	out, code := realignRunWith(t, nil, td)
 
 	if code != 0 {
 		t.Fatalf("exit code is %d, want 0", code)
@@ -901,10 +905,10 @@ func TestRealignPlanTakesOneConfirmationForTheWholeRun(t *testing.T) {
 func TestRealignConfirmationRefusesWithoutATerminal(t *testing.T) {
 	realignDepthFlags(t, "configure", false)
 
-	if registryPromptIsInteractive() {
+	if defaultDeps().registryPromptIsInteractive() {
 		t.Skip("this test process has a TTY on both streams, so the non-interactive path cannot be reached here")
 	}
-	if confirmRealignPlan(realignPlan{Atoms: []string{"media-libs/gst-plugins-qt6"}, Depth: "configure"}) {
+	if confirmRealignPlan(realignPlan{Atoms: []string{"media-libs/gst-plugins-qt6"}, Depth: "configure"}, defaultDeps()) {
 		t.Error("confirmRealignPlan approved a run with no terminal and no --yes; the builds would start with nobody having agreed to them")
 	}
 }
@@ -918,9 +922,10 @@ func TestRealignNonInteractiveRunBuildsNothingAndSaysHow(t *testing.T) {
 	realignSetup(t, true, true)
 	realignFlags(t, true, false)
 	realignDepthFlags(t, "configure", false) // no --yes
-	calls := realignStubProver(t)
+	td := defaultDeps()
+	calls := realignStubProver(td)
 
-	out, code := realignRun(t, nil)
+	out, code := realignRunWith(t, nil, td)
 
 	if *calls != 0 {
 		t.Errorf("%d realignment(s) were proved without a terminal and without --yes; nothing may be built until somebody has agreed to it (R7.3)", *calls)
@@ -944,9 +949,10 @@ func TestRealignPipedYesCannotAnswer(t *testing.T) {
 	realignFlags(t, true, false)
 	realignDepthFlags(t, "compile", false)
 	realignPipeStdin(t, "y\ny\ny\n")
-	calls := realignStubProver(t)
+	td := defaultDeps()
+	calls := realignStubProver(td)
 
-	out, code := realignRun(t, nil)
+	out, code := realignRunWith(t, nil, td)
 
 	if *calls != 0 {
 		t.Errorf("%d realignment(s) were proved after a piped `yes`; the confirmation must require BOTH stdin and stdout to be a terminal, exactly as confirmSweep does (overlay_autoupdate_sweep.go:241)", *calls)

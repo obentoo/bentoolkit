@@ -218,7 +218,7 @@ func TestCheckPackageCommitTrack_DateBumpOnly(t *testing.T) {
 	)
 
 	checker := newCommitChecker(t, pkg, currentVer, baseCommitCfg(), body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestCheckPackageCommitTrack_BaseVersionBump(t *testing.T) {
 	)
 
 	checker := newCommitChecker(t, pkg, currentVer, cfg, body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestCheckPackageCommitTrack_NoUpdate(t *testing.T) {
 	)
 
 	checker := newCommitChecker(t, pkg, currentVer, cfg, body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestCheckPackageCommitTrack_SHA_StoredInPending(t *testing.T) {
 	)
 
 	checker := newCommitChecker(t, pkg, currentVer, baseCommitCfg(), body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -364,11 +364,11 @@ func TestCheckPackageCommitTrack_SkipsCache(t *testing.T) {
 	createTestEbuild(t, overlayDir, pkg, currentVer)
 
 	// First call — force=false. Commit-tracked packages must still fetch.
-	if _, err := checker.CheckPackage(pkg, false); err != nil {
+	if _, err := checker.CheckPackage(t.Context(), pkg, false); err != nil {
 		t.Fatalf("first check: %v", err)
 	}
 	// Second call — force=false again. Must fetch again (no cache read).
-	if _, err := checker.CheckPackage(pkg, false); err != nil {
+	if _, err := checker.CheckPackage(t.Context(), pkg, false); err != nil {
 		t.Fatalf("second check: %v", err)
 	}
 	if fetchCount < 2 {
@@ -655,7 +655,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			checker := newCommitChecker(t, tt.pkg, tt.currentVersion, tt.cfg, tt.body)
 
-			result, err := checker.CheckPackage(tt.pkg, true)
+			result, err := checker.CheckPackage(t.Context(), tt.pkg, true)
 			if err != nil {
 				t.Fatalf("CheckPackage: %v", err)
 			}
@@ -707,7 +707,7 @@ func TestCheckPackageCommitTrack_BaseVersionNotDowngraded(t *testing.T) {
 	)
 
 	checker := newCommitChecker(t, pkg, currentVer, cfg, body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -739,7 +739,7 @@ func TestCheckPackageCommitTrack_GitLabDateFormat(t *testing.T) {
 	body := makeGLCommits(struct{ id, date, title string }{testSHA40, "2026-06-10T14:30:00.000+00:00", "fix"})
 
 	checker := newCommitChecker(t, pkg, currentVer, cfg, body)
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
