@@ -446,7 +446,7 @@ func TestGetRateLimitInfo(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	remaining, resetTime, err := client.GetRateLimitInfo()
+	remaining, resetTime, err := client.GetRateLimitInfo(t.Context())
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestGetRateLimitInfoInvalidJSON(t *testing.T) {
 	client := NewClient()
 	client.BaseURL = server.URL
 
-	_, _, err := client.GetRateLimitInfo()
+	_, _, err := client.GetRateLimitInfo(t.Context())
 	if err == nil {
 		t.Fatal("Expected parse error, got nil")
 	}

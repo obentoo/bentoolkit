@@ -140,14 +140,13 @@ func TestCheckRun_ThePlanIsPrintedBeforeTheFirstGateRuns(t *testing.T) {
 // thing would be the worst outcome; one that silently did nothing would be the
 // second worst, because the operator would not know why.
 func TestCheckRun_NonInteractiveWithoutYesChangesNothingAndSaysHow(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = false
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = false
 
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var approved bool
-	out := captureStdout(t, func() { approved = confirmValidationRun(plan) })
+	out := captureStdout(t, func() { approved = testAutoupdateRun(auOpts).confirmValidationRun(plan) })
 
 	if approved {
 		t.Fatal("a non-interactive run without --yes approved a plan containing a build; the test requires BOTH stdin and stdout to be a TTY, " +
@@ -163,14 +162,15 @@ func TestCheckRun_NonInteractiveWithoutYesChangesNothingAndSaysHow(t *testing.T)
 // stdout being a pipe is enough to refuse, which is why the check is on both
 // streams rather than on stdin alone.
 func TestCheckRun_PipedYesCannotAnswerForTheOperator(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = false
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = false
 
 	// captureStdout replaces os.Stdout with a pipe, which is exactly the shape
 	// `yes | bentoo …` produces.
 	var approved bool
-	_ = captureStdout(t, func() { approved = confirmValidationRun(buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())) })
+	_ = captureStdout(t, func() {
+		approved = testAutoupdateRun(auOpts).confirmValidationRun(buildValidationPlan(checkPlanUpdates(), checkPlanPolicy()))
+	})
 
 	if approved {
 		t.Error("a piped stdout was treated as an interactive terminal; the predicate requires both stdin and stdout to be a TTY " +
@@ -183,9 +183,8 @@ func TestCheckRun_PipedYesCannotAnswerForTheOperator(t *testing.T) {
 // where nothing does must not prompt, or the operator learns to answer without
 // reading.
 func TestCheckRun_AnOptionsOnlyRunAsksNothing(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = false
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = false
 
 	cheap := []autoupdate.PendingUpdate{
 		{Package: "dev-libs/quiet", CurrentVersion: "1.28.5", NewVersion: "1.28.6"},
@@ -194,7 +193,7 @@ func TestCheckRun_AnOptionsOnlyRunAsksNothing(t *testing.T) {
 	plan := buildValidationPlan(cheap, checkPlanPolicy())
 
 	var approved bool
-	out := captureStdout(t, func() { approved = confirmValidationRun(plan) })
+	out := captureStdout(t, func() { approved = testAutoupdateRun(auOpts).confirmValidationRun(plan) })
 
 	if !approved {
 		t.Errorf("a run whose depths are all `options` was refused for want of a confirmation; nothing here starts a build:\n%s", out)
@@ -204,14 +203,13 @@ func TestCheckRun_AnOptionsOnlyRunAsksNothing(t *testing.T) {
 // TestCheckRun_YesApprovesWithAWarning is confirmSweep's first gate, kept
 // identical so the two commands read alike.
 func TestCheckRun_YesApprovesWithAWarning(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = true
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = true
 
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var approved bool
-	out := captureStdout(t, func() { approved = confirmValidationRun(plan) })
+	out := captureStdout(t, func() { approved = testAutoupdateRun(auOpts).confirmValidationRun(plan) })
 
 	if !approved {
 		t.Fatal("--yes did not approve the run")
@@ -229,14 +227,16 @@ func TestCheckRun_PublishesNothingOnAnyPath(t *testing.T) {
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var promoted []string
-	origSet := setVersionsForCheck
-	setVersionsForCheck = func(overlayPath string, pins map[string]string) error {
+	// runValidationCheck takes no deps, so it cannot reach any publisher at
+	// all: the stub below stays wired as the observable form of R9.2, and a
+	// future signature that threads deps into the check must hand it td.
+	td := defaultDeps()
+	td.setVersionsForCheck = func(overlayPath string, pins map[string]string) error {
 		for pkg := range pins {
 			promoted = append(promoted, pkg)
 		}
 		return nil
 	}
-	t.Cleanup(func() { setVersionsForCheck = origSet })
 
 	outcomes := map[string]validate.Outcome{
 		"media-plugins/gst-plugins-qt6": validate.OutcomeFailed,
@@ -413,9 +413,8 @@ func TestCheckPlan_NamesTheDistfilesToBeFetchedAndTheDepthDistribution(t *testin
 // not acceptable is doing the expensive thing silently, so the report has to say
 // which happened.
 func TestCheckRun_AReviewerEscalationPastTheConfirmedDepthDoesNotRunUnasked(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = false // nothing may be approved without an explicit ask
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = false // nothing may be approved without an explicit ask
 
 	// A plan whose every entry is `options`: by R9.4 this asks for no
 	// confirmation at all.
@@ -484,19 +483,17 @@ func TestCheckRun_AReviewerEscalationPastTheConfirmedDepthDoesNotRunUnasked(t *t
 // asks for nothing new — re-prompting there would train them to approve without
 // reading, which is the failure mode every confirmation gate dies of.
 func TestCheckRun_AnEscalationInsideTheConfirmedDepthRunsWithoutFuss(t *testing.T) {
-	origYes := autoupdateYes
-	autoupdateYes = true // the whole run, including its configure, was approved
-	t.Cleanup(func() { autoupdateYes = origYes })
+	auOpts := testAutoupdateOptions()
+	auOpts.yes = true // the whole run, including its configure, was approved
 
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 
 	var prompts int
-	origConfirm := confirmSweepFn
-	confirmSweepFn = func(string) bool { prompts++; return true }
-	t.Cleanup(func() { confirmSweepFn = origConfirm })
+	td := defaultDeps()
+	td.confirmSweep = func(string) bool { prompts++; return true }
 
 	_ = captureStdout(t, func() {
-		if !confirmValidationRun(plan) {
+		if !testAutoupdateRunWith(auOpts, td).confirmValidationRun(plan) {
 			t.Fatal("--yes did not approve the run")
 		}
 		runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
@@ -800,7 +797,7 @@ func TestValidationDoesNotRenderTheReport(t *testing.T) {
 // Every other path through runPendingValidation needs a Checker, a config
 // directory and a network, and this package builds none of them — its tests
 // compose the individual producers by hand (see renderCheckReport at :586). The
-// `if !autoupdateLLM` arm returns before any of that, so it is the one arm
+// `if !ar.opts.llm` arm returns before any of that, so it is the one arm
 // callable with nothing but a context. That is a narrow claim and it is stated
 // narrowly; the structural half above is what covers the rest.
 //
@@ -812,11 +809,10 @@ func TestValidationDoesNotRenderTheReport(t *testing.T) {
 // here would be merged into a run that never validated anything and reported as
 // if it had.
 func TestPendingValidationReturnsThePlanHalf(t *testing.T) {
-	restore := autoupdateLLM
-	autoupdateLLM = false
-	t.Cleanup(func() { autoupdateLLM = restore })
+	auOpts := testAutoupdateOptions()
+	auOpts.llm = false
 
-	run, printed := runPendingValidation(t.Context(), t.TempDir(), t.TempDir(),
+	run, printed := testAutoupdateRun(auOpts).runPendingValidation(t.Context(), t.TempDir(), t.TempDir(),
 		[]autoupdate.CheckResult{{Package: "app-misc/jq", CurrentVersion: "1.7.1", UpstreamVersion: "1.8.0", HasUpdate: true, Type: "source"}},
 		config.LLMConfig{})
 	got := checkPayload(run)
@@ -883,6 +879,7 @@ func story045Scanned() ([]autoupdate.CheckResult, []report.PackageResult) {
 // "Validation Plan" at overlay_autoupdate_check.go:320 before the confirmation,
 // and the report emits its own at render/text.go:327 afterwards.
 func TestValidationPlanHeadingAppearsOnce(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	_, scanned := story045Scanned()
 	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
 	r := report.AutoupdateCheck{
@@ -892,7 +889,7 @@ func TestValidationPlanHeadingAppearsOnce(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		printValidationPrice(plan)
-		presentCheckReport(finishedRun(r), true)
+		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(r), true)
 	})
 
 	if got := strings.Count(out, "Validation Plan"); got != 1 {
@@ -1030,8 +1027,9 @@ func finishedRun(r report.AutoupdateCheck) report.Run {
 // runCheck needs a checker, a config dir and a network, and this package's tests
 // do not build one.
 func TestEmptyScanRendersNoReport(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	out := captureStdout(t, func() {
-		presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
+		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
 	})
 
 	if strings.TrimSpace(out) != "" {
@@ -1045,11 +1043,12 @@ func TestEmptyScanRendersNoReport(t *testing.T) {
 // an implementation that renders nothing ever. This is the fixture that would
 // make that implementation fail.
 func TestNonEmptyScanStillRenders(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	r := report.AutoupdateCheck{Scanned: []report.PackageResult{
 		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
 	}}
 
-	out := captureStdout(t, func() { presentCheckReport(finishedRun(r), noPlanPrinted) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(r), noPlanPrinted) })
 
 	if !strings.Contains(out, "Version Check Results") {
 		t.Errorf("a scan with one package rendered no version check — the empty-scan rule must not swallow real runs (R4.1)\n%s", out)
@@ -1080,11 +1079,12 @@ func TestNonEmptyScanStillRenders(t *testing.T) {
 // suppressor. The logger's own half is covered where it belongs, by
 // TestQuietModeSuppressesInfoMessages in internal/common/logger.
 func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	logger.SetQuiet(true)
 	t.Cleanup(func() { logger.Default().SetLevel(logger.LevelInfo) })
 
 	empty := captureStdout(t, func() {
-		presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
+		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
 	})
 	if strings.TrimSpace(empty) != "" {
 		t.Errorf("a quiet run over an empty scan put %d bytes on stdout, which --quiet cannot reach — the one silence a quiet run has today would be gone (R5.3, D4)\n%s",
@@ -1092,7 +1092,7 @@ func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
 	}
 
 	scanned := captureStdout(t, func() {
-		presentCheckReport(finishedRun(report.AutoupdateCheck{Scanned: []report.PackageResult{
+		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(report.AutoupdateCheck{Scanned: []report.PackageResult{
 			{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
 		}}), noPlanPrinted)
 	})
@@ -1121,13 +1121,14 @@ func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
 // say. A run holding results has something to say however its scan came out, so
 // the guard is a conjunction: silent only when BOTH halves are empty.
 func TestEmptyScanWithValidationStillRenders(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	r := report.AutoupdateCheck{
 		Plan:    []report.PlanEntry{{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Depth: "configure"}},
 		Results: []report.ValidationRow{{Package: "app-misc/jq", Outcome: "proved"}},
 		Tally:   report.Tally{Proved: 1},
 	}
 
-	out := captureStdout(t, func() { presentCheckReport(finishedRun(r), noPlanPrinted) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(r), noPlanPrinted) })
 
 	if !strings.Contains(out, "app-misc/jq") {
 		t.Errorf("a run that evaluated a package rendered nothing because its scan came out empty — the gates ran and their answer was discarded (D4, R5.3)\n%s", out)
@@ -1139,12 +1140,13 @@ func TestEmptyScanWithValidationStillRenders(t *testing.T) {
 // internal/common must not know one binary's command names. R1.4 permits it
 // because a hint is not a package name, a version, a plan entry or a tally.
 func TestListHintAppearsOnce(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	r := report.AutoupdateCheck{Scanned: []report.PackageResult{
 		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
 		{Package: "app-misc/yq", Type: "source", CurrentVersion: "4.44.1", CandidateVersion: "4.45.0", HasUpdate: true},
 	}}
 
-	out := captureStdout(t, func() { presentCheckReport(finishedRun(r), noPlanPrinted) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(r), noPlanPrinted) })
 
 	// Two pending updates, one hint — not one per package, and not one per section.
 	if got := strings.Count(out, "--list"); got != 1 {
@@ -1155,11 +1157,12 @@ func TestListHintAppearsOnce(t *testing.T) {
 // TestListHintAbsentWithNoUpdates keeps the hint from becoming unconditional
 // noise: a run that found nothing to update has nothing to list.
 func TestListHintAbsentWithNoUpdates(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	r := report.AutoupdateCheck{Scanned: []report.PackageResult{
 		{Package: "app-editors/zed", Type: "bin", CurrentVersion: "0.199.4", CandidateVersion: "0.199.4"},
 	}}
 
-	out := captureStdout(t, func() { presentCheckReport(finishedRun(r), noPlanPrinted) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(r), noPlanPrinted) })
 
 	if strings.Contains(out, "--list") {
 		t.Errorf("the hint was printed for a scan with no pending update (R5.2)\n%s", out)
@@ -1262,13 +1265,14 @@ func countHeadingEmitters(t *testing.T, heading string) int {
 // "disabled in packages.toml" and returns before presentCheckReport, so there
 // is no risk of saying it twice. Only the batch path went quiet.
 func TestOrphanDisableIsAnnounced(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	orphaned := report.AutoupdateCheck{Scanned: []report.PackageResult{
 		{Package: "app-misc/gone", Type: "source", Orphaned: true},
 		{Package: "app-misc/alsogone", Type: "source", Orphaned: true},
 		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.7.1"},
 	}}
 
-	out := captureStdout(t, func() { presentCheckReport(finishedRun(orphaned), noPlanPrinted) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(orphaned), noPlanPrinted) })
 
 	// One sentence for the run, not one per package: it reports a single
 	// batched write, which is what DisableOrphans performs.
@@ -1280,7 +1284,7 @@ func TestOrphanDisableIsAnnounced(t *testing.T) {
 		{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.7.1"},
 	}}
 
-	quiet := captureStdout(t, func() { presentCheckReport(finishedRun(clean), noPlanPrinted) })
+	quiet := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(clean), noPlanPrinted) })
 	if strings.Contains(quiet, "packages.toml") {
 		t.Errorf("a run that disabled nothing announced a registry write — the notice must not become unconditional noise (R5.4)\n%s", quiet)
 	}

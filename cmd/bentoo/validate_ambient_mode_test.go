@@ -107,9 +107,9 @@ import (
 func seedValidate(t *testing.T, rep validate.Report) *testCLI {
 	t.Helper()
 
-	stubValidateRunner(t, rep)
 	c := newTestCLI(t)
-	t.Cleanup(stubUIIsTerminal(false))
+	stubValidateRunner(c.deps, rep)
+	stubUIIsTerminal(c.deps, false)
 	return c
 }
 

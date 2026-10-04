@@ -14,7 +14,7 @@ import (
 
 // Authored for story 048, sub-task 3.3 — S048-R3.1, S048-R4.1, S048-R5.1.
 //
-// newClaudeAsker (overlay_compare_review.go:64) is the ONE construction seam
+// deps.newClaudeAsker (default newClaudeCodeAsker) is the ONE construction seam
 // both review paths are built through, and it passes no timeout option at all —
 // so every review this program has ever run has run on
 // autoupdate.DefaultClaudeCodeTimeout, whatever the operator configured.

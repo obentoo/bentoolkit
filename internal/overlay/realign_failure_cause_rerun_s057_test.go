@@ -46,7 +46,7 @@ func s057RealignFixture(t *testing.T, atoms ...string) (*CompareReport, *localRo
 	}
 	prov := &localRootedFakeProvider{root: gentooRoot, versions: versions}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v", err)
 	}
@@ -57,14 +57,14 @@ func s057RealignFixture(t *testing.T, atoms ...string) (*CompareReport, *localRo
 func TestRealignNoVerdictByDescribesTheLastPass(t *testing.T) {
 	report, prov, opts := s057RealignFixture(t, "s057/a", "s057/b")
 
-	AnnotateRealignVerdicts(report, &s057RealignByAtom{errs: map[string]error{
+	AnnotateRealignVerdicts(t.Context(), report, &s057RealignByAtom{errs: map[string]error{
 		"s057/a": fmt.Errorf("the realignment review failed: %w", ErrReviewTimedOut),
 	}}, prov, opts)
 	if got := s057CountsByCause(t, report.RealignNoVerdictBy); got["timed out"] != 1 || report.RealignNoVerdict != 1 {
 		t.Fatalf("the fixture is wrong: first pass gave NoVerdict %d, by %v", report.RealignNoVerdict, got)
 	}
 
-	AnnotateRealignVerdicts(report, &s057RealignByAtom{}, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), report, &s057RealignByAtom{}, prov, opts)
 	if report.RealignNoVerdict != 0 {
 		t.Fatalf("the fixture is wrong: second pass left NoVerdict %d", report.RealignNoVerdict)
 	}
@@ -77,10 +77,9 @@ func TestRealignCancelledMidCallCountsAsCancelled(t *testing.T) {
 	report, prov, opts := s057RealignFixture(t, "s057/a", "s057/b", "s057/c")
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	opts.Ctx = ctx
 
 	rev := &s057CancellingRealign{cancel: cancel}
-	AnnotateRealignVerdicts(report, rev, prov, opts)
+	AnnotateRealignVerdicts(ctx, report, rev, prov, opts)
 
 	if rev.calls != 1 {
 		t.Fatalf("the loop asked %d times after the run was cancelled; want 1", rev.calls)

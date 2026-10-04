@@ -8,4 +8,5 @@ description = "Env var NAMES used in tests (e.g. BENTOO_T13_CLAUDE_KEY, BENTOO05
 regexes = [
   '''BENTOO_T13_[A-Z0-9_]+_KEY''',
   '''(XDG_)?BENTOO051_[A-Z0-9_]*KEY''',
+  '''BENTOO_CTX059_[A-Z0-9_]+_KEY''',
 ]

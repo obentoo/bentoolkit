@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -125,7 +126,7 @@ func (c *OllamaClient) GetModel() string {
 }
 
 // ExtractVersion uses Ollama to extract a version string from content.
-func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, error) {
+func (c *OllamaClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
 	// Build the user message with content and prompt
 	userMessage := buildVersionExtractionPrompt(content, prompt)
 
@@ -147,7 +148,7 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.baseURL+"/api/generate", bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(reqJSON))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -158,7 +159,7 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrOllamaConnectionFailed, err)
+		return "", fmt.Errorf("%w: ollama request to %s failed: %w", ErrOllamaConnectionFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 
@@ -199,7 +200,7 @@ func (c *OllamaClient) ExtractVersion(content []byte, prompt string) (string, er
 }
 
 // AnalyzeContent uses Ollama to analyze content and suggest a parser configuration.
-func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *OllamaClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 
@@ -221,7 +222,7 @@ func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.baseURL+"/api/generate", bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -232,7 +233,7 @@ func (c *OllamaClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrOllamaConnectionFailed, err)
+		return nil, fmt.Errorf("%w: ollama request to %s failed: %w", ErrOllamaConnectionFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 

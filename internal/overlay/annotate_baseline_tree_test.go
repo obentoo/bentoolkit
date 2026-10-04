@@ -124,7 +124,7 @@ func TestAnnotateBaselineReviewsAResultSetWithNoCarriedPackage(t *testing.T) {
 		"app-editors/zed", "app-arch/bentoo-tools")
 	opts := baselineTreeOpts(overlayRoot)
 
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -190,7 +190,7 @@ func TestAnnotateBaselineWithNoTreeSaysSoRatherThanNothing(t *testing.T) {
 	overlayRoot, prov, pkgs := baselineTreeFixture(t, false, "", "app-editors/zed")
 	opts := baselineTreeOpts(overlayRoot)
 
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

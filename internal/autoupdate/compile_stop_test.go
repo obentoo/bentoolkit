@@ -201,10 +201,10 @@ func combinedOutput(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput()
 // build that exited 0 while a helper still held its pipe is a PASS, and must not
 // reach repairBuildGatesAndRerun as a failure (S054-R1.5).
 func TestRecordingRunnerTreatsWaitDelayAfterSuccessAsSuccess(t *testing.T) {
-	a := &Applier{ctx: context.Background(), runAttached: combinedOutput}
+	a := &Applier{runAttached: combinedOutput}
 
 	var passed buildAttempt
-	if _, err := a.recordingRunner(&passed)(lingeringChild(t, 0)); err != nil {
+	if _, err := a.recordingRunner(t.Context(), &passed)(lingeringChild(t, 0)); err != nil {
 		t.Errorf("the runner returned %v for a build that exited 0", err)
 	}
 	if passed.err != nil {
@@ -214,7 +214,7 @@ func TestRecordingRunnerTreatsWaitDelayAfterSuccessAsSuccess(t *testing.T) {
 	// The hostile half: the same lingering helper after a non-zero exit is
 	// still a compile failure.
 	var failed buildAttempt
-	if _, err := a.recordingRunner(&failed)(lingeringChild(t, 3)); err == nil {
+	if _, err := a.recordingRunner(t.Context(), &failed)(lingeringChild(t, 3)); err == nil {
 		t.Fatal("instrument: a build that exited 3 returned no error")
 	}
 	if !errors.Is(failed.err, ErrCompileFailed) {
@@ -227,7 +227,7 @@ func TestRecordingRunnerTreatsWaitDelayAfterSuccessAsSuccess(t *testing.T) {
 func TestRecordingRunnerNeverLabelsAnInterruptACompileFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a := &Applier{ctx: ctx, runAttached: func(cmd *exec.Cmd) ([]byte, error) {
+	a := &Applier{runAttached: func(cmd *exec.Cmd) ([]byte, error) {
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func TestRecordingRunnerNeverLabelsAnInterruptACompileFailure(t *testing.T) {
 	procgroup.Group(cmd)
 
 	var attempt buildAttempt
-	if _, err := a.recordingRunner(&attempt)(cmd); err == nil {
+	if _, err := a.recordingRunner(ctx, &attempt)(cmd); err == nil {
 		t.Fatal("instrument: a build stopped by its context returned no error")
 	}
 	if errors.Is(attempt.err, ErrCompileFailed) {
@@ -265,7 +265,7 @@ func TestCompileExitZeroWithALingeringHelperPasses(t *testing.T) {
 		}
 	})
 
-	logPath, err := h.applier.runCompile(h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
+	logPath, err := h.applier.runCompile(t.Context(), h.cand, "media-plugins/gst-plugins-qt6", "1.29.2", &ApplyResult{})
 	if err != nil {
 		t.Errorf("a compile that exited 0 while a helper held its pipe returned %v (log %q), want a pass (R1.5)", err, logPath)
 	}

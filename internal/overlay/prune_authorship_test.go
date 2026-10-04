@@ -426,7 +426,7 @@ func TestPruneAuthorshipEndToEnd(t *testing.T) {
 	// divergence map, since an atom missing from it yields VerdictUnknown and
 	// would be refused at the verdict gate for a reason that has nothing to do
 	// with authorship.
-	report, err := CompareWithProvider(
+	report, err := CompareWithProvider(t.Context(),
 		[]PackageInfo{
 			{Category: pruneAuthorshipCat, Package: provedPrunePkg, LatestVersion: provedPruneVersion},
 			{Category: pruneAuthorshipCat, Package: unprovedPkg, LatestVersion: provedPruneVersion},

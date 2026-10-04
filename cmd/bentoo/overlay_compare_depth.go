@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/obentoo/bentoolkit/internal/realign"
@@ -46,24 +47,24 @@ import (
 //
 // _Requirements: R7, R7.3_
 
-// realignProve is the prover, held as a package-level variable so no build ever
+// The prover is the realignProve field of deps (deps.go), so no build ever
 // runs in a test.
 //
 // It IS realign.Prove and not an adapter over it, on the discipline
-// internal/realign already applies to story 033's two entry points: the var's
-// type is the function's signature, so a change to either stops this file
-// compiling instead of quietly changing what a realignment is proved by. Driving
+// internal/realign already applies to story 033's two entry points: the
+// field's type is the function's signature, so a change to either stops
+// defaultDeps compiling instead of quietly changing what a realignment is
+// proved by. Driving
 // the real one from a test would mean a real `ebuild … clean compile` — a network
 // fetch, a writable DISTDIR and portage on the host — which this story's
 // constraints forbid a test to need.
 //
+// The y/N question is the confirmRealignPlan field of deps, defaulting to the
+// single confirmation helper this package already uses. confirmAction reads
+// os.Stdin and answers "no" on any read error, so an EOF is a decline rather
+// than an accident.
+//
 // _Requirements: R7, R7.3_
-var realignProve = realign.Prove
-
-// confirmRealignPlanFn is the y/N seam, defaulting to the single confirmation
-// helper this package already uses. confirmAction reads os.Stdin and answers
-// "no" on any read error, so an EOF is a decline rather than an accident.
-var confirmRealignPlanFn = confirmAction
 
 // compareDepthPreflight reports why THIS INVOCATION cannot honour the `--depth`
 // it was given, or nil when it can (R7.3).
@@ -200,7 +201,7 @@ func printRealignPlan(plan realignPlan) {
 // The three gates are confirmSweep's, in the same order and for the same reason:
 // --yes proceeds unattended because the operator asked for that in so many words;
 // an interactive terminal is asked; anything else says how to proceed and proves
-// nothing. registryPromptIsInteractive requires BOTH a stdin and a stdout TTY, so
+// nothing. deps.registryPromptIsInteractive requires BOTH a stdin and a stdout TTY, so
 // `yes | bentoo overlay compare --realign --depth=compile` cannot answer for a
 // human — a readable stdin full of consent nobody typed is exactly what a check
 // on stdin alone accepts.
@@ -220,12 +221,12 @@ func printRealignPlan(plan realignPlan) {
 // past the prompt and never past the plan.
 //
 // _Requirements: R7, R7.3_
-func confirmRealignPlan(plan realignPlan) bool {
+func confirmRealignPlan(plan realignPlan, d *deps) bool {
 	if compareYes {
 		output.Warning.Printf("  --yes given: proving %d realignment(s) without a prompt.\n", len(plan.Atoms))
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !d.registryPromptIsInteractive() {
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing was built.")
 		output.Info.Printf("  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n", len(plan.Atoms))
 		return false
@@ -233,7 +234,7 @@ func confirmRealignPlan(plan realignPlan) bool {
 
 	fmt.Println()
 	output.Warning.Printf("  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n", plan.Depth)
-	return confirmRealignPlanFn(fmt.Sprintf("Prove %d realignment(s) at depth %s?", len(plan.Atoms), plan.Depth))
+	return d.confirmRealignPlan(fmt.Sprintf("Prove %d realignment(s) at depth %s?", len(plan.Atoms), plan.Depth))
 }
 
 // realignCandidate is one package this run would prove, with the proposal that
@@ -352,7 +353,7 @@ func realignCandidates(report *overlay.CompareReport) (candidates []realignCandi
 // to speak for the run.
 //
 // _Requirements: R7, R7.3_
-func proveRealignments(ctx context.Context, report *overlay.CompareReport, overlayPath string) {
+func proveRealignments(ctx context.Context, report *overlay.CompareReport, overlayPath string, d *deps) {
 	// Unreachable: compareDepthPreflight parsed the very same string before the
 	// run started and refused it there. Handled anyway, and handled by RETURNING,
 	// because the alternative — assuming the zero value — is the one ParseDepth's
@@ -414,8 +415,12 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// one, and taking a second answer for the same question is how a run proves
 	// one overlay and reports on another.
 	var requireIsolation bool
-	if appCtx, cerr := loadAppContextNoValidation(); cerr == nil {
-		requireIsolation = appCtx.Config.Autoupdate.Validate.GetRequireIsolation()
+	// The config alone: no overlay selection runs here, so the run's "using the
+	// overlay checkout at …" notice is not repeated for a path this ignores.
+	if cfg, cerr := config.Load(); cerr == nil {
+		if _, perr := cfg.GetOverlayPathNoValidation(); perr == nil {
+			requireIsolation = cfg.Autoupdate.Validate.GetRequireIsolation()
+		}
 	}
 
 	// A build gate that FAILED says so on its own, but the reason upstream broke
@@ -436,12 +441,12 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 
 	plan := realignPlan{Atoms: realignPlanAtoms(candidates), Depth: depth.String()}
 	printRealignPlan(plan)
-	if !confirmRealignPlan(plan) {
+	if !confirmRealignPlan(plan, d) {
 		return
 	}
 
 	for _, c := range candidates {
-		proof, err := realignProve(ctx, c.proposal, realign.Options{
+		proof, err := d.realignProve(ctx, c.proposal, realign.Options{
 			Overlay:     overlayPath,
 			StagingRoot: stagingRoot,
 			Depth:       depth,
@@ -483,7 +488,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 		if err != nil || len(proof.Gates) == 0 || !proof.Passed {
 			continue
 		}
-		offerRealignPublish(c, proof, overlayPath)
+		offerRealignPublish(c, proof, overlayPath, d)
 	}
 }
 

@@ -58,7 +58,7 @@ func s057CompareAll(t *testing.T, prov provider.Provider, opts CompareOptions, a
 		cat, pkg, _ := strings.Cut(a, "/")
 		pkgs = append(pkgs, PackageInfo{Category: cat, Package: pkg, LatestVersion: "1.0"})
 	}
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v", err)
 	}
@@ -199,7 +199,7 @@ func TestLookupFailureRecordsCauseAndText(t *testing.T) {
 	goneURL := gone.URL
 	gone.Close()
 	netProv := newProv(goneURL)
-	_, netRes := s057CompareAll(t, netProv, CompareOptions{Ctx: context.Background()}, "cat/refused")
+	_, netRes := s057CompareAll(t, netProv, CompareOptions{}, "cat/refused")
 	r := netRes["cat/refused"]
 	if r.Status != StatusError || s057Word(r.LookupCause) != "network" {
 		t.Errorf("a refused connection gave Status %v cause %q, want StatusError and \"network\" (R1.3)", r.Status, s057Word(r.LookupCause))

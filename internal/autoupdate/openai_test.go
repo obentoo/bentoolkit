@@ -29,7 +29,7 @@ func TestOpenAIExtractVersionSuccess(t *testing.T) {
 	}
 	client.SetBaseURL(server.URL)
 
-	version, err := client.ExtractVersion([]byte("some content"), "")
+	version, err := client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestOpenAIExtractVersionHTTP500(t *testing.T) {
 	}
 	client.SetBaseURL(server.URL)
 
-	_, err = client.ExtractVersion([]byte("some content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -83,7 +83,7 @@ func TestOpenAIExtractVersionMalformedJSON(t *testing.T) {
 	}
 	client.SetBaseURL(server.URL)
 
-	_, err = client.ExtractVersion([]byte("some content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -127,7 +127,7 @@ func TestOpenAIExtractVersionContextCancellation(t *testing.T) {
 	client.SetBaseURL(server.URL)
 	client.SetHTTPClient(&http.Client{Timeout: 50 * time.Millisecond})
 
-	_, err = client.ExtractVersion([]byte("some content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -150,7 +150,7 @@ func TestOpenAIExtractVersionEmptyResponse(t *testing.T) {
 	}
 	client.SetBaseURL(server.URL)
 
-	_, err = client.ExtractVersion([]byte("some content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -192,7 +192,7 @@ func TestOpenAIClient_WithCustomMaxBody(t *testing.T) {
 		t.Fatalf("WithMaxBodyBytes(%d) did not apply: maxBodyBytes = %d", limit, client.maxBodyBytes)
 	}
 
-	_, err = client.ExtractVersion([]byte("some content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("some content"), "")
 	if err == nil {
 		t.Fatal("expected an error for an oversized response body, got nil")
 	}

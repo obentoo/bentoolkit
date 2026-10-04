@@ -29,7 +29,7 @@ func newLogCmd() *cobra.Command {
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
-	ctx, err := loadAppContext()
+	ctx, err := loadAppContext(cmd)
 	if err != nil {
 		logger.Error("loading config: %v", err)
 		return exitWith(1)

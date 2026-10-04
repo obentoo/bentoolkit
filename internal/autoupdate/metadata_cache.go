@@ -30,7 +30,7 @@ const defaultGentooRepo = "/var/db/repos/gentoo"
 // resolves the repository by name to the synced copy Portage reads and would
 // rewrite THAT cache instead. With a package atom it touches only that
 // package's entries, which is what lets it run after every bump.
-func (a *Applier) regenMetadataCache(pkg, version string) error {
+func (a *Applier) regenMetadataCache(ctx context.Context, pkg, version string) error {
 	if fi, err := os.Stat(filepath.Join(a.overlayPath, "metadata", "md5-cache")); err != nil || !fi.IsDir() {
 		return nil
 	}
@@ -46,9 +46,9 @@ func (a *Applier) regenMetadataCache(pkg, version string) error {
 		return fmt.Errorf("md5-cache of %s not regenerated: egencache is not on PATH", pkg)
 	}
 
-	ctx, cancel := context.WithTimeout(a.ctx, metadataCacheTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, metadataCacheTimeout)
 	defer cancel()
-	cmd := a.execCommand(ctx, "egencache", "--update", "--repo", repo,
+	cmd := a.execCommand(runCtx, "egencache", "--update", "--repo", repo,
 		"--repositories-configuration", conf, category+"/"+pkgName)
 	var out bytes.Buffer
 	cmd.Stdout = &out

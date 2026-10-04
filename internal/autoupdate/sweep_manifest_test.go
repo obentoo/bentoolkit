@@ -50,14 +50,14 @@ func init() {
 //     directory belonging to this test process is substituted instead;
 //   - the host's DISTDIR named outright: refused, loudly, as an error the
 //     calling test fails on.
-func sandboxedResolveDistdir(explicit, configured string) (distfiles.Dir, error) {
+func sandboxedResolveDistdir(ctx context.Context, explicit, configured string) (distfiles.Dir, error) {
 	if explicit == distfiles.DefaultCache || configured == distfiles.DefaultCache {
 		return distfiles.Dir{}, fmt.Errorf("refused: a test asked for the host's DISTDIR (%s)", distfiles.DefaultCache)
 	}
 	if explicit == "" && configured == "" {
 		configured = testDistdirSandbox()
 	}
-	return distfiles.Resolve(explicit, configured)
+	return distfiles.Resolve(ctx, explicit, configured)
 }
 
 // testDistdirSandbox is where a sweeper that named no distdir lands.
@@ -80,7 +80,7 @@ var testDistdirSandbox = sync.OnceValue(func() string {
 // guard nothing tests is a guard that quietly stops working — and the failure
 // mode it prevents is damage to the machine running the suite, not a red test.
 func TestRunManifestNeverResolvesTheHostDistdir(t *testing.T) {
-	dir, err := resolveDistdir("", "")
+	dir, err := resolveDistdir(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("resolving with nothing named: %v", err)
 	}
@@ -94,10 +94,10 @@ func TestRunManifestNeverResolvesTheHostDistdir(t *testing.T) {
 		t.Errorf("the sandbox reported Created = true; Cleanup would remove a directory other workers share")
 	}
 
-	if _, err := resolveDistdir(distfiles.DefaultCache, ""); err == nil {
+	if _, err := resolveDistdir(t.Context(), distfiles.DefaultCache, ""); err == nil {
 		t.Error("naming the host's DISTDIR explicitly was accepted; it must be refused")
 	}
-	if _, err := resolveDistdir("", distfiles.DefaultCache); err == nil {
+	if _, err := resolveDistdir(t.Context(), "", distfiles.DefaultCache); err == nil {
 		t.Error("naming the host's DISTDIR through the config rung was accepted; it must be refused")
 	}
 }
@@ -257,7 +257,7 @@ func TestRunManifestUsesResolvedDistdir(t *testing.T) {
 	before := tempDistdirsNow(t)
 	fake := &fakePkgdev{}
 	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(fake.seam()))
-	if err := s.runManifest(pkg, "2.0.0"); err != nil {
+	if err := s.runManifest(t.Context(), pkg, "2.0.0"); err != nil {
 		t.Fatalf("runManifest: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestRunManifestDoesNotRemoveAConfiguredDistdir(t *testing.T) {
 
 	fake := &fakePkgdev{}
 	s := manifestSweeper(t, overlayDir, "", distdir, withSweeperExec(fake.seam()))
-	if err := s.runManifest(pkg, "2.0.0"); err != nil {
+	if err := s.runManifest(t.Context(), pkg, "2.0.0"); err != nil {
 		t.Fatalf("runManifest: %v", err)
 	}
 
@@ -334,7 +334,7 @@ func TestRunManifestRemovesADistdirItCreated(t *testing.T) {
 		}
 	}}
 	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(fake.seam()))
-	if err := s.runManifest(pkg, "2.0.0"); err != nil {
+	if err := s.runManifest(t.Context(), pkg, "2.0.0"); err != nil {
 		t.Fatalf("runManifest: %v", err)
 	}
 
@@ -401,7 +401,7 @@ func TestRunManifestQuarantinesBeforeInvokingPkgdev(t *testing.T) {
 
 	s := manifestSweeper(t, overlayDir, distdir, "",
 		withSweeperExec(fake.seam()), withSweeperReporter(rep))
-	if err := s.runManifest(pkg, "2.0.0"); err != nil {
+	if err := s.runManifest(t.Context(), pkg, "2.0.0"); err != nil {
 		t.Fatalf("runManifest: %v", err)
 	}
 	if fake.invoked != 1 {
@@ -453,7 +453,7 @@ func TestRunManifestCleansUpOnlyWhatItCreatedWhenPkgdevFails(t *testing.T) {
 	s := manifestSweeper(t, overlayDir, distdir, "",
 		withSweeperExec(fake.seam()), withSweeperReporter(rep))
 
-	err := s.runManifest(pkg, "2.0.0")
+	err := s.runManifest(t.Context(), pkg, "2.0.0")
 	if err == nil {
 		t.Fatal("runManifest: expected the failure the fake pkgdev produced")
 	}
@@ -495,7 +495,7 @@ func TestRunManifestFailureCarriesTheDistdirAndExpectedNames(t *testing.T) {
 	fake := &fakePkgdev{script: func(string) string { return "echo 'boom' >&2; exit 3" }}
 	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(fake.seam()))
 
-	err := s.runManifest(pkg, "2.0.0")
+	err := s.runManifest(t.Context(), pkg, "2.0.0")
 	if err == nil {
 		t.Fatal("runManifest: expected a failure")
 	}
@@ -542,7 +542,7 @@ func TestRunManifestHoldsTheDistfileLockAcrossPkgdev(t *testing.T) {
 		}
 	}}
 	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(fake.seam()))
-	if err := s.runManifest(pkg, "2.0.0"); err != nil {
+	if err := s.runManifest(t.Context(), pkg, "2.0.0"); err != nil {
 		t.Fatalf("runManifest: %v", err)
 	}
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {

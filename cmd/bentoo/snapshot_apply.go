@@ -13,21 +13,23 @@ import (
 var snapshotApplyDryRun bool
 
 // newSnapshotApplyCmd builds `snapshot apply`.
-func newSnapshotApplyCmd() *cobra.Command {
+func newSnapshotApplyCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "apply",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
 		Short:       "Render native config and install the systemd timer",
 		Long: `Load and validate snapshot.toml, render the btrbk.conf, and install +
 enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
-		RunE: runSnapshotApply,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotApply(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&snapshotApplyDryRun, "dry-run", false,
 		"print the configs and systemd units that would be written, without writing them")
 	return cmd
 }
 
-func runSnapshotApply(cmd *cobra.Command, _ []string) error {
+func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
 	cfg, path, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot apply: %v", err)
@@ -43,7 +45,7 @@ func runSnapshotApply(cmd *cobra.Command, _ []string) error {
 
 	ctx := commandContext(cmd)
 
-	if err := snapshot.Apply(ctx, cfg, path, snapshotRunner); err != nil {
+	if err := snapshot.Apply(ctx, cfg, path, d.snapshotRunner); err != nil {
 		logger.Error("snapshot apply: %v", err)
 		return exitWith(1)
 	}

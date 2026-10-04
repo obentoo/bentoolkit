@@ -58,7 +58,7 @@ func TestResolveRefusesOtherUsersHome(t *testing.T) {
 		t.Run("Resolve/"+path, func(t *testing.T) {
 			home := sandboxHome(t)
 			stubPortageqUnavailable(t)
-			dir, err := Resolve(path, "")
+			dir, err := Resolve(t.Context(), path, "")
 			if !errors.Is(err, ErrUnsupportedHomeForm) {
 				t.Errorf("Resolve(%q) = (%+v, %v), want an error wrapping ErrUnsupportedHomeForm", path, dir, err)
 			}
@@ -121,7 +121,7 @@ func TestLocateRefusesOtherUsersHome(t *testing.T) {
 				if rung == "configured" {
 					explicit, configured = "", path
 				}
-				got, ok := Locate(explicit, configured)
+				got, ok := Locate(t.Context(), explicit, configured)
 				if ok || got != "" {
 					t.Errorf("Locate(%q, %q) = (%q, %v), want (\"\", false), not the current user's %q", explicit, configured, got, ok, target)
 				}
