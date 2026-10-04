@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
@@ -16,10 +17,13 @@ var ErrNoLocalPackageDir = errors.New("the gentoo provider has no local package 
 // ReviveStatus is the result class of reviving one package.
 type ReviveStatus string
 
-// The three revive results the summary keys on.
+// The revive results the summary keys on. ReviveWaiting (story 079) is a bump
+// whose required versions are not available yet: the entry is re-enabled and
+// the bump stays pending, so it is not a failure.
 const (
 	ReviveRevived ReviveStatus = "revived"
 	ReviveSkipped ReviveStatus = "skipped"
+	ReviveWaiting ReviveStatus = "waiting"
 	ReviveFailed  ReviveStatus = "failed"
 )
 
@@ -186,6 +190,10 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 	if applyResult != nil && applyResult.Held {
 		return ReviveOutcome{Package: pkg, Status: ReviveSkipped,
 			Detail: "held (" + applyResult.HoldReason + "); the bump stays pending"}
+	}
+	if applyResult != nil && len(applyResult.Waiting) > 0 {
+		return ReviveOutcome{Package: pkg, Status: ReviveWaiting,
+			Detail: "waiting for " + strings.Join(applyResult.Waiting, ", ")}
 	}
 	if applyResult != nil && applyResult.Obsolete {
 		return ReviveOutcome{Package: pkg, Status: ReviveSkipped, Detail: applyResult.ObsoleteReason}

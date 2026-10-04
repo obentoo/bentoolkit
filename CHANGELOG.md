@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`requires` in `packages.toml`: packages that must move together.** A
+  record can declare that its ebuild pins another package at a version
+  upstream publishes beside its own — dev-lang/flutter pins
+  `~dev-lang/dart-<dart_sdk_version>`, and four flutter bumps shipped with the
+  previous pin. `--check` captures the required version from the same release
+  object and reports whether it is `present`, `pending` or `missing`.
+  `--apply` rewrites the pinned atom, and waits (keeping the pending entry)
+  while neither the overlay nor ::gentoo holds that version. `--apply all`
+  applies the required bump first. The JSON check report gains a
+  `requirements` key on every package (empty when none).
+
 - **A bump warns about `files/` named for the old version.** A patch named
   with the old `${P}` made the new ebuild die in `src_prepare`. When the ebuild
   builds `${FILESDIR}` paths from a version variable and such a file exists,

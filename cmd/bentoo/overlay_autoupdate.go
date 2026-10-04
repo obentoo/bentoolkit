@@ -792,6 +792,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		opts = append(opts, autoupdate.WithLLMClient(p))
 	}
 	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
+	opts = append(opts, autoupdate.WithGentooPath(gentooRepoPath()))
 
 	// Progress feedback: CheckAll fans out concurrently and otherwise prints
 	// nothing until the final table, so show a live [pct%] done/total counter on
@@ -1455,11 +1456,17 @@ func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 // is where portage puts it, so the common case needs no configuration - a check
 // nobody has to switch on is a check that is actually on.
 func applierGentooPathOption() autoupdate.ApplierOption {
-	path := os.Getenv("BENTOO_GENTOO_REPO")
-	if path == "" {
-		path = "/var/db/repos/gentoo"
+	return autoupdate.WithApplierGentooPath(gentooRepoPath())
+}
+
+// gentooRepoPath is the ::gentoo tree: BENTOO_GENTOO_REPO, else where Portage
+// puts it. The check report reads it too, to tell a required version that
+// ::gentoo already ships from one nothing provides.
+func gentooRepoPath() string {
+	if path := os.Getenv("BENTOO_GENTOO_REPO"); path != "" {
+		return path
 	}
-	return autoupdate.WithApplierGentooPath(path)
+	return "/var/db/repos/gentoo"
 }
 
 // applierDistfileOptions carries the resolved distfile directories into every
@@ -1766,12 +1773,14 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 		ar.displayApplyResult(result)
 	}
 
-	applied, obsolete, held := 0, 0, 0
+	applied, obsolete, held, waiting := 0, 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
 		case r.Obsolete:
 			obsolete++
+		case len(r.Waiting) > 0:
+			waiting++
 		case r.Held:
 			held++
 		case r.Success:
@@ -1787,6 +1796,9 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 	}
 	if held > 0 {
 		output.Warning.Printf("  Held:     %d (hold = true; kept in pending)\n", held)
+	}
+	if waiting > 0 {
+		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
 	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
@@ -1818,6 +1830,14 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		output.Warning.Println("    Status:  Obsolete (pruned from pending)")
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
+		}
+		return
+	}
+
+	if len(result.Waiting) > 0 {
+		output.Warning.Println("    Status:  Waiting (kept in pending)")
+		for _, w := range result.Waiting {
+			output.Info.Printf("    Waiting: %s\n", w)
 		}
 		return
 	}
@@ -2104,6 +2124,26 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 	output.Info.Println("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate")
 }
 
+// reviveApplierOptions is the option set the --revive Applier is built with.
+// It is a method so the revive wiring can be tested as it ships.
+func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pending *autoupdate.PendingList) []autoupdate.ApplierOption {
+	reviveOpts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierClean(ar.opts.clean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPendingList(pending),
+	}
+	reviveOpts = append(reviveOpts, ar.applierDistfileOptions()...)
+	// The ::gentoo tree too, as on the apply paths: a revived package whose
+	// `requires` is met only by ::gentoo would otherwise always read as waiting.
+	reviveOpts = append(reviveOpts, applierGentooPathOption())
+	// R3 reaches the revive path through the same option block as the two apply
+	// paths, which is what keeps a second entry point from growing a second,
+	// gate-free way into the published overlay.
+	reviveOpts = append(reviveOpts, ar.applierValidateOptions(configDir)...)
+
+	return reviveOpts
+}
+
 // runRevive handles --revive <pkg|all>: it resurrects each target orphan by
 // seeding the current ::gentoo ebuild into the overlay, re-enabling the entry,
 // and bumping it to the upstream version via the normal CheckPackage+Apply flow.
@@ -2175,16 +2215,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 		return failWith(1, fmt.Errorf("failed to initialize pending list: %w", err))
 	}
 
-	reviveOpts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierClean(ar.opts.clean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		autoupdate.WithApplierPendingList(pending),
-	}
-	reviveOpts = append(reviveOpts, ar.applierDistfileOptions()...)
-	// R3 reaches the revive path through the same option block as the two apply
-	// paths, which is what keeps a second entry point from growing a second,
-	// gate-free way into the published overlay.
-	reviveOpts = append(reviveOpts, ar.applierValidateOptions(configDir)...)
+	reviveOpts := ar.reviveApplierOptions(overlayPath, configDir, pending)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
@@ -2231,7 +2262,9 @@ func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 		case autoupdate.ReviveRevived:
 			revived++
 			output.Success.Printf("  ✓ %s: %s\n", o.Package, o.Detail)
-		case autoupdate.ReviveSkipped:
+		case autoupdate.ReviveSkipped, autoupdate.ReviveWaiting:
+			// A waiting revive is not a failure: the entry is re-enabled and its
+			// bump stays pending until the required version exists.
 			skipped++
 			output.Warning.Printf("  - %s: %s\n", o.Package, o.Detail)
 		default:

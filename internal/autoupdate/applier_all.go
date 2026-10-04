@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // ApplyAll applies every pending update through the shared Applier and
@@ -35,9 +37,32 @@ import (
 // non-nil result, in input order, and counts as a failure — no package after
 // the cancel is applied, and the loop needs no second check or early break
 // (a break would leave nil results).
+//
+// Story 079: a bump that requires another pending bump runs in a later wave
+// (applyWaves), after the one it requires has finished, so the requirement
+// gate of the later wave sees what the earlier one published. A batch with no
+// `requires` is a single wave and runs exactly as before.
 func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile bool, concurrency int) ([]*ApplyResult, int) {
 	results := make([]*ApplyResult, len(updates))
+	serial := compile || a.SerialApplyRequired(updates)
 
+	pins := func(pkg, atom string) string {
+		pin, ok := a.RequirePin(pkg, atom)
+		if !ok {
+			logger.Warn("%s no longer requires %s in packages.toml; not ordering it after that package", pkg, atom)
+		}
+		return pin
+	}
+	failures := 0
+	for _, wave := range applyWaves(updates, pins) {
+		failures += a.applyWave(ctx, updates, wave, results, compile, serial, concurrency)
+	}
+	return results, failures
+}
+
+// applyWave applies the entries of updates named by wave, writing each result
+// at its original index in results, and returns how many failed.
+func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave []int, results []*ApplyResult, compile, serial bool, concurrency int) int {
 	// Serial when the compile step will prompt and escalate, and — since story
 	// 033 — when ANY of these bumps resolves to a depth that starts a build
 	// (D14). The second rule has nothing to do with prompts: concurrent builds
@@ -45,19 +70,19 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 	// one gst configure, and a worker pool multiplies that on a machine that was
 	// never asked. Depths none and options keep the pool, which is every run whose
 	// bumps are revisions and patches.
-	if compile || a.SerialApplyRequired(updates) {
+	if serial {
 		failures := 0
-		for i, u := range updates {
-			// `compile`, not a literal true: this branch is now reached for two
+		for _, i := range wave {
+			// `compile`, not a literal true: this branch is reached for two
 			// different reasons, and a depth-driven serial run must not acquire the
 			// privileged compile step the operator never asked for.
-			result, err := a.Apply(ctx, u.Package, compile)
+			result, err := a.Apply(ctx, updates[i].Package, compile)
 			if err != nil {
 				failures++
 			}
 			results[i] = result
 		}
-		return results, failures
+		return failures
 	}
 
 	// Concurrent path: a bounded worker pool over an index queue. Workers write
@@ -66,13 +91,13 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 	if jobs < 1 {
 		jobs = 1
 	}
-	if jobs > len(updates) {
-		jobs = len(updates)
+	if jobs > len(wave) {
+		jobs = len(wave)
 	}
 
 	var failures int64
-	queue := make(chan int, len(updates))
-	for i := range updates {
+	queue := make(chan int, len(wave))
+	for _, i := range wave {
 		queue <- i
 	}
 	close(queue)
@@ -92,6 +117,58 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 		}()
 	}
 	wg.Wait()
+	return int(failures)
+}
 
-	return results, int(failures)
+// applyWaves orders a batch into waves of indices into updates, each wave to
+// complete before the next starts. Entry B depends on entry A when A's atom is a
+// key of B.Requires and A's new version satisfies the pin B's record declares
+// for it (pins answers that operator; "" adds no edge). Kahn's algorithm, in
+// input order; entries left in a cycle form one final wave, where the
+// requirement gate refuses whatever is still unmet.
+func applyWaves(updates []PendingUpdate, pins func(pkg, atom string) string) [][]int {
+	n := len(updates)
+	dependents := make([][]int, n)
+	indegree := make([]int, n)
+	for b, ub := range updates {
+		for atom, want := range ub.Requires {
+			pin := pins(ub.Package, atom)
+			if pin == "" {
+				continue
+			}
+			for a, ua := range updates {
+				if a != b && PackageAtom(ua.Package) == atom && VersionSatisfies(pin, ua.NewVersion, want) {
+					dependents[a] = append(dependents[a], b)
+					indegree[b]++
+				}
+			}
+		}
+	}
+
+	done := make([]bool, n)
+	var waves [][]int
+	for remaining := n; remaining > 0; {
+		var wave []int
+		for i := range updates {
+			if !done[i] && indegree[i] == 0 {
+				wave = append(wave, i)
+			}
+		}
+		if len(wave) == 0 { // a cycle: everything left runs last, together
+			for i := range updates {
+				if !done[i] {
+					wave = append(wave, i)
+				}
+			}
+		}
+		for _, i := range wave {
+			done[i] = true
+			for _, d := range dependents[i] {
+				indegree[d]--
+			}
+		}
+		remaining -= len(wave)
+		waves = append(waves, wave)
+	}
+	return waves
 }

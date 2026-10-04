@@ -228,6 +228,20 @@ type PackageResult struct {
 	// string rather than an error because the model carries facts and has no
 	// behaviour.
 	Error string `json:"error"`
+	// Requirements is the state of each package this bump requires (the
+	// record's `requires`), in atom order, and empty for a record without them.
+	// Always a key, like every field here: an absent key could not be told from
+	// an unanswered one.
+	Requirements []Requirement `json:"requirements"`
+}
+
+// Requirement is one package a bump requires and whether its version is
+// available yet: "present" (the overlay or ::gentoo has it), "pending" (another
+// pending bump will provide it) or "missing".
+type Requirement struct {
+	Package string `json:"package"`
+	Version string `json:"version"`
+	State   string `json:"state"`
 }
 
 // PlanEntry is one pending update the run intends to validate: the bump, the

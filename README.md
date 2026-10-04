@@ -836,6 +836,7 @@ series = '^1\.28\.'                 # REQUIRED when the dir holds two release li
 aux_var = "MY_BUILD"                # free-text ebuild var kept in sync…
 aux_pattern = 'esr-bb([0-9]+)'      # …always paired with aux_var
 aux_url = "https://…/{version}/x"   # …read aux_pattern here instead of url
+requires = { "dev-lang/dart" = { pattern = '…"{version}"…"([^"]+)"', pin = "~" } }  # pins moved with the bump
 comments = """…"""                  # REQUIRED — the doc, always last
 # END
 ```
@@ -1153,6 +1154,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | Field | Description |
 |-------|-------------|
 | `mirrors` | List of URLs serving the same content as `url`, tried in order when the one before fails and before `fallback_url`. Each is probed with the whole record (parser, `script`, `series`, `select`…) with `url` swapped. Credential headers are never sent to a mirror. Only the version fetch uses them: `base_url`, `commit_sha_path`, `aux_pattern` and `track = "commit"` still read `url`. A failure counts as a network failure (no registry repair offered) only when every source failed in transport. |
+| `requires` | Packages this record pins at a version upstream publishes beside its own, as one inline table keyed by `category/package` (no version, slot or label): `requires = { "dev-lang/dart" = { pattern = '"version": "{version}",\s+"dart_sdk_version": "([^"]+)"', pin = "~" } }`. `pattern` has exactly one capture group; `{version}` is replaced by the detected version, which anchors the capture to the same release object. An optional `url` (with `{version}` only in the path or query; no credential header is sent) is read instead of the record's own. `pin` is `~`, `=` or `>=`. `--check` records the captured version and reports it as `present`, `pending` or `missing` (`waits for …`). `--apply` rewrites every atom of that package carrying that operator in the new ebuild — other operators and comments are left alone, and an ebuild with no such atom fails the bump — and waits, keeping the pending entry, while neither the overlay nor ::gentoo (`BENTOO_GENTOO_REPO`) holds the version. `--apply all` applies a required pending bump before the bump that needs it. |
 | `aux_url` | Where `aux_pattern` reads `aux_var`'s value when it is not on the version page (a `latest.txt`, the release's `Cargo.lock` or `package.json`, a tag's commit). `{version}` is replaced by the detected upstream version and may appear only in the path or query. Credential headers are not sent to it. Requires `aux_var` and `aux_pattern`. |
 | `fallback_url` | Secondary URL to try if the primary fails. It keeps the record's `timeout`, `series`, `suffix`, `suffix_when` and non-credential headers |
 | `fallback_parser` | Parser type for the fallback URL |
