@@ -42,6 +42,8 @@ func TestReviveAppliesAfterReenable(t *testing.T) {
 	applier, err := autoupdate.NewApplier(overlay, configDir,
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlay)),
 		autoupdate.WithApplierPendingList(pending),
+		// Hermetic: never the host's DISTDIR, which a CI runner cannot write.
+		autoupdate.WithApplierDistdir(t.TempDir(), ""),
 		autoupdate.WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
