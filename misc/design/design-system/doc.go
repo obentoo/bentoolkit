@@ -28,7 +28,7 @@
 // what that costs: the browser-driven script evaluator sits behind the chromedp
 // tag, so `go build ./...` skips it entirely, and a dependency bump once passed
 // CI fully green while breaking the only code that called it
-// (.github/workflows/ci.yml, the "Build and vet the tagged script evaluators"
+// (.github/workflows/ci.yml, the "Build and vet the tagged script evaluator"
 // step exists because of that). Untagged means every change to lipgloss,
 // bubbletea or this package's own callers is compiled and vetted by the normal
 // CI run.

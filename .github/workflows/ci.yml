@@ -288,7 +288,7 @@ jobs:
       # that proposes it.
       # No workflow expressions are interpolated below; the loop variable is
       # local to the step and quoted.
-      - name: Build and vet the tagged script evaluators
+      - name: Build and vet the tagged script evaluator
         run: |
           for tag in chromedp; do
             echo "::group::-tags ${tag}"

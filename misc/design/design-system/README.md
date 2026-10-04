@@ -242,8 +242,9 @@ It is deliberately **not** behind a build tag. This repository already learned w
 that costs: the browser-driven script evaluator sits behind the `chromedp` tag, so
 `go build ./...` skips it, and a dependency bump once passed CI fully green while
 breaking the only code that called it — the `.github/workflows/ci.yml` step that
-builds and vets the tag exists because of that. Untagged means every change to lipgloss, bubbletea or this package's callers
-is compiled and vetted by the normal CI run.
+builds and vets the tag exists because of that. Untagged means every change to
+lipgloss, bubbletea or this package's callers is compiled and vetted by the normal
+CI run.
 
 `Catalogue()` has exactly two consumers — the contract test and the gallery — so the
 picture an operator looks at and the assertions CI runs cannot drift apart.

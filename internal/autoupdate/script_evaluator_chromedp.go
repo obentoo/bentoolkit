@@ -59,8 +59,8 @@ type chromedpEvaluator struct {
 // Evaluate opens a fresh tab, navigates to url, and evaluates script against the
 // rendered DOM. WithAwaitPromise makes the evaluation wait for a returned
 // Promise to settle, so an `(async () => {...})()` IIFE resolves to its string
-// result rather than returning an unresolved Promise. The result is unmarshalled into a string, so
-// a non-string JS result (e.g. `1 + 1`) surfaces as an error.
+// result rather than returning an unresolved Promise. The result is unmarshalled
+// into a string, so a non-string JS result (e.g. `1 + 1`) surfaces as an error.
 func (e *chromedpEvaluator) Evaluate(ctx context.Context, url, script string, headers map[string]string) (string, error) {
 	// Derive a per-call tab from the shared browser.
 	tabCtx, cancel := chromedp.NewContext(e.browserCtx)
