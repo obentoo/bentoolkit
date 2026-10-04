@@ -36,6 +36,9 @@ type ReviveOutcome struct {
 // so a unit test can make Apply report an obsolete bump (R4.3).
 type ReviveApplier interface {
 	SeedFromGentoo(pkg, srcDir, version string) error
+	// MarkReenabled tells the applier the entry was re-enabled after it loaded
+	// packages.toml, so its stale enabled = false does not refuse the bump.
+	MarkReenabled(pkg string)
 	Apply(ctx context.Context, pkg string, compile bool) (*ApplyResult, error)
 }
 
@@ -140,6 +143,9 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 	if err := EnablePackagesInConfig(r.overlayPath, []string{pkg}); err != nil {
 		return failed(fmt.Sprintf("re-enable in packages.toml failed: %v", err))
 	}
+	// The shared Applier loaded packages.toml before this entry was enabled;
+	// without this its stale enabled = false would refuse the bump below.
+	r.applier.MarkReenabled(pkg)
 
 	// A FRESH Checker loads the now re-enabled packages.toml; force=true bypasses
 	// the cache so the pending list gets the current upstream version.
@@ -150,6 +156,10 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 	result, err := checker.CheckPackage(ctx, pkg, true)
 	if err != nil {
 		return failed(fmt.Sprintf("check failed: %v", err))
+	}
+	if result.Skipped != "" {
+		return ReviveOutcome{Package: pkg, Status: ReviveSkipped,
+			Detail: fmt.Sprintf("re-enabled, but %s still keeps it out of autoupdate", result.Skipped)}
 	}
 	if !result.HasUpdate {
 		// The seeded base already equals upstream: nothing to bump. The base
@@ -172,6 +182,10 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 			detail = fmt.Sprintf("%s (staged tree kept at %s)", detail, applyResult.StagedPath)
 		}
 		return failed(detail)
+	}
+	if applyResult != nil && applyResult.Held {
+		return ReviveOutcome{Package: pkg, Status: ReviveSkipped,
+			Detail: "held (" + applyResult.HoldReason + "); the bump stays pending"}
 	}
 	if applyResult != nil && applyResult.Obsolete {
 		return ReviveOutcome{Package: pkg, Status: ReviveSkipped, Detail: applyResult.ObsoleteReason}

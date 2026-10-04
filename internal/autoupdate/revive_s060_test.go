@@ -422,6 +422,8 @@ func (a *s060ObsoleteApplier) SeedFromGentoo(pkg, srcDir, version string) error 
 	return a.real.SeedFromGentoo(pkg, srcDir, version)
 }
 
+func (a *s060ObsoleteApplier) MarkReenabled(pkg string) { a.real.MarkReenabled(pkg) }
+
 func (a *s060ObsoleteApplier) Apply(_ context.Context, pkg string, compile bool) (*ApplyResult, error) {
 	a.applied = append(a.applied, pkg)
 	a.compile = append(a.compile, compile)

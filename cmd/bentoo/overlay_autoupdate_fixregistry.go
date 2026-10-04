@@ -22,7 +22,11 @@ import (
 // promptRegistryFixes drives the interactive per-package LLM registry-fix loop.
 //
 // It offers a fix only for packages whose failure wraps autoupdate.ErrFetchFailed
-// (R3.5), in deterministic lexical order (R3.4) — autoupdate.RepairableFetchFailures.
+// and not autoupdate.ErrUpstreamUnreachable (R3.5), in deterministic lexical
+// order (R3.4) — autoupdate.RepairableFetchFailures. A transport failure is
+// a fetch failure the record did not cause — a timeout or a TLS EOF — so
+// offering to rewrite the record would invite a distracted "y" to break an
+// entry that was correct.
 // For each such package it prompts y/N/a/q (R3.1-R3.3): `y` attempts a fix, `a`
 // attempts this and all remaining without further per-package prompts,
 // `n`/empty skips, `q` stops the loop.

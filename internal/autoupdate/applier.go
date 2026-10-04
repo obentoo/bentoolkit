@@ -183,11 +183,17 @@ type ApplyResult struct {
 	// therefore refused. Like Obsolete this is NOT a failure (Success false,
 	// Error nil), but unlike Obsolete the pending entry is KEPT: the update is
 	// real and still pending, it just may not be applied automatically. A held
-	// package reaches this point at all because an explicit
-	// `--check <pkg> --force` bypasses the checker's hold filter and records the
-	// update, so the entry is already in pending.json by the time `--apply all`
-	// walks it.
+	// package reaches this point when its update was recorded before the hold
+	// was set (CheckPackage skips held packages, but pending.json outlives the
+	// check that wrote it).
+	//
+	// enabled = false is refused the same way and reported through the same
+	// field: both are a maintainer's "do not auto-bump", and HoldReason names
+	// which of the two keys said so.
 	Held bool
+	// HoldReason is the packages.toml key that refused the package
+	// ("hold = true" or "enabled = false"). Empty unless Held is true.
+	HoldReason string
 	// ObsoleteReason explains, in user-facing terms, why the entry was deemed
 	// obsolete. Empty unless Obsolete is true.
 	ObsoleteReason string
@@ -286,6 +292,13 @@ type Applier struct {
 	// warning at the moment of the rename puts it in front of the one person
 	// who does, while the bump is still in their hands.
 	gentooPath string
+
+	// reenabled holds packages re-enabled in packages.toml after this Applier
+	// loaded it (--revive enables an orphan's entry, then applies it). Their
+	// enabled = false snapshot in configs is stale and must not refuse the bump.
+	// Guarded by reenabledMu: revives run concurrently on one Applier.
+	reenabledMu sync.Mutex
+	reenabled   map[string]bool
 	// pending manages pending updates
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
@@ -824,8 +837,13 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// like any other. From there `--apply all` applied the very bump the hold
 	// existed to prevent. The guard belongs here because this is the only place
 	// every apply path passes through.
-	if cfg, ok := a.configs[pkg]; ok && cfg.IsHeld() {
+	//
+	// enabled = false is refused here for the same reason: CheckAll skips a
+	// disabled entry, but an update already in pending.json — recorded before
+	// the disable, or by an explicit check — would otherwise still be applied.
+	if reason := a.refusal(pkg); reason != "" {
 		result.Held = true
+		result.HoldReason = reason
 		if update, found := a.pending.Get(pkg); found {
 			result.OldVersion = update.CurrentVersion
 			result.NewVersion = update.NewVersion
@@ -1066,6 +1084,10 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
 		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
+	}
+	// pkgdev exiting 0 does not prove every SRC_URI file got a DIST line.
+	if err := a.checkManifestCoverage(ctx, cand.pkgDir, pkg, newVersion); err != nil {
+		return a.failApply(pkg, result, err)
 	}
 
 	// The static gates — the Meson option gate and the advisory QA scan (story
@@ -1503,7 +1525,7 @@ func applySummary(result *ApplyResult) string {
 	case result.Obsolete:
 		return result.ObsoleteReason
 	case result.Held:
-		return "held (hold = true)"
+		return "held (" + result.HoldReason + ")"
 	}
 
 	// What is left is a failure. Its error text is the summary — except that
@@ -3189,4 +3211,29 @@ func copyTree(src, dst string) error {
 		}
 		return nil
 	})
+}
+
+// MarkReenabled tells the Applier that pkg's entry was re-enabled in
+// packages.toml after the Applier loaded it, so its stale enabled = false no
+// longer refuses the bump. hold = true still does.
+func (a *Applier) MarkReenabled(pkg string) {
+	a.reenabledMu.Lock()
+	defer a.reenabledMu.Unlock()
+	if a.reenabled == nil {
+		a.reenabled = make(map[string]bool)
+	}
+	a.reenabled[pkg] = true
+}
+
+// refusal is refusedBy with the run's re-enables applied.
+func (a *Applier) refusal(pkg string) string {
+	reason := refusedBy(a.configs, pkg)
+	if reason == "enabled = false" {
+		a.reenabledMu.Lock()
+		defer a.reenabledMu.Unlock()
+		if a.reenabled[pkg] {
+			return ""
+		}
+	}
+	return reason
 }

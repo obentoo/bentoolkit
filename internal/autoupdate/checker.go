@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/sony/gobreaker"
 )
 
 // httpRateLimiter is the minimal surface fetchContent needs from a rate
@@ -41,6 +43,11 @@ var (
 	ErrNoEbuildFound = errors.New("no ebuild file found for package")
 	// ErrFetchFailed is returned when fetching upstream version fails
 	ErrFetchFailed = errors.New("failed to fetch upstream version")
+	// ErrUpstreamUnreachable is wrapped beside ErrFetchFailed when the fetch
+	// failed in transport — retries exhausted, a timeout, an open circuit
+	// breaker — rather than on what the record asked for. Nothing in the record
+	// is wrong, so the interactive registry repair must not offer to rewrite it.
+	ErrUpstreamUnreachable = errors.New("upstream unreachable")
 	// ErrBaseVersionUnresolved is returned when an entry declares where its base
 	// version lives (base_from, or commit_version_pattern) and that source yields
 	// nothing. It is deliberately fatal for the check: falling back to the
@@ -84,6 +91,11 @@ type CheckResult struct {
 	// an informational result rather than a recurring hard failure. When set,
 	// all other fields except Package are zero-valued.
 	Orphaned bool
+	// Skipped names the packages.toml key ("hold = true" or "enabled = false")
+	// that kept CheckPackage from checking the package at all. When set, nothing
+	// was fetched, nothing was written to the cache or pending list, and every
+	// other field except Package is zero-valued.
+	Skipped string
 }
 
 // DefaultOpTimeout is the default per-operation timeout applied to a single
@@ -621,6 +633,39 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	return checker, nil
 }
 
+// fetchFailure wraps a failed upstream fetch as ErrFetchFailed and, when the
+// failure was the transport's, as ErrUpstreamUnreachable too.
+func fetchFailure(err error) error {
+	if isUpstreamUnreachable(err) {
+		return fmt.Errorf("%w: %w: %w", ErrFetchFailed, ErrUpstreamUnreachable, err)
+	}
+	return fmt.Errorf("%w: %w", ErrFetchFailed, err)
+}
+
+// isUpstreamUnreachable reports whether err is a transport failure: the
+// retrying client gave up (ErrMaxRetriesExceeded covers refused and reset
+// connections, TLS EOF and retried 429/5xx statuses), a request or operation
+// timed out, a Retry-After was too long, or the host's circuit breaker is open.
+//
+// A host the resolver says does not exist is NOT one: that is almost always a
+// mistyped url, which is exactly what the registry repair is for. A cancelled
+// context is not one either — the operator stopped the run.
+func isUpstreamUnreachable(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return errors.Is(err, ErrMaxRetriesExceeded) ||
+		errors.Is(err, ErrRequestTimeout) ||
+		errors.Is(err, ErrRetryAfterTooLong) ||
+		errors.Is(err, gobreaker.ErrOpenState) ||
+		errors.Is(err, gobreaker.ErrTooManyRequests) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
 // CheckPackage checks a single package for updates.
 // If force is true, the cache is bypassed and upstream is queried directly.
 // ctx bounds every upstream fetch, rate-limit wait and LLM call this check
@@ -636,6 +681,15 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	if !exists {
 		result.Error = fmt.Errorf("%w: %s", ErrPackageNotFound, pkg)
 		return result, result.Error
+	}
+
+	// An explicit `--check <pkg>` honours the same two keys CheckAll filters on.
+	// It used to check a held or disabled package like any other and queue its
+	// update in pending.json, so the maintainer's "do not auto-bump" held only
+	// for the full scan.
+	if reason := refusedBy(c.config.Packages, pkg); reason != "" {
+		result.Skipped = reason
+		return result, nil
 	}
 
 	// Get current version from overlay
@@ -663,7 +717,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 			if errors.Is(err, ErrBaseVersionUnresolved) {
 				result.Error = err
 			} else {
-				result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
+				result.Error = fetchFailure(err)
 			}
 			return result, result.Error
 		}
@@ -760,7 +814,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	// Fetch upstream version
 	upstreamVersion, err := c.fetchUpstreamVersion(ctx, pkg, &pkgConfig)
 	if err != nil {
-		result.Error = fmt.Errorf("%w: %w", ErrFetchFailed, err)
+		result.Error = fetchFailure(err)
 		return result, result.Error
 	}
 	result.UpstreamVersion = upstreamVersion
@@ -1696,19 +1750,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 			fallbackPattern = cfg.Path // Use primary path for JSON fallback
 		}
 
-		// Derive a config for the fallback URL: it swaps in the fallback
-		// parser/pattern but keeps the primary path/selector/xpath and the
-		// transform/select post-processing so the fallback behaves consistently.
-		fallbackCfg := &PackageConfig{
-			Parser:    cfg.FallbackParser,
-			Path:      cfg.Path,
-			Pattern:   fallbackPattern,
-			Selector:  cfg.Selector,
-			XPath:     cfg.XPath,
-			Transform: cfg.Transform,
-			Select:    cfg.Select,
-		}
-		version, err = c.fetchAndParse(ctx, cfg.FallbackURL, fallbackCfg)
+		version, err = c.fetchAndParse(ctx, cfg.FallbackURL, fallbackConfig(cfg, fallbackPattern))
 		if err == nil {
 			return version, nil
 		}
@@ -1728,6 +1770,47 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 
 	// All methods failed
 	return "", fmt.Errorf("all version extraction methods failed: %w", primaryErr)
+}
+
+// fallbackConfig derives the config fetchAndParse runs the fallback URL with.
+// It swaps in the fallback parser and pattern and keeps everything else that
+// shapes the fetch or the answer, so the fallback is the same probe pointed at
+// another source:
+//   - path/selector/xpath, transform and select, as before;
+//   - timeout, so a record that raised its budget for a slow host keeps it;
+//   - series and suffix/suffix_when, so select = max filters an out-of-line
+//     candidate per candidate instead of returning it and failing the whole
+//     check at fetchUpstreamVersion's series guard;
+//   - headers that cannot carry a credential, so a custom User-Agent or
+//     Accept reaches the fallback. Every credential-bearing header
+//     (isAllowedHeaderName) is dropped, literal value or ${VAR} alike: the
+//     fallback host is deliberately outside the record's credential scope (see
+//     packageCredentialScope).
+func fallbackConfig(cfg *PackageConfig, pattern string) *PackageConfig {
+	var headers map[string]string
+	for name, value := range cfg.Headers {
+		if isAllowedHeaderName(name) || containsCRLF(name) {
+			continue
+		}
+		if headers == nil {
+			headers = make(map[string]string, len(cfg.Headers))
+		}
+		headers[name] = value
+	}
+	return &PackageConfig{
+		Parser:     cfg.FallbackParser,
+		Path:       cfg.Path,
+		Pattern:    pattern,
+		Selector:   cfg.Selector,
+		XPath:      cfg.XPath,
+		Transform:  cfg.Transform,
+		Select:     cfg.Select,
+		Headers:    headers,
+		Timeout:    cfg.Timeout,
+		Series:     cfg.Series,
+		Suffix:     cfg.Suffix,
+		SuffixWhen: cfg.SuffixWhen,
+	}
 }
 
 // fetchAndParse fetches content from rawURL and extracts a version from it.

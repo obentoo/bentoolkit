@@ -259,6 +259,28 @@ func TestPromptRegistryFixes_SkipsNonFetchFailures(t *testing.T) {
 	}
 }
 
+// TestPromptRegistryFixes_SkipsUnreachableUpstream pins that a transport
+// failure — a timeout, a TLS EOF — is a fetch failure the record did not cause,
+// so it is never offered for an LLM rewrite of a correct record.
+func TestPromptRegistryFixes_SkipsUnreachableUpstream(t *testing.T) {
+	h := newRegfixHarness(t)
+
+	fixer := &fakeRegistryFixer{summary: "should never run"}
+	failures := map[string]error{
+		"net-dns/bind-tools": fmt.Errorf("%w: %w: max retries exceeded: tls: EOF",
+			autoupdate.ErrFetchFailed, autoupdate.ErrUpstreamUnreachable),
+	}
+
+	in := strings.NewReader("y\n") // would answer yes IF anything were offered
+	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		failures, in, h.newChecker); err != nil {
+		t.Fatalf("promptRegistryFixes: %v", err)
+	}
+	if fixer.called != 0 {
+		t.Errorf("fixer called %d times for an unreachable upstream, want 0", fixer.called)
+	}
+}
+
 // TestPromptRegistryFixes_FixerErrorRestoresAndContinues pins R5.5: when FixRegistry
 // itself errors, the snapshot is restored and the loop continues (no panic, file
 // unchanged byte-for-byte).

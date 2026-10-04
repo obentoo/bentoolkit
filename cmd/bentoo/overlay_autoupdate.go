@@ -838,6 +838,10 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			}
 			return failWith(1, fmt.Errorf("failed to check package %s: %w", pkg, err))
 		}
+		if result.Skipped != "" {
+			logger.Info("%s skipped: %s in packages.toml", pkg, result.Skipped)
+			return nil
+		}
 		// S045-R1.2: the one package this run scanned, as the same report the
 		// batch path builds and through the same render — one element, joined
 		// with the zero validation half because nothing validates here. This
@@ -1819,8 +1823,8 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 	}
 
 	if result.Held {
-		output.Warning.Println("    Status:  Held (hold = true; kept in pending)")
-		output.Info.Println("    Reason:  bumped by hand — drop the hold in packages.toml to automate it")
+		output.Warning.Printf("    Status:  Held (%s; kept in pending)\n", result.HoldReason)
+		output.Info.Printf("    Reason:  bumped by hand — drop %q in packages.toml to automate it\n", result.HoldReason)
 		return
 	}
 

@@ -424,10 +424,14 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 // is errors.Is, never the error text: a failure that merely says "failed to fetch
 // upstream version" is not repairable, and one wrapped twice or joined with
 // another error still is.
+//
+// A failure that also wraps ErrUpstreamUnreachable is excluded: a timeout or a
+// TLS EOF is a fetch failure the record did not cause, so offering to rewrite
+// the record would invite a distracted "y" to break an entry that was correct.
 func RepairableFetchFailures(failures map[string]error) []string {
 	pkgs := make([]string, 0, len(failures))
 	for pkg, ferr := range failures {
-		if errors.Is(ferr, ErrFetchFailed) {
+		if errors.Is(ferr, ErrFetchFailed) && !errors.Is(ferr, ErrUpstreamUnreachable) {
 			pkgs = append(pkgs, pkg)
 		}
 	}

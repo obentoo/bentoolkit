@@ -93,6 +93,8 @@ func (a *failingApplier) SeedFromGentoo(pkg, srcDir, version string) error {
 	return a.real.SeedFromGentoo(pkg, srcDir, version)
 }
 
+func (a *failingApplier) MarkReenabled(pkg string) { a.real.MarkReenabled(pkg) }
+
 func (a *failingApplier) Apply(context.Context, string, bool) (*ApplyResult, error) {
 	return a.result, a.err
 }
