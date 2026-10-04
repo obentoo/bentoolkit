@@ -62,17 +62,17 @@ jobs:
           exit 1
 
       # golangci-lint skips a file behind a tag it was not given, exactly as
-      # `go build` does, so `run ./...` on its own leaves both tagged script
-      # evaluators unlinted — the same blind spot the tagged build and
+      # `go build` does, so `run ./...` on its own leaves the tagged chromedp
+      # evaluator unlinted — the same blind spot the tagged build and
       # govulncheck steps already exist for. `go vet -tags` in the build job is
       # not a substitute: it covers neither errcheck nor contextcheck, and an
-      # audit found one real errcheck finding sitting behind the playwright tag
-      # that had never been reported here. Lint once per tag.
+      # audit found one real errcheck finding sitting behind a browser tag
+      # that had never been reported here. Lint once per tag set.
       # No workflow expressions are interpolated; the loop variable is local to
       # this step and quoted.
       - name: Run golangci-lint
         run: |
-          for tag in "" chromedp playwright; do
+          for tag in "" chromedp; do
             label="${tag:-default}"
             echo "::group::golangci-lint (${label})"
             if [ -z "$tag" ]; then
@@ -153,14 +153,14 @@ jobs:
           #
           # Analysed once per build tag, not just by default. govulncheck skips a
           # file behind a tag it was not given, exactly as `go build` does, so the
-          # default run says nothing about chromedp or playwright-go — the two
-          # modules whose call sites live only in the tagged script evaluators. A
+          # default run says nothing about chromedp and cdproto — the modules
+          # whose call sites live only in the tagged script evaluator. A
           # reachable CVE in either would have gone unreported here.
           #
           # No workflow expressions are interpolated; the loop variable is local
           # to this step and quoted.
           failed=""
-          for tag in "" chromedp playwright; do
+          for tag in "" chromedp; do
             label="${tag:-default}"
             echo "::group::govulncheck (${label})"
             if [ -z "$tag" ]; then
@@ -278,19 +278,19 @@ jobs:
       - name: Build all targets
         run: make build-all
 
-      # The browser-driven script evaluators sit behind build tags
-      # (script_evaluator_chromedp.go is `//go:build chromedp && !playwright`,
-      # its playwright sibling the mirror), so nothing above ever compiles them:
-      # `go build ./...` and `go test ./...` both skip a tagged file entirely.
-      # That left a dependency bump to chromedp or playwright-go passing CI fully
-      # green while breaking the only code that calls it — the failure would
-      # surface for whoever built with the tag, not here. Compile and vet both
-      # tags so an incompatible bump fails in the PR that proposes it.
+      # The browser-driven script evaluator sits behind a build tag
+      # (script_evaluator_chromedp.go is `//go:build chromedp`), so nothing
+      # above ever compiles it: `go build ./...` and `go test ./...` both skip
+      # a tagged file entirely. That once let a dependency bump to a browser
+      # backend pass CI fully green while breaking the only code that calls
+      # it — the failure would surface for whoever built with the tag, not
+      # here. Compile and vet the tag so an incompatible bump fails in the PR
+      # that proposes it.
       # No workflow expressions are interpolated below; the loop variable is
       # local to the step and quoted.
-      - name: Build and vet the tagged script evaluators
+      - name: Build and vet the tagged script evaluator
         run: |
-          for tag in chromedp playwright; do
+          for tag in chromedp; do
             echo "::group::-tags ${tag}"
             go build -tags "${tag}" ./...
             go vet -tags "${tag}" ./...

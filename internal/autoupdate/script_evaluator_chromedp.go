@@ -1,13 +1,12 @@
-//go:build chromedp && !playwright
+//go:build chromedp
 
-// This file provides an alternative headless-browser backend for the "script"
-// parser, built only when the `chromedp` build tag is set (and `playwright` is
-// not, so the two backends never both register an init). Unlike the
-// playwright-go backend it speaks the Chrome DevTools Protocol directly via
-// github.com/chromedp/chromedp: no Node.js driver and no `playwright install`
-// step — it drives whatever Chrome/Chromium is already on the system. The
-// default build (no tag) still ships only the testable interface in
-// script_parser.go, keeping the browser dependency opt-in.
+// This file is the headless-browser backend for the "script" parser, built
+// only when the `chromedp` build tag is set. It speaks the Chrome DevTools
+// Protocol directly via github.com/chromedp/chromedp and drives whatever Chrome
+// or Chromium is already installed on the system. Its complement,
+// script_evaluator_stub.go (`!chromedp`), carries the default build, which
+// ships only the testable interface in script_parser.go, keeping the browser
+// dependency opt-in.
 //
 //	go build -tags chromedp ./...
 //	go test  -tags chromedp ./internal/autoupdate/ -run Integration
@@ -23,31 +22,29 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// init replaces the default newLiveEvaluator with a chromedp-backed one. Each
-// evaluator owns a browser allocator and a long-lived browser context (started
-// eagerly so launch failures surface here, not on the first Evaluate); both are
-// torn down by Close.
-func init() {
-	newLiveEvaluator = func(opTimeout time.Duration) (liveEvaluator, error) {
-		allocCtx, allocCancel := chromedp.NewExecAllocator(
-			context.Background(), // SAFE: root parent for the browser allocator; no caller ctx exists at construction, and it is torn down by Close. Per-call cancellation arrives via Evaluate's ctx.
-			chromedp.DefaultExecAllocatorOptions[:]...,
-		)
-		browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-		// Start the browser now so a missing/broken Chrome fails fast and is
-		// reported like Playwright's launch error, rather than on first use.
-		if err := chromedp.Run(browserCtx); err != nil {
-			browserCancel()
-			allocCancel()
-			return nil, fmt.Errorf("could not launch headless Chrome (chromedp): %w", err)
-		}
-		return &chromedpEvaluator{
-			allocCancel:   allocCancel,
-			browserCtx:    browserCtx,
-			browserCancel: browserCancel,
-			opTimeout:     opTimeout,
-		}, nil
+// defaultLiveEvaluator is the `-tags chromedp` build's evaluator factory: it
+// returns a chromedp-backed evaluator. Each evaluator owns a browser allocator
+// and a long-lived browser context (started eagerly so launch failures surface
+// here, not on the first Evaluate); both are torn down by Close.
+func defaultLiveEvaluator(opTimeout time.Duration) (liveEvaluator, error) {
+	allocCtx, allocCancel := chromedp.NewExecAllocator(
+		context.Background(), // SAFE: root parent for the browser allocator; no caller ctx exists at construction, and it is torn down by Close. Per-call cancellation arrives via Evaluate's ctx.
+		chromedp.DefaultExecAllocatorOptions[:]...,
+	)
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	// Start the browser now so a missing/broken Chrome fails fast with a
+	// launch error, rather than on first use.
+	if err := chromedp.Run(browserCtx); err != nil {
+		browserCancel()
+		allocCancel()
+		return nil, fmt.Errorf("could not launch headless Chrome (chromedp): %w", err)
 	}
+	return &chromedpEvaluator{
+		allocCancel:   allocCancel,
+		browserCtx:    browserCtx,
+		browserCancel: browserCancel,
+		opTimeout:     opTimeout,
+	}, nil
 }
 
 // chromedpEvaluator renders pages and evaluates JS via the DevTools Protocol.
@@ -60,10 +57,10 @@ type chromedpEvaluator struct {
 }
 
 // Evaluate opens a fresh tab, navigates to url, and evaluates script against the
-// rendered DOM. WithAwaitPromise mirrors Playwright's page.Evaluate semantics so
-// an `(async () => {...})()` IIFE resolves to its string result rather than
-// returning an unresolved Promise. The result is unmarshalled into a string, so
-// a non-string JS result (e.g. `1 + 1`) surfaces as an error.
+// rendered DOM. WithAwaitPromise makes the evaluation wait for a returned
+// Promise to settle, so an `(async () => {...})()` IIFE resolves to its string
+// result rather than returning an unresolved Promise. The result is unmarshalled
+// into a string, so a non-string JS result (e.g. `1 + 1`) surfaces as an error.
 func (e *chromedpEvaluator) Evaluate(ctx context.Context, url, script string, headers map[string]string) (string, error) {
 	// Derive a per-call tab from the shared browser.
 	tabCtx, cancel := chromedp.NewContext(e.browserCtx)

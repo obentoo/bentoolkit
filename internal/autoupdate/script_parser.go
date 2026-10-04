@@ -9,33 +9,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // ErrScriptSupportNotBuilt is returned when a parser="script" package is checked
-// by a binary compiled WITHOUT the headless-browser backend. The real evaluator
-// lives behind the `playwright` build tag (and needs the Playwright browsers
-// installed); the default build ships only the testable interface so the heavy
-// dependency stays opt-in.
+// by a binary compiled WITHOUT the chromedp headless-browser backend. The real
+// evaluator lives behind the `chromedp` build tag and drives a Chrome or
+// Chromium already installed on the system; the default build ships only the
+// testable interface so the browser dependency stays opt-in.
 var ErrScriptSupportNotBuilt = errors.New(
-	"script parser support not built: rebuild with -tags playwright and run " +
-		"`playwright install chromium`")
+	"script parser support not built: rebuild with -tags chromedp; " +
+		"a Chrome or Chromium executable is required at run time")
 
 // liveEvaluator renders a URL in a headless browser and evaluates a JS
 // expression against the live (post-JS) DOM, returning the expression's string
-// result. It is an interface so tests can inject a fake without a real browser,
-// and so the heavy browser backend can be swapped in behind a build tag.
+// result. It is an interface so tests can inject a fake without a real browser;
+// the only real implementation is the chromedp backend, built with
+// `-tags chromedp`.
 type liveEvaluator interface {
 	Evaluate(ctx context.Context, url, script string, headers map[string]string) (string, error)
 }
 
 // newLiveEvaluator builds the evaluator used by the script parser. opTimeout
-// bounds each navigation/evaluation. The default implementation reports
-// ErrScriptSupportNotBuilt; the `playwright` build tag replaces this (via init)
-// with a real headless-browser evaluator.
-var newLiveEvaluator = func(opTimeout time.Duration) (liveEvaluator, error) {
-	return nil, ErrScriptSupportNotBuilt
-}
+// bounds each navigation/evaluation. It is initialised from
+// defaultLiveEvaluator, which build constraints select: the stub in
+// script_evaluator_stub.go (`!chromedp`) reports ErrScriptSupportNotBuilt, and
+// the chromedp backend in script_evaluator_chromedp.go (`chromedp`) launches a
+// headless Chrome. It stays a var so in-package tests can swap it, restoring
+// the original through t.Cleanup.
+var newLiveEvaluator = defaultLiveEvaluator
 
 // ScriptParser extracts a version by evaluating JS against a live page. Unlike
 // the Parser implementations it navigates itself (it needs the rendered DOM),

@@ -1132,6 +1132,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `json` | `path` | JSON path to the version field (e.g. `tag_name`, `data.version`) |
 | `regex` | `pattern` | Regex with one capture group matching the version |
 | `html` | `selector` or `xpath` | CSS selector or XPath to the element containing the version |
+| `script` | `script` | JavaScript evaluated against the rendered page (inline, or `@file.js` from `.autoupdate/scripts/`); its string result is the version. Needs a binary built with `-tags chromedp` and a Chrome or Chromium executable on `PATH` |
 
 > **Regex parser caveat:** `regex` returns the **first** match in the response
 > body, not the highest version. On a page that lists several releases (e.g. a
