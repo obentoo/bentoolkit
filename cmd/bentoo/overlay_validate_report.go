@@ -295,7 +295,7 @@ func validateReportConfig() *config.Config {
 // asks for the document twice, in two places, and answering only the first would
 // be this command re-deciding what --export means for itself — which is the
 // arrangement D8 exists to end.
-func presentValidateReport(rep validate.Report, complete, asJSON bool, diag io.Writer) {
+func presentValidateReport(d *deps, rep validate.Report, complete, asJSON bool, diag io.Writer) {
 	run := validateEnvelope(rep, complete)
 
 	// R3.7, stated for BOTH branches below and drawn by neither.
@@ -356,7 +356,7 @@ func presentValidateReport(rep validate.Report, complete, asJSON bool, diag io.W
 	// to stdout is about THE REPORT — a SKIPPED line and the reason beside it
 	// have to be read together — and this is not the report. It is a fact about
 	// the display, which is why the design puts it on stderr for every producer.
-	_ = reportModeOrPlain(validateReportConfig())
+	_ = reportModeOrPlain(validateReportConfig(), false, d.uiIsTerminal)
 
 	if asJSON {
 		renderValidateJSON(run, diag)

@@ -2,13 +2,14 @@ package main
 
 // Story 058, sub-task 11.1 — R1.3.
 //
-// The guards for restoreReportFlags and restoreAutoupdateFlags (testcli_test.go).
-// A testCLI Run parses `overlay autoupdate` flags into package variables, and
-// nothing resets them until the next tree is built; a test that calls
-// runAutoupdate on the package-level autoupdateCmd reads whatever the last Run
-// left. That is how TestRunAutoupdate_SignalCancels failed under -shuffle
-// after the `--lint --fix --yes` row of
-// TestS058AutoupdateRegistryModesKeepTheirExitCodes.
+// The guard for restoreReportFlags (testcli_test.go). A testCLI Run parses
+// the root report flags (--ui, --all, --export) into package variables, and
+// nothing resets them until the next tree is built. The other flags of
+// `overlay autoupdate` used to leak the same way — that is how
+// TestRunAutoupdate_SignalCancels failed under -shuffle after the
+// `--lint --fix --yes` row of TestS058AutoupdateRegistryModesKeepTheirExitCodes —
+// until story 060 bound them to a per-tree autoupdateOptions; the two-tree
+// proof of that is autoupdate_options_s060_test.go (R5.1).
 //
 // # How a flag is matched to the restore
 //
@@ -31,8 +32,6 @@ package main
 
 import (
 	"reflect"
-	"slices"
-	"sort"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -72,93 +71,12 @@ func autoupdateFlagsOf(t *testing.T, root *cobra.Command) map[string]*pflag.Flag
 	return flags
 }
 
-// restoredAddresses maps the address of every variable the two restore
-// helpers put back to a printable name.
-func restoredAddresses(t *testing.T) map[uintptr]string {
-	t.Helper()
-
-	covered := map[uintptr]string{}
-	for _, p := range append(reportFlagGlobals(), autoupdateFlagGlobals()...) {
-		v := reflect.ValueOf(p)
-		covered[v.Pointer()] = v.Type().String()
-	}
-	return covered
-}
-
-// TestAutoupdateFlagGlobalsAreAllRestored fails when a flag of `overlay
-// autoupdate` binds a package variable that neither reportFlagGlobals nor
-// autoupdateFlagGlobals lists — the flag a later Run would leak into every test
-// that reads the variable without building a tree.
-//
-// It also fails the other way: an entry of autoupdateFlagGlobals that no flag
-// binds means the list was not derived from the source it claims to mirror.
-func TestAutoupdateFlagGlobalsAreAllRestored(t *testing.T) {
-	// Building a tree writes every default through its pointer; put back what
-	// the tests before this one expect to find.
-	restoreReportFlags(t)
-	restoreAutoupdateFlags(t)
-
-	first := autoupdateFlagsOf(t, newRootCmd())
-	second := autoupdateFlagsOf(t, newRootCmd())
-	covered := restoredAddresses(t)
-
-	names := make([]string, 0, len(first))
-	for name := range first {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	bound := map[uintptr]bool{}
-	var shared, perTree []string
-	for _, name := range names {
-		a, okA := flagStorage(first[name])
-		other, inBoth := second[name]
-		if !inBoth {
-			t.Errorf("--%s is on one fresh tree's `overlay autoupdate` and not on the other's", name)
-			continue
-		}
-		b, okB := flagStorage(other)
-		if !okA || !okB {
-			t.Errorf("--%s: cannot read the variable its %T value writes to; teach flagStorage this shape so the guard still covers it", name, first[name].Value)
-			continue
-		}
-		if a != b {
-			perTree = append(perTree, name)
-			continue
-		}
-		shared = append(shared, name)
-		bound[a] = true
-		if _, ok := covered[a]; !ok {
-			t.Errorf("--%s binds a package variable that no restore helper puts back: add it to autoupdateFlagGlobals (testcli_test.go), or a Run that passes it leaks its value into later tests", name)
-		}
-	}
-
-	for i, p := range autoupdateFlagGlobals() {
-		v := reflect.ValueOf(p)
-		if !bound[v.Pointer()] {
-			t.Errorf("autoupdateFlagGlobals()[%d] (a %s) is bound by no `overlay autoupdate` flag: remove it, or the list no longer mirrors overlay_autoupdate.go", i, v.Type())
-		}
-	}
-
-	// The classification must have seen both kinds, or the two-tree comparison
-	// proved nothing: --check is a package variable, --depth is read off the
-	// command.
-	if !slices.Contains(shared, "check") || !slices.Contains(perTree, "depth") {
-		t.Errorf("two-tree classification is off: --check must be shared (got shared=%v), --depth per-tree (got per-tree=%v)", shared, perTree)
-	}
-	if len(shared) < len(autoupdateFlagGlobals()) {
-		t.Errorf("swept %d package-bound flags, fewer than the %d autoupdateFlagGlobals lists", len(shared), len(autoupdateFlagGlobals()))
-	}
-	t.Logf("swept %d flags: %d bound to package variables; %d per-tree %v", len(names), len(shared), len(perTree), perTree)
-}
-
 // TestAutoupdateFlagGlobalsRestoredAfterRun is the leak itself, end to end: a
 // harness Run that sets autoupdate flags must leave every one of them as it
 // found them once its test ends. The subtest also checks the Run DID change
 // them, so the test cannot pass by never exercising the leak.
 func TestAutoupdateFlagGlobalsRestoredAfterRun(t *testing.T) {
 	restoreReportFlags(t)
-	restoreAutoupdateFlags(t)
 
 	// Name each variable by the flag that binds it, for the failure message.
 	flagOf := map[uintptr]string{}
@@ -168,7 +86,7 @@ func TestAutoupdateFlagGlobalsRestoredAfterRun(t *testing.T) {
 		}
 	}
 
-	ptrs := append(reportFlagGlobals(), autoupdateFlagGlobals()...)
+	ptrs := reportFlagGlobals()
 	snapshot := func() []any {
 		values := make([]any, len(ptrs))
 		for i, p := range ptrs {
@@ -189,9 +107,8 @@ func TestAutoupdateFlagGlobalsRestoredAfterRun(t *testing.T) {
 		// The exit status is not the point: the flags are parsed into their
 		// variables before RunE decides anything.
 		c.Run("overlay", "autoupdate", "--lint", "--fix", "--yes", "--except", "cat/one,cat/two", "--ui=plain")
-		if !autoupdateLint || !autoupdateFix || !autoupdateYes || len(autoupdateExcept) != 2 || autoupdateUI != "plain" {
-			t.Fatalf("the Run did not set the flags it passed (lint=%v fix=%v yes=%v except=%v ui=%q); this test would pass without exercising the leak",
-				autoupdateLint, autoupdateFix, autoupdateYes, autoupdateExcept, autoupdateUI)
+		if autoupdateUI != "plain" {
+			t.Fatalf("the Run did not set the flag it passed (ui=%q); this test would pass without exercising the leak", autoupdateUI)
 		}
 	})
 

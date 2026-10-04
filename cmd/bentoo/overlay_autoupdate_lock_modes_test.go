@@ -20,7 +20,8 @@ import (
 // refused naming the lock — without it, a build that takes no lock at all
 // would pass the read-only half vacuously.
 func TestAutoupdateOverlayLock_ReadOnlyModesTakeNoLock(t *testing.T) {
-	overlay, _ := s056AutoupdateEnv(t)
+	auOpts := testAutoupdateOptions()
+	overlay, _ := s056AutoupdateEnv(t, auOpts)
 	oldWait, oldPoll := filelock.Wait, filelock.Poll
 	filelock.Wait, filelock.Poll = 200*time.Millisecond, 10*time.Millisecond
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
@@ -37,16 +38,16 @@ func TestAutoupdateOverlayLock_ReadOnlyModesTakeNoLock(t *testing.T) {
 		set       func()
 		wantsLock bool
 	}{
-		{"--list", func() { autoupdateCheck, autoupdateList = false, true }, false},
-		{"--lint", func() { autoupdateCheck, autoupdateLint, autoupdateFix = false, true, false }, false},
-		{"--lint --fix", func() { autoupdateCheck, autoupdateLint, autoupdateFix = false, true, true }, true},
+		{"--list", func() { auOpts.check, auOpts.list = false, true }, false},
+		{"--lint", func() { auOpts.check, auOpts.lint, auOpts.fix = false, true, false }, false},
+		{"--lint --fix", func() { auOpts.check, auOpts.lint, auOpts.fix = false, true, true }, true},
 	}
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
-			autoupdateCheck, autoupdateList, autoupdateLint, autoupdateFix = true, false, false, false
+			auOpts.check, auOpts.list, auOpts.lint, auOpts.fix = true, false, false, false
 			m.set()
 
-			code, out := s056RunCapturingFDs(t)
+			code, out := s056RunCapturingFDs(t, auOpts)
 			mentionsLock := strings.Contains(out, lockPath)
 			if m.wantsLock {
 				if code != 1 || !mentionsLock {

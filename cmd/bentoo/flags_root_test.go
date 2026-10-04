@@ -110,18 +110,18 @@ func TestRootFlagsReachEveryReportProducer(t *testing.T) {
 		},
 		{
 			command: []string{"overlay", "validate"},
-			seed: func(t *testing.T, _ *testCLI) []string {
-				stubValidateRunner(t, mixedReport())
+			seed: func(_ *testing.T, c *testCLI) []string {
+				stubValidateRunner(c.deps, mixedReport())
 				return nil
 			},
 		},
 		{
 			command: []string{"snapshot", "run"},
-			seed: func(t *testing.T, _ *testCLI) []string {
+			seed: func(t *testing.T, c *testCLI) []string {
 				stubBinariesOnPath(t, "btrbk", "ssh")
 				_, configPath := writeSnapshotConfig(t, validSnapshotTOML)
 				redirectStateDir(t)
-				snapshotRunner = &snapshot.MockRunner{}
+				c.deps.snapshotRunner = &snapshot.MockRunner{}
 				return []string{"--config=" + configPath}
 			},
 		},

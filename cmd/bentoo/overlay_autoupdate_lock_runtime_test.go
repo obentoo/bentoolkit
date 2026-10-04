@@ -52,6 +52,8 @@ func (f *lockProbingFixer) FixRegistry(_ context.Context, _ autoupdate.RegistryF
 // while the run still holds the overlay lock, so an Acquire from inside it
 // times out with ErrLocked.
 func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	// 200 OK without the "version" field: extraction fails, a real ErrFetchFailed.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -69,10 +71,9 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
 
 	fixer := &lockProbingFixer{lockPath: filepath.Join(overlayDir, ".autoupdate.bentoo-lock")}
-	oldFixerFn, oldInteractive := checkRegistryFixerFn, checkInteractiveFn
-	checkRegistryFixerFn = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
-	checkInteractiveFn = func() bool { return true }
-	t.Cleanup(func() { checkRegistryFixerFn, checkInteractiveFn = oldFixerFn, oldInteractive })
+	td := defaultDeps()
+	td.checkRegistryFixer = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+	td.checkInteractive = func() bool { return true }
 
 	// The prompt reads os.Stdin: answer "y" to the one package offered.
 	r, w, err := os.Pipe()
@@ -87,11 +88,9 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = oldStdin; _ = r.Close() })
 
-	origCheck, origForce, origConc := autoupdateCheck, autoupdateForce, autoupdateConcurrency
-	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
-	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
+	auOpts.check, auOpts.force, auOpts.concurrency = true, true, autoupdate.DefaultConcurrency
 
-	_ = runAutoupdate(autoupdateCmd, nil)
+	_ = runAutoupdate(auCmd, nil, auOpts, td)
 
 	fixer.mu.Lock()
 	defer fixer.mu.Unlock()
@@ -106,6 +105,8 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 // TestAutoupdateOverlayLock_ReleasedAfterSignal: R4.7's signal half. A --check
 // cancelled by SIGINT mid-flight returns, and the overlay lock file is gone.
 func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
+	auCmd := testAutoupdateCmd()
+	auOpts := testAutoupdateOptions()
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGINT / syscall.Kill is not portable on Windows")
 	}
@@ -130,19 +131,17 @@ func TestAutoupdateOverlayLock_ReleasedAfterSignal(t *testing.T) {
 	}
 	lockPath := filepath.Join(overlayDir, ".autoupdate.bentoo-lock")
 
-	origCheck, origForce, origConc := autoupdateCheck, autoupdateForce, autoupdateConcurrency
-	autoupdateCheck, autoupdateForce, autoupdateConcurrency = true, true, autoupdate.DefaultConcurrency
-	t.Cleanup(func() { autoupdateCheck, autoupdateForce, autoupdateConcurrency = origCheck, origForce, origConc })
+	auOpts.check, auOpts.force, auOpts.concurrency = true, true, autoupdate.DefaultConcurrency
 
 	// The process-wide handler func runMain installs (func
 	// setProcessSignalContext): without it the SIGINT below takes its default
 	// action and kills the test binary.
-	setProcessSignalContext(t, autoupdateCmd)
+	setProcessSignalContext(t, auCmd)
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(autoupdateCmd, nil)
+		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 	}()
 
 	select {

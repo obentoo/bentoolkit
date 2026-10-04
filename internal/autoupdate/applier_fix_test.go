@@ -540,7 +540,7 @@ func pkgdevFailsPrinting(out string) func(ctx context.Context, name string, arg 
 // as an ARGUMENT to sh, never interpolated into the script.
 //
 // The counter lives in the closure because the call site takes no arguments and
-// returns one value; the mutex is there because applyAllPackages runs applies
+// returns one value; the mutex is there because ApplyAll runs applies
 // concurrently and a seam is shared by construction.
 func pkgdevFailsUntilFixed() func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 	var mu sync.Mutex
@@ -790,7 +790,7 @@ func TestRepairableFailureStillInvokesTheFixer(t *testing.T) {
 //
 // The exit code is NOT the applier's and is not asserted here, because asserting
 // it here would assert nothing. A failed apply returns a non-nil error with
-// Success == false — the exact shape applyAllPackages tallies
+// Success == false — the exact shape ApplyAll tallies
 // (cmd/bentoo/overlay_autoupdate.go, the concurrent worker's `if err != nil`),
 // and runApplyAll then calls osExit(1) whenever that tally is above zero. An
 // environment failure is a failed apply like any other, so it already rides that

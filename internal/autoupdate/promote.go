@@ -64,7 +64,7 @@ type candidatePaths struct {
 	//
 	// A field on Applier is the obvious shortcut and it is wrong for the reason
 	// story 033 kept staging keyed by path rather than by an index:
-	// applyAllPackages runs its workers CONCURRENTLY, so a per-Applier field
+	// ApplyAll runs its workers CONCURRENTLY, so a per-Applier field
 	// would be shared mutable state across packages being staged at the same
 	// time, and package A's gate could be handed package B's distdir.
 	// candidatePaths is already the per-bump carrier that reaches both

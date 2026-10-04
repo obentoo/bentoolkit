@@ -362,7 +362,7 @@ func TestCheckPath_UnproducibleNamesSkipNamesThePackage(t *testing.T) {
 }
 
 // TestApplyGates_ConcurrentAppliesKeepSeamValuesPerBump is R3.4, in the shape
-// applyAllPackages actually runs: two bumps, one applier, concurrent applies.
+// ApplyAll actually runs: two bumps, one applier, concurrent applies.
 // Package A's gate must answer from A's names (FAILED — its archive dropped
 // aalib and libcaca) and package B's from B's (PASS — its archive declares
 // exactly what its ebuild passes). A seam value parked on an Applier field

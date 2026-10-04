@@ -12,13 +12,13 @@
 // identifiers are the implementation's to provide, and both follow the house
 // pattern the design names (D5, "Test seams"):
 //
-//   - runStagedClean(ctx, overlayPath, stagingRoot) — the testable half, split
+//   - runStagedClean(ctx, overlayPath, stagingRoot, d) — the testable half, split
 //     from the cobra half exactly as runPrune is split from runPruneCmd and
 //     runSweep from its caller: "everything that can be decided without config
 //     and the overlay path lives in runPrune, which takes both as parameters so
 //     the whole flow is drivable from a test".
-//   - confirmStagedCleanFn — the confirmation seam, defaulting to confirmAction.
-//     It cannot be confirmSweepFn: that name is taken (constraint in story.md).
+//   - deps.confirmStagedClean — the confirmation seam, defaulting to
+//     confirmAction. It is not deps.confirmSweep (constraint in story.md).
 //   - stagedCleanYes — this subcommand's OWN --yes flag variable. Not
 //     autoupdateYes: that one is `overlay autoupdate --yes`, and driving it here
 //     would set a flag the command under test never reads, so the R2.3 test would
@@ -146,15 +146,12 @@ func stagedRootFingerprint(t *testing.T, root string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// setStagedCleanConfirm pins the confirmation seam for one test and restores it.
+// setStagedCleanConfirm pins the confirmation seam on d.
 // countingConfirm also reports whether the prompt was reached at all, which is
 // what R1.3 and R2.2 are about: not "the answer was no" but "the question was
 // never asked".
-func setStagedCleanConfirm(t *testing.T, answer bool, calls *int) {
-	t.Helper()
-	orig := confirmStagedCleanFn
-	t.Cleanup(func() { confirmStagedCleanFn = orig })
-	confirmStagedCleanFn = func(string) bool {
+func setStagedCleanConfirm(d *deps, answer bool, calls *int) {
+	d.confirmStagedClean = func(string) bool {
 		*calls++
 		return answer
 	}
@@ -213,6 +210,7 @@ type cobraCommandUnderTest struct{ Use, Short, Long string }
 // deletions. So: a subcommand of its own, and the autoupdate command gains
 // nothing.
 func TestStagedClean_IsRegisteredAsItsOwnSubcommandAndMovesNothing(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	cmd := stagedCleanCmd(t)
 
 	if cmd.Short == "" || cmd.Long == "" {
@@ -224,7 +222,7 @@ func TestStagedClean_IsRegisteredAsItsOwnSubcommandAndMovesNothing(t *testing.T)
 	// invocation that already does something else, or an existing `--apply … `
 	// run silently becomes a sweep of the shared staging root.
 	for _, name := range []string{"clean-staging", "staged-clean", "clean-staged"} {
-		if autoupdateCmd.Flags().Lookup(name) != nil {
+		if auCmd.Flags().Lookup(name) != nil {
 			t.Errorf("`overlay autoupdate` grew a --%s flag; the staged-tree cleanup is a standalone subcommand "+
 				"precisely so that no existing invocation can be converted into a whole-root sweep (D1, R6.2)", name)
 		}
@@ -344,10 +342,11 @@ func TestStagedClean_PrintsEveryEntryOfThePlan(t *testing.T) {
 	}
 
 	calls := 0
-	setStagedCleanConfirm(t, false, &calls)
+	td := defaultDeps()
+	setStagedCleanConfirm(td, false, &calls)
 
 	out := captureStdout(t, func() {
-		_ = runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot, td)
 	})
 
 	for _, path := range expected {
@@ -380,10 +379,11 @@ func TestStagedClean_AnEmptyPlanSaysWhichEmptinessItIsAndDoesNotPrompt(t *testin
 		empty := filepath.Join(t.TempDir(), "staging")
 
 		calls := 0
-		setStagedCleanConfirm(t, true, &calls)
+		td := defaultDeps()
+		setStagedCleanConfirm(td, true, &calls)
 
 		out := strings.ToLower(captureStdout(t, func() {
-			_ = runStagedClean(context.Background(), overlay, empty)
+			_ = runStagedClean(context.Background(), overlay, empty, td)
 		}))
 
 		if calls != 0 {
@@ -408,10 +408,11 @@ func TestStagedClean_AnEmptyPlanSaysWhichEmptinessItIsAndDoesNotPrompt(t *testin
 		unknown := stagedCleanTree(t, overlay, stagingRoot, "net-libs/nghttp2", "1.66.0", "")
 
 		calls := 0
-		setStagedCleanConfirm(t, true, &calls)
+		td := defaultDeps()
+		setStagedCleanConfirm(td, true, &calls)
 
 		out := captureStdout(t, func() {
-			_ = runStagedClean(context.Background(), overlay, stagingRoot)
+			_ = runStagedClean(context.Background(), overlay, stagingRoot, td)
 		})
 		low := strings.ToLower(out)
 
@@ -445,16 +446,17 @@ func TestStagedClean_AnEmptyPlanSaysWhichEmptinessItIsAndDoesNotPrompt(t *testin
 // is the state R2.1 exists to make unreachable, since a declined sweep must not
 // enter the removal path at all.
 func TestStagedClean_ADeclinedConfirmationLeavesTheStagingRootByteIdentical(t *testing.T) {
+	td := defaultDeps()
 	overlay, stagingRoot, removable, _ := stagedCleanFixture(t)
 	before := stagedRootFingerprint(t, stagingRoot)
 
 	calls := 0
-	setStagedCleanConfirm(t, false, &calls)
-	setReconcileInteractive(t, func() bool { return true })
+	setStagedCleanConfirm(td, false, &calls)
+	setReconcileInteractive(td, func() bool { return true })
 	setStagedCleanYes(t, false)
 
 	out := captureStdout(t, func() {
-		_ = runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot, td)
 	})
 
 	if calls != 1 {
@@ -490,16 +492,17 @@ func TestStagedClean_ADeclinedConfirmationLeavesTheStagingRootByteIdentical(t *t
 // test binary's streams are not terminals anyway and an accidental change of
 // that condition would silently switch this test to the interactive path.
 func TestStagedClean_ANonInteractiveSessionRefusesAndStillPrints(t *testing.T) {
+	td := defaultDeps()
 	overlay, stagingRoot, removable, _ := stagedCleanFixture(t)
 	before := stagedRootFingerprint(t, stagingRoot)
 
 	calls := 0
-	setStagedCleanConfirm(t, true, &calls)
-	setReconcileInteractive(t, func() bool { return false })
+	setStagedCleanConfirm(td, true, &calls)
+	setReconcileInteractive(td, func() bool { return false })
 	setStagedCleanYes(t, false)
 
 	out := captureStdout(t, func() {
-		_ = runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot, td)
 	})
 
 	if calls != 0 {
@@ -529,15 +532,16 @@ func TestStagedClean_ANonInteractiveSessionRefusesAndStillPrints(t *testing.T) {
 // protected tree is asserted to survive in the same run, because "--yes"
 // authorizes the PLAN, never a wider sweep than the one that was printed.
 func TestStagedClean_TheAuthorizingFlagWarnsAndProceeds(t *testing.T) {
+	td := defaultDeps()
 	overlay, stagingRoot, removable, protected := stagedCleanFixture(t)
 
 	calls := 0
-	setStagedCleanConfirm(t, false, &calls)
-	setReconcileInteractive(t, func() bool { return false })
+	setStagedCleanConfirm(td, false, &calls)
+	setReconcileInteractive(td, func() bool { return false })
 	setStagedCleanYes(t, true)
 
 	out := captureStdout(t, func() {
-		_ = runStagedClean(context.Background(), overlay, stagingRoot)
+		_ = runStagedClean(context.Background(), overlay, stagingRoot, td)
 	})
 
 	if calls != 0 {

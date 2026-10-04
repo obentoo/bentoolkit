@@ -17,7 +17,7 @@ package main
 //
 // THE REACH. `--check` is documented read-only and the overlay it would write
 // to auto-commits and pushes. Nothing here writes to the overlay on any path:
-// setVersionsForCheck below is the one call that could, and it exists precisely
+// deps.setVersionsForCheck is the one call that could, and it exists precisely
 // so that a test can watch a seam that is never used (R9.2).
 //
 // WHAT IT SAYS AFTERWARDS is not built here any more (S044). This file used to
@@ -54,17 +54,6 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
-
-// setVersionsForCheck is the ONE way this file could publish, held as a variable
-// so R9.2 can be proved rather than asserted.
-//
-// It is deliberately never called. A check that promoted anything would write a
-// version pin through exactly this function, so a test can keep it wired, run
-// every path — a gate that passed, one that failed, one that skipped — and read
-// the seam afterwards. Deleting it would not make the check safer; it would make
-// the guarantee unobservable, which is how the guarantee gets removed by
-// accident later.
-var setVersionsForCheck = autoupdate.SetPackageVersions
 
 // validationPlanEntry is one pending update, the depth it earned and the case
 // for that depth.
@@ -395,14 +384,14 @@ func depthDistributionLine(plan validationPlan) string {
 // many words; a non-interactive terminal without --yes runs nothing AND says how
 // to proceed, because a run that silently did nothing is only marginally better
 // than one that silently did the expensive thing; anything else is asked.
-// registryPromptIsInteractive requires BOTH stdin and stdout to be terminals, so
+// deps.registryPromptIsInteractive requires BOTH stdin and stdout to be terminals, so
 // `yes | bentoo overlay autoupdate --check` cannot answer for a human.
 //
 // A run with nothing above `options` asks nothing at all. The confirmation
 // exists because a build costs hours; a plan that cannot start one has nothing
 // to ask about, and a gate that asks anyway teaches the operator to answer
 // without reading — which is how every confirmation gate dies.
-func confirmValidationRun(plan validationPlan) bool {
+func (ar *autoupdateRun) confirmValidationRun(plan validationPlan) bool {
 	builds := plan.building()
 	if builds == 0 {
 		return true
@@ -410,7 +399,7 @@ func confirmValidationRun(plan validationPlan) bool {
 
 	deepest := plan.deepest()
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		output.Warning.Printf("  --yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.\n",
 			len(plan.Entries), builds, deepest)
 		output.Warning.Printf("  Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.\n",
@@ -418,7 +407,7 @@ func confirmValidationRun(plan validationPlan) bool {
 		return true
 	}
 
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: no gate ran and nothing was validated.")
 		output.Info.Printf("  Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s).\n",
 			len(plan.Entries), builds, deepest, plan.DistfilesToFetch)
@@ -429,7 +418,7 @@ func confirmValidationRun(plan validationPlan) bool {
 	output.Warning.Printf("  %d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours.\n",
 		builds, plan.DistfilesToFetch)
 	output.Info.Println("  Nothing is published either way — a check writes no ebuild and no version pin.")
-	return confirmSweepFn(fmt.Sprintf(
+	return ar.deps.confirmSweep(fmt.Sprintf(
 		"Evaluate %d package(s), %d of them up to depth %s?", len(plan.Entries), builds, deepest))
 }
 
@@ -478,11 +467,11 @@ func confirmValidationRun(plan validationPlan) bool {
 // # It publishes nothing, and the guarantee is structural
 //
 // The one function in this file that could write to the overlay,
-// setVersionsForCheck, is never called — from here or from anywhere. The applier
+// deps.setVersionsForCheck, is never called — from here or from anywhere. The applier
 // built below runs Validate and never Apply: promotion, the version pin and the
 // `--clean` sweep all live in Apply, which this path does not reach.
-func runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Run, bool) {
-	if !autoupdateLLM {
+func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Run, bool) {
+	if !ar.opts.llm {
 		return nothingValidated(), false
 	}
 
@@ -509,7 +498,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		}
 	}
 
-	plan := planValidation(updates, autoupdateValidate.Policy, autoupdateValidate.Depth,
+	plan := planValidation(updates, ar.validate.Policy, ar.validate.Depth,
 		func(update autoupdate.PendingUpdate) string { return tier[update.Package] })
 
 	// Printed here rather than left to runValidationCheck, because the
@@ -518,7 +507,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 	// not repeated.
 	printValidationPrice(plan)
 	plan.Printed = true
-	if !confirmValidationRun(plan) {
+	if !ar.confirmValidationRun(plan) {
 		// Nothing was validated, so there is no half to hand back. The plan is on
 		// screen either way, though, which is what the second value reports: the
 		// operator has just read it and answered no, and a false here would ask
@@ -531,9 +520,9 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 		applierFixerOption(llmCfg),
 	}
 	opts = append(opts, applierGentooPathOption())
-	opts = append(opts, applierDistfileOptions()...)
-	opts = append(opts, applierValidateOptions(configDir)...)
-	opts = append(opts, applierLLMOptions(autoupdateLLM, llmCfg, autoupdateValidateCfg)...)
+	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(ar.opts.llm, llmCfg, ar.validateCfg)...)
 
 	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
 	// a read-only check has no business owning that switch even by accident.
@@ -585,7 +574,7 @@ func runPendingValidation(ctx context.Context, overlayPath, configDir string, ch
 // through buildReport, so the tally on screen and the tally in the JSON export
 // cannot disagree (R1.3).
 //
-// It publishes nothing, on every path — see setVersionsForCheck.
+// It publishes nothing, on every path — see deps.setVersionsForCheck.
 func runValidationCheck(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult) report.Run {
 	if !plan.Printed {
 		printValidationPrice(plan)
@@ -708,7 +697,7 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 // carve-out (S045-R3.3) and a file that records "this run scanned nothing" is
 // the absence carried honestly (S045-R4.3). No file at all would be
 // indistinguishable from a command that never ran.
-func presentCheckReport(run report.Run, planPrinted bool) {
+func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// This command's own facts, read back out of the run that carries them: the
 	// three decisions below — whether to render at all, whether to point at
 	// `--list`, whether to announce the registry write — are all about packages,
@@ -748,7 +737,7 @@ func presentCheckReport(run report.Run, planPrinted bool) {
 		content := report.SectionOptions{ShowAll: autoupdateAll, SkipPlan: planPrinted}
 		device := render.Options{}
 
-		mode := reportModeOrPlain(autoupdateUIConfig)
+		mode := reportModeOrPlain(ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
 
 		// The sections are built ONCE, here, and every mode below is handed the
 		// same slice — which is what makes "the three modes differ in

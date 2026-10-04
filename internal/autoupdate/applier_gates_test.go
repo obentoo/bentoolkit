@@ -630,8 +630,8 @@ func TestApplyGates_ReviveUsesTheSamePipeline(t *testing.T) {
 // contend for CPU and for space under PORTAGE_TMPDIR — measured at 60 MB for one
 // gst configure — and the existing rule already serialises `--compile`.
 //
-// The predicate is asserted here; that cmd/bentoo's applyAllPackages consults it
-// is asserted where that file is touched (overlay_autoupdate.go:1376-1379).
+// The predicate is asserted here; that (*Applier).ApplyAll consults it is
+// asserted by TestS060ApplyAllSerialWhenADepthStartsABuild.
 func TestRequiresSerialApply_AnyBuildDepthSerialises(t *testing.T) {
 	tests := []struct {
 		depth validate.Depth
