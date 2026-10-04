@@ -25,9 +25,9 @@
 // catalogue can be read, run and argued with before anything downstream moves.
 //
 // It is deliberately NOT behind a build tag. This repository already learned
-// what that costs: the browser-driven script evaluators sit behind chromedp and
-// playwright tags, so `go build ./...` skips them entirely, and a dependency
-// bump once passed CI fully green while breaking the only code that called it
+// what that costs: the browser-driven script evaluator sits behind the chromedp
+// tag, so `go build ./...` skips it entirely, and a dependency bump once passed
+// CI fully green while breaking the only code that called it
 // (.github/workflows/ci.yml, the "Build and vet the tagged script evaluators"
 // step exists because of that). Untagged means every change to lipgloss,
 // bubbletea or this package's own callers is compiled and vetted by the normal

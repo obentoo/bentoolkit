@@ -212,7 +212,7 @@ vet:
 .PHONY: lint
 lint: fmt vet lint-pin-check
 	@set -e; \
-	for tag in "" chromedp playwright; do \
+	for tag in "" chromedp; do \
 		echo "golangci-lint $(GOLANGCI_LINT_VERSION) (tags: $${tag:-none})"; \
 		if [ -z "$$tag" ]; then \
 			$(GOLANGCI_LINT) run $(LINT_ARGS) ./...; \

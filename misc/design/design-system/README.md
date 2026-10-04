@@ -239,11 +239,10 @@ already consume; that is a decision to take deliberately, per command, not as a 
 effect of adding a package.
 
 It is deliberately **not** behind a build tag. This repository already learned what
-that costs: the browser-driven script evaluators sit behind `chromedp` and
-`playwright` tags, so `go build ./...` skips them, and a dependency bump once passed
-CI fully green while breaking the only code that called it — the
-`.github/workflows/ci.yml` step that builds and vets both tags exists because of
-that. Untagged means every change to lipgloss, bubbletea or this package's callers
+that costs: the browser-driven script evaluator sits behind the `chromedp` tag, so
+`go build ./...` skips it, and a dependency bump once passed CI fully green while
+breaking the only code that called it — the `.github/workflows/ci.yml` step that
+builds and vets the tag exists because of that. Untagged means every change to lipgloss, bubbletea or this package's callers
 is compiled and vetted by the normal CI run.
 
 `Catalogue()` has exactly two consumers — the contract test and the gallery — so the

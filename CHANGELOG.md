@@ -93,6 +93,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
   v5.2.2 was published on 2025-12-29.
 
+### Removed
+
+- **The playwright-go backend of the `script` parser, and its `playwright`
+  build tag.** Two backends did one job; chromedp stays, because it drives the
+  system Chrome with no Node.js driver and no `playwright install` step, and it
+  is already the overlay ebuild's default (`USE=browser`). Build with
+  `-tags chromedp` and keep a Chrome or Chromium executable on `PATH`. A build
+  that still passes `-tags playwright` now fails to compile with a message
+  naming `-tags chromedp`, so no binary ships silently without browser
+  support; an ebuild using `USE=playwright` must move to `USE=browser`. The
+  backend is now chosen by build constraints alone, and a binary built without
+  the tag reports that it needs `-tags chromedp` and Chrome or Chromium.
+  `github.com/mxschmitt/playwright-go` and its three indirect modules leave
+  `go.mod`.
+
 ### Fixed
 
 - **`--check` caps requests per host, and script records share a
