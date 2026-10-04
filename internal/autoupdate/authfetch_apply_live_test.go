@@ -93,7 +93,7 @@ func TestApplyLiveFileZillaPro(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Apply: %v (result=%+v)", err, result)
 	}

@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -86,7 +87,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 	t.Run("LLM fix attempt failed", func(t *testing.T) {
 		prev := fixSandboxRoot
 		root := t.TempDir()
-		fixSandboxRoot = func() string { return root }
+		fixSandboxRoot = func(context.Context) string { return root }
 		t.Cleanup(func() { fixSandboxRoot = prev })
 
 		pkg := "dev-games/godot"
@@ -100,7 +101,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 		fixErr := fmt.Errorf("%s: %w", fixText, ErrClaudeTimedOut)
 		fixer.err = fixErr
 
-		result, err := applier.Apply(pkg, false)
+		result, err := applier.Apply(t.Context(), pkg, false)
 		if err == nil || result == nil || result.Success {
 			t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 		}
@@ -121,7 +122,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 		// error that stops it is an *fs.PathError satisfying fs.ErrNotExist.
 		prev := fixSandboxRoot
 		missing := filepath.Join(t.TempDir(), "no-such-root")
-		fixSandboxRoot = func() string { return missing }
+		fixSandboxRoot = func(context.Context) string { return missing }
 		t.Cleanup(func() { fixSandboxRoot = prev })
 
 		pkg := "dev-games/godot"
@@ -129,7 +130,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 			pkgdevFailsPrinting(s064ManifestOutput),
 			gatePkg{pkg, "4.7_rc3", "4.7"})
 
-		result, err := applier.Apply(pkg, false)
+		result, err := applier.Apply(t.Context(), pkg, false)
 		if err == nil || result == nil || result.Success {
 			t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 		}

@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -43,7 +44,7 @@ import (
 // case comes back as a SKIPPED gate carrying the reason, which is what
 // EbuildResult.WorstOutcome reads as "nothing was said about this bump" — never
 // as a pass.
-func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildResult {
+func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Depth) validate.EbuildResult {
 	update, found := a.pending.Get(pkg)
 	if !found {
 		return checkSkipped(pkg, "", fmt.Sprintf("%s is no longer in the pending list, so there was nothing to validate", pkg))
@@ -141,10 +142,10 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 	// recorded beside the tree they said it about — which is precisely what makes
 	// a later `--apply` able to promote this work instead of repeating it.
 	stagedRoot := local.StagedPath
-	defer func() { a.recordStagedProof(stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
+	defer func() { a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
 
 	a.reporter.TaskStage(pkg, "manifest")
-	fetchedDistdir, err := a.runManifestWithFix(cand, pkg, newVersion, local)
+	fetchedDistdir, err := a.runManifestWithFix(ctx, cand, pkg, newVersion, local)
 	// The same lifetime and the same hand-off the apply path gets, on the runner
 	// that publishes nothing (R3.1). --check's failure mode is quieter, not
 	// smaller: a plan that reports "proved" for a bump nothing read.
@@ -168,15 +169,15 @@ func (a *Applier) Validate(pkg string, ceiling validate.Depth) validate.EbuildRe
 		return checkResult(pkg, newVersion, local, depth, gates)
 	}
 
-	gates = a.runStaticGates(cand, pkg, newVersion)
+	gates = a.runStaticGates(ctx, cand, pkg, newVersion)
 
-	depth = a.reviewBump(cand, pkg, currentVersion, newVersion, depth, &gates)
+	depth = a.reviewBump(ctx, cand, pkg, currentVersion, newVersion, depth, &gates)
 	depth = holdAtConfirmedDepth(depth, ceiling)
 	local.DepthRequested = depth.Depth.String()
 	local.DepthReason = depth.Reason
 
 	a.reporter.TaskStage(pkg, "build gates")
-	buildGates, buildErr := a.runBuildGates(cand, pkg, newVersion, depth.Depth, local)
+	buildGates, buildErr := a.runBuildGates(ctx, cand, pkg, newVersion, depth.Depth, local)
 	gates = append(gates, buildGates...)
 	if buildErr != nil {
 		// The build CHILD failed in a way no gate could attribute. On the apply

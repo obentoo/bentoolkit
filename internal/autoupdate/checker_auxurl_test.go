@@ -41,7 +41,7 @@ func TestAuxURLReadsTheValueFromAnotherURL(t *testing.T) {
 		AuxURL:     lock.URL + "/rust-v{version}/Cargo.lock",
 	})
 
-	result, err := c.CheckPackage(pkg, true)
+	result, err := c.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

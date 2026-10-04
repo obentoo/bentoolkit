@@ -43,7 +43,7 @@ func TestNilDivergenceMapIsAdditive(t *testing.T) {
 	t.Run("statuses and counts are what they are today", func(t *testing.T) {
 		pkgs, prov := nilMapPackages()
 
-		report, err := CompareWithProvider(pkgs, prov, CompareOptions{
+		report, err := CompareWithProvider(t.Context(), pkgs, prov, CompareOptions{
 			IncludeSynced:      true,
 			IncludeNotInRemote: true,
 			Divergence:         nil, // nothing is known about any package
@@ -110,7 +110,7 @@ func TestNilDivergenceMapIsAdditive(t *testing.T) {
 		pkgs, prov := nilMapPackages()
 
 		// The flag combination runCompare builds for `--only-outdated`.
-		report, err := CompareWithProvider(pkgs, prov, CompareOptions{
+		report, err := CompareWithProvider(t.Context(), pkgs, prov, CompareOptions{
 			OnlyOutdated:  true,
 			IncludeSynced: false,
 			Divergence:    nil,

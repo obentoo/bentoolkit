@@ -77,7 +77,7 @@ func TestEbuildCopyVersioning(t *testing.T) {
 			}
 
 			// Apply update (without compile)
-			result, err := applier.Apply(pkg, false)
+			result, err := applier.Apply(t.Context(), pkg, false)
 			if err != nil {
 				t.Logf("Apply failed: %v", err)
 				return false
@@ -155,7 +155,7 @@ func TestEbuildCopyVersioning(t *testing.T) {
 			}
 
 			// Apply update
-			_, err = applier.Apply(pkg, false)
+			_, err = applier.Apply(t.Context(), pkg, false)
 			if err != nil {
 				t.Logf("Apply failed: %v", err)
 				return false
@@ -238,7 +238,7 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 			}
 
 			// Apply update
-			result, err := applier.Apply(pkg, false)
+			result, err := applier.Apply(t.Context(), pkg, false)
 			if err != nil {
 				t.Logf("Apply failed: %v", err)
 				return false
@@ -305,7 +305,7 @@ func TestApplySuccessUpdatesStatus(t *testing.T) {
 			}
 
 			// Apply update (should fail)
-			result, _ := applier.Apply(pkg, false)
+			result, _ := applier.Apply(t.Context(), pkg, false)
 
 			// Verify apply failed
 			if result.Success {
@@ -526,7 +526,7 @@ func TestApplyPackageNotInPending(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply("nonexistent/pkg", false)
+	result, err := applier.Apply(t.Context(), "nonexistent/pkg", false)
 	if !errors.Is(err, ErrPackageNotInPending) {
 		t.Errorf("Expected ErrPackageNotInPending, got: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestApplySourceEbuildNotFound(t *testing.T) {
 	// The recorded current_version (1.0.0) has no ebuild in the overlay, and no
 	// other ebuild exists either: the entry is stale/obsolete. Apply now prunes
 	// it rather than failing with a cryptic "source ebuild not found".
-	result, err := applier.Apply("test-cat/test-pkg", false)
+	result, err := applier.Apply(t.Context(), "test-cat/test-pkg", false)
 	if err != nil {
 		t.Errorf("Expected no error for obsolete entry, got: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestApplyObsoleteOverlayAlreadyAhead(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Errorf("Expected no error for obsolete entry, got: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestApplyHealsStaleCurrentVersion(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Expected self-healed apply to succeed, got: %v", err)
 	}
@@ -692,7 +692,7 @@ func TestApplyCopiesEbuild(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -739,7 +739,7 @@ func TestApplyStripsVersionPrefix(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -791,7 +791,7 @@ func TestApplyRejectsInvalidNewVersion(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err == nil {
 		t.Fatal("Expected error for invalid new version, got nil")
 	}
@@ -851,7 +851,7 @@ func TestApplyCleanRemovesOldEbuild(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -903,7 +903,7 @@ func TestApplyWithoutCleanKeepsOldEbuild(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -949,7 +949,7 @@ func TestApplyManifestFailure(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, _ := applier.Apply(pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg, false)
 
 	if result.Success {
 		t.Error("Expected failure when manifest fails")
@@ -993,7 +993,7 @@ func TestApplyWithCompileUserDeclines(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, true)
+	result, err := applier.Apply(t.Context(), pkg, true)
 
 	if !errors.Is(err, ErrUserDeclined) {
 		t.Errorf("Expected ErrUserDeclined, got: %v", err)
@@ -1073,7 +1073,7 @@ func TestApplyResultFields(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1192,7 +1192,7 @@ func TestApply_RollbackOnManifestFailure(t *testing.T) {
 		t.Fatalf("NewApplier failed: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr == nil {
 		t.Fatal("expected Apply to fail when manifest fails")
 	}
@@ -1254,7 +1254,7 @@ func TestApply_RollbackPreservesOriginalError(t *testing.T) {
 		t.Fatalf("NewApplier failed: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr == nil {
 		t.Fatal("expected Apply to fail when manifest fails")
 	}
@@ -1279,7 +1279,7 @@ func TestApply_RollbackPreservesOriginalError(t *testing.T) {
 // TestApply_ManifestTimeoutHonored verifies that the manifest invocation is
 // bounded: with a blocking manifest process and a short parent-context
 // deadline, Apply aborts promptly instead of hanging. The 5-minute manifest
-// timeout derives a child from a.ctx, so a shorter parent deadline is
+// timeout derives a child from Apply's ctx, so a shorter parent deadline is
 // inherited and wins. (R5.3)
 func TestApply_ManifestTimeoutHonored(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1300,7 +1300,7 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 		Status:         StatusPending,
 	})
 
-	// Parent context with a ~100ms deadline. context.WithTimeout(a.ctx,
+	// Parent context with a ~100ms deadline. context.WithTimeout(ctx,
 	// manifestTimeout) inside runManifest inherits this shorter deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1308,7 +1308,6 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandBlocking),
-		WithApplierContext(ctx),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier failed: %v", err)
@@ -1317,7 +1316,7 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, applyErr := applier.Apply(pkg, false)
+		_, applyErr := applier.Apply(ctx, pkg, false)
 		done <- applyErr
 	}()
 
@@ -1346,7 +1345,7 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 }
 
 // TestApply_CancelsOnContextCancellation_Manifest verifies R1.1, R1.3:
-// cancelling the WithApplierContext parent while runManifest is blocked in the
+// cancelling the context passed to Apply while runManifest is blocked in the
 // spawned process aborts Apply within ~2 s, surfaces a context-derived error
 // in result.Error, and rolls back the orphan ebuild placed by copyEbuild.
 func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
@@ -1378,7 +1377,6 @@ func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(blockingChildWithReadyFile(readyFile)),
-		WithApplierContext(ctx),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier failed: %v", err)
@@ -1387,7 +1385,7 @@ func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
 	done := make(chan error, 1)
 	resCh := make(chan *ApplyResult, 1)
 	go func() {
-		r, applyErr := applier.Apply(pkg, false)
+		r, applyErr := applier.Apply(ctx, pkg, false)
 		resCh <- r
 		done <- applyErr
 	}()
@@ -1433,7 +1431,7 @@ func TestApply_CancelsOnContextCancellation_Manifest(t *testing.T) {
 }
 
 // TestApply_CancelsOnContextCancellation_Compile verifies R1.2, R1.3:
-// cancelling the WithApplierContext parent while runCompile is blocked in the
+// cancelling the context passed to Apply while runCompile is blocked in the
 // elevated child aborts Apply within ~2 s and the orphan ebuild is rolled
 // back. Manifest succeeds fast; only the compile step blocks under the cancel.
 //
@@ -1487,7 +1485,6 @@ func TestApply_CancelsOnContextCancellation_Compile(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(execFn),
-		WithApplierContext(ctx),
 		WithConfirmFunc(func(prompt string) bool { return true }),
 	)
 	if err != nil {
@@ -1497,7 +1494,7 @@ func TestApply_CancelsOnContextCancellation_Compile(t *testing.T) {
 	done := make(chan error, 1)
 	resCh := make(chan *ApplyResult, 1)
 	go func() {
-		r, applyErr := applier.Apply(pkg, true) // compile=true
+		r, applyErr := applier.Apply(ctx, pkg, true) // compile=true
 		resCh <- r
 		done <- applyErr
 	}()
@@ -1580,7 +1577,7 @@ func TestApply_DeletesPendingOnSuccess(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Fatalf("Apply unexpected error: %v", err)
 	}
@@ -1625,7 +1622,7 @@ func TestApply_RetainsPendingOnManifestFailure(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, _ := applier.Apply(pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg, false)
 	if result.Success {
 		t.Fatal("Apply.Success = true, want false on manifest failure")
 	}
@@ -1692,7 +1689,7 @@ func TestApply_RetainsPendingOnCompileFailure(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, _ := applier.Apply(pkg, true) // compile=true
+	result, _ := applier.Apply(t.Context(), pkg, true) // compile=true
 	if result.Success {
 		t.Fatal("Apply.Success = true, want false on compile failure")
 	}
@@ -1753,7 +1750,7 @@ func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("Apply unexpected error: %v", applyErr)
 	}
@@ -1830,7 +1827,7 @@ func TestApply_RollbackOnManifestWriteFailure(t *testing.T) {
 		t.Fatalf("NewApplier failed: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr == nil {
 		t.Fatal("expected Apply to fail when the manifest write fails")
 	}
@@ -1885,7 +1882,7 @@ func TestApplyRefusesHeldPackage(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Errorf("Expected no error for a held package, got: %v", err)
 	}
@@ -1937,7 +1934,7 @@ func TestApplyUnheldPackageStillApplies(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	result, _ := applier.Apply(pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg, false)
 	if result.Held {
 		t.Error("Expected Held to be false for a package with no hold")
 	}
@@ -2002,7 +1999,7 @@ func TestCleanPackageDirSweepsResidueAndRegeneratesManifestOnce(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	plan, err := applier.cleanPackageDir(t.Context(), pkg, "2.0.0")
 	if err != nil {
 		t.Fatalf("cleanPackageDir: %v", err)
 	}
@@ -2060,7 +2057,7 @@ func TestCleanPackageDirNoRemovalSkipsManifest(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	plan, err := applier.cleanPackageDir(t.Context(), pkg, "2.0.0")
 	if err != nil {
 		t.Fatalf("cleanPackageDir: %v", err)
 	}
@@ -2102,7 +2099,7 @@ func TestCleanPackageDirBlockedByPinlessSibling(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	plan, err := applier.cleanPackageDir(stable, "1.28.5")
+	plan, err := applier.cleanPackageDir(t.Context(), stable, "1.28.5")
 	if err == nil {
 		t.Fatalf("a blocked sweep reported success: %+v", plan)
 	}
@@ -2164,7 +2161,7 @@ func TestApplyCleanBlockedKeepsSuccessAndNamesEntry(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(stable, false)
+	result, err := applier.Apply(t.Context(), stable, false)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -2231,7 +2228,7 @@ func TestApplyCleanRemovalFailureWarnsButKeepsSuccess(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("a failed clean must not fail the apply: %v", applyErr)
 	}
@@ -2292,7 +2289,7 @@ func TestApplyCleanWithoutRegistryRemovesNothing(t *testing.T) {
 		t.Fatalf("this test needs a nil registry; got %v", applier.configs)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("Apply: %v", applyErr)
 	}
@@ -2350,7 +2347,7 @@ func TestCleanPackageDirVanishedCandidateIsNotPlanned(t *testing.T) {
 		t.Fatalf("pre-removing the candidate: %v", err)
 	}
 
-	plan, err := applier.cleanPackageDir(pkg, "2.0.0")
+	plan, err := applier.cleanPackageDir(t.Context(), pkg, "2.0.0")
 	if err != nil {
 		t.Fatalf("an already-absent candidate must not be an error: %v", err)
 	}
@@ -2397,7 +2394,7 @@ func TestApplyCleanReportsKeptAndRemoved(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("Apply: %v", applyErr)
 	}
@@ -2539,7 +2536,7 @@ func TestApply_SuccessWritesRegistryPin(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("Apply: %v", applyErr)
 	}
@@ -2634,7 +2631,7 @@ func TestApply_ManifestFailureLeavesRegistryByteIdentical(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr == nil {
 		t.Fatal("Apply reported success although the manifest step failed")
 	}
@@ -2702,7 +2699,7 @@ func TestApply_RegistryWriteFailureWarnsButKeepsSuccess(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg, false)
 	if applyErr != nil {
 		t.Fatalf("Apply returned an error for a failed pin write: %v", applyErr)
 	}

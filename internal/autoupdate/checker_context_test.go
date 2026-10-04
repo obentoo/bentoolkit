@@ -75,7 +75,7 @@ func newContextTestChecker(t *testing.T, srvURL string, opts ...CheckerOption) *
 	return checker
 }
 
-// TestChecker_ContextCancelled verifies that cancelling the Checker's parent
+// TestChecker_ContextCancelled verifies that cancelling the caller's
 // context mid-fetch aborts the in-flight HTTP request promptly (R3.1/R3.2).
 func TestChecker_ContextCancelled(t *testing.T) {
 	// Server holds each request for up to 10s; the test cancels well before.
@@ -86,7 +86,6 @@ func TestChecker_ContextCancelled(t *testing.T) {
 	defer cancel()
 
 	checker := newContextTestChecker(t, server.URL,
-		WithContext(ctx),
 		// Generous op timeout so the *cancellation* (not the deadline) is what
 		// ends the fetch.
 		WithOpTimeout(10*time.Second),
@@ -99,7 +98,7 @@ func TestChecker_ContextCancelled(t *testing.T) {
 	outcome := make(chan fetchOutcome, 1)
 	go func() {
 		start := time.Now()
-		_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		_, err := checker.fetchContent(ctx, server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		outcome <- fetchOutcome{err: err, elapsed: time.Since(start)}
 	}()
 
@@ -142,14 +141,13 @@ func TestChecker_ContextDeadlineExceeded(t *testing.T) {
 	defer server.Close()
 
 	checker := newContextTestChecker(t, server.URL,
-		WithContext(context.Background()),
 		// Tiny per-operation timeout: the WithTimeout deadline derived inside
 		// fetchContent expires naturally while the request is in flight.
 		WithOpTimeout(50*time.Millisecond),
 	)
 
 	start := time.Now()
-	_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+	_, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 	elapsed := time.Since(start)
 
 	if err == nil {

@@ -388,13 +388,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	// is only ever READ from: Locate creates nothing and proves nothing
 	// writable, which is what lets a validate run work against the portage-owned
 	// DISTDIR the invoking user cannot write (design D2).
-	//
-	//nolint:contextcheck // Locate mirrors Resolve's context-free signature by
-	// design (D2) — they are siblings and diverging on this would be worse than
-	// the gap. Its only child process is a portageq query bounded by the
-	// distfiles package's own timeout, on the last rung of the precedence, and
-	// it is reached at most once per run.
-	distdir, haveDistdir := distfiles.Locate(opts.Distdir, "")
+	distdir, haveDistdir := distfiles.Locate(ctx, opts.Distdir, "")
 
 	// Resolved once, for the whole run, so that every package is answered by the
 	// same source and no branch below has to remember that the seam may be nil.

@@ -68,7 +68,7 @@ func TestARecordedPreconditionIsClearedWhereItCannotBeJudged(t *testing.T) {
 	}
 
 	// The verdict is not what this test is about; the record is.
-	_, _ = env.applier.runBuildGates(env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
+	_, _ = env.applier.runBuildGates(t.Context(), env.cand, env.pkg, "1.29.2", validate.DepthConfigure, &ApplyResult{})
 
 	if rec, ok := env.reopen(t).Precondition(env.pkg); ok {
 		t.Errorf("the record survived on a host that cannot judge it: %+v — it could never be cleared, "+

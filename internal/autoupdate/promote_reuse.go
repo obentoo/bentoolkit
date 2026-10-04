@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -375,7 +376,7 @@ func short(digest string) string {
 // The cost of a missing record is exactly one revalidation, which is the
 // behaviour every release before this one had. Failing an otherwise good apply
 // over a bookkeeping file would trade an hour saved for a bump not published.
-func (a *Applier) recordStagedProof(root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth) {
+func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth) {
 	if root == "" {
 		return
 	}
@@ -395,7 +396,7 @@ func (a *Applier) recordStagedProof(root, pkg, version string, inputs stagedInpu
 	// a retained tree carrying no readable record, because absence of a claim is
 	// not a passing claim. The tree itself still stays on disk as the failure's
 	// evidence (R3.6).
-	if ctxErr := a.ctx.Err(); ctxErr != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		logger.Warn("the run was interrupted, so what the gates of %s-%s reported is NOT recorded beside %s: "+
 			"they were stopped rather than answered, and the next run validates this bump again instead of "+
 			"promoting it on their silence (%v)", pkg, version, root, ctxErr)

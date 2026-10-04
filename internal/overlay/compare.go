@@ -434,10 +434,6 @@ type CompareOptions struct {
 	// Concurrency bounds the number of packages CompareWithProvider processes
 	// in parallel. A value <= 0 is treated as DefaultCompareConcurrency.
 	Concurrency int
-	// Ctx is the parent context for the comparison. It originates in cmd/
-	// (signal.NotifyContext), so cancelling it aborts an in-flight comparison.
-	// When nil it is treated as context.Background() by the consumer.
-	Ctx context.Context
 	// Divergence is what the caller knows about each package, keyed by the bare
 	// "category/package" atom. The caller builds it once, before the comparison
 	// starts, and the comparison only reads it — so it is shared across the
@@ -724,15 +720,15 @@ func (a *githubProviderAdapter) SupportsAPI() bool { return true }
 func (a *githubProviderAdapter) Close() error { return nil }
 
 // Compare compares local packages against a remote GitHub repository
-func Compare(localPackages []PackageInfo, client *github.Client, opts CompareOptions) (*CompareReport, error) {
-	return CompareWithProvider(localPackages, &githubProviderAdapter{client: client}, opts)
+func Compare(ctx context.Context, localPackages []PackageInfo, client *github.Client, opts CompareOptions) (*CompareReport, error) {
+	return CompareWithProvider(ctx, localPackages, &githubProviderAdapter{client: client}, opts)
 }
 
 // CompareWithProvider compares local packages against an upstream repository using any Provider.
 //
 // Packages are compared concurrently, bounded by opts.Concurrency (a value <= 0
 // is treated as DefaultCompareConcurrency). The semaphore is acquired with a
-// context-cancellable select: when opts.Ctx is cancelled the remaining packages
+// context-cancellable select: when ctx is cancelled the remaining packages
 // are not dispatched and the comparison returns the partial report together
 // with the context error, so a SIGINT aborts a long scan. That stop is also
 // recorded on the report itself, as Interrupted, so a caller reading the report
@@ -740,16 +736,13 @@ func Compare(localPackages []PackageInfo, client *github.Client, opts CompareOpt
 // report from the worker goroutines are mutex-guarded, and results are sorted by
 // category/package before returning so the output is deterministic regardless of
 // completion order.
-func CompareWithProvider(localPackages []PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
+//
+// ctx must be non-nil. Every provider.GetPackageVersions call receives ctx
+// itself, so a lookup ends when the caller's context does.
+func CompareWithProvider(ctx context.Context, localPackages []PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
 	report := &CompareReport{
 		TotalPackages: len(localPackages),
 		Results:       []CompareResult{},
-	}
-
-	// A nil opts.Ctx is treated as context.Background() (additive field, R3.3).
-	ctx := opts.Ctx
-	if ctx == nil {
-		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
 	}
 
 	// Sanitize the concurrency limit: a non-positive value means "use the

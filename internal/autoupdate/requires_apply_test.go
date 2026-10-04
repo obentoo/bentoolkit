@@ -315,7 +315,7 @@ func TestRequiresApplyWaitsWhileRequirementUnmet(t *testing.T) {
 				f := newRequiresApplyFixture(t, requiresApplyOptions{requires: requires, staged: staged})
 				tc.setup(t, f)
 
-				result, err := f.applier(t).Apply(requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 
 				assertWaiting(t, result, err, requiresApplyWaiting)
 				f.assertNothingWritten(t)
@@ -353,7 +353,7 @@ func TestRequiresApplyProceedsWhenRequirementMet(t *testing.T) {
 			f := newRequiresApplyFixture(t, requiresApplyOptions{requires: map[string]string{requiresApplyAtom: requiresApplyDartNew}})
 			tc.setup(t, f)
 
-			result, err := f.applier(t).Apply(requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -394,7 +394,7 @@ func TestRequiresApplyWaitsWhenRequirementsNotCaptured(t *testing.T) {
 			f := newRequiresApplyFixture(t, requiresApplyOptions{requires: tc.requires})
 			f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-			result, err := f.applier(t).Apply(requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 
 			assertWaiting(t, result, err, "--check")
 			f.assertNothingWritten(t)
@@ -416,7 +416,7 @@ func TestRequiresApplyWaitsWhenRequirementsNotCaptured(t *testing.T) {
 func TestRequiresApplyRecordWithoutRequiresIsNotGated(t *testing.T) {
 	f := newRequiresApplyFixture(t, requiresApplyOptions{noSpec: true, ebuild: strings.Replace(requiresApplyEbuild, "\t~dev-lang/dart-3.13.5\n", "", 1)})
 
-	result, err := f.applier(t).Apply(requiresApplyPkg, false)
+	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestRequiresApplyValidateReportsWaiting(t *testing.T) {
 	f.place(t, f.overlay, "dev-lang/dart-sass", "3.14.0")
 	f.place(t, f.overlay, requiresApplyAtom, "3.13.5")
 
-	result := f.applier(t).Validate(requiresApplyPkg, validate.DepthNone)
+	result := f.applier(t).Validate(t.Context(), requiresApplyPkg, validate.DepthNone)
 
 	if !strings.Contains(fmt.Sprintf("%+v", result), requiresApplyWaiting) {
 		t.Errorf("Validate's result does not name the unmet %s:\n%+v", requiresApplyWaiting, result)
@@ -467,7 +467,7 @@ func TestRequiresApplyRewritesPinnedAtom(t *testing.T) {
 			})
 			f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-			result, err := f.applier(t).Apply(requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -494,7 +494,7 @@ func TestRequiresApplyValidateStagesRewrittenPin(t *testing.T) {
 	})
 	f.place(t, f.gentoo, requiresApplyAtom, "3.14.0")
 
-	result := f.applier(t).Validate(requiresApplyPkg, validate.DepthNone)
+	result := f.applier(t).Validate(t.Context(), requiresApplyPkg, validate.DepthNone)
 
 	staged := requiresFindFiles(t, f.staging, "flutter-"+requiresApplyNew+".ebuild")
 	if len(staged) != 1 {
@@ -557,7 +557,7 @@ func TestRequiresApplyFailsWhenPinNotFound(t *testing.T) {
 				})
 				f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-				result, err := f.applier(t).Apply(requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 
 				if result == nil {
 					t.Fatalf("Apply returned a nil result (err %v)", err)
@@ -606,7 +606,7 @@ func TestRequiresApplyRefusesInvalidCapturedVersion(t *testing.T) {
 				f := newRequiresApplyFixture(t, requiresApplyOptions{requires: requires, staged: staged})
 				f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-				result, err := f.applier(t).Apply(requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 
 				if result == nil {
 					t.Fatalf("Apply returned a nil result (err %v)", err)
@@ -639,7 +639,7 @@ func TestRequiresApplyValidateRefusesInvalidCapturedVersion(t *testing.T) {
 	// Look-alike only: dart-sass at the "version" must not count as dart.
 	f.place(t, f.overlay, "dev-lang/dart-sass", "3.14.0")
 
-	result := f.applier(t).Validate(requiresApplyPkg, validate.DepthNone)
+	result := f.applier(t).Validate(t.Context(), requiresApplyPkg, validate.DepthNone)
 
 	if len(result.Gates) == 0 {
 		t.Fatalf("Validate returned no gate at all for an invalid captured version: %+v", result)

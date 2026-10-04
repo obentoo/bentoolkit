@@ -96,7 +96,7 @@ func (f *requiresReportFixture) check(t *testing.T) *CheckResult {
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
-	result, err := c.CheckPackage(requiresReportPkg, true)
+	result, err := c.CheckPackage(t.Context(), requiresReportPkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestRequiresReportPendingIndependentOfCheckOrder(t *testing.T) {
 				t.Fatalf("NewChecker: %v", err)
 			}
 
-			batch := c.CheckAll(true)
+			batch := c.CheckAll(t.Context(), true)
 
 			if len(batch.Failures) != 0 {
 				t.Fatalf("CheckAll failures: %v", batch.Failures)

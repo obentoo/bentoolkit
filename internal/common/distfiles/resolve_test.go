@@ -122,7 +122,7 @@ func TestResolvePrefersExplicitPathOverPortageq(t *testing.T) {
 		explicit := filepath.Join(t.TempDir(), "flag-distdir")
 		configured := filepath.Join(t.TempDir(), "config-distdir")
 
-		dir, err := Resolve(explicit, configured)
+		dir, err := Resolve(t.Context(), explicit, configured)
 		if err != nil {
 			t.Fatalf("Resolve(%q, %q) error = %v", explicit, configured, err)
 		}
@@ -146,7 +146,7 @@ func TestResolvePrefersExplicitPathOverPortageq(t *testing.T) {
 		call := stubPortageqOutput(t, hostAnswer+"\n")
 		configured := filepath.Join(t.TempDir(), "config-distdir")
 
-		dir, err := Resolve("", configured)
+		dir, err := Resolve(t.Context(), "", configured)
 		if err != nil {
 			t.Fatalf("Resolve(\"\", %q) error = %v", configured, err)
 		}
@@ -179,7 +179,7 @@ func TestResolveFallsBackToPortageqDistdir(t *testing.T) {
 		// with spaces as well so trimming is pinned rather than assumed.
 		call := stubPortageqOutput(t, "  "+answer+"  \n")
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		if err != nil {
 			t.Fatalf("Resolve(\"\", \"\") error = %v", err)
 		}
@@ -215,7 +215,7 @@ func TestResolveFallsBackToPortageqDistdir(t *testing.T) {
 		answer := filepath.Join(t.TempDir(), "nested", "distfiles")
 		stubPortageqOutput(t, answer+"\n")
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		if err != nil {
 			t.Fatalf("Resolve(\"\", \"\") error = %v", err)
 		}
@@ -258,7 +258,7 @@ func TestResolveRejectsNonAbsolutePortageqOutput(t *testing.T) {
 			t.Chdir(sandbox)
 			stubPortageqOutput(t, tc.output)
 
-			dir, err := Resolve("", "")
+			dir, err := Resolve(t.Context(), "", "")
 			t.Cleanup(dir.Cleanup)
 
 			assertChosePath(t, dir, err, DefaultCache)
@@ -283,7 +283,7 @@ func TestResolveFallsBackToDefaultWhenPortageqMissing(t *testing.T) {
 	t.Run("the binary is not on the host", func(t *testing.T) {
 		stubPortageqUnavailable(t)
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		t.Cleanup(dir.Cleanup)
 
 		assertChosePath(t, dir, err, DefaultCache)
@@ -294,7 +294,7 @@ func TestResolveFallsBackToDefaultWhenPortageqMissing(t *testing.T) {
 		// is what makes it untrustworthy.
 		stubPortageqExec(t, "sh", "-c", "printf '%s' /should/never/be/used; exit 3")
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		t.Cleanup(dir.Cleanup)
 
 		assertChosePath(t, dir, err, DefaultCache)
@@ -305,7 +305,7 @@ func TestResolveFallsBackToDefaultWhenPortageqMissing(t *testing.T) {
 		stubPortageqExec(t, "sleep", "30")
 
 		start := time.Now()
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		elapsed := time.Since(start)
 		t.Cleanup(dir.Cleanup)
 
@@ -330,7 +330,7 @@ func TestResolveNeverUsesOsTempDir(t *testing.T) {
 	t.Run("the fallback is a disk path, not a temporary one", func(t *testing.T) {
 		stubPortageqUnavailable(t)
 
-		dir, err := Resolve("", "")
+		dir, err := Resolve(t.Context(), "", "")
 		t.Cleanup(dir.Cleanup)
 
 		assertChosePath(t, dir, err, DefaultCache)
@@ -378,7 +378,7 @@ func TestResolveExpandsTildeAndRelativePaths(t *testing.T) {
 		expected := filepath.Join(home, rel)
 		t.Cleanup(func() { _ = os.RemoveAll(expected) })
 
-		dir, err := Resolve(input, "")
+		dir, err := Resolve(t.Context(), input, "")
 		if err != nil {
 			t.Fatalf("Resolve(%q, \"\") error = %v", input, err)
 		}
@@ -395,7 +395,7 @@ func TestResolveExpandsTildeAndRelativePaths(t *testing.T) {
 		}
 		stubPortageqUnavailable(t)
 
-		dir, err := Resolve("distfiles", "")
+		dir, err := Resolve(t.Context(), "distfiles", "")
 		if err != nil {
 			t.Fatalf("Resolve(\"distfiles\", \"\") error = %v", err)
 		}
@@ -497,7 +497,7 @@ func TestResolveCreationFailureCarriesErrDistdirNotWritable(t *testing.T) {
 	target := filepath.Join(blocker, "distfiles")
 
 	t.Run("Resolve wraps the sentinel around a creation failure", func(t *testing.T) {
-		dir, err := Resolve(target, "")
+		dir, err := Resolve(t.Context(), target, "")
 		if err == nil {
 			t.Fatalf("Resolve(%q, \"\") error = nil; a path under a regular file cannot be created", target)
 		}
@@ -551,7 +551,7 @@ func TestResolveCreationFailureCarriesErrDistdirNotWritable(t *testing.T) {
 func TestTempRootAsksThePackageManagerForPortageTmpdir(t *testing.T) {
 	call := stubPortageqOutput(t, "/var/tmp\n")
 
-	if got := TempRoot(); got != "/var/tmp" {
+	if got := TempRoot(t.Context()); got != "/var/tmp" {
 		t.Errorf("TempRoot() = %q, want %q", got, "/var/tmp")
 	}
 	if want := "portageq envvar PORTAGE_TMPDIR"; call.argv() != want {
@@ -570,7 +570,7 @@ func TestTempRootAsksThePackageManagerForPortageTmpdir(t *testing.T) {
 func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
 	t.Run("portageq is not installed", func(t *testing.T) {
 		stubPortageqUnavailable(t)
-		if got := TempRoot(); got != "" {
+		if got := TempRoot(t.Context()); got != "" {
 			t.Errorf("TempRoot() = %q, want \"\" so os.MkdirTemp falls back to its default", got)
 		}
 	})
@@ -578,14 +578,14 @@ func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
 	t.Run("the answer is not an absolute path", func(t *testing.T) {
 		// A relative path is meaningless: portage's working directory is unknown.
 		stubPortageqOutput(t, "var/tmp\n")
-		if got := TempRoot(); got != "" {
+		if got := TempRoot(t.Context()); got != "" {
 			t.Errorf("TempRoot() = %q, want \"\": a relative answer is not a directory", got)
 		}
 	})
 
 	t.Run("the answer is empty", func(t *testing.T) {
 		stubPortageqOutput(t, "\n")
-		if got := TempRoot(); got != "" {
+		if got := TempRoot(t.Context()); got != "" {
 			t.Errorf("TempRoot() = %q, want \"\"", got)
 		}
 	})
@@ -593,7 +593,7 @@ func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
 	t.Run("the query times out", func(t *testing.T) {
 		stubPortageqTimeout(t, time.Millisecond)
 		stubPortageqExec(t, "sleep", "5")
-		if got := TempRoot(); got != "" {
+		if got := TempRoot(t.Context()); got != "" {
 			t.Errorf("TempRoot() = %q, want \"\"", got)
 		}
 	})
@@ -609,11 +609,11 @@ func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
 // directory the sandbox exists to keep it out of.
 func TestTempRootAndHostDistdirAskDifferentQuestions(t *testing.T) {
 	distdirCall := stubPortageqOutput(t, "/var/cache/distfiles\n")
-	_ = hostDistdir()
+	_ = hostDistdir(t.Context())
 	distdirArgv := distdirCall.argv()
 
 	tempCall := stubPortageqOutput(t, "/var/tmp\n")
-	_ = TempRoot()
+	_ = TempRoot(t.Context())
 	tempArgv := tempCall.argv()
 
 	if distdirArgv == tempArgv {

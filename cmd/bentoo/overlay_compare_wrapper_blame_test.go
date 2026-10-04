@@ -204,8 +204,9 @@ func TestRealignReviewWrapperDoesNotBlameTheEbuilds(t *testing.T) {
 // value — the asker is scripted and no client is built.
 func realignReviewerOverAsker(t *testing.T, asker claudeAsker) overlay.RealignReviewer {
 	t.Helper()
-	stubClaudeAsker(t, func() (claudeAsker, error) { return asker, nil })
-	reviewer, err := newRealignReviewer(context.Background(), cmdReviewBudget)
+	td := defaultDeps()
+	stubClaudeAsker(td, func() (claudeAsker, error) { return asker, nil })
+	reviewer, err := newRealignReviewer(cmdReviewBudget, td)
 	if err != nil {
 		t.Fatalf("newRealignReviewer returned %v, want nil", err)
 	}

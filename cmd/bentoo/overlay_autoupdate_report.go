@@ -274,7 +274,7 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 // over a run that finished — telling the operator that a run which had nothing
 // to do was cut short.
 //
-// The condition is read off the PLAN rather than off autoupdateLLM: an operator
+// The condition is read off the PLAN rather than off the --llm option: an operator
 // can decline the confirmation with `--llm` set, and that run validated nothing
 // either. It agrees with the producer instead of overriding it — both
 // buildReport and nothingValidated already answer complete for an empty plan

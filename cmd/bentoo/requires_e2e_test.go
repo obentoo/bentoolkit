@@ -122,7 +122,7 @@ func requiresPairRun(t *testing.T, staged bool) {
 	}
 
 	// Concurrency 1: one worker, so only the wave order can put dart first.
-	results, failures := applyAllPackages(applier, updates, false, 1)
+	results, failures := applier.ApplyAll(t.Context(), updates, false, 1)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)

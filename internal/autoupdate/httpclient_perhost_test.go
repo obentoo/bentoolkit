@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,8 +68,10 @@ func newPerHostClient(rt http.RoundTripper) *RetryableHTTPClient {
 }
 
 // perHostGet performs one GET and reports any failure, including a non-200.
+// It has no *testing.T, so it uses context.Background(): the same context the
+// request carried before Get took one.
 func perHostGet(c *RetryableHTTPClient, rawURL string) error {
-	resp, err := c.Get(rawURL)
+	resp, err := c.Get(context.Background(), rawURL)
 	if resp != nil && resp.Body != nil {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()

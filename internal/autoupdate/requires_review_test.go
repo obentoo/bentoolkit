@@ -62,7 +62,7 @@ func TestRequiresReviewCaptureRefusesRevisionForTilde(t *testing.T) {
   "releases": [{"version": "3.48.0", "dart_sdk_version": "3.14.0-r1"}]}`)
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
-	result, err := c.CheckPackage(requiresCapturePkg, true)
+	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom, "3.14.0-r1")
 }
 
@@ -72,7 +72,7 @@ func TestRequiresReviewCaptureRefusesRevisionForTilde(t *testing.T) {
 func TestRequiresReviewObsoleteBeatsWaiting(t *testing.T) {
 	f := newRequiresApplyFixture(t, requiresApplyOptions{requires: map[string]string{requiresApplyAtom: requiresApplyDartNew}})
 	f.place(t, f.overlay, requiresApplyPkg, requiresApplyNew)
-	result, err := f.applier(t).Apply(requiresApplyPkg, false)
+	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

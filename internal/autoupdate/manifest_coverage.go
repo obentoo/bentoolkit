@@ -39,7 +39,7 @@ type missingManifestRecord struct {
 // so at WARN instead of refusing a bump nothing proved wrong. MissingManifest
 // is a package-scope check, so the scan covers every version in the directory
 // and the records are narrowed to the one this bump wrote.
-func (a *Applier) checkManifestCoverage(pkgDir, pkg, version string) error {
+func (a *Applier) checkManifestCoverage(ctx context.Context, pkgDir, pkg, version string) error {
 	category, pkgName, ok := splitPkgAtom(pkg)
 	if !ok {
 		return nil
@@ -49,12 +49,12 @@ func (a *Applier) checkManifestCoverage(pkgDir, pkg, version string) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(a.ctx, qaCheckTimeout)
+	scanCtx, cancel := context.WithTimeout(ctx, qaCheckTimeout)
 	defer cancel()
 
 	// --cache=-git for the reason validate.PkgcheckFindings gives: the git addon
 	// crashes on this overlay's history and exits 0 with nothing on stdout.
-	cmd := a.execCommand(ctx, "pkgcheck", "scan", "--cache=-git", "-k", "MissingManifest",
+	cmd := a.execCommand(scanCtx, "pkgcheck", "scan", "--cache=-git", "-k", "MissingManifest",
 		"-R", "JsonStream", category+"/"+pkgName)
 	cmd.Dir = pkgDir
 	var stdout, stderr bytes.Buffer

@@ -6,7 +6,7 @@ package main
 // the hostile rows come first: an interruption must stay 130 and not collapse
 // into 2 or 1, a run failure must stay 2 and not collapse into 1, and a --depth
 // that does not parse must stay 1 and not be promoted to 2. The run is replaced
-// through the validateRunnerFn seam where the row needs a specific report.
+// through the validateRunner field of deps where the row needs a specific report.
 //
 // Red on arrival: overlay validate is still a Run command.
 
@@ -26,17 +26,15 @@ func TestS058ValidateReturnsThroughRunE(t *testing.T) {
 	}
 }
 
-// s058StubValidate replaces the validation run for one test.
-func s058StubValidate(t *testing.T, fn func(context.Context, validate.Options) (validate.Report, error)) {
-	t.Helper()
-	orig := validateRunnerFn
-	validateRunnerFn = fn
-	t.Cleanup(func() { validateRunnerFn = orig })
+// s058StubValidate replaces the validation run on the deps the row's tree is
+// built from.
+func s058StubValidate(c *testCLI, fn func(context.Context, validate.Options) (validate.Report, error)) {
+	c.deps.validateRunner = fn
 }
 
 func s058ValidateAnswers(report validate.Report, err error) func(*testing.T, *testCLI) []string {
-	return func(t *testing.T, _ *testCLI) []string {
-		s058StubValidate(t, func(context.Context, validate.Options) (validate.Report, error) { return report, err })
+	return func(_ *testing.T, c *testCLI) []string {
+		s058StubValidate(c, func(context.Context, validate.Options) (validate.Report, error) { return report, err })
 		return nil
 	}
 }
@@ -68,8 +66,8 @@ func s058ValidateRows() []s058Row {
 		{name: "an interrupted run", args: []string{"overlay", "validate"},
 			setup: s058ValidateAnswers(partial, fmt.Errorf("the validation run was interrupted: %w", context.Canceled)), want: 130},
 		{name: "the caller's cancellation reaches the run", args: []string{"overlay", "validate"},
-			setup: func(t *testing.T, _ *testCLI) []string {
-				s058StubValidate(t, func(ctx context.Context, _ validate.Options) (validate.Report, error) {
+			setup: func(_ *testing.T, c *testCLI) []string {
+				s058StubValidate(c, func(ctx context.Context, _ validate.Options) (validate.Report, error) {
 					select {
 					case <-ctx.Done():
 						return validate.Report{}, fmt.Errorf("the validation run was interrupted: %w", ctx.Err())

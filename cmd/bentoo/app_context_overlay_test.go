@@ -44,16 +44,43 @@ func TestSelectOverlay(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Chdir(tc.cwd)
-			orig := overlayFlag
-			overlayFlag = tc.flag
-			t.Cleanup(func() { overlayFlag = orig })
-
 			cfg := &config.Config{}
 			cfg.Overlay.Path = main
-			selectOverlay(cfg)
+			selectOverlay(cfg, tc.flag)
 			if !samePath(cfg.Overlay.Path, tc.want) {
 				t.Errorf("overlay = %s, want %s", cfg.Overlay.Path, tc.want)
 			}
 		})
+	}
+}
+
+// TestOverlayFlagReachesSubcommands pins how --overlay travels now that it has
+// no package variable: the root declares it persistent and loadAppContext reads
+// it off the running command, so a subcommand sees the value given on its own
+// command line, and a fresh tree starts from "" (nothing leaks between runs).
+func TestOverlayFlagReachesSubcommands(t *testing.T) {
+	for _, path := range [][]string{{"overlay", "status"}, {"overlay", "autoupdate"}} {
+		root := newRootCmd()
+		sub, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", path, err)
+		}
+		if err := sub.ParseFlags([]string{"--overlay", "/srv/other"}); err != nil {
+			t.Fatalf("ParseFlags(%v): %v", path, err)
+		}
+		if got := overlayFlagValue(sub); got != "/srv/other" {
+			t.Errorf("%v: overlayFlagValue = %q, want /srv/other", path, got)
+		}
+
+		fresh, _, err := newRootCmd().Find(path)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", path, err)
+		}
+		if got := overlayFlagValue(fresh); got != "" {
+			t.Errorf("%v: a fresh tree's overlayFlagValue = %q, want empty", path, got)
+		}
+	}
+	if got := overlayFlagValue(nil); got != "" {
+		t.Errorf("overlayFlagValue(nil) = %q, want empty", got)
 	}
 }

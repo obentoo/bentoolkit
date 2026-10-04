@@ -118,7 +118,7 @@ func annotateReviewOpts(overlayRoot string) CompareOptions {
 
 func annotateCompare(t *testing.T, pkgs []PackageInfo, prov provider.Provider, opts CompareOptions) *CompareReport {
 	t.Helper()
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

@@ -129,7 +129,7 @@ func TestValidate_StagingFault_DeclinesOverTheCandidate(t *testing.T) {
 	}
 
 	applier, pkg := checkFixture(t, blocked, false)
-	result := applier.Validate(pkg, validate.DepthNone)
+	result := applier.Validate(t.Context(), pkg, validate.DepthNone)
 
 	assertCandidateDeclined(t, result.Gates, "a staged tree that could not be prepared")
 }
@@ -140,7 +140,7 @@ func TestValidate_StagingFault_DeclinesOverTheCandidate(t *testing.T) {
 // has no digested distfile for any gate to read.
 func TestValidate_ManifestFault_DeclinesOverTheCandidate(t *testing.T) {
 	applier, pkg := checkFixture(t, filepath.Join(t.TempDir(), "staging"), true)
-	result := applier.Validate(pkg, validate.DepthNone)
+	result := applier.Validate(t.Context(), pkg, validate.DepthNone)
 
 	assertCandidateDeclined(t, result.Gates, "a manifest step that failed")
 }
@@ -274,7 +274,7 @@ func assertApplyRefused(t *testing.T, applier *Applier, pkg, overlayDir string, 
 	t.Helper()
 
 	before := hashOverlayTree(t, overlayDir)
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 
 	if err == nil {
 		t.Errorf("%s: Apply returned no error\nnothing read this candidate, so an apply that succeeds here publishes an unmeasured ebuild into an overlay that auto-commits and pushes", what)

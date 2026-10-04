@@ -1,4 +1,4 @@
-package main
+package autoupdate
 
 import (
 	"context"
@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
 )
 
 // Story 079, sub-task 6.1: `--apply all` runs a batch in dependency waves.
@@ -64,7 +62,7 @@ func rwSorted(waves [][]int) [][]int {
 }
 
 func TestRequiresWavesNoRequirementsIsOneWaveInInputOrder(t *testing.T) {
-	updates := []autoupdate.PendingUpdate{
+	updates := []PendingUpdate{
 		{Package: "dev-lang/flutter", CurrentVersion: "3.47.6", NewVersion: "3.48.0"},
 		{Package: "dev-lang/dart@stable", CurrentVersion: "3.13.5", NewVersion: "3.14.0"},
 		{Package: "app-misc/foo:2", CurrentVersion: "2.0", NewVersion: "2.1"},
@@ -83,7 +81,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		updates []autoupdate.PendingUpdate
+		updates []PendingUpdate
 		pins    map[string]string
 		want    [][]int // compared with each wave sorted
 	}{
@@ -91,7 +89,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		// packages. An edge here would delay flutter for nothing.
 		{
 			name: "hostile collapse: dart-sass, dartx and dev-util/dart are not dev-lang/dart",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart-sass", NewVersion: "3.14.0"},
 				{Package: "dev-lang/dartx@stable", NewVersion: "3.14.0"},
@@ -105,7 +103,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 			// the pin must not become an edge. dart@beta is pushed to wave 1 by
 			// its own requirement, so a wrong edge would push flutter to wave 2.
 			name: "hostile collapse: a second dart key with a non-matching version adds no edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@beta", NewVersion: "3.15.0_beta1", Requires: map[string]string{"sys-devel/llvm": "19.1.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.14.0"},
@@ -118,7 +116,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		// Missing the edge here would apply flutter before its dart.
 		{
 			name: "hostile split: an @label key is the required atom",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.14.0"},
 			},
@@ -127,7 +125,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "hostile split: a :slot key is the required atom",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart:0", NewVersion: "3.14.0"},
 			},
@@ -136,7 +134,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "hostile split: a :slot@label key is the required atom",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart:0@stable", NewVersion: "3.14.0"},
 			},
@@ -146,7 +144,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		// --- The pin decides whether the pending version satisfies the edge.
 		{
 			name: "pin ~ not satisfied by another version: no edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.15.0"},
 			},
@@ -155,7 +153,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "pin >= satisfied by a greater version: edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.15.0"},
 			},
@@ -164,7 +162,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "pin >= not satisfied by a lower version: no edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.13.9"},
 			},
@@ -173,7 +171,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "pin = satisfied by the exact version: edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "dev-lang/dart@stable", NewVersion: "3.14.0"},
 			},
@@ -183,7 +181,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		// --- Benign shapes.
 		{
 			name: "chain dart@stable then flutter, required entry first in input",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/dart@stable", NewVersion: "3.14.0"},
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 			},
@@ -192,7 +190,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "three-link chain gives three waves",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "app-misc/c", NewVersion: "3.0", Requires: map[string]string{"app-misc/b": "2.0"}},
 				{Package: "app-misc/b", NewVersion: "2.0", Requires: map[string]string{"app-misc/a": "1.0"}},
 				{Package: "app-misc/a", NewVersion: "1.0"},
@@ -202,7 +200,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "requirement with no pending entry adds no edge",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "dev-lang/flutter", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 				{Package: "app-misc/bar", NewVersion: "1.1"},
 			},
@@ -211,7 +209,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "two-entry cycle lands in the final wave, after the free entry",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "app-misc/aaa", NewVersion: "1.0", Requires: map[string]string{"app-misc/bbb": "1.0"}},
 				{Package: "app-misc/bbb", NewVersion: "1.0", Requires: map[string]string{"app-misc/aaa": "1.0"}},
 				{Package: "app-misc/free", NewVersion: "5.0"},
@@ -221,7 +219,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 		},
 		{
 			name: "two-entry cycle alone is one final wave",
-			updates: []autoupdate.PendingUpdate{
+			updates: []PendingUpdate{
 				{Package: "app-misc/aaa", NewVersion: "1.0", Requires: map[string]string{"app-misc/bbb": "1.0"}},
 				{Package: "app-misc/bbb", NewVersion: "1.0", Requires: map[string]string{"app-misc/aaa": "1.0"}},
 			},
@@ -241,7 +239,7 @@ func TestRequiresWavesOrdering(t *testing.T) {
 	}
 }
 
-// --- applyAllPackages over a real Applier -----------------------------------
+// --- ApplyAll over a real Applier -----------------------------------
 
 const rwDartEbuild = "EAPI=8\nDESCRIPTION=\"dart\"\nSLOT=\"0\"\nKEYWORDS=\"~amd64\"\nLICENSE=\"BSD\"\n"
 
@@ -277,8 +275,8 @@ func rwHermetic(t *testing.T) string {
 }
 
 // rwRecord is a registry record; only Requires matters to the apply path.
-func rwRecord(requires map[string]autoupdate.RequireSpec) autoupdate.PackageConfig {
-	return autoupdate.PackageConfig{
+func rwRecord(requires map[string]RequireSpec) PackageConfig {
+	return PackageConfig{
 		URL:      "https://example.invalid/releases.json",
 		Parser:   "regex",
 		Pattern:  `"version":\s*"([^"]+)"`,
@@ -286,22 +284,22 @@ func rwRecord(requires map[string]autoupdate.RequireSpec) autoupdate.PackageConf
 	}
 }
 
-var rwDartRequire = map[string]autoupdate.RequireSpec{
+var rwDartRequire = map[string]RequireSpec{
 	"dev-lang/dart": {Pattern: `"dart_sdk_version":\s*"([^"]+)"`, Pin: "~"},
 }
 
 // rwApplier builds an Applier over overlay whose external commands run through
 // factory, with an empty ::gentoo and a private distdir.
-func rwApplier(t *testing.T, overlay, configDir, gentoo string, pending *autoupdate.PendingList,
-	records map[string]autoupdate.PackageConfig, factory func(context.Context, string, ...string) *exec.Cmd,
-) *autoupdate.Applier {
+func rwApplier(t *testing.T, overlay, configDir, gentoo string, pending *PendingList,
+	records map[string]PackageConfig, factory func(context.Context, string, ...string) *exec.Cmd,
+) *Applier {
 	t.Helper()
-	applier, err := autoupdate.NewApplier(overlay, configDir,
-		autoupdate.WithApplierPendingList(pending),
-		autoupdate.WithExecCommand(factory),
-		autoupdate.WithApplierDistdir(t.TempDir(), ""),
-		autoupdate.WithApplierGentooPath(gentoo),
-		autoupdate.WithApplierPackagesConfig(&autoupdate.PackagesConfig{Packages: records}),
+	applier, err := NewApplier(overlay, configDir,
+		WithApplierPendingList(pending),
+		WithExecCommand(factory),
+		WithApplierDistdir(t.TempDir(), ""),
+		WithApplierGentooPath(gentoo),
+		WithApplierPackagesConfig(&PackagesConfig{Packages: records}),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
@@ -322,7 +320,7 @@ func rwFailIn(dir string) func(context.Context, string, ...string) *exec.Cmd {
 	}
 }
 
-func rwAddPending(t *testing.T, pending *autoupdate.PendingList, updates []autoupdate.PendingUpdate) {
+func rwAddPending(t *testing.T, pending *PendingList, updates []PendingUpdate) {
 	t.Helper()
 	for _, u := range updates {
 		if err := pending.Add(u); err != nil {
@@ -331,7 +329,7 @@ func rwAddPending(t *testing.T, pending *autoupdate.PendingList, updates []autou
 	}
 }
 
-func rwFindWaiting(r *autoupdate.ApplyResult, want string) bool {
+func rwFindWaiting(r *ApplyResult, want string) bool {
 	for _, w := range r.Waiting {
 		if strings.Contains(w, want) {
 			return true
@@ -366,25 +364,25 @@ func rwApplyAllKeepsResultsAtInputIndices(t *testing.T, concurrency int) {
 	rwWriteEbuild(t, overlay, "app-misc/indep/indep-1.0.ebuild", rwPlainEbuild)
 	rwWriteEbuild(t, overlay, "dev-lang/dart/dart-3.13.5.ebuild", rwDartEbuild)
 
-	updates := []autoupdate.PendingUpdate{
+	updates := []PendingUpdate{
 		{Package: "dev-lang/flutter", CurrentVersion: "3.47.6", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 		{Package: "app-misc/indep", CurrentVersion: "1.0", NewVersion: "1.1"},
 		{Package: "dev-lang/dart@stable", CurrentVersion: "3.13.5", NewVersion: "3.14.0"},
 	}
-	pending, err := autoupdate.NewPendingList(configDir)
+	pending, err := NewPendingList(configDir)
 	if err != nil {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
 
-	records := map[string]autoupdate.PackageConfig{
+	records := map[string]PackageConfig{
 		"dev-lang/flutter":     rwRecord(rwDartRequire),
 		"app-misc/indep":       rwRecord(nil),
 		"dev-lang/dart@stable": rwRecord(nil),
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applyAllPackages(applier, updates, false, concurrency)
+	results, failures := applier.ApplyAll(t.Context(), updates, false, concurrency)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)
@@ -428,22 +426,22 @@ func TestRequiresWavesDependentWaitsWhenRequiredFails(t *testing.T) {
 	rwWriteEbuild(t, overlay, "dev-lang/flutter/flutter-3.47.6.ebuild", rwFlutterEbuild)
 	rwWriteEbuild(t, overlay, "dev-lang/dart/dart-3.13.5.ebuild", rwDartEbuild)
 
-	updates := []autoupdate.PendingUpdate{
+	updates := []PendingUpdate{
 		{Package: "dev-lang/flutter", CurrentVersion: "3.47.6", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 		{Package: "dev-lang/dart@stable", CurrentVersion: "3.13.5", NewVersion: "3.14.0"},
 	}
-	pending, err := autoupdate.NewPendingList(configDir)
+	pending, err := NewPendingList(configDir)
 	if err != nil {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]autoupdate.PackageConfig{
+	records := map[string]PackageConfig{
 		"dev-lang/flutter":     rwRecord(rwDartRequire),
 		"dev-lang/dart@stable": rwRecord(nil),
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwFailIn("/dev-lang/dart"))
 
-	results, failures := applyAllPackages(applier, updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
 
 	if failures != 1 {
 		t.Errorf("failures = %d, want 1 (dart failed; a waiting flutter is not a failure)", failures)
@@ -464,7 +462,7 @@ func TestRequiresWavesDependentWaitsWhenRequiredFails(t *testing.T) {
 	if rwExists(filepath.Join(overlay, "dev-lang/flutter/flutter-3.48.0.ebuild")) {
 		t.Error("flutter-3.48.0.ebuild was written although its requirement failed")
 	}
-	reloaded, err := autoupdate.NewPendingList(configDir)
+	reloaded, err := NewPendingList(configDir)
 	if err != nil {
 		t.Fatalf("reload pending: %v", err)
 	}
@@ -484,24 +482,24 @@ func TestRequiresWavesDependentWaitsWhenRequiredWaits(t *testing.T) {
 	rwWriteEbuild(t, overlay, "dev-lang/flutter/flutter-3.47.6.ebuild", rwFlutterEbuild)
 	rwWriteEbuild(t, overlay, "dev-lang/dart/dart-3.13.5.ebuild", rwDartEbuild+"BDEPEND=\"~dev-util/dartgen-0.9\"\n")
 
-	updates := []autoupdate.PendingUpdate{
+	updates := []PendingUpdate{
 		{Package: "dev-lang/flutter", CurrentVersion: "3.47.6", NewVersion: "3.48.0", Requires: map[string]string{"dev-lang/dart": "3.14.0"}},
 		{Package: "dev-lang/dart@stable", CurrentVersion: "3.13.5", NewVersion: "3.14.0", Requires: map[string]string{"dev-util/dartgen": "1.0"}},
 	}
-	pending, err := autoupdate.NewPendingList(configDir)
+	pending, err := NewPendingList(configDir)
 	if err != nil {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]autoupdate.PackageConfig{
+	records := map[string]PackageConfig{
 		"dev-lang/flutter": rwRecord(rwDartRequire),
-		"dev-lang/dart@stable": rwRecord(map[string]autoupdate.RequireSpec{
+		"dev-lang/dart@stable": rwRecord(map[string]RequireSpec{
 			"dev-util/dartgen": {Pattern: `"dartgen":\s*"([^"]+)"`, Pin: "~"},
 		}),
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applyAllPackages(applier, updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0 (waiting is not failing)", failures)
@@ -532,22 +530,22 @@ func TestRequiresWavesCycleAttemptsEveryEntry(t *testing.T) {
 	rwWriteEbuild(t, overlay, "app-misc/aaa/aaa-0.9.ebuild", rwPlainEbuild+"RDEPEND=\"~app-misc/bbb-0.9\"\n")
 	rwWriteEbuild(t, overlay, "app-misc/bbb/bbb-0.9.ebuild", rwPlainEbuild+"RDEPEND=\"~app-misc/aaa-0.9\"\n")
 
-	updates := []autoupdate.PendingUpdate{
+	updates := []PendingUpdate{
 		{Package: "app-misc/aaa", CurrentVersion: "0.9", NewVersion: "1.0", Requires: map[string]string{"app-misc/bbb": "1.0"}},
 		{Package: "app-misc/bbb", CurrentVersion: "0.9", NewVersion: "1.0", Requires: map[string]string{"app-misc/aaa": "1.0"}},
 	}
-	pending, err := autoupdate.NewPendingList(configDir)
+	pending, err := NewPendingList(configDir)
 	if err != nil {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]autoupdate.PackageConfig{
-		"app-misc/aaa": rwRecord(map[string]autoupdate.RequireSpec{"app-misc/bbb": {Pattern: `"b":\s*"([^"]+)"`, Pin: "~"}}),
-		"app-misc/bbb": rwRecord(map[string]autoupdate.RequireSpec{"app-misc/aaa": {Pattern: `"a":\s*"([^"]+)"`, Pin: "~"}}),
+	records := map[string]PackageConfig{
+		"app-misc/aaa": rwRecord(map[string]RequireSpec{"app-misc/bbb": {Pattern: `"b":\s*"([^"]+)"`, Pin: "~"}}),
+		"app-misc/bbb": rwRecord(map[string]RequireSpec{"app-misc/aaa": {Pattern: `"a":\s*"([^"]+)"`, Pin: "~"}}),
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applyAllPackages(applier, updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)

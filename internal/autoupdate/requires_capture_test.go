@@ -97,7 +97,7 @@ func TestRequiresCaptureFromTheDetectedReleaseObject(t *testing.T) {
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 
-	result, err := c.CheckPackage(requiresCapturePkg, true)
+	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -137,14 +137,14 @@ func TestRequiresCaptureOnTheCachedVersionPath(t *testing.T) {
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 
-	if _, err := c.CheckPackage(requiresCapturePkg, true); err != nil {
+	if _, err := c.CheckPackage(t.Context(), requiresCapturePkg, true); err != nil {
 		t.Fatalf("CheckPackage (seed cache): %v", err)
 	}
 	if err := c.pending.Delete(requiresCapturePkg); err != nil {
 		t.Fatalf("pending.Delete: %v", err)
 	}
 
-	result, err := c.CheckPackage(requiresCapturePkg, false)
+	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, false)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRequiresCaptureFromItsOwnURL(t *testing.T) {
 	cfg.Headers = map[string]string{"Authorization": "Bearer literal", "User-Agent": "bentoo-test/1"}
 	c := requiresCaptureChecker(t, cfg)
 
-	result, err := c.CheckPackage(requiresCapturePkg, true)
+	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestRequiresCaptureHeldWhenPatternMatchesNothing(t *testing.T) {
   "releases": [{"version": "3.47.0", "dart_sdk_version": "3.13.5"}, {"version": "3.48.0"}]}`)
 		c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 			map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
-		result, err := c.CheckPackage(requiresCapturePkg, true)
+		result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 		requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom)
 	})
 
@@ -264,7 +264,7 @@ func TestRequiresCaptureHeldWhenPatternMatchesNothing(t *testing.T) {
 				Pin:     "=",
 			},
 		}))
-		result, err := c.CheckPackage(requiresCapturePkg, true)
+		result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 		requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, "dev-util/flutter-engine")
 	})
 }
@@ -279,7 +279,7 @@ func TestRequiresCaptureHeldOnAnInvalidVersion(t *testing.T) {
   "releases": [{"version": "3.48.0", "dart_sdk_version": "`+value+`"}]}`)
 			c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 				map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
-			result, err := c.CheckPackage(requiresCapturePkg, true)
+			result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 			requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom, value)
 		})
 	}
@@ -290,7 +290,7 @@ func TestRequiresCaptureHeldOnAnInvalidVersion(t *testing.T) {
   "releases": [{"version": "3.48.0", "dart_sdk_version": "`+value+`"}]}`)
 			c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
 				map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
-			result, err := c.CheckPackage(requiresCapturePkg, true)
+			result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 			if err != nil || result.Error != nil {
 				t.Fatalf("CheckPackage: err=%v result.Error=%v", err, result.Error)
 			}
@@ -311,7 +311,7 @@ func TestRequiresCaptureAbsentLeavesEntryBare(t *testing.T) {
 	page, hits := requiresCaptureServer(t, requiresCapturePage)
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL, nil))
 
-	result, err := c.CheckPackage(requiresCapturePkg, true)
+	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	if err != nil || result.Error != nil {
 		t.Fatalf("CheckPackage: err=%v result.Error=%v", err, result.Error)
 	}

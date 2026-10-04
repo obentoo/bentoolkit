@@ -142,7 +142,7 @@ func TestFetchContent_ParseHostFailure_FailsOpen(t *testing.T) {
 	const malformedURL = ":bad-url:"
 	checker := newRateLimitTestChecker(t, malformedURL, WithRateLimiter(mock))
 
-	_, err := checker.fetchContent(malformedURL, nil, credentialScope{}, checker.operationTimeout(nil))
+	_, err := checker.fetchContent(t.Context(), malformedURL, nil, credentialScope{}, checker.operationTimeout(nil))
 
 	// The fetch proceeds to the HTTP layer (which itself rejects the malformed
 	// URL), so an error is expected — but it must NOT be the rate-limiter wait
@@ -188,7 +188,7 @@ func TestFetchContent_CallsWaitHTTP(t *testing.T) {
 	mock := &recordingRateLimiter{}
 	checker := newRateLimitTestChecker(t, server.URL, WithRateLimiter(mock))
 
-	if _, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
+	if _, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
 		t.Fatalf("fetchContent returned an unexpected error: %v", err)
 	}
 
@@ -223,7 +223,6 @@ func TestFetchContent_RateLimitContextCancelled(t *testing.T) {
 
 	checker := newRateLimitTestChecker(t, server.URL,
 		WithRateLimiter(mock),
-		WithContext(ctx),
 		WithOpTimeout(10*time.Second), // generous: the cancel, not the deadline, ends the wait
 	)
 
@@ -234,7 +233,7 @@ func TestFetchContent_RateLimitContextCancelled(t *testing.T) {
 	outcome := make(chan fetchOutcome, 1)
 	go func() {
 		start := time.Now()
-		_, err := checker.fetchContent(server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		_, err := checker.fetchContent(ctx, server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
 		outcome <- fetchOutcome{err: err, elapsed: time.Since(start)}
 	}()
 

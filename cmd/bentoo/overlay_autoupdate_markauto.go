@@ -22,8 +22,8 @@ import (
 // print the whole plan, gate the write, and only then stamp.
 //
 // The gates are story 021's, not a third set: the same --yes flag, the same
-// registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
-// same confirmRegistryWriteFn seam that guard the post-check version pins and
+// deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
+// same deps.confirmRegistryWrite seam that guard the post-check version pins and
 // the lint repair. Three idioms for "may I publish?" in one command would be two
 // too many.
 //
@@ -42,8 +42,8 @@ import (
 // in the state the operator asked for? 0 only when it is — so a declined
 // migration, a refused unattended write, an exclusion list with a typo in it and
 // a plan that did not fully land all exit 1.
-func runMarkAutoDisabled(overlayPath string) error {
-	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, autoupdateExcept)
+func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
+	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, ar.opts.except)
 	if err != nil {
 		// Nothing has been written: the plan only reads. A registry that does not
 		// load cannot be migrated either, and failing here is the cheapest place
@@ -82,7 +82,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 		return nil
 	}
 
-	if !confirmAutoDisableMigration(plan) {
+	if !ar.confirmAutoDisableMigration(plan) {
 		// Return WITHOUT calling MarkAutoDisabled: the file is never opened, so
 		// it stays byte-identical by construction rather than by care. The
 		// entries above are still frozen, so the exit code still says so.
@@ -90,7 +90,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 		return exitWith(1)
 	}
 
-	marked, err := autoupdate.MarkAutoDisabled(overlayPath, autoupdateExcept)
+	marked, err := autoupdate.MarkAutoDisabled(overlayPath, ar.opts.except)
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		logger.Error("failed to record the automatic origin: %v", err)
@@ -112,8 +112,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 	if len(marked) != len(plan.Mark) {
 		output.Warning.Printf("  %d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it.\n",
 			len(plan.Mark)-len(marked), len(plan.Mark))
-		logger.Error("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked))
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked)))
 	}
 	return nil
 }
@@ -160,16 +159,16 @@ func printAutoDisableGroup(style *color.Color, heading string, pkgs []string) {
 // It reports whether the migration may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
+func (ar *autoupdateRun) confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
 	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
 
-	if autoupdateYes {
+	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
 		output.Warning.Printf("  --yes given: stamping %d entry(ies) without a prompt.\n", len(plan.Mark))
 		return true
 	}
-	if !registryPromptIsInteractive() {
+	if !ar.deps.registryPromptIsInteractive() {
 		// The plan above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
@@ -180,7 +179,7 @@ func confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
 	// ONE question covering the whole plan, not one per record: the operator is
 	// approving the migration they just read.
 	fmt.Println()
-	return confirmRegistryWriteFn(fmt.Sprintf(
+	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)",
 		len(plan.Mark), len(plan.Excluded)))
 }

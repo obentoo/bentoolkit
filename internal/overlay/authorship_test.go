@@ -755,7 +755,7 @@ func TestAnnotateAuthorshipThroughTheRealComparison(t *testing.T) {
 		OverlayPath:   overlayRoot,
 		Divergence:    map[string]Divergence{"kde-plasma/spectacle": {}},
 	}
-	report, err := CompareWithProvider(
+	report, err := CompareWithProvider(t.Context(),
 		[]PackageInfo{{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"}}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)

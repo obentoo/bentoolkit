@@ -174,6 +174,7 @@ func depthEnumeration(t *testing.T, where, text, intro, tail string) string {
 // Any surface that spells the rungs belongs in this table. A guard scoped to
 // one KIND of surface is a guard the next rung walks around.
 func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	const (
 		dash     = "— "
 		flagTail = ", each including every rung before it"
@@ -188,12 +189,12 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 	}{
 		{
 			where: "overlay autoupdate --depth",
-			text:  autoupdateCmd.Flags().Lookup("depth").Usage,
+			text:  auCmd.Flags().Lookup("depth").Usage,
 			intro: dash, tail: flagTail,
 		},
 		{
 			where: "overlay validate --depth",
-			text:  newValidateCmd().Flags().Lookup("depth").Usage,
+			text:  newValidateCmd(defaultDeps()).Flags().Lookup("depth").Usage,
 			intro: dash, tail: flagTail,
 		},
 		{
@@ -206,7 +207,7 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 		},
 		{
 			where: "overlay validate --help (Long)",
-			text:  newValidateCmd().Long,
+			text:  newValidateCmd(defaultDeps()).Long,
 			// The Long carries an em dash of its own, paragraphs earlier, so it
 			// names the phrase that actually introduces ITS list — and its closing
 			// phrase differs from the flags' by one word.
@@ -245,7 +246,8 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 // rather than left to be discovered by an operator who assumed --compile was
 // the deepest thing on offer.
 func TestCompileFlag_NamesTheDeeperPathItDoesNotTake(t *testing.T) {
-	usage := autoupdateCmd.Flags().Lookup("compile").Usage
+	auCmd := testAutoupdateCmd()
+	usage := auCmd.Flags().Lookup("compile").Usage
 
 	if !strings.Contains(usage, "src_compile") {
 		t.Errorf("the --compile usage %q does not say where the privileged gate STOPS; its ceiling is the "+

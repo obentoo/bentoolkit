@@ -74,7 +74,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 		t.Run("refused: "+name, func(t *testing.T) {
 			srv, hits, _ := scopeTestServer(t)
 			checker := newRateLimitTestChecker(t, srv.URL, WithRateLimiter(&recordingRateLimiter{}))
-			_, err := checker.fetchContent(srv.URL+"/data", headers, packageCredentialScope(cfg), time.Second)
+			_, err := checker.fetchContent(t.Context(), srv.URL+"/data", headers, packageCredentialScope(cfg), time.Second)
 			if !errors.Is(err, ErrCredentialHostMismatch) {
 				t.Fatalf("err = %v; want ErrCredentialHostMismatch", err)
 			}
@@ -98,7 +98,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 		srv, _, keys := scopeTestServer(t)
 		checker := newRateLimitTestChecker(t, srv.URL, WithRateLimiter(&recordingRateLimiter{}))
 		cfg := &PackageConfig{URL: "https://vendor.example/latest", BaseURL: "http://LOCALHOST:1/"}
-		if _, err := checker.fetchContent(localhostURL(t, srv.URL)+"/data", headers, packageCredentialScope(cfg), time.Second); err != nil {
+		if _, err := checker.fetchContent(t.Context(), localhostURL(t, srv.URL)+"/data", headers, packageCredentialScope(cfg), time.Second); err != nil {
 			t.Fatalf("fetch to the base_url host failed: %v", err)
 		}
 		if got := keys(); !slices.Equal(got, []string{"bentoo-secret"}) {
@@ -121,7 +121,7 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 	// A record whose own host IS the listener fetches first; its body is
 	// admitted to the per-run cache.
 	own := packageCredentialScope(&PackageConfig{URL: target})
-	if _, err := checker.fetchContent(target, headers, own, time.Second); err != nil {
+	if _, err := checker.fetchContent(t.Context(), target, headers, own, time.Second); err != nil {
 		t.Fatalf("priming fetch failed: %v", err)
 	}
 	if n := hits.Load(); n != 1 {
@@ -131,7 +131,7 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 	// A second record, bound elsewhere, asks for the same URL with the same
 	// declared headers: same cache key. It must be refused, not served.
 	foreign := packageCredentialScope(&PackageConfig{URL: "https://vendor.example/latest"})
-	body, err := checker.fetchContent(target, headers, foreign, time.Second)
+	body, err := checker.fetchContent(t.Context(), target, headers, foreign, time.Second)
 	if !errors.Is(err, ErrCredentialHostMismatch) {
 		t.Fatalf("fetchContent = (%q, %v); want ErrCredentialHostMismatch even with a cached body", body, err)
 	}

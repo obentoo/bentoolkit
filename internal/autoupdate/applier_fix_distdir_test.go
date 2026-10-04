@@ -38,7 +38,7 @@ func TestStagedManifestForcesOnlyWithASuppliedDistdir(t *testing.T) {
 		env := stagedManifestFixture(t, false)
 		supplied := t.TempDir()
 
-		got, err := env.sweeper.runStagedManifestIn(supplied, env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+		got, err := env.sweeper.runStagedManifestIn(t.Context(), supplied, env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 		if err != nil {
 			t.Fatalf("runStagedManifestIn: %v", err)
 		}
@@ -58,7 +58,7 @@ func TestStagedManifestForcesOnlyWithASuppliedDistdir(t *testing.T) {
 	t.Run("not supplied", func(t *testing.T) {
 		env := stagedManifestFixture(t, false)
 
-		got, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+		got, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 		if err != nil {
 			t.Fatalf("runStagedManifest: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestStagedManifestDoesNotSeedASuppliedDistdir(t *testing.T) {
 		t.Fatalf("seeding the supplied distdir: %v", err)
 	}
 
-	if _, err := env.sweeper.runStagedManifestIn(supplied, env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
+	if _, err := env.sweeper.runStagedManifestIn(t.Context(), supplied, env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2"); err != nil {
 		t.Fatalf("runStagedManifestIn: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestStagedManifestWithoutASuppliedDistdirIsUnchanged(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	distdir, err := env.sweeper.runStagedManifest(env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	distdir, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 	if err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestGateReadsTheDistdirTheFixFetched(t *testing.T) {
 		}
 	}
 
-	res, _ := applier.Apply("a/b", true)
+	res, _ := applier.Apply(t.Context(), "a/b", true)
 	if fetched == "" {
 		t.Fatal("the fixer was never invoked; this test cannot fail for its own reason")
 	}
@@ -235,7 +235,7 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 				}
 			}
 
-			applier.Apply("a/b", true)
+			applier.Apply(t.Context(), "a/b", true)
 
 			if dir == "" {
 				t.Fatal("the fixer was never invoked")
@@ -262,7 +262,7 @@ func TestAnEmptyFixDistdirStillFallsBack(t *testing.T) {
 		fetched = req.DistDir
 	}
 
-	res, _ := applier.Apply("a/b", true)
+	res, _ := applier.Apply(t.Context(), "a/b", true)
 	if fetched == "" {
 		t.Fatal("the fixer was never invoked; this test cannot fail for its own reason")
 	}

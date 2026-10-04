@@ -36,20 +36,6 @@ import (
 //     the one directory that must not be touched.
 // =============================================================================
 
-// distdirTestState saves and restores the package-level flag variables these
-// tests drive. They are process-global (pflag binds them at init), so a test
-// that left one modified would change the behaviour of every test that runs
-// after it.
-func distdirTestState(t *testing.T) {
-	t.Helper()
-	origDistdir, origCache, origDirs := autoupdateDistdir, autoupdateDistfilesCache, autoupdateDirs
-	t.Cleanup(func() {
-		autoupdateDistdir = origDistdir
-		autoupdateDistfilesCache = origCache
-		autoupdateDirs = origDirs
-	})
-}
-
 // ownedDir creates a directory inside this test's own temporary tree and
 // returns it. Every path these tests resolve comes from here — see the safety
 // rule at the top of the file.
@@ -76,7 +62,7 @@ func resolvedPath(t *testing.T, dirs autoupdateDistfileDirs) string {
 	if dirs.Distdir == "" && dirs.ConfiguredDistdir == "" {
 		t.Fatal("refusing to resolve with nothing named: that is the rung that reaches this host's own DISTDIR")
 	}
-	dir, err := distfiles.Resolve(dirs.Distdir, dirs.ConfiguredDistdir)
+	dir, err := distfiles.Resolve(t.Context(), dirs.Distdir, dirs.ConfiguredDistdir)
 	if err != nil {
 		t.Fatalf("resolving distdir(explicit=%q, configured=%q): %v", dirs.Distdir, dirs.ConfiguredDistdir, err)
 	}
@@ -122,15 +108,15 @@ func captureStderr(t *testing.T, fn func()) string {
 // answer the moment both are set.
 func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 	t.Run("the flag wins over the config key", func(t *testing.T) {
-		distdirTestState(t)
+		auOpts := testAutoupdateOptions()
 		fromFlag := ownedDir(t, "from-flag")
 		fromConfig := ownedDir(t, "from-config")
 
-		autoupdateDistdir = fromFlag
+		auOpts.distdir = fromFlag
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = fromConfig
 
-		dirs := resolveAutoupdateDistfileDirs(cfg, false)
+		dirs := auOpts.resolveAutoupdateDistfileDirs(cfg, false)
 		if dirs.ConfiguredDistdir != fromConfig {
 			t.Errorf("the config rung = %q, want %q: the key must still be carried, not discarded", dirs.ConfiguredDistdir, fromConfig)
 		}
@@ -140,23 +126,23 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 	})
 
 	t.Run("the config key answers when the flag is absent", func(t *testing.T) {
-		distdirTestState(t)
+		auOpts := testAutoupdateOptions()
 		fromConfig := ownedDir(t, "from-config")
 
-		autoupdateDistdir = ""
+		auOpts.distdir = ""
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = fromConfig
 
-		if got := resolvedPath(t, resolveAutoupdateDistfileDirs(cfg, false)); got != fromConfig {
+		if got := resolvedPath(t, auOpts.resolveAutoupdateDistfileDirs(cfg, false)); got != fromConfig {
 			t.Errorf("resolved %q, want the configured %q", got, fromConfig)
 		}
 	})
 
 	t.Run("neither named invents nothing", func(t *testing.T) {
-		distdirTestState(t)
-		autoupdateDistdir = ""
+		auOpts := testAutoupdateOptions()
+		auOpts.distdir = ""
 
-		dirs := resolveAutoupdateDistfileDirs(&config.Config{}, false)
+		dirs := auOpts.resolveAutoupdateDistfileDirs(&config.Config{}, false)
 		// Deliberately NOT resolved: with both rungs empty the precedence asks
 		// this host for its own DISTDIR, which is the directory these tests must
 		// never act in. What matters at this layer is that the command passes on
@@ -169,12 +155,12 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 	})
 
 	t.Run("a relative config path is refused, not resolved against an arbitrary cwd", func(t *testing.T) {
-		distdirTestState(t)
-		autoupdateDistdir = ""
+		auOpts := testAutoupdateOptions()
+		auOpts.distdir = ""
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = "relative/distfiles"
 
-		if dirs := resolveAutoupdateDistfileDirs(cfg, false); dirs.ConfiguredDistdir != "" {
+		if dirs := auOpts.resolveAutoupdateDistfileDirs(cfg, false); dirs.ConfiguredDistdir != "" {
 			t.Errorf("the config rung = %q, want %q: a relative path in a config file resolves against whatever directory the process started in", dirs.ConfiguredDistdir, "")
 		}
 	})
@@ -221,7 +207,8 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 // holding thousands of real distfiles; asking the filesystem about it would add
 // nothing to what "the two registered defaults are equal" already proves.
 func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
-	autoFlag := autoupdateCmd.Flags().Lookup("distfiles-cache")
+	auCmd := testAutoupdateCmd()
+	autoFlag := auCmd.Flags().Lookup("distfiles-cache")
 	manifestFlag := manifestCmd.Flags().Lookup("distfiles-cache")
 	if autoFlag == nil || manifestFlag == nil {
 		t.Fatalf("--distfiles-cache is missing: autoupdate has it = %t, manifest has it = %t", autoFlag != nil, manifestFlag != nil)
@@ -235,38 +222,38 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 	}
 
 	t.Run("an unset flag with no config key resolves to that same default", func(t *testing.T) {
-		distdirTestState(t)
-		autoupdateDistfilesCache = autoFlag.DefValue // what pflag leaves there when the flag is not passed
-		if got := resolveAutoupdateDistfileDirs(&config.Config{}, false).Cache; got != distfiles.DefaultCache {
+		auOpts := testAutoupdateOptions()
+		auOpts.distfilesCache = autoFlag.DefValue // what pflag leaves there when the flag is not passed
+		if got := auOpts.resolveAutoupdateDistfileDirs(&config.Config{}, false).Cache; got != distfiles.DefaultCache {
 			t.Errorf("with no flag and no config key the cache resolved to %q, want %q", got, distfiles.DefaultCache)
 		}
 	})
 
 	t.Run("the config key answers when the flag is not passed", func(t *testing.T) {
-		distdirTestState(t)
-		autoupdateDistfilesCache = autoFlag.DefValue
+		auOpts := testAutoupdateOptions()
+		auOpts.distfilesCache = autoFlag.DefValue
 		cfg := &config.Config{}
 		cfg.Autoupdate.DistfilesCache = "/srv/mirror/distfiles"
-		if got := resolveAutoupdateDistfileDirs(cfg, false).Cache; got != "/srv/mirror/distfiles" {
+		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, false).Cache; got != "/srv/mirror/distfiles" {
 			t.Errorf("the cache resolved to %q, want the configured %q", got, "/srv/mirror/distfiles")
 		}
 	})
 
 	t.Run("a passed flag beats the config key, including the empty string that disables it", func(t *testing.T) {
-		distdirTestState(t)
+		auOpts := testAutoupdateOptions()
 		cfg := &config.Config{}
 		cfg.Autoupdate.DistfilesCache = "/srv/mirror/distfiles"
 
-		autoupdateDistfilesCache = "/srv/other/distfiles"
-		if got := resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "/srv/other/distfiles" {
+		auOpts.distfilesCache = "/srv/other/distfiles"
+		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "/srv/other/distfiles" {
 			t.Errorf("the cache resolved to %q, want the flag's %q", got, "/srv/other/distfiles")
 		}
 
 		// "" is a MEANING for this flag — it disables the lookup, which is how
 		// `overlay manifest` documents it — so a passed empty flag must not be
 		// read as "unset" and quietly replaced by the config key.
-		autoupdateDistfilesCache = ""
-		if got := resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "" {
+		auOpts.distfilesCache = ""
+		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "" {
 			t.Errorf("--distfiles-cache \"\" resolved to %q, want \"\": passing it explicitly disables the lookup", got)
 		}
 	})
@@ -278,8 +265,9 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 // defect this requirement exists to prevent, and it is the kind that only
 // surfaces when an operator has already typed the wrong one.
 func TestAutoupdateDistdirFlagNamesMatchManifestCommand(t *testing.T) {
+	auCmd := testAutoupdateCmd()
 	for _, name := range []string{"distdir", "distfiles-cache"} {
-		autoFlag := autoupdateCmd.Flags().Lookup(name)
+		autoFlag := auCmd.Flags().Lookup(name)
 		manifestFlag := manifestCmd.Flags().Lookup(name)
 		if manifestFlag == nil {
 			t.Fatalf("overlay manifest has no --%s; this test compares against it and can no longer do so", name)
@@ -298,7 +286,7 @@ func TestAutoupdateDistdirFlagNamesMatchManifestCommand(t *testing.T) {
 			t.Errorf("--%s's usage contains a back-quoted word, which pflag turns into the value placeholder: %q", name, autoFlag.Usage)
 		}
 		// Both names must be documented where an operator looks for them.
-		if !strings.Contains(autoupdateCmd.Long, "--"+name) {
+		if !strings.Contains(auCmd.Long, "--"+name) {
 			t.Errorf("--%s is not documented in the autoupdate command's long help", name)
 		}
 	}
@@ -310,7 +298,7 @@ func TestAutoupdateDistdirFlagNamesMatchManifestCommand(t *testing.T) {
 	// temporary one was on a tmpfs, so every distfile a bump fetched went into
 	// RAM. Copying the sentence would ship a flag whose help contradicts its
 	// code, which is worse than two differently-worded helps.
-	usage := autoupdateCmd.Flags().Lookup("distdir").Usage
+	usage := auCmd.Flags().Lookup("distdir").Usage
 	if strings.Contains(strings.ToLower(usage), "temporary directory") {
 		t.Errorf("--distdir's help claims a temporary directory, which this path no longer uses (S030-R1.1): %q", usage)
 	}

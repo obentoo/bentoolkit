@@ -343,11 +343,6 @@ type Applier struct {
 	// (injectable for testing). It defaults to exec.CommandContext so a
 	// cancelled context kills the spawned manifest/compile process.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
-	// ctx is the parent context for all spawned external commands. It is set
-	// via WithApplierContext and originates in cmd/ (signal.NotifyContext), so a
-	// SIGINT or deadline kills in-flight ebuild/compile processes. Defaults to
-	// context.Background().
-	ctx context.Context
 	// pendingDeleteFn is the function Apply invokes to remove a package from
 	// pending.json after the full success path (S002-R3.1). It defaults to
 	// a.pending.Delete and is overridable via WithApplierPendingDeleteFunc
@@ -546,18 +541,6 @@ func WithExecCommand(fn func(ctx context.Context, name string, arg ...string) *e
 		}
 		a.execCommand = fn
 		a.lookPath = func(name string) (string, error) { return name, nil }
-	}
-}
-
-// WithApplierContext sets the parent context for the applier. The context is
-// threaded into every spawned external command (pkgdev manifest, compile test),
-// so cancelling it (e.g. on SIGINT or a deadline) kills in-flight processes.
-// A nil context is ignored, leaving the default context.Background().
-func WithApplierContext(ctx context.Context) ApplierOption {
-	return func(a *Applier) {
-		if ctx != nil {
-			a.ctx = ctx
-		}
 	}
 }
 
@@ -785,8 +768,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: the real PATH lookup the build gates ask before spawning;
 		// replaced together with execCommand (see WithExecCommand).
 		lookPath: exec.LookPath,
-		ctx:      context.Background(), // SAFE: default parent; replaced by WithApplierContext when cmd/ wires signal.NotifyContext
-		reporter: tui.Noop(),           // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
+		reporter: tui.Noop(), // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
 		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
@@ -845,9 +827,18 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 // The result is returned via a named value so a single deferred cleanup can
 // observe whichever error the function ultimately surfaces (result.Error is
 // kept in lockstep with the returned error on every path).
-func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error) {
+func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *ApplyResult, _ error) {
 	result = &ApplyResult{
 		Package: pkg,
+	}
+
+	// A context that is already done stops Apply before it reads the pending
+	// list or touches the overlay, so the pending entry stays and the deferred
+	// orphan rollback below has nothing to undo. The check sits above TaskStart
+	// so the reporter never sees a task opened without its matching TaskDone.
+	if err := ctx.Err(); err != nil {
+		result.Error = fmt.Errorf("apply %s was not started: %w", pkg, err)
+		return result, result.Error
 	}
 
 	// Open the task in the progress reporter and guarantee a matching TaskDone on
@@ -1073,7 +1064,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			result.StagedPath = reuse.root
 			result.DepthReached = reuse.reached
 
-			promoted, err := a.promote(reuse.cand, pkg, newVersion)
+			promoted, err := a.promote(ctx, reuse.cand, pkg, newVersion)
 			if err != nil {
 				return a.failApply(pkg, result, err)
 			}
@@ -1083,7 +1074,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 			// R3.6's other direction, exactly as on the validating path: the
 			// retained tree is a failure's evidence, and there is no failure here.
 			result.StagedPath = ""
-			a.completeApply(pkg, newVersion, result)
+			a.completeApply(ctx, pkg, newVersion, result)
 			return result, nil
 		}
 	}
@@ -1116,7 +1107,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// on a match alone. The closure reads `gates` and `depth` at return time, so it
 	// records the final list and the depth a reviewer's escalation may have raised.
 	if stagedRoot := result.StagedPath; stagedRoot != "" {
-		defer func() { a.recordStagedProof(stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
+		defer func() { a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
 	}
 
 	// Run manifest command. When a fixer is wired, a failure here triggers a
@@ -1125,7 +1116,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// staged path this is `pkgdev manifest` inside the staged tree against a
 	// private distdir, so no directory the host shares changes while it runs.
 	a.reporter.TaskStage(pkg, "manifest")
-	fetchedDistdir, manifestErr := a.runManifestWithFix(cand, pkg, newVersion, result)
+	fetchedDistdir, manifestErr := a.runManifestWithFix(ctx, cand, pkg, newVersion, result)
 	// Armed the instant the directory can exist, so every exit below — the six
 	// failing ones included — takes it back (R2.1, R2.2). A removal added after
 	// the fact is a removal one path will not have.
@@ -1138,7 +1129,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 	// pkgdev exiting 0 does not prove every SRC_URI file got a DIST line.
-	if err := a.checkManifestCoverage(cand.pkgDir, pkg, newVersion); err != nil {
+	if err := a.checkManifestCoverage(ctx, cand.pkgDir, pkg, newVersion); err != nil {
 		return a.failApply(pkg, result, err)
 	}
 
@@ -1148,7 +1139,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// the whole point of the slot: a gate added ABOVE that line instead of below
 	// it would silently undo sub-task 4.1's move, and the state's meaning —
 	// "passed the static gates" — would quietly go back to "the manifest ran".
-	gates = a.runStaticGates(cand, pkg, newVersion)
+	gates = a.runStaticGates(ctx, cand, pkg, newVersion)
 
 	// Update status to validated.
 	//
@@ -1166,7 +1157,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// R7: the optional bump reviewer, after the static gates and before anything
 	// is built — it reads a diff and may only ask for MORE gates, never fewer.
 	// A run with no reviewer wired passes the policy depth straight through.
-	depth = a.reviewBump(cand, pkg, currentVersion, newVersion, depth, &gates)
+	depth = a.reviewBump(ctx, cand, pkg, currentVersion, newVersion, depth, &gates)
 	result.DepthRequested = depth.Depth.String()
 	// The reviewer may have raised the depth, so its reason REPLACES the policy's
 	// — but the retained tree's verdict answers a different question and is put
@@ -1179,7 +1170,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// path, and running the depth gates beside it would build the same tree twice.
 	if !compile {
 		a.reporter.TaskStage(pkg, "build gates")
-		buildGates, buildErr := a.runBuildGates(cand, pkg, newVersion, depth.Depth, result)
+		buildGates, buildErr := a.runBuildGates(ctx, cand, pkg, newVersion, depth.Depth, result)
 		gates = append(gates, buildGates...)
 		if buildErr != nil {
 			a.recordDepthReached(result, gates, depth.Depth)
@@ -1192,7 +1183,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// overlay would be reading a candidate that is not there yet.
 	if compile {
 		a.reporter.TaskStage(pkg, "compile")
-		logPath, err := a.runCompile(cand, pkg, newVersion, result)
+		logPath, err := a.runCompile(ctx, cand, pkg, newVersion, result)
 		if err != nil {
 			result.LogPath = logPath
 			a.recordDepthReached(result, gates, depth.Depth)
@@ -1212,7 +1203,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// The same invariant, said early so the operator reads the interruption
 	// instead of refuseUnproved's "proof at depth X is required" — true, but it
 	// blames configuration for a Ctrl-C. promote() enforces it regardless.
-	if err := a.refuseOnInterrupt(pkg, newVersion); err != nil {
+	if err := a.refuseOnInterrupt(ctx, pkg, newVersion); err != nil {
 		return a.failApply(pkg, result, err)
 	}
 
@@ -1244,7 +1235,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// candidate there and `pkgdev manifest` already regenerated the Manifest in
 	// place.
 	if cand.staged {
-		promoted, err := a.promote(cand, pkg, newVersion)
+		promoted, err := a.promote(ctx, cand, pkg, newVersion)
 		if err != nil {
 			return a.failApply(pkg, result, err)
 		}
@@ -1270,7 +1261,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 	// what is left is one directory per version, not a growing pile per run.
 	result.StagedPath = ""
 
-	a.completeApply(pkg, newVersion, result)
+	a.completeApply(ctx, pkg, newVersion, result)
 	return result, nil
 }
 
@@ -1288,7 +1279,7 @@ func (a *Applier) Apply(pkg string, compile bool) (result *ApplyResult, _ error)
 // NOTHING HERE MAY FAIL THE APPLY. Every miss is a warning on the result with
 // Success left true and Error left nil — setting Error would fire the deferred
 // rollback and delete the ebuild this apply just published (S021-UB5).
-func (a *Applier) completeApply(pkg, newVersion string, result *ApplyResult) {
+func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, result *ApplyResult) {
 	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
 	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (via the package warnLogf sink so tests
@@ -1332,7 +1323,7 @@ func (a *Applier) completeApply(pkg, newVersion string, result *ApplyResult) {
 	// failed Manifest regeneration is surfaced as a warning on the result and
 	// never flips Success, because the update itself is done (R4.4).
 	if a.clean {
-		plan, err := a.cleanPackageDir(pkg, newVersion)
+		plan, err := a.cleanPackageDir(ctx, pkg, newVersion)
 		result.CleanKept = plan.Keep
 		result.CleanRemoved = plan.Remove
 		if n := len(plan.Remove); n > 0 {
@@ -1349,7 +1340,7 @@ func (a *Applier) completeApply(pkg, newVersion string, result *ApplyResult) {
 
 	// Last, so it sees the directory as --clean left it: the new version gets
 	// its md5-cache entry and every removed version loses its own.
-	if err := a.regenMetadataCache(pkg, newVersion); err != nil {
+	if err := a.regenMetadataCache(ctx, pkg, newVersion); err != nil {
 		warnLogf("md5-cache: %v", err)
 		result.MetadataCacheWarning = err.Error()
 	}
@@ -1670,7 +1661,7 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 //     just created;
 //   - the package directory cannot be read, which planSweep reports as an
 //     error rather than as an empty plan.
-func (a *Applier) cleanPackageDir(pkg, newVersion string) (sweepPlan, error) {
+func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (sweepPlan, error) {
 	cfgs, claimed := a.sweepConfigs(pkg, newVersion)
 
 	plan, err := planSweep(a.overlayPath, cfgs, pkg)
@@ -1699,7 +1690,7 @@ func (a *Applier) cleanPackageDir(pkg, newVersion string) (sweepPlan, error) {
 	// than a second implementation of "delete these ebuilds". newVersion is the
 	// version this apply just created, and it is the one that remains in the
 	// directory — which is what the Manifest step needs (S027-G2).
-	return a.sweeper().execute(pkg, plan, newVersion)
+	return a.sweeper().execute(ctx, pkg, plan, newVersion)
 }
 
 // sweeper builds the executor for this applier's overlay, carrying the fields
@@ -1708,7 +1699,6 @@ func (a *Applier) cleanPackageDir(pkg, newVersion string) (sweepPlan, error) {
 // reach it (S027-R4.5).
 func (a *Applier) sweeper() *sweeper {
 	return newSweeper(a.overlayPath,
-		withSweeperContext(a.ctx),
 		withSweeperExec(a.execCommand),
 		withSweeperReporter(a.reporter),
 		withSweeperConfigs(a.configs),
@@ -2082,8 +2072,8 @@ func literalReplacement(value string) string {
 // directory the AGENT downloaded into becomes that path (S043-R2.1): it is handed
 // to the authoritative re-check below and returned from here, so the first
 // distdir is superseded and is removed at the moment it stops being the answer.
-func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
-	distdir, firstErr := a.runManifestFor(cand, pkg, version)
+func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
+	distdir, firstErr := a.runManifestFor(ctx, cand, pkg, version)
 	if firstErr == nil {
 		return distdir, nil
 	}
@@ -2117,7 +2107,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	// asks the host for PORTAGE_TMPDIR and answers "" when it cannot, which is
 	// what os.MkdirTemp already means by "use the default": a host without
 	// portageq keeps exactly today's behaviour.
-	fixDistdir, err := os.MkdirTemp(fixSandboxRoot(), "bentoo-fix-distfiles-")
+	fixDistdir, err := os.MkdirTemp(fixSandboxRoot(ctx), "bentoo-fix-distfiles-")
 	if err != nil {
 		// Can't give the agent a private distdir; don't attempt the fix.
 		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
@@ -2145,7 +2135,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	a.reporter.TaskStage(pkg, "llm-fix")
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
-	fixRes, fixErr := a.fixer.FixManifest(a.ctx, ManifestFixRequest{
+	fixRes, fixErr := a.fixer.FixManifest(ctx, ManifestFixRequest{
 		Package:       pkg,
 		Version:       version,
 		PkgDir:        pkgDir,
@@ -2181,7 +2171,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	// The path returned is whatever the re-check ran against, on its failure paths
 	// too — the caller must be able to take the directory back however this ends.
 	a.reporter.TaskStage(pkg, "re-check")
-	recheckDistdir, secondErr := a.runManifestForIn(distdir, cand, pkg, version)
+	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
@@ -2205,7 +2195,7 @@ func (a *Applier) runManifestWithFix(cand candidatePaths, pkg, version string, r
 	// available) on the package and attach any findings for human review. This is
 	// best-effort and never flips Success — a fixed-and-fetchable ebuild is still
 	// applied; the QA notes just travel with the result.
-	if qa := a.runQACheck(pkgDir, pkg); qa != "" {
+	if qa := a.runQACheck(ctx, pkgDir, pkg); qa != "" {
 		result.QASummary = qa
 		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
 	}
@@ -2400,18 +2390,18 @@ func environmentVerdict(firstErr error) error {
 // "findings" once dumped a full Python traceback onto the result, so stderr is
 // captured separately and only logged at debug — a pkgcheck crash yields no QA
 // noise. The scan is bounded by qaCheckTimeout.
-func (a *Applier) runQACheck(pkgDir, pkg string) string {
+func (a *Applier) runQACheck(ctx context.Context, pkgDir, pkg string) string {
 	if _, err := lookPath("pkgcheck"); err != nil {
 		logger.Debug("qa: pkgcheck not on PATH; skipping post-fix QA for %s", pkg)
 		return ""
 	}
 
-	ctx, cancel := context.WithTimeout(a.ctx, qaCheckTimeout)
+	opCtx, cancel := context.WithTimeout(ctx, qaCheckTimeout)
 	defer cancel()
 
 	// Scan the single package from its directory so pkgcheck resolves the overlay
 	// repo from cwd. Scope to repo-level checks for the one package via its atom.
-	cmd := a.execCommand(ctx, "pkgcheck", "scan", pkg)
+	cmd := a.execCommand(opCtx, "pkgcheck", "scan", pkg)
 	cmd.Dir = pkgDir
 
 	var stdout, stderr bytes.Buffer
@@ -2429,8 +2419,8 @@ func (a *Applier) runQACheck(pkgDir, pkg string) string {
 // sweeper that owns the step (S027-D3). It stays on Applier because
 // runManifestWithFix and the apply path both call it, and because keeping the
 // name here left every existing caller and test untouched.
-func (a *Applier) runManifest(pkg, version string) error {
-	return a.sweeper().runManifest(pkg, version)
+func (a *Applier) runManifest(ctx context.Context, pkg, version string) error {
+	return a.sweeper().runManifest(ctx, pkg, version)
 }
 
 // runManifestFor regenerates the Manifest of whichever tree the candidate is in.
@@ -2445,10 +2435,10 @@ func (a *Applier) runManifest(pkg, version string) error {
 // "" on the published path — which has no private directory, having written into
 // the shared one all along. A caller that receives a non-empty path owns it and
 // must remove it (S035-D1); removeStagedDistdir is that removal.
-func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) (string, error) {
+func (a *Applier) runManifestFor(ctx context.Context, cand candidatePaths, pkg, version string) (string, error) {
 	// An empty supplied distdir means "whatever this path would have created for
 	// itself", which is the entire difference between the two entry points.
-	return a.runManifestForIn("", cand, pkg, version)
+	return a.runManifestForIn(ctx, "", cand, pkg, version)
 }
 
 // runManifestForIn is runManifestFor against a distdir the caller already holds.
@@ -2471,11 +2461,11 @@ func (a *Applier) runManifestFor(cand candidatePaths, pkg, version string) (stri
 //
 // Both branches therefore keep runManifestFor's contract: what comes back is the
 // directory the caller owns and must remove, and "" only where there is none.
-func (a *Applier) runManifestForIn(suppliedDistdir string, cand candidatePaths, pkg, version string) (string, error) {
+func (a *Applier) runManifestForIn(ctx context.Context, suppliedDistdir string, cand candidatePaths, pkg, version string) (string, error) {
 	if cand.staged {
-		return a.sweeper().runStagedManifestIn(suppliedDistdir, cand.pkgDir, pkg, version)
+		return a.sweeper().runStagedManifestIn(ctx, suppliedDistdir, cand.pkgDir, pkg, version)
 	}
-	return suppliedDistdir, a.runManifest(pkg, version)
+	return suppliedDistdir, a.runManifest(ctx, pkg, version)
 }
 
 // removeStagedDistdir takes back what runManifestFor's staged branch created.
@@ -2531,7 +2521,7 @@ func removeStagedDistdir(distdir string) {
 // edits the staged ebuild and this same gate runs again, with the RE-RUN deciding
 // (S033-R8.1, S033-R8.2). Everything up to the first failure is unchanged, and a
 // run with no fixer wired still ends exactly where it used to.
-func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
+func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	// Measured before the prompt: asking the operator to confirm a compile that
 	// --require-isolation will refuse to run would be a question with no
 	// consequence.
@@ -2562,7 +2552,7 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 		return "", fmt.Errorf("invalid package name format: %s", pkg)
 	}
 
-	first := a.compileOnce(cand, pkg, version, privTool)
+	first := a.compileOnce(ctx, cand, pkg, version, privTool)
 	// Recorded as soon as a child has actually run, and on both outcomes: the
 	// gate below has to be able to say which directory this build read and
 	// whether the privilege tool could be made to honour it (S040-R2.3). The
@@ -2577,11 +2567,11 @@ func (a *Applier) runCompile(cand candidatePaths, pkg, version string, result *A
 	// says nothing about the ebuild, and the fixer is an LLM invocation the
 	// operator has just asked this run to stop. compileOnce has already kept the
 	// partial transcript (R3.6), so returning here throws no evidence away.
-	if a.ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return first.logPath, first.err
 	}
 
-	return a.repairBuildAndRerun(cand, pkg, version, privTool, first, result)
+	return a.repairBuildAndRerun(ctx, cand, pkg, version, privTool, first, result)
 }
 
 // compileGatePhase is the `ebuild` phase the compile gate runs.
@@ -2703,7 +2693,7 @@ func recordCompileDistdir(result *ApplyResult, attempt buildAttempt) {
 // gate that vetted its archive is the divergence one resolver exists to prevent.
 // How it crosses the privilege boundary, and when it cannot, is
 // privilegedDistdirArgs' decision and its comment carries the measurement.
-func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string) buildAttempt {
+func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, version, privTool string) buildAttempt {
 	distdir := a.staticGateDistdir(cand)
 	assignment, enforced := privilegedDistdirArgs(privTool, distdir)
 
@@ -2746,7 +2736,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 	args := make([]string, 0, len(assignment)+4)
 	args = append(args, assignment...)
 	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
-	cmd := a.execCommand(a.ctx, privTool, args...)
+	cmd := a.execCommand(ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
 	// S054-R3.3/R3.4. Foreground and not Group: sudo and doas ask for the
 	// password on the terminal, and a child moved into a process group of its
@@ -2785,7 +2775,7 @@ func (a *Applier) compileOnce(cand candidatePaths, pkg, version, privTool string
 		// SIGTERM reports `signal: terminated`, which wraps nothing. The log above
 		// is written first and on purpose — an interrupted compile's partial
 		// transcript is evidence too (R3.6).
-		if ctxErr := a.ctx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			pid, refused := stopRefused()
 			attempt.err = interruptedCompileError(pkg, version, privTool, ctxErr, pid, refused)
 			if refused == nil && killedAfterGrace(cmd) {
@@ -2917,7 +2907,7 @@ func keepStopRefusal(cmd *exec.Cmd) func() (pid int, refused error) {
 // shape runManifestWithFix has: the agent iterates internally under its own
 // --max-turns, and every extra external attempt costs a FULL rebuild, which for a
 // real package is measured in hours.
-func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privTool string, first buildAttempt, result *ApplyResult) (string, error) {
+func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, pkg, version, privTool string, first buildAttempt, result *ApplyResult) (string, error) {
 	// The free rungs. Reported to every operator, LLM or not.
 	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, buildFaultEvidence{transcript: first.transcript}); machineErr != nil {
 		return first.logPath, machineErr
@@ -2940,8 +2930,8 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	// The paid rungs, now that the alternative is a full agent invocation.
 	paid := buildFaultEvidence{
 		transcript:  first.transcript,
-		deps:        a.buildDependencyAnswer(cand, pkg, version),
-		buildTmpdir: fixSandboxRoot(),
+		deps:        a.buildDependencyAnswer(ctx, cand, pkg, version),
+		buildTmpdir: fixSandboxRoot(ctx),
 	}
 	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, paid); machineErr != nil {
 		return first.logPath, machineErr
@@ -2952,7 +2942,7 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
-	fixRes, fixErr := a.buildFixer.FixBuild(a.ctx, BuildFixRequest{
+	fixRes, fixErr := a.buildFixer.FixBuild(ctx, BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
 		Gate:       compileGatePhase,
@@ -2985,14 +2975,14 @@ func (a *Applier) repairBuildAndRerun(cand candidatePaths, pkg, version, privToo
 	// R8.2. The authoritative re-run: bentoo's own build of the same phase, never
 	// the agent's account of what it did.
 	a.reporter.TaskStage(pkg, "re-check")
-	second := a.compileOnce(cand, pkg, version, privTool)
+	second := a.compileOnce(ctx, cand, pkg, version, privTool)
 	// The re-run is the verdict (R8.2), so its distdir facts are the ones the
 	// gate must report: this build is the one the PASS would be about.
 	recordCompileDistdir(result, second)
 	// S054-R3.5 holds for the re-run as well: a re-run its context stopped is no
 	// verdict on the edit, so it is returned as the interrupt it is — never as the
 	// first failure "still" standing, which would wrap ErrCompileFailed.
-	if second.err != nil && a.ctx.Err() != nil {
+	if second.err != nil && ctx.Err() != nil {
 		return second.logPath, second.err
 	}
 	if second.err != nil {
@@ -3063,8 +3053,8 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 // Only the exec seam is injected. LookPath is deliberately left at the validate
 // package's own default, so a host with no `emerge` reaches the undetermined
 // branch through the real absence rather than through a substitute.
-func (a *Applier) buildDependencyAnswer(cand candidatePaths, pkg, version string) buildDependencyAnswer {
-	ok, missing, err := validate.DependenciesSatisfied(a.ctx, cand.repoRoot, pkg, version, validate.BuildDeps{
+func (a *Applier) buildDependencyAnswer(ctx context.Context, cand candidatePaths, pkg, version string) buildDependencyAnswer {
+	ok, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, validate.BuildDeps{
 		ExecCommand: a.execCommand,
 	})
 	if err != nil {

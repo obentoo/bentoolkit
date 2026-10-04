@@ -27,14 +27,13 @@ type reviveFixture struct {
 	fake                       *fakeReviveProvider
 	pending                    *autoupdate.PendingList
 	applier                    *autoupdate.Applier
+	run                        *autoupdateRun
 }
 
 func newReviveFixture(t *testing.T, withRequires bool) *reviveFixture {
 	t.Helper()
-	pinReviveConcurrency(t)
-	origOnly, origCompile, origClean := autoupdateOnly, autoupdateCompile, autoupdateClean
-	autoupdateOnly, autoupdateCompile, autoupdateClean = "", false, false
-	t.Cleanup(func() { autoupdateOnly, autoupdateCompile, autoupdateClean = origOnly, origCompile, origClean })
+	run := testAutoupdateRun(testAutoupdateOptions())
+	pinReviveConcurrency(t, run.opts)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
@@ -43,7 +42,7 @@ func newReviveFixture(t *testing.T, withRequires bool) *reviveFixture {
 	}))
 	t.Cleanup(server.Close)
 
-	f := &reviveFixture{overlay: setupTestOverlay(t), configDir: t.TempDir(), gentoo: t.TempDir()}
+	f := &reviveFixture{overlay: setupTestOverlay(t), configDir: t.TempDir(), gentoo: t.TempDir(), run: run}
 	t.Setenv("BENTOO_GENTOO_REPO", f.gentoo)
 
 	record := "[\"" + revivePkg + "\"]\nenabled = false\nurl = \"" + server.URL + "\"\nparser = \"regex\"\npattern = 'version ([0-9.]+)'\n"
@@ -72,7 +71,7 @@ func newReviveFixture(t *testing.T, withRequires bool) *reviveFixture {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	f.pending = pending
-	opts := append(reviveApplierOptions(context.Background(), f.overlay, f.configDir, pending),
+	opts := append(run.reviveApplierOptions(f.overlay, f.configDir, pending),
 		autoupdate.WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}))
@@ -84,10 +83,20 @@ func newReviveFixture(t *testing.T, withRequires bool) *reviveFixture {
 	return f
 }
 
-func (f *reviveFixture) revive(t *testing.T) reviveOutcome {
+// revive drives one target through the Reviver the way runRevive wires it: a
+// fresh Checker per target that shares the applier's pending list.
+func (f *reviveFixture) revive(t *testing.T) autoupdate.ReviveOutcome {
 	t.Helper()
-	return reviveOne(context.Background(), revivePkg, f.overlay, f.configDir, 0, 0,
-		config.LLMConfig{}, f.fake, f.fake, f.applier, f.pending)
+	newChecker := func() (*autoupdate.Checker, error) {
+		return autoupdate.NewChecker(f.overlay,
+			append(f.run.reviveCheckerOptions(f.configDir, 0, 0, config.LLMConfig{}), autoupdate.WithPendingList(f.pending))...)
+	}
+	reviver, err := autoupdate.NewReviver(f.overlay, f.applier, f.fake, newChecker,
+		autoupdate.WithReviveCompile(f.run.opts.compile))
+	if err != nil {
+		t.Fatalf("NewReviver: %v", err)
+	}
+	return reviver.Revive(t.Context(), revivePkg)
 }
 
 // TestRequiresReviveWaitsOnUnmetRequirement — R4.8. The first case is the
@@ -96,8 +105,8 @@ func TestRequiresReviveWaitsOnUnmetRequirement(t *testing.T) {
 	t.Run("no requirement revives", func(t *testing.T) {
 		f := newReviveFixture(t, false)
 		out := f.revive(t)
-		if out.status != "revived" {
-			t.Fatalf("status = %q (%s), want revived", out.status, out.detail)
+		if out.Status != autoupdate.ReviveRevived {
+			t.Fatalf("status = %q (%s), want revived", out.Status, out.Detail)
 		}
 		// "revived" must mean the bump landed: the record was disabled when the
 		// Applier loaded it, and a refusal reported as success is the bug.
@@ -109,13 +118,13 @@ func TestRequiresReviveWaitsOnUnmetRequirement(t *testing.T) {
 	t.Run("unmet requirement waits", func(t *testing.T) {
 		f := newReviveFixture(t, true)
 		out := f.revive(t)
-		if out.status != "waiting" || !strings.Contains(out.detail, "~dev-lang/dart-3.14.0") {
-			t.Fatalf("status = %q (%s), want waiting naming ~dev-lang/dart-3.14.0", out.status, out.detail)
+		if out.Status != autoupdate.ReviveWaiting || !strings.Contains(out.Detail, "~dev-lang/dart-3.14.0") {
+			t.Fatalf("status = %q (%s), want waiting naming ~dev-lang/dart-3.14.0", out.Status, out.Detail)
 		}
 		if _, ok := f.pending.Get(revivePkg); !ok {
 			t.Error("the waiting bump's pending entry was not kept")
 		}
-		if failed := displayReviveSummary([]reviveOutcome{out}); failed != 0 {
+		if failed := displayReviveSummary([]autoupdate.ReviveOutcome{out}); failed != 0 {
 			t.Errorf("a waiting revive counted as %d failure(s)", failed)
 		}
 	})
@@ -133,8 +142,8 @@ func TestRequiresReviveSeesGentoo(t *testing.T) {
 		t.Fatalf("write gentoo dart: %v", err)
 	}
 	out := f.revive(t)
-	if out.status != "revived" {
-		t.Fatalf("status = %q (%s), want revived", out.status, out.detail)
+	if out.Status != autoupdate.ReviveRevived {
+		t.Fatalf("status = %q (%s), want revived", out.Status, out.Detail)
 	}
 	got, err := os.ReadFile(filepath.Join(f.overlay, "dev-test", "foo", "foo-1.3.0.ebuild"))
 	if err != nil {

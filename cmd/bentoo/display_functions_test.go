@@ -68,22 +68,25 @@ func TestDisplayPendingUpdatesAllStatuses(t *testing.T) {
 
 // TestDisplayApplyResultNil tests displayApplyResult with nil result (no panic).
 func TestDisplayApplyResultNil(t *testing.T) {
-	displayApplyResult(nil)
+	auOpts := testAutoupdateOptions()
+	testAutoupdateRun(auOpts).displayApplyResult(nil)
 }
 
 // TestDisplayApplyResultSuccess tests displayApplyResult with successful result.
 func TestDisplayApplyResultSuccess(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:    "net-misc/foo",
 		OldVersion: "1.0",
 		NewVersion: "2.0",
 		Success:    true,
 	}
-	displayApplyResult(result)
+	testAutoupdateRun(auOpts).displayApplyResult(result)
 }
 
 // TestDisplayApplyResultFailure tests displayApplyResult with failed result.
 func TestDisplayApplyResultFailure(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:    "net-misc/bar",
 		OldVersion: "1.0",
@@ -92,18 +95,19 @@ func TestDisplayApplyResultFailure(t *testing.T) {
 		Error:      io.ErrUnexpectedEOF,
 		LogPath:    "/tmp/apply.log",
 	}
-	displayApplyResult(result)
+	testAutoupdateRun(auOpts).displayApplyResult(result)
 }
 
 // TestDisplayApplyResultFailureNoLog tests displayApplyResult with failure and no log path.
 func TestDisplayApplyResultFailureNoLog(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	result := &autoupdate.ApplyResult{
 		Package:    "net-misc/nolog",
 		OldVersion: "1.0",
 		NewVersion: "2.0",
 		Success:    false,
 	}
-	displayApplyResult(result)
+	testAutoupdateRun(auOpts).displayApplyResult(result)
 }
 
 // ---- displayAnalyzeResult ----
@@ -388,7 +392,8 @@ func TestOverlayAnalyzeSubcommandRegistered(t *testing.T) {
 
 // TestOverlayAutoupdateSubcommandRegistered tests autoupdate subcommand is registered.
 func TestOverlayAutoupdateSubcommandRegistered(t *testing.T) {
-	if autoupdateCmd.RunE == nil {
+	auCmd := testAutoupdateCmd()
+	if auCmd.RunE == nil {
 		t.Error("autoupdate command should have a RunE function")
 	}
 }

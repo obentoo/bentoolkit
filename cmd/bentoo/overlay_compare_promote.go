@@ -38,24 +38,11 @@ import (
 //
 // _Requirements: R5, R5.3, R5.4, R5.5, R7_
 
-// realignPromote is the publisher, held as a package-level variable on the
-// discipline realignProve documents: the var's type is realign.Promote's
-// signature, so a change to the contract stops this file compiling instead of
-// quietly changing what a publication is. Tests that assert how an outcome is
-// REPORTED substitute it; tests that assert what a publication WRITES drive the
-// real one against a fixture overlay.
-var realignPromote = realign.Promote
-
-// confirmRealignPublishFn is the per-package y/N seam, defaulting to the same
-// confirmAction the build prompt uses. It reads os.Stdin and answers "no" on
-// any read error, so an EOF is a decline rather than an accident.
-var confirmRealignPublishFn = confirmAction
-
-// realignPublishIsInteractive gates the question on a real terminal, through
-// the same registryPromptIsInteractive the build prompt uses — BOTH streams
-// must be a TTY, so a piped `yes` cannot answer for a human. It is a var so the
-// approve path is reachable under `go test`, where neither stream is one.
-var realignPublishIsInteractive = registryPromptIsInteractive
+// The publisher, the per-package y/N question and the terminal probe that
+// gates it are the realignPromote, confirmRealignPublish and
+// realignPublishIsInteractive fields of deps (deps.go). The question defaults
+// to confirmAction, which reads os.Stdin and answers "no" on any read error, so
+// an EOF is a decline rather than an accident.
 
 // realignProofCarriesEvidence reports whether at least one gate read the
 // staged tree and said PASS. SKIPPED is not evidence — it is the gate saying it
@@ -84,21 +71,21 @@ func realignProofCarriesEvidence(proof realign.Proof) bool {
 // nothing written — the system working — while any other error happened after
 // every authority said yes and may have left the package directory needing a
 // human before the overlay publishes itself.
-func offerRealignPublish(c realignCandidate, proof realign.Proof, overlayRoot string) {
+func offerRealignPublish(c realignCandidate, proof realign.Proof, overlayRoot string, d *deps) {
 	if !realignProofCarriesEvidence(proof) {
 		output.Warning.Printf("    not offered for publication: every gate was SKIPPED, so nothing was proved about it — a proof of nothing is not evidence to publish on.\n")
 		return
 	}
-	if !realignPublishIsInteractive() {
+	if !d.realignPublishIsInteractive() {
 		output.Info.Printf("    publishable — re-run in an interactive terminal to be asked; nothing is published without the maintainer's yes.\n")
 		return
 	}
-	if !confirmRealignPublishFn(fmt.Sprintf("Publish %s — replace the published ebuild with the proved ::gentoo bytes?", c.name)) {
+	if !d.confirmRealignPublish(fmt.Sprintf("Publish %s — replace the published ebuild with the proved ::gentoo bytes?", c.name)) {
 		output.Warning.Printf("    declined: nothing was written, and the published overlay is byte-identical.\n")
 		return
 	}
 
-	if err := realignPromote(c.proposal, proof, true, overlayRoot); err != nil {
+	if err := d.realignPromote(c.proposal, proof, true, overlayRoot); err != nil {
 		if errors.Is(err, realign.ErrNotPromoted) {
 			output.Warning.Printf("    refused: %v\n", err)
 			return

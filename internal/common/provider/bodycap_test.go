@@ -95,7 +95,7 @@ func TestGitHubProviderBodyCapped(t *testing.T) {
 // by GetRateLimitInfo.
 func TestGitHubProviderRateLimitBodyCapped(t *testing.T) {
 	p := newCappedGitHubProvider(t, hugeBodyServer(t, http.StatusOK, overCap).URL)
-	_, _, err := p.GetRateLimitInfo()
+	_, _, err := p.GetRateLimitInfo(t.Context())
 	if !errors.Is(err, httputil.ErrResponseTooLarge) {
 		t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 	}

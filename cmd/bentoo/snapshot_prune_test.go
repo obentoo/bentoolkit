@@ -12,7 +12,7 @@ import (
 // Story 008 T3.1 — `snapshot prune [--dry-run] [--ship NAME]` verb (R3).
 //
 // Mirrors the other verb tests: the outcome read through exitOf, a MockRunner
-// injected as snapshotRunner, temp snapshot.toml via the shared helpers. The
+// injected as deps.snapshotRunner, temp snapshot.toml via the shared helpers. The
 // MockRunner answers `rclone lsjson` with an empty object list so the archive
 // GFS path runs end-to-end without deletions.
 // ---------------------------------------------------------------------------
@@ -98,14 +98,15 @@ func TestRunSnapshotPrune_InvokesEnginePruneAndArchiveGFS(t *testing.T) {
 	writeSnapshotConfig(t, pruneTOMLTwoArchives)
 	redirectStateDir(t)
 	mr := pruneMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setPruneFlags(t, "", false)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil))
+		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("prune exited with code %d, want success", code)
@@ -136,14 +137,15 @@ func TestRunSnapshotPrune_DryRunZeroExec(t *testing.T) {
 	writeSnapshotConfig(t, pruneTOMLTwoArchives)
 	redirectStateDir(t)
 	mr := pruneMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setPruneFlags(t, "", true)
 
 	var code int
 	var exited bool
 	out := captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil))
+		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("prune --dry-run exited with code %d, want success", code)
@@ -167,14 +169,15 @@ func TestRunSnapshotPrune_ShipScopesToOneDestination(t *testing.T) {
 	writeSnapshotConfig(t, pruneTOMLTwoArchives)
 	redirectStateDir(t)
 	mr := pruneMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setPruneFlags(t, "cloud-b", false)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil))
+		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil, td))
 	})
 	if exited {
 		t.Fatalf("prune --ship cloud-b exited with code %d, want success", code)
@@ -203,14 +206,15 @@ func TestRunSnapshotPrune_UnknownShipExits1(t *testing.T) {
 	writeSnapshotConfig(t, pruneTOMLTwoArchives)
 	redirectStateDir(t)
 	mr := pruneMockRunner()
-	snapshotRunner = mr
+	td := defaultDeps()
+	td.snapshotRunner = mr
 
 	setPruneFlags(t, "nope", false)
 
 	var code int
 	var exited bool
 	_ = captureStdout(t, func() {
-		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil))
+		code, exited = exitOf(runSnapshotPrune(snapshotPruneCmd, nil, td))
 	})
 	if !exited || code != 1 {
 		t.Errorf("prune --ship nope exit = (%d, %v), want (1, true)", code, exited)

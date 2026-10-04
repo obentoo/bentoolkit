@@ -25,9 +25,9 @@ func TestCheckPackageCancelledKeepsCause(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		checker := newRateLimitTestChecker(t, srv.URL, WithContext(ctx))
+		checker := newRateLimitTestChecker(t, srv.URL)
 
-		result, err := checker.CheckPackage(pkg, true)
+		result, err := checker.CheckPackage(ctx, pkg, true)
 		if err == nil || result == nil || result.Error == nil {
 			t.Fatalf("CheckPackage on a cancelled context: result=%v err=%v; want a failed check", result, err)
 		}
@@ -48,8 +48,8 @@ func TestCheckPackageCancelledKeepsCause(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		checker := newRateLimitTestChecker(t, srv.URL, WithContext(context.Background()))
-		result, _ := checker.CheckPackage(pkg, true)
+		checker := newRateLimitTestChecker(t, srv.URL)
+		result, _ := checker.CheckPackage(t.Context(), pkg, true)
 		if result == nil || result.Error == nil {
 			t.Fatalf("CheckPackage against a 404: result=%v; want a failed check", result)
 		}

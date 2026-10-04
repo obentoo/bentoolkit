@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -34,25 +33,28 @@ import (
 // and pushes within minutes, so a declaration this program wrote would be
 // published before anyone could read it.
 
-// reviewWarnf emits the one warning this file is allowed to print: a reviewer
-// that was asked for and could not be built.
-//
-// It is a package var for the same narrow reason internal/overlay's warnLogf is
-// one — logger binds its io.Writer at first use and exposes no setter
-// (logger.go's `func Default`), so without a seam the only way to assert on this
-// line would be to read the process's stderr. Production never assigns it.
-var reviewWarnf = logger.Warn
+// The one warning this file is allowed to print — a reviewer that was asked
+// for and could not be built — goes through the reviewWarnf field of deps
+// (deps.go), for the same narrow reason internal/overlay's warnLogf is a seam:
+// logger binds its io.Writer at first use and exposes no setter (logger.go's
+// `func Default`), so without a seam the only way to assert on this line would
+// be to read the process's stderr. Production wires logger.Warn.
 
 // claudeAsker is the slice of *autoupdate.ClaudeCodeClient this adapter uses: one
 // schema-constrained round trip. Declaring it here rather than holding the
 // concrete client keeps the CLI out of every test that is about the translation,
 // and it is the same "capability declared by its consumer" shape
 // overlay.DivergenceReviewer and provider.PackageDirProvider already use.
+//
+// The context is the CALL's, never one captured when the asker was built: each
+// reviewer hands AskJSON the context of the review it is serving, so the
+// `claude` child ends with that review (story 059, R3.4).
 type claudeAsker interface {
-	AskJSON(instruction string, content []byte, schema string) (string, error)
+	AskJSON(ctx context.Context, instruction string, content []byte, schema string) (string, error)
 }
 
-// newClaudeAsker builds the real client. It is a var so tests can script the CLI
+// newClaudeCodeAsker builds the real client, and is the default of the
+// newClaudeAsker field of deps. It is a seam so tests can script the CLI
 // without one being installed, and so a test can prove that `--no-review`
 // reaches it ZERO times — R5.6 is a claim about a process that never starts, and
 // the only way to assert something did not happen is to have the thing that
@@ -76,8 +78,8 @@ type claudeAsker interface {
 // "unset, zero or negative" becomes the documented default, and this seam takes
 // the value from nowhere else.
 //
-// It is set ON THE CLIENT rather than per call, beside the context and for the
-// same reason: autoupdate combines the two on entry to every invocation, so one
+// It is set ON THE CLIENT rather than per call: autoupdate combines it with
+// the call's context on entry to every invocation, so one
 // value here bounds each round trip the reviewers make and there is no second
 // deadline to keep in step with this one.
 //
@@ -85,9 +87,11 @@ type claudeAsker interface {
 // the constructor hands back beside its error. Boxed into this interface that
 // pointer would be non-nil, and every `!= nil` check downstream would wave it
 // through to a dereference.
-var newClaudeAsker = func(ctx context.Context, budget time.Duration) (claudeAsker, error) {
+//
+// It takes NO context: the client stores none (story 059), and each AskJSON
+// call receives the context of the review that makes it.
+func newClaudeCodeAsker(budget time.Duration) (claudeAsker, error) {
 	client, err := autoupdate.NewClaudeCodeClient(reviewLLMConfig(),
-		autoupdate.WithClaudeCodeContext(ctx),
 		autoupdate.WithClaudeCodeTimeout(budget))
 	if err != nil {
 		return nil, err
@@ -130,16 +134,16 @@ func reviewLLMConfig() autoupdate.LLMConfig {
 // and is not getting one, which is worth a line — and then the run proceeds
 // without commentary, because the report they asked for is already complete
 // without it.
-func compareDivergenceReviewer(ctx context.Context, noReview bool, budget time.Duration) overlay.DivergenceReviewer {
+func compareDivergenceReviewer(noReview bool, budget time.Duration, d *deps) overlay.DivergenceReviewer {
 	if noReview {
 		return nil
 	}
 
-	reviewer, err := newDivergenceReviewer(ctx, budget)
+	reviewer, err := newDivergenceReviewer(budget, d)
 	if err != nil {
 		// The error is an ARGUMENT and never a format string: it may carry the
 		// CLI's own text.
-		reviewWarnf("the divergence review could not be started (%v); the report is unchanged apart from carrying no commentary", err)
+		d.reviewWarnf("the divergence review could not be started (%v); the report is unchanged apart from carrying no commentary", err)
 		return nil
 	}
 	return reviewer
@@ -155,16 +159,16 @@ func compareDivergenceReviewer(ctx context.Context, noReview bool, budget time.D
 // difference between "you do not have this" and "you have it and it would not
 // start" is the difference between nothing to say and something to fix.
 //
-// The CONTEXT is threaded into the client rather than applied per call, because
-// that is where autoupdate puts it: ClaudeCodeClient combines c.ctx with
-// c.timeout on entry to claude_code.go's `func run`, so a run cancelled with
-// Ctrl-C kills the `claude` process it is waiting on instead of holding the
-// terminal for the rest of the budget.
+// The CONTEXT is not taken here: ReviewDivergence passes each review's own to
+// AskJSON, and ClaudeCodeClient combines it with c.timeout on entry to
+// claude_code.go's `func run`, so a run cancelled with Ctrl-C kills the `claude`
+// process it is waiting on instead of holding the terminal for the rest of the
+// budget.
 //
-// The BUDGET is threaded the same way and for the same reason, and this
-// function does nothing with it but carry it to the seam (S048-R4.1).
-func newDivergenceReviewer(ctx context.Context, budget time.Duration) (overlay.DivergenceReviewer, error) {
-	asker, err := newClaudeAsker(ctx, budget)
+// The BUDGET is threaded into the client, and this function does nothing with
+// it but carry it to the seam (S048-R4.1).
+func newDivergenceReviewer(budget time.Duration, d *deps) (overlay.DivergenceReviewer, error) {
+	asker, err := d.newClaudeAsker(budget)
 	if err != nil {
 		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
 			return nil, nil
@@ -210,7 +214,7 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 		return overlay.ReviewNote{}, fmt.Errorf("the review was not started: %w", err)
 	}
 
-	reply, err := r.asker.AskJSON(divergenceReviewInstruction(req), divergenceReviewPayload(req), divergenceReviewSchema)
+	reply, err := r.asker.AskJSON(ctx, divergenceReviewInstruction(req), divergenceReviewPayload(req), divergenceReviewSchema)
 	if err != nil {
 		// IT NAMES THIS OPERATION AND CLAIMS NOTHING ELSE. This seam opens no
 		// file: both ebuilds arrive as bytes in req, read upstream before

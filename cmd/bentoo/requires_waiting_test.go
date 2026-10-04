@@ -34,7 +34,7 @@ func TestRequiresWaitingCountedInSummary(t *testing.T) {
 		{Package: "app-misc/broken", OldVersion: "1.0", NewVersion: "1.1", Error: errors.New("manifest failed")},
 	}
 
-	out := captureStdout(t, func() { displayApplyAllResults(results, 1) })
+	out := captureStdout(t, func() { testAutoupdateRun(testAutoupdateOptions()).displayApplyAllResults(results, 1) })
 	perPackage, summary := rwaitSplitSummary(t, out)
 
 	// Rendered: each waiting bump names the atom it waits for, so the two
@@ -71,7 +71,7 @@ func TestRequiresWaitingNoLineWhenNoneWait(t *testing.T) {
 		nil,
 	}
 
-	out := captureStdout(t, func() { displayApplyAllResults(results, 0) })
+	out := captureStdout(t, func() { testAutoupdateRun(testAutoupdateOptions()).displayApplyAllResults(results, 0) })
 	_, summary := rwaitSplitSummary(t, out)
 
 	if strings.Contains(out, "Waiting") {

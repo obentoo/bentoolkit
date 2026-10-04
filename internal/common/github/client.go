@@ -290,13 +290,15 @@ func (c *Client) ClearCache() error {
 	return os.RemoveAll(c.CacheDir)
 }
 
-// GetRateLimitInfo returns current rate limit status
-func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err error) {
+// GetRateLimitInfo returns current rate limit status. The request is bound to
+// ctx: cancelling it aborts the lookup in flight, and the returned error wraps
+// ctx.Err() (R1.7, R3.8).
+func (c *Client) GetRateLimitInfo(ctx context.Context) (remaining int, resetTime time.Time, err error) {
 	url := fmt.Sprintf("%s/rate_limit", c.BaseURL)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, fmt.Errorf("building GitHub rate_limit request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", c.UserAgent)
@@ -308,7 +310,7 @@ func (c *Client) GetRateLimitInfo() (remaining int, resetTime time.Time, err err
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, fmt.Errorf("GitHub rate_limit request: %w", err)
 	}
 	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
 	defer resp.Body.Close()

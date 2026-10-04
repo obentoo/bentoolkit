@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -71,17 +72,46 @@ func exitProcess(code int) {
 }
 
 // exitStatus is an error that carries the process exit code a command chose.
-// The command already printed its own diagnostic, so the status is silent:
-// func execute prints nothing for a bare one. It deliberately has no Unwrap —
-// a silent status carries no cause.
+// Built by exitWith it has no cause: the command already printed its own
+// diagnostic, so func execute prints nothing for it. Built by failWith it
+// carries the one diagnostic the command did NOT print, and func execute
+// prints that cause once.
 type exitStatus struct {
-	code int
+	code  int
+	cause error
 }
 
 // Error returns "exit status <code>". It is only ever printed when a caller
 // wrapped the status in words of its own, and then as part of that wrapper.
 func (e *exitStatus) Error() string {
 	return fmt.Sprintf("exit status %d", e.code)
+}
+
+// Unwrap returns the cause failWith gave the status, or nil for a status
+// built by exitWith, so errors.Is and errors.As reach the diagnostic.
+func (e *exitStatus) Unwrap() error {
+	return e.cause
+}
+
+// failWith reports a code together with the diagnostic func execute prints
+// once. failWith(0, err) returns nil, as exitWith(0) does, and a nil err is a
+// bare status.
+//
+// A cause that already carries an exit status is returned unchanged: once
+// exitStatus has Unwrap, errors.As would find the inner status first anyway,
+// and wrapping it again would print one diagnostic under a code nobody chose.
+func failWith(code int, err error) error {
+	if code == 0 {
+		return nil
+	}
+	if err == nil {
+		return exitWith(code)
+	}
+	var inner *exitStatus
+	if errors.As(err, &inner) {
+		return err
+	}
+	return &exitStatus{code: code, cause: err}
 }
 
 // exitWith reports a code whose diagnostic the command already printed.
@@ -123,10 +153,18 @@ func execute(ctx context.Context, root *cobra.Command, stderr io.Writer) int {
 	// A bare silent status is not printed: its diagnostic is already out. The
 	// question is whether the returned value itself IS the status, not whether
 	// the chain contains one — a wrapper added words nobody printed yet.
-	if _, bare := err.(*exitStatus); !bare { //nolint:errorlint // identity of the returned value, not the chain, decides silence
+	st, bare := err.(*exitStatus) //nolint:errorlint // identity of the returned value, not the chain, decides silence
+	if !bare {
 		// A failed write to stderr has nowhere else to be reported, and the
 		// exit code is returned regardless, so the write's result is dropped.
 		_, _ = fmt.Fprintln(stderr, err)
+		return exitCodeFor(err)
+	}
+	if st.cause != nil {
+		// failWith's cause goes through the logger, the call the handler made
+		// before it returned the error instead: the stderr line and the
+		// log-file entry stay what they were (story 060, R7.1, R7.2).
+		logger.Error("%v", st.cause)
 	}
 	return exitCodeFor(err)
 }

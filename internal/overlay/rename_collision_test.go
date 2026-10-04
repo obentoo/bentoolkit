@@ -101,7 +101,7 @@ func TestRenameRefusesSharedTarget(t *testing.T) {
 		})
 		before := collisionSnapshot(t, root)
 
-		result, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
+		result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
 			&RenameOptions{NoManifest: true, SkipPrompt: true})
 		assertIsCollisionError(t, err)
 		if result == nil {
@@ -133,7 +133,7 @@ func TestRenameRefusesSharedTarget(t *testing.T) {
 		})
 		before := collisionSnapshot(t, root)
 
-		result, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
+		result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
 			&RenameOptions{NoManifest: true, SkipPrompt: true})
 		assertIsCollisionError(t, err)
 		if result == nil {
@@ -160,7 +160,7 @@ func TestRenameRefusesSharedTarget(t *testing.T) {
 		})
 		before := collisionSnapshot(t, root)
 
-		result, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-*", OldVersion: "1.0", NewVersion: "1.1"},
+		result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-*", OldVersion: "1.0", NewVersion: "1.1"},
 			&RenameOptions{NoManifest: true, SkipPrompt: true})
 		assertIsCollisionError(t, err)
 		if result == nil {
@@ -185,7 +185,7 @@ func TestRenameRefusesSharedTarget(t *testing.T) {
 			"app-misc/lib-foo": {"lib-foo-1.0.ebuild"},
 			"app-misc/lib-bar": {"lib-bar-1.0.ebuild"},
 		})
-		result, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-*", OldVersion: "1.0", NewVersion: "1.1"},
+		result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-*", OldVersion: "1.0", NewVersion: "1.1"},
 			&RenameOptions{NoManifest: true, SkipPrompt: true})
 		if err != nil {
 			t.Fatalf("Rename error = %v, want success: lib-foo-1.1 and lib-bar-1.1 are different targets", err)
@@ -207,7 +207,7 @@ func TestRenameRefusesSharedTarget(t *testing.T) {
 			"app-misc/lib-foo": {"lib-foo-1.0.ebuild"},
 			"dev-libs/lib-foo": {"lib-foo-1.0.ebuild"},
 		})
-		result, err := Rename(cfg, &RenameSpec{Category: "*", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
+		result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "*", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
 			&RenameOptions{NoManifest: true, SkipPrompt: true})
 		if err != nil {
 			t.Fatalf("Rename error = %v, want success: app-misc/foo and dev-libs/foo have different targets", err)
@@ -235,7 +235,7 @@ func TestRenameRefusesSharedTargetEvenWithForce(t *testing.T) {
 			root, cfg := collisionOverlay(t, map[string][]string{"app-misc/lib-foo": files})
 			before := collisionSnapshot(t, root)
 
-			result, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
+			result, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
 				&RenameOptions{NoManifest: true, SkipPrompt: true, Force: true})
 			assertIsCollisionError(t, err)
 			if result != nil && len(result.Renamed) != 0 {
@@ -303,7 +303,7 @@ func TestRenamePreviewReportsCollisions(t *testing.T) {
 		if n := len(result.Conflicts); n != 1 {
 			t.Errorf("len(Conflicts) = %d, want 1", n)
 		}
-		_, err = Rename(cfg, spec, &RenameOptions{NoManifest: true, SkipPrompt: true})
+		_, err = Rename(t.Context(), cfg, spec, &RenameOptions{NoManifest: true, SkipPrompt: true})
 		var ce *CollisionError
 		if errors.As(err, &ce) {
 			t.Errorf("Rename error = %v, a *CollisionError; want the *ConflictError --force can override", err)
@@ -363,7 +363,7 @@ func TestCollisionErrorMessage(t *testing.T) {
 	_, cfg := collisionOverlay(t, map[string][]string{
 		"app-misc/lib-foo": {"lib-foo-1.0.ebuild", "lib-foo-1.0-r1.ebuild"},
 	})
-	_, err := Rename(cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
+	_, err := Rename(t.Context(), cfg, &RenameSpec{Category: "app-misc", PackagePattern: "lib-foo", OldVersion: "1.0", NewVersion: "1.1"},
 		&RenameOptions{NoManifest: true, SkipPrompt: true})
 	ce := assertIsCollisionError(t, err)
 	msg := ce.Error()

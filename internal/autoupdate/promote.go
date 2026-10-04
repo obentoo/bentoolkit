@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -63,7 +64,7 @@ type candidatePaths struct {
 	//
 	// A field on Applier is the obvious shortcut and it is wrong for the reason
 	// story 033 kept staging keyed by path rather than by an index:
-	// applyAllPackages runs its workers CONCURRENTLY, so a per-Applier field
+	// ApplyAll runs its workers CONCURRENTLY, so a per-Applier field
 	// would be shared mutable state across packages being staged at the same
 	// time, and package A's gate could be handed package B's distdir.
 	// candidatePaths is already the per-bump carrier that reaches both
@@ -144,12 +145,12 @@ func stagedCandidate(stagedRoot, pkg, version string) (candidatePaths, error) {
 // returns, so that a promotion which did not complete can never leave a pin aiming
 // `--clean` at the only ebuild present (the hazard applier.go's own comment
 // spells out).
-func (a *Applier) promote(cand candidatePaths, pkg, version string) (publishedUndo, error) {
+func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version string) (publishedUndo, error) {
 	// The invariant, at the single function that writes into the published
 	// overlay. Both call sites pass through here — the validating path and R10.1's
 	// reuse path, which reaches a published write without consulting
 	// PromotionDecision at all.
-	if err := a.refuseOnInterrupt(pkg, version); err != nil {
+	if err := a.refuseOnInterrupt(ctx, pkg, version); err != nil {
 		return nil, err
 	}
 
