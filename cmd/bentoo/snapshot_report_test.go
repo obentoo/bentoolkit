@@ -19,7 +19,7 @@ package main
 // # The fixture is this package's own
 //
 // writeSnapshotConfig, redirectStateDir, stubBinariesOnPath and
-// validSnapshotTOML come from snapshot_test.go; snapshotRunner is the
+// validSnapshotTOML come from snapshot_test.go; deps.snapshotRunner is the
 // subprocess seam snapshot_run_test.go already injects a MockRunner into, so no
 // btrbk runs and no subvolume is touched.
 //
@@ -52,7 +52,7 @@ func snapshotRunExport(t *testing.T, runner snapshot.Runner) (stdout, exportPath
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	_, configPath := writeSnapshotConfig(t, validSnapshotTOML)
 	redirectStateDir(t)
-	snapshotRunner = runner
+	c.deps.snapshotRunner = runner
 
 	exportPath = filepath.Join(t.TempDir(), "snapshot.json")
 

@@ -228,8 +228,8 @@ func manifestTargetFacts(update overlay.ManifestUpdate) report.ManifestTarget {
 // The two are independent answers to the same report. A terminal that went away
 // mid-write is no reason to also withhold the file, which may be the only copy
 // left.
-func presentManifestReport(cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg)
+func presentManifestReport(d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
 
 	// Two questions, kept apart. What the report should SAY — list every target
 	// that succeeded, or count them — is report.SectionOptions, answered here

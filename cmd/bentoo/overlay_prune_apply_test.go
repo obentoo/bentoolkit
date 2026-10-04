@@ -207,22 +207,20 @@ func pruneApplyRemovablePair(t *testing.T) (overlayPath string, prov *fakePruneG
 // Under `go test` stdin is never a character device, so without this seam the
 // interactive requirements could only ever be tested in the direction the runner
 // hands out for free.
-func setOverlayPruneInteractive(t *testing.T, interactive bool) {
+func setOverlayPruneInteractive(t *testing.T, d *deps, interactive bool) {
 	t.Helper()
-	orig := pruneInteractiveFn
-	t.Cleanup(func() { pruneInteractiveFn = orig })
-	pruneInteractiveFn = func() bool { return interactive }
+	d.pruneInteractive = func() bool { return interactive }
 }
 
 // recordPruneConfirmations replaces the confirmation seam with one that keeps
 // every prompt it was shown and answers them in the order given. A prompt beyond
 // the supplied answers fails the test: an unexpected extra confirmation is a bug
 // in the same family as a missing one.
-func recordPruneConfirmations(t *testing.T, answers ...bool) *[]string {
+func recordPruneConfirmations(t *testing.T, d *deps, answers ...bool) *[]string {
 	t.Helper()
 
 	prompts := make([]string, 0, len(answers))
-	setOverlayPruneConfirm(t, func(prompt string) bool {
+	setOverlayPruneConfirm(t, d, func(prompt string) bool {
 		prompts = append(prompts, prompt)
 		if len(prompts) <= len(answers) {
 			return answers[len(prompts)-1]
@@ -235,9 +233,9 @@ func recordPruneConfirmations(t *testing.T, answers ...bool) *[]string {
 }
 
 // forbidPruneConfirmation fails the test if any confirmation is requested.
-func forbidPruneConfirmation(t *testing.T) {
+func forbidPruneConfirmation(t *testing.T, d *deps) {
 	t.Helper()
-	setOverlayPruneConfirm(t, func(prompt string) bool {
+	setOverlayPruneConfirm(t, d, func(prompt string) bool {
 		t.Errorf("a confirmation was requested where the run must decide without one:\n%s", prompt)
 		return false
 	})
@@ -258,11 +256,11 @@ type pruneExecutorSpy struct {
 // acts only on plans carrying Eligible, and a plan it may not act on yields no
 // result at all — so len(results) is not len(batch), and a caller counting one
 // from the other is counting wrong.
-func spyOnPruneExecutor(t *testing.T, fail map[string]error) *pruneExecutorSpy {
+func spyOnPruneExecutor(t *testing.T, d *deps, fail map[string]error) *pruneExecutorSpy {
 	t.Helper()
 
 	spy := &pruneExecutorSpy{fail: fail}
-	setOverlayPruneExecutor(t, func(batch overlay.PruneBatch, _ overlay.PruneOptions) []overlay.PruneResult {
+	setOverlayPruneExecutor(t, d, func(batch overlay.PruneBatch, _ overlay.PruneOptions) []overlay.PruneResult {
 		var results []overlay.PruneResult
 		for _, plans := range [][]overlay.PrunePlan{batch.Identical, batch.Diverging, batch.Refused} {
 			for _, plan := range plans {
@@ -284,9 +282,9 @@ func spyOnPruneExecutor(t *testing.T, fail map[string]error) *pruneExecutorSpy {
 }
 
 // forbidPruneRemovalAttempt fails the test if the executor is reached at all.
-func forbidPruneRemovalAttempt(t *testing.T, why string) {
+func forbidPruneRemovalAttempt(t *testing.T, d *deps, why string) {
 	t.Helper()
-	setOverlayPruneExecutor(t, func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult {
+	setOverlayPruneExecutor(t, d, func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult {
 		t.Errorf("the executor was reached: %s", why)
 		return nil
 	})
@@ -294,10 +292,10 @@ func forbidPruneRemovalAttempt(t *testing.T, why string) {
 
 // runPruneApply drives one --apply invocation and returns its output and the
 // exit status its returned outcome maps to (func exitCodeFor).
-func runPruneApply(t *testing.T, overlayPath string) (out string, code int) {
+func runPruneApply(t *testing.T, overlayPath string, d *deps) (out string, code int) {
 	t.Helper()
 	out = captureStdout(t, func() {
-		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}))
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, d))
 	})
 	return out, code
 }
@@ -324,15 +322,16 @@ func assertPrunePackagesIntact(t *testing.T, overlayPath string, pkgs ...string)
 //
 // _Requirements: R6.1, R6.3_
 func TestPruneApplyDeclinedRemovesNothing(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyMixedFixture(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, false, false)
-	setOverlayPruneInteractive(t, true)
-	prompts := recordPruneConfirmations(t, false)
-	forbidPruneRemovalAttempt(t, "the confirmation was declined, so nothing may be handed to it")
+	setOverlayPruneInteractive(t, td, true)
+	prompts := recordPruneConfirmations(t, td, false)
+	forbidPruneRemovalAttempt(t, td, "the confirmation was declined, so nothing may be handed to it")
 
 	before := readPruneRegistry(t, overlayPath)
-	_, _ = runPruneApply(t, overlayPath)
+	_, _ = runPruneApply(t, overlayPath, td)
 
 	if len(*prompts) != 1 {
 		t.Errorf("confirmations requested = %d, want 1; R6.1 asks for one confirmation covering the batch, and a run that removes nothing WITHOUT asking has not obtained consent, it has merely avoided the question", len(*prompts))
@@ -355,14 +354,15 @@ func TestPruneApplyDeclinedRemovesNothing(t *testing.T) {
 //
 // _Requirements: R6.2_
 func TestPruneApplyNonInteractiveWithoutYesExitsNonZero(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyMixedFixture(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, false, false)
-	setOverlayPruneInteractive(t, false)
-	forbidPruneConfirmation(t)
-	forbidPruneRemovalAttempt(t, "a non-interactive run without --yes may not remove anything")
+	setOverlayPruneInteractive(t, td, false)
+	forbidPruneConfirmation(t, td)
+	forbidPruneRemovalAttempt(t, td, "a non-interactive run without --yes may not remove anything")
 
-	out, code := runPruneApply(t, overlayPath)
+	out, code := runPruneApply(t, overlayPath, td)
 
 	if code <= 0 {
 		t.Errorf("exit code = %d, want non-zero; a script that reads 0 here concludes the removals were carried out", code)
@@ -390,14 +390,15 @@ func TestPruneApplyNonInteractiveWithoutYesExitsNonZero(t *testing.T) {
 //
 // _Requirements: R6.1, R4.3, R4.4_
 func TestPruneApplyYesSkipsOnlyTheIdenticalConfirmation(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyMixedFixture(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, true, false, true)
-	setOverlayPruneInteractive(t, true)
-	prompts := recordPruneConfirmations(t, true)
-	spy := spyOnPruneExecutor(t, nil)
+	setOverlayPruneInteractive(t, td, true)
+	prompts := recordPruneConfirmations(t, td, true)
+	spy := spyOnPruneExecutor(t, td, nil)
 
-	_, _ = runPruneApply(t, overlayPath)
+	_, _ = runPruneApply(t, overlayPath, td)
 
 	if len(*prompts) != 1 {
 		t.Fatalf("confirmations requested = %d, want exactly 1: --yes covers the identical batch and nothing else, so the diverging batch must still ask", len(*prompts))
@@ -430,13 +431,14 @@ func TestPruneApplyYesSkipsOnlyTheIdenticalConfirmation(t *testing.T) {
 //
 // _Requirements: R4.4, R6.2_
 func TestPruneApplyDivergingRefusedNonInteractiveEvenWithYes(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyMixedFixture(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, true, false, true)
-	setOverlayPruneInteractive(t, false)
-	spy := spyOnPruneExecutor(t, nil)
+	setOverlayPruneInteractive(t, td, false)
+	spy := spyOnPruneExecutor(t, td, nil)
 
-	out, _ := runPruneApply(t, overlayPath)
+	out, _ := runPruneApply(t, overlayPath, td)
 
 	if containsPruneAtom(spy.atoms, pruneUndeclaredAtom) {
 		t.Errorf("%q was handed to the executor from a non-interactive session; it is the diverging batch, and --yes must never satisfy that confirmation (R4.4). Attempted: %v", pruneUndeclaredAtom, spy.atoms)
@@ -475,14 +477,15 @@ func TestPruneApplyDivergingRefusedNonInteractiveEvenWithYes(t *testing.T) {
 //
 // _Requirements: R4.2, R4.3_
 func TestPruneApplyDivergingPromptNamesEachPackageAndReason(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyMixedFixture(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, true, false, false)
-	setOverlayPruneInteractive(t, true)
-	prompts := recordPruneConfirmations(t, true, true)
-	_ = spyOnPruneExecutor(t, nil)
+	setOverlayPruneInteractive(t, td, true)
+	prompts := recordPruneConfirmations(t, td, true, true)
+	_ = spyOnPruneExecutor(t, td, nil)
 
-	_, _ = runPruneApply(t, overlayPath)
+	_, _ = runPruneApply(t, overlayPath, td)
 
 	if len(*prompts) != 2 {
 		t.Fatalf("confirmations requested = %d, want 2: R4.3 asks for a confirmation distinct from the one covering the identical packages, because approving a batch that loses nothing says nothing about a batch that does. Prompts: %q", len(*prompts), *prompts)
@@ -525,17 +528,18 @@ func TestPruneApplyDivergingPromptNamesEachPackageAndReason(t *testing.T) {
 //
 // _Requirements: R5.2, R5.5_
 func TestPruneApplyEditsRegistryOnlyForRemovedDirectories(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyRemovablePair(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, false, true)
-	setOverlayPruneInteractive(t, false)
-	forbidPruneConfirmation(t)
-	spy := spyOnPruneExecutor(t, map[string]error{
+	setOverlayPruneInteractive(t, td, false)
+	forbidPruneConfirmation(t, td)
+	spy := spyOnPruneExecutor(t, td, map[string]error{
 		pruneUndeclaredAtom: errors.New("removing the directory: permission denied"),
 	})
 
 	before := readPruneRegistry(t, overlayPath)
-	_, _ = runPruneApply(t, overlayPath)
+	_, _ = runPruneApply(t, overlayPath, td)
 	after := readPruneRegistry(t, overlayPath)
 
 	if len(spy.atoms) != 2 {
@@ -567,15 +571,16 @@ func TestPruneApplyEditsRegistryOnlyForRemovedDirectories(t *testing.T) {
 //
 // _Requirements: R5.3_
 func TestPruneApplyKeepRegistryLeavesConfigUntouched(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyRemovablePair(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, true, true)
-	setOverlayPruneInteractive(t, false)
-	forbidPruneConfirmation(t)
-	spy := spyOnPruneExecutor(t, nil)
+	setOverlayPruneInteractive(t, td, false)
+	forbidPruneConfirmation(t, td)
+	spy := spyOnPruneExecutor(t, td, nil)
 
 	before := readPruneRegistry(t, overlayPath)
-	_, _ = runPruneApply(t, overlayPath)
+	_, _ = runPruneApply(t, overlayPath, td)
 	after := readPruneRegistry(t, overlayPath)
 
 	if len(spy.atoms) == 0 {
@@ -597,16 +602,17 @@ func TestPruneApplyKeepRegistryLeavesConfigUntouched(t *testing.T) {
 //
 // _Requirements: R5.5_
 func TestPruneApplyOneFailureExitsNonZero(t *testing.T) {
+	td := defaultDeps()
 	overlayPath, prov := pruneApplyRemovablePair(t)
-	withFakeGentoo(t, prov)
+	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, false, true)
-	setOverlayPruneInteractive(t, false)
-	forbidPruneConfirmation(t)
-	spy := spyOnPruneExecutor(t, map[string]error{
+	setOverlayPruneInteractive(t, td, false)
+	forbidPruneConfirmation(t, td)
+	spy := spyOnPruneExecutor(t, td, map[string]error{
 		pruneUndeclaredAtom: errors.New("removing the directory: permission denied"),
 	})
 
-	out, code := runPruneApply(t, overlayPath)
+	out, code := runPruneApply(t, overlayPath, td)
 
 	if len(spy.atoms) != 2 {
 		t.Fatalf("the executor was asked to remove %v, want both; R5.5 is about continuing PAST a failure, which needs something after it to continue to", spy.atoms)

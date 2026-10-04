@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -150,7 +151,7 @@ func (c *OpenAIClient) GetModel() string {
 }
 
 // ExtractVersion uses OpenAI to extract a version string from content.
-func (c *OpenAIClient) ExtractVersion(content []byte, prompt string) (string, error) {
+func (c *OpenAIClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
 	// Build the user message with content and prompt
 	userMessage := buildVersionExtractionPrompt(content, prompt)
 
@@ -174,7 +175,7 @@ func (c *OpenAIClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.baseURL+"/chat/completions", bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(reqJSON))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -186,7 +187,7 @@ func (c *OpenAIClient) ExtractVersion(content []byte, prompt string) (string, er
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
+		return "", fmt.Errorf("%w: openai request to %s failed: %w", ErrLLMRequestFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 
@@ -227,7 +228,7 @@ func (c *OpenAIClient) ExtractVersion(content []byte, prompt string) (string, er
 }
 
 // AnalyzeContent uses OpenAI to analyze content and suggest a parser configuration.
-func (c *OpenAIClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *OpenAIClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 
@@ -251,7 +252,7 @@ func (c *OpenAIClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.baseURL+"/chat/completions", bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -263,7 +264,7 @@ func (c *OpenAIClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
+		return nil, fmt.Errorf("%w: openai request to %s failed: %w", ErrLLMRequestFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 

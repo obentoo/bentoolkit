@@ -52,7 +52,7 @@ func TestPerHostConcurrencyCapsInFlightRequests(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res := c.CheckAll(true)
+	res := c.CheckAll(t.Context(), true)
 	if res.HasFailures() {
 		t.Fatalf("CheckAll failures: %v", res.Failures)
 	}
@@ -126,7 +126,7 @@ func TestScriptRecordsShareOneEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
-	if res := c.CheckAll(true); res.HasFailures() {
+	if res := c.CheckAll(t.Context(), true); res.HasFailures() {
 		t.Fatalf("CheckAll failures: %v", res.Failures)
 	}
 

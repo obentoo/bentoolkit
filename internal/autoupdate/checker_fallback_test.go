@@ -55,7 +55,7 @@ func TestFallbackKeepsRecordFields(t *testing.T) {
 	}
 	c := holdChecker(t, overlayDir, filepath.Join(tmpDir, "config"), pkg, cfg)
 
-	result, err := c.CheckPackage(pkg, true)
+	result, err := c.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

@@ -96,7 +96,7 @@ func TestRun_ASuccessfulInvocationRecordsItsDuration(t *testing.T) {
 	seam, _ := scriptedSeam(`sleep 0.2; printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(30*time.Second))
 
-	out, err := c.run("instr", []byte("content"), "")
+	out, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err != nil {
 		t.Fatalf("the scripted invocation failed (%v); this test is about what a SUCCESSFUL call records", err)
 	}
@@ -126,7 +126,7 @@ func TestRun_AFailedInvocationRecordsItsDuration(t *testing.T) {
 	seam, _ := scriptedSeam(`sleep 0.2; exit 3`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(30*time.Second))
 
-	if _, err := c.run("instr", []byte("content"), ""); err == nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err == nil {
 		t.Fatalf("the scripted invocation exited 3 but run returned no error; this test is about what a FAILED call records")
 	}
 
@@ -166,7 +166,7 @@ func TestRun_ADeadlineKilledInvocationRecordsItsDuration(t *testing.T) {
 	}
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(300*time.Millisecond))
 
-	if _, err := c.run("instr", []byte("content"), ""); err == nil {
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err == nil {
 		t.Fatalf("a child that outlives its 300ms budget returned no error; there is no killed invocation to time")
 	}
 

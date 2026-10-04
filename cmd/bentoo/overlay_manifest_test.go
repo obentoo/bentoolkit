@@ -87,14 +87,11 @@ func TestManifestCommandArgsAcceptsZeroOrOne(t *testing.T) {
 // has: os, github.com/obentoo/bentoolkit/internal/common/config and
 // github.com/obentoo/bentoolkit/internal/common/tui.
 
-// stubUIIsTerminal replaces the package's TTY seam and returns the restore
-// function. The seam is what makes R3.7 checkable at all: the requirement is
+// stubUIIsTerminal answers d's TTY seam with tty. The seam is what makes R3.7 checkable at all: the requirement is
 // about behaviour ON a terminal and OFF one, and a test binary is only ever
 // off one.
-func stubUIIsTerminal(tty bool) func() {
-	original := uiIsTerminal
-	uiIsTerminal = func() bool { return tty }
-	return func() { uiIsTerminal = original }
+func stubUIIsTerminal(d *deps, tty bool) {
+	d.uiIsTerminal = func() bool { return tty }
 }
 
 // legacyEnabled transcribes tui.Enabled's rule so R3.7 can be checked at a TTY
@@ -141,17 +138,19 @@ func TestLegacyTranscriptionIsAnchored(t *testing.T) {
 // so this compares the new path against the real old one instead of against
 // somebody's recollection of it.
 func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	for _, tty := range []bool{true, false} {
 		t.Run(map[bool]string{true: "on a terminal", false: "off a terminal"}[tty], func(t *testing.T) {
-			defer stubUIIsTerminal(tty)()
+			td := defaultDeps()
+			stubUIIsTerminal(td, tty)
 
 			legacy := legacyEnabled(tty)
 			cfg := &config.Config{} // no ui block at all
 
-			if got := manifestUsesTUI(cfg); got != legacy {
+			if got := manifestUsesTUI(cfg, td.uiIsTerminal); got != legacy {
 				t.Errorf("overlay manifest: new path says %v, tui.Enabled says %v (R3.7)", got, legacy)
 			}
-			if got := autoupdateUsesTUI(cfg); got != legacy {
+			if got := (&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI(); got != legacy {
 				t.Errorf("autoupdate --apply: new path says %v, tui.Enabled says %v (R3.7)", got, legacy)
 			}
 		})
@@ -163,20 +162,22 @@ func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
 // NO_COLOR configured nothing about ui.mode, so this story must leave them
 // exactly where they were.
 func TestNoConfigMatchesLegacyBehaviourUnderTheOptOuts(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	for _, env := range []string{"NO_COLOR", "BENTOO_NO_TUI"} {
 		t.Run(env, func(t *testing.T) {
 			t.Setenv(env, "1")
-			defer stubUIIsTerminal(true)()
+			td := defaultDeps()
+			stubUIIsTerminal(td, true)
 
 			if legacyEnabled(true) {
 				t.Fatalf("the premise is wrong: the legacy rule is true with %s set", env)
 			}
 
 			cfg := &config.Config{}
-			if manifestUsesTUI(cfg) {
+			if manifestUsesTUI(cfg, td.uiIsTerminal) {
 				t.Errorf("overlay manifest turned the TUI on for an operator who set %s (R3.7)", env)
 			}
-			if autoupdateUsesTUI(cfg) {
+			if (&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI() {
 				t.Errorf("autoupdate --apply turned the TUI on for an operator who set %s (R3.7)", env)
 			}
 		})
@@ -188,15 +189,16 @@ func TestNoConfigMatchesLegacyBehaviourUnderTheOptOuts(t *testing.T) {
 // commands — an operator should not have to learn a different switch per
 // command.
 func TestManifestInheritsUIMode(t *testing.T) {
-	defer stubUIIsTerminal(true)()
+	td := defaultDeps()
+	stubUIIsTerminal(td, true)
 
 	plain := &config.Config{UI: config.UIConfig{Mode: "plain"}}
-	if manifestUsesTUI(plain) {
+	if manifestUsesTUI(plain, td.uiIsTerminal) {
 		t.Error("ui.mode: plain did not reach overlay manifest — it is still deciding on its own (S044-R3.8)")
 	}
 
 	inline := &config.Config{UI: config.UIConfig{Mode: "inline"}}
-	if !manifestUsesTUI(inline) {
+	if !manifestUsesTUI(inline, td.uiIsTerminal) {
 		t.Error("ui.mode: inline did not turn the manifest TUI on")
 	}
 }
@@ -206,14 +208,16 @@ func TestManifestInheritsUIMode(t *testing.T) {
 // alternate screen is a different piece of work, and doing it by accident here
 // would take over the terminal during a build.
 func TestFullscreenDoesNotReachTheApplyPath(t *testing.T) {
-	defer stubUIIsTerminal(true)()
+	auOpts := testAutoupdateOptions()
+	td := defaultDeps()
+	stubUIIsTerminal(td, true)
 
 	cfg := &config.Config{UI: config.UIConfig{Mode: "fullscreen"}}
 
-	if !autoupdateUsesTUI(cfg) {
+	if !(&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI() {
 		t.Error("ui.mode: fullscreen turned the apply-path live region off entirely")
 	}
-	if !manifestUsesTUI(cfg) {
+	if !manifestUsesTUI(cfg, td.uiIsTerminal) {
 		t.Error("ui.mode: fullscreen turned the manifest live region off entirely")
 	}
 }

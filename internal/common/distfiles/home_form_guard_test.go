@@ -57,7 +57,7 @@ func TestResolveCacheAndLocateKeepCurrentUserForms(t *testing.T) {
 		t.Errorf("ResolveCache(\"~/cache\") = %q, want %q", got, want)
 	}
 	stubPortageqUnavailable(t)
-	if got, ok := Locate("~/distfiles", ""); !ok || got != filepath.Join(home, "distfiles") {
+	if got, ok := Locate(t.Context(), "~/distfiles", ""); !ok || got != filepath.Join(home, "distfiles") {
 		t.Errorf("Locate(\"~/distfiles\") = (%q, %v), want (%q, true)", got, ok, filepath.Join(home, "distfiles"))
 	}
 }

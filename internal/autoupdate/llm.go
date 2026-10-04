@@ -3,6 +3,7 @@ package autoupdate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,11 +48,11 @@ var (
 type LLMProvider interface {
 	// ExtractVersion extracts a version string from content using the LLM.
 	// The prompt provides additional context for the extraction.
-	ExtractVersion(content []byte, prompt string) (string, error)
+	ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error)
 
 	// AnalyzeContent analyzes content and suggests a parser configuration.
 	// It uses ebuild metadata and optional hints to generate a schema analysis.
-	AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error)
+	AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error)
 
 	// GetModel returns the model name being used by this provider.
 	GetModel() string
@@ -265,7 +266,7 @@ func (c *ClaudeClient) GetModel() string {
 }
 
 // ExtractVersion uses Claude to extract a version string from content.
-func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, error) {
+func (c *ClaudeClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
 	// Build the user message with content and prompt
 	userMessage := buildVersionExtractionPrompt(content, prompt)
 
@@ -288,7 +289,7 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.config.BaseURL, bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.BaseURL, bytes.NewReader(reqJSON))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -301,7 +302,7 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
+		return "", fmt.Errorf("%w: claude request to %s failed: %w", ErrLLMRequestFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 
@@ -342,7 +343,7 @@ func (c *ClaudeClient) ExtractVersion(content []byte, prompt string) (string, er
 }
 
 // AnalyzeContent uses Claude to analyze content and suggest a parser configuration.
-func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *ClaudeClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 
@@ -365,7 +366,7 @@ func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", c.config.BaseURL, bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.BaseURL, bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -378,7 +379,7 @@ func (c *ClaudeClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrLLMRequestFailed, err)
+		return nil, fmt.Errorf("%w: claude request to %s failed: %w", ErrLLMRequestFailed, req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 
@@ -698,8 +699,8 @@ func NewLLMClientWithHTTPClient(cfg LLMConfig, httpClient *http.Client) (*LLMCli
 var _ LLMProvider = (*LLMClient)(nil)
 
 // ExtractVersion uses the LLM to extract a version string from content.
-func (c *LLMClient) ExtractVersion(content []byte, prompt string) (string, error) {
-	return c.provider.ExtractVersion(content, prompt)
+func (c *LLMClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
+	return c.provider.ExtractVersion(ctx, content, prompt)
 }
 
 // AnalyzeContent delegates schema analysis to the embedded provider so
@@ -707,8 +708,8 @@ func (c *LLMClient) ExtractVersion(content []byte, prompt string) (string, error
 // historically exposed only ExtractVersion; this method exists purely to keep
 // *LLMClient a valid WithLLMClient argument now that the option takes an
 // LLMProvider.
-func (c *LLMClient) AnalyzeContent(content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
-	return c.provider.AnalyzeContent(content, meta, hint)
+func (c *LLMClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+	return c.provider.AnalyzeContent(ctx, content, meta, hint)
 }
 
 // GetModel delegates to the embedded provider so *LLMClient satisfies

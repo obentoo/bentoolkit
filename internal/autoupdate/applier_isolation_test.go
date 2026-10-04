@@ -73,7 +73,7 @@ func TestRunCompile_UnverifiedIsolationIsNeverAPlainPass(t *testing.T) {
 		}),
 	)
 
-	result, err := applier.Apply(pkg, true)
+	result, err := applier.Apply(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRunCompile_VerifiedIsolationIsAPlainPass(t *testing.T) {
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 	)
 
-	result, err := applier.Apply(pkg, true)
+	result, err := applier.Apply(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRunCompile_RequireIsolationLeavesTheCompileUnrun(t *testing.T) {
 		}),
 	)
 
-	result, err := applier.Apply(pkg, true)
+	result, err := applier.Apply(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRunCompile_ExistingFailureStillFails(t *testing.T) {
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 	)
 
-	result, _ := applier.Apply(pkg, true)
+	result, _ := applier.Apply(t.Context(), pkg, true)
 
 	if result.Success {
 		t.Error("a failing compile reported success; the gate's failure condition moved")
@@ -183,7 +183,7 @@ func TestRunCompile_ProbeIsSkippedWhenNotCompiling(t *testing.T) {
 		WithApplierIsolationProbe(func() (bool, string) { probed = true; return true, "" }),
 	)
 
-	if _, err := applier.Apply(pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

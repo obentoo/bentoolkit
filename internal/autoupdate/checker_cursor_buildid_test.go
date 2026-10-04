@@ -93,7 +93,7 @@ func TestCheckPackageVersionTrack_AuxSHA_StoredInPending(t *testing.T) {
 	}
 	createTestEbuild(t, overlayDir, pkg, currentVer)
 
-	result, err := checker.CheckPackage(pkg, true)
+	result, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

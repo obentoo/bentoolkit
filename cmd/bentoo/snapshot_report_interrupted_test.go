@@ -237,7 +237,7 @@ target = "user@host:/backup"
 	// cancelled when it continues. No sleep decides the outcome.
 	var once sync.Once
 	var observed bool
-	snapshotRunner = &snapshot.MockRunner{
+	c.deps.snapshotRunner = &snapshot.MockRunner{
 		RunFunc: func(ctx context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			once.Do(func() {
 				proc, err := os.FindProcess(os.Getpid())

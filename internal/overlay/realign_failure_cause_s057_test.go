@@ -91,7 +91,7 @@ func TestRealignNoVerdictIsCountedPerCause(t *testing.T) {
 	}
 	prov := &localRootedFakeProvider{root: gentooRoot, versions: versions}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
-	report, err := CompareWithProvider(pkgs, prov, opts)
+	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v", err)
 	}
@@ -120,7 +120,7 @@ func TestRealignNoVerdictIsCountedPerCause(t *testing.T) {
 		},
 		notes: map[string]RealignNote{"s057/silent": {Justified: true, Why: "   "}},
 	}
-	AnnotateRealignVerdicts(report, rev, prov, opts)
+	AnnotateRealignVerdicts(t.Context(), report, rev, prov, opts)
 
 	if report.RealignAsked != 6 || report.RealignNoVerdict != 5 {
 		t.Fatalf("the fixture is wrong: RealignAsked %d, RealignNoVerdict %d; want 6 and 5 (five unanswered, one judged)",

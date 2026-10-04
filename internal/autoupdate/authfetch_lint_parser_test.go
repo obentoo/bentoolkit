@@ -158,12 +158,12 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 
 	// The sweep: the refused package fails its manifest step, the next one runs.
 	sw := newSweeper(overlay, withSweeperConfigs(cfg.Packages))
-	sweepErr := sw.prefetchAuthDistfile("app-misc/leak", "1.0", t.TempDir())
+	sweepErr := sw.prefetchAuthDistfile(t.Context(), "app-misc/leak", "1.0", t.TempDir())
 	check("sweep", sweepErr)
 	if sweepErr != nil && !errors.Is(sweepErr, ErrManifestFailed) {
 		t.Errorf("sweep: %v is not ErrManifestFailed", sweepErr)
 	}
-	if err := sw.prefetchAuthDistfile("app-misc/fine", "1.0", t.TempDir()); err != nil {
+	if err := sw.prefetchAuthDistfile(t.Context(), "app-misc/fine", "1.0", t.TempDir()); err != nil {
 		t.Errorf("sweep: the next, valid package failed after the refused one: %v", err)
 	}
 

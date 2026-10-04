@@ -29,6 +29,13 @@ import (
 // Run and so is invisible to their readers (overlay_compare.go, which reads
 // verbose, and overlay_autoupdate.go, which reads quiet).
 func newRootCmd() *cobra.Command {
+	return newRootCmdWith(defaultDeps())
+}
+
+// newRootCmdWith builds the same tree as newRootCmd with d as its dependencies.
+// d reaches every constructor that owns a seam, so a test that substitutes a
+// field of its own d changes this tree alone (story 060, R6.1, R6.5).
+func newRootCmdWith(d *deps) *cobra.Command {
 	var (
 		verboseFlag bool
 		quietFlag   bool
@@ -112,7 +119,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
 	root.PersistentFlags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress non-error output")
 	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
-	root.PersistentFlags().StringVar(&overlayFlag, "overlay", "", "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so")
+	root.PersistentFlags().String(overlayFlagName, "", "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so")
 
 	// These three bind straight to their package variables, unlike --verbose,
 	// --quiet and --no-color above. Two reasons: pflag writes the default
@@ -137,16 +144,17 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(newDistfileCmd())
 	root.AddCommand(newNoticeCmd())
-	root.AddCommand(newOverlayCmd())
-	root.AddCommand(newSnapshotCmd())
+	root.AddCommand(newOverlayCmd(d))
+	root.AddCommand(newSnapshotCmd(d))
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newCompletionCmd())
 
 	return root
 }
 
-// newOverlayCmd builds `overlay` and registers every command under it.
-func newOverlayCmd() *cobra.Command {
+// newOverlayCmd builds `overlay` and registers every command under it, handing
+// d to each child that reaches a seam.
+func newOverlayCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "overlay",
 		Short: "Manage the Bentoo overlay repository",
@@ -156,20 +164,20 @@ func newOverlayCmd() *cobra.Command {
 	cmd.AddCommand(
 		newAddCmd(),
 		newAnalyzeCmd(),
-		newAutoupdateCmd(),
+		newAutoupdateCmd(d),
 		newCommitCmd(),
-		newCompareCmd(),
+		newCompareCmd(d),
 		newDiffCmd(),
 		newInitCmd(),
 		newLogCmd(),
-		newManifestCmd(),
-		newPruneCmd(),
+		newManifestCmd(d),
+		newPruneCmd(d),
 		newPullCmd(),
 		newPushCmd(),
 		newRenameCmd(),
-		newStagedCmd(),
+		newStagedCmd(d),
 		newStatusCmd(),
-		newValidateCmd(),
+		newValidateCmd(d),
 	)
 
 	return cmd
@@ -201,7 +209,9 @@ func subCommand(parent *cobra.Command, name string) *cobra.Command {
 // package's existing tests in the same change. Nothing in production reads them
 // — production goes through rootCmd — and a later story can delete this block
 // once the tests it serves are moved onto the harness newRootCmd now makes
-// possible. `overlay prune` has no variable here because nothing references one.
+// possible. `overlay prune` has no variable here because nothing references one,
+// and `overlay autoupdate` has none since story 060 moved its tests onto
+// testAutoupdateCmd.
 //
 // Go orders these by dependency, not by line: rootCmd is built first, then the
 // four below it, then their children.
@@ -212,19 +222,18 @@ var (
 	versionCmd    = subCommand(rootCmd, "version")
 	completionCmd = subCommand(rootCmd, "completion")
 
-	addCmd        = subCommand(overlayCmd, "add")
-	analyzeCmd    = subCommand(overlayCmd, "analyze")
-	autoupdateCmd = subCommand(overlayCmd, "autoupdate")
-	commitCmd     = subCommand(overlayCmd, "commit")
-	compareCmd    = subCommand(overlayCmd, "compare")
-	diffCmd       = subCommand(overlayCmd, "diff")
-	initCmd       = subCommand(overlayCmd, "init")
-	logCmd        = subCommand(overlayCmd, "log")
-	manifestCmd   = subCommand(overlayCmd, "manifest")
-	pullCmd       = subCommand(overlayCmd, "pull")
-	pushCmd       = subCommand(overlayCmd, "push")
-	renameCmd     = subCommand(overlayCmd, "rename")
-	statusCmd     = subCommand(overlayCmd, "status")
+	addCmd      = subCommand(overlayCmd, "add")
+	analyzeCmd  = subCommand(overlayCmd, "analyze")
+	commitCmd   = subCommand(overlayCmd, "commit")
+	compareCmd  = subCommand(overlayCmd, "compare")
+	diffCmd     = subCommand(overlayCmd, "diff")
+	initCmd     = subCommand(overlayCmd, "init")
+	logCmd      = subCommand(overlayCmd, "log")
+	manifestCmd = subCommand(overlayCmd, "manifest")
+	pullCmd     = subCommand(overlayCmd, "pull")
+	pushCmd     = subCommand(overlayCmd, "push")
+	renameCmd   = subCommand(overlayCmd, "rename")
+	statusCmd   = subCommand(overlayCmd, "status")
 
 	distfileFetchCmd = subCommand(distfileCmd, "fetch")
 

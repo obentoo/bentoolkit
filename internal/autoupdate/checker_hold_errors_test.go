@@ -66,7 +66,7 @@ func blockCacheWrite(t *testing.T, configDir string) {
 // fixture reached the block it names.
 func checkForHold(t *testing.T, c *Checker, pkg string, force, wantFromCache bool) *CheckResult {
 	t.Helper()
-	result, _ := c.CheckPackage(pkg, force)
+	result, _ := c.CheckPackage(t.Context(), pkg, force)
 	if result == nil {
 		t.Fatal("CheckPackage returned no result")
 	}
@@ -163,7 +163,7 @@ func TestCheckPackage_HeldBumpWrapsErrAuxUnresolved(t *testing.T) {
 		overlayDir, configDir := t.TempDir(), t.TempDir()
 		createTestEbuild(t, overlayDir, holdPkg, holdCurrent)
 		c := heldErrChecker(t, overlayDir, configDir, holdPkg, holdAuxConfig(srv.srv.URL))
-		result, err := c.CheckPackage(holdPkg, true)
+		result, err := c.CheckPackage(t.Context(), holdPkg, true)
 		if err == nil || result == nil || !errors.Is(result.Error, ErrFetchFailed) {
 			t.Fatalf("fixture: want a failed fetch, got result=%+v err=%v", result, err)
 		}

@@ -51,7 +51,7 @@ path = "version"
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res := checker.CheckAll(false)
+	res := checker.CheckAll(t.Context(), false)
 
 	// In-memory config reconciled to enabled.
 	if pc := checker.Config().Packages[pkg]; !pc.IsEnabled() {
@@ -102,7 +102,7 @@ path = "version"
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res := checker.CheckAll(false)
+	res := checker.CheckAll(t.Context(), false)
 
 	if hasItem(res, pkg) {
 		t.Errorf("held package %s must not be processed", pkg)
@@ -145,7 +145,7 @@ path = "version"
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res := checker.CheckAll(false)
+	res := checker.CheckAll(t.Context(), false)
 
 	if hasItem(res, pkg) {
 		t.Errorf("absent orphan %s must stay out of the batch", pkg)

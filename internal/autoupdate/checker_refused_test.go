@@ -38,7 +38,7 @@ func TestCheckPackageSkipsHeldAndDisabled(t *testing.T) {
 			createTestEbuild(t, overlayDir, pkg, "1.0.0")
 			c := holdChecker(t, overlayDir, configDir, pkg, tc.cfg(srv.URL))
 
-			result, err := c.CheckPackage(pkg, true)
+			result, err := c.CheckPackage(t.Context(), pkg, true)
 			if err != nil {
 				t.Fatalf("CheckPackage: %v", err)
 			}
@@ -89,7 +89,7 @@ func TestApplyRefusesDisabledPackage(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil {
 		t.Errorf("Apply: %v", err)
 	}

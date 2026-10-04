@@ -12,7 +12,7 @@ import (
 var snapshotRunDryRun bool
 
 // newSnapshotRunCmd builds `snapshot run`.
-func newSnapshotRunCmd() *cobra.Command {
+func newSnapshotRunCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "run",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -20,14 +20,16 @@ func newSnapshotRunCmd() *cobra.Command {
 		Long: `Execute the engine → prune → ship pipeline for every configured subvolume,
 persist a RunResult for 'status', and exit non-zero if any stage failed. This is
 the command driven by the systemd timer.`,
-		RunE: runSnapshotRun,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotRun(cmd, args, d)
+		},
 	}
 	cmd.Flags().BoolVar(&snapshotRunDryRun, "dry-run", false,
 		"print the pipeline that would run, without executing it")
 	return cmd
 }
 
-func runSnapshotRun(cmd *cobra.Command, _ []string) error {
+func runSnapshotRun(cmd *cobra.Command, _ []string, d *deps) error {
 	cfg, path, err := loadSnapshotConfig()
 	if err != nil {
 		logger.Error("snapshot run: %v", err)
@@ -69,12 +71,12 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) error {
 
 	// Ensure the engine's native config exists (btrbk.conf or the snapper
 	// configs) so the run is self-contained even if 'apply' was never executed.
-	if err := snapshot.WriteEngineConfig(ctx, cfg, path, snapshotRunner); err != nil {
+	if err := snapshot.WriteEngineConfig(ctx, cfg, path, d.snapshotRunner); err != nil {
 		logger.Error("snapshot run: render engine config: %v", err)
 		return exitWith(1)
 	}
 
-	mgr, err := snapshot.NewManager(*cfg, path, snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
 	if err != nil {
 		logger.Error("snapshot run: %v", err)
 		return exitWith(1)
@@ -111,7 +113,7 @@ func runSnapshotRun(cmd *cobra.Command, _ []string) error {
 	// cancellation as a sentence in the same string field it uses for ordinary
 	// failures, so the context — which cannot be mistaken for anything else — is
 	// what the report is told.
-	presentSnapshotReport(snapshotReportConfig(),
+	presentSnapshotReport(d, snapshotReportConfig(),
 		buildSnapshotReport(&result, cfg.Engine.Subvolumes, ctx.Err() != nil))
 
 	if runErr != nil {

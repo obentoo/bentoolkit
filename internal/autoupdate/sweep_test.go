@@ -29,11 +29,12 @@ import (
 // this block, and the one S027 sub-task 1.1 recorded as its evidence — silently
 // skipped a TestNewSweeper… name while appearing to pass. Keep the prefix.
 //
-// A nil ctx does not fail loudly at construction: it panics inside
-// context.WithTimeout on the first Manifest run, which is a production crash for
-// any sweeper built outside NewApplier. So the test builds the sweeper the way a
-// forgetful caller would — supplying only the exec seam, and a nil option for
-// good measure — and then drives the path that would panic.
+// A nil execCommand does not fail loudly at construction: it panics on the
+// first Manifest run, which is a production crash for any sweeper built outside
+// NewApplier. So the test builds the sweeper the way a forgetful caller would —
+// supplying only the exec seam, and a nil option for good measure — and then
+// drives the path that would panic. The context is no longer a field: every
+// method that spawns a command takes it from its caller.
 func TestSweeperNewNormalisesNilFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
@@ -41,17 +42,17 @@ func TestSweeperNewNormalisesNilFields(t *testing.T) {
 	createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
 
 	var runs atomic.Int64
-	// No context, no reporter, and a nil option: everything newSweeper must
-	// normalise. If it does not, runManifest panics on context.WithTimeout(nil).
+	// No reporter and a nil option: everything newSweeper must normalise. If it
+	// does not, the Manifest step panics on a nil reporter.
 	s := newSweeper(overlayDir, nil, withSweeperExec(countingManifestSeam(&runs)))
 
-	if s.ctx == nil || s.execCommand == nil || s.reporter == nil {
-		t.Fatalf("newSweeper left a nil field: ctx=%v execCommand=%v reporter=%v",
-			s.ctx == nil, s.execCommand == nil, s.reporter == nil)
+	if s.execCommand == nil || s.reporter == nil {
+		t.Fatalf("newSweeper left a nil field: execCommand=%v reporter=%v",
+			s.execCommand == nil, s.reporter == nil)
 	}
 
 	plan := sweepPlan{Keep: map[string]string{}, Remove: []string{"1.0.0"}}
-	if _, err := s.execute(pkg, plan, "1.0.0"); err != nil {
+	if _, err := s.execute(t.Context(), pkg, plan, "1.0.0"); err != nil {
 		t.Fatalf("execute on a normalised sweeper: %v", err)
 	}
 	if got := runs.Load(); got != 1 {
@@ -78,7 +79,7 @@ func TestSweeperExecuteRemovesAscendingAndRunsManifestOnce(t *testing.T) {
 		Keep:   map[string]string{"2.0.0": pkg},
 		Remove: []string{"1.0.0", "1.5.0"},
 	}
-	got, err := s.execute(pkg, plan, "2.0.0")
+	got, err := s.execute(t.Context(), pkg, plan, "2.0.0")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestSweeperExecuteSkipsMissingFileWithoutCounting(t *testing.T) {
 
 	// 1.0.0 is condemned but is not on disk.
 	plan := sweepPlan{Keep: map[string]string{"2.0.0": pkg}, Remove: []string{"1.0.0"}}
-	got, err := s.execute(pkg, plan, "2.0.0")
+	got, err := s.execute(t.Context(), pkg, plan, "2.0.0")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestSweeperExecuteSkipsManifestWhenNothingRemoved(t *testing.T) {
 	var runs atomic.Int64
 	s := newSweeper(overlayDir, withSweeperExec(countingManifestSeam(&runs)))
 
-	if _, err := s.execute(pkg, sweepPlan{Keep: map[string]string{"2.0.0": pkg}}, "2.0.0"); err != nil {
+	if _, err := s.execute(t.Context(), pkg, sweepPlan{Keep: map[string]string{"2.0.0": pkg}}, "2.0.0"); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if runs.Load() != 0 {
@@ -174,7 +175,7 @@ func TestSweeperExecuteReturnsRemovedPrefixOnFailure(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
 
 	plan := sweepPlan{Keep: map[string]string{"2.0.0": pkg}, Remove: []string{"1.0.0", "1.5.0"}}
-	got, err := s.execute(pkg, plan, "2.0.0")
+	got, err := s.execute(t.Context(), pkg, plan, "2.0.0")
 	if err == nil {
 		t.Fatal("execute: expected an error from the locked directory")
 	}
@@ -211,12 +212,11 @@ func TestSweeperExecuteHonoursCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := newSweeper(overlayDir,
-		withSweeperContext(ctx),
 		withSweeperExec(mockExecCommandSuccess),
 	)
 
 	plan := sweepPlan{Keep: map[string]string{"2.0.0": pkg}, Remove: []string{"1.0.0"}}
-	if _, err := s.execute(pkg, plan, "2.0.0"); err == nil {
+	if _, err := s.execute(ctx, pkg, plan, "2.0.0"); err == nil {
 		t.Error("execute with a cancelled context: expected the manifest step to fail")
 	}
 }
@@ -805,7 +805,7 @@ func TestSweepManifestVersionIsAKeptVersion(t *testing.T) {
 		var runs atomic.Int64
 		s := newSweeper(overlayDir, withSweeperExec(countingManifestSeam(&runs)))
 
-		res := sweepOneDir(s, SweepDirPlan{Atom: pkg, Remove: []string{"1.0.0"}, Keep: map[string]string{}})
+		res := sweepOneDir(t.Context(), s, SweepDirPlan{Atom: pkg, Remove: []string{"1.0.0"}, Keep: map[string]string{}})
 		if res.Err == nil {
 			t.Fatal("a plan that keeps nothing was executed")
 		}

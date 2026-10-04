@@ -27,7 +27,7 @@ func TestLocate_ExplicitWinsOverConfigured(t *testing.T) {
 	configured := t.TempDir()
 	call := stubPortageqOutput(t, t.TempDir())
 
-	got, found := Locate(explicit, configured)
+	got, found := Locate(t.Context(), explicit, configured)
 
 	if !found {
 		t.Fatalf("Locate(%q, %q): got found=false, want true", explicit, configured)
@@ -46,7 +46,7 @@ func TestLocate_ConfiguredWinsOverHost(t *testing.T) {
 	configured := t.TempDir()
 	call := stubPortageqOutput(t, t.TempDir())
 
-	got, found := Locate("", configured)
+	got, found := Locate(t.Context(), "", configured)
 
 	if !found {
 		t.Fatalf("Locate(\"\", %q): got found=false, want true", configured)
@@ -64,7 +64,7 @@ func TestLocate_FallsBackToHost(t *testing.T) {
 	host := t.TempDir()
 	stubPortageqOutput(t, host)
 
-	got, found := Locate("", "")
+	got, found := Locate(t.Context(), "", "")
 
 	if !found {
 		t.Fatalf("Locate(\"\", \"\"): got found=false, want true")
@@ -80,7 +80,7 @@ func TestLocate_MissingDirectoryIsNotFound(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-distdir")
 	stubPortageqUnavailable(t)
 
-	_, found := Locate(missing, "")
+	_, found := Locate(t.Context(), missing, "")
 
 	if found {
 		t.Errorf("Locate(%q): got found=true, want false for a directory that does not exist", missing)
@@ -94,7 +94,7 @@ func TestLocate_MissingDirectoryIsNotFound(t *testing.T) {
 func TestLocate_NoCandidateIsNotFound(t *testing.T) {
 	stubPortageqUnavailable(t)
 
-	got, found := Locate("", "")
+	got, found := Locate(t.Context(), "", "")
 
 	if found {
 		t.Errorf("Locate(\"\", \"\"): got found=true (%q), want false when no rung answers", got)
@@ -114,7 +114,7 @@ func TestLocate_UnwritableDirectoryIsStillFound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	got, found := Locate(dir, "")
+	got, found := Locate(t.Context(), dir, "")
 
 	if !found {
 		t.Fatalf("Locate(%q): got found=false; an unwritable but readable distdir is usable", dir)

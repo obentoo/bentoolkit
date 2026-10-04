@@ -920,8 +920,8 @@ func compareOneLine(s string) string {
 // `func (r CompareRun) Sections` emits them and both paths read the same
 // sentences from the same field. This function is back to the three steps
 // `func presentManifestReport` takes, which is what S047-R1.2 asked of it.
-func presentCompareReport(cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg)
+func presentCompareReport(d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
 	content := report.SectionOptions{ShowAll: autoupdateAll}
 	if err := renderCheckReportIn(mode, run.Sections(content), render.Options{}); err != nil {
 		logger.Warn("the report could not be rendered: %v", err)

@@ -116,10 +116,6 @@ type ManifestOptions struct {
 	// reach this at all. A --dry-run in particular emits no lifecycle event of
 	// any kind, which is why a summary composer never has to answer for one.
 	Summary func(ManifestResult) string
-	// Ctx, when non-nil, is propagated to the pkgdev sub-processes via
-	// exec.CommandContext so callers can cancel an in-flight run (e.g.
-	// on SIGINT). Nil is treated as context.Background().
-	Ctx context.Context
 }
 
 // summarize is the sentence the run's batch closes on: the caller's, or the
@@ -352,7 +348,7 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 // The returned Updates preserve the order of the input targets, even when
 // workers complete out of order.
 //
-// # Cancelling opts.Ctx stops the run and does not fail what it never reached
+// # Cancelling ctx stops the run and does not fail what it never reached
 //
 // Workers stop PULLING from the queue once the context is done, and a target
 // that was still running when the cancellation arrived contributes no row
@@ -373,7 +369,7 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 // the value that holds all three keeps them travelling together; a caller
 // wrapping the slice by hand could only wrap what it was given, and would have
 // to guess the rest from lengths it no longer knows.
-func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *ManifestOptions) ManifestResult {
+func RegenerateManifests(ctx context.Context, overlayPath string, targets []ManifestUpdate, opts *ManifestOptions) ManifestResult {
 	if opts == nil {
 		opts = &ManifestOptions{}
 	}
@@ -450,11 +446,6 @@ func RegenerateManifests(overlayPath string, targets []ManifestUpdate, opts *Man
 	}
 	if jobs > len(updates) {
 		jobs = len(updates)
-	}
-
-	ctx := opts.Ctx
-	if ctx == nil {
-		ctx = context.Background() // SAFE: opts.Ctx is an additive field; nil means "no cancellation requested"
 	}
 
 	// Normalize the reporter once so workers can emit unconditionally. A nil
@@ -713,7 +704,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 
 // RegenerateManifestsForScope is a convenience wrapper that resolves a scope
 // and runs RegenerateManifests.
-func RegenerateManifestsForScope(cfg *config.Config, scope ManifestScope, opts *ManifestOptions) (*ManifestResult, error) {
+func RegenerateManifestsForScope(ctx context.Context, cfg *config.Config, scope ManifestScope, opts *ManifestOptions) (*ManifestResult, error) {
 	if cfg == nil {
 		return nil, ErrOverlayPathNotSet
 	}
@@ -729,7 +720,7 @@ func RegenerateManifestsForScope(cfg *config.Config, scope ManifestScope, opts *
 	// interrupted run left is on the value the run returned, and rebuilding the
 	// struct from one field would drop it silently — the caller would receive a
 	// short list with nothing to say why.
-	result := RegenerateManifests(overlayPath, targets, opts)
+	result := RegenerateManifests(ctx, overlayPath, targets, opts)
 	return &result, nil
 }
 

@@ -230,11 +230,12 @@ func onARenderOptionsLine(t *testing.T, file string, line int) bool {
 // It also pins the other half of R9.6: an export that could not be written
 // changes no count. The tally rendered to the terminal is the fixture's own.
 func TestUnwritableExportStillRendersToTheTerminal(t *testing.T) {
+	auOpts := testAutoupdateOptions()
 	originalExport := autoupdateExport
 	autoupdateExport = filepath.Join(t.TempDir(), "no-such-directory", "report.md")
 	t.Cleanup(func() { autoupdateExport = originalExport })
 
-	out := captureStdout(t, func() { presentCheckReport(exportedFixtureRun(), false) })
+	out := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(exportedFixtureRun(), false) })
 
 	if !strings.Contains(out, "app-misc/jq") {
 		t.Errorf("the export failed and the terminal received no report (R9.5):\n%s", out)

@@ -88,7 +88,7 @@ func TestApplyRegeneratesMetadataCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := applier.Apply(pkg, false)
+	result, err := applier.Apply(t.Context(), pkg, false)
 	if err != nil || !result.Success {
 		t.Fatalf("Apply: %v (success=%v)", err, result.Success)
 	}
@@ -139,7 +139,7 @@ func TestRegenMetadataCacheWithRealEgencache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.regenMetadataCache("test-cat/test-pkg", "2.0.0"); err != nil {
+	if err := a.regenMetadataCache(t.Context(), "test-cat/test-pkg", "2.0.0"); err != nil {
 		t.Fatalf("regenMetadataCache: %v", err)
 	}
 	entries, _ := os.ReadDir(cache)
@@ -164,7 +164,7 @@ func TestRegenMetadataCacheRefusesASilentEgencacheFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = a.regenMetadataCache("test-cat/test-pkg", "2.0.0")
+	err = a.regenMetadataCache(t.Context(), "test-cat/test-pkg", "2.0.0")
 	if err == nil || !strings.Contains(err.Error(), "Error processing") {
 		t.Errorf("err = %v, want a failure carrying egencache's output", err)
 	}

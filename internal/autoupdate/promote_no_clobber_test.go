@@ -46,7 +46,7 @@ func TestPromoteRefusesEbuildCreatedAfterCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	undo, err := a.promote(cand, pkg, "1.1.0")
+	undo, err := a.promote(t.Context(), cand, pkg, "1.1.0")
 	if !errors.Is(err, ErrEbuildExists) {
 		if undo != nil {
 			undo(errors.New("test cleanup"))

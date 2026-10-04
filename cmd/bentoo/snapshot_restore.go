@@ -31,16 +31,10 @@ var (
 	// snapshotRestoreDryRun is --dry-run: print the destructive actions without
 	// performing them — no subprocess and no confirm prompt (008 R2.3).
 	snapshotRestoreDryRun bool
-	// snapshotRestoreConfirm is the confirm seam. nil (the default) makes
-	// snapshot.Restore fall back to its own stdin y/N prompt (defaultConfirmFunc);
-	// tests override it to inject a yes/no decision without terminal I/O. A plain
-	// func(string) bool is assignable to RestoreOptions.Confirm (the unexported
-	// confirmFunc type) from package main.
-	snapshotRestoreConfirm func(string) bool
 )
 
 // newSnapshotRestoreCmd builds `snapshot restore`.
-func newSnapshotRestoreCmd() *cobra.Command {
+func newSnapshotRestoreCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "restore <id>",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -57,7 +51,9 @@ know which subvolume it reads from. With exactly one subvolume configured that i
 implied and --subvolume is unnecessary; with several, name one — the restore
 refuses to guess rather than read another subvolume's backups.`,
 		Args: cobra.ExactArgs(1),
-		RunE: runSnapshotRestore,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshotRestore(cmd, args, d)
+		},
 	}
 	cmd.Flags().StringVar(&snapshotRestoreTarget, "target", "",
 		"path to restore the snapshot into (required)")
@@ -74,7 +70,7 @@ refuses to guess rather than read another subvolume's backups.`,
 	return cmd
 }
 
-func runSnapshotRestore(cmd *cobra.Command, args []string) error {
+func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 	id := args[0]
 
 	// Restore is destructive: load AND validate the config (drivers + deps) so an
@@ -128,8 +124,8 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	opts := snapshot.RestoreOptions{
 		Driver:  ship.Type,
 		Yes:     snapshotRestoreYes,
-		Run:     snapshotRunner,
-		Confirm: snapshotRestoreConfirm,
+		Run:     d.snapshotRunner,
+		Confirm: d.snapshotRestoreConfirm,
 
 		// archive driver: replay the object chain for id from the rclone remote.
 		// SCOPE NOTE — the multi-link full→target chain reconstruction is future

@@ -33,13 +33,12 @@ func TestManifestFailureKeepsCause(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(exit7),
-		WithApplierContext(context.Background()),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	_, applyErr := applier.Apply(pkg, false)
+	_, applyErr := applier.Apply(t.Context(), pkg, false)
 	if !errors.Is(applyErr, ErrManifestFailed) {
 		t.Errorf("Apply error = %v, want errors.Is(ErrManifestFailed)", applyErr)
 	}
@@ -58,9 +57,9 @@ func TestManifestFailureKeepsCause(t *testing.T) {
 func TestRecordingRunnerKeepsCause(t *testing.T) {
 	// runAttached is the Applier's injected process runner; a plain
 	// CombinedOutput stands in for the attached-terminal one.
-	a := &Applier{ctx: context.Background(), runAttached: func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() }}
+	a := &Applier{runAttached: func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() }}
 	var attempt buildAttempt
-	run := a.recordingRunner(&attempt)
+	run := a.recordingRunner(t.Context(), &attempt)
 
 	_, runErr := run(exec.Command("sh", "-c", "exit 5"))
 	if runErr == nil {
@@ -116,14 +115,13 @@ func TestCompileFailureKeepsCause(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(execFn),
-		WithApplierContext(context.Background()),
 		WithConfirmFunc(func(string) bool { return true }),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	_, applyErr := applier.Apply(pkg, true)
+	_, applyErr := applier.Apply(t.Context(), pkg, true)
 	if !sawCompile {
 		t.Fatalf("Apply never ran a command whose argv contains \"compile\" (err = %v)", applyErr)
 	}
