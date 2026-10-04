@@ -3,6 +3,8 @@ package autoupdate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,6 +291,10 @@ type Checker struct {
 	// pre-story path byte for byte. NewChecker builds one in the struct literal
 	// below, so deduplication is on by default.
 	bodies *bodyCache
+
+	// hostSlots caps the requests in flight to one host (DefaultPerHostConcurrency
+	// unless WithPerHostConcurrency says otherwise). Nil means no cap.
+	hostSlots *hostSlots
 }
 
 // CheckerOption is a functional option for configuring Checker
@@ -470,6 +476,15 @@ func WithCacheTTL(d time.Duration) CheckerOption {
 	}
 }
 
+// WithPerHostConcurrency caps the requests in flight to one host at n; n < 1
+// removes the cap.
+func WithPerHostConcurrency(n int) CheckerOption {
+	return func(c *Checker) error {
+		c.hostSlots = newHostSlots(n)
+		return nil
+	}
+}
+
 // WithFetchCache turns per-run deduplication of upstream response bodies on or
 // off. It is ON by default (S024-R7.2) — NewChecker builds a cache in its struct
 // literal — so the only reason to pass this option at all is to turn it OFF.
@@ -523,7 +538,8 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		// simply sets the field back to nil — instead of a flag threaded through
 		// the fetch path. fetchContent then has one branch on one field, and the
 		// off state is the pre-story code verbatim.
-		bodies: newDefaultBodyCache(),
+		bodies:    newDefaultBodyCache(),
+		hostSlots: newHostSlots(DefaultPerHostConcurrency),
 	}
 
 	// Apply options first to allow overriding configDir
@@ -1956,6 +1972,26 @@ func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, er
 		return "", err
 	}
 
+	if c.bodies == nil {
+		return c.evaluateLive(ctx, cfg, body)
+	}
+	// Two records running the same script on the same page — libreoffice and
+	// libreoffice-l10n track one release listing — get one browser and one
+	// navigation, through the run's body cache that HTTP reads already share.
+	// The key cannot collide with an HTTP body's: it carries a prefix no URL has.
+	// The lookup precedes the rate-limit wait for the reason fetchContent's does.
+	digest := sha256.Sum256([]byte(body))
+	key := "script" + keySeparator + hex.EncodeToString(digest[:]) + keySeparator + bodyKey(cfg.URL, cfg.Headers)
+	out, err := c.bodies.do(ctx, key, func() ([]byte, error) {
+		v, err := c.evaluateLive(ctx, cfg, body)
+		return []byte(v), err
+	})
+	return string(out), err
+}
+
+// evaluateLive renders cfg.URL in a headless browser and evaluates body there,
+// after the host's rate-limit token and connection slot.
+func (c *Checker) evaluateLive(ctx context.Context, cfg *PackageConfig, body string) (string, error) {
 	// Gate on the per-host rate limiter (same policy as fetchContent), waiting on
 	// the parent context so the wait is signal-cancellable and not charged to the
 	// per-operation timeout. Fail open on an unparseable URL.
@@ -1968,6 +2004,11 @@ func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, er
 		}
 		return "", fmt.Errorf("rate limiter wait failed: %w", werr)
 	}
+	release, err := c.hostSlots.acquire(ctx, cfg.URL)
+	if err != nil {
+		return "", fmt.Errorf("waiting for a connection slot to %s: %w", hostForError(cfg.URL), err)
+	}
+	defer release()
 
 	// Honour a per-package timeout for the script/browser path too, falling back
 	// to the global budget when unset.
@@ -2116,6 +2157,15 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 		// limiter's burst): surface it rather than issuing a doomed request.
 		return nil, fmt.Errorf("rate limiter wait failed: %w", waitErr)
 	}
+
+	// Then a slot among the host's in-flight requests, on the parent context for
+	// the same reason as the token: time queued behind a slow host's other
+	// requests is not this request's round-trip. Held until the body is read.
+	release, err := c.hostSlots.acquire(ctx, rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for a connection slot to %s: %w", hostForError(rawURL), err)
+	}
+	defer release()
 
 	// The per-operation timeout bounds only the HTTP round-trip; its deadline
 	// starts now, after the rate-limit token has been acquired. opTimeout is the
