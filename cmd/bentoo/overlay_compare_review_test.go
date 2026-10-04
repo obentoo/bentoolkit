@@ -56,7 +56,7 @@ func stubClaudeAsker(t *testing.T, build func() (claudeAsker, error)) func() int
 	t.Helper()
 	attempts := 0
 	previous := newClaudeAsker
-	newClaudeAsker = func(context.Context, time.Duration) (claudeAsker, error) {
+	newClaudeAsker = func(time.Duration) (claudeAsker, error) {
 		attempts++
 		return build()
 	}
@@ -83,7 +83,7 @@ type fakeAsker struct {
 	calls []askCall
 }
 
-func (f *fakeAsker) AskJSON(instruction string, content []byte, schema string) (string, error) {
+func (f *fakeAsker) AskJSON(_ context.Context, instruction string, content []byte, schema string) (string, error) {
 	call := askCall{instruction: instruction, content: append([]byte(nil), content...), schema: schema}
 	f.calls = append(f.calls, call)
 	if f.answer != nil {
@@ -100,7 +100,7 @@ var _ claudeAsker = (*fakeAsker)(nil)
 func reviewerOver(t *testing.T, asker claudeAsker) overlay.DivergenceReviewer {
 	t.Helper()
 	stubClaudeAsker(t, func() (claudeAsker, error) { return asker, nil })
-	reviewer, err := newDivergenceReviewer(context.Background(), cmdReviewBudget)
+	reviewer, err := newDivergenceReviewer(cmdReviewBudget)
 	if err != nil {
 		t.Fatalf("newDivergenceReviewer returned %v, want nil", err)
 	}
@@ -194,7 +194,7 @@ func annotateFixture(t *testing.T) (*overlay.CompareReport, provider.Provider, o
 		Divergence:    map[string]overlay.Divergence{"kde-plasma/spectacle": {}},
 	}
 
-	report, err := overlay.CompareWithProvider([]overlay.PackageInfo{
+	report, err := overlay.CompareWithProvider(t.Context(), []overlay.PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 	}, prov, opts)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		warnings := captureCompareReviewWarnings(t)
 		stubClaudeAsker(t, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
 
-		reviewer, err := newDivergenceReviewer(context.Background(), cmdReviewBudget)
+		reviewer, err := newDivergenceReviewer(cmdReviewBudget)
 		if err != nil {
 			t.Fatalf("newDivergenceReviewer returned %v, want nil: an absent CLI is a machine without the reviewer, not a failed run (R5.5)", err)
 		}
@@ -231,7 +231,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 	t.Run("the nil it returns is a nil INTERFACE, not a boxed nil pointer", func(t *testing.T) {
 		stubClaudeAsker(t, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
 
-		reviewer, _ := newDivergenceReviewer(context.Background(), cmdReviewBudget)
+		reviewer, _ := newDivergenceReviewer(cmdReviewBudget)
 		// `reviewer != nil` above is already this assertion; reflect states it
 		// again in the terms that make the failure legible. A boxed
 		// (*claudeDivergenceReviewer)(nil) is a NON-nil interface with a nil
@@ -244,7 +244,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		// The same claim stated where it costs a panic to be wrong: the whole
 		// annotate pass, run with what the constructor returned.
 		report, prov, opts := annotateFixture(t)
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 		if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 			t.Errorf("a run with no reviewer annotated %+v, want the zero note", got)
 		}
@@ -255,11 +255,11 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		broken := errors.New("the secrets file is unreadable")
 		attempts := stubClaudeAsker(t, func() (claudeAsker, error) { return nil, broken })
 
-		if reviewer, err := newDivergenceReviewer(context.Background(), cmdReviewBudget); reviewer != nil || !errors.Is(err, broken) {
+		if reviewer, err := newDivergenceReviewer(cmdReviewBudget); reviewer != nil || !errors.Is(err, broken) {
 			t.Fatalf("newDivergenceReviewer returned (%#v, %v), want (nil, the construction error)", reviewer, err)
 		}
 
-		reviewer := compareDivergenceReviewer(context.Background(), false, cmdReviewBudget)
+		reviewer := compareDivergenceReviewer(false, cmdReviewBudget)
 		if reviewer != nil {
 			t.Fatalf("compareDivergenceReviewer returned %#v after a failed construction, want nil", reviewer)
 		}
@@ -282,7 +282,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 			return nil, errors.New("unreachable")
 		})
 
-		reviewer := compareDivergenceReviewer(context.Background(), true, cmdReviewBudget)
+		reviewer := compareDivergenceReviewer(true, cmdReviewBudget)
 		if reviewer != nil {
 			t.Fatalf("--no-review returned %#v, want nil", reviewer)
 		}
@@ -298,7 +298,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		warnings := captureCompareReviewWarnings(t)
 		attempts := stubClaudeAsker(t, func() (claudeAsker, error) { return &fakeAsker{reply: `{"origin":"upstream","summary":"s"}`}, nil })
 
-		reviewer := compareDivergenceReviewer(context.Background(), false, cmdReviewBudget)
+		reviewer := compareDivergenceReviewer(false, cmdReviewBudget)
 		if reviewer == nil {
 			t.Fatal("compareDivergenceReviewer returned nil over a constructible CLI")
 		}
@@ -555,7 +555,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		report, prov, opts := annotateFixture(t)
 		reviewer := reviewerOver(t, &fakeAsker{reply: "sorry, I could not tell"})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 			t.Errorf("a malformed reply annotated %+v, want the zero note", got)
@@ -574,7 +574,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 			report, prov, opts := annotateFixture(t)
 			reviewer := reviewerOver(t, &fakeAsker{reply: tc.reply})
 
-			overlay.AnnotateReviews(report, reviewer, prov, opts)
+			overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 			if got := report.Results[0].Review; got != (overlay.ReviewNote{}) {
 				t.Errorf("%s was attached as %+v, want the zero note", tc.name, got)
@@ -590,7 +590,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		report, prov, opts := annotateFixture(t)
 		reviewer := reviewerOver(t, &fakeAsker{reply: forged})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		// The adapter hands the reply back VERBATIM. Flattening belongs to the
 		// renderer (oneLine, compare.go), which is where every note passes —
@@ -648,7 +648,7 @@ func TestReviewAnnotationEndToEnd(t *testing.T) {
 		}
 		reviewer := reviewerOver(t, &fakeAsker{reply: string(encoded)})
 
-		overlay.AnnotateReviews(report, reviewer, prov, opts)
+		overlay.AnnotateReviews(t.Context(), report, reviewer, prov, opts)
 
 		if got := report.Results[0].Review; got != want {
 			t.Errorf("the finding carries %+v, want %+v", got, want)

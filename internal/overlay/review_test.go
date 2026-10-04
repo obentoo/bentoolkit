@@ -361,7 +361,7 @@ func TestOverlayImportFenceDetectsAViolation(t *testing.T) {
 // (R5.5), which is already complete without the commentary. A signature with no
 // error value is how that is held: there is nothing for a caller to drop, and an
 // edit that added one would stop compiling here.
-var _ func(*CompareReport, DivergenceReviewer, provider.Provider, CompareOptions) = AnnotateReviews
+var _ func(context.Context, *CompareReport, DivergenceReviewer, provider.Provider, CompareOptions) = AnnotateReviews
 
 // annotateReviewer is the reviewer the AnnotateReviews cases drive.
 //
@@ -501,7 +501,7 @@ func reviewFixtureIn(t *testing.T, cacheDir string) (*CompareReport, provider.Pr
 		},
 	}
 
-	report, err := CompareWithProvider([]PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 		{Category: "kde-plasma", Package: "kwin", LatestVersion: "6.7.4"},
 		{Category: "app-editors", Package: "zed", LatestVersion: "1.0"},
@@ -656,7 +656,7 @@ func TestAnnotateReviews(t *testing.T) {
 			},
 		}
 
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		// ORDER, not membership. The pass runs after CompareWithProvider returns
 		// rather than inside its ten goroutines, so the sequence is the report's
@@ -689,7 +689,7 @@ func TestAnnotateReviews(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
 
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		want := map[string][2]string{
 			"kde-plasma/kwin":      {reviewKwinOurs, reviewKwinTheirs},
@@ -725,7 +725,7 @@ func TestAnnotateReviews(t *testing.T) {
 		report, prov, opts := reviewFixtureIn(t, cacheDir)
 		before := cloneReport(report)
 
-		AnnotateReviews(report, nil, prov, opts)
+		AnnotateReviews(t.Context(), report, nil, prov, opts)
 
 		if !reflect.DeepEqual(report, before) {
 			t.Errorf("a nil reviewer changed the report.\n got %+v\nwant %+v", report, before)
@@ -760,7 +760,7 @@ func TestAnnotateReviews(t *testing.T) {
 		reference := withoutReviews(report)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("claude: exit status 1")}
 
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		// R5.5: the report the operator asked for is already complete without the
 		// commentary, so a failed review leaves everything but the commentary
@@ -819,7 +819,7 @@ func TestAnnotateReviews(t *testing.T) {
 				reference := withoutReviews(report) // normalised like the value it is compared against; see the erroring-reviewer case above
 				rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: c.note, err: c.err}
 
-				AnnotateReviews(report, rev, prov, opts)
+				AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 				if !reflect.DeepEqual(withoutReviews(report), reference) {
 					t.Errorf("the report changed beyond its commentary fields.\n got %+v\nwant %+v", withoutReviews(report), reference)
@@ -837,7 +837,7 @@ func TestAnnotateReviews(t *testing.T) {
 				// for as long as neither ebuild changed. A second pass must ask again.
 				second, prov2, opts2 := reviewFixtureIn(t, cacheDir)
 				again := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: c.note, err: c.err}
-				AnnotateReviews(second, again, prov2, opts2)
+				AnnotateReviews(t.Context(), second, again, prov2, opts2)
 				if len(again.calls) != len(reviewedAtoms) {
 					t.Errorf("the second run asked %d times, want %d; a failed review was cached and the question is now permanently suppressed",
 						len(again.calls), len(reviewedAtoms))
@@ -854,7 +854,7 @@ func TestAnnotateReviews(t *testing.T) {
 		first := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(req ReviewRequest) (ReviewNote, error) {
 			return noteFor(req.Category + "/" + req.Package), nil
 		}}
-		AnnotateReviews(report, first, prov, opts)
+		AnnotateReviews(t.Context(), report, first, prov, opts)
 		if len(first.calls) != len(reviewedAtoms) {
 			t.Fatalf("the first run asked %d times, want %d", len(first.calls), len(reviewedAtoms))
 		}
@@ -863,7 +863,7 @@ func TestAnnotateReviews(t *testing.T) {
 		// question. It must be answered from the cache and reach no reviewer.
 		second, prov2, opts2 := reviewFixtureIn(t, cacheDir)
 		silent := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("a cached run must not ask")}
-		AnnotateReviews(second, silent, prov2, opts2)
+		AnnotateReviews(t.Context(), second, silent, prov2, opts2)
 
 		if len(silent.calls) != 0 {
 			t.Errorf("the second run submitted %v; a note cached on the two files' content answers it", silent.atoms())
@@ -904,7 +904,7 @@ func TestAnnotateReviews(t *testing.T) {
 			OverlayPath:   overlayRoot,
 			Divergence:    map[string]Divergence{"dev-libs/alpha": {}, "dev-libs/beta": {}},
 		}
-		report, err := CompareWithProvider([]PackageInfo{
+		report, err := CompareWithProvider(t.Context(), []PackageInfo{
 			{Category: "dev-libs", Package: "alpha", LatestVersion: "1.0"},
 			{Category: "dev-libs", Package: "beta", LatestVersion: "1.0"},
 		}, prov, opts)
@@ -913,7 +913,7 @@ func TestAnnotateReviews(t *testing.T) {
 		}
 
 		rev := &annotateReviewer{t: t, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		if len(rev.calls) != 1 {
 			t.Errorf("the pass asked %d times for two identical differences, want 1", len(rev.calls))
@@ -940,7 +940,7 @@ func TestAnnotateReviews(t *testing.T) {
 		writeVerifyEbuild(t, opts.OverlayPath, "kde-plasma", "spectacle", "6.7.4", edited)
 
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		for _, req := range rev.calls {
 			if req.Package != "spectacle" {
@@ -970,7 +970,7 @@ func TestAnnotateReviews(t *testing.T) {
 		}
 
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		if atoms := rev.atoms(); !reflect.DeepEqual(atoms, []string{"kde-plasma/kwin"}) {
 			t.Errorf("the pass submitted %v, want only kde-plasma/kwin; a package whose files cannot be read has no difference to submit", atoms)
@@ -1004,16 +1004,16 @@ func TestAnnotateReviews(t *testing.T) {
 
 	t.Run("the caller's context reaches the reviewer", func(t *testing.T) {
 		// A review is a network round trip behind a CLI, so a cancelled compare must
-		// abort it rather than hold the run open. The spine is CompareOptions.Ctx —
+		// abort it rather than hold the run open. The spine is the ctx argument —
 		// the same one the comparison itself carries — and a value planted on it is
 		// how the test sees that spine arrive rather than a fresh Background.
 		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		type ctxKey struct{}
-		opts.Ctx = context.WithValue(context.Background(), ctxKey{}, "the caller's")
+		callerCtx := context.WithValue(context.Background(), ctxKey{}, "the caller's")
 
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(callerCtx, report, rev, prov, opts)
 
 		if len(rev.seenCtx) != len(reviewedAtoms) {
 			t.Fatalf("the pass made %d calls, want %d", len(rev.seenCtx), len(reviewedAtoms))
@@ -1049,10 +1049,9 @@ func TestAnnotateReviews(t *testing.T) {
 		report, prov, opts := reviewFixture(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		opts.Ctx = ctx
 
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(ctx, report, rev, prov, opts)
 
 		if len(rev.calls) != 0 {
 			t.Errorf("a cancelled run still submitted %v", rev.atoms())
@@ -1087,8 +1086,8 @@ func TestAnnotateReviews(t *testing.T) {
 			Summary:     "this package must be kept",
 			Declaration: "patched = true",
 		}}
-		AnnotateReviews(reviewed, rev, prov, opts)
-		AnnotateReviews(unreviewed, nil, prov, opts)
+		AnnotateReviews(t.Context(), reviewed, rev, prov, opts)
+		AnnotateReviews(t.Context(), unreviewed, nil, prov, opts)
 
 		// BOTH sides are stripped. A run with no reviewer keeps whatever Reading
 		// the comparison itself recorded — a refused pair reads NotComparable
@@ -1126,7 +1125,7 @@ func TestAnnotateReviews(t *testing.T) {
 		report.Results = nil
 
 		rev := &annotateReviewer{t: t, err: errors.New("nothing should be asked")}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		if len(rev.calls) != 0 {
 			t.Errorf("the pass submitted %v from a report with no findings", rev.atoms())
@@ -1154,7 +1153,7 @@ func TestAnnotateReviews(t *testing.T) {
 		t.Cleanup(func() { reviewCacheDirFor = previous })
 
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		if len(rev.calls) != len(reviewedAtoms) {
 			t.Errorf("the pass asked %d times, want %d; an uncached run still reviews", len(rev.calls), len(reviewedAtoms))
@@ -1277,7 +1276,7 @@ func TestReviewCommentary(t *testing.T) {
 			Summary:     "ours",
 			Declaration: "patched = true\npatched_reason = \"apply me\"",
 		}}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 		EstablishFindings(report)
 
 		if after := treeSnapshot(t, opts.OverlayPath); !reflect.DeepEqual(after, before) {
@@ -1307,7 +1306,7 @@ func TestReviewCommentary(t *testing.T) {
 				Declaration: "patched = true",
 			}, nil
 		}}
-		AnnotateReviews(report, rev, prov, opts)
+		AnnotateReviews(t.Context(), report, rev, prov, opts)
 
 		// Story 047, sub-task 5.5 (S047-R8.2): the same claim, asked of the
 		// findings. It is stricter than the old substring sweep in one way that
@@ -1412,12 +1411,12 @@ func TestReviewChangesNothing(t *testing.T) {
 		// beneath it recommends removal.
 		return noteFor(req.Category + "/" + req.Package), nil
 	}}
-	AnnotateReviews(reviewedReport, rev, prov, opts)
+	AnnotateReviews(t.Context(), reviewedReport, rev, prov, opts)
 
 	unreviewedReport, nilProv, nilOpts := reviewFixture(t)
 	// nil IS `--no-review` (R5.6) and "no `claude` on PATH" (R5.5): one no-op
 	// path, called here exactly as runCompare calls it.
-	AnnotateReviews(unreviewedReport, nil, nilProv, nilOpts)
+	AnnotateReviews(t.Context(), unreviewedReport, nil, nilProv, nilOpts)
 
 	// Story 047, sub-task 5.5 (S047-R8.2). The two reports are compared as what
 	// they ESTABLISHED, not as what FormatReport printed — 4.2 deletes it, and

@@ -87,7 +87,7 @@ func TestClaudeClient_EndpointOverride(t *testing.T) {
 		Transport: &mockTransport{server: server},
 	})
 
-	_, _ = client.ExtractVersion([]byte("content"), "")
+	_, _ = client.ExtractVersion(t.Context(), []byte("content"), "")
 	if requestPath == "" {
 		t.Error("Expected a request to be made to the server")
 	}
@@ -259,7 +259,7 @@ func TestExtractVersionClaudeSuccess(t *testing.T) {
 	})
 
 	content := []byte(`{"version": "11.81.1", "notes": [{"version": "11.81.1"}]}`)
-	version, err := client.ExtractVersion(content, "Extract the version number")
+	version, err := client.ExtractVersion(t.Context(), content, "Extract the version number")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestExtractVersionClaudeAPIError(t *testing.T) {
 		Transport: &mockTransport{server: server},
 	})
 
-	_, err = client.ExtractVersion([]byte("test content"), "Extract version")
+	_, err = client.ExtractVersion(t.Context(), []byte("test content"), "Extract version")
 	if err == nil {
 		t.Error("Expected error for API error response")
 	}
@@ -355,7 +355,7 @@ func TestExtractVersionClaudeEmptyResponse(t *testing.T) {
 		Transport: &mockTransport{server: server},
 	})
 
-	_, err = client.ExtractVersion([]byte("test content"), "Extract version")
+	_, err = client.ExtractVersion(t.Context(), []byte("test content"), "Extract version")
 	if !errors.Is(err, ErrLLMEmptyResponse) {
 		t.Errorf("Expected ErrLLMEmptyResponse, got: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestExtractVersionClaudeNetworkError(t *testing.T) {
 		Transport: &failingTransport{},
 	})
 
-	_, err = client.ExtractVersion([]byte("test content"), "Extract version")
+	_, err = client.ExtractVersion(t.Context(), []byte("test content"), "Extract version")
 	if err == nil {
 		t.Error("Expected error for network failure")
 	}
@@ -569,7 +569,7 @@ func TestExtractVersionRequestFormat(t *testing.T) {
 		Transport: &mockTransport{server: server},
 	})
 
-	client.ExtractVersion([]byte("test content"), "Extract version")
+	client.ExtractVersion(t.Context(), []byte("test content"), "Extract version")
 
 	// Verify request format
 	if capturedRequest.Model != "claude-3-haiku-20240307" {
@@ -619,7 +619,7 @@ func TestExtractVersionWithVersionPrefix(t *testing.T) {
 		Transport: &mockTransport{server: server},
 	})
 
-	version, err := client.ExtractVersion([]byte("test"), "")
+	version, err := client.ExtractVersion(t.Context(), []byte("test"), "")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestClaudeClient_WithCustomMaxBody(t *testing.T) {
 	}
 	client.SetHTTPClient(&http.Client{Transport: &mockTransport{server: server}})
 
-	_, err = client.ExtractVersion([]byte("content"), "")
+	_, err = client.ExtractVersion(t.Context(), []byte("content"), "")
 	if err == nil {
 		t.Fatal("expected an error for an oversized response body, got nil")
 	}
@@ -1180,7 +1180,7 @@ func TestModelConfiguration(t *testing.T) {
 				Transport: &mockTransport{server: server},
 			})
 
-			_, _ = client.ExtractVersion([]byte("test content"), "")
+			_, _ = client.ExtractVersion(t.Context(), []byte("test content"), "")
 
 			return capturedModel == modelName
 		},
@@ -1238,7 +1238,7 @@ func TestModelConfiguration(t *testing.T) {
 				return false
 			}
 
-			_, _ = client.ExtractVersion([]byte("test content"), "")
+			_, _ = client.ExtractVersion(t.Context(), []byte("test content"), "")
 
 			return capturedModel == modelName
 		},
@@ -1284,7 +1284,7 @@ func TestModelConfiguration(t *testing.T) {
 
 			client.SetBaseURL(server.URL)
 
-			_, _ = client.ExtractVersion([]byte("test content"), "")
+			_, _ = client.ExtractVersion(t.Context(), []byte("test content"), "")
 
 			return capturedModel == modelName
 		},

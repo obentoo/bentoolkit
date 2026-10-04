@@ -34,6 +34,7 @@ func TestRunFailuresCarryTheirOutcome(t *testing.T) {
 
 	cases := []struct {
 		name     string
+		ctx      context.Context // the call's context; nil means t.Context()
 		opts     []ClaudeCodeOption
 		want     string
 		wantText string // byte-exact where an existing test already pins it
@@ -44,7 +45,8 @@ func TestRunFailuresCarryTheirOutcome(t *testing.T) {
 			opts: []ClaudeCodeOption{WithClaudeCodeExecCommand(blockingSeam()), WithClaudeCodeTimeout(time.Nanosecond)},
 			want: "timed out", contains: "budget elapsed"},
 		{name: "a cancelled parent is stopped, not timed out",
-			opts: []ClaudeCodeOption{WithClaudeCodeExecCommand(blockingSeam()), WithClaudeCodeContext(cancelled), WithClaudeCodeTimeout(30 * time.Second)},
+			ctx:  cancelled,
+			opts: []ClaudeCodeOption{WithClaudeCodeExecCommand(blockingSeam()), WithClaudeCodeTimeout(30 * time.Second)},
 			want: "stopped", contains: "was stopped before it answered"},
 		{name: "its own budget elapsed",
 			opts: []ClaudeCodeOption{WithClaudeCodeExecCommand(blockingSeam()), WithClaudeCodeTimeout(250 * time.Millisecond)},
@@ -62,7 +64,11 @@ func TestRunFailuresCarryTheirOutcome(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestClient(t, LLMConfig{}, tc.opts...)
-			_, err := c.run("instr", []byte("content"), "")
+			ctx := tc.ctx
+			if ctx == nil {
+				ctx = t.Context()
+			}
+			_, err := c.run(ctx, "instr", []byte("content"), "")
 			if err == nil {
 				t.Fatal("the invocation returned no error")
 			}

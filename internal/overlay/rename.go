@@ -2,6 +2,7 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -320,7 +321,7 @@ func FormatRenamePreview(result *RenameResult, isGlobalSearch bool) string {
 // Rename performs bulk ebuild renaming.
 // It validates the pattern, finds matching ebuilds, detects version files,
 // and performs the rename operation (or simulates it in dry-run mode).
-func Rename(cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameResult, error) {
+func Rename(ctx context.Context, cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameResult, error) {
 	result := &RenameResult{}
 
 	// Get overlay path from config
@@ -401,7 +402,7 @@ func Rename(cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameR
 
 	// Update Manifests unless --no-manifest is set
 	if !opts.NoManifest && len(result.Renamed) > 0 {
-		result.ManifestUpdates = updateManifests(result.Renamed, overlayPath)
+		result.ManifestUpdates = updateManifests(ctx, result.Renamed, overlayPath)
 	}
 
 	return result, nil
@@ -410,7 +411,7 @@ func Rename(cfg *config.Config, spec *RenameSpec, opts *RenameOptions) (*RenameR
 // updateManifests updates Manifest files for renamed packages using the
 // shared regeneration helper. Duplicate (category, package) pairs are
 // collapsed so each package is processed once.
-func updateManifests(renamed []RenameMatch, overlayPath string) []ManifestUpdate {
+func updateManifests(ctx context.Context, renamed []RenameMatch, overlayPath string) []ManifestUpdate {
 	processed := make(map[string]bool)
 	var targets []ManifestUpdate
 
@@ -435,10 +436,11 @@ func updateManifests(renamed []RenameMatch, overlayPath string) []ManifestUpdate
 	//
 	// Only the per-target rows are taken. The run's own two facts — whether it
 	// was cut short, and how many targets it never evaluated — are dropped here
-	// because this path passes no Ctx, so the run cannot be cancelled and both
-	// are always the zero value. A rename that grows a cancellable context is
-	// the change that must start carrying them.
-	return RegenerateManifests(overlayPath, targets, &ManifestOptions{Keep: true}).Updates
+	// because `overlay rename` is not annotated cancellable: a signal ends the
+	// process instead of cancelling ctx, so the run is never cut short and both
+	// are always the zero value. Annotating rename cancellable is the change
+	// that must start carrying them.
+	return RegenerateManifests(ctx, overlayPath, targets, &ManifestOptions{Keep: true}).Updates
 }
 
 // FormatRenameResult formats the rename result for display.

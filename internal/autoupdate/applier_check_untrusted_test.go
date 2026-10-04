@@ -103,7 +103,7 @@ func TestValidateRefusesMalformedUpstreamValues(t *testing.T) {
 			}
 			overlayBefore := snapshotTree(t, f.overlayDir)
 
-			result := a.Validate(f.pkg, validate.DepthNone)
+			result := a.Validate(t.Context(), f.pkg, validate.DepthNone)
 
 			if calls := rec.recorded(); len(calls) != 0 {
 				t.Errorf("Validate ran %d command(s) for a malformed value, want none: %q", len(calls), calls)
@@ -169,7 +169,7 @@ func TestValidateAcceptsWellFormedUpstreamValues(t *testing.T) {
 		CommitHash: checkUntrustedGoodHash,
 	})
 
-	result := a.Validate(f.pkg, validate.DepthNone)
+	result := a.Validate(t.Context(), f.pkg, validate.DepthNone)
 
 	if len(rec.recorded()) == 0 {
 		t.Errorf("Validate ran no command for well-formed values; it was refused before the manifest step: %+v", result)

@@ -352,13 +352,12 @@ func realignShippedPayload(t *testing.T, fx realignFixture) (report.CompareRun, 
 	opts := overlay.CompareOptions{
 		IncludeSynced: true, // what runCompare sets when --only-outdated is off
 		Concurrency:   compareConcurrency,
-		Ctx:           context.Background(),
 		OverlayPath:   fx.overlayPath,
 		// IncludeNotInRemote is deliberately ABSENT. D1: switching it on
 		// unconditionally would give the Bentoo-only packages rows they do not
 		// have today.
 	}
-	rep, err := overlay.CompareWithProvider(scan.Packages, prov, opts)
+	rep, err := overlay.CompareWithProvider(t.Context(), scan.Packages, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -366,7 +365,7 @@ func realignShippedPayload(t *testing.T, fx realignFixture) (report.CompareRun, 
 	// The reviewer is nil because PATH holds no `claude`, which is also the
 	// state the captured run is in.
 	overlay.AnnotateAuthorship(rep, prov, opts)
-	overlay.AnnotateReviews(rep, nil, prov, opts)
+	overlay.AnnotateReviews(t.Context(), rep, nil, prov, opts)
 
 	return compareComparePayload(t, buildCompareReport(rep, "gentoo", nil)), rep
 }

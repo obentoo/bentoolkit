@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -81,14 +80,14 @@ type reviewBudgetCase struct {
 // run warns and prints its report, and no model, CLI or PATH is involved.
 //
 // NOTE for sub-task 3.3: the assignment below is the new seam signature — the
-// budget arrives as a time.Duration beside the context. If the signature lands
-// in another shape, this line moves with the other five consumers, and what it
-// asserts is unchanged.
+// budget arrives as a time.Duration, and since story 059 no context beside it.
+// If the signature lands in another shape, this line moves with the other five
+// consumers, and what it asserts is unchanged.
 func captureReviewBudget(t *testing.T) func() []time.Duration {
 	t.Helper()
 	var handed []time.Duration
 	previous := newClaudeAsker
-	newClaudeAsker = func(_ context.Context, budget time.Duration) (claudeAsker, error) {
+	newClaudeAsker = func(budget time.Duration) (claudeAsker, error) {
 		handed = append(handed, budget)
 		return &fakeAsker{err: errors.New("this asker exists to be counted, never to answer")}, nil
 	}

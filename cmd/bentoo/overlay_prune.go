@@ -324,7 +324,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		logger.Warn("registry key %q is not a category/package atom; it is not listed against any package below", key)
 	}
 
-	report, err := overlay.CompareWithProvider(packages, prov, overlay.CompareOptions{ //nolint:contextcheck // ctx is injected via CompareOptions.Ctx below
+	report, err := overlay.CompareWithProvider(ctx, packages, prov, overlay.CompareOptions{
 		// Every compared package reaches the plan, so the three buckets account for
 		// the whole scan: a package the report does not mention would read as one
 		// that does not exist. There is no progress callback because there is
@@ -333,7 +333,6 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		IncludeSynced:      true,
 		IncludeNotInRemote: true,
 		Concurrency:        overlay.DefaultCompareConcurrency,
-		Ctx:                ctx,
 		Divergence:         divergence,
 		OverlayPath:        overlayPath,
 	})

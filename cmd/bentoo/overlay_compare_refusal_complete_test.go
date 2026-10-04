@@ -57,7 +57,7 @@ func refusalFixture(t *testing.T, locals map[string]string, upstream map[string]
 	prov := &reviewDirProvider{root: upstreamRoot, versions: versions}
 	opts := overlay.CompareOptions{IncludeSynced: true, OverlayPath: overlayRoot, Divergence: divergence}
 
-	report, err := overlay.CompareWithProvider(packages, prov, opts)
+	report, err := overlay.CompareWithProvider(t.Context(), packages, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -75,7 +75,7 @@ func TestCompareRefusedPairIsNotEvaluatedWithoutAReviewer(t *testing.T) {
 	// The nil reviewer IS the case. runCompare calls this pass with whatever
 	// compareDivergenceReviewer returned, and it returns nil both for
 	// `--no-review` and for a machine with no `claude` on PATH.
-	overlay.AnnotateReviews(report, nil, prov, opts)
+	overlay.AnnotateReviews(t.Context(), report, nil, prov, opts)
 
 	run := buildCompareReport(report, "gentoo", nil)
 	if run.NotEvaluated < 1 {
@@ -101,7 +101,7 @@ func TestCompareNoReviewOverACleanRunStaysComplete(t *testing.T) {
 		map[string]string{"dev-libs/libixion": "1.0"},
 		map[string]string{"dev-libs/libixion": "1.0"})
 
-	overlay.AnnotateReviews(report, nil, prov, opts)
+	overlay.AnnotateReviews(t.Context(), report, nil, prov, opts)
 
 	run := buildCompareReport(report, "gentoo", nil)
 	if run.NotEvaluated != 0 {

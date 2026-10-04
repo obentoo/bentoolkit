@@ -52,7 +52,7 @@ func TestCheckPackageAppliesSuffix(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res, err := checker.CheckPackage(pkg, true)
+	res, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestCheckPackageSuffixFiresOnPromotion(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res, err := checker.CheckPackage(pkg, true)
+	res, err := checker.CheckPackage(t.Context(), pkg, true)
 	if err != nil {
 		t.Fatalf("CheckPackage: %v", err)
 	}

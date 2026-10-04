@@ -124,7 +124,7 @@ func TestManifestRunCountsOkAndFailed(t *testing.T) {
 			overlay, targets := manifestTargets(t, tc.atoms...)
 			stubPkgdev(t, tc.outcomes...)
 
-			result := RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Keep: true})
+			result := RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Keep: true})
 
 			if got := result.Ok(); got != tc.wantOk {
 				t.Errorf("Ok() = %d, want %d", got, tc.wantOk)
@@ -151,7 +151,7 @@ func TestFailedTargetCarriesItsWrappedErrorAndOutput(t *testing.T) {
 	overlay, targets := manifestTargets(t, "c/a", "c/b")
 	stubPkgdev(t, true, false)
 
-	updates := RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Keep: true}).Updates
+	updates := RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Keep: true}).Updates
 	if len(updates) != 2 {
 		t.Fatalf("got %d updates, want 2", len(updates))
 	}
@@ -191,7 +191,7 @@ func TestManifestRunStillReportsToTheReporter(t *testing.T) {
 	stubPkgdev(t, true, false)
 
 	rec := &recManifestReporter{}
-	RegenerateManifests(overlay, targets, &ManifestOptions{Jobs: 1, Keep: true, Reporter: rec})
+	RegenerateManifests(t.Context(), overlay, targets, &ManifestOptions{Jobs: 1, Keep: true, Reporter: rec})
 
 	events := rec.snap()
 	for _, want := range []string{"batchstart:2", "start:c/a", "done:c/a:true", "start:c/b", "done:c/b:false", "batchdone"} {

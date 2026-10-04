@@ -70,7 +70,7 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
-			resp, err := client.Get(server.URL)
+			resp, err := client.Get(t.Context(), server.URL)
 			if err != nil {
 				t.Logf("Request failed: %v", err)
 				return false
@@ -118,7 +118,7 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetDelayFunc(func(d time.Duration) {})
 
 			// Make request (should fail after max retries)
-			_, err := client.Get(server.URL) //nolint:bodyclose // test client, response body intentionally not closed
+			_, err := client.Get(t.Context(), server.URL) //nolint:bodyclose // test client, response body intentionally not closed
 			if err == nil {
 				t.Log("Expected error after max retries")
 				return false
@@ -163,7 +163,7 @@ func TestRetryExponentialBackoff(t *testing.T) {
 			client.SetJitterFunc(func(d time.Duration) time.Duration { return d })
 
 			// Make request
-			resp, err := client.Get(server.URL)
+			resp, err := client.Get(t.Context(), server.URL)
 			if err != nil {
 				t.Logf("Request failed: %v", err)
 				return false
@@ -255,7 +255,7 @@ func TestRetryableHTTPClientSuccessOnFirstAttempt(t *testing.T) {
 	client.SetHTTPClient(server.Client())
 	client.SetDelayFunc(func(d time.Duration) {})
 
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestRetryableHTTPClientSuccessOnRetry(t *testing.T) {
 	client.SetHTTPClient(server.Client())
 	client.SetDelayFunc(func(d time.Duration) {})
 
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestRetryableHTTPClientMaxRetriesExceeded(t *testing.T) {
 	client.SetHTTPClient(server.Client())
 	client.SetDelayFunc(func(d time.Duration) {})
 
-	_, err := client.Get(server.URL) //nolint:bodyclose // test client, response body intentionally not closed
+	_, err := client.Get(t.Context(), server.URL) //nolint:bodyclose // test client, response body intentionally not closed
 	if err == nil {
 		t.Fatal("Expected error after max retries")
 	}
@@ -366,7 +366,7 @@ func TestRetryableHTTPClientNoRetryOn4xx(t *testing.T) {
 			client.SetHTTPClient(server.Client())
 			client.SetDelayFunc(func(d time.Duration) {})
 
-			resp, err := client.Get(server.URL)
+			resp, err := client.Get(t.Context(), server.URL)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -404,7 +404,7 @@ func TestRetryableHTTPClientRetryOn5xx(t *testing.T) {
 			client.SetHTTPClient(server.Client())
 			client.SetDelayFunc(func(d time.Duration) {})
 
-			_, err := client.Get(server.URL) //nolint:bodyclose // test client, response body intentionally not closed
+			_, err := client.Get(t.Context(), server.URL) //nolint:bodyclose // test client, response body intentionally not closed
 			if err == nil {
 				t.Fatal("Expected error after max retries")
 			}
@@ -436,7 +436,7 @@ func TestRetryableHTTPClientRetryOn429(t *testing.T) {
 	client.SetHTTPClient(server.Client())
 	client.SetDelayFunc(func(d time.Duration) {})
 
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestRecordedDelays(t *testing.T) {
 		// No-op, but delays are still recorded
 	})
 
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1154,7 +1154,7 @@ func TestHTTPClient_CircuitOpens(t *testing.T) {
 
 	// Trigger 5 failures to open the circuit
 	for i := 0; i < DefaultBreakerMaxFailures; i++ {
-		resp, _ := client.Get(server.URL)
+		resp, _ := client.Get(t.Context(), server.URL)
 		if resp != nil {
 			resp.Body.Close()
 		}
@@ -1162,7 +1162,7 @@ func TestHTTPClient_CircuitOpens(t *testing.T) {
 
 	// 6th request: circuit should be open now, server should NOT be hit
 	hitsBefore := atomic.LoadInt32(&serverHits)
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if resp != nil {
 		resp.Body.Close()
 	}
@@ -1228,7 +1228,7 @@ func TestHTTPClient_CircuitRecovery(t *testing.T) {
 
 		// Open the circuit with 5 failures
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			r, _ := client.Get("http://breaker.test/pkg")
+			r, _ := client.Get(t.Context(), "http://breaker.test/pkg")
 			if r != nil {
 				r.Body.Close()
 			}
@@ -1240,7 +1240,7 @@ func TestHTTPClient_CircuitRecovery(t *testing.T) {
 		time.Sleep(breakerTimeout * 3) // hold: advances the bubble's fake clock past the breaker timeout
 
 		// Probe should succeed and circuit should close
-		resp, err := client.Get("http://breaker.test/pkg")
+		resp, err := client.Get(t.Context(), "http://breaker.test/pkg")
 		if err != nil {
 			t.Errorf("Expected success after circuit recovery, got: %v", err)
 		}
@@ -1259,7 +1259,7 @@ func TestHTTPClient_CircuitProbeFailure(t *testing.T) {
 
 		// Open the circuit
 		for i := 0; i < DefaultBreakerMaxFailures; i++ {
-			resp, _ := client.Get("http://breaker.test/pkg")
+			resp, _ := client.Get(t.Context(), "http://breaker.test/pkg")
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close()
 			}
@@ -1270,7 +1270,7 @@ func TestHTTPClient_CircuitProbeFailure(t *testing.T) {
 		time.Sleep(breakerTimeout * 3) // hold: advances the bubble's fake clock past the breaker timeout
 
 		// Probe will fail (the upstream still returns 500)
-		resp, err := client.Get("http://breaker.test/pkg")
+		resp, err := client.Get(t.Context(), "http://breaker.test/pkg")
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
@@ -1278,7 +1278,7 @@ func TestHTTPClient_CircuitProbeFailure(t *testing.T) {
 		_ = err
 
 		// Next request should indicate circuit is still open or re-opened
-		resp, err = client.Get("http://breaker.test/pkg")
+		resp, err = client.Get(t.Context(), "http://breaker.test/pkg")
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
@@ -1307,7 +1307,7 @@ func TestHTTPClient_CircuitAndRateLimiterIndependent(t *testing.T) {
 	rl := NewRateLimiter(WithMaxDomains(10))
 
 	// Both should work independently: rate limiter doesn't affect circuit breaker
-	resp, err := client.Get(server.URL)
+	resp, err := client.Get(t.Context(), server.URL)
 	if err != nil {
 		t.Errorf("Expected success, got: %v", err)
 	}
@@ -1348,7 +1348,7 @@ func TestHTTPClient_CircuitDisabled(t *testing.T) {
 
 	// Even after many failures, every request should reach the server
 	for i := 0; i < DefaultBreakerMaxFailures+3; i++ {
-		resp, _ := client.Get(server.URL)
+		resp, _ := client.Get(t.Context(), server.URL)
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}

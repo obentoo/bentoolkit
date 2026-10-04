@@ -168,13 +168,21 @@ func (d Dir) Cleanup() {
 // Cleanup stays a no-op, and the caller can name the directory it could not
 // prepare in the diagnostic instead of failing anonymously (R1.4). A non-nil
 // error means the path is for the message only; it is never a directory to use.
-func Resolve(explicit, configured string) (Dir, error) {
+//
+// ctx bounds the host query on the third rung. A done ctx is not an unanswered
+// rung: falling through to DefaultCache would create and probe a directory the
+// host never named, and report an interrupt as ErrDistdirNotWritable. So the
+// cancellation is returned instead, wrapped with %w.
+func Resolve(ctx context.Context, explicit, configured string) (Dir, error) {
 	candidate := explicit
 	if candidate == "" {
 		candidate = configured
 	}
 	if candidate == "" {
-		candidate = hostDistdir()
+		candidate = hostDistdir(ctx)
+		if err := ctx.Err(); err != nil {
+			return Dir{}, fmt.Errorf("resolving the distdir: %w", err)
+		}
 	}
 	if candidate == "" {
 		candidate = DefaultCache
@@ -228,7 +236,9 @@ func Resolve(explicit, configured string) (Dir, error) {
 // found is false when no rung named a candidate, when the candidate does not
 // exist, or when it is not a directory. A Stat error other than not-exist is
 // false too: the caller's question is "can I read here", not "why not".
-func Locate(explicit, configured string) (string, bool) {
+//
+// ctx bounds the host query on the last rung, exactly as it does for Resolve.
+func Locate(ctx context.Context, explicit, configured string) (string, bool) {
 	candidate := explicit
 	if candidate == "" {
 		candidate = configured
@@ -237,7 +247,7 @@ func Locate(explicit, configured string) (string, bool) {
 	// the host is a precedence bug even when it happens to return the right
 	// path, which is why the tests count this call rather than only checking it.
 	if candidate == "" {
-		candidate = hostDistdir()
+		candidate = hostDistdir(ctx)
 	}
 	if candidate == "" {
 		return "", false
@@ -388,8 +398,8 @@ func Probe(dir string) error {
 // working directory.
 //
 // This is a library: the absence is reported by returning "", never logged.
-func hostDistdir() string {
-	return portageqPath("distdir")
+func hostDistdir(ctx context.Context) string {
+	return portageqPath(ctx, "distdir")
 }
 
 // TempRoot returns the directory a THROWAWAY distdir should be created under —
@@ -398,7 +408,7 @@ func hostDistdir() string {
 // "" is not a failure and not a sentinel: it is exactly what os.MkdirTemp takes
 // to mean "use os.TempDir()", so a caller writes
 //
-//	os.MkdirTemp(distfiles.TempRoot(), "…")
+//	os.MkdirTemp(distfiles.TempRoot(ctx), "…")
 //
 // and gets the disk-backed answer where one exists and today's behaviour where
 // it does not.
@@ -418,14 +428,17 @@ func hostDistdir() string {
 // reading the environment is not enough: PORTAGE_TMPDIR is set in make.conf and
 // is NOT exported into an ordinary user process, so os.Getenv returns "" here
 // and would silently land back on the tmpfs. Only portageq can answer.
-func TempRoot() string {
-	return portageqPath("envvar", "PORTAGE_TMPDIR")
+func TempRoot(ctx context.Context) string {
+	return portageqPath(ctx, "envvar", "PORTAGE_TMPDIR")
 }
 
 // portageqPath runs one portageq query that is expected to print a single
 // absolute path, and returns "" for every way that question can go unanswered:
-// portageq absent, a non-zero exit, the timeout expiring, empty output, or
-// output that is not an absolute path.
+// portageq absent, a non-zero exit, the timeout expiring, the caller's ctx
+// being done, empty output, or output that is not an absolute path.
+//
+// The timeout is derived from ctx, so a cancelled caller stops the query at once
+// instead of waiting out portageqTimeout.
 //
 // None of those is an error. "Unanswered" is a legitimate state — a non-portage
 // host has no portageq at all — and its consequence is the caller's next rung,
@@ -435,11 +448,11 @@ func TempRoot() string {
 // working directory.
 //
 // This is a library: the absence is reported by returning "", never logged.
-func portageqPath(arg ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), portageqTimeout)
+func portageqPath(ctx context.Context, arg ...string) string {
+	opCtx, cancel := context.WithTimeout(ctx, portageqTimeout)
 	defer cancel()
 
-	out, err := execCommand(ctx, "portageq", arg...).Output()
+	out, err := execCommand(opCtx, "portageq", arg...).Output()
 	if err != nil {
 		return ""
 	}

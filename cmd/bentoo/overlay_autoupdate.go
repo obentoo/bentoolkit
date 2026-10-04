@@ -428,7 +428,7 @@ func tuiEnabledForApply() bool {
 //
 // TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
 // cancel — cancelling the apply context, which kills the in-flight child
-// (WithApplierContext) and triggers the existing orphan rollback (R5.1/R5.2). The
+// (Apply runs under it) and triggers the existing orphan rollback (R5.1/R5.2). The
 // extra options also route the in-UI y/n confirm (R4.2) and release the terminal
 // for the compile step's sudo/doas prompt while teeing the child's output to a
 // capture buffer the failure path still logs (R4.1). finish closes the batch,
@@ -744,7 +744,6 @@ func resolveHTTPTimeout(cfg *config.Config) time.Duration {
 func runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
-		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		// Per-request HTTP timeout (flag > config > 30s default). The Checker
 		// derives the larger per-operation budget so the retry attempts fit.
@@ -779,7 +778,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
 	// (R5.3) and we avoid a double-warn with the failure line just below.
-	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -819,9 +818,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	if len(args) > 0 {
 		// Check specific package
 		pkg := args[0]
-		// ctx is threaded into the Checker via WithContext above, so every
-		// outbound request observes it; CheckPackage takes no ctx parameter.
-		result, err := checker.CheckPackage(pkg, autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+		result, err := checker.CheckPackage(ctx, pkg, autoupdateForce)
 		if err != nil {
 			// A removed ebuild is not a hard error: auto-disable the orphaned
 			// entry and report it as info so repeated runs stay quiet.
@@ -856,9 +853,8 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	}
 
 	// Check all packages. CheckAll never returns a fatal error: every
-	// per-package failure is captured in the BatchResult. ctx is threaded
-	// into the Checker via WithContext above; CheckAll takes no ctx parameter.
-	result := checker.CheckAll(autoupdateForce) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	// per-package failure is captured in the BatchResult.
+	result := checker.CheckAll(ctx, autoupdateForce)
 
 	// Clear the progress line before rendering results so the counter does not
 	// bleed into the table. Mirrors `overlay compare`'s clear step.
@@ -904,8 +900,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 	// ::gentoo), reusing the checker --check already built. Read-only and
 	// best-effort — it never changes the check's exit code.
 	if autoupdateRevivable {
-		//nolint:contextcheck // ctx is already injected into checker via autoupdate.WithContext above
-		reportRevivableOrphans(checker, cfg)
+		reportRevivableOrphans(ctx, checker, cfg)
 	}
 
 	// S033-R9.1: put every pending update through the gates at its resolved
@@ -1329,7 +1324,7 @@ func confirmRegistryWrite(divs []autoupdate.Divergence, writable int) bool {
 // is read-only and best-effort — a provider-resolution failure warns and returns
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
-func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
+func reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
 		logger.Warn("revivable-orphan scan skipped: %v", err)
@@ -1337,7 +1332,7 @@ func reportRevivableOrphans(checker *autoupdate.Checker, cfg *config.Config) {
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	candidates, ferr := checker.FindRevivableOrphans(prov)
+	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 	if ferr != nil {
 		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
 	}
@@ -1512,9 +1507,9 @@ func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
 // (e.g. the `claude` CLI is absent) is logged as a Warn and --apply proceeds with
 // its original fail-fast manifest behaviour.
 //
-// The fixer needs no context of its own here: the Applier threads its own
-// signal-aware context (WithApplierContext) into FixManifest, so a SIGINT/SIGTERM
-// already cancels an in-flight agent process.
+// The fixer needs no context of its own here: Apply threads the context it is
+// given into FixManifest, so a SIGINT/SIGTERM already cancels an in-flight agent
+// process.
 func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
 	fixer, err := newConfiguredManifestFixer(llmCfg)
 	if err != nil {
@@ -1704,14 +1699,14 @@ func autoupdateStagingRoot() (string, error) {
 	return filepath.Join(dir, stagingDirName), nil
 }
 
-// runApply handles the --apply flag. ctx is threaded into the Applier via
-// WithApplierContext so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
+// runApply handles the --apply flag. ctx is passed to Apply so a SIGINT/SIGTERM
+// cancels the in-flight `pkgdev manifest`
 // or compile child process within ~2 s (R1.1, R1.2). The existing orphan
 // rollback path then removes the half-applied .ebuild (R1.3).
 func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) error {
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
-	// Ctrl-C (which invokes cancel) cancels the in-flight child via
-	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
+	// under it and triggers the existing orphan rollback (R5.1/R5.2).
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1724,7 +1719,6 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	defer finish()
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		applierFixerOption(llmCfg),
@@ -1745,10 +1739,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 	// (the plain backend prints a START line; the TUI shows the task), so the
 	// previous output.Info Printf is intentionally gone.
 
-	//nolint:contextcheck // applyCtx is propagated into Apply's spawned processes
-	// via WithApplierContext (a.ctx) — the deliberate single-source wiring derived
-	// from signal.NotifyContext. Apply takes no ctx param by design.
-	result, err := applier.Apply(pkg, autoupdateCompile)
+	result, err := applier.Apply(applyCtx, pkg, autoupdateCompile)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyResult prints to a clean line.
@@ -1764,9 +1755,9 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 }
 
 // runApplyAll handles `--apply all`: it applies every pending update, reusing a
-// single Applier so the pending list and logs directory are loaded once. ctx is
-// threaded into the Applier via WithApplierContext so a SIGINT/SIGTERM cancels
-// the in-flight `pkgdev manifest` or compile child process (R1.1, R1.2).
+// single Applier so the pending list and logs directory are loaded once. ctx
+// bounds every Apply so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
+// or compile child process (R1.1, R1.2).
 //
 // The package list is snapshotted up front: Apply mutates the underlying
 // pending list (a successful apply deletes its entry), so iterating over the
@@ -1797,8 +1788,8 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	}
 
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
-	// Ctrl-C (which invokes cancel) cancels the in-flight child via
-	// WithApplierContext and triggers the existing orphan rollback (R5.1/R5.2).
+	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
+	// under it and triggers the existing orphan rollback (R5.1/R5.2).
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1809,7 +1800,6 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	defer finish()
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(applyCtx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
@@ -1834,10 +1824,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
-	//nolint:contextcheck // applyCtx reaches each Apply's spawned processes via
-	// WithApplierContext (a.ctx) — Apply takes no ctx param by design, so the
-	// manifest chain is cancelled through a.ctx rather than parameter propagation.
-	results, failures := applyAllPackages(applier, updates, autoupdateCompile, autoupdateConcurrency)
+	results, failures := applyAllPackages(applyCtx, applier, updates, autoupdateCompile, autoupdateConcurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyAllResults prints cleanly.
@@ -1873,7 +1860,14 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 // each Apply's file work is scoped to its own package directory, and workers
 // write results to distinct slice indices — so beyond the atomic failure tally
 // no additional locking is needed.
-func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
+//
+// Cancellation (audit B8): every Apply receives ctx, and an Apply on a done ctx
+// returns at once with a failed result wrapping ctx.Err() before it touches the
+// overlay. So once ctx ends, every package not yet begun still gets its own
+// non-nil result, in input order, and counts as a failure — no package after
+// the cancel is applied, and the loop needs no second check or early break
+// (a break would leave nil results).
+func applyAllPackages(ctx context.Context, applier *autoupdate.Applier, updates []autoupdate.PendingUpdate, compile bool, concurrency int) ([]*autoupdate.ApplyResult, int) {
 	results := make([]*autoupdate.ApplyResult, len(updates))
 
 	// Serial when the compile step will prompt and escalate, and — since story
@@ -1889,7 +1883,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 			// `compile`, not a literal true: this branch is now reached for two
 			// different reasons, and a depth-driven serial run must not acquire the
 			// privileged compile step the operator never asked for.
-			result, err := applier.Apply(u.Package, compile)
+			result, err := applier.Apply(ctx, u.Package, compile)
 			if err != nil {
 				failures++
 			}
@@ -1921,7 +1915,7 @@ func applyAllPackages(applier *autoupdate.Applier, updates []autoupdate.PendingU
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				result, err := applier.Apply(updates[i].Package, false)
+				result, err := applier.Apply(ctx, updates[i].Package, false)
 				results[i] = result
 				if err != nil {
 					atomic.AddInt64(&failures, 1)
@@ -2140,17 +2134,16 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 }
 
 // reviveCheckerOptions builds the Checker option set shared by the revive modes.
-// It mirrors runCheck's option set exactly — config dir, context, concurrency,
+// It mirrors runCheck's option set exactly — config dir, concurrency,
 // type filter, tuned rate limiter, cache TTL, fetch-body sharing, and the same
 // LLM wiring (with the err-first nil guard) — so a revived package's upstream
 // check behaves identically to a normal --check. The GitHub token is not an
 // option: NewChecker resolves it itself from GITHUB_TOKEN/GH_TOKEN via the
 // secrets chain. The progress callback is omitted: the revive paths drive
 // single-package CheckPackage calls, which never fire it.
-func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
+func reviveCheckerOptions(configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
-		autoupdate.WithContext(ctx),
 		autoupdate.WithConcurrency(autoupdateConcurrency),
 		autoupdate.WithTypeFilter(autoupdateOnly),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
@@ -2170,7 +2163,7 @@ func reviveCheckerOptions(ctx context.Context, configDir string, cacheTTL, httpT
 	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
 	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
 	// "unused llm_prompt" Warn when a provider was requested.
-	if p, err := newConfiguredLLMProvider(ctx, llmCfg); err != nil {
+	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
 		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
@@ -2235,7 +2228,7 @@ func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 // (the same option set as --check) and the ::gentoo provider, then prints the
 // candidates FindRevivableOrphans returns as a PACKAGE | GENTOO | UPSTREAM table.
 func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		return exitWith(1)
@@ -2248,10 +2241,9 @@ func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL 
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	// FindRevivableOrphans threads ctx into every upstream/gentoo lookup via the
-	// Checker (WithContext) and the provider. Soft per-package errors are returned
+	// FindRevivableOrphans threads ctx into every upstream and ::gentoo lookup. Soft per-package errors are returned
 	// alongside the candidates, so a partial scan still reports what it found.
-	candidates, err := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	candidates, err := checker.FindRevivableOrphans(ctx, prov)
 	if err != nil {
 		logger.Warn("revive scan completed with soft errors: %v", err)
 	}
@@ -2327,7 +2319,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	// Build the initial Checker (shared option set) to resolve the target list.
-	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(ctx, configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
+	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
 		logger.Error("failed to initialize checker: %v", err)
 		return exitWith(1)
@@ -2337,7 +2329,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	// (every candidate FindRevivableOrphans reports).
 	var targets []string
 	if target == "all" {
-		candidates, ferr := checker.FindRevivableOrphans(prov) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+		candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 		if ferr != nil {
 			logger.Warn("revive scan completed with soft errors: %v", ferr)
 		}
@@ -2367,7 +2359,6 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	}
 
 	reviveOpts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierContext(ctx),
 		autoupdate.WithApplierClean(autoupdateClean),
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
 		autoupdate.WithApplierPendingList(pending),
@@ -2447,11 +2438,11 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 	// It shares the applier's pending list so the entry CheckPackage writes is
 	// visible to Apply below (same in-memory map, same process).
 	checker, err := autoupdate.NewChecker(overlayPath,
-		append(reviveCheckerOptions(ctx, configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
+		append(reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("checker init failed: %v", err)}
 	}
-	result, err := checker.CheckPackage(pkg, true) //nolint:contextcheck // ctx is injected via autoupdate.WithContext
+	result, err := checker.CheckPackage(ctx, pkg, true)
 	if err != nil {
 		return reviveOutcome{pkg: pkg, status: "failed", detail: fmt.Sprintf("check failed: %v", err)}
 	}
@@ -2464,8 +2455,7 @@ func reviveOne(ctx context.Context, pkg, overlayPath, configDir string, cacheTTL
 
 	// Bump to the upstream version using the existing apply flow (honours
 	// --compile and --clean exactly as runApply does).
-	//nolint:contextcheck // ctx is propagated into Apply's spawned processes via WithApplierContext.
-	applyResult, err := applier.Apply(pkg, autoupdateCompile)
+	applyResult, err := applier.Apply(ctx, pkg, autoupdateCompile)
 	if err != nil {
 		detail := err.Error()
 		if applyResult != nil && applyResult.LogPath != "" {

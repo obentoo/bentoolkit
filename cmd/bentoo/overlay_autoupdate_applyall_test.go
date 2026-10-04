@@ -129,7 +129,7 @@ func TestApplyAllPackagesConcurrentSuccess(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		results, failures = applyAllPackages(applier, updates, false, concurrency)
+		results, failures = applyAllPackages(t.Context(), applier, updates, false, concurrency)
 	}()
 	barrier.openOnceArrived(t, "manifest steps", concurrency)
 	waitReturned(t, "applyAllPackages", done)
@@ -178,7 +178,7 @@ func TestApplyAllPackagesCountsFailures(t *testing.T) {
 
 	applier, updates := setupApplyAllTest(t, n, failFactory)
 
-	results, failures := applyAllPackages(applier, updates, false, concurrency)
+	results, failures := applyAllPackages(t.Context(), applier, updates, false, concurrency)
 
 	if failures != n {
 		t.Errorf("failures = %d, want %d", failures, n)

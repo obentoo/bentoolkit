@@ -314,7 +314,7 @@ func realignDeclarationHolds(declared []DeclaredDivergence) bool {
 // the rendering is byte-identical to the one the comparison produced.
 //
 // _Requirements: R4, R4.1, R4.2, R4.3, R4.4, R4.5_
-func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov provider.Provider, opts CompareOptions) {
+func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev RealignReviewer, prov provider.Provider, opts CompareOptions) {
 	if report == nil || rev == nil {
 		return
 	}
@@ -351,10 +351,6 @@ func AnnotateRealignVerdicts(report *CompareReport, rev RealignReviewer, prov pr
 	// compare must abort an in-flight review, while the per-invocation timeout
 	// belongs to the adapter, which knows what it is invoking. A second deadline
 	// here would be a second thing to tune for one round trip.
-	ctx := opts.Ctx
-	if ctx == nil {
-		ctx = context.Background() // SAFE: CompareOptions.Ctx is an additive field; nil means "no cancellation requested", exactly as CompareWithProvider reads it
-	}
 
 	// ONE cache for the run, like AnnotateReviews': the "warn once" guard inside
 	// a reviewCache is scoped to the value, so two would warn twice about the

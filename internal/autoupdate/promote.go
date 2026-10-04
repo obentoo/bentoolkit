@@ -1,6 +1,7 @@
 package autoupdate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -144,12 +145,12 @@ func stagedCandidate(stagedRoot, pkg, version string) (candidatePaths, error) {
 // returns, so that a promotion which did not complete can never leave a pin aiming
 // `--clean` at the only ebuild present (the hazard applier.go's own comment
 // spells out).
-func (a *Applier) promote(cand candidatePaths, pkg, version string) (publishedUndo, error) {
+func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version string) (publishedUndo, error) {
 	// The invariant, at the single function that writes into the published
 	// overlay. Both call sites pass through here — the validating path and R10.1's
 	// reuse path, which reaches a published write without consulting
 	// PromotionDecision at all.
-	if err := a.refuseOnInterrupt(pkg, version); err != nil {
+	if err := a.refuseOnInterrupt(ctx, pkg, version); err != nil {
 		return nil, err
 	}
 

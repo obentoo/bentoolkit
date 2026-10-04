@@ -232,7 +232,7 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 
 	// The stable entry sees 26.2.5.2 as current and 26.2.6.1 as newest in its
 	// line — NOT 26.8.0.1, which is the other entry's business.
-	res, err := checker.CheckPackage(stableKey, true)
+	res, err := checker.CheckPackage(t.Context(), stableKey, true)
 	if err != nil {
 		t.Fatalf("CheckPackage(stable): %v", err)
 	}
@@ -248,7 +248,7 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 	}
 
 	// The testing entry sees the pre-release ebuild and its own line's version.
-	res, err = checker.CheckPackage(testingKey, true)
+	res, err = checker.CheckPackage(t.Context(), testingKey, true)
 	if err != nil {
 		t.Fatalf("CheckPackage(testing): %v", err)
 	}
@@ -292,7 +292,7 @@ func TestFetchUpstreamVersionOutsideSeries(t *testing.T) {
 		t.Fatalf("NewChecker: %v", err)
 	}
 
-	res, err := checker.CheckPackage(key, true)
+	res, err := checker.CheckPackage(t.Context(), key, true)
 	if err == nil && res.Error == nil {
 		t.Fatalf("a version outside the series was accepted: %+v", res)
 	}
@@ -346,7 +346,7 @@ func TestCleanPackageDirLeavesOtherSeries(t *testing.T) {
 		t.Fatalf("resolveCurrentVersion = %q, want %q", current, "26.2.6.1")
 	}
 
-	if _, err := applier.cleanPackageDir(key, "26.2.6.1"); err != nil {
+	if _, err := applier.cleanPackageDir(t.Context(), key, "26.2.6.1"); err != nil {
 		t.Fatalf("cleanPackageDir: %v", err)
 	}
 

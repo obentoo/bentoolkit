@@ -76,7 +76,7 @@ func resolvedPath(t *testing.T, dirs autoupdateDistfileDirs) string {
 	if dirs.Distdir == "" && dirs.ConfiguredDistdir == "" {
 		t.Fatal("refusing to resolve with nothing named: that is the rung that reaches this host's own DISTDIR")
 	}
-	dir, err := distfiles.Resolve(dirs.Distdir, dirs.ConfiguredDistdir)
+	dir, err := distfiles.Resolve(t.Context(), dirs.Distdir, dirs.ConfiguredDistdir)
 	if err != nil {
 		t.Fatalf("resolving distdir(explicit=%q, configured=%q): %v", dirs.Distdir, dirs.ConfiguredDistdir, err)
 	}
