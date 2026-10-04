@@ -108,8 +108,7 @@ func runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
 	if err != nil {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.
-		logger.Error("packages.toml was repaired but no longer lints: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("packages.toml was repaired but no longer lints: %w", err))
 	}
 	return reportUnrepaired(remaining)
 }
@@ -134,8 +133,7 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) error {
 	for _, issue := range remaining {
 		output.Warning.Println("    " + issue.String())
 	}
-	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	return exitWith(1)
+	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
 
 // summarizeUnrepaired is the NOTHING-WAS-WRITTEN report: the findings are the
@@ -154,8 +152,7 @@ func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 	output.Warning.Printf(
 		"  Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.\n",
 		len(remaining))
-	logger.Error("packages.toml: %d issue(s) remain", len(remaining))
-	return exitWith(1)
+	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
 
 // confirmLintRepair is the write gate (R7.3): three gates, in order of how much

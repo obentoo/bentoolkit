@@ -498,15 +498,13 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// with a clear message and a non-zero exit (R4.2). The accepted range
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
 	if autoupdateConcurrency < minConcurrency || autoupdateConcurrency > maxConcurrency {
-		logger.Error("--concurrency must be in range [%d, %d], got %d", minConcurrency, maxConcurrency, autoupdateConcurrency)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--concurrency must be in range [%d, %d], got %d", minConcurrency, maxConcurrency, autoupdateConcurrency))
 	}
 
 	// Validate --timeout up front: a negative value is a typo, and 0 is the
 	// sentinel for "use the configured/default value".
 	if autoupdateTimeout < 0 {
-		logger.Error("--timeout must be >= 0 seconds, got %d", autoupdateTimeout)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--timeout must be >= 0 seconds, got %d", autoupdateTimeout))
 	}
 
 	// Validate --only up front so a typo fails fast rather than silently
@@ -515,8 +513,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	case "", "bin", "source":
 		// valid
 	default:
-		logger.Error("--only must be \"bin\" or \"source\", got %q", autoupdateOnly)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--only must be \"bin\" or \"source\", got %q", autoupdateOnly))
 	}
 
 	// --fix repairs what --lint reports, so without --lint there is nothing for
@@ -526,8 +523,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// or (worse) silently, leaving the operator believing the registry was
 	// repaired when it was never even read.
 	if autoupdateFix && !autoupdateLint {
-		logger.Error("--fix repairs what --lint reports, so it is valid only together with it — run: bentoo overlay autoupdate --lint --fix")
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--fix repairs what --lint reports, so it is valid only together with it — run: bentoo overlay autoupdate --lint --fix"))
 	}
 
 	// The same reasoning one flag over: --except names what the migration must
@@ -536,8 +532,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// exclusion list but forgot the mode would read "nothing to do" and believe
 	// their pins had been protected by a run that never looked at them.
 	if len(autoupdateExcept) > 0 && !autoupdateMarkAutoDisabledFlag {
-		logger.Error("--except names the entries --mark-auto-disabled must not stamp, so it is valid only together with it — run: bentoo overlay autoupdate --mark-auto-disabled --except <atom>[,<atom>...]")
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--except names the entries --mark-auto-disabled must not stamp, so it is valid only together with it — run: bentoo overlay autoupdate --mark-auto-disabled --except <atom>[,<atom>...]"))
 	}
 
 	// --lint and --mark-auto-disabled are both MODES, and the dispatch below is a
@@ -548,14 +543,12 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// Refusing costs one re-run; the silent version costs a scan cycle nobody
 	// knows was skipped.
 	if autoupdateMarkAutoDisabledFlag && autoupdateLint {
-		logger.Error("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other")
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other"))
 	}
 
 	appCtx, err := loadAppContextNoValidation()
 	if err != nil {
-		logger.Error("loading config: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("loading config: %w", err))
 	}
 
 	overlayPath := appCtx.OverlayPath
@@ -563,8 +556,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// Determine config directory for autoupdate
 	configDir, err := autoupdateConfigDir()
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 
 	// The process-wide context (func commandContext): overlay autoupdate is
@@ -595,8 +587,7 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 	// be the run they did not ask for.
 	autoupdateValidate, err = resolveAutoupdateValidatePolicy(appCtx.Config, cmd)
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 	// The same block, unresolved, for the two --llm capabilities: their keys are
 	// tri-state and only mean something next to the flag (S033-R7.2).
@@ -663,11 +654,9 @@ func runAutoupdate(cmd *cobra.Command, args []string) error {
 		lock, err := acquireOverlayLock(overlayPath)
 		if err != nil {
 			if errors.Is(err, filelock.ErrLocked) {
-				logger.Error("another bentoo run holds the overlay: %v", err)
-			} else {
-				logger.Error("cannot take the overlay lock: %v", err)
+				return failWith(1, fmt.Errorf("another bentoo run holds the overlay: %w", err))
 			}
-			return exitWith(1)
+			return failWith(1, fmt.Errorf("cannot take the overlay lock: %w", err))
 		}
 		// Released by the defer on every return, including after a signal
 		// cancelled the mode's context (S056-R4.7): every mode returns its
@@ -810,8 +799,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 
 	checker, err := newChecker()
 	if err != nil {
-		logger.Error("failed to initialize checker: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
 	if len(args) > 0 {
@@ -828,8 +816,7 @@ func runCheck(ctx context.Context, overlayPath, configDir string, args []string,
 				logger.Info("%s has no ebuild in the overlay — disabled in packages.toml", pkg)
 				return nil
 			}
-			logger.Error("failed to check package %s: %v", pkg, err)
-			return exitWith(1)
+			return failWith(1, fmt.Errorf("failed to check package %s: %w", pkg, err))
 		}
 		// S045-R1.2: the one package this run scanned, as the same report the
 		// batch path builds and through the same render — one element, joined
@@ -1307,8 +1294,7 @@ func reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cf
 func runList(configDir string) error {
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
-		logger.Error("failed to load pending list: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to load pending list: %w", err))
 	}
 
 	updates := pending.List()
@@ -1333,8 +1319,7 @@ func runLint(overlayPath string) error {
 	if err != nil {
 		// --fix adds nothing on this path: a file that does not load cannot be
 		// repaired either, and RepairPackagesConfig refuses to start on one.
-		logger.Error("failed to lint packages.toml: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to lint packages.toml: %w", err))
 	}
 
 	if len(issues) > 0 {
@@ -1352,8 +1337,7 @@ func runLint(overlayPath string) error {
 		output.Success.Println("packages.toml: record model OK")
 		return nil
 	}
-	logger.Error("packages.toml: %d issue(s)", len(issues))
-	return exitWith(1)
+	return failWith(1, fmt.Errorf("packages.toml: %d issue(s)", len(issues)))
 }
 
 // printLintTally closes the report with a per-rule count: a registry
@@ -1695,8 +1679,7 @@ func runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg co
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
-		logger.Error("failed to initialize applier: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
 
 	// The applier's TaskStart now surfaces "applying <pkg>" through the reporter
@@ -1742,8 +1725,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 	// snapshot rationale).
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
-		logger.Error("failed to load pending list: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to load pending list: %w", err))
 	}
 	updates := pending.List()
 	if len(updates) == 0 {
@@ -1782,8 +1764,7 @@ func runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg conf
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
-		logger.Error("failed to initialize applier: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
@@ -2104,14 +2085,12 @@ func resolveGentooProvider(cfg *config.Config) (provider.Provider, error) {
 func runReviveList(ctx context.Context, overlayPath, configDir string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, resolveHTTPTimeout(cfg), llmCfg)...)
 	if err != nil {
-		logger.Error("failed to initialize checker: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
@@ -2164,8 +2143,7 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 func runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
 	prov, err := resolveGentooProviderFn(cfg)
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
@@ -2189,8 +2167,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	httpTimeout := resolveHTTPTimeout(cfg)
 	checker, err := autoupdate.NewChecker(overlayPath, reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg)...)
 	if err != nil {
-		logger.Error("failed to initialize checker: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
 	// Resolve the target package list: an explicit "category/pkg", or "all"
@@ -2222,8 +2199,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	// state the single source of truth.
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
-		logger.Error("failed to initialize pending list: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize pending list: %w", err))
 	}
 
 	reviveOpts := []autoupdate.ApplierOption{
@@ -2239,8 +2215,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
-		logger.Error("failed to initialize applier: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
 
 	// Each target is re-checked on a FRESH Checker so it loads the re-enabled
@@ -2253,8 +2228,7 @@ func runRevive(ctx context.Context, overlayPath, configDir, target string, cache
 	reviver, err := autoupdate.NewReviver(overlayPath, applier, prov, newChecker,
 		autoupdate.WithReviveCompile(autoupdateCompile))
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 
 	outcomes := make([]autoupdate.ReviveOutcome, 0, len(targets))

@@ -9,7 +9,6 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -51,8 +50,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 	// "nothing to clean" when the truth is "nothing could be read".
 	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
 	if err != nil {
-		logger.Error("cannot sweep: %v", err)
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("cannot sweep: %w", err))
 	}
 
 	var target string
@@ -62,8 +60,7 @@ func runSweep(ctx context.Context, overlayPath string, args []string, concurrenc
 
 	batch, err := sweepPlannerFn(overlayPath, cfg.Packages, target)
 	if err != nil {
-		logger.Error("%v", err)
-		return exitWith(1)
+		return failWith(1, err)
 	}
 
 	displaySweepPlan(batch)

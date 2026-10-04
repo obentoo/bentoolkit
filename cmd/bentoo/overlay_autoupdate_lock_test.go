@@ -19,6 +19,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
+	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 const (
@@ -128,7 +129,8 @@ func s056AutoupdateEnv(t *testing.T) (overlay, configDir string) {
 	return overlay, filepath.Join(home, ".config", "bentoo", "autoupdate")
 }
 
-// s056RunCapturingFDs runs runAutoupdate with fds 1 and 2 pointed at a file.
+// s056RunCapturingFDs runs runAutoupdate with fds 1 and 2 pointed at a file,
+// and prints a returned failWith cause there as func execute would.
 // The logger holds the os.Stderr it saw first, so swapping the variable would
 // miss its lines; redirecting the descriptor does not.
 func s056RunCapturingFDs(t *testing.T) (code int, out string) {
@@ -152,7 +154,15 @@ func s056RunCapturingFDs(t *testing.T) (code int, out string) {
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		code = exitCodeFor(runAutoupdate(autoupdateCmd, nil))
+		err := runAutoupdate(autoupdateCmd, nil)
+		// Since story 060 a single-line failure is returned (func failWith)
+		// and func execute prints it. This harness bypasses execute, so it
+		// prints the cause the way execute does: inside the redirect, after
+		// the handler's deferred calls have run.
+		if st, bare := err.(*exitStatus); bare && st.cause != nil { //nolint:errorlint // the same identity test as func execute
+			logger.Error("%v", st.cause)
+		}
+		code = exitCodeFor(err)
 	}()
 	data, _ := os.ReadFile(f.Name())
 	return code, string(data)

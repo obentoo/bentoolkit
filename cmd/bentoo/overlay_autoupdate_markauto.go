@@ -112,8 +112,7 @@ func runMarkAutoDisabled(overlayPath string) error {
 	if len(marked) != len(plan.Mark) {
 		output.Warning.Printf("  %d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it.\n",
 			len(plan.Mark)-len(marked), len(plan.Mark))
-		logger.Error("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked))
-		return exitWith(1)
+		return failWith(1, fmt.Errorf("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked)))
 	}
 	return nil
 }
