@@ -1853,6 +1853,9 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 			// that may not even have run.
 			output.Warning.Printf("    Registry: %s\n", result.RegistryWarning)
 		}
+		if result.MetadataCacheWarning != "" {
+			output.Warning.Printf("    Cache:   %s\n", result.MetadataCacheWarning)
+		}
 		output.Success.Println("\n✓ Update applied successfully")
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
 	} else {
