@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -28,9 +28,10 @@ func newSnapshotStatusCmd(d *deps) *cobra.Command {
 }
 
 func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
-	cfg, _, err := loadSnapshotConfigLenient()
+	log := logging.FromContext(commandContext(cmd))
+	cfg, _, err := loadSnapshotConfigLenient(log)
 	if err != nil {
-		logger.Error("snapshot status: %v", err)
+		log.Error("snapshot status: failed", "err", err)
 		return exitWith(1)
 	}
 

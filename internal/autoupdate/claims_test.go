@@ -159,20 +159,20 @@ func TestResolveClaims(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			overlay := writeSweepOverlay(t, tt.atom, tt.ebuilds)
-			got := resolveClaims(overlay, tt.cfgs, tt.atom)
+			got := resolveClaims(nil, overlay, tt.cfgs, tt.atom)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("resolveClaims(%q) =\n  %+v\nwant\n  %+v", tt.atom, got, tt.want)
+				t.Fatalf("resolveClaims(nil, %q) =\n  %+v\nwant\n  %+v", tt.atom, got, tt.want)
 			}
 		})
 	}
 
 	t.Run("a nil registry and a malformed atom claim nothing", func(t *testing.T) {
 		overlay := writeSweepOverlay(t, "net-misc/rclone", []sweepEbuild{{version: "1.71.1"}})
-		if got := resolveClaims(overlay, nil, "net-misc/rclone"); got != nil {
+		if got := resolveClaims(nil, overlay, nil, "net-misc/rclone"); got != nil {
 			t.Errorf("resolveClaims with a nil registry = %+v, want nil", got)
 		}
 		cfgs := map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")}
-		if got := resolveClaims(overlay, cfgs, "rclone"); got != nil {
+		if got := resolveClaims(nil, overlay, cfgs, "rclone"); got != nil {
 			t.Errorf("resolveClaims with a malformed atom = %+v, want nil", got)
 		}
 	})
@@ -434,9 +434,9 @@ func TestPlanSweep(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			overlay := writeSweepOverlay(t, tt.atom, tt.ebuilds)
-			got, err := planSweep(overlay, tt.cfgs, tt.atom)
+			got, err := planSweep(nil, overlay, tt.cfgs, tt.atom)
 			if err != nil {
-				t.Fatalf("planSweep(%q): %v", tt.atom, err)
+				t.Fatalf("planSweep(nil, %q): %v", tt.atom, err)
 			}
 			if !reflect.DeepEqual(got.Keep, tt.wantKeep) {
 				t.Errorf("Keep = %v, want %v", got.Keep, tt.wantKeep)
@@ -469,7 +469,7 @@ func TestPlanSweep(t *testing.T) {
 		// Restore the mode, or t.TempDir()'s own cleanup cannot remove the tree.
 		t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
 
-		got, err := planSweep(overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")}, atom)
+		got, err := planSweep(nil, overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")}, atom)
 		if err == nil {
 			t.Fatalf("an unreadable directory produced a plan instead of an error: %+v", got)
 		}
@@ -496,17 +496,17 @@ func TestPlanSweep(t *testing.T) {
 			"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""),
 		}
 
-		want, err := planSweep(overlay, cfgs, atom)
+		want, err := planSweep(nil, overlay, cfgs, atom)
 		if err != nil {
-			t.Fatalf("planSweep(bare atom): %v", err)
+			t.Fatalf("planSweep(nil, bare atom): %v", err)
 		}
 		for _, key := range []string{"net-libs/webkit-gtk:4.1", "net-libs/webkit-gtk:6@lts"} {
-			got, err := planSweep(overlay, cfgs, key)
+			got, err := planSweep(nil, overlay, cfgs, key)
 			if err != nil {
-				t.Fatalf("planSweep(%q): %v", key, err)
+				t.Fatalf("planSweep(nil, %q): %v", key, err)
 			}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("planSweep(%q) = %+v, want the bare atom's plan %+v", key, got, want)
+				t.Errorf("planSweep(nil, %q) = %+v, want the bare atom's plan %+v", key, got, want)
 			}
 		}
 	})
@@ -521,7 +521,7 @@ func TestPlanSweep(t *testing.T) {
 			atom + "@dev":    regEntry("", gstDevSeries),
 		}
 		for i := 0; i < 8; i++ {
-			got, err := planSweep(overlay, cfgs, atom)
+			got, err := planSweep(nil, overlay, cfgs, atom)
 			if err != nil {
 				t.Fatalf("planSweep: %v", err)
 			}
@@ -557,7 +557,7 @@ func TestPlanSweep(t *testing.T) {
 			nil, // registry did not load at all
 			{"app-misc/other": regEntry("1.0.0", "")}, // matches, but another directory
 		} {
-			got, err := planSweep(overlay, cfgs, atom)
+			got, err := planSweep(nil, overlay, cfgs, atom)
 			if err != nil {
 				t.Fatalf("planSweep: %v", err)
 			}
@@ -795,7 +795,7 @@ func TestReconcile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			overlay := writeReconcileOverlay(t, tt.dirs)
-			got := Reconcile(overlay, tt.cfgs)
+			got := Reconcile(nil, overlay, tt.cfgs)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Reconcile() =\n  %+v\nwant\n  %+v", got, tt.want)
 			}
@@ -816,7 +816,7 @@ func TestReconcile(t *testing.T) {
 			atom + "@dev":    regEntry("1.29.2", gstDevSeries),
 		}
 
-		got := Reconcile(overlay, cfgs)
+		got := Reconcile(nil, overlay, cfgs)
 		want := []Divergence{{Key: atom, Kind: UnclaimedEbuild, Disk: "1.28.4"}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Reconcile() =\n  %+v\nwant exactly one unclaimed ebuild\n  %+v", got, want)
@@ -843,7 +843,7 @@ func TestReconcile(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
 
 		lc := captureWarnLogs(t)
-		got := Reconcile(overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")})
+		got := Reconcile(lc.logger(), overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")})
 		if got != nil {
 			t.Fatalf("an unreadable directory produced divergences: %+v", got)
 		}
@@ -863,7 +863,7 @@ func TestReconcile(t *testing.T) {
 			"net-misc/rclone": {{version: "1.71.1"}},
 		})
 		lc := captureWarnLogs(t)
-		if got := Reconcile(overlay, map[string]PackageConfig{"rclone": regEntry("1.71.1", "")}); got != nil {
+		if got := Reconcile(lc.logger(), overlay, map[string]PackageConfig{"rclone": regEntry("1.71.1", "")}); got != nil {
 			t.Fatalf("a malformed key produced divergences: %+v", got)
 		}
 		if lc.count() == 0 {
@@ -875,7 +875,7 @@ func TestReconcile(t *testing.T) {
 		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
 			"net-misc/rclone": {{version: "1.71.1"}},
 		})
-		if got := Reconcile(overlay, nil); got != nil {
+		if got := Reconcile(nil, overlay, nil); got != nil {
 			t.Errorf("Reconcile with a nil registry = %+v, want nil", got)
 		}
 	})
@@ -919,7 +919,7 @@ func TestReconcileOrderIsStable(t *testing.T) {
 	// Eight runs, because a map-iteration order that leaks into the output is a
 	// coin flip, not a constant failure.
 	for i := 0; i < 8; i++ {
-		got := Reconcile(overlay, cfgs)
+		got := Reconcile(nil, overlay, cfgs)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("run %d: Reconcile() =\n  %+v\nwant\n  %+v", i, got, want)
 		}

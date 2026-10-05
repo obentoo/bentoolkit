@@ -116,7 +116,7 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = fromConfig
 
-		dirs := auOpts.resolveAutoupdateDistfileDirs(cfg, false)
+		dirs := auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, false)
 		if dirs.ConfiguredDistdir != fromConfig {
 			t.Errorf("the config rung = %q, want %q: the key must still be carried, not discarded", dirs.ConfiguredDistdir, fromConfig)
 		}
@@ -133,7 +133,7 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = fromConfig
 
-		if got := resolvedPath(t, auOpts.resolveAutoupdateDistfileDirs(cfg, false)); got != fromConfig {
+		if got := resolvedPath(t, auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, false)); got != fromConfig {
 			t.Errorf("resolved %q, want the configured %q", got, fromConfig)
 		}
 	})
@@ -142,7 +142,7 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 		auOpts := testAutoupdateOptions()
 		auOpts.distdir = ""
 
-		dirs := auOpts.resolveAutoupdateDistfileDirs(&config.Config{}, false)
+		dirs := auOpts.resolveAutoupdateDistfileDirs(discardLog(), &config.Config{}, false)
 		// Deliberately NOT resolved: with both rungs empty the precedence asks
 		// this host for its own DISTDIR, which is the directory these tests must
 		// never act in. What matters at this layer is that the command passes on
@@ -160,7 +160,7 @@ func TestAutoupdateDistdirFlagOverridesConfig(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Autoupdate.Distdir = "relative/distfiles"
 
-		if dirs := auOpts.resolveAutoupdateDistfileDirs(cfg, false); dirs.ConfiguredDistdir != "" {
+		if dirs := auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, false); dirs.ConfiguredDistdir != "" {
 			t.Errorf("the config rung = %q, want %q: a relative path in a config file resolves against whatever directory the process started in", dirs.ConfiguredDistdir, "")
 		}
 	})
@@ -224,7 +224,7 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 	t.Run("an unset flag with no config key resolves to that same default", func(t *testing.T) {
 		auOpts := testAutoupdateOptions()
 		auOpts.distfilesCache = autoFlag.DefValue // what pflag leaves there when the flag is not passed
-		if got := auOpts.resolveAutoupdateDistfileDirs(&config.Config{}, false).Cache; got != distfiles.DefaultCache {
+		if got := auOpts.resolveAutoupdateDistfileDirs(discardLog(), &config.Config{}, false).Cache; got != distfiles.DefaultCache {
 			t.Errorf("with no flag and no config key the cache resolved to %q, want %q", got, distfiles.DefaultCache)
 		}
 	})
@@ -234,7 +234,7 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 		auOpts.distfilesCache = autoFlag.DefValue
 		cfg := &config.Config{}
 		cfg.Autoupdate.DistfilesCache = "/srv/mirror/distfiles"
-		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, false).Cache; got != "/srv/mirror/distfiles" {
+		if got := auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, false).Cache; got != "/srv/mirror/distfiles" {
 			t.Errorf("the cache resolved to %q, want the configured %q", got, "/srv/mirror/distfiles")
 		}
 	})
@@ -245,7 +245,7 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 		cfg.Autoupdate.DistfilesCache = "/srv/mirror/distfiles"
 
 		auOpts.distfilesCache = "/srv/other/distfiles"
-		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "/srv/other/distfiles" {
+		if got := auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, true).Cache; got != "/srv/other/distfiles" {
 			t.Errorf("the cache resolved to %q, want the flag's %q", got, "/srv/other/distfiles")
 		}
 
@@ -253,7 +253,7 @@ func TestAutoupdateDistfilesCacheDefaultMatchesManifestCommand(t *testing.T) {
 		// `overlay manifest` documents it — so a passed empty flag must not be
 		// read as "unset" and quietly replaced by the config key.
 		auOpts.distfilesCache = ""
-		if got := auOpts.resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "" {
+		if got := auOpts.resolveAutoupdateDistfileDirs(discardLog(), cfg, true).Cache; got != "" {
 			t.Errorf("--distfiles-cache \"\" resolved to %q, want \"\": passing it explicitly disables the lookup", got)
 		}
 	})

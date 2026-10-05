@@ -1705,8 +1705,8 @@ func TestApply_RetainsPendingOnCompileFailure(t *testing.T) {
 
 // TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds verifies R3.4: if
 // the final pending.Delete call returns an error AFTER the apply itself
-// succeeded, the result keeps Success=true and a Warn line is emitted via the
-// package warnLogf sink — the exit-code path must not flip on a bookkeeping
+// succeeded, the result keeps Success=true and a Warn line is emitted through
+// the applier's logger — the exit-code path must not flip on a bookkeeping
 // failure that does not undo the actual update.
 func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1742,6 +1742,7 @@ func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
 	logs := captureWarnLogs(t)
 
 	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierLogger(logs.logger()),
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierPendingDeleteFunc(deleteFn),
@@ -1764,7 +1765,7 @@ func TestApply_DeleteAfterSuccessFailure_LogsWarnButSucceeds(t *testing.T) {
 		t.Errorf("delete called %d times, want 1", deleteCalled)
 	}
 	if logs.count() == 0 {
-		t.Errorf("no Warn emitted via warnLogf after delete failure (R3.4)")
+		t.Errorf("no Warn emitted through the applier logger after delete failure (R3.4)")
 	}
 	joined := strings.Join(logs.all(), "\n")
 	if !strings.Contains(joined, pkg) {
@@ -2687,6 +2688,7 @@ func TestApply_RegistryWriteFailureWarnsButKeepsSuccess(t *testing.T) {
 	logs := captureWarnLogs(t)
 
 	applier, err := NewApplier(overlayDir, configDir,
+		WithApplierLogger(logs.logger()),
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierSetVersionsFunc(func(_ string, pins map[string]string) error {
@@ -2719,7 +2721,7 @@ func TestApply_RegistryWriteFailureWarnsButKeepsSuccess(t *testing.T) {
 
 	// The warning must reach both the log sink and the result.
 	if logs.count() == 0 {
-		t.Errorf("no Warn emitted via warnLogf after a failed pin write (S021-R2.4)")
+		t.Errorf("no Warn emitted through the applier logger after a failed pin write (S021-R2.4)")
 	}
 	joined := strings.Join(logs.all(), "\n")
 	if !strings.Contains(joined, pkg) || !strings.Contains(joined, wantErr.Error()) {

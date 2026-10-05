@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -452,6 +454,15 @@ type CompareOptions struct {
 	// secrets.Scrub, so a token echoed inside an error reaches no report. nil
 	// redacts nothing; an empty entry is ignored.
 	Redact []string
+	// Logger receives the diagnostics of the passes that take these options —
+	// the review, realignment and baseline annotations and the review cache
+	// they open. nil discards them.
+	Logger *slog.Logger
+}
+
+// logger returns o.Logger, or a discarding logger when none was set.
+func (o CompareOptions) logger() *slog.Logger {
+	return logging.OrDiscard(o.Logger)
 }
 
 // CompareReport contains the full comparison report

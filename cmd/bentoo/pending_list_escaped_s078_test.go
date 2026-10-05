@@ -26,7 +26,7 @@ func TestS078ListEscapesNonPrintableFields(t *testing.T) {
 	errText := "download failed\n    Status:  validated" + s078RLO
 	status := autoupdate.UpdateStatus("failed" + s078Esc + "[31m")
 	out := captureStdout(t, func() {
-		displayPendingUpdates([]autoupdate.PendingUpdate{{
+		displayPendingUpdates(discardLog(), []autoupdate.PendingUpdate{{
 			Package:        pkg,
 			CurrentVersion: "1.0",
 			NewVersion:     "2.0",
@@ -55,7 +55,7 @@ func TestS078ListEscapesNonPrintableFields(t *testing.T) {
 // letters included.
 func TestS078ListPrintableEntryUnchanged(t *testing.T) {
 	out := captureStdout(t, func() {
-		displayPendingUpdates([]autoupdate.PendingUpdate{{
+		displayPendingUpdates(discardLog(), []autoupdate.PendingUpdate{{
 			Package:        "app-misc/café",
 			CurrentVersion: "1.0",
 			NewVersion:     "2.0",

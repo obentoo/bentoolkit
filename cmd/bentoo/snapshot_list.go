@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -31,23 +31,24 @@ func newSnapshotListCmd(d *deps) *cobra.Command {
 }
 
 func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
-	cfg, path, err := loadSnapshotConfigLenient()
+	log := logging.FromContext(commandContext(cmd))
+	cfg, path, err := loadSnapshotConfigLenient(log)
 	if err != nil {
-		logger.Error("snapshot list: %v", err)
+		log.Error("snapshot list: failed", "err", err)
 		return exitWith(1)
 	}
 
 	ctx := commandContext(cmd)
 
-	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner, snapshot.WithManagerLogger(log))
 	if err != nil {
-		logger.Error("snapshot list: %v", err)
+		log.Error("snapshot list: failed", "err", err)
 		return exitWith(1)
 	}
 
 	snaps, err := mgr.List(ctx)
 	if err != nil {
-		logger.Error("snapshot list: %v", err)
+		log.Error("snapshot list: failed", "err", err)
 		return exitWith(1)
 	}
 

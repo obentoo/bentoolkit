@@ -60,7 +60,7 @@ func TestRequiresRenderRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, cfg.Requires) {
 		t.Errorf("requires after a save round trip:\n got %#v\nwant %#v\n--- rendered ---\n%s", got, cfg.Requires, rendered)
 	}
-	if err := decoded.ValidateAll(); err != nil {
+	if err := decoded.ValidateAll(nil); err != nil {
 		t.Errorf("the rendered record no longer validates: %v", err)
 	}
 }
@@ -178,7 +178,7 @@ flutter — pins the Dart SDK its release bundles.
 	const requiresLine = "requires = { \"dev-lang/dart\" = { pattern = '\"version\":\\s*\"{version}\",\\s*\"dart_sdk_version\":\\s*\"([^\"]+)\"', pin = \"~\" } }\n"
 
 	t.Run("accepted after aux_url", func(t *testing.T) {
-		issues, err := LintPackagesConfig(writeRegistry(t, record(auxLines+requiresLine)))
+		issues, err := LintPackagesConfig(nil, writeRegistry(t, record(auxLines+requiresLine)))
 		if err != nil {
 			t.Fatalf("LintPackagesConfig: %v; requires must be a key the registry claims", err)
 		}
@@ -190,7 +190,7 @@ flutter — pins the Dart SDK its release bundles.
 	})
 
 	t.Run("reported before aux_url", func(t *testing.T) {
-		issues, err := LintPackagesConfig(writeRegistry(t, record(requiresLine+auxLines)))
+		issues, err := LintPackagesConfig(nil, writeRegistry(t, record(requiresLine+auxLines)))
 		if err != nil {
 			t.Fatalf("LintPackagesConfig: %v", err)
 		}

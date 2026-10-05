@@ -69,7 +69,7 @@ func TestManifestFlagModePlainTurnsTheLiveRegionOff(t *testing.T) {
 
 	cfg := &config.Config{} // no ui block: --ui is the only source that speaks
 
-	if manifestUsesTUI(cfg, td.uiIsTerminal) {
+	if manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal) {
 		t.Error("overlay manifest --ui=plain still started the live region on a terminal — the operator asked for the mode whose help text promises no escape sequence at all and got them anyway (R3.3)")
 	}
 }
@@ -85,7 +85,7 @@ func TestManifestFlagModeInlineTurnsTheLiveRegionOn(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	if !manifestUsesTUI(cfg, td.uiIsTerminal) {
+	if !manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal) {
 		t.Error("overlay manifest --ui=inline left the live region off on a terminal — the flag is not being read, it is being ignored in one direction (R3.3)")
 	}
 }
@@ -111,7 +111,7 @@ func TestManifestFlagModeNoTUIDoesNotReachAManifestRun(t *testing.T) {
 	if (&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI() {
 		t.Fatal("the premise is wrong: --no-tui did not turn the live region off on the command that declares it, so this test cannot tell a leak from a flag that does nothing")
 	}
-	if !manifestUsesTUI(cfg, td.uiIsTerminal) {
+	if !manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal) {
 		t.Error("--no-tui, which only `overlay autoupdate` declares, turned a manifest run's live region off — that is a cross-command leak: the manifest run never parsed the flag it just obeyed (R3.3)")
 	}
 }

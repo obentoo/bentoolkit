@@ -13,19 +13,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"github.com/BurntSushi/toml"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
-
-// warnLogf emits a non-fatal warning. It is a package var (defaulting to
-// logger.Warn) so tests can capture the warn-but-continue path of Validate,
-// mirroring internal/autoupdate's warnLogf seam.
-var warnLogf = logger.Warn
 
 // Config is the parsed snapshot.toml. The engine produces snapshots, each ship
 // replicates them, notify reports the outcome (no-op until story 005), and
@@ -317,7 +313,16 @@ func smtpPasswordDestination() string {
 // dead key, where the value belongs, the env-var name, and the consequence of
 // doing nothing. It mirrors the config.yaml diagnostic of story 015 task 5.2.
 // The password VALUE is never read or printed.
-func warnLegacySMTPPassword(path string) {
+//
+// With a logger (story 062) the warning is one WARN record carrying the path,
+// the dead key and where the value belongs; with a nil logger — func LoadFrom,
+// a caller that holds none — it keeps its pre-062 bare line on stderr.
+func warnLegacySMTPPassword(log *slog.Logger, path string) {
+	if log != nil {
+		log.Warn("snapshot.toml carries a key that is no longer read; SMTP mail is sent unauthenticated until it is deleted",
+			"path", path, "key", legacySMTPPasswordKey, "destination", smtpPasswordDestination())
+		return
+	}
 	fmt.Fprintf(os.Stderr,
 		"warning: %s: `%s` is no longer read. %s, then delete the key. "+
 			"Until then, SMTP mail is sent unauthenticated.\n",
@@ -333,7 +338,17 @@ func warnLegacySMTPPassword(path string) {
 // with the MetaData discarded, so behavior, errors, and leniency are unchanged.
 // This is deliberately not a general strict-decode pass: only the single removed
 // key is reported, so forward-compatible additions to snapshot.toml stay silent.
+//
+// LoadFrom is LoadFromWith(path, nil): the migration warning goes to stderr as
+// a bare line.
 func LoadFrom(path string) (*Config, error) {
+	return LoadFromWith(path, nil)
+}
+
+// LoadFromWith is LoadFrom reporting the migration warning on log, the
+// invocation's logger (story 062, R5.2). A nil log keeps LoadFrom's bare
+// stderr line.
+func LoadFromWith(path string, log *slog.Logger) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own --config flag or the XDG config path FindConfigPath resolved
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snapshot.toml: %w", err)
@@ -350,7 +365,7 @@ func LoadFrom(path string) (*Config, error) {
 	// (R3.3). The load itself still succeeds and the password is simply treated as
 	// absent (R3.2).
 	if hasLegacySMTPPassword(md) {
-		warnLegacySMTPPassword(path)
+		warnLegacySMTPPassword(log, path)
 	}
 	return &cfg, nil
 }
@@ -415,7 +430,17 @@ var ErrShipEngineMismatch = errors.New("ship type not supported by engine")
 // Order matters: every enum is checked first, so an unknown driver string is
 // reported before — and independently of — any missing-binary detection, and
 // both happen before the command writes any file (G3).
+//
+// Validate logs nothing: it is ValidateWith(nil), and a nil logger discards.
 func (c *Config) Validate() error {
+	return c.ValidateWith(nil)
+}
+
+// ValidateWith is Validate with its non-fatal warnings sent to log; a nil log
+// discards them (R5.3). The verdict is the same as Validate's: log changes only
+// where the warnings go.
+func (c *Config) ValidateWith(log *slog.Logger) error {
+	log = logging.OrDiscard(log)
 	switch c.Engine.Driver {
 	case "btrbk", "snapper":
 		// supported
@@ -457,7 +482,7 @@ func (c *Config) Validate() error {
 	// Non-fatal: an empty subvolume list means nothing is snapshotted, but it is
 	// not an error (the autoupdate validate-and-warn pattern, R1.4).
 	if len(c.Engine.Subvolumes) == 0 {
-		warnLogf("snapshot: engine.subvolumes is empty; nothing will be snapshotted")
+		log.Warn("snapshot: engine.subvolumes is empty; nothing will be snapshotted")
 	}
 
 	// Dependency detection for the active drivers (still before any side effect).

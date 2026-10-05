@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -46,11 +46,12 @@ are never deleted — each is the base of its subvolume's next incremental send.
 // the engine-native prune per subvolume plus the remote GFS per archive ship,
 // honoring --dry-run and --ship scoping (008 R3.2).
 func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
+	log := logging.FromContext(commandContext(cmd))
 	// Prune is destructive: load AND validate the config (drivers + deps) so an
 	// unknown driver or missing binary fails fast before any subprocess (G3).
-	cfg, path, err := loadSnapshotConfig()
+	cfg, path, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot prune: %v", err)
+		log.Error("snapshot prune: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -58,7 +59,7 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	// dry-run too — mirroring restore's unknown-ship handling.
 	if snapshotPruneShip != "" {
 		if _, ok := findShipByName(cfg, snapshotPruneShip); !ok {
-			logger.Error("snapshot prune: no ship entry named %q", snapshotPruneShip)
+			log.Error("snapshot prune: no ship entry named", "ship", snapshotPruneShip)
 			return exitWith(1)
 		}
 	}
@@ -78,14 +79,14 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	// --ship scoping, where the engine-local prune does not run at all.
 	if snapshotPruneShip == "" {
 		if err := snapshot.WriteEngineConfig(ctx, cfg, path, d.snapshotRunner); err != nil {
-			logger.Error("snapshot prune: render engine config: %v", err)
+			log.Error("snapshot prune: render engine config: failed", "err", err)
 			return exitWith(1)
 		}
 	}
 
-	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner, snapshot.WithManagerLogger(log))
 	if err != nil {
-		logger.Error("snapshot prune: %v", err)
+		log.Error("snapshot prune: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -93,7 +94,7 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	if pruneErr != nil {
 		// Covers failed stages too: Prune returns a non-nil error whenever the
 		// result records any failure — a user-invoked prune must not hide them.
-		logger.Error("snapshot prune: %v", pruneErr)
+		log.Error("snapshot prune: failed", "err", pruneErr)
 		return exitWith(1)
 	}
 

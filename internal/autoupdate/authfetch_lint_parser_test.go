@@ -65,7 +65,7 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 	}
 
 	// bentoo distfile.
-	_, distErr := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+	_, distErr := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 		OverlayPath: overlay, Package: "app-misc/leak", Version: "1.0", DestDir: t.TempDir(),
 	})
 	check("distfile", distErr)
@@ -177,7 +177,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 	}
 
 	// --lint.
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}

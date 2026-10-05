@@ -2,23 +2,30 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // runRenameOutput runs runRename like runRenameObserved does, and returns the
 // exit code its returned error maps to (0 for nil) and everything the run
 // printed on stdout and stderr together.
 //
-// Stderr is captured at the file-descriptor level, not by swapping os.Stderr:
-// the logger keeps the *os.File it saw on first use, so a swapped variable would
-// miss every logger.Error line — which is exactly the output these tests read.
+// Stderr is captured at the file-descriptor level, not by swapping os.Stderr.
+// runRename is called without the root, so nothing builds the invocation's
+// logger (story 062): the harness puts one on renameCmd's context, writing to
+// descriptor 2 in the production shape, so its Error records are in the output
+// these tests read.
 func runRenameOutput(t *testing.T, flags renameFlagsSnapshot, args []string) (int, string) {
 	t.Helper()
 	orig := renameFlags
@@ -62,6 +69,14 @@ func runRenameOutput(t *testing.T, flags renameFlagsSnapshot, args []string) (in
 			_ = syscall.Dup2(savedErrFD, 2)
 			_ = syscall.Close(savedErrFD)
 		}()
+		log, closeLog, err := logging.New(logging.Options{Stderr: os.Stderr, Level: slog.LevelInfo})
+		if err != nil {
+			t.Fatalf("building the harness logger: %v", err)
+		}
+		defer func() { _ = closeLog() }()
+		prevCtx := renameCmd.Context()
+		renameCmd.SetContext(logging.NewContext(context.Background(), log))
+		defer renameCmd.SetContext(prevCtx)
 		code = exitCodeFor(runRename(renameCmd, args))
 	}()
 	if err := outW.Close(); err != nil {
@@ -116,6 +131,10 @@ func TestRunRenameInvalidNewVersionNamesValueWithoutPreview(t *testing.T) {
 
 	for _, v := range []string{"1.2/../../../x", "latest"} {
 		quoted := fmt.Sprintf("%q", v)
+		// The rejection reaches stderr as the err attribute of a slog text
+		// record, which quotes the error text and so escapes the quotes around
+		// the value (story 062).
+		logged := strings.Trim(strconv.Quote(quoted), `"`)
 
 		t.Run(v+"/matching overlay", func(t *testing.T) {
 			pkgDir := renameTestHome(t, map[string]string{"foo-1.1.ebuild": "V11\n"})
@@ -127,7 +146,7 @@ func TestRunRenameInvalidNewVersionNamesValueWithoutPreview(t *testing.T) {
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1 for new version %q", code, v)
 			}
-			if !strings.Contains(out, quoted) {
+			if !strings.Contains(out, logged) {
 				t.Errorf("output does not name the rejected value %s:\n%s", quoted, out)
 			}
 			if strings.Contains(out, renamePreviewMarker) {
@@ -147,7 +166,7 @@ func TestRunRenameInvalidNewVersionNamesValueWithoutPreview(t *testing.T) {
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1 for new version %q", code, v)
 			}
-			if !strings.Contains(out, quoted) {
+			if !strings.Contains(out, logged) {
 				t.Errorf("output does not name the rejected value %s:\n%s", quoted, out)
 			}
 			if strings.Contains(out, "loading config") {

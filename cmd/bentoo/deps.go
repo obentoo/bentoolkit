@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -45,11 +45,11 @@ type deps struct {
 	// checkInteractive asks whether stdin is interactive. Without them the
 	// registry-fix loop, and the overlay lock it must run under (S056-R4.6),
 	// could only be reached from a terminal with a configured claude CLI.
-	checkRegistryFixer func(llmCfg config.LLMConfig) (autoupdate.RegistryFixer, error)
+	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (autoupdate.RegistryFixer, error)
 	checkInteractive   func() bool
 	// resolveGentooProvider obtains the ::gentoo provider for the revive flows
 	// and for prune, so they can be driven with an on-disk fake.
-	resolveGentooProvider func(cfg *config.Config) (provider.Provider, error)
+	resolveGentooProvider func(log *slog.Logger, cfg *config.Config) (provider.Provider, error)
 	// setVersionsForCheck is the ONE way the check could publish. It is
 	// deliberately never called: a test keeps it wired, runs every path and
 	// reads the seam afterwards, so R9.2 is proved rather than asserted.
@@ -60,7 +60,7 @@ type deps struct {
 	uiIsTerminal func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
-	sweepPlanner  func(overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
+	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
 	sweepExecutor func(ctx context.Context, overlayPath string, batch autoupdate.SweepBatch, opts ...autoupdate.SweepOption) autoupdate.SweepReport
 	confirmSweep  func(prompt string) bool
 
@@ -96,16 +96,11 @@ type deps struct {
 	confirmRealignPublish       func(prompt string) bool
 	realignPublishIsInteractive func() bool
 
-	// reviewWarnf emits the one warning the compare reviews may print: a
-	// reviewer that was asked for and could not be built. logger binds its
-	// writer at first use and exposes no setter, so without this seam the
-	// line could only be asserted by reading the process's stderr.
-	reviewWarnf func(format string, args ...any)
 	// newClaudeAsker builds the `claude` client both compare reviews ask
 	// through, so tests can script the CLI without one being installed and
 	// prove `--no-review` reaches it ZERO times (R5.6 of story 025). The
 	// budget enters here and nowhere else (see newClaudeCodeAsker).
-	newClaudeAsker func(budget time.Duration) (claudeAsker, error)
+	newClaudeAsker func(log *slog.Logger, budget time.Duration) (claudeAsker, error)
 
 	// prunePlanner, pruneExecutor and confirmPrune drive `overlay prune`, on
 	// the sweep's shape: a test has to be able to prove the executor was NOT
@@ -161,7 +156,6 @@ func defaultDeps() *deps {
 		confirmRealignPublish:       confirmAction,
 		// The SAME function as registryPromptIsInteractive (design C6).
 		realignPublishIsInteractive: stdinAndStdoutAreTerminals,
-		reviewWarnf:                 logger.Warn,
 		newClaudeAsker:              newClaudeCodeAsker,
 		prunePlanner:                overlay.PlanPrune,
 		pruneExecutor:               overlay.ExecutePrune,

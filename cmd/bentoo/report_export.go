@@ -33,7 +33,8 @@ package main
 // have had to copy.
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"log/slog"
+
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -79,7 +80,7 @@ import (
 // its report was drawn. presentCheckReport renders and then calls this, and
 // TestUnwritableExportStillRendersToTheTerminal asserts that pairing at the one
 // place both happen; a new caller owes the same ordering.
-func exportReport(run report.Run) {
+func exportReport(log *slog.Logger, run report.Run) {
 	if autoupdateExport == "" {
 		return
 	}
@@ -95,6 +96,6 @@ func exportReport(run report.Run) {
 		// operator needs to fix a missing directory, a read-only mount or a
 		// full disk. A second wrap here would print the path twice and add no
 		// identifier the first one lacks.
-		logger.Warn("%v", err)
+		log.Warn("writing the report export: failed", "err", err)
 	}
 }

@@ -3,24 +3,27 @@
 package autoupdate
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // applyTransforms applies ordered regex substitutions to an extracted version.
 // Each rule is [regex, repl]; repl follows regexp.ReplaceAllString semantics.
 // A malformed rule (wrong arity or uncompilable regex) is warned and skipped,
 // so a single bad rule never aborts a check (ValidatePackageConfig warns too).
-func applyTransforms(v string, rules [][]string) string {
+// The warning goes to log; nil discards it.
+func applyTransforms(log *slog.Logger, v string, rules [][]string) string {
 	for _, r := range rules {
 		if len(r) != 2 {
 			continue
 		}
 		re, err := regexp.Compile(r[0])
 		if err != nil {
-			warnLogf("transform: bad regex %q: %v", r[0], err)
+			logging.OrDiscard(log).Warn("transform: bad regex", "regex", r[0], "err", err)
 			continue
 		}
 		v = re.ReplaceAllString(v, r[1])
@@ -48,8 +51,8 @@ var existingSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc|p)[0-9]*(-r[0-
 //
 // A malformed suffix_when is warned and ignored rather than fatal: the record is
 // rejected up front by ValidatePackageConfig, and a check that got this far must
-// not die on the annotation.
-func applySuffix(v string, cfg *PackageConfig) string {
+// not die on the annotation. The warning goes to log; nil discards it.
+func applySuffix(log *slog.Logger, v string, cfg *PackageConfig) string {
 	if cfg == nil || cfg.Suffix == "" || v == "" {
 		return v
 	}
@@ -59,7 +62,7 @@ func applySuffix(v string, cfg *PackageConfig) string {
 	if cfg.SuffixWhen != "" {
 		re, err := regexp.Compile(cfg.SuffixWhen)
 		if err != nil {
-			warnLogf("suffix_when: bad regex %q: %v; suffix not applied", cfg.SuffixWhen, err)
+			logging.OrDiscard(log).Warn("suffix_when: bad regex; suffix not applied", "regex", cfg.SuffixWhen, "err", err)
 			return v
 		}
 		if !re.MatchString(v) {
@@ -82,7 +85,8 @@ func applySuffix(v string, cfg *PackageConfig) string {
 //
 // Non-comparable candidates (per ebuild.IsValidVersion, after transform and
 // prefix stripping) are skipped. Returns "" when no candidate is comparable.
-func selectVersion(cands []string, cfg *PackageConfig) string {
+// A malformed rule is warned about to log; nil discards the warning.
+func selectVersion(log *slog.Logger, cands []string, cfg *PackageConfig) string {
 	var transform [][]string
 	mode, series := "", ""
 	if cfg != nil {
@@ -90,11 +94,11 @@ func selectVersion(cands []string, cfg *PackageConfig) string {
 		mode = cfg.Select
 		series = cfg.Series
 	}
-	matcher := newSeriesMatcher(series)
+	matcher := newSeriesMatcher(log, series)
 	best := ""
 	for _, c := range cands {
-		c = applyTransforms(strings.TrimSpace(c), transform)
-		cc := applySuffix(stripVersionPrefix(c), cfg)
+		c = applyTransforms(log, strings.TrimSpace(c), transform)
+		cc := applySuffix(log, stripVersionPrefix(c), cfg)
 		if !ebuild.IsValidVersion(cc) {
 			continue
 		}

@@ -56,7 +56,7 @@ func TestAdapterCounts(t *testing.T) {
 		resultOf("app-misc/policy"),
 	}
 
-	checked := checkPayload(buildReport(plan, results))
+	checked := checkPayload(discardLog(), buildReport(plan, results))
 	got := checked.Tally
 	want := report.Tally{Proved: 1, Errored: 1, Inconclusive: 1, Skipped: 1}
 
@@ -105,7 +105,7 @@ func TestAdapterReconciles(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			r := checkPayload(buildReport(tc.plan, tc.results))
+			r := checkPayload(discardLog(), buildReport(tc.plan, tc.results))
 
 			if !r.Reconciles() {
 				t.Errorf("the tally does not reconcile: %+v sums to %d over a plan of %d (R5.5)",
@@ -160,7 +160,7 @@ func TestProvedAndErroredUnchanged(t *testing.T) {
 			results := []validate.EbuildResult{resultOf("x/pkg", gates...)}
 
 			wantProved, wantErrored := currentImplementationTally(results)
-			checked := checkPayload(buildReport(plan, results))
+			checked := checkPayload(discardLog(), buildReport(plan, results))
 			got := checked.Tally
 
 			if got.Proved != wantProved {
@@ -197,7 +197,7 @@ func TestQAGateDoesNotReachTheClassifier(t *testing.T) {
 		),
 	}
 
-	checked := checkPayload(buildReport(plan, results))
+	checked := checkPayload(discardLog(), buildReport(plan, results))
 	got := checked.Tally
 
 	if got.Proved != 1 {
@@ -227,7 +227,7 @@ func TestAdapterSetsSameReasonAsPlan(t *testing.T) {
 		}},
 	}
 
-	checked := checkPayload(buildReport(plan, results))
+	checked := checkPayload(discardLog(), buildReport(plan, results))
 	rows := checked.Results
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))
@@ -259,7 +259,7 @@ func TestAdapterKeepsReasonsWhole(t *testing.T) {
 	plan := planOf(validationPlanEntry{Package: "a/pkg", From: "1.0", Version: "1.1", Depth: "none", Reason: long, Skipped: true})
 	results := []validate.EbuildResult{{Package: "a/pkg", Version: "1.1", DepthReason: long}}
 
-	r := checkPayload(buildReport(plan, results))
+	r := checkPayload(discardLog(), buildReport(plan, results))
 	if r.Plan[0].Reason != long {
 		t.Errorf("the plan's reason was shortened by the adapter: %d chars, want %d (R7.4)", len(r.Plan[0].Reason), len(long))
 	}
@@ -299,7 +299,7 @@ func TestPolicyAndLimitationDoNotSwap(t *testing.T) {
 		resultOf("app-misc/beta", declined("build", validate.DeclineHost)),
 	}
 
-	checked := checkPayload(buildReport(plan, results))
+	checked := checkPayload(discardLog(), buildReport(plan, results))
 	rows := checked.Results
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))

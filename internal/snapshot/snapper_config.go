@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // snapper_config.go — provisioning snapper configs through snapper's own API
@@ -37,7 +40,7 @@ const snapshotsDirName = ".snapshots"
 
 // statPath, readDirPath, removePath and readFilePath are the filesystem seams
 // used to classify a leftover .snapshots and to decide whether removing it is
-// safe. They are package vars (the lookPath/warnLogf seam pattern) so tests
+// safe. They are package vars (the lookPath seam pattern) so tests
 // decide what exists rather than inheriting the developer's filesystem: a real
 // /home/.snapshots on the host would otherwise turn the "leftover" case into
 // the "nothing there" one and assert nothing, and the developer's own
@@ -142,7 +145,9 @@ func settableSnapperKeys(cfg EngineConfig, subvolume string) []string {
 // applied to every config, new or pre-existing: the old file-merge never
 // reached a running daemon, so a config bentoo has managed for months may still
 // be running the template's retention rather than the operator's.
-func ensureSnapperConfigs(ctx context.Context, cfg *Config, run Runner) error {
+//
+// Warnings go to log; a nil log discards them.
+func ensureSnapperConfigs(ctx context.Context, cfg *Config, run Runner, log *slog.Logger) error {
 	// A nil Runner means "use the production one" everywhere else in this
 	// package, and the cmd layer relies on it: snapshotRunner is left nil
 	// outside tests, so every real apply arrives here with nil.
@@ -167,9 +172,9 @@ func ensureSnapperConfigs(ctx context.Context, cfg *Config, run Runner) error {
 			// chosen — an operator-made config. Its keys are still managed, but
 			// the engine derives the config name it passes to create/list from
 			// the subvolume, so those commands will not find it.
-			warnLogf("snapshot: %s is covered by snapper config %q, not %q; "+
+			logging.OrDiscard(log).Warn("snapshot: the subvolume is covered by a snapper config bentoo did not name; "+
 				"snapshot create/list will not find it until the config is renamed",
-				subvolume, name, snapperConfigName(subvolume))
+				"subvolume", subvolume, "config", name, "want_config", snapperConfigName(subvolume))
 		}
 		if err := applyManagedSnapperKeys(ctx, run, cfg.Engine, name, subvolume); err != nil {
 			return err

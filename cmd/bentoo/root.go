@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/spf13/cobra"
@@ -40,6 +39,9 @@ func newRootCmdWith(d *deps) *cobra.Command {
 		verboseFlag bool
 		quietFlag   bool
 		noColorFlag bool
+		// closeLog closes this invocation's log file. PersistentPreRunE sets
+		// it; PersistentPostRunE calls it on a successful return.
+		closeLog func()
 	)
 
 	root := &cobra.Command{
@@ -100,23 +102,35 @@ func newRootCmdWith(d *deps) *cobra.Command {
 				return err
 			}
 
-			// Configure logging based on flags
-			if verbose {
-				logger.SetVerbose(true)
-			}
-			if quiet {
-				logger.SetQuiet(true)
-			}
+			// Story 062: the invocation's one logger (R5.1), its level from
+			// the flags and BENTOO_LOG_LEVEL, its JSON file opened here. The
+			// file is closed by PersistentPostRunE on a successful return. cobra
+			// skips the post-run hooks when RunE fails, and func execute still
+			// logs a failWith cause after ExecuteContext returns, so on that
+			// path execute closes it (func closeInvocationLog), and the
+			// exitProcess cleanup covers a process that ends before either.
+			closeLog = setUpInvocationLogger(cmd, verboseFlag, quietFlag)
+
 			if noColor {
 				output.NoColor()
 			}
 
 			return nil
 		},
+		// The only PersistentPostRun(E) in the tree, for the same reason as the
+		// pre-run hook above: cobra runs the nearest one only. It runs after a
+		// successful RunE alone; a normal return never passes through
+		// exitProcess, so this is where the log file is closed then.
+		PersistentPostRunE: func(*cobra.Command, []string) error {
+			if closeLog != nil {
+				closeLog()
+			}
+			return nil
+		},
 	}
 
 	// Global flags
-	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
+	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output: diagnostics at the debug level and above. Without --verbose or --quiet the level comes from the BENTOO_LOG_LEVEL environment variable, which accepts debug, info, warn or error in any letter case and defaults to info; --verbose and --quiet both outrank it, and --quiet outranks --verbose")
 	root.PersistentFlags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress non-error output")
 	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	root.PersistentFlags().String(overlayFlagName, "", "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so")

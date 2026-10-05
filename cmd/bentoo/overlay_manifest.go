@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -97,6 +98,7 @@ Examples:
 }
 
 func runManifest(cmd *cobra.Command, args []string, d *deps) error {
+	log := logging.FromContext(commandContext(cmd))
 	arg := ""
 	if len(args) == 1 {
 		arg = args[0]
@@ -104,19 +106,19 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 
 	scope, err := overlay.ParseManifestScope(arg)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("parsing the manifest scope: failed", "err", err)
 		return exitWith(1)
 	}
 
 	ctx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
 	targets, err := overlay.ResolveManifestTargets(ctx.OverlayPath, scope)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("resolving the manifest targets: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -132,11 +134,12 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 	defer cancel()
 
 	// Emit the lead-in line BEFORE building the reporter: once the live TUI
-	// program is running it owns the terminal, so direct logger writes would
-	// race with its rendering.
-	logger.Info("Regenerating Manifest for %d package(s)", len(targets))
+	// program is running it owns the terminal, so a direct stderr write would
+	// race with its rendering. It is a count line the operator reads as part
+	// of the command's output, so it prints bare (ui_notes.go).
+	uiInfo(fmt.Sprintf("Regenerating Manifest for %d package(s)", len(targets)))
 
-	reporter, finishUI := chooseManifestReporter(d, ctx.Config, manifestFlags.DryRun, runCtx, cancel)
+	reporter, finishUI := chooseManifestReporter(log, d, ctx.Config, manifestFlags.DryRun, runCtx, cancel)
 
 	opts := &overlay.ManifestOptions{
 		Keep:           manifestFlags.Keep,
@@ -156,8 +159,8 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 
 	// The run ends in a report, and it ends in exactly one (S046-R1.1).
 	//
-	// What stood here was logger.Info over overlay.FormatManifestResult — the
-	// same facts, formatted by the library, on stderr, in one mode, exportable
+	// What stood here was a stderr log line over overlay.FormatManifestResult —
+	// the same facts, formatted by the library, on stderr, in one mode, exportable
 	// by nothing. That sentence is what story 046 replaces: the counts are
 	// values now (ManifestResult.Ok/Failed), the report is assembled whole
 	// before any of it is displayed (R1.3), and the same value is rendered in
@@ -173,7 +176,7 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 	// stdout — rendering first would draw it into a frame the TUI then redraws
 	// over. This is the point in the run where the terminal has been handed
 	// back, so it is the first point the report may be drawn.
-	presentManifestReport(d, ctx.Config, buildManifestReport(&result, opts.DryRun))
+	presentManifestReport(log, d, ctx.Config, buildManifestReport(&result, opts.DryRun))
 
 	if opts.DryRun {
 		return nil
@@ -213,11 +216,11 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 // Dry-run skips the reporter entirely since there are no pkgdev invocations to
 // track. The returned func tears the UI down and must be called before any
 // post-run logging or exit; for the non-TUI paths it is a no-op.
-func chooseManifestReporter(d *deps, cfg *config.Config, dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
+func chooseManifestReporter(log *slog.Logger, d *deps, cfg *config.Config, dryRun bool, ctx context.Context, cancel context.CancelFunc) (tui.Reporter, func()) {
 	if dryRun {
 		return tui.Noop(), func() {}
 	}
-	if manifestUsesTUI(cfg, d.uiIsTerminal) {
+	if manifestUsesTUI(log, cfg, d.uiIsTerminal) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
 		return r, func() { prog.Stop(); _ = prog.Wait() }

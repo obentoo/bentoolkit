@@ -706,6 +706,7 @@ func TestEnvironmentFailureReportsCauseAsEnvironment(t *testing.T) {
 	applier, _, rec := newGateApplier(t,
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
+	applier.log = warns.logger()
 
 	_, err := applier.Apply(t.Context(), pkg, false)
 	if err == nil {
@@ -1022,6 +1023,7 @@ func TestPreflightRefusalStatesTheCauseWasTheEnvironment(t *testing.T) {
 	applier, _, rec := newGateApplier(t,
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
+	applier.log = warns.logger()
 
 	_, err := applier.Apply(t.Context(), pkg, false)
 	if err == nil {

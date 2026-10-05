@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -30,9 +30,10 @@ the command driven by the systemd timer.`,
 }
 
 func runSnapshotRun(cmd *cobra.Command, _ []string, d *deps) error {
-	cfg, path, err := loadSnapshotConfig()
+	log := logging.FromContext(commandContext(cmd))
+	cfg, path, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot run: %v", err)
+		log.Error("snapshot run: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -72,25 +73,25 @@ func runSnapshotRun(cmd *cobra.Command, _ []string, d *deps) error {
 	// Ensure the engine's native config exists (btrbk.conf or the snapper
 	// configs) so the run is self-contained even if 'apply' was never executed.
 	if err := snapshot.WriteEngineConfig(ctx, cfg, path, d.snapshotRunner); err != nil {
-		logger.Error("snapshot run: render engine config: %v", err)
+		log.Error("snapshot run: render engine config: failed", "err", err)
 		return exitWith(1)
 	}
 
-	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner)
+	mgr, err := snapshot.NewManager(*cfg, path, d.snapshotRunner, snapshot.WithManagerLogger(log))
 	if err != nil {
-		logger.Error("snapshot run: %v", err)
+		log.Error("snapshot run: failed", "err", err)
 		return exitWith(1)
 	}
 
 	result, runErr := mgr.Run(ctx)
 	if perr := result.SaveLastRun(); perr != nil {
-		logger.Warn("snapshot run: persist result: %v", perr)
+		log.Warn("snapshot run: persist result: failed", "err", perr)
 	}
 
 	// The run ends in a report, and it ends in exactly one (S046-R1.2).
 	//
 	// What stood here was output.PrintSuccess("snapshot run completed (%d
-	// stages)") on the way out of a successful run, and logger.Error with the
+	// stages)") on the way out of a successful run, and log.Error with the
 	// pipeline's own error on the way out of a failed one. Both are gone, and
 	// they are gone for the reason runManifest states for its own removal: two
 	// statements of one run's outcome, in two voices on two streams, is the
@@ -101,7 +102,7 @@ func runSnapshotRun(cmd *cobra.Command, _ []string, d *deps) error {
 	// which subvolume, and how each step came out — and the failure line said
 	// "snapshot run completed with failures", which is the number the report now
 	// prints beside the name of every step that produced it. The error paths
-	// ABOVE this point keep their logger.Error calls, and the rule is the same
+	// ABOVE this point keep their log.Error calls, and the rule is the same
 	// one: before a report exists, the log line is the only statement there is;
 	// after it exists, a second one is a competing account of the same run.
 	//
@@ -113,7 +114,7 @@ func runSnapshotRun(cmd *cobra.Command, _ []string, d *deps) error {
 	// cancellation as a sentence in the same string field it uses for ordinary
 	// failures, so the context — which cannot be mistaken for anything else — is
 	// what the report is told.
-	presentSnapshotReport(d, snapshotReportConfig(),
+	presentSnapshotReport(log, d, snapshotReportConfig(log),
 		buildSnapshotReport(&result, cfg.Engine.Subvolumes, ctx.Err() != nil))
 
 	if runErr != nil {

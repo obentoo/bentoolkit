@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/obentoo/bentoolkit/internal/realign"
 )
@@ -32,7 +31,6 @@ func TestS060GuardDepsDefaultsOfTheOtherCommands(t *testing.T) {
 		{"confirmRealignPublish", d.confirmRealignPublish, confirmAction},
 		{"realignPublishIsInteractive", d.realignPublishIsInteractive, d.registryPromptIsInteractive},
 		{"realignPublishIsInteractive (production)", d.realignPublishIsInteractive, stdinAndStdoutAreTerminals},
-		{"reviewWarnf", d.reviewWarnf, logger.Warn},
 		{"newClaudeAsker", d.newClaudeAsker, newClaudeCodeAsker},
 		{"prunePlanner", d.prunePlanner, overlay.PlanPrune},
 		{"pruneExecutor", d.pruneExecutor, overlay.ExecutePrune},

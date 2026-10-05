@@ -68,7 +68,7 @@ func envelopePlan() validationPlan {
 
 // checkRunOf composes the adapter the way the check path composes it.
 func checkRunOf(plan validationPlan, results []validate.EbuildResult) report.Run {
-	return checkReport(envelopeScan(), buildReport(plan, results))
+	return checkReport(discardLog(), envelopeScan(), buildReport(plan, results))
 }
 
 // TestBuildReportEnvelopeNamesTheCheckKind pins R4.1 at the producer. The

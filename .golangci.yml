@@ -20,6 +20,7 @@ linters:
     - forbidigo
     - nolintlint
     - gochecknoglobals
+    - sloglint
 
   settings:
     errcheck:
@@ -51,6 +52,14 @@ linters:
       # Resolve the package behind an identifier, so a renamed import of os
       # (`import osx "os"`) cannot hide an os.Exit from the rule above.
       analyze-types: true
+    sloglint:
+      # Story 062 (R5.4, R5.5): no package-level slog logger, constant
+      # messages, key-value pairs only, snake_case keys.
+      no-global: all
+      static-msg: true
+      kv-only: true
+      key-naming-case: snake
+      args-on-sep-lines: false
     gosec:
       # G204 (subprocess launched with variable) is intentionally NOT excluded:
       # T6 added ValidateRepoURL/ValidateBranch so every git invocation now runs
@@ -105,6 +114,9 @@ linters:
         linters:
           - errcheck
           - gosec
+          # R5.5 binds production diagnostics; a test logs hostile, built
+          # messages and attributes on purpose (the redaction tests).
+          - sloglint
           # A test table carrying a context per case is idiomatic.
           - containedctx
 

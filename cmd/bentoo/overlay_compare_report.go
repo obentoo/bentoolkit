@@ -29,11 +29,11 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -920,13 +920,13 @@ func compareOneLine(s string) string {
 // `func (r CompareRun) Sections` emits them and both paths read the same
 // sentences from the same field. This function is back to the three steps
 // `func presentManifestReport` takes, which is what S047-R1.2 asked of it.
-func presentCompareReport(d *deps, cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
+func presentCompareReport(log *slog.Logger, d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(log, cfg, false, d.uiIsTerminal)
 	content := report.SectionOptions{ShowAll: autoupdateAll}
 	if err := renderCheckReportIn(mode, run.Sections(content), render.Options{}); err != nil {
-		logger.Warn("the report could not be rendered: %v", err)
+		log.Warn("the report could not be rendered", "err", err)
 	}
-	exportReport(run)
+	exportReport(log, run)
 }
 
 // compareRunNotes is what a comparison run has to say about ITSELF: the

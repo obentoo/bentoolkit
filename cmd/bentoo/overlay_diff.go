@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -35,9 +35,10 @@ func gitDiffFoundDifferences(err error) bool {
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -49,7 +50,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		gitArgs = append(gitArgs, "--staged")
 	}
 	if err := validateGitPathArgs(args); err != nil {
-		logger.Error("%v", err)
+		log.Error("invalid path argument", "err", err)
 		return exitWith(1)
 	}
 	gitArgs = append(gitArgs, args...)
@@ -64,7 +65,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		if gitDiffFoundDifferences(err) {
 			return nil
 		}
-		logger.Error("running git diff: %v", err)
+		log.Error("running git diff: failed", "err", err)
 		return exitWith(1)
 	}
 	return nil

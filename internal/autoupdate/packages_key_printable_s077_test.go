@@ -92,7 +92,7 @@ func TestS077LintNamesNoRawKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "packages.toml"), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if !errors.Is(err, ErrInvalidPackageKey) {
 		t.Fatalf("LintPackagesConfig err = %v, want ErrInvalidPackageKey", err)
 	}
@@ -115,8 +115,8 @@ func TestS077PrintableKeysAndOtherErrorsUnchanged(t *testing.T) {
 		t.Fatalf("decoded %d records, want 4", len(cfg.Packages))
 	}
 	// A printable but malformed key still loads and is refused per record.
-	if verr := ValidatePackageConfig("../x", new(cfg.Packages["../x"])); !errors.Is(verr, ErrInvalidPackageKey) {
-		t.Errorf("ValidatePackageConfig(../x) = %v, want ErrInvalidPackageKey", verr)
+	if verr := ValidatePackageConfig(nil, "../x", new(cfg.Packages["../x"])); !errors.Is(verr, ErrInvalidPackageKey) {
+		t.Errorf("ValidatePackageConfig(nil, ../x) = %v, want ErrInvalidPackageKey", verr)
 	}
 
 	if _, err := decodePackagesConfig([]byte("[\"cat/pkg\"\nurl = 1\n")); err == nil || !strings.Contains(err.Error(), "failed to parse packages.toml") {
@@ -142,7 +142,7 @@ func TestS077LintTextScanNamesNoRawKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "packages.toml"), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if err == nil {
 		t.Fatal("a file holding a raw ESC byte loaded")
 	}

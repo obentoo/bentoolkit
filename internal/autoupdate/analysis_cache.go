@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // Error variables for analysis cache errors
@@ -58,6 +59,21 @@ type AnalysisCache struct {
 	// baseEntries is the per-key JSON of Entries as last loaded or saved; a
 	// save merges against it (see mergeState).
 	baseEntries map[string]json.RawMessage
+	// log receives the cache's diagnostics; nil discards them (see logger).
+	log *slog.Logger
+}
+
+// logger returns the cache's logger, or a discarding one when none was set.
+func (c *AnalysisCache) logger() *slog.Logger {
+	return logging.OrDiscard(c.log)
+}
+
+// WithAnalysisCacheLogger sets the logger the cache reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithAnalysisCacheLogger(l *slog.Logger) AnalysisCacheOption {
+	return func(c *AnalysisCache) {
+		c.log = l
+	}
 }
 
 // AnalysisCacheOption is a functional option for configuring AnalysisCache
@@ -186,9 +202,9 @@ func (c *AnalysisCache) Get(pkg string) (*PackageConfig, bool) {
 	// miss so the caller re-runs analysis. The read lock is released above
 	// before Delete (which acquires the write lock) to avoid a deadlock.
 	if err := c.validateEntry(entry); err != nil {
-		infoLogf("analysis cache entry for %s invalidated: %v", pkg, err)
+		c.logger().Info("analysis cache entry invalidated", "package", pkg, "err", err)
 		if delErr := c.Delete(pkg); delErr != nil {
-			logger.Debug("failed to delete invalidated cache entry for %s: %v", pkg, delErr)
+			c.logger().Debug("failed to delete invalidated cache entry", "package", pkg, "err", delErr)
 		}
 		return nil, false
 	}

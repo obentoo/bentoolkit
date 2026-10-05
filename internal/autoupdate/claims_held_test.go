@@ -125,7 +125,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			overlay := writeReconcileOverlay(t, tc.dirs)
-			got := Reconcile(overlay, tc.cfgs)
+			got := Reconcile(nil, overlay, tc.cfgs)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("Reconcile() =\n  %+v\nwant\n  %+v", got, tc.want)
 			}
@@ -155,7 +155,7 @@ func TestReconcileLeavesHoldAndEnabledAlone(t *testing.T) {
 		"net-misc/rclone": off,
 	}
 
-	_ = Reconcile(overlay, cfgs)
+	_ = Reconcile(nil, overlay, cfgs)
 
 	// Copied out of the map before the checks: IsHeld/IsEnabled have pointer
 	// receivers and a map value is not addressable.

@@ -27,7 +27,7 @@ func TestHeaderExpansion_BentooFetchStaysLiteral(t *testing.T) {
 				t.Setenv(name, secret)
 
 				ref := "${" + name + "}"
-				got := SubstituteEnvVars("Bearer "+ref, header)
+				got := SubstituteEnvVars(lc.logger(), "Bearer "+ref, header)
 				if got != "Bearer "+ref {
 					t.Errorf("SubstituteEnvVars expanded %s in %s: got %q, want %q", name, header, got, "Bearer "+ref)
 				}
@@ -93,7 +93,7 @@ func TestHeaderExpansion_BentooFetchStaysLiteral(t *testing.T) {
 		t.Run(name+" still expands", func(t *testing.T) {
 			lc := captureWarnLogs(t)
 			t.Setenv(name, "ordinary-value")
-			if got := SubstituteEnvVars("Bearer ${"+name+"}", "Authorization"); got != "Bearer ordinary-value" {
+			if got := SubstituteEnvVars(lc.logger(), "Bearer ${"+name+"}", "Authorization"); got != "Bearer ordinary-value" {
 				t.Errorf("got %q, want %q — %s is not a BENTOO_FETCH_ variable", got, "Bearer ordinary-value", name)
 			}
 			if c := lc.count(); c != 0 {

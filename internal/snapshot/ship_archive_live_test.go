@@ -297,7 +297,7 @@ func TestLive_PruneOnDemandSkipsAnUnshippedSubvolume(t *testing.T) {
 		parents:   newMapParentStore(),
 		retention: Retention{Daily: 1},
 	}
-	warnings := captureWarn(t)
+	warnings := captureWarn(t, a)
 
 	// "/var" has no directory on the remote at all: nothing was ever shipped for
 	// it. It is listed FIRST, so a `return` where the code must `continue` would

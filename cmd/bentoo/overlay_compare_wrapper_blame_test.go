@@ -206,7 +206,7 @@ func realignReviewerOverAsker(t *testing.T, asker claudeAsker) overlay.RealignRe
 	t.Helper()
 	td := defaultDeps()
 	stubClaudeAsker(td, func() (claudeAsker, error) { return asker, nil })
-	reviewer, err := newRealignReviewer(cmdReviewBudget, td)
+	reviewer, err := newRealignReviewer(discardLog(), cmdReviewBudget, td)
 	if err != nil {
 		t.Fatalf("newRealignReviewer returned %v, want nil", err)
 	}

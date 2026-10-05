@@ -3,7 +3,7 @@ package autoupdate
 // Authored for story 051 (llm-agent-least-privilege), sub-task 2.2 — the
 // upstream host set and WebFetch domain rules (S051-R3.3, R3.6, R8.1).
 //
-// Names pinned by tasks.md: upstreamHosts(pkg string, urls ...string) []string,
+// Names pinned by tasks.md: upstreamHosts(nil, pkg string, urls ...string) []string,
 // webFetchDomainRule(host string) (string, error), FuzzWebFetchDomainRule. Kept
 // apart from agent_permissions_test.go so 2.1 can go green before 2.2 exists.
 
@@ -33,7 +33,7 @@ func hostSet(hosts []string) map[string]int {
 // GitHub and must stay DISTINCT hosts rather than fold into github.com. Split:
 // two URLs on one host (different port, userinfo, path) are one host, once.
 func TestUpstreamHosts_FromURLs(t *testing.T) {
-	hosts := upstreamHosts("dev-libs/foo",
+	hosts := upstreamHosts(nil, "dev-libs/foo",
 		"https://dl.example.org/foo/1.0.tar.gz",
 		"https://user:pw@dl.example.org:8443/foo/2.0.tar.gz",
 		"http://mirror.example.net:8080/x",
@@ -86,7 +86,7 @@ func TestUpstreamHosts_RejectsHostileValues(t *testing.T) {
 	for u := range bad {
 		urls = append(urls, u)
 	}
-	hosts := upstreamHosts(pkg, urls...)
+	hosts := upstreamHosts(lc.logger(), pkg, urls...)
 	set := hostSet(hosts)
 	if set["good.example.org"] != 1 {
 		t.Errorf("the valid host was lost among hostile ones; hosts = %q", hosts)
@@ -124,14 +124,14 @@ func quoteForWarn(v string) string { return fmt.Sprintf("%q", v) }
 // duplicate one of them.
 func TestUpstreamHosts_AlwaysIncludesGitHub(t *testing.T) {
 	for _, urls := range [][]string{nil, {"https://github.com/o/r/archive/v1.tar.gz", "https://codeload.github.com/o/r/tar.gz/v1"}} {
-		hosts := upstreamHosts("dev-libs/foo", urls...)
+		hosts := upstreamHosts(nil, "dev-libs/foo", urls...)
 		if len(hosts) != len(githubHosts) {
-			t.Errorf("upstreamHosts(%q) = %q, want exactly %q", urls, hosts, githubHosts)
+			t.Errorf("upstreamHosts(nil, %q) = %q, want exactly %q", urls, hosts, githubHosts)
 		}
 		set := hostSet(hosts)
 		for _, h := range githubHosts {
 			if set[h] != 1 {
-				t.Errorf("upstreamHosts(%q): %q appears %d times, want 1", urls, h, set[h])
+				t.Errorf("upstreamHosts(nil, %q): %q appears %d times, want 1", urls, h, set[h])
 			}
 		}
 	}

@@ -71,7 +71,7 @@ func TestFetchAuthDistfileResolvesTheOverlayVersion(t *testing.T) {
 	)
 
 	dest := t.TempDir()
-	res, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+	res, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 		OverlayPath: overlay, Package: "app-misc/example", DestDir: dest,
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestFetchAuthDistfileHonoursAnExplicitVersion(t *testing.T) {
 		"app-misc/example/example-1.2.3.ebuild")
 
 	dest := t.TempDir()
-	res, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+	res, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 		OverlayPath: overlay, Package: "app-misc/example", Version: "1.0.0", DestDir: dest,
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func TestFetchAuthDistfileRequestErrors(t *testing.T) {
 
 	t.Run("no record for the package", func(t *testing.T) {
 		overlay := authFetchOverlay(t, authFetchRecord("app-misc/example", url))
-		_, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+		_, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 			OverlayPath: overlay, Package: "app-misc/absent", Version: "1", DestDir: t.TempDir(),
 		})
 		if !errors.Is(err, ErrPackageNotInRegistry) {
@@ -134,7 +134,7 @@ parser = "json"
 path = "tag_name"
 comments = """an ordinary package"""
 `)
-		_, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+		_, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 			OverlayPath: overlay, Package: "app-misc/plain", Version: "1", DestDir: t.TempDir(),
 		})
 		if !errors.Is(err, ErrNoAuthFetch) {
@@ -146,7 +146,7 @@ comments = """an ordinary package"""
 		overlay := authFetchOverlay(t,
 			authFetchRecord("app-misc/example@stable", url)+authFetchRecord("app-misc/example@testing", url))
 
-		_, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+		_, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 			OverlayPath: overlay, Package: "app-misc/example", Version: "1", DestDir: t.TempDir(),
 		})
 		if !errors.Is(err, ErrAmbiguousPackageKey) {
@@ -164,7 +164,7 @@ comments = """an ordinary package"""
 		overlay := authFetchOverlay(t,
 			authFetchRecord("app-misc/example@stable", url)+authFetchRecord("app-misc/example@testing", url))
 
-		res, err := FetchAuthDistfile(context.Background(), AuthDistfileRequest{
+		res, err := FetchAuthDistfile(context.Background(), nil, AuthDistfileRequest{
 			OverlayPath: overlay, Package: "app-misc/example@testing", Version: "1", DestDir: t.TempDir(),
 		})
 		if err != nil {

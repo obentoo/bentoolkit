@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -49,12 +51,12 @@ Examples:
 // loadSnapshotConfig resolves, loads, and validates the snapshot config. Used by
 // the side-effecting verbs (apply/run) so an unknown driver or missing dependency
 // fails fast before anything is written (R1.3, R6.1, G3).
-func loadSnapshotConfig() (*snapshot.Config, string, error) {
-	cfg, path, err := loadSnapshotConfigLenient()
+func loadSnapshotConfig(log *slog.Logger) (*snapshot.Config, string, error) {
+	cfg, path, err := loadSnapshotConfigLenient(log)
 	if err != nil {
 		return nil, path, err
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.ValidateWith(log); err != nil {
 		return nil, path, err
 	}
 	return cfg, path, nil
@@ -73,7 +75,7 @@ func printDryRunPlan(lines []string) {
 // loadSnapshotConfigLenient resolves and loads the config without validation, for
 // read-only inspection verbs (list/status) that should report even when a driver
 // binary is absent (A3).
-func loadSnapshotConfigLenient() (*snapshot.Config, string, error) {
+func loadSnapshotConfigLenient(log *slog.Logger) (*snapshot.Config, string, error) {
 	path := snapshotConfigPath
 	if path == "" {
 		p, err := snapshot.FindConfigPath()
@@ -82,7 +84,7 @@ func loadSnapshotConfigLenient() (*snapshot.Config, string, error) {
 		}
 		path = p
 	}
-	cfg, err := snapshot.LoadFrom(path)
+	cfg, err := snapshot.LoadFromWith(path, log)
 	if err != nil {
 		return nil, path, err
 	}

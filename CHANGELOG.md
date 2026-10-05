@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A JSON log file, and `BENTOO_LOG_LEVEL`.** Every run appends its
+  diagnostics to `$XDG_STATE_HOME/bentoo/logs/bentoo.log`
+  (`~/.local/state/bentoo/logs/bentoo.log` by default), one JSON object per
+  line, at `info` and above whatever `--quiet` says. `BENTOO_LOG_LEVEL`
+  (`debug`, `info`, `warn`, `error`) sets the stderr level when neither
+  `--verbose` nor `--quiet` is given.
+
 - **`make build` is reproducible, and `make checksums` writes `SHA256SUMS`.**
   The build date stamped into the binaries was the wall clock, and the
   checkout's path was embedded, so two builds of one commit never matched.
@@ -93,6 +100,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gnome-shell-extension-appindicator`.
 
 ### Changed
+
+- **Diagnostics on stderr are `key=value` lines, and secrets are redacted
+  from them.** bentoo's warnings and errors now go through `log/slog`: each is
+  one line such as `level=WARN msg="loading config: failed" err="..."`, with
+  the variable data in attributes instead of inside the sentence. A failing
+  command's cause reads `level=ERROR msg="command failed" err="..."`. Every
+  secret bentoo resolved, and the value of any credential-named attribute, is
+  written as `***`. Command results, reports and prompts keep their shape.
 
 - **New dependency: `github.com/godbus/dbus/v5` v5.2.2.** The `bentoo-tray`
   desktop notifier speaks D-Bus (StatusNotifierItem, dbusmenu, Notifications,

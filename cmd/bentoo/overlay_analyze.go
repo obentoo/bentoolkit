@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -60,9 +61,10 @@ Examples:
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	appCtx, err := loadAppContextNoValidation(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -71,7 +73,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// Determine config directory for autoupdate
 	configDir, err := autoupdateConfigDir()
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("autoupdate config directory unavailable", "err", err)
 		return exitWith(1)
 	}
 
@@ -107,10 +109,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
 	analyzerOpts := []autoupdate.AnalyzerOption{
 		autoupdate.WithAnalyzerConfigDir(configDir),
+		autoupdate.WithAnalyzerLogger(log),
 	}
 	llmCfg := appCtx.Config.Autoupdate.LLM
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
-		logger.Warn("LLM provider %q unavailable; falling back to heuristic analysis: %v", llmCfg.Provider, err)
+	if p, err := newConfiguredLLMProvider(log, llmCfg); err != nil {
+		log.Warn("LLM provider unavailable; falling back to heuristic analysis", "provider", llmCfg.Provider, "err", err)
 	} else if p != nil {
 		analyzerOpts = append(analyzerOpts, autoupdate.WithAnalyzerLLMClient(p))
 	}
@@ -118,7 +121,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// Create analyzer
 	analyzer, err := autoupdate.NewAnalyzer(overlayPath, analyzerOpts...)
 	if err != nil {
-		logger.Error("failed to initialize analyzer: %v", err)
+		log.Error("failed to initialize analyzer", "err", err)
 		return exitWith(1)
 	}
 
@@ -132,15 +135,15 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 
 	// Handle different modes
 	if analyzeAll {
-		return runAnalyzeAll(runCtx, analyzer, opts, release)
+		return runAnalyzeAll(runCtx, log, analyzer, opts, release)
 	}
-	return runAnalyzeSingle(runCtx, analyzer, args[0], opts, release)
+	return runAnalyzeSingle(runCtx, log, analyzer, args[0], opts, release)
 }
 
 // runAnalyzeSingle handles single package analysis and returns the command's
 // exit status (func exitWith). ctx is the analysis context; release ends it,
 // and runs before the confirmation prompt.
-func runAnalyzeSingle(ctx context.Context, analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
+func runAnalyzeSingle(ctx context.Context, log *slog.Logger, analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Printf("Analyzing %s...\n", pkg)
 
 	result, err := analyzer.Analyze(ctx, pkg, opts)
@@ -164,13 +167,13 @@ func runAnalyzeSingle(ctx context.Context, analyzer *autoupdate.Analyzer, pkg st
 			output.Warning.Printf("  Extracted: %s\n", result.ExtractedVersion)
 			output.Warning.Printf("  Ebuild:    %s\n", result.EbuildVersion)
 			if !confirmAfterRelease(release, "Save schema anyway?") {
-				logger.Info("Schema not saved")
+				log.Info("Schema not saved")
 				return nil
 			}
 		}
 
 		if err := analyzer.SaveSchema(pkg, result.SuggestedSchema); err != nil {
-			logger.Error("failed to save schema: %v", err)
+			log.Error("failed to save schema", "err", err)
 			return exitWith(1)
 		}
 		output.Success.Println("\n✓ Schema saved to packages.toml")
@@ -182,7 +185,7 @@ func runAnalyzeSingle(ctx context.Context, analyzer *autoupdate.Analyzer, pkg st
 // exit status: BatchResult.ExitCode through func exitWith — 0 all ok, 1
 // partial, 2 total failure. ctx is the analysis context; release ends it, and
 // runs before the confirmation prompt.
-func runAnalyzeAll(ctx context.Context, analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
+func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
 	output.Info.Println("Analyzing all packages without schema...")
 
 	// AnalyzeAll never returns a fatal error: enumeration and per-package
@@ -224,7 +227,7 @@ func runAnalyzeAll(ctx context.Context, analyzer *autoupdate.Analyzer, opts auto
 	// Ask for confirmation to save all successful schemas
 	output.Info.Printf("\n%d schema(s) ready to save\n", successful)
 	if !confirmAfterRelease(release, "Save all successful schemas?") {
-		logger.Info("Schemas not saved")
+		log.Info("Schemas not saved")
 		return exitWith(result.ExitCode())
 	}
 

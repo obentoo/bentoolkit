@@ -30,8 +30,9 @@ package main
 // and marking it incomplete would have printed a sentence that is not true of it.
 
 import (
+	"log/slog"
+
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -243,10 +244,10 @@ func snapshotStepFacts(stage snapshot.StageResult) report.SnapshotStep {
 // leaves the flag, the environment and the terminal deciding — exactly what this
 // command did before the key existed. The miss is logged at debug level rather
 // than warned about, because on the intended host it is the normal case.
-func snapshotReportConfig() *config.Config {
+func snapshotReportConfig(log *slog.Logger) *config.Config {
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Debug("snapshot run: no bentoo configuration was read, so ui.mode is not consulted: %v", err)
+		log.Debug("snapshot run: no bentoo configuration was read, so ui.mode is not consulted", "err", err)
 		return nil
 	}
 	return cfg
@@ -294,8 +295,8 @@ func snapshotReportConfig() *config.Config {
 // The two are independent answers to the same report. A terminal that went away
 // mid-write is no reason to also withhold the file, which may be the only copy
 // left — and on a timer-driven run it usually is.
-func presentSnapshotReport(d *deps, cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
+func presentSnapshotReport(log *slog.Logger, d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(log, cfg, false, d.uiIsTerminal)
 
 	// Two questions, kept apart. What the report should SAY — list every step
 	// that succeeded, or count them — is report.SectionOptions, answered here
@@ -311,7 +312,7 @@ func presentSnapshotReport(d *deps, cfg *config.Config, run report.Run) {
 	// needed it and knows nothing about one: it takes sections, and nothing below
 	// it can tell a snapshot run from a check.
 	if err := renderCheckReportIn(mode, run.Sections(content), render.Options{}); err != nil {
-		logger.Warn("the report could not be rendered: %v", err)
+		log.Warn("the report could not be rendered", "err", err)
 	}
 
 	// LAST, and unconditional. exportReport is the CLI's one export path
@@ -319,5 +320,5 @@ func presentSnapshotReport(d *deps, cfg *config.Config, run report.Run) {
 	// rather than fails when the path cannot be written, and it returns nothing
 	// so this run's exit status cannot be altered by a copy of an answer already
 	// delivered above.
-	exportReport(run)
+	exportReport(log, run)
 }

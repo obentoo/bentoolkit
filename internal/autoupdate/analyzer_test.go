@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1897,16 +1898,12 @@ func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMe
 }
 func (s *patternLLMStub) GetModel() string { return "pattern-stub" }
 
-// captureInfoLogs swaps the package-private infoLogf sink with a recorder for
-// the duration of the test and restores it on cleanup. It reuses the logCapture
-// type defined in httpclient_test.go.
+// captureInfoLogs returns a capture of Info-level records (the logCapture type
+// is defined in httpclient_test.go); the test injects lc.logger() into the
+// component it exercises.
 func captureInfoLogs(t *testing.T) *logCapture {
 	t.Helper()
-	lc := &logCapture{}
-	orig := infoLogf
-	infoLogf = lc.record
-	t.Cleanup(func() { infoLogf = orig })
-	return lc
+	return &logCapture{level: slog.LevelInfo}
 }
 
 // TestValidatePattern_AcceptsValid verifies that valid bounded RE2 patterns —
@@ -2123,7 +2120,7 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 	logs := captureInfoLogs(t)
 
 	cacheDir := t.TempDir()
-	cache, err := NewAnalysisCache(cacheDir)
+	cache, err := NewAnalysisCache(cacheDir, WithAnalysisCacheLogger(logs.logger()))
 	if err != nil {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
@@ -2179,7 +2176,8 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 	lines := logs.all()
 	found := false
 	for _, line := range lines {
-		if strings.Contains(line, "analysis cache entry for "+pkg+" invalidated") {
+		// Since story 062 the package is an attribute, not part of the message.
+		if strings.HasPrefix(line, "analysis cache entry invalidated") && strings.Contains(line, `package="`+pkg+`"`) {
 			found = true
 		}
 	}

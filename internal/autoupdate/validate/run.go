@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -121,6 +122,10 @@ type Options struct {
 	// instead of a directory. Concurrent applies make that a race; a sequential
 	// one merely makes it wrong later.
 	DistNames func(pkgDir string) ([]string, error)
+
+	// Logger receives the run's diagnostics. Nil discards them (story 062,
+	// R5.3).
+	Logger *slog.Logger
 
 	// StagedManifest answers, for ONE package directory, the Manifest content
 	// that package's STAGED tree must carry before a build gate can run in it
@@ -538,6 +543,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 // document every `overlay validate --json` consumer already parses, to say
 // something that is not a verdict on the candidate.
 func recordStagedGates(ctx context.Context, res EbuildResult, target ebuildTarget, depth Depth, opts Options) {
+	log := logging.OrDiscard(opts.Logger)
 	// THE CONDITION IS "A TREE WAS STAGED", NOT "THE DEPTH WAS HIGH ENOUGH", and
 	// the two branches here are only its necessary half.
 	//
@@ -579,10 +585,10 @@ func recordStagedGates(ctx context.Context, res EbuildResult, target ebuildTarge
 	// the package it is about.
 	staged, err := StagedTreePath(stagingRoot, target.atom, target.version)
 	if err != nil {
-		logger.Warn("what the gates reported about %s-%s is NOT recorded, because the staged tree it would be "+
-			"recorded beside cannot be named: %v (the run's own report is unaffected; a tree left under the "+
+		log.Warn("what the gates reported is NOT recorded, because the staged tree it would be "+
+			"recorded beside cannot be named (the run's own report is unaffected; a tree left under the "+
 			"staging root keeps the unknown outcome an unrecorded tree has always had)",
-			target.atom, target.version, err)
+			"package", target.atom, "version", target.version, "err", err)
 		return
 	}
 
@@ -631,11 +637,11 @@ func recordStagedGates(ctx context.Context, res EbuildResult, target ebuildTarge
 	// It withholds the WRITE and nothing else. The tree itself stays on disk as
 	// the stopped run's evidence, and stays kept.
 	if err := ctx.Err(); err != nil {
-		logger.Warn("the run was interrupted, so what the gates of %s-%s reported is NOT recorded beside %s: "+
+		log.Warn("the run was interrupted, so what the gates reported is NOT recorded beside the staged tree: "+
 			"they were stopped rather than answered, and recording them would hand the next reader an account "+
 			"of a run nobody interrupted. The tree stays under the staging root, keeping the unknown outcome "+
-			"an unrecorded tree has always had (%v)",
-			target.atom, target.version, staged, err)
+			"an unrecorded tree has always had",
+			"package", target.atom, "version", target.version, "path", staged, "err", err)
 		return
 	}
 
@@ -670,9 +676,9 @@ func recordStagedGates(ctx context.Context, res EbuildResult, target ebuildTarge
 		Depth:      depth,
 		Gates:      res.Gates,
 	}); err != nil {
-		logger.Warn("could not record what the gates said about %s-%s beside %s: %v (the run's own report is "+
+		log.Warn("could not record what the gates said beside the staged tree (the run's own report is "+
 			"unaffected; the tree stays under the staging root, keeping the unknown outcome an unrecorded "+
-			"tree has always had)", target.atom, target.version, staged, err)
+			"tree has always had)", "package", target.atom, "version", target.version, "path", staged, "err", err)
 	}
 }
 

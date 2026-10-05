@@ -26,13 +26,14 @@ package main
 // carries the Red.
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // s060FailWithSites are the single-line flag-check failures of `overlay
@@ -91,8 +92,8 @@ func TestS060FailWithSiteStderrIsUnchanged(t *testing.T) {
 			if code != tt.code {
 				t.Errorf("exit status = %d, want %d (R7.1, U2)", code, tt.code)
 			}
-			if stderr != tt.line+"\n" {
-				t.Errorf("stderr = %q\nwant     %q — the line, byte-identical, exactly once (R7.1)", stderr, tt.line+"\n")
+			if want := s060CauseRecord(tt.line); stderr != want {
+				t.Errorf("stderr = %q\nwant     %q — the line, byte-identical, exactly once (R7.1)", stderr, want)
 			}
 			if stdout != "" {
 				t.Errorf("stdout = %q, want nothing", stdout)
@@ -108,13 +109,10 @@ func TestS060FailWithSiteLogFileIsUnchanged(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newTestCLI(t)
 			t.Setenv("XDG_STATE_HOME", filepath.Join(c.Home(), ".local", "state"))
-			if err := logger.Default().EnableFileLogging(); err != nil {
-				t.Fatalf("EnableFileLogging: %v", err)
-			}
-			t.Cleanup(logger.Default().Close)
 
+			// The invocation logger writes its file unbuffered, and execute
+			// closes it once the cause is logged (story 062).
 			c.Run(tt.args...)
-			logger.Default().Close() // flush and detach before reading
 
 			data, err := os.ReadFile(filepath.Join(c.Home(), ".local", "state", "bentoo", "logs", "bentoo.log"))
 			if err != nil {
@@ -122,7 +120,8 @@ func TestS060FailWithSiteLogFileIsUnchanged(t *testing.T) {
 			}
 			n := 0
 			for _, l := range strings.Split(string(data), "\n") {
-				if strings.HasSuffix(l, "] ERROR: "+tt.line) {
+				var rec struct{ Level, Msg, Err string }
+				if json.Unmarshal([]byte(l), &rec) == nil && rec.Level == "ERROR" && rec.Msg == "command failed" && rec.Err == tt.line {
 					n++
 				}
 			}
@@ -146,7 +145,6 @@ func TestS060FailWithSiteHandlerReturnsItsDiagnostic(t *testing.T) {
 
 			ctx, stop, policy := processContext()
 			defer stop()
-			logger.Default() // bind the logger before fd 2 moves
 			readOut := captureStream(t, 1, &os.Stdout)
 			readErr := captureStream(t, 2, &os.Stderr)
 			err := root.ExecuteContext(withSignalPolicy(ctx, policy))
@@ -170,4 +168,22 @@ func TestS060FailWithSiteHandlerReturnsItsDiagnostic(t *testing.T) {
 			}
 		})
 	}
+}
+
+// s060CauseRecord is the stderr record the invocation logger writes for a
+// failWith cause since story 062: one key=value line carrying the cause, byte
+// for byte, as its err attribute. It is rendered by the same TextHandler setup
+// logging.New uses, so the quoting is slog's own.
+func s060CauseRecord(cause string) string {
+	var b bytes.Buffer
+	h := slog.NewTextHandler(&b, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	slog.New(h).Error("command failed", "err", errors.New(cause))
+	return b.String()
 }

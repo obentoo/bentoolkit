@@ -8,7 +8,6 @@ import (
 
 	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -44,7 +43,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 		// the repair ABORTED — the file could not be read or parsed, or the
 		// rewrite failed the inertness gate. Both mean report it and change
 		// nothing; neither is a condition to retry around.
-		logger.Error("failed to repair packages.toml: %v", err)
+		ar.log().Error("failed to repair packages.toml", "err", err)
 		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
@@ -66,7 +65,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 	if err != nil {
 		// No diff means no review, and no review means no write: this gate exists
 		// to stop a change nobody has seen from being published.
-		logger.Error("failed to render the repair as a diff: %v", err)
+		ar.log().Error("failed to render the repair as a diff", "err", err)
 		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
@@ -92,7 +91,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 		// Write re-runs the inertness gate before the rename, so this covers both
 		// "the filesystem refused" and "the rewrite stopped being provably inert
 		// between the diff and now". Either way the registry is untouched.
-		logger.Error("failed to write the repaired packages.toml: %v", err)
+		ar.log().Error("failed to write the repaired packages.toml", "err", err)
 		output.Error.Fprintf(os.Stderr, "  The registry was NOT repaired: %v\n", err)
 		return exitWith(1)
 	}
@@ -104,7 +103,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 	// the file on disk can say whether the repair did what it claimed, and this
 	// is the run's own proof that `--lint --fix` followed by `--lint` is silent
 	// except for the findings no repair offers.
-	remaining, err := autoupdate.LintPackagesConfig(overlayPath)
+	remaining, err := autoupdate.LintPackagesConfig(ar.log(), overlayPath)
 	if err != nil {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.

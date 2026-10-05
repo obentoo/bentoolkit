@@ -3,6 +3,7 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -180,7 +181,7 @@ func (i LintIssue) String() string {
 // all — a TOML syntax error leaves nothing to lint. An unknown key is both: it
 // fails the load AND is reported as an issue, so the maintainer reads the same
 // per-record line the other rules produce instead of only a fatal error.
-func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
+func LintPackagesConfig(log *slog.Logger, overlayPath string) ([]LintIssue, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
 	if err != nil {
@@ -216,7 +217,7 @@ func LintPackagesConfig(overlayPath string) ([]LintIssue, error) {
 	}
 	for _, pkg := range sortedKeys(cfg.Packages) {
 		c := cfg.Packages[pkg]
-		if verr := ValidatePackageConfig(pkg, &c); verr != nil {
+		if verr := ValidatePackageConfig(log, pkg, &c); verr != nil {
 			issues = append(issues, LintIssue{
 				Package: pkg,
 				Rule:    LintInvalidConfig,

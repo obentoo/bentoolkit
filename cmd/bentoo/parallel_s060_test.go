@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -185,7 +186,7 @@ func TestS060ParallelSweepUsesItsOwnPlanner(t *testing.T) {
 	var gotPath, gotTarget string
 	calls := 0
 	d := defaultDeps()
-	d.sweepPlanner = func(path string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error) {
+	d.sweepPlanner = func(_ *slog.Logger, path string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error) {
 		calls++
 		gotPath, gotTarget = path, target
 		if _, ok := cfgs["app-editors/neovim"]; !ok {
@@ -214,7 +215,7 @@ func TestS060ParallelSweepUsesItsOwnPlanner(t *testing.T) {
 func TestS060ParallelDefaultDepsAreIndependent(t *testing.T) {
 	t.Parallel()
 	a, b := defaultDeps(), defaultDeps()
-	a.sweepPlanner = func(string, map[string]autoupdate.PackageConfig, string) (autoupdate.SweepBatch, error) {
+	a.sweepPlanner = func(*slog.Logger, string, map[string]autoupdate.PackageConfig, string) (autoupdate.SweepBatch, error) {
 		return autoupdate.SweepBatch{}, nil
 	}
 	a.registryWriter = func(string, map[string]string) error { return nil }

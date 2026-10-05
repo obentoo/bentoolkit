@@ -9,6 +9,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -49,7 +50,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		target = args[0]
 	}
 
-	batch, err := ar.deps.sweepPlanner(overlayPath, cfg.Packages, target)
+	batch, err := ar.deps.sweepPlanner(logging.FromContext(ctx), overlayPath, cfg.Packages, target)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -87,6 +88,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		// too, so it downloads distfiles too.
 		autoupdate.WithSweepDistdir(ar.dirs.Distdir, ar.dirs.ConfiguredDistdir),
 		autoupdate.WithSweepDistfilesCache(ar.dirs.Cache),
+		autoupdate.WithSweepLogger(ar.log()),
 	)
 	displaySweepReport(report)
 	return nil

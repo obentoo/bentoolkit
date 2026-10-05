@@ -193,17 +193,18 @@ func TestReviewReadingACachedAnswerIsStillARead(t *testing.T) {
 // TestReviewReadingNoOutcomeReachesTheOperatorAsAWarning is S047-R4.2, and it
 // is the half that makes the field worth having.
 //
-// Four warnLogf calls describe a review outcome (review.go:111, 122, 141, 145).
+// Four warnings used to describe a review outcome (review.go:111, 122, 141, 145).
 // Every one of them is now a row in the report, and a warning that duplicates a
 // visible row is noise printed ABOVE the thing it duplicates — which is the
 // boundary story 046 closed: a library does not format for an operator.
 //
-// The three warnLogf calls elsewhere in this package that describe something
+// The three warnings elsewhere in this package that describe something
 // else are out of scope and are deliberately not asserted here. What is
 // asserted is that no warning NAMES a package whose review failed.
 func TestReviewReadingNoOutcomeReachesTheOperatorAsAWarning(t *testing.T) {
-	warnings := captureReviewWarnings(t)
+	warnLog, warnings := captureReviewWarnings(t)
 	report, prov, opts := reviewFixture(t)
+	opts.Logger = warnLog
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("claude: exit status 1")}
 
 	AnnotateReviews(t.Context(), report, rev, prov, opts)

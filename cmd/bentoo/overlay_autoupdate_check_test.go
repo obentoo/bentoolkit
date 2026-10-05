@@ -31,6 +31,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -41,7 +42,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
@@ -277,7 +278,7 @@ func TestCheckRun_TallyCountsEachOutcomeExactlyOnce(t *testing.T) {
 
 	var tally report.Tally
 	_ = captureStdout(t, func() {
-		checked := checkPayload(runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
+		checked := checkPayload(discardLog(), runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
 			outcome := outcomes[entry.Package]
 			res := validate.EbuildResult{
 				Package: entry.Package,
@@ -815,7 +816,7 @@ func TestPendingValidationReturnsThePlanHalf(t *testing.T) {
 	run, printed := testAutoupdateRun(auOpts).runPendingValidation(t.Context(), t.TempDir(), t.TempDir(),
 		[]autoupdate.CheckResult{{Package: "app-misc/jq", CurrentVersion: "1.7.1", UpstreamVersion: "1.8.0", HasUpdate: true, Type: "source"}},
 		config.LLMConfig{})
-	got := checkPayload(run)
+	got := checkPayload(discardLog(), run)
 
 	if printed {
 		t.Error("the gated arm reported the plan as printed, but it never reached printValidationPrice — SkipPlan would then omit a section nobody had shown (R2.3)")
@@ -1080,11 +1081,20 @@ func TestNonEmptyScanStillRenders(t *testing.T) {
 // TestQuietModeSuppressesInfoMessages in internal/common/logger.
 func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
 	auOpts := testAutoupdateOptions()
-	logger.SetQuiet(true)
-	t.Cleanup(func() { logger.Default().SetLevel(logger.LevelInfo) })
+	// --quiet is the invocation logger's level (story 062): the run carries a
+	// logger at the level the flag resolves to.
+	quietLevel, err := logging.ResolveLevel(false, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quietRun := func() *autoupdateRun {
+		ar := testAutoupdateRun(auOpts)
+		ar.lg = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: quietLevel}))
+		return ar
+	}
 
 	empty := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
+		quietRun().presentCheckReport(finishedRun(report.AutoupdateCheck{}), noPlanPrinted)
 	})
 	if strings.TrimSpace(empty) != "" {
 		t.Errorf("a quiet run over an empty scan put %d bytes on stdout, which --quiet cannot reach — the one silence a quiet run has today would be gone (R5.3, D4)\n%s",
@@ -1092,7 +1102,7 @@ func TestEmptyScanUnderQuietIsSilent(t *testing.T) {
 	}
 
 	scanned := captureStdout(t, func() {
-		testAutoupdateRun(auOpts).presentCheckReport(finishedRun(report.AutoupdateCheck{Scanned: []report.PackageResult{
+		quietRun().presentCheckReport(finishedRun(report.AutoupdateCheck{Scanned: []report.PackageResult{
 			{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true},
 		}}), noPlanPrinted)
 	})

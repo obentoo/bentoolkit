@@ -1642,6 +1642,7 @@ func TestNewChecker_WarnsOnUnusedLLMPrompt(t *testing.T) {
 	_, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(cfg),
+		WithLogger(logs.logger()),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker failed: %v", err)
@@ -1670,6 +1671,7 @@ func TestNewChecker_WarnsOnUnusedLLMPrompt(t *testing.T) {
 	_, err = NewChecker(overlayDir,
 		WithConfigDir(configDir),
 		WithPackagesConfig(cfg),
+		WithLogger(logs2.logger()),
 	)
 	if err != nil {
 		t.Fatalf("second NewChecker failed: %v", err)
@@ -1873,6 +1875,7 @@ func TestNewChecker_NoProviderConfigured_WarnsAndSkipsLLM(t *testing.T) {
 		WithConfigDir(configDir),
 		WithPackagesConfig(cfg),
 		WithRateLimiter(unlimitedRateLimiter()),
+		WithLogger(logs.logger()),
 		WithLLMProviderConfigured(false), // no provider configured
 	)
 	if err != nil {
@@ -1938,6 +1941,7 @@ func TestNewChecker_ProviderConfigured_SuppressesUnusedWarn(t *testing.T) {
 			logs := captureWarnLogs(t)
 
 			opts := append([]CheckerOption{
+				WithLogger(logs.logger()),
 				WithConfigDir(filepath.Join(tmpDir, tc.name)),
 				WithPackagesConfig(cfg),
 				WithRateLimiter(unlimitedRateLimiter()),

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -149,10 +150,12 @@ Examples:
 }
 
 func runCompare(cmd *cobra.Command, args []string, d *deps) error {
+	log := logging.FromContext(commandContext(cmd))
+
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
 	// with a clear message and a non-zero exit (R4.2).
 	if compareConcurrency < 1 || compareConcurrency > 100 {
-		logger.Error("--concurrency must be in range [1, 100], got %d", compareConcurrency)
+		log.Error("--concurrency must be in range [1, 100]", "concurrency", compareConcurrency)
 		return exitWith(1)
 	}
 
@@ -166,7 +169,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// two cannot be confused, because this one returns before a single package has
 	// been looked at and prints no report to attach a verdict to.
 	if err := compareDepthPreflight(compareDepth, compareRealign); err != nil {
-		logger.Error("%v", err)
+		log.Error("refusing --depth", "err", err)
 		return exitWith(1)
 	}
 
@@ -179,7 +182,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -193,18 +196,18 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	// Convert config repos to provider.RepositoryInfo map
-	configRepos := convertConfigRepos(cfg)
+	configRepos := convertConfigRepos(log, cfg)
 
 	// Create repository registry
 	registry, err := provider.NewRepositoryRegistry()
 	if err != nil {
-		logger.Error("Failed to initialize repository registry: %v", err)
+		log.Error("Failed to initialize repository registry", "err", err)
 		return exitWith(1)
 	}
 
 	if compareSync {
 		if err := registry.Sync(); err != nil {
-			logger.Error("Failed to sync repository list: %v", err)
+			log.Error("Failed to sync repository list", "err", err)
 			return exitWith(1)
 		}
 	}
@@ -212,16 +215,16 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// Resolve repository info
 	repoInfo, err := provider.ResolveRepository(repoName, configRepos, registry)
 	if err != nil {
-		logger.Error("Repository '%s' not found.", repoName)
+		log.Error("Repository not found.", "repository", repoName)
 		configNames := provider.ListAvailableRepositories(configRepos, nil)
 		registryNames := provider.ListAvailableRepositories(nil, registry)
 		if len(configNames) > 0 {
-			logger.Info("Config repositories: %s", strings.Join(configNames, ", "))
+			log.Info("Config repositories", "repositories", strings.Join(configNames, ", "))
 		}
 		if len(registryNames) > 0 {
-			logger.Info("Registry repositories: use `eselect repository list` to see all available")
+			log.Info("Registry repositories: use `eselect repository list` to see all available")
 		} else {
-			logger.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
+			log.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
 		}
 		return exitWith(1)
 	}
@@ -230,14 +233,14 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// warns and degrades to anonymous access rather than aborting the comparison.
 	resolvedToken, err := resolveRepoToken(compareToken, repoInfo.Token)
 	if err != nil {
-		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
+		log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
 	}
 	repoInfo.Token = resolvedToken
 
 	// Create provider
 	prov, err := provider.NewProvider(repoInfo, compareClone)
 	if err != nil {
-		logger.Error("Failed to create provider: %v", err)
+		log.Error("Failed to create provider", "err", err)
 		return exitWith(1)
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
@@ -251,12 +254,12 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// overlay. A refusal that arrived after either would have spent the run before
 	// saying the request was impossible.
 	//
-	// The reason comes back as a VALUE and is printed here, where this command
-	// knows its output goes to a terminal — logger binds its writer at first use
-	// and a refusal written inside the check could not be read by anything else.
+	// The reason comes back as a VALUE and is logged here, through the
+	// invocation's logger, so the check itself stays free of output and a test
+	// can read the refusal as a returned error.
 	if compareRealign {
 		if err := realignPreflight(repoName, prov); err != nil {
-			logger.Error("%v", err)
+			log.Error("refusing --realign", "err", err)
 			return exitWith(1)
 		}
 	}
@@ -275,53 +278,57 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		if err == nil {
 			switch {
 			case remaining == 0:
-				logger.Error("GitHub API rate limit exceeded (resets at %s)", resetTime.Format("15:04:05"))
-				logger.Info("")
-				logger.Info("Options:")
-				logger.Info("  1. Use --clone to download the repository:")
-				logger.Info("     bentoo overlay compare %s --clone", repoName)
-				logger.Info("")
-				logger.Info("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
-				logger.Info("     repositories:")
-				logger.Info("       gentoo:")
-				logger.Info("         provider: local")
-				logger.Info("         path: /var/db/repos/gentoo")
-				logger.Info("")
-				logger.Info("  3. Wait until %s for rate limit reset", resetTime.Format("15:04:05"))
+				// The failure is a diagnostic; the ways out below it are the
+				// command's guidance and print as bare lines (ui_notes.go), so
+				// the indented YAML snippet can be pasted as it reads.
+				resetAt := resetTime.Format("15:04:05")
+				log.Error("GitHub API rate limit exceeded", "resets_at", resetAt)
+				uiInfo("")
+				uiInfo("Options:")
+				uiInfo("  1. Use --clone to download the repository:")
+				uiInfo(fmt.Sprintf("     bentoo overlay compare %s --clone", repoName))
+				uiInfo("")
+				uiInfo("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
+				uiInfo("     repositories:")
+				uiInfo("       gentoo:")
+				uiInfo("         provider: local")
+				uiInfo("         path: /var/db/repos/gentoo")
+				uiInfo("")
+				uiInfo(fmt.Sprintf("  3. Wait until %s for rate limit reset", resetAt))
 				return exitWith(1)
 			case remaining < 10:
-				logger.Warn("GitHub API rate limit low: %d requests remaining (resets at %s)",
-					remaining, resetTime.Format("15:04:05"))
+				log.Warn("GitHub API rate limit low",
+					"remaining", remaining, "resets_at", resetTime.Format("15:04:05"))
 				if !compareClone {
-					logger.Info("Tip: Use --clone flag to avoid rate limits")
+					uiInfo("Tip: Use --clone flag to avoid rate limits")
 				}
 			case verbose:
-				logger.Debug("GitHub API rate limit: %d requests remaining", remaining)
+				log.Debug("GitHub API rate limit", "remaining", remaining)
 			}
 		}
 	}
 
 	// Scan local overlay
-	logger.Info("Scanning Bentoo overlay at %s...", overlayPath)
+	log.Info("Scanning Bentoo overlay", "path", overlayPath)
 	scanResult, err := overlay.ScanOverlay(overlayPath)
 	if err != nil {
-		logger.Error("scanning overlay: %v", err)
+		log.Error("scanning overlay: failed", "err", err)
 		return exitWith(1)
 	}
 
 	if len(scanResult.Packages) == 0 {
-		logger.Warn("No packages found in overlay")
+		log.Warn("No packages found in overlay")
 		return nil
 	}
 
-	logger.Info("Found %s packages in Bentoo overlay",
-		output.Sprint(output.Info, fmt.Sprintf("%d", len(scanResult.Packages))))
+	uiInfo(fmt.Sprintf("Found %s packages in Bentoo overlay",
+		output.Sprint(output.Info, fmt.Sprintf("%d", len(scanResult.Packages)))))
 
 	// Report scan errors if any
 	if len(scanResult.Errors) > 0 {
-		logger.Warn("Encountered %d errors during scan:", len(scanResult.Errors))
+		log.Warn("Encountered errors during scan", "errors", len(scanResult.Errors))
 		for _, e := range scanResult.Errors {
-			logger.Debug("  %s: %s", e.Path, e.Message)
+			log.Debug("scan error", "path", e.Path, "message", e.Message)
 		}
 	}
 
@@ -330,15 +337,18 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// registry warns exactly once here and leaves divergence nil, which the
 	// comparator reads as "nothing is known about any package" (R2.5): compare
 	// has never depended on packages.toml and must not start now.
-	divergence, err := buildDivergenceMap(overlayPath)
+	divergence, err := buildDivergenceMap(log, overlayPath)
 	if err != nil {
-		logger.Warn("reading the autoupdate registry: %v; every package's divergence state will be reported as unknown", err)
+		log.Warn("reading the autoupdate registry: failed; every package's divergence state will be reported as unknown", "err", err)
 	}
 
 	// Compare with upstream
-	logger.Info("Comparing with %s using %s...", repoInfo.Name, prov.GetName())
+	log.Info("Comparing with upstream", "repository", repoInfo.Name, "provider", prov.GetName())
 
 	opts := overlay.CompareOptions{
+		// The invocation's logger, so the review, realignment and baseline
+		// passes below warn where every other diagnostic of this run goes.
+		Logger:        log,
 		OnlyOutdated:  compareOnlyOutdated,
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
 		// A REVIEW RUN AND ONLY A REVIEW RUN sees the packages ::gentoo does not
@@ -375,12 +385,12 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	if err != nil {
 		// Check if it's a rate limit error and suggest --clone
 		if strings.Contains(err.Error(), "rate limit") && !compareClone {
-			logger.Error("GitHub API rate limit exceeded.")
-			logger.Info("Try using --clone flag to download the repository instead:")
-			logger.Info("  bentoo overlay compare %s --clone", repoName)
+			log.Error("GitHub API rate limit exceeded.")
+			uiInfo("Try using --clone flag to download the repository instead:")
+			uiInfo(fmt.Sprintf("  bentoo overlay compare %s --clone", repoName))
 			return exitWith(1)
 		}
-		logger.Error("comparing packages: %v", err)
+		log.Error("comparing packages: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -423,7 +433,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// nothing, and the report has to say so instead of printing a coverage line
 	// over a comparison that never happened.
 	realignRan := compareRealign &&
-		realignBaselineIsLocatable(report, realignBaselineTreeCandidate(repoInfo, prov))
+		realignBaselineIsLocatable(log, report, realignBaselineTreeCandidate(repoInfo, prov))
 	if realignRan {
 		overlay.AnnotateBaseline(report, prov, opts)
 		annotateOtherRepositories(report, realignLocalRepos(cfg))
@@ -464,7 +474,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// instead of two conditions that could disagree. Nothing here can fail the
 	// run: every way of not getting a reading costs one warning and the report is
 	// printed unchanged.
-	overlay.AnnotateReviews(ctx, report, compareDivergenceReviewer(compareNoReview, reviewBudget, d), prov, opts)
+	overlay.AnnotateReviews(ctx, report, compareDivergenceReviewer(log, compareNoReview, reviewBudget, d), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
 	// divergence still justified, and what would replace it if not (R4.1, R4.2).
@@ -483,7 +493,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// was judged and none objected".
 	realignJudged := false
 	if realignRan {
-		reviewer := compareRealignReviewer(compareNoReview, reviewBudget, d)
+		reviewer := compareRealignReviewer(log, compareNoReview, reviewBudget, d)
 		realignJudged = reviewer != nil
 		overlay.AnnotateRealignVerdicts(ctx, report, reviewer, prov, opts)
 	}
@@ -608,7 +618,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// on that package's own entry (S047-R6.1). Both reach the terminal and every
 	// export through one code path, which is what they did not do while they were
 	// appended to the sections after the fact.
-	presentCompareReport(d, cfg, buildCompareReport(report, repoInfo.Name, unfiltered,
+	presentCompareReport(log, d, cfg, buildCompareReport(report, repoInfo.Name, unfiltered,
 		compareRunNotes(report, realignRan, realignJudged, compareNoReview)...))
 
 	// The ONE non-zero condition (R7.5, D9): the review could not locate a
@@ -702,7 +712,7 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // What keeps traversal out is that the key is used only as a map key and never
 // to build a filesystem path: the verification step builds its path from the
 // scanned directory names instead. Keep it that way.
-func buildDivergenceMap(overlayPath string) (map[string]overlay.Divergence, error) {
+func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overlay.Divergence, error) {
 	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return nil, err
@@ -718,7 +728,7 @@ func buildDivergenceMap(overlayPath string) (map[string]overlay.Divergence, erro
 	for _, key := range keys {
 		category, name, ok := autoupdate.SplitPackageKey(key)
 		if !ok {
-			logger.Warn("registry key %q is not a category/package atom; skipping it", key)
+			log.Warn("registry key is not a category/package atom; skipping it", "key", key)
 			continue
 		}
 		// Plain concatenation, not path.Join: this is a map key, not a path, and
@@ -806,7 +816,7 @@ func resolveRepoToken(flagToken, repoToken string) (string, error) {
 // BENTOO_REPO_<NAME>_TOKEN via the secrets chain (env → user file → system file).
 // config.yaml is no longer a token source. An unreadable secrets file warns and
 // the token is treated as unset rather than aborting the whole conversion.
-func convertConfigRepos(cfg *config.Config) map[string]*provider.RepositoryInfo {
+func convertConfigRepos(log *slog.Logger, cfg *config.Config) map[string]*provider.RepositoryInfo {
 	if cfg.Repositories == nil {
 		return nil
 	}
@@ -815,7 +825,7 @@ func convertConfigRepos(cfg *config.Config) map[string]*provider.RepositoryInfo 
 	for name, repo := range cfg.Repositories {
 		tok, _, err := secrets.Lookup(repoTokenName(name))
 		if err != nil {
-			logger.Warn("resolving token for repository %q: %v; treating it as unset", name, err)
+			log.Warn("resolving token for repository: failed; treating it as unset", "repository", name, "err", err)
 			tok = ""
 		}
 		result[name] = &provider.RepositoryInfo{

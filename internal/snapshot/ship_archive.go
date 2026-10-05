@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // archiveShipper streams a btrfs snapshot to an rclone remote as a single
@@ -25,13 +28,17 @@ import (
 // retention-driven GFS lands in T5.
 type archiveShipper struct {
 	name      string
-	remote    string      // rclone remote+path prefix, e.g. "gdrive:bentoo-backups"
-	mode      string      // "incremental" (default) | "full"  (selection logic is T3.2)
-	compress  string      // compressor; default "zstd"
-	run       Runner      // subprocess seam (R7.2)
-	parents   parentStore // CONSUMED in T3.2 (incremental parent selection).
-	retention Retention   // GFS policy applied to the remote after a successful ship (T5.1, R4).
+	remote    string       // rclone remote+path prefix, e.g. "gdrive:bentoo-backups"
+	mode      string       // "incremental" (default) | "full"  (selection logic is T3.2)
+	compress  string       // compressor; default "zstd"
+	run       Runner       // subprocess seam (R7.2)
+	parents   parentStore  // CONSUMED in T3.2 (incremental parent selection).
+	retention Retention    // GFS policy applied to the remote after a successful ship (T5.1, R4).
+	log       *slog.Logger // nil discards; set by newShipper
 }
+
+// logger returns the shipper's logger, or a discarding one for a zero value.
+func (a *archiveShipper) logger() *slog.Logger { return logging.OrDiscard(a.log) }
 
 // Name returns the ship's configured name, or "archive" when unnamed (mirrors
 // sshShipper.Name() / resticShipper.Name()).
@@ -79,7 +86,8 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 		if ok {
 			parentPath = parent.Path
 		} else {
-			warnLogf("snapshot: ship %q subvolume %q: no recorded parent; sending full", a.Name(), snap.Subvolume)
+			a.logger().Warn("snapshot: ship has no recorded parent for the subvolume; sending full",
+				"ship", a.Name(), "subvolume", snap.Subvolume)
 		}
 	}
 
@@ -94,7 +102,8 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveDeleteTimeout)
 		defer cancel()
 		if _, derr := a.run.Run(dctx, "rclone", []string{"deletefile", dest}, nil); derr != nil {
-			warnLogf("snapshot: ship %q: removing possibly truncated %s failed: %v", a.Name(), dest, derr)
+			a.logger().Warn("snapshot: ship failed removing a possibly truncated object",
+				"ship", a.Name(), "object", dest, "err", derr)
 		}
 		return ShipReport{}, err
 	}
@@ -459,7 +468,7 @@ func (k bucketKey) after(other bucketKey) bool {
 // sparing snap's object IS sparing the recorded head that the next incremental
 // send will reference with `-p`.
 //
-// Non-fatal by contract: every failure here is reported via warnLogf and
+// Non-fatal by contract: every failure here is logged as a warning and
 // swallowed, never returned, because Send has already succeeded and recorded the
 // new head by the time this runs (see the call site in Send). A failed prune only
 // leaves stale objects for the next run to reconsider.
@@ -494,13 +503,15 @@ func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 		if isRemoteDirNotFound(err) {
 			return
 		}
-		warnLogf("snapshot: ship %q: rclone lsjson %q failed; skipping prune: %v", a.Name(), prefixPath, err)
+		a.logger().Warn("snapshot: ship rclone lsjson failed; skipping prune",
+			"ship", a.Name(), "path", prefixPath, "err", err)
 		return
 	}
 
 	objs, err := decodeLsjson(out)
 	if err != nil {
-		warnLogf("snapshot: ship %q: parsing rclone lsjson output for %q failed; skipping prune: %v", a.Name(), prefixPath, err)
+		a.logger().Warn("snapshot: ship parsing rclone lsjson output failed; skipping prune",
+			"ship", a.Name(), "path", prefixPath, "err", err)
 		return
 	}
 
@@ -515,7 +526,8 @@ func (a *archiveShipper) pruneRemote(ctx context.Context, snap Snapshot) {
 		}
 		target := prefixPath + "/" + d.Name // re-join the prefix the listing stripped.
 		if _, err := a.run.Run(ctx, "rclone", []string{"deletefile", target}, nil); err != nil {
-			warnLogf("snapshot: ship %q: rclone deletefile %q failed: %v", a.Name(), target, err)
+			a.logger().Warn("snapshot: ship rclone deletefile failed",
+				"ship", a.Name(), "target", target, "err", err)
 		}
 	}
 }
@@ -612,7 +624,8 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 			// BEFORE decodeLsjson deliberately: rclone prints a bare "[" on stdout
 			// in this case, which does not parse.
 			if isRemoteDirNotFound(err) {
-				warnLogf("snapshot: ship %q: subvolume %q has nothing at %q yet; skipping its prune", a.Name(), p.subvolume, p.prefixPath)
+				a.logger().Warn("snapshot: ship has nothing for the subvolume at its remote prefix yet; skipping its prune",
+					"ship", a.Name(), "subvolume", p.subvolume, "path", p.prefixPath)
 				continue
 			}
 			// Every OTHER failure still surfaces as a failed stage.

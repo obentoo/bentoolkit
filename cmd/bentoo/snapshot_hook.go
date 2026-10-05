@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -41,11 +41,12 @@ The hook is never installed implicitly: 'bentoo snapshot apply' does not touch
 }
 
 func runSnapshotHook(cmd *cobra.Command, _ []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	// EXACTLY ONE of --install/--uninstall is required. Validated before
 	// anything else — no config load, no filesystem write — so invalid usage
 	// leaves the system untouched.
 	if snapshotHookInstall == snapshotHookUninstall {
-		logger.Error("snapshot hook: exactly one of --install or --uninstall is required")
+		log.Error("snapshot hook: exactly one of --install or --uninstall is required")
 		return exitWith(1)
 	}
 
@@ -53,7 +54,7 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 		// Deliberately NO config load: uninstall must succeed even with a
 		// broken or absent snapshot.toml (R4.2).
 		if err := snapshot.UninstallEmergeHook(); err != nil {
-			logger.Error("snapshot hook: %v", err)
+			log.Error("snapshot hook: failed", "err", err)
 			return exitWith(1)
 		}
 		output.PrintSuccess("Portage emerge hook removed")
@@ -62,21 +63,21 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 
 	// --install: load AND validate the config so an unknown driver or a missing
 	// snapper binary fails fast before anything is written (R5.1, G3).
-	cfg, _, err := loadSnapshotConfig()
+	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot hook: %v", err)
+		log.Error("snapshot hook: failed", "err", err)
 		return exitWith(1)
 	}
 	// The hook script shells out to snapper for its pre/post pairs, so any
 	// other engine is refused — with nothing written (R4.1).
 	if cfg.Engine.Driver != "snapper" {
-		logger.Error(`snapshot hook: the emerge hook shells out to snapper and requires engine.driver = "snapper"; active engine is %q`,
-			cfg.Engine.Driver)
+		log.Error(`snapshot hook: the emerge hook shells out to snapper and requires engine.driver = "snapper"`,
+			"engine", cfg.Engine.Driver)
 		return exitWith(1)
 	}
 
 	if err := snapshot.InstallEmergeHook(); err != nil {
-		logger.Error("snapshot hook: %v", err)
+		log.Error("snapshot hook: failed", "err", err)
 		return exitWith(1)
 	}
 	output.PrintSuccess("Portage emerge hook installed — snapper pre/post snapshots around each emerged package")

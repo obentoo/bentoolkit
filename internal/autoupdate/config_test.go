@@ -434,7 +434,7 @@ func TestValidatePackageConfigMissingURL(t *testing.T) {
 		Path:   "version",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for missing URL")
 	}
@@ -447,7 +447,7 @@ func TestValidatePackageConfigMissingParser(t *testing.T) {
 		URL: "https://example.com/api",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for missing parser")
 	}
@@ -461,7 +461,7 @@ func TestValidatePackageConfigInvalidParser(t *testing.T) {
 		Parser: "invalid",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for invalid parser type")
 	}
@@ -477,7 +477,7 @@ func TestValidatePackageConfigType(t *testing.T) {
 			Pattern: `v(\d+\.\d+)`,
 			Type:    valid,
 		}
-		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "test/pkg", cfg); err != nil {
 			t.Errorf("type %q: unexpected error: %v", valid, err)
 		}
 	}
@@ -488,7 +488,7 @@ func TestValidatePackageConfigType(t *testing.T) {
 		Pattern: `v(\d+\.\d+)`,
 		Type:    "binary", // typo: not an accepted value
 	}
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Fatal("Expected error for invalid type value")
 	}
@@ -505,7 +505,7 @@ func TestValidatePackageConfigJSONMissingPath(t *testing.T) {
 		Parser: "json",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for JSON parser without path")
 	}
@@ -519,7 +519,7 @@ func TestValidatePackageConfigRegexMissingPattern(t *testing.T) {
 		Parser: "regex",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for regex parser without pattern")
 	}
@@ -534,7 +534,7 @@ func TestValidatePackageConfigValidJSON(t *testing.T) {
 		Path:   "version",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestValidatePackageConfigValidRegex(t *testing.T) {
 		Pattern: `version=([0-9.]+)`,
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestValidatePackageConfigFallbackRegexMissingPattern(t *testing.T) {
 		// Missing FallbackPattern
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for regex fallback without pattern")
 	}
@@ -590,7 +590,7 @@ func TestValidateAllValid(t *testing.T) {
 		},
 	}
 
-	err := config.ValidateAll()
+	err := config.ValidateAll(nil)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -613,7 +613,7 @@ func TestValidateAllInvalid(t *testing.T) {
 		},
 	}
 
-	err := config.ValidateAll()
+	err := config.ValidateAll(nil)
 	if err == nil {
 		t.Error("Expected error for invalid config")
 	}
@@ -627,7 +627,7 @@ func TestValidatePackageConfigHTMLMissingSelectorAndXPath(t *testing.T) {
 		Parser: "html",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err == nil {
 		t.Error("Expected error for HTML parser without selector or xpath")
 	}
@@ -642,7 +642,7 @@ func TestValidatePackageConfigValidHTMLWithSelector(t *testing.T) {
 		Selector: ".version",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestValidatePackageConfigValidHTMLWithXPath(t *testing.T) {
 		XPath:  "//div[@class='version']/text()",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestValidatePackageConfigValidHTMLWithHeaders(t *testing.T) {
 		},
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -692,7 +692,7 @@ func TestValidatePackageConfigValidJSONWithVersionsPath(t *testing.T) {
 		VersionsPath: "[*].tag_name",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -708,7 +708,7 @@ func TestValidatePackageConfigValidHTMLWithVersionsSelector(t *testing.T) {
 		VersionsSelector: ".version",
 	}
 
-	err := ValidatePackageConfig("test/pkg", cfg)
+	err := ValidatePackageConfig(nil, "test/pkg", cfg)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -1003,7 +1003,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 	}
 
 	t.Run("absent version still validates", func(t *testing.T) {
-		if err := ValidatePackageConfig("test/pkg", base()); err != nil {
+		if err := ValidatePackageConfig(nil, "test/pkg", base()); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
 	})
@@ -1011,7 +1011,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 	t.Run("valid pin passes", func(t *testing.T) {
 		cfg := base()
 		cfg.Version = "1.28.4"
-		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "test/pkg", cfg); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
 	})
@@ -1019,7 +1019,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 	t.Run("pin with revision suffix passes", func(t *testing.T) {
 		cfg := base()
 		cfg.Version = "2.52.4-r411" // the webkit-gtk shape
-		if err := ValidatePackageConfig("net-libs/webkit-gtk:4.1", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "net-libs/webkit-gtk:4.1", cfg); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
 	})
@@ -1027,7 +1027,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 	t.Run("malformed pin fails naming the key", func(t *testing.T) {
 		cfg := base()
 		cfg.Version = "not-a-version"
-		err := ValidatePackageConfig("test/pkg", cfg)
+		err := ValidatePackageConfig(nil, "test/pkg", cfg)
 		if err == nil {
 			t.Fatal("Expected error for malformed version")
 		}
@@ -1046,7 +1046,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 		cfg := base()
 		cfg.Version = "1.29.2"
 		cfg.Series = `^1\.28\.`
-		err := ValidatePackageConfig("test/pkg", cfg)
+		err := ValidatePackageConfig(nil, "test/pkg", cfg)
 		if err == nil {
 			t.Fatal("Expected error for version outside series")
 		}
@@ -1065,7 +1065,7 @@ func TestValidatePackageConfigVersion(t *testing.T) {
 		cfg := base()
 		cfg.Version = "1.28.4"
 		cfg.Series = `^1\.28\.`
-		if err := ValidatePackageConfig("test/pkg", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "test/pkg", cfg); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
 	})
@@ -1104,7 +1104,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	}
 
 	t.Run("the real filezilla-pro shape validates", func(t *testing.T) {
-		if err := ValidatePackageConfig("net-ftp/filezilla-pro", base(filezillaMeta())); err != nil {
+		if err := ValidatePackageConfig(nil, "net-ftp/filezilla-pro", base(filezillaMeta())); err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
 	})
@@ -1115,7 +1115,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 			{},
 			{"requires_serial": "true", "platform": "linux", "notes": "bought 2024"},
 		} {
-			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+			if err := ValidatePackageConfig(nil, "test/pkg", base(meta)); err != nil {
 				t.Errorf("meta %v: expected no error, got: %v", meta, err)
 			}
 		}
@@ -1125,7 +1125,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	// so the applier reads the block as "no authenticated fetch" and says nothing.
 	t.Run("fetch_serial_env without fetch_url fails", func(t *testing.T) {
 		cfg := base(map[string]string{"fetch_serial_env": "BENTOO_FETCH_FILEZILLA_PRO_KEY"})
-		err := ValidatePackageConfig("net-ftp/filezilla-pro", cfg)
+		err := ValidatePackageConfig(nil, "net-ftp/filezilla-pro", cfg)
 		if err == nil {
 			t.Fatal("Expected error for a fetch_* block without fetch_url")
 		}
@@ -1145,7 +1145,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	t.Run("blank fetch_url fails like a missing one", func(t *testing.T) {
 		meta := filezillaMeta()
 		meta["fetch_url"] = "   "
-		err := ValidatePackageConfig("test/pkg", base(meta))
+		err := ValidatePackageConfig(nil, "test/pkg", base(meta))
 		if err == nil {
 			t.Fatal("Expected error for a blank fetch_url")
 		}
@@ -1160,14 +1160,14 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		for _, valid := range []string{"post", "POST", "get", "Get", "  post  ", ""} {
 			meta := filezillaMeta()
 			meta["fetch_method"] = valid
-			if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+			if err := ValidatePackageConfig(nil, "test/pkg", base(meta)); err != nil {
 				t.Errorf("fetch_method %q: unexpected error: %v", valid, err)
 			}
 		}
 		// Absent is legal too: the parser defaults it to "post".
 		meta := filezillaMeta()
 		delete(meta, "fetch_method")
-		if err := ValidatePackageConfig("test/pkg", base(meta)); err != nil {
+		if err := ValidatePackageConfig(nil, "test/pkg", base(meta)); err != nil {
 			t.Errorf("absent fetch_method: unexpected error: %v", err)
 		}
 	})
@@ -1175,7 +1175,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 	t.Run("fetch_method PUT fails", func(t *testing.T) {
 		meta := filezillaMeta()
 		meta["fetch_method"] = "PUT"
-		err := ValidatePackageConfig("test/pkg", base(meta))
+		err := ValidatePackageConfig(nil, "test/pkg", base(meta))
 		if err == nil {
 			t.Fatal("Expected error for fetch_method = \"PUT\"")
 		}
@@ -1193,7 +1193,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		meta := filezillaMeta()
 		delete(meta, "fetch_serial_env")
 		meta["fetch_seral_env"] = "BENTOO_FETCH_FILEZILLA_PRO_KEY"
-		err := ValidatePackageConfig("net-ftp/filezilla-pro", base(meta))
+		err := ValidatePackageConfig(nil, "net-ftp/filezilla-pro", base(meta))
 		if err == nil {
 			t.Fatal("Expected error for the misspelled fetch_seral_env")
 		}
@@ -1216,7 +1216,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		meta := filezillaMeta()
 		meta["fetch_zebra"] = "1"
 		meta["fetch_alpha"] = "2"
-		first := ValidatePackageConfig("test/pkg", base(meta))
+		first := ValidatePackageConfig(nil, "test/pkg", base(meta))
 		if first == nil {
 			t.Fatal("Expected error for the unknown fetch_* keys")
 		}
@@ -1224,7 +1224,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 			t.Errorf("Expected both keys sorted in the message, got %q", first.Error())
 		}
 		for i := 0; i < 20; i++ {
-			again := ValidatePackageConfig("test/pkg", base(meta))
+			again := ValidatePackageConfig(nil, "test/pkg", base(meta))
 			if again == nil || again.Error() != first.Error() {
 				t.Fatalf("message is not stable across runs: %v vs %v", first, again)
 			}
@@ -1243,7 +1243,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 			if perr == nil {
 				t.Fatalf("missing %s: expected parseAuthFetchSpec to reject it", key)
 			}
-			err := ValidatePackageConfig("test/pkg", base(meta))
+			err := ValidatePackageConfig(nil, "test/pkg", base(meta))
 			if err == nil || err.Error() != perr.Error() {
 				t.Errorf("missing %s: validator returned %v, want the parser's error %q", key, err, perr)
 			}

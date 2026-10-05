@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // loggerLevelFlagTests run the shared root command with a global logging flag.
@@ -76,7 +74,9 @@ func TestLoggerLevelFlagsDoNotSilenceALaterTest(t *testing.T) {
 }
 
 // resetLoggerLevelFlagState puts the shared root command's flags and the
-// process-wide logger back to the state the test binary starts in.
+// package variables its pre-run publishes back to the state the test binary
+// starts in. Since story 062 each invocation builds its own logger, so the
+// lasting state a quiet run leaves is the quiet variable uiInfo reads.
 //
 // The help flags are part of it: a test that ran `version --help` on the shared
 // tree leaves --help set on that subcommand, and every later run of `version`
@@ -90,7 +90,7 @@ func resetLoggerLevelFlagState(t *testing.T) {
 		}
 	}
 	resetHelpFlags(t, rootCmd)
-	logger.Default().SetLevel(logger.LevelInfo)
+	verbose, quiet = false, false
 }
 
 // resetHelpFlags clears --help on cmd and every command below it.

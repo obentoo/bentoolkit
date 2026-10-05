@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -147,6 +148,10 @@ func exitCodeFor(err error) int {
 // field whichever command ran, and otherwise every error would print twice.
 func execute(ctx context.Context, root *cobra.Command, stderr io.Writer) int {
 	err := root.ExecuteContext(ctx)
+	// The invocation's log file is closed on the way out, after the failWith
+	// cause below is logged: cobra skips PersistentPostRunE on an error return.
+	// The root's context is read when the deferred call runs, not now.
+	defer func() { closeInvocationLog(invocationContext(ctx, root)) }()
 	if err == nil {
 		return 0
 	}
@@ -161,12 +166,38 @@ func execute(ctx context.Context, root *cobra.Command, stderr io.Writer) int {
 		return exitCodeFor(err)
 	}
 	if st.cause != nil {
-		// failWith's cause goes through the logger, the call the handler made
-		// before it returned the error instead: the stderr line and the
-		// log-file entry stay what they were (story 060, R7.1, R7.2).
-		logger.Error("%v", st.cause)
+		logFailWithCause(invocationContext(ctx, root), st.cause)
 	}
 	return exitCodeFor(err)
+}
+
+// invocationContext returns the context the root ended its run with — the one
+// the pre-run stored the invocation logger in, derived from ctx — or ctx when
+// the root carries none.
+func invocationContext(ctx context.Context, root *cobra.Command) context.Context {
+	if rc := root.Context(); rc != nil {
+		return rc
+	}
+	return ctx
+}
+
+// logFailWithCause reports failWith's cause on the invocation's logger, which
+// ctx (func invocationContext) carries: the call the handler made before it returned the
+// error instead, so the line reaches both stderr and the log file (story 060,
+// R7.1, R7.2; story 062).
+//
+// A tree whose pre-run never stored a logger — the run failed before the
+// root's PersistentPreRunE, or the tree has no such hook — would log into a
+// discarding logger. The cause is then printed as a bare line on stderr, as it
+// was before story 062, so a failure is never silent.
+func logFailWithCause(ctx context.Context, cause error) {
+	log := logging.FromContext(ctx)
+	if !log.Enabled(ctx, slog.LevelError) {
+		// A failed write to stderr has nowhere else to be reported.
+		_, _ = fmt.Fprintln(os.Stderr, cause)
+		return
+	}
+	log.Error("command failed", "err", cause)
 }
 
 // rootCmd is the process's own command tree: one call to the constructor that

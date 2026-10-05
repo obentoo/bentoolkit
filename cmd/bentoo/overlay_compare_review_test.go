@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,19 +29,24 @@ import (
 // TestConfiguredReviewBudgetIsTheDeadlineInForce, not here.
 const cmdReviewBudget = 90 * time.Second
 
-// captureCompareReviewWarnings redirects, on d, the one warning this file is
-// allowed to emit and returns an accessor for what was said.
+// captureCompareReviewWarnings returns a logger to hand the reviewer functions
+// in place of the invocation's, and an accessor for the lines it received: the
+// one warning this file is allowed to emit, one slog text line per record.
 //
-// It exists because logger binds its io.Writer at first use and exposes no
-// setter (logger.go:44-52), so the alternative is reading the process's stderr —
-// which the rest of the suite writes to concurrently. The same shape
-// internal/overlay uses for warnLogf, for the same reason.
-func captureCompareReviewWarnings(d *deps) func() []string {
-	var lines []string
-	d.reviewWarnf = func(format string, args ...any) {
-		lines = append(lines, fmt.Sprintf(format, args...))
+// A logger over a buffer rather than the process's stderr, which the rest of
+// the suite writes to concurrently (story 062 made the logger a parameter).
+func captureCompareReviewWarnings() (*slog.Logger, func() []string) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	return log, func() []string {
+		var lines []string
+		for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		return lines
 	}
-	return func() []string { return lines }
 }
 
 // stubClaudeAsker replaces the CLI construction seam on d and returns a counter of how many times construction was ATTEMPTED.
@@ -50,7 +56,7 @@ func captureCompareReviewWarnings(d *deps) func() []string {
 // is to have a seam that would record it if it had.
 func stubClaudeAsker(d *deps, build func() (claudeAsker, error)) func() int {
 	attempts := 0
-	d.newClaudeAsker = func(time.Duration) (claudeAsker, error) {
+	d.newClaudeAsker = func(*slog.Logger, time.Duration) (claudeAsker, error) {
 		attempts++
 		return build()
 	}
@@ -92,15 +98,15 @@ var _ claudeAsker = (*fakeAsker)(nil)
 // produce.
 func reviewerOver(t *testing.T, asker claudeAsker) overlay.DivergenceReviewer {
 	t.Helper()
-	return reviewerOverDeps(t, asker, defaultDeps())
+	return reviewerOverDeps(t, discardLog(), asker, defaultDeps())
 }
 
-// reviewerOverDeps is reviewerOver built through d, for a test that also
-// captures d's warnings.
-func reviewerOverDeps(t *testing.T, asker claudeAsker, d *deps) overlay.DivergenceReviewer {
+// reviewerOverDeps is reviewerOver built through d and log, for a test that
+// also captures the warnings sent to log.
+func reviewerOverDeps(t *testing.T, log *slog.Logger, asker claudeAsker, d *deps) overlay.DivergenceReviewer {
 	t.Helper()
 	stubClaudeAsker(d, func() (claudeAsker, error) { return asker, nil })
-	reviewer, err := newDivergenceReviewer(cmdReviewBudget, d)
+	reviewer, err := newDivergenceReviewer(log, cmdReviewBudget, d)
 	if err != nil {
 		t.Fatalf("newDivergenceReviewer returned %v, want nil", err)
 	}
@@ -214,10 +220,10 @@ func annotateFixture(t *testing.T) (*overlay.CompareReport, provider.Provider, o
 func TestNewDivergenceReviewer(t *testing.T) {
 	t.Run("an absent claude CLI yields no reviewer and no error", func(t *testing.T) {
 		td := defaultDeps()
-		warnings := captureCompareReviewWarnings(td)
+		log, warnings := captureCompareReviewWarnings()
 		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
 
-		reviewer, err := newDivergenceReviewer(cmdReviewBudget, td)
+		reviewer, err := newDivergenceReviewer(log, cmdReviewBudget, td)
 		if err != nil {
 			t.Fatalf("newDivergenceReviewer returned %v, want nil: an absent CLI is a machine without the reviewer, not a failed run (R5.5)", err)
 		}
@@ -233,7 +239,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 		td := defaultDeps()
 		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
 
-		reviewer, _ := newDivergenceReviewer(cmdReviewBudget, td)
+		reviewer, _ := newDivergenceReviewer(discardLog(), cmdReviewBudget, td)
 		// `reviewer != nil` above is already this assertion; reflect states it
 		// again in the terms that make the failure legible. A boxed
 		// (*claudeDivergenceReviewer)(nil) is a NON-nil interface with a nil
@@ -254,15 +260,15 @@ func TestNewDivergenceReviewer(t *testing.T) {
 
 	t.Run("any other construction failure warns and still yields no reviewer", func(t *testing.T) {
 		td := defaultDeps()
-		warnings := captureCompareReviewWarnings(td)
+		log, warnings := captureCompareReviewWarnings()
 		broken := errors.New("the secrets file is unreadable")
 		attempts := stubClaudeAsker(td, func() (claudeAsker, error) { return nil, broken })
 
-		if reviewer, err := newDivergenceReviewer(cmdReviewBudget, td); reviewer != nil || !errors.Is(err, broken) {
+		if reviewer, err := newDivergenceReviewer(log, cmdReviewBudget, td); reviewer != nil || !errors.Is(err, broken) {
 			t.Fatalf("newDivergenceReviewer returned (%#v, %v), want (nil, the construction error)", reviewer, err)
 		}
 
-		reviewer := compareDivergenceReviewer(false, cmdReviewBudget, td)
+		reviewer := compareDivergenceReviewer(log, false, cmdReviewBudget, td)
 		if reviewer != nil {
 			t.Fatalf("compareDivergenceReviewer returned %#v after a failed construction, want nil", reviewer)
 		}
@@ -280,13 +286,13 @@ func TestNewDivergenceReviewer(t *testing.T) {
 
 	t.Run("--no-review constructs nothing at all", func(t *testing.T) {
 		td := defaultDeps()
-		warnings := captureCompareReviewWarnings(td)
+		log, warnings := captureCompareReviewWarnings()
 		attempts := stubClaudeAsker(td, func() (claudeAsker, error) {
 			t.Error("--no-review reached the CLI construction seam; R5.6 is that no model is contacted, which starts with nothing being built")
 			return nil, errors.New("unreachable")
 		})
 
-		reviewer := compareDivergenceReviewer(true, cmdReviewBudget, td)
+		reviewer := compareDivergenceReviewer(log, true, cmdReviewBudget, td)
 		if reviewer != nil {
 			t.Fatalf("--no-review returned %#v, want nil", reviewer)
 		}
@@ -300,10 +306,10 @@ func TestNewDivergenceReviewer(t *testing.T) {
 
 	t.Run("a constructible CLI yields a reviewer", func(t *testing.T) {
 		td := defaultDeps()
-		warnings := captureCompareReviewWarnings(td)
+		log, warnings := captureCompareReviewWarnings()
 		attempts := stubClaudeAsker(td, func() (claudeAsker, error) { return &fakeAsker{reply: `{"origin":"upstream","summary":"s"}`}, nil })
 
-		reviewer := compareDivergenceReviewer(false, cmdReviewBudget, td)
+		reviewer := compareDivergenceReviewer(log, false, cmdReviewBudget, td)
 		if reviewer == nil {
 			t.Fatal("compareDivergenceReviewer returned nil over a constructible CLI")
 		}
@@ -499,8 +505,8 @@ func TestReviewDivergenceReply(t *testing.T) {
 	} {
 		t.Run("an unusable reply is an error: "+tc.name, func(t *testing.T) {
 			td := defaultDeps()
-			warnings := captureCompareReviewWarnings(td)
-			reviewer := reviewerOverDeps(t, &fakeAsker{reply: tc.reply}, td)
+			log, warnings := captureCompareReviewWarnings()
+			reviewer := reviewerOverDeps(t, log, &fakeAsker{reply: tc.reply}, td)
 
 			note, err := reviewer.ReviewDivergence(context.Background(), cmdReviewRequest())
 			if err == nil {

@@ -646,8 +646,9 @@ func noteFor(atom string) ReviewNote {
 // _Requirements: R5.1, R5.5, R5.8, S047-R4.1, S047-R4.2_
 func TestAnnotateReviews(t *testing.T) {
 	t.Run("every undeclared divergence carries the model's reading, and nothing else is asked", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
+		opts.Logger = warnLog
 		rev := &annotateReviewer{
 			t:         t,
 			offLimits: unreviewableAtoms,
@@ -685,7 +686,6 @@ func TestAnnotateReviews(t *testing.T) {
 	})
 
 	t.Run("the reviewer is handed the package and both ebuilds, ours first", func(t *testing.T) {
-		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: reviewFixtureNote()}
 
@@ -720,9 +720,10 @@ func TestAnnotateReviews(t *testing.T) {
 		// (R5.5) both reach. "Nothing crashed" is not the assertion: the report is
 		// compared field for field, and the cache directory is asserted untouched,
 		// which is what proves the pass returns BEFORE it opens anything.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		cacheDir := t.TempDir()
 		report, prov, opts := reviewFixtureIn(t, cacheDir)
+		opts.Logger = warnLog
 		before := cloneReport(report)
 
 		AnnotateReviews(t.Context(), report, nil, prov, opts)
@@ -749,8 +750,9 @@ func TestAnnotateReviews(t *testing.T) {
 		// assertion is strictly stronger — a count says how many reviews failed,
 		// the field says WHICH — and the warning it replaces was noise printed
 		// above the very rows it duplicated.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
+		opts.Logger = warnLog
 		// withoutReviews and not cloneReport, so BOTH SIDES of the comparison
 		// below are normalised identically. Reading is no longer written only by
 		// this pass: `func noteContentRefusal` (compare.go) records a refused
@@ -813,9 +815,10 @@ func TestAnnotateReviews(t *testing.T) {
 			{"the model returned an empty answer", ReviewNote{}, nil},
 		} {
 			t.Run(c.name, func(t *testing.T) {
-				warnings := captureReviewWarnings(t)
+				warnLog, warnings := captureReviewWarnings(t)
 				cacheDir := t.TempDir()
 				report, prov, opts := reviewFixtureIn(t, cacheDir)
+				opts.Logger = warnLog
 				reference := withoutReviews(report) // normalised like the value it is compared against; see the erroring-reviewer case above
 				rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: c.note, err: c.err}
 
@@ -836,6 +839,7 @@ func TestAnnotateReviews(t *testing.T) {
 				// files' content — so a stored non-answer would suppress the question
 				// for as long as neither ebuild changed. A second pass must ask again.
 				second, prov2, opts2 := reviewFixtureIn(t, cacheDir)
+				opts2.Logger = warnLog
 				again := &annotateReviewer{t: t, offLimits: unreviewableAtoms, note: c.note, err: c.err}
 				AnnotateReviews(t.Context(), second, again, prov2, opts2)
 				if len(again.calls) != len(reviewedAtoms) {
@@ -847,10 +851,11 @@ func TestAnnotateReviews(t *testing.T) {
 	})
 
 	t.Run("a cache hit issues no second call", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		cacheDir := t.TempDir()
 
 		report, prov, opts := reviewFixtureIn(t, cacheDir)
+		opts.Logger = warnLog
 		first := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(req ReviewRequest) (ReviewNote, error) {
 			return noteFor(req.Category + "/" + req.Package), nil
 		}}
@@ -862,6 +867,7 @@ func TestAnnotateReviews(t *testing.T) {
 		// A second run over the same two trees: same ebuilds, same content, same
 		// question. It must be answered from the cache and reach no reviewer.
 		second, prov2, opts2 := reviewFixtureIn(t, cacheDir)
+		opts2.Logger = warnLog
 		silent := &annotateReviewer{t: t, offLimits: unreviewableAtoms, err: errors.New("a cached run must not ask")}
 		AnnotateReviews(t.Context(), second, silent, prov2, opts2)
 
@@ -884,7 +890,7 @@ func TestAnnotateReviews(t *testing.T) {
 		// on the live overlay, and it is asserted here because it is what the
 		// commentary's wording has to survive: prose about the DIFFERENCE stays true
 		// under both atoms, prose about the package does not.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		previous := reviewCacheDirFor
 		cacheDir := t.TempDir()
 		reviewCacheDirFor = func() (string, error) { return cacheDir, nil }
@@ -903,6 +909,7 @@ func TestAnnotateReviews(t *testing.T) {
 			IncludeSynced: true,
 			OverlayPath:   overlayRoot,
 			Divergence:    map[string]Divergence{"dev-libs/alpha": {}, "dev-libs/beta": {}},
+			Logger:        warnLog,
 		}
 		report, err := CompareWithProvider(t.Context(), []PackageInfo{
 			{Category: "dev-libs", Package: "alpha", LatestVersion: "1.0"},
@@ -934,7 +941,6 @@ func TestAnnotateReviews(t *testing.T) {
 		// overlay, so the re-read costs nothing. Proved by CHANGING one file between
 		// the comparison and the pass: a request built from remembered bytes would
 		// carry the old text.
-		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		const edited = "EAPI=8\ninherit ecm\n# edited after the comparison\n"
 		writeVerifyEbuild(t, opts.OverlayPath, "kde-plasma", "spectacle", "6.7.4", edited)
@@ -962,8 +968,9 @@ func TestAnnotateReviews(t *testing.T) {
 		// not refuse this pair — it compared both files and found a difference, and
 		// the row still says VerifiedDiffers. What failed is the re-read for the
 		// review, which is a reading that was requested and did not happen.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
+		opts.Logger = warnLog
 		gone := filepath.Join(opts.OverlayPath, "kde-plasma", "spectacle", "spectacle-6.7.4.ebuild")
 		if err := os.Remove(gone); err != nil {
 			t.Fatalf("remove the overlay ebuild: %v", err)
@@ -1007,7 +1014,6 @@ func TestAnnotateReviews(t *testing.T) {
 		// abort it rather than hold the run open. The spine is the ctx argument —
 		// the same one the comparison itself carries — and a value planted on it is
 		// how the test sees that spine arrive rather than a fresh Background.
-		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		type ctxKey struct{}
 		callerCtx := context.WithValue(context.Background(), ctxKey{}, "the caller's")
@@ -1045,8 +1051,9 @@ func TestAnnotateReviews(t *testing.T) {
 		// The cancellation fires before the FIRST call here, so this asserts the
 		// whole pending set — which is the case a per-iteration marking would get
 		// wrong.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
+		opts.Logger = warnLog
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -1077,7 +1084,6 @@ func TestAnnotateReviews(t *testing.T) {
 		// every divergence is ours, every one has a declaration to write — and the
 		// grouping, the Verdicts and the counts are the same as with no reviewer at
 		// all.
-		captureReviewWarnings(t)
 		reviewed, prov, opts := reviewFixture(t)
 		unreviewed := cloneReport(reviewed)
 
@@ -1119,9 +1125,10 @@ func TestAnnotateReviews(t *testing.T) {
 		// R5.1's precondition. It is not an optimisation: a run whose findings are
 		// all declared or all identical must not build a cache, so it cannot warn
 		// about one either.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		cacheDir := t.TempDir()
 		report, prov, opts := reviewFixtureIn(t, cacheDir)
+		opts.Logger = warnLog
 		report.Results = nil
 
 		rev := &annotateReviewer{t: t, err: errors.New("nothing should be asked")}
@@ -1146,8 +1153,9 @@ func TestAnnotateReviews(t *testing.T) {
 		// newReviewCache("") is deliberately silent: the caller that could not name
 		// a directory is the one holding the reason, so the reason is stated HERE or
 		// not at all.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
+		opts.Logger = warnLog
 		previous := reviewCacheDirFor
 		reviewCacheDirFor = func() (string, error) { return "", errors.New("no home directory") }
 		t.Cleanup(func() { reviewCacheDirFor = previous })
@@ -1264,7 +1272,6 @@ func TestReviewCommentary(t *testing.T) {
 		// program wrote would be published before anyone could read it — which is
 		// why the proposal is text on a terminal and this is an assertion over a
 		// real tree rather than a promise in a comment.
-		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		before := treeSnapshot(t, opts.OverlayPath)
 		if len(before) == 0 {
@@ -1297,7 +1304,6 @@ func TestReviewCommentary(t *testing.T) {
 		// The cases above hand-build their results, which is what lets one section
 		// carry several notes without several overlay trees. This one reaches the
 		// same lines the way runCompare will: comparison, annotation, FormatReport.
-		captureReviewWarnings(t)
 		report, prov, opts := reviewFixture(t)
 		rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(req ReviewRequest) (ReviewNote, error) {
 			return ReviewNote{
@@ -1395,7 +1401,7 @@ func countsOf(report *CompareReport) CompareReport {
 //
 // _Requirements: R5.8_
 func TestReviewChangesNothing(t *testing.T) {
-	warnings := captureReviewWarnings(t)
+	warnLog, warnings := captureReviewWarnings(t)
 
 	// TWO independent runs of the same fixture, each with its own trees and its
 	// own note cache — the reviewed one and the `--no-review` one, as they would
@@ -1403,6 +1409,7 @@ func TestReviewChangesNothing(t *testing.T) {
 	// compare a report against itself and could not see a comparison that read
 	// its own Review field.
 	reviewedReport, prov, opts := reviewFixture(t)
+	opts.Logger = warnLog
 	rev := &annotateReviewer{t: t, offLimits: unreviewableAtoms, answer: func(req ReviewRequest) (ReviewNote, error) {
 		// The most decisive-looking answer a model can give: every divergence is
 		// ours, and every one comes with a declaration to write. If anything a
@@ -1414,6 +1421,7 @@ func TestReviewChangesNothing(t *testing.T) {
 	AnnotateReviews(t.Context(), reviewedReport, rev, prov, opts)
 
 	unreviewedReport, nilProv, nilOpts := reviewFixture(t)
+	nilOpts.Logger = warnLog
 	// nil IS `--no-review` (R5.6) and "no `claude` on PATH" (R5.5): one no-op
 	// path, called here exactly as runCompare calls it.
 	AnnotateReviews(t.Context(), unreviewedReport, nil, nilProv, nilOpts)

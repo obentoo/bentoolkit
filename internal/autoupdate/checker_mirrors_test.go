@@ -140,9 +140,9 @@ func TestValidateMirrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base
 			cfg.Mirrors = tc.mirrors
-			err := ValidatePackageConfig("app-misc/foo", &cfg)
+			err := ValidatePackageConfig(nil, "app-misc/foo", &cfg)
 			if (err == nil) != tc.ok {
-				t.Errorf("ValidatePackageConfig(%v) = %v, want ok=%v", tc.mirrors, err, tc.ok)
+				t.Errorf("ValidatePackageConfig(nil, %v) = %v, want ok=%v", tc.mirrors, err, tc.ok)
 			}
 		})
 	}

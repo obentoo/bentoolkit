@@ -49,7 +49,7 @@ func s058ReportRows() []s058Row {
 		{name: "analyze --all with nothing to analyze", args: []string{"overlay", "analyze", "--all"}, want: 0},
 		{name: "staged clean with nothing staged", args: []string{"overlay", "staged", "clean"}, want: 0},
 		{name: "analyze with no package prints help and fails", args: []string{"overlay", "analyze"}, want: 1, usage: true},
-		{name: "compare with --concurrency 0", args: []string{"overlay", "compare", "--concurrency", "0"}, want: 1, once: "--concurrency must be in range [1, 100], got 0"},
+		{name: "compare with --concurrency 0", args: []string{"overlay", "compare", "--concurrency", "0"}, want: 1, once: `msg="--concurrency must be in range [1, 100]" concurrency=0`},
 		{name: "staged clean with an argument", args: []string{"overlay", "staged", "clean", "extra"}, want: 1, usage: true},
 	}
 }

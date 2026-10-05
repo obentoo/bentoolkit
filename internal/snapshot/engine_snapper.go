@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // snapperDescription tags every snapshot created by bentoo so they are
@@ -33,7 +36,11 @@ const snapperDateLayout = "2006-01-02 15:04:05"
 type snapperEngine struct {
 	cfg EngineConfig
 	run Runner
+	log *slog.Logger // nil discards; set by newEngine
 }
+
+// logger returns the engine's logger, or a discarding one for a zero value.
+func (e *snapperEngine) logger() *slog.Logger { return logging.OrDiscard(e.log) }
 
 // newSnapperEngine builds the snapper engine. A nil Runner falls back to the
 // production execRunner.
@@ -68,7 +75,8 @@ func (e *snapperEngine) Create(ctx context.Context, subvolume string) (Snapshot,
 	if !isSnapperNumber(id) {
 		// The snapshot exists; only its identity is unknown. The ships that
 		// need a Path refuse it with ErrSnapshotUnidentified.
-		warnLogf("snapshot: snapper create %s printed %q, not a snapshot number; its ships cannot address it", subvolume, out)
+		e.logger().Warn("snapshot: snapper create printed no snapshot number; its ships cannot address it",
+			"subvolume", subvolume, "output", string(out))
 		return Snapshot{Subvolume: subvolume}, nil
 	}
 	return Snapshot{
@@ -124,7 +132,7 @@ func (e *snapperEngine) List(ctx context.Context, subvolume string) ([]Snapshot,
 	if err != nil {
 		return nil, errors.Join(ErrEngineFailed, fmt.Errorf("snapper list %s: %w", subvolume, err))
 	}
-	return parseSnapperListJSON(out, subvolume), nil
+	return parseSnapperListJSON(out, subvolume, e.logger()), nil
 }
 
 // snapperListEntry mirrors the fields consumed from one element of
@@ -167,17 +175,18 @@ type snapperListEntry struct {
 //
 // The signature returns no error, so a malformed payload could only surface as
 // an empty list, which reads as "no snapshots" — indistinguishable from the bug
-// this replaces. An unmarshal failure is therefore announced through warnLogf
+// this replaces. An unmarshal failure is therefore announced as a warning on log
 // before returning empty, mirroring how archiveShipper.pruneRemote reports
 // unparseable `rclone lsjson` output. A blank payload is not malformed: it is
-// R3.4's empty case and stays quiet.
-func parseSnapperListJSON(out []byte, subvolume string) []Snapshot {
+// R3.4's empty case and stays quiet. A nil log discards.
+func parseSnapperListJSON(out []byte, subvolume string, log *slog.Logger) []Snapshot {
 	if len(bytes.TrimSpace(out)) == 0 {
 		return nil // no output at all: an empty listing, not a parse failure (016 R3.4)
 	}
 	var configs map[string][]snapperListEntry
 	if err := json.Unmarshal(out, &configs); err != nil {
-		warnLogf("snapshot: parsing `snapper --jsonout list` output failed; reporting no snapshots: %v", err)
+		logging.OrDiscard(log).Warn("snapshot: parsing `snapper --jsonout list` output failed; reporting no snapshots",
+			"subvolume", subvolume, "err", err)
 		return nil
 	}
 

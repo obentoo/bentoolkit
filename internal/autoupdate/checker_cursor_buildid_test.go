@@ -48,13 +48,13 @@ func TestSubstituteCommitHash_BuildID(t *testing.T) {
 func TestValidate_CommitSHAPath_VersionTrack(t *testing.T) {
 	t.Run("json ok", func(t *testing.T) {
 		cfg := PackageConfig{URL: "https://x", Parser: "json", Path: "version", CommitSHAPath: "commitSha"}
-		if err := ValidatePackageConfig("app-editors/cursor", &cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "app-editors/cursor", &cfg); err != nil {
 			t.Errorf("expected valid, got %v", err)
 		}
 	})
 	t.Run("non-json rejected", func(t *testing.T) {
 		cfg := PackageConfig{URL: "https://x", Parser: "regex", Pattern: "v(.*)", CommitSHAPath: "commitSha"}
-		if err := ValidatePackageConfig("app-editors/cursor", &cfg); err == nil {
+		if err := ValidatePackageConfig(nil, "app-editors/cursor", &cfg); err == nil {
 			t.Error("expected error for commit_sha_path with parser!=json")
 		}
 	})

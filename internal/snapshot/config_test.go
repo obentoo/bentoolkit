@@ -372,17 +372,14 @@ func TestValidate_UnknownDriverBeatsMissingBinary(t *testing.T) {
 func TestValidate_EmptySubvolumesWarnsButPasses(t *testing.T) {
 	stubLookPath(t, "btrbk", "ssh", "systemctl")
 
-	var warnings []string
-	origWarn := warnLogf
-	t.Cleanup(func() { warnLogf = origWarn })
-	warnLogf = func(format string, args ...interface{}) { warnings = append(warnings, format) }
+	lc := &logCapture{}
 
 	cfg := validConfig()
 	cfg.Engine.Subvolumes = nil
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.ValidateWith(lc.logger()); err != nil {
 		t.Fatalf("Validate = %v, want nil (warn-but-continue)", err)
 	}
-	if len(warnings) == 0 {
+	if len(lc.all()) == 0 {
 		t.Errorf("expected a warning for empty subvolumes")
 	}
 }

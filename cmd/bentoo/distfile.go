@@ -7,6 +7,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -137,7 +138,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) error {
 		return exitWith(1)
 	}
 
-	res, err := autoupdate.FetchAuthDistfile(ctx, autoupdate.AuthDistfileRequest{
+	res, err := autoupdate.FetchAuthDistfile(ctx, logging.FromContext(ctx), autoupdate.AuthDistfileRequest{
 		OverlayPath: appCtx.OverlayPath,
 		Package:     args[0],
 		Version:     distfileFetchVersion,
