@@ -243,6 +243,12 @@ func newTestCLI(t *testing.T, opts ...testCLIOption) *testCLI {
 
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	// Story 062: every run opens the log file under XDG_STATE_HOME, so it is
+	// pointed into the temporary home — where an unset value would resolve —
+	// and BENTOO_LOG_LEVEL is cleared so the developer's shell cannot change
+	// what a run's stderr carries.
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv(logLevelEnv, "")
 
 	// Forced, not inherited. Under `go test` stdout is already a pipe, so the
 	// answer would come out right by accident — and would come out differently
