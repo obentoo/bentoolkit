@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -46,7 +48,7 @@ func TestCompareLookupStopsOnCancel(t *testing.T) {
 	prov.BaseURL = srv.URL
 	prov.CacheDir = ""
 
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "app-misc", Package: "first", LatestVersion: "1.0"},
 		{Category: "app-misc", Package: "second", LatestVersion: "1.0"},
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -310,7 +312,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	// Scan local overlay
 	log.Info("Scanning Bentoo overlay", "path", overlayPath)
-	scanResult, err := overlay.ScanOverlay(overlayPath)
+	scanResult, err := repo.ScanOverlay(overlayPath)
 	if err != nil {
 		log.Error("scanning overlay: failed", "err", err)
 		return exitWith(1)

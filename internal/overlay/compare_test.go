@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
@@ -50,7 +52,7 @@ func TestCompare(t *testing.T) {
 	client := github.NewClient()
 	client.BaseURL = server.URL
 
-	localPackages := []PackageInfo{
+	localPackages := []repo.PackageInfo{
 		{Category: "app-misc", Package: "hello", LatestVersion: "2.0"},         // up-to-date
 		{Category: "app-editors", Package: "vscode", LatestVersion: "1.107.1"}, // outdated
 		{Category: "www-client", Package: "firefox", LatestVersion: "128.0"},   // outdated
@@ -114,7 +116,7 @@ func TestCompareWithAllResults(t *testing.T) {
 	client := github.NewClient()
 	client.BaseURL = server.URL
 
-	localPackages := []PackageInfo{
+	localPackages := []repo.PackageInfo{
 		{Category: "app-misc", Package: "hello", LatestVersion: "1.0"}, // up-to-date
 	}
 
@@ -152,7 +154,7 @@ func TestCompareNewerInLocal(t *testing.T) {
 	client := github.NewClient()
 	client.BaseURL = server.URL
 
-	localPackages := []PackageInfo{
+	localPackages := []repo.PackageInfo{
 		{Category: "app-misc", Package: "hello", LatestVersion: "2.0"}, // newer locally
 	}
 
@@ -185,7 +187,7 @@ func TestCompareProgressCallback(t *testing.T) {
 	client := github.NewClient()
 	client.BaseURL = server.URL
 
-	localPackages := []PackageInfo{
+	localPackages := []repo.PackageInfo{
 		{Category: "app-misc", Package: "hello", LatestVersion: "1.0"},
 		{Category: "app-misc", Package: "world", LatestVersion: "1.0"},
 	}
@@ -369,7 +371,7 @@ func holdUntilCancelled(t *testing.T) func(ctx context.Context, category, pkg st
 // flight at once, and returns what the run returned. prov's hook must be the
 // barrier's arrive. It fails the test when the overlap is not reached, or the
 // run does not return, within signalWaitDeadline.
-func compareThroughBarrier(t *testing.T, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, barrier *overlapBarrier, want int) (*CompareReport, error) {
+func compareThroughBarrier(t *testing.T, pkgs []repo.PackageInfo, prov *fakeProvider, opts CompareOptions, barrier *overlapBarrier, want int) (*CompareReport, error) {
 	t.Helper()
 	var (
 		report *CompareReport
@@ -400,13 +402,13 @@ func TestCompareOptions_DefaultConcurrency(t *testing.T) {
 		hook:     func(context.Context, string, string) { barrier.arrive() },
 		versions: map[string][]string{},
 	}
-	pkgs := make([]PackageInfo, 0, numPkgs)
+	pkgs := make([]repo.PackageInfo, 0, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("pkg%02d", i)
 		// Provider returns plain version strings (matching the provider.Provider
 		// contract); remote == local 1.0 -> every package is up-to-date.
 		prov.versions["cat/"+name] = []string{"1.0"}
-		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
 	}
 
 	// Concurrency left at zero -> must be sanitized to the default (10).
@@ -444,12 +446,12 @@ func TestCompareWithProvider_Parallel(t *testing.T) {
 		hook:     func(context.Context, string, string) { barrier.arrive() },
 		versions: map[string][]string{},
 	}
-	pkgs := make([]PackageInfo, 0, numPkgs)
+	pkgs := make([]repo.PackageInfo, 0, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("pkg%02d", i)
 		// Remote has version 2.0 -> every local 1.0 package is outdated.
 		prov.versions["cat/"+name] = []string{"2.0"}
-		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
 	}
 
 	var progressCalls atomic.Int64
@@ -507,11 +509,11 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 		hook:     holdUntilCancelled(t),
 		versions: map[string][]string{},
 	}
-	pkgs := make([]PackageInfo, 0, numPkgs)
+	pkgs := make([]repo.PackageInfo, 0, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("pkg%03d", i)
 		prov.versions["cat/"+name] = []string{"1.0"}
-		pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -547,7 +549,7 @@ func TestCompareWithProvider_ContextCancel(t *testing.T) {
 // then calls cancel, so the cancellation lands mid-scan however slowly the
 // host reaches the first package. It fails the test when dispatch never begins
 // or the run does not return within signalWaitDeadline of the cancel.
-func compareCancelledOnceDispatched(t *testing.T, ctx context.Context, pkgs []PackageInfo, prov *fakeProvider, opts CompareOptions, cancel context.CancelFunc) (*CompareReport, error) {
+func compareCancelledOnceDispatched(t *testing.T, ctx context.Context, pkgs []repo.PackageInfo, prov *fakeProvider, opts CompareOptions, cancel context.CancelFunc) (*CompareReport, error) {
 	t.Helper()
 	type result struct {
 		report *CompareReport
@@ -578,7 +580,7 @@ func compareCancelledOnceDispatched(t *testing.T, ctx context.Context, pkgs []Pa
 // cancelled before CompareWithProvider is called dispatches no work at all.
 func TestCompareWithProvider_ContextCancelledUpfront(t *testing.T) {
 	prov := &fakeProvider{versions: map[string][]string{}}
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "cat", Package: "a", LatestVersion: "1.0"},
 		{Category: "cat", Package: "b", LatestVersion: "1.0"},
 	}

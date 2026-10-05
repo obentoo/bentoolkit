@@ -41,6 +41,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // realignFakeReviewer answers every request the same way and counts the calls.
@@ -85,7 +87,7 @@ func realignFixture(t *testing.T) (*CompareReport, *localRootedFakeProvider, Com
 		versions: map[string][]string{"media-libs/gst-plugins-qt6": {"1.29.2"}},
 	}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{{
 		Category:      "media-libs",
 		Package:       "gst-plugins-qt6",
 		Versions:      []string{"1.29.2"},
@@ -289,7 +291,7 @@ func TestRealignVerdictSecondRunMakesNoCall(t *testing.T) {
 	}
 
 	// A second report over the SAME files: same content, same key, no question.
-	second, err := CompareWithProvider(t.Context(), []PackageInfo{{
+	second, err := CompareWithProvider(t.Context(), []repo.PackageInfo{{
 		Category:      "media-libs",
 		Package:       "gst-plugins-qt6",
 		Versions:      []string{"1.29.2"},

@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -731,7 +733,7 @@ func (a *githubProviderAdapter) SupportsAPI() bool { return true }
 func (a *githubProviderAdapter) Close() error { return nil }
 
 // Compare compares local packages against a remote GitHub repository
-func Compare(ctx context.Context, localPackages []PackageInfo, client *github.Client, opts CompareOptions) (*CompareReport, error) {
+func Compare(ctx context.Context, localPackages []repo.PackageInfo, client *github.Client, opts CompareOptions) (*CompareReport, error) {
 	return CompareWithProvider(ctx, localPackages, &githubProviderAdapter{client: client}, opts)
 }
 
@@ -750,7 +752,7 @@ func Compare(ctx context.Context, localPackages []PackageInfo, client *github.Cl
 //
 // ctx must be non-nil. Every provider.GetPackageVersions call receives ctx
 // itself, so a lookup ends when the caller's context does.
-func CompareWithProvider(ctx context.Context, localPackages []PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
+func CompareWithProvider(ctx context.Context, localPackages []repo.PackageInfo, prov provider.Provider, opts CompareOptions) (*CompareReport, error) {
 	report := &CompareReport{
 		TotalPackages: len(localPackages),
 		Results:       []CompareResult{},
@@ -801,7 +803,7 @@ func CompareWithProvider(ctx context.Context, localPackages []PackageInfo, prov 
 		}
 
 		wg.Add(1)
-		go func(p PackageInfo) {
+		go func(p repo.PackageInfo) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
@@ -941,7 +943,7 @@ func sortCompareResults(results []CompareResult) {
 // can ever come to depend on the registry: the version comparison keeps its
 // current four values and their current meanings by construction, not by
 // convention.
-func comparePackageWithProvider(ctx context.Context, pkg PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
+func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
 	result := comparePackageVersions(ctx, pkg, prov)
 	// comparePackageVersions has no opts, so the text it recorded is scrubbed
 	// here, before anything else can read it.
@@ -986,7 +988,7 @@ func comparePackageWithProvider(ctx context.Context, pkg PackageInfo, prov provi
 // comparePackageVersions resolves how the local package's latest version relates
 // to the provider's copy. It sets Status and the two version fields, and knows
 // nothing about divergence.
-func comparePackageVersions(ctx context.Context, pkg PackageInfo, prov provider.Provider) CompareResult {
+func comparePackageVersions(ctx context.Context, pkg repo.PackageInfo, prov provider.Provider) CompareResult {
 	result := CompareResult{
 		Category:     pkg.Category,
 		Package:      pkg.Package,
@@ -1012,7 +1014,7 @@ func comparePackageVersions(ctx context.Context, pkg PackageInfo, prov provider.
 	}
 
 	// Find latest remote version (ignoring live/9999 ebuilds)
-	remoteLatest := FindLatestVersionFiltered(remoteVersions, true)
+	remoteLatest := repo.FindLatestVersionFiltered(remoteVersions, true)
 	result.RemoteVersion = remoteLatest
 
 	// If remote only has live versions, consider up-to-date

@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // s057RealignByAtom answers per atom; an atom absent from both maps is judged.
@@ -80,14 +82,14 @@ func TestRealignNoVerdictIsCountedPerCause(t *testing.T) {
 	overlayRoot, gentooRoot := t.TempDir(), t.TempDir()
 	atoms := []string{"s057/timeout-a", "s057/timeout-b", "s057/failed", "s057/silent", "s057/unreadable", "s057/judged"}
 	versions := map[string][]string{}
-	pkgs := make([]PackageInfo, 0, len(atoms))
+	pkgs := make([]repo.PackageInfo, 0, len(atoms))
 	for i, atom := range atoms {
 		cat, pkg := "s057", atom[len("s057/"):]
 		// Every pair distinct, so each is its own question and its own cache key.
 		writeVerifyEbuild(t, overlayRoot, cat, pkg, "1.0", fmt.Sprintf("%sDESCRIPTION=\"ours %d\"\n", realignOurs, i))
 		writeVerifyEbuild(t, gentooRoot, cat, pkg, "1.0", fmt.Sprintf("%sDESCRIPTION=\"theirs %d\"\n", realignBaseline, i))
 		versions[atom] = []string{"1.0"}
-		pkgs = append(pkgs, PackageInfo{Category: cat, Package: pkg, Versions: []string{"1.0"}, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: cat, Package: pkg, Versions: []string{"1.0"}, LatestVersion: "1.0"})
 	}
 	prov := &localRootedFakeProvider{root: gentooRoot, versions: versions}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}

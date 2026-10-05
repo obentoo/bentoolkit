@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -53,10 +55,10 @@ func (p *s057LookupProvider) Close() error      { return nil }
 func s057CompareAll(t *testing.T, prov provider.Provider, opts CompareOptions, atoms ...string) (*CompareReport, map[string]CompareResult) {
 	t.Helper()
 	opts.IncludeSynced, opts.IncludeNotInRemote = true, true
-	pkgs := make([]PackageInfo, 0, len(atoms))
+	pkgs := make([]repo.PackageInfo, 0, len(atoms))
 	for _, a := range atoms {
 		cat, pkg, _ := strings.Cut(a, "/")
-		pkgs = append(pkgs, PackageInfo{Category: cat, Package: pkg, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: cat, Package: pkg, LatestVersion: "1.0"})
 	}
 	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {

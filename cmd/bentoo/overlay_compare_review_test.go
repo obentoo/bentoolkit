@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -200,7 +202,7 @@ func annotateFixture(t *testing.T) (*overlay.CompareReport, provider.Provider, o
 		Divergence:    map[string]overlay.Divergence{"kde-plasma/spectacle": {}},
 	}
 
-	report, err := overlay.CompareWithProvider(t.Context(), []overlay.PackageInfo{
+	report, err := overlay.CompareWithProvider(t.Context(), []repo.PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 	}, prov, opts)
 	if err != nil {

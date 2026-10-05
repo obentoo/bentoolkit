@@ -1,4 +1,4 @@
-package overlay
+package repo
 
 import (
 	"os"
@@ -30,8 +30,8 @@ type ScanError struct {
 	Message string
 }
 
-// isCategory checks if a directory name looks like a valid Gentoo category
-func isCategory(name string) bool {
+// IsCategory checks if a directory name looks like a valid Gentoo category
+func IsCategory(name string) bool {
 	// Categories have format: word-word (e.g., app-editors, sys-apps)
 	// Skip hidden directories and special directories
 	if strings.HasPrefix(name, ".") {
@@ -78,7 +78,7 @@ func ScanOverlay(overlayPath string) (*ScanResult, error) {
 		}
 
 		categoryName := entry.Name()
-		if !isCategory(categoryName) {
+		if !IsCategory(categoryName) {
 			continue
 		}
 

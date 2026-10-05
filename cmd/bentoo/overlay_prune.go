@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -234,7 +236,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	output.Header.Println("Overlay Prune")
 	fmt.Println()
 
-	scan, err := overlay.ScanOverlay(overlayPath)
+	scan, err := repo.ScanOverlay(overlayPath)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  cannot scan the overlay at %s: %v\n", overlayPath, err)
 		return exitWith(1)
@@ -850,7 +852,7 @@ func removePruneRegistryEntries(overlayPath string, atoms []string) error {
 // plan to nothing". A category directory holding no package therefore fails too,
 // which is the honest answer to "prune app-editors" when there is no such
 // package to prune.
-func selectPrunePackages(packages []overlay.PackageInfo, target string) ([]overlay.PackageInfo, error) {
+func selectPrunePackages(packages []repo.PackageInfo, target string) ([]repo.PackageInfo, error) {
 	if target == "" {
 		return packages, nil
 	}
@@ -860,7 +862,7 @@ func selectPrunePackages(packages []overlay.PackageInfo, target string) ([]overl
 	// into a filesystem path — the paths the plan uses come from the scan.
 	category, name, named := strings.Cut(target, "/")
 
-	selected := make([]overlay.PackageInfo, 0, len(packages))
+	selected := make([]repo.PackageInfo, 0, len(packages))
 	for _, p := range packages {
 		if p.Category != category {
 			continue

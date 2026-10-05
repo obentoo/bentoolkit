@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/report"
@@ -351,7 +353,7 @@ func realignShippedPayload(t *testing.T, fx realignFixture) (report.CompareRun, 
 	}
 	t.Cleanup(func() { _ = prov.Close() })
 
-	scan, err := overlay.ScanOverlay(fx.overlayPath)
+	scan, err := repo.ScanOverlay(fx.overlayPath)
 	if err != nil {
 		t.Fatalf("scanning the fixture overlay: %v", err)
 	}

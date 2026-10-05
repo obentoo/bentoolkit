@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // MatchResult holds the results of a Match() call, including any non-fatal scan warnings.
@@ -50,7 +52,7 @@ func (m *EbuildMatcher) Match(spec *RenameSpec) (*MatchResult, error) {
 			}
 
 			categoryName := entry.Name()
-			if !isCategory(categoryName) {
+			if !repo.IsCategory(categoryName) {
 				continue
 			}
 

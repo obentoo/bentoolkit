@@ -1,6 +1,10 @@
 package overlay
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+)
 
 // TestCompareCarriesVerdict pins what one comparison reports per package once
 // the caller supplies what it knows about divergence (R2.1, R2.2).
@@ -30,7 +34,7 @@ func TestCompareCarriesVerdict(t *testing.T) {
 		"cat/current":    {"2.0"},
 	}}
 
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "cat", Package: "redundant", LatestVersion: "1.0"},
 		{Category: "cat", Package: "rebase", LatestVersion: "1.0"},
 		{Category: "cat", Package: "unrecorded", LatestVersion: "1.0"},

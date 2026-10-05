@@ -1,4 +1,4 @@
-package overlay
+package repo
 
 import (
 	"os"

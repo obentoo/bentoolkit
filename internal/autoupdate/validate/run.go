@@ -10,9 +10,10 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
-	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
 // Options is what a run needs, and a run is fully described by it: nothing here
@@ -366,7 +367,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		return Report{}, err
 	}
 
-	scan, err := overlay.ScanOverlay(opts.Overlay)
+	scan, err := repo.ScanOverlay(opts.Overlay)
 	if err != nil {
 		return Report{}, fmt.Errorf("scanning overlay %q: %w", opts.Overlay, err)
 	}
@@ -1683,7 +1684,7 @@ func buildDepthNotRunReason(depth Depth, stagingRoot string) string {
 // A selector that matches nothing returns no targets. The caller reports that
 // on the Report rather than as an error: the run DID produce an answer, and the
 // command turns it into exit 2 naming the selector (R5.7).
-func selectTargets(scan *overlay.ScanResult, selector string) []ebuildTarget {
+func selectTargets(scan *repo.ScanResult, selector string) []ebuildTarget {
 	var targets []ebuildTarget
 
 	for _, pkg := range scan.Packages {

@@ -42,6 +42,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -79,7 +81,7 @@ src_configure() {
 //
 // `gentooCarries` decides, per package, whether ::gentoo has a counterpart — the
 // only difference between a package with a baseline and one of the 84 without.
-func annotateFixtureTrees(t *testing.T, gentooCarries map[string]bool) (overlayRoot string, prov *localRootedFakeProvider, pkgs []PackageInfo) {
+func annotateFixtureTrees(t *testing.T, gentooCarries map[string]bool) (overlayRoot string, prov *localRootedFakeProvider, pkgs []repo.PackageInfo) {
 	t.Helper()
 	overlayRoot, gentooRoot := t.TempDir(), t.TempDir()
 	versions := map[string][]string{}
@@ -90,7 +92,7 @@ func annotateFixtureTrees(t *testing.T, gentooCarries map[string]bool) (overlayR
 			t.Fatalf("fixture atom %q is not category/package", atom)
 		}
 		writeVerifyEbuild(t, overlayRoot, category, pkg, "1.29.2", annotateOursEbuild)
-		pkgs = append(pkgs, PackageInfo{
+		pkgs = append(pkgs, repo.PackageInfo{
 			Category:      category,
 			Package:       pkg,
 			Versions:      []string{"1.29.2"},
@@ -116,7 +118,7 @@ func annotateReviewOpts(overlayRoot string) CompareOptions {
 	}
 }
 
-func annotateCompare(t *testing.T, pkgs []PackageInfo, prov provider.Provider, opts CompareOptions) *CompareReport {
+func annotateCompare(t *testing.T, pkgs []repo.PackageInfo, prov provider.Provider, opts CompareOptions) *CompareReport {
 	t.Helper()
 	report, err := CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {
@@ -840,7 +842,7 @@ func TestAnnotateBaselinePassesTheChosenMoveToTheReduction(t *testing.T) {
 		root:     gentooRoot,
 		versions: map[string][]string{atom: {"1.28.0"}},
 	}
-	pkgs := []PackageInfo{{
+	pkgs := []repo.PackageInfo{{
 		Category:      category,
 		Package:       pkg,
 		Versions:      []string{"1.29.0", "1.29.2"},

@@ -30,6 +30,8 @@ package overlay
 import (
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // comparedThree runs a comparison over three packages that land in three
@@ -51,7 +53,7 @@ func comparedThree(t *testing.T) *CompareReport {
 		},
 	}
 
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "cat", Package: "behind", LatestVersion: "1.0"},
 		{Category: "cat", Package: "current", LatestVersion: "1.0"},
 		{Category: "cat", Package: "absent", LatestVersion: "1.0"},

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -57,7 +59,7 @@ import (
 // is genuinely populated while no result in the report has a counterpart in it.
 // Without it the fixture could not tell "the tree could not be reached" from "the
 // tree is empty", and the assertions would hold for the wrong reason.
-func baselineTreeFixture(t *testing.T, marker bool, alsoInGentoo string, ourPackages ...string) (overlayRoot string, prov provider.Provider, pkgs []PackageInfo) {
+func baselineTreeFixture(t *testing.T, marker bool, alsoInGentoo string, ourPackages ...string) (overlayRoot string, prov provider.Provider, pkgs []repo.PackageInfo) {
 	t.Helper()
 
 	home := t.TempDir()
@@ -93,7 +95,7 @@ func baselineTreeFixture(t *testing.T, marker bool, alsoInGentoo string, ourPack
 			t.Fatalf("fixture atom %q is not category/package", atom)
 		}
 		writeVerifyEbuild(t, overlayRoot, category, pkg, "1.0.0", body)
-		pkgs = append(pkgs, PackageInfo{
+		pkgs = append(pkgs, repo.PackageInfo{
 			Category:      category,
 			Package:       pkg,
 			Versions:      []string{"1.0.0"},
