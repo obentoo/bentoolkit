@@ -103,6 +103,7 @@ func s070SkipWithoutSIGINT(t *testing.T) {
 // and R4.3: one SIGINT while the registry download waits.
 func TestS070RegistryInterruptReportsTheInterruption(t *testing.T) {
 	s070SkipWithoutSIGINT(t)
+	t.Parallel()
 	rows := []struct {
 		name string
 		args []string
