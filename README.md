@@ -62,9 +62,15 @@ make coverage        # Run tests with coverage report
 make audit           # Run security audit (go mod verify + govulncheck)
 make clean           # Remove build artifacts
 make build-all       # Cross-compile for linux amd64 and arm64
+make checksums       # Write build/SHA256SUMS over the binaries in build/
 make check           # Run lint, test, and audit
 make help            # Show all available targets
 ```
+
+Builds are reproducible: binaries are built with `-trimpath`, and the build
+date they report is the time in `SOURCE_DATE_EPOCH`, else the last commit's, so
+two builds of one commit from clean checkouts are byte-identical wherever the
+tree was cloned.
 
 ## Configuration
 

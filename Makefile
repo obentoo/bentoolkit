@@ -6,7 +6,12 @@ TRAY_BINARY := bentoo-tray
 MODULE := github.com/obentoo/bentoolkit
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+# Build time stamped into version.BuildDate. It comes from SOURCE_DATE_EPOCH
+# (the reproducible-builds.org convention), else from the last commit, so two
+# builds of one commit are byte-identical; the wall clock is used only when
+# neither exists (a source tarball built with no git and no SOURCE_DATE_EPOCH).
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null)
+BUILD_TIME := $(if $(SOURCE_DATE_EPOCH),$(shell date -u -d '@$(SOURCE_DATE_EPOCH)' '+%Y-%m-%d_%H:%M:%S'),$(shell date -u '+%Y-%m-%d_%H:%M:%S'))
 VERSION_PKG := $(MODULE)/internal/common/version
 LDFLAGS := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME)"
 LDFLAGS_DEBUG := -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME)"
@@ -35,7 +40,9 @@ GO_TOOLCHAIN := $(shell awk '/^toolchain /{print $$2}' go.mod)
 export GOTOOLCHAIN ?= $(GO_TOOLCHAIN)
 GO := go
 GOTEST := $(GO) test
-GOBUILD := $(GO) build
+# -trimpath keeps the checkout's absolute path out of the binaries, so where the
+# tree was cloned does not change them.
+GOBUILD := $(GO) build -trimpath
 GOMOD := $(GO) mod
 
 # golangci-lint at the version the CI Lint job installs, built with the toolchain
@@ -182,6 +189,16 @@ clean:
 	rm -f coverage.out coverage.html cov.out coverage*.out $(BINARY_NAME) $(TRAY_BINARY)
 	rm -rf $(BUILD_DIR)
 
+# Write build/SHA256SUMS over every binary in build/, with bare file names so
+# `cd build && sha256sum -c SHA256SUMS` verifies them. Run after a build target.
+.PHONY: checksums
+checksums:
+	@set -eu; \
+	files="$$(find $(BUILD_DIR) -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' 2>/dev/null | LC_ALL=C sort)"; \
+	if [ -z "$$files" ]; then echo "checksums: no binaries in $(BUILD_DIR)/ (run make build or make build-all first)"; exit 1; fi; \
+	cd $(BUILD_DIR) && printf '%s\n' "$$files" | xargs sha256sum > SHA256SUMS; \
+	echo "checksums: wrote $(BUILD_DIR)/SHA256SUMS"
+
 # Cross-compilation targets. CGO is disabled so these build on any host without a
 # target C cross-toolchain (both binaries are pure Go); the result is a static
 # binary, which is what we want to ship.
@@ -279,6 +296,7 @@ help:
 	@echo "  audit           Run security audit (audit-ctx + go mod verify + govulncheck)"
 	@echo "  clean           Remove build artifacts"
 	@echo "  build-all       Cross-compile for linux amd64 and arm64"
+	@echo "  checksums       Write build/SHA256SUMS over the binaries in build/"
 	@echo "  build-linux-amd64  Build for Linux amd64"
 	@echo "  build-linux-arm64  Build for Linux arm64"
 	@echo "  fmt             Format code"
