@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -204,6 +206,10 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	if compareSync {
 		if err := registry.Sync(ctx); err != nil {
+			if errors.Is(err, context.Canceled) {
+				logger.Error("%s", registryInterruptedMsg)
+				return exitWith(1)
+			}
 			logger.Error("Failed to sync repository list: %v", err)
 			return exitWith(1)
 		}
@@ -212,6 +218,12 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// Resolve repository info
 	repoInfo, err := provider.ResolveRepository(ctx, repoName, configRepos, registry)
 	if err != nil {
+		// An interruption is not a missing repository, and returning here keeps
+		// the hint below from downloading the registry a second time.
+		if errors.Is(err, context.Canceled) {
+			logger.Error("%s", registryInterruptedMsg)
+			return exitWith(1)
+		}
 		logger.Error("Repository '%s' not found.", repoName)
 		configNames := provider.ListAvailableRepositories(ctx, configRepos, nil)
 		registryNames := provider.ListAvailableRepositories(ctx, nil, registry)
@@ -800,6 +812,11 @@ func resolveRepoToken(flagToken, repoToken string) (string, error) {
 	}
 	return github.ResolveToken()
 }
+
+// registryInterruptedMsg is the one line an interrupted repository registry
+// fetch reports: printed by runCompare, and the wrap text of
+// resolveGentooProvider's error for prune and the revive flows.
+const registryInterruptedMsg = "interrupted while fetching the repository registry"
 
 // convertConfigRepos converts a config.RepoConfig map to a
 // provider.RepositoryInfo map, resolving each repository's auth token from

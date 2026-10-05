@@ -1255,6 +1255,11 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
 	prov, err := ar.deps.resolveGentooProvider(ctx, cfg)
 	if err != nil {
+		// Interrupted: the --check run reports its own interruption, and a
+		// "skipped" warning here would only repeat it under another name.
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		logger.Warn("revivable-orphan scan skipped: %v", err)
 		return
 	}
@@ -2046,6 +2051,11 @@ func resolveGentooProvider(ctx context.Context, cfg *config.Config) (provider.Pr
 
 	repoInfo, err := provider.ResolveRepository(ctx, "gentoo", configRepos, registry)
 	if err != nil {
+		// An interrupted registry fetch is not a missing repository: say so, and
+		// keep context.Canceled in the chain for the callers.
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("%s: %w", registryInterruptedMsg, err)
+		}
 		return nil, fmt.Errorf("repository 'gentoo' not found: %w", err)
 	}
 
