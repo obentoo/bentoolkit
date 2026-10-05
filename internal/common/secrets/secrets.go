@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -128,6 +129,7 @@ func UserPath() (string, bool) {
 // system-scope file is instead a silent miss (D2).
 func Lookup(name string) (value string, found bool, err error) {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		record(v)
 		return v, true, nil
 	}
 
@@ -141,10 +143,51 @@ func Lookup(name string) (value string, found bool, err error) {
 			return "", false, err
 		}
 		if hit {
+			record(v)
 			return v, true, nil
 		}
 	}
 	return "", false, nil
+}
+
+// resolved is the set of every value Lookup has returned in this process. A
+// log handler reads it through Resolved to scrub those values from each
+// diagnostic, so a call site never has to remember to.
+var resolved = struct {
+	sync.Mutex
+	values map[string]struct{}
+}{values: map[string]struct{}{}}
+
+// record adds v to the resolved set. A blank value is never recorded: scrubbing
+// with an empty string would insert the mask between every rune.
+func record(v string) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return
+	}
+	resolved.Lock()
+	resolved.values[v] = struct{}{}
+	resolved.Unlock()
+}
+
+// Resolved returns a copy of every non-empty value Lookup has returned in this
+// process, each once, longest first (ties in lexical order), so that a scrubber
+// replacing them in order redacts a value whole before any shorter value it
+// contains. It is safe to call while Lookup runs on other goroutines.
+func Resolved() []string {
+	resolved.Lock()
+	out := make([]string, 0, len(resolved.values))
+	for v := range resolved.values {
+		out = append(out, v)
+	}
+	resolved.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) > len(out[j])
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 // lookupInFile reads and parses one secrets file. userScope selects the error
