@@ -110,6 +110,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`overlay compare` and `overlay prune` stop on the first `Ctrl+C`.** The
+  repository registry download ignored the interruption, so while
+  api.gentoo.org never answered both commands ran on for 30 s (compare up to
+  60 s: a second download for its hint), then reported "repository 'gentoo'
+  not found". They now exit `1` at once and print `interrupted while fetching
+  the repository registry`. `overlay autoupdate --revive`, `--revive-list` and
+  `--check --revivable` share the fix.
+
 - **`--check` caps requests per host, and script records share a
   navigation.** `--concurrency` bounded packages, not connections, so a host
   that stopped answering could hold as many hung requests as the run had
