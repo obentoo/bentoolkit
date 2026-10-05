@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // This file pins R5.2–R5.4: deleting a package's registry records without
@@ -342,7 +344,7 @@ func TestRemovePackagesFromConfigResultStillParses(t *testing.T) {
 		}
 	}
 	for key := range cfg.Packages {
-		if category, name, ok := SplitPackageKey(key); ok && category+"/"+name == pruneAtomWebkit {
+		if category, name, ok := ebuilds.SplitPackageKey(key); ok && category+"/"+name == pruneAtomWebkit {
 			t.Errorf("%q still parses out of the registry after its atom was removed", key)
 		}
 	}

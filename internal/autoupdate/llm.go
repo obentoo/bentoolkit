@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -52,7 +53,7 @@ type LLMProvider interface {
 
 	// AnalyzeContent analyzes content and suggests a parser configuration.
 	// It uses ebuild metadata and optional hints to generate a schema analysis.
-	AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error)
+	AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error)
 
 	// GetModel returns the model name being used by this provider.
 	GetModel() string
@@ -343,7 +344,7 @@ func (c *ClaudeClient) ExtractVersion(ctx context.Context, content []byte, promp
 }
 
 // AnalyzeContent uses Claude to analyze content and suggest a parser configuration.
-func (c *ClaudeClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *ClaudeClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 
@@ -448,7 +449,7 @@ func buildVersionExtractionPrompt(content []byte, userPrompt string) string {
 }
 
 // buildSchemaAnalysisPrompt creates the prompt for schema analysis
-func buildSchemaAnalysisPrompt(content []byte, meta *EbuildMetadata, hint string) string {
+func buildSchemaAnalysisPrompt(content []byte, meta *ebuilds.EbuildMetadata, hint string) string {
 	// Truncate content if too long
 	contentStr := string(content)
 	const maxContentLen = 4000
@@ -708,7 +709,7 @@ func (c *LLMClient) ExtractVersion(ctx context.Context, content []byte, prompt s
 // historically exposed only ExtractVersion; this method exists purely to keep
 // *LLMClient a valid WithLLMClient argument now that the option takes an
 // LLMProvider.
-func (c *LLMClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *LLMClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	return c.provider.AnalyzeContent(ctx, content, meta, hint)
 }
 

@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -41,10 +42,6 @@ type httpRateLimiter interface {
 
 // Error variables for checker errors
 var (
-	// ErrPackageNotFound is returned when a package is not found in the configuration
-	ErrPackageNotFound = errors.New("package not found in configuration")
-	// ErrNoEbuildFound is returned when no ebuild file is found for a package
-	ErrNoEbuildFound = errors.New("no ebuild file found for package")
 	// ErrFetchFailed is returned when fetching upstream version fails
 	ErrFetchFailed = errors.New("failed to fetch upstream version")
 	// ErrUpstreamUnreachable is wrapped beside ErrFetchFailed when the fetch
@@ -767,7 +764,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	// Get package configuration
 	pkgConfig, exists := c.config.Packages[pkg]
 	if !exists {
-		result.Error = fmt.Errorf("%w: %s", ErrPackageNotFound, pkg)
+		result.Error = fmt.Errorf("%w: %s", ebuilds.ErrPackageNotFound, pkg)
 		return result, result.Error
 	}
 
@@ -960,7 +957,7 @@ func (c *Checker) seriesFor(pkg string) string {
 // version, restricted to the slot when pkg's key carries a ":slot" suffix and to
 // the release line when the entry declares a `series`.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := ebuilds.SelectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1157,7 +1154,7 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 
 		// Split category/package the same way getCurrentVersion does, dropping
 		// any ":slot" suffix so the ::gentoo lookup below gets a real path.
-		category, pkgName, ok := splitPkgAtom(pkg)
+		category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 		if !ok {
 			notes = append(notes, fmt.Sprintf("%s: invalid package name format", pkg))
 			continue
@@ -1186,9 +1183,9 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		// one request per scan to say it.
 		if _, err := c.getCurrentVersion(pkg); err == nil {
 			continue // ebuild still present: disabled but not orphaned, skip silently
-		} else if errors.Is(err, ErrSlotNotFound) || errors.Is(err, ErrSeriesNotFound) {
+		} else if errors.Is(err, ebuilds.ErrSlotNotFound) || errors.Is(err, ebuilds.ErrSeriesNotFound) {
 			continue // the entry's filter selects no line: not an orphan, not a failure
-		} else if !errors.Is(err, ErrNoEbuildFound) {
+		} else if !errors.Is(err, ebuilds.ErrNoEbuildFound) {
 			notes = append(notes, fmt.Sprintf("%s: overlay lookup failed: %v", pkg, err))
 			continue
 		}
@@ -1260,7 +1257,7 @@ func maxGentooVersion(versions []string) string {
 // ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := ebuilds.SelectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1284,7 +1281,7 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 	if err != nil {
 		return "source"
 	}
-	if detectBinaryPackage(content) {
+	if ebuilds.DetectBinaryPackage(content) {
 		return "bin"
 	}
 	return "source"
@@ -1465,7 +1462,7 @@ func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *Pack
 		if !ebuild.IsValidVersion(version) {
 			return nil, fmt.Errorf("%w for %s requiring %s: captured %q is not a Gentoo version", ErrRequirementUnresolved, pkg, atom, version)
 		}
-		if spec.Pin == "~" && revisionSuffixRegex.MatchString(version) {
+		if spec.Pin == "~" && ebuilds.RevisionSuffixRegex.MatchString(version) {
 			return nil, fmt.Errorf("%w for %s requiring %s: captured %q carries a revision, which a ~ pin cannot match", ErrRequirementUnresolved, pkg, atom, version)
 		}
 		captured[atom] = version
@@ -1527,7 +1524,7 @@ var ebuildCommitRegex = regexp.MustCompile(
 // match to SUPPRESS an update, so an unreadable ebuild leaves the normal version
 // comparison in charge rather than silently freezing the package.
 func currentEbuildCommit(log *slog.Logger, overlayPath, pkg, series string) string {
-	best, err := selectCurrentEbuild(log, overlayPath, pkg, series)
+	best, err := ebuilds.SelectCurrentEbuild(log, overlayPath, pkg, series)
 	if err != nil || best.Path == "" {
 		return ""
 	}
@@ -1856,7 +1853,7 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *Pac
 	// per candidate; this covers the paths that yield a single value (first
 	// match, script, fallback, LLM). Failing loudly is the point: the entry's
 	// source moved, or its series is wrong, and both need a human.
-	if m := newSeriesMatcher(c.logger(), cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
+	if m := ebuilds.NewSeriesMatcher(c.logger(), cfg.Series); m.Active() && !m.Matches(stripVersionPrefix(version)) {
 		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
 			ErrNoVersionFound, version, cfg.Series)
 	}
@@ -2490,7 +2487,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 
 			mu.Lock()
 			switch {
-			case err != nil && errors.Is(err, ErrNoEbuildFound):
+			case err != nil && errors.Is(err, ebuilds.ErrNoEbuildFound):
 				// The ebuild was removed from the overlay. Don't record a
 				// recurring failure: queue the package for auto-disable after
 				// the run and surface it as an informational result so it does

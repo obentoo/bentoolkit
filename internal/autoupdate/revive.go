@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -115,7 +116,7 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 		return ReviveOutcome{Package: pkg, Status: ReviveFailed, Detail: detail}
 	}
 
-	category, pkgName, ok := SplitPackageKey(pkg)
+	category, pkgName, ok := ebuilds.SplitPackageKey(pkg)
 	if !ok {
 		return failed(fmt.Sprintf("invalid package name %q (want category/package)", pkg))
 	}

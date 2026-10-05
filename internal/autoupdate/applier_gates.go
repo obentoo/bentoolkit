@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
@@ -143,7 +144,7 @@ func (a *Applier) resolvedPackageType(pkg, currentVersion string) string {
 	if err != nil {
 		return "source"
 	}
-	if detectBinaryPackage(content) {
+	if ebuilds.DetectBinaryPackage(content) {
 		return "bin"
 	}
 	return "source"

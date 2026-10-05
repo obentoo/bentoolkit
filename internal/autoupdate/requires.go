@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
@@ -27,7 +28,7 @@ import (
 func VersionSatisfies(pin, have, want string) bool {
 	switch pin {
 	case "~":
-		return revisionSuffixRegex.ReplaceAllString(have, "") == want
+		return ebuilds.RevisionSuffixRegex.ReplaceAllString(have, "") == want
 	case "=":
 		return have == want
 	case ">=":
@@ -50,7 +51,7 @@ func exactVersion(v string) bool {
 // Any other read failure is returned, wrapped with the directory, because "could
 // not look" is not "not there".
 func requirementMet(overlayPath, gentooPath, atom, pin, version string) (bool, error) {
-	category, pkgName, ok := splitPkgAtom(atom)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return false, fmt.Errorf("requirement %q is not a category/package atom", atom)
 	}
@@ -272,7 +273,7 @@ func (c *Checker) resettleMissing(results []CheckResult) {
 // without a ":slot" or "@label" — bumps to a version meeting pin and version.
 func pendingSatisfies(entries []PendingUpdate, atom, pin, version string) bool {
 	for _, e := range entries {
-		cat, name, ok := splitPkgAtom(e.Package)
+		cat, name, ok := ebuilds.SplitPkgAtom(e.Package)
 		if ok && cat+"/"+name == atom && VersionSatisfies(pin, e.NewVersion, version) {
 			return true
 		}
@@ -284,7 +285,7 @@ func pendingSatisfies(entries []PendingUpdate, atom, pin, version string) bool {
 // ":slot" and "@label", and "" for a key that is not an atom. The --apply all
 // planner uses it to match a pending entry against another entry's requirement.
 func PackageAtom(key string) string {
-	cat, name, ok := splitPkgAtom(key)
+	cat, name, ok := ebuilds.SplitPkgAtom(key)
 	if !ok {
 		return ""
 	}

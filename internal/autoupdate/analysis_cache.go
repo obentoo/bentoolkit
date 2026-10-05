@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/statefile"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -135,7 +136,7 @@ func NewAnalysisCache(configDir string, opts ...AnalysisCacheOption) (*AnalysisC
 
 // adoptBaseline records Entries as what this instance last loaded or saved.
 func (c *AnalysisCache) adoptBaseline() error {
-	base, err := snapshotState(c.Entries)
+	base, err := statefile.SnapshotState(c.Entries)
 	if err != nil {
 		return fmt.Errorf("recording the analysis cache baseline for %s: %w", c.path, err)
 	}
@@ -259,12 +260,12 @@ func (c *AnalysisCache) Save() error {
 // saveUnsafe persists the analysis cache to disk without locking.
 // Caller must hold the write lock.
 func (c *AnalysisCache) saveUnsafe() error {
-	return withStateLock(c.path, func() error {
+	return statefile.WithStateLock(c.path, func() error {
 		disk, err := readAnalysisCacheFileForMerge(c.path)
 		if err != nil {
 			return err
 		}
-		entries, err := mergeState(c.Entries, c.baseEntries, disk.Entries)
+		entries, err := statefile.MergeState(c.Entries, c.baseEntries, disk.Entries)
 		if err != nil {
 			return fmt.Errorf("merging %s: %w", c.path, err)
 		}

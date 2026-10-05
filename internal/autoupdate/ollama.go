@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
@@ -200,7 +201,7 @@ func (c *OllamaClient) ExtractVersion(ctx context.Context, content []byte, promp
 }
 
 // AnalyzeContent uses Ollama to analyze content and suggest a parser configuration.
-func (c *OllamaClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *OllamaClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 

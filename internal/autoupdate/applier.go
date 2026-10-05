@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -54,8 +55,6 @@ const qaCheckTimeout = 2 * time.Minute
 
 // Error variables for applier errors
 var (
-	// ErrEbuildNotFound is returned when the source ebuild file is not found
-	ErrEbuildNotFound = errors.New("source ebuild file not found")
 	// ErrManifestFailed is returned when the manifest command fails
 	ErrManifestFailed = errors.New("manifest command failed")
 	// ErrCompileFailed is returned when the compile test fails
@@ -939,7 +938,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// manifest, compile, clean — has to run against the decorated version from
 	// here on. Validation stays on the bare upstream value above; the suffix is
 	// well-formed by construction.
-	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
+	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
 	result.NewVersion = newVersion
 
 	// Re-resolve the current version against the live overlay rather than
@@ -954,7 +953,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		// A slot that matches nothing is a config error, not an obsolete entry:
 		// the package is present, its key is wrong. Pruning would delete the
 		// pending record and report success-ish, hiding the typo. Fail loudly.
-		if errors.Is(err, ErrSlotNotFound) {
+		if errors.Is(err, ebuilds.ErrSlotNotFound) {
 			result.Error = err
 			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
 				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
@@ -1474,7 +1473,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	case errors.Is(err, os.ErrNotExist):
 		// Same sentinel copyEbuild reports, so a caller that recognises a missing
 		// source ebuild keeps recognising it on either path.
-		return candidatePaths{}, fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+		return candidatePaths{}, fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcPath)
 	case err != nil:
 		return candidatePaths{}, fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
@@ -1629,7 +1628,7 @@ func applySummary(result *ApplyResult) string {
 // possibly-stale current_version. Returns ErrNoEbuildFound when the package
 // directory is absent or holds no parsable, non-live ebuild in the slot.
 func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(a.logger(), a.overlayPath, pkg, a.configs[pkg].Series)
+	best, err := ebuilds.SelectCurrentEbuild(a.logger(), a.overlayPath, pkg, a.configs[pkg].Series)
 	if err != nil {
 		return "", err
 	}
@@ -1793,7 +1792,7 @@ func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
 		return
 	}
 
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return
 	}
@@ -1826,7 +1825,7 @@ func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
 // Destination: {category}/{package}/{package}-{newVersion}.ebuild
 func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -1844,7 +1843,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 
 	// Check source exists
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
-		return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+		return fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcPath)
 	}
 
 	// Refuse to write over an ebuild that already exists. Overwriting it would
@@ -3202,7 +3201,7 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 	}
 
 	// Parse package name (same split+slot-stripping as the sibling helpers).
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -3219,7 +3218,7 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 	srcEbuild := filepath.Join(srcPkgDir, ebuildName)
 	if _, err := os.Stat(srcEbuild); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcEbuild)
+			return fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcEbuild)
 		}
 		return fmt.Errorf("failed to stat source ebuild %s: %w", srcEbuild, err)
 	}

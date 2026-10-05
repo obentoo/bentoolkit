@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -154,7 +155,7 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 // split components, never from the raw key: a ":slot" or "@label" leaking into
 // a path is destructive here rather than merely wrong (S027-G4).
 func (s *sweeper) ebuildPath(pkg, version string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}
@@ -291,7 +292,7 @@ func normaliseSweepTarget(overlayPath, target string) (atom, category string, er
 		return "", "", nil
 	}
 	if strings.Contains(target, "/") {
-		cat, pkgName, ok := splitPkgAtom(target)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(target)
 		if !ok {
 			return "", "", fmt.Errorf("%w: %q is not a category/package atom", ErrInvalidSweepTarget, target)
 		}
@@ -342,7 +343,7 @@ func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[stri
 	}
 	scoped := make(map[string]PackageConfig, len(cfgs))
 	for key, cfg := range cfgs {
-		cat, pkgName, ok := splitPkgAtom(key)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok {
 			continue
 		}
@@ -368,7 +369,7 @@ func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[stri
 // receiver and a map value is not addressable.
 func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
 	for key, cfg := range cfgs {
-		cat, pkgName, ok := splitPkgAtom(key)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok || cat+"/"+pkgName != atom {
 			continue
 		}
@@ -503,7 +504,7 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]Pack
 // window the record depends on.
 func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...string) error {
 	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -932,7 +933,7 @@ func otherEbuildVersions(pkgDir, pkgName string, versions []string) []string {
 // upstream release and not for the ebuild's revision of it: bumping foo-1.2.3-r1
 // does not rename foo-1.2.3.tar.gz.
 func baseVersion(version string) string {
-	return revisionSuffixRegex.ReplaceAllString(version, "")
+	return ebuilds.RevisionSuffixRegex.ReplaceAllString(version, "")
 }
 
 // substituteVersion rewrites one DIST name for a new version, and returns ""

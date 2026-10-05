@@ -1,4 +1,4 @@
-package autoupdate
+package ebuilds
 
 import (
 	"errors"

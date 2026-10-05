@@ -9,44 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
-
-// TestSplitPkgLabel covers the key form that lets one package carry several
-// entries. The label is identity only, so every path- and slot-aware consumer
-// must drop it.
-func TestSplitPkgLabel(t *testing.T) {
-	tests := []struct {
-		key      string
-		rest     string
-		label    string
-		atom     string
-		slot     string
-		category string
-		pkgName  string
-	}{
-		{"app-misc/hello", "app-misc/hello", "", "app-misc/hello", "", "app-misc", "hello"},
-		{"app-office/libreoffice@testing", "app-office/libreoffice", "testing", "app-office/libreoffice", "", "app-office", "libreoffice"},
-		{"net-libs/webkit-gtk:4.1", "net-libs/webkit-gtk:4.1", "", "net-libs/webkit-gtk", "4.1", "net-libs", "webkit-gtk"},
-		{"net-libs/webkit-gtk:4.1@lts", "net-libs/webkit-gtk:4.1", "lts", "net-libs/webkit-gtk", "4.1", "net-libs", "webkit-gtk"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			rest, label := splitPkgLabel(tt.key)
-			if rest != tt.rest || label != tt.label {
-				t.Fatalf("splitPkgLabel = (%q, %q), want (%q, %q)", rest, label, tt.rest, tt.label)
-			}
-			atom, slot := splitPkgSlot(tt.key)
-			if atom != tt.atom || slot != tt.slot {
-				t.Fatalf("splitPkgSlot = (%q, %q), want (%q, %q)", atom, slot, tt.atom, tt.slot)
-			}
-			cat, pn, ok := splitPkgAtom(tt.key)
-			if !ok || cat != tt.category || pn != tt.pkgName {
-				t.Fatalf("splitPkgAtom = (%q, %q, %v), want (%q, %q, true)", cat, pn, ok, tt.category, tt.pkgName)
-			}
-		})
-	}
-}
 
 // TestSelectCurrentEbuildSeries is the fix for the zed-bin bug: with a stable
 // and a preview ebuild side by side under one SLOT, an unfiltered scan returns
@@ -59,7 +24,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	}
 
 	t.Run("no series returns the directory's highest version", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, "")
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, "")
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -69,7 +34,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the stable line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.13\.`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.13\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -79,7 +44,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the preview line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.14\.`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.14\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -89,19 +54,19 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("a series matching nothing is a config error, not an orphan", func(t *testing.T) {
-		_, err := selectCurrentEbuild(nil, overlay, pkg, `^9\.`)
-		if !errors.Is(err, ErrSeriesNotFound) {
+		_, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^9\.`)
+		if !errors.Is(err, ebuilds.ErrSeriesNotFound) {
 			t.Fatalf("got %v, want ErrSeriesNotFound", err)
 		}
 		// Critically NOT ErrNoEbuildFound: that one makes the checker write
 		// enabled = false, turning a typo into a package that stops updating.
-		if errors.Is(err, ErrNoEbuildFound) {
+		if errors.Is(err, ebuilds.ErrNoEbuildFound) {
 			t.Fatal("a series typo must not be reported as a removed package")
 		}
 	})
 
 	t.Run("an uncompilable series does not narrow the scan", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^(1\.13`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^(1\.13`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -121,7 +86,7 @@ func TestSelectCurrentEbuildSeriesIgnoresRevision(t *testing.T) {
 		createTestEbuild(t, overlay, pkg, v)
 	}
 
-	got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.8\.3$`)
+	got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.8\.3$`)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}

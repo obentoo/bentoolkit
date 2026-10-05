@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
@@ -70,7 +71,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	} else if len(waiting) > 0 {
 		return checkSkipped(pkg, newVersion, fmt.Sprintf("waiting for %s, so no gate was run for %s", strings.Join(waiting, ", "), pkg))
 	}
-	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
+	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
 
 	currentVersion, err := a.resolveCurrentVersion(pkg)
 	if err != nil {

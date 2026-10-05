@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -94,7 +95,7 @@ func selectVersion(log *slog.Logger, cands []string, cfg *PackageConfig) string 
 		mode = cfg.Select
 		series = cfg.Series
 	}
-	matcher := newSeriesMatcher(log, series)
+	matcher := ebuilds.NewSeriesMatcher(log, series)
 	best := ""
 	for _, c := range cands {
 		c = applyTransforms(log, strings.TrimSpace(c), transform)
@@ -105,7 +106,7 @@ func selectVersion(log *slog.Logger, cands []string, cfg *PackageConfig) string 
 		// An entry restricted to a release line must not select outside it: with
 		// two entries per package, the other line has its own entry, and "max"
 		// over the whole listing would make both chase the same version.
-		if !matcher.matches(cc) {
+		if !matcher.Matches(cc) {
 			continue
 		}
 		switch mode {

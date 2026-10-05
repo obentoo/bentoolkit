@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -228,7 +229,7 @@ func (c *OpenAIClient) ExtractVersion(ctx context.Context, content []byte, promp
 }
 
 // AnalyzeContent uses OpenAI to analyze content and suggest a parser configuration.
-func (c *OpenAIClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *OpenAIClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Build the analysis prompt
 	userMessage := buildSchemaAnalysisPrompt(content, meta, hint)
 

@@ -1,4 +1,4 @@
-package autoupdate
+package ebuilds
 
 import (
 	"errors"
@@ -12,6 +12,16 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
+)
+
+// Sentinel errors for locating packages and ebuilds in an overlay tree.
+var (
+	// ErrPackageNotFound is returned when a package is not found in the configuration
+	ErrPackageNotFound = errors.New("package not found in configuration")
+	// ErrNoEbuildFound is returned when no ebuild file is found for a package
+	ErrNoEbuildFound = errors.New("no ebuild file found for package")
+	// ErrEbuildNotFound is returned when the source ebuild file is not found
+	ErrEbuildNotFound = errors.New("source ebuild file not found")
 )
 
 // ErrSlotNotFound is returned when a package's directory IS present in the
@@ -53,30 +63,30 @@ var ErrSlotNotFound = errors.New("no ebuild in the package directory declares th
 // config map, and NEITHER is part of any filesystem path: every path-building
 // site must strip them first.
 
-// splitPkgLabel splits a package key into everything before its "@label" and the
+// SplitPkgLabel splits a package key into everything before its "@label" and the
 // label itself. A key with no "@" yields an empty label. The label carries no
 // behavior of its own — it exists so two entries for the same atom and slot can
 // coexist — so every consumer other than the config map simply drops it.
-func splitPkgLabel(key string) (rest, label string) {
+func SplitPkgLabel(key string) (rest, label string) {
 	if i := strings.IndexByte(key, '@'); i >= 0 {
 		return key[:i], key[i+1:]
 	}
 	return key, ""
 }
 
-// splitPkgSlot splits a package key into its "category/package" atom and its
+// SplitPkgSlot splits a package key into its "category/package" atom and its
 // optional slot restriction, dropping any "@label" first. A key with no ":"
 // yields an empty slot, which every consumer reads as "no slot filtering" — the
 // behaviour of every single-slot package, i.e. all of them before this existed.
-func splitPkgSlot(key string) (atom, slot string) {
-	key, _ = splitPkgLabel(key)
+func SplitPkgSlot(key string) (atom, slot string) {
+	key, _ = SplitPkgLabel(key)
 	if i := strings.IndexByte(key, ':'); i >= 0 {
 		return key[:i], key[i+1:]
 	}
 	return key, ""
 }
 
-// splitPkgAtom splits a package key into its category and package-name
+// SplitPkgAtom splits a package key into its category and package-name
 // components, dropping any ":slot" and "@label" suffix. It reports false when
 // the key is not a well-formed "category/package" atom, leaving the (varied)
 // error wording to each caller. This is the single place that knows a package
@@ -88,19 +98,19 @@ func splitPkgSlot(key string) (atom, slot string) {
 // one directory: "../x" or "cat/.." would otherwise be accepted as an atom and
 // build a path outside the package directory (S064-R1.4). parsePkgAtom says
 // which half was refused and why.
-func splitPkgAtom(key string) (category, pkgName string, ok bool) {
-	category, pkgName, err := parsePkgAtom(key)
+func SplitPkgAtom(key string) (category, pkgName string, ok bool) {
+	category, pkgName, err := ParsePkgAtom(key)
 	if err != nil {
 		return "", "", false
 	}
 	return category, pkgName, true
 }
 
-// parsePkgAtom is splitPkgAtom with the refusal explained: the error names the
+// ParsePkgAtom is splitPkgAtom with the refusal explained: the error names the
 // half that cannot be used as one directory name. Callers that report a bad key
 // to a person (ValidatePackageConfig) use it; path builders use splitPkgAtom.
-func parsePkgAtom(key string) (category, pkgName string, err error) {
-	atom, _ := splitPkgSlot(key)
+func ParsePkgAtom(key string) (category, pkgName string, err error) {
+	atom, _ := SplitPkgSlot(key)
 	category, pkgName, found := strings.Cut(atom, "/")
 	if !found {
 		return "", "", fmt.Errorf("%q does not name category/package", atom)
@@ -135,13 +145,13 @@ func atomPathElementError(kind, value string) error {
 // filesystem path (cmd/bentoo's revive flow) — a second, slot-blind copy of the
 // split is exactly the bug the slot suffix invites.
 func SplitPackageKey(key string) (category, name string, ok bool) {
-	return splitPkgAtom(key)
+	return SplitPkgAtom(key)
 }
 
-// pkgDirFor returns the overlay directory holding pkg's ebuilds, or "" when the
+// PkgDirFor returns the overlay directory holding pkg's ebuilds, or "" when the
 // key is malformed.
-func pkgDirFor(overlayPath, pkg string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+func PkgDirFor(overlayPath, pkg string) string {
+	category, pkgName, ok := SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}
@@ -203,14 +213,14 @@ var ErrSeriesNotFound = errors.New("no ebuild in the package directory matches t
 // "no series filtering", which is every entry that does not declare one.
 type seriesMatcher struct{ re *regexp.Regexp }
 
-// newSeriesMatcher compiles series into a matcher. An empty series yields a
+// NewSeriesMatcher compiles series into a matcher. An empty series yields a
 // pass-everything matcher. An uncompilable one is warned and also passes
 // everything: ValidatePackageConfig rejects it up front, and a scan that got
 // this far must not silently select the wrong ebuild — a filter that fails open
 // is visible (the wrong line gets bumped and the warning says why), one that
 // fails closed looks exactly like a removed package. The warning goes to log;
 // nil discards it.
-func newSeriesMatcher(log *slog.Logger, series string) seriesMatcher {
+func NewSeriesMatcher(log *slog.Logger, series string) seriesMatcher {
 	if series == "" {
 		return seriesMatcher{}
 	}
@@ -222,15 +232,15 @@ func newSeriesMatcher(log *slog.Logger, series string) seriesMatcher {
 	return seriesMatcher{re: re}
 }
 
-// matches reports whether version belongs to the matcher's release line.
-func (m seriesMatcher) matches(version string) bool {
+// Matches reports whether version belongs to the matcher's release line.
+func (m seriesMatcher) Matches(version string) bool {
 	return m.re == nil || m.re.MatchString(version)
 }
 
-// active reports whether the matcher actually filters anything.
-func (m seriesMatcher) active() bool { return m.re != nil }
+// Active reports whether the matcher actually filters anything.
+func (m seriesMatcher) Active() bool { return m.re != nil }
 
-// selectCurrentEbuild returns the highest-version, non-live ebuild for pkg in
+// SelectCurrentEbuild returns the highest-version, non-live ebuild for pkg in
 // the overlay. It is the single implementation behind the checker's
 // getCurrentVersion/currentEbuildPath and the applier's resolveCurrentVersion,
 // which were three byte-for-byte copies of the same scan.
@@ -254,13 +264,13 @@ func (m seriesMatcher) active() bool { return m.re != nil }
 // reads no files at all: it matches on the version in the filename).
 //
 // A series that does not compile is warned about to log; nil discards it.
-func selectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebuildCandidate, error) {
-	category, pkgName, ok := splitPkgAtom(pkg)
+func SelectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebuildCandidate, error) {
+	category, pkgName, ok := SplitPkgAtom(pkg)
 	if !ok {
 		return ebuildCandidate{}, fmt.Errorf("invalid package name format: %s", pkg)
 	}
-	_, slot := splitPkgSlot(pkg)
-	matcher := newSeriesMatcher(log, series)
+	_, slot := SplitPkgSlot(pkg)
+	matcher := NewSeriesMatcher(log, series)
 
 	pkgDir := filepath.Join(overlayPath, category, pkgName)
 	entries, err := os.ReadDir(pkgDir)
@@ -287,7 +297,7 @@ func selectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebu
 		// The series names an upstream release line, so it is matched against the
 		// PV: matched against the PVR, an exact `^1\.8\.3$` rejected the line's
 		// own 1.8.3-r1 and every revbump broke the entry.
-		if !matcher.matches(revisionSuffixRegex.ReplaceAllString(eb.Version, "")) {
+		if !matcher.Matches(RevisionSuffixRegex.ReplaceAllString(eb.Version, "")) {
 			continue
 		}
 		path := filepath.Join(pkgDir, name)
@@ -306,7 +316,7 @@ func selectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebu
 		if slot != "" {
 			return ebuildCandidate{}, fmt.Errorf("%w: %s (slot %q)", ErrSlotNotFound, pkg, slot)
 		}
-		if matcher.active() {
+		if matcher.Active() {
 			return ebuildCandidate{}, fmt.Errorf("%w: %s (series %q)", ErrSeriesNotFound, pkg, series)
 		}
 		return ebuildCandidate{}, fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
@@ -314,10 +324,10 @@ func selectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebu
 	return best, nil
 }
 
-// revisionSuffixRegex matches the trailing -rN of a PV.
-var revisionSuffixRegex = regexp.MustCompile(`-r\d+$`)
+// RevisionSuffixRegex matches the trailing -rN of a PV.
+var RevisionSuffixRegex = regexp.MustCompile(`-r\d+$`)
 
-// applyRevision returns the PV to write for a freshly bumped ebuild, attaching
+// ApplyRevision returns the PV to write for a freshly bumped ebuild, attaching
 // the revision a multi-slot package pins via `revision = N` in packages.toml.
 //
 // The revision is configured rather than carried over from the source ebuild
@@ -331,8 +341,8 @@ var revisionSuffixRegex = regexp.MustCompile(`-r\d+$`)
 // revision <= 0 means "plain PV", which is both the default and correct for
 // every single-slot package — and for a slot that happens to use a bare PV, as
 // the bentoo overlay's SLOT 6 webkit-gtk ebuild does.
-func applyRevision(version string, revision int) string {
-	base := revisionSuffixRegex.ReplaceAllString(version, "")
+func ApplyRevision(version string, revision int) string {
+	base := RevisionSuffixRegex.ReplaceAllString(version, "")
 	if revision <= 0 {
 		return base
 	}

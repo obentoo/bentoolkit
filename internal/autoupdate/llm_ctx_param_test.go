@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // llmCtx059KeyEnv names the API key variable the keyed providers read.
@@ -113,7 +115,7 @@ func llmCtx059ExtractVersion(ctx context.Context, p LLMProvider) error {
 }
 
 func llmCtx059AnalyzeContent(ctx context.Context, p LLMProvider) error {
-	_, err := p.AnalyzeContent(ctx, []byte(`{"version":"1.2.3"}`), &EbuildMetadata{}, "")
+	_, err := p.AnalyzeContent(ctx, []byte(`{"version":"1.2.3"}`), &ebuilds.EbuildMetadata{}, "")
 	return err
 }
 

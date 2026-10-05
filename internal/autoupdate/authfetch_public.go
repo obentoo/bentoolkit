@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // This file is the ONE exported door onto the authenticated fetch.
@@ -111,7 +113,7 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
-		best, err := selectCurrentEbuild(log, req.OverlayPath, key, pkgCfg.Series)
+		best, err := ebuilds.SelectCurrentEbuild(log, req.OverlayPath, key, pkgCfg.Series)
 		if err != nil {
 			return AuthDistfileResult{}, fmt.Errorf("resolving the version to fetch for %s: %w", key, err)
 		}
@@ -145,7 +147,7 @@ func resolveRegistryKey(cfg *PackagesConfig, want string) (string, PackageConfig
 
 	var matches []string
 	for key := range cfg.Packages {
-		atom, _ := splitPkgSlot(key)
+		atom, _ := ebuilds.SplitPkgSlot(key)
 		if atom == want {
 			matches = append(matches, key)
 		}

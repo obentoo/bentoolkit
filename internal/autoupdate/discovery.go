@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // DataSource represents a candidate data source for version checking.
@@ -61,7 +63,7 @@ var (
 // DiscoverDataSources finds candidate URLs for version checking.
 // It analyzes ebuild metadata and returns a prioritized list of data sources.
 // If providedURL is non-empty, it is included as the highest priority source.
-func DiscoverDataSources(meta *EbuildMetadata, providedURL string) []DataSource {
+func DiscoverDataSources(meta *ebuilds.EbuildMetadata, providedURL string) []DataSource {
 	var sources []DataSource
 
 	// Add provided URL as highest priority if specified
@@ -117,8 +119,8 @@ func DiscoverDataSources(meta *EbuildMetadata, providedURL string) []DataSource 
 
 // discoverGitHubSource attempts to discover a GitHub releases API endpoint.
 // It checks HOMEPAGE and SRC_URI for GitHub URLs and constructs the releases API URL.
-func discoverGitHubSource(meta *EbuildMetadata) *DataSource {
-	owner, repo, found := ExtractGitHubInfo(meta)
+func discoverGitHubSource(meta *ebuilds.EbuildMetadata) *DataSource {
+	owner, repo, found := ebuilds.ExtractGitHubInfo(meta)
 	if !found {
 		return nil
 	}
@@ -136,7 +138,7 @@ func discoverGitHubSource(meta *EbuildMetadata) *DataSource {
 
 // discoverPyPISource attempts to discover a PyPI API endpoint.
 // It checks HOMEPAGE, SRC_URI, and dependencies for PyPI indicators.
-func discoverPyPISource(meta *EbuildMetadata) *DataSource {
+func discoverPyPISource(meta *ebuilds.EbuildMetadata) *DataSource {
 	// Try to extract package name from PyPI URL in HOMEPAGE
 	if matches := pypiURLRegex.FindStringSubmatch(meta.Homepage); matches != nil {
 		pkgName := matches[1]
@@ -158,7 +160,7 @@ func discoverPyPISource(meta *EbuildMetadata) *DataSource {
 	// Check dependencies for Python indicators
 	hasPythonDep := false
 	for _, dep := range meta.Dependencies {
-		if pythonDepRegex.MatchString(dep) {
+		if ebuilds.PythonDepRegex.MatchString(dep) {
 			hasPythonDep = true
 			break
 		}
@@ -190,7 +192,7 @@ func createPyPISource(pkgName string) *DataSource {
 // extractPyPIPackageName attempts to extract a PyPI package name from a Gentoo package atom.
 // For example, "dev-python/requests" -> "requests"
 func extractPyPIPackageName(pkg string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}
@@ -205,7 +207,7 @@ func extractPyPIPackageName(pkg string) string {
 
 // discoverNPMSource attempts to discover an npm registry API endpoint.
 // It checks HOMEPAGE, SRC_URI, and dependencies for npm indicators.
-func discoverNPMSource(meta *EbuildMetadata) *DataSource {
+func discoverNPMSource(meta *ebuilds.EbuildMetadata) *DataSource {
 	// Try to extract package name from npm URL in HOMEPAGE
 	if matches := npmURLRegex.FindStringSubmatch(meta.Homepage); matches != nil {
 		pkgName := matches[1]
@@ -221,7 +223,7 @@ func discoverNPMSource(meta *EbuildMetadata) *DataSource {
 	// Check dependencies for Node.js indicators
 	hasNodeDep := false
 	for _, dep := range meta.Dependencies {
-		if nodeDepRegex.MatchString(dep) {
+		if ebuilds.NodeDepRegex.MatchString(dep) {
 			hasNodeDep = true
 			break
 		}
@@ -252,7 +254,7 @@ func createNPMSource(pkgName string) *DataSource {
 // extractNPMPackageName attempts to extract an npm package name from a Gentoo package atom.
 // For example, "dev-nodejs/typescript" -> "typescript"
 func extractNPMPackageName(pkg string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}
@@ -267,7 +269,7 @@ func extractNPMPackageName(pkg string) string {
 
 // discoverCratesSource attempts to discover a crates.io API endpoint.
 // It checks HOMEPAGE, SRC_URI, and dependencies for Rust/crates.io indicators.
-func discoverCratesSource(meta *EbuildMetadata) *DataSource {
+func discoverCratesSource(meta *ebuilds.EbuildMetadata) *DataSource {
 	// Try to extract crate name from crates.io URL in HOMEPAGE
 	if matches := cratesURLRegex.FindStringSubmatch(meta.Homepage); matches != nil {
 		crateName := matches[1]
@@ -283,7 +285,7 @@ func discoverCratesSource(meta *EbuildMetadata) *DataSource {
 	// Check dependencies for Rust indicators
 	hasRustDep := false
 	for _, dep := range meta.Dependencies {
-		if rustDepRegex.MatchString(dep) {
+		if ebuilds.RustDepRegex.MatchString(dep) {
 			hasRustDep = true
 			break
 		}
@@ -314,7 +316,7 @@ func createCratesSource(crateName string) *DataSource {
 // extractCrateName attempts to extract a crate name from a Gentoo package atom.
 // For example, "dev-rust/serde" -> "serde"
 func extractCrateName(pkg string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}

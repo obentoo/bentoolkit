@@ -18,6 +18,7 @@ import (
 
 	"github.com/antchfx/xpath"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -356,7 +357,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 	}
 
 	// Extract ebuild metadata
-	meta, err := ExtractEbuildMetadata(a.overlayPath, pkg)
+	meta, err := ebuilds.ExtractEbuildMetadata(a.overlayPath, pkg)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to extract ebuild metadata: %w", err)
 		return result, result.Error
@@ -429,7 +430,7 @@ func (a *Analyzer) validateResult(ctx context.Context, result *AnalyzeResult, op
 
 	// Get ebuild version if not already set
 	if result.EbuildVersion == "" {
-		meta, err := ExtractEbuildMetadata(a.overlayPath, result.Package)
+		meta, err := ebuilds.ExtractEbuildMetadata(a.overlayPath, result.Package)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to extract ebuild metadata for validation: %w", err)
 			return result, result.Error
@@ -515,7 +516,7 @@ func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte,
 // analyzeContent analyzes content and generates a schema.
 // The LLM call, and its rate-limit wait, are bounded by a child of the
 // caller's ctx with the configured LLM timeout.
-func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
+func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
 	// If LLM client is available, use it for analysis
 	if a.llmClient != nil {
 		opCtx, cancel := context.WithTimeout(ctx, a.llmTimeout)

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -887,7 +888,7 @@ func selectPrunePackages(packages []repo.PackageInfo, target string) ([]repo.Pac
 // than one entry — one per slot ("net-libs/webkit-gtk:4.1") or per release
 // channel ("media-libs/gstreamer@stable") — and a plan showing one of them
 // understates what --apply would do to a file that publishes itself minutes
-// later. Keys are split with autoupdate.SplitPackageKey rather than by hand, for
+// later. Keys are split with ebuilds.SplitPackageKey rather than by hand, for
 // the reason buildDivergenceMap states: a second, slot-blind copy of the split is
 // exactly the bug the suffixes invite.
 //
@@ -912,7 +913,7 @@ func buildPruneRegistryKeys(overlayPath string) (byAtom map[string][]string, mal
 
 	byAtom = make(map[string][]string, len(keys))
 	for _, key := range keys {
-		category, name, ok := autoupdate.SplitPackageKey(key)
+		category, name, ok := ebuilds.SplitPackageKey(key)
 		if !ok {
 			malformed = append(malformed, key)
 			continue

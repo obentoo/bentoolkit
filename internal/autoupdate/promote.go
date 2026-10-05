@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -80,7 +81,7 @@ type candidatePaths struct {
 // property of the code: promotion copies between the two by path, so a divergence
 // in how either is built would be a copy to the wrong place.
 func candidateIn(repoRoot, pkg, version string) (candidatePaths, error) {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return candidatePaths{}, fmt.Errorf("invalid package name format: %s", pkg)
 	}

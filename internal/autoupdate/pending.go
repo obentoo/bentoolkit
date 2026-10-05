@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/statefile"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
@@ -155,7 +156,7 @@ func NewPendingList(configDir string, opts ...PendingListOption) (*PendingList, 
 
 // adoptBaseline records Updates as what this instance last loaded or saved.
 func (p *PendingList) adoptBaseline() error {
-	base, err := snapshotState(p.Updates)
+	base, err := statefile.SnapshotState(p.Updates)
 	if err != nil {
 		return fmt.Errorf("recording the pending baseline for %s: %w", p.path, err)
 	}
@@ -299,12 +300,12 @@ func (p *PendingList) Save() error {
 // saveUnsafe persists the pending list to disk without locking.
 // Caller must hold the write lock.
 func (p *PendingList) saveUnsafe() error {
-	return withStateLock(p.path, func() error {
+	return statefile.WithStateLock(p.path, func() error {
 		disk, err := readPendingFileForMerge(p.path)
 		if err != nil {
 			return err
 		}
-		updates, err := mergeState(p.Updates, p.baseUpdates, disk.Updates)
+		updates, err := statefile.MergeState(p.Updates, p.baseUpdates, disk.Updates)
 		if err != nil {
 			return fmt.Errorf("merging %s: %w", p.path, err)
 		}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // jsonQuote returns s encoded as a JSON string literal (with surrounding double
@@ -703,7 +705,7 @@ func TestAnalyzeContent_StructuredPath(t *testing.T) {
 	seam, cap := scriptedSeam(`cat >/dev/null; printf '%s' '{"type":"result","is_error":false,"result":` + jsonQuote(validAnalysisJSON) + `}'`)
 	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam))
 
-	meta := &EbuildMetadata{Package: "dev-foo/bar", Version: "1.0.0", Homepage: "https://example.com"}
+	meta := &ebuilds.EbuildMetadata{Package: "dev-foo/bar", Version: "1.0.0", Homepage: "https://example.com"}
 	got, err := c.AnalyzeContent(t.Context(), []byte("content"), meta, "look at the API")
 	if err != nil {
 		t.Fatalf("AnalyzeContent: %v", err)

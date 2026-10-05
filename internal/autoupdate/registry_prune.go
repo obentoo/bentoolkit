@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // This file deletes records from packages.toml (R5.2, R5.4): the counterpart of
@@ -162,7 +164,7 @@ func requestedAtoms(keys []string) (map[string]bool, error) {
 // invite: one caller that reads "net-libs/webkit-gtk:4.1" as a package named
 // "webkit-gtk:4.1" and quietly matches nothing.
 func recordAtom(key string) (string, bool) {
-	category, name, ok := SplitPackageKey(key)
+	category, name, ok := ebuilds.SplitPackageKey(key)
 	if !ok {
 		return "", false
 	}

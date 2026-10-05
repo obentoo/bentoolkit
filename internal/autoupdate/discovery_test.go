@@ -7,6 +7,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // =============================================================================
@@ -115,7 +116,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: GitHub URL in HOMEPAGE results in GitHub API source
 	properties.Property("GitHub HOMEPAGE results in GitHub API source", prop.ForAll(
 		func(githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -137,7 +138,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: GitHub URL in SRC_URI results in GitHub API source
 	properties.Property("GitHub SRC_URI results in GitHub API source", prop.ForAll(
 		func(githubSrcURI string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package: "app-misc/test",
 				SrcURI:  githubSrcURI,
 			}
@@ -159,7 +160,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: PyPI URL in HOMEPAGE results in PyPI API source
 	properties.Property("PyPI HOMEPAGE results in PyPI API source", prop.ForAll(
 		func(pypiURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-python/test",
 				Homepage: pypiURL,
 			}
@@ -181,7 +182,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: Python dependencies result in PyPI API source for dev-python packages
 	properties.Property("Python dependencies result in PyPI API source", prop.ForAll(
 		func(pythonDep string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:      "dev-python/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{pythonDep},
@@ -203,7 +204,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: npm URL in HOMEPAGE results in npm registry source
 	properties.Property("npm HOMEPAGE results in npm registry source", prop.ForAll(
 		func(npmURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-nodejs/test",
 				Homepage: npmURL,
 			}
@@ -224,7 +225,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: Node.js dependencies result in npm registry source for dev-nodejs packages
 	properties.Property("Node.js dependencies result in npm registry source", prop.ForAll(
 		func(nodeDep string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:      "dev-nodejs/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{nodeDep},
@@ -246,7 +247,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: crates.io URL in HOMEPAGE results in crates.io API source
 	properties.Property("crates.io HOMEPAGE results in crates.io API source", prop.ForAll(
 		func(cratesURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-rust/test",
 				Homepage: cratesURL,
 			}
@@ -267,7 +268,7 @@ func TestEcosystemDetection(t *testing.T) {
 	// Property: Rust dependencies result in crates.io API source for dev-rust packages
 	properties.Property("Rust dependencies result in crates.io API source", prop.ForAll(
 		func(rustDep string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:      "dev-rust/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{rustDep},
@@ -303,7 +304,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: Provided URL always has highest priority
 	properties.Property("provided URL has highest priority", prop.ForAll(
 		func(providedURL, githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -323,7 +324,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: GitHub has higher priority than homepage
 	properties.Property("GitHub has higher priority than homepage", prop.ForAll(
 		func(githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -357,7 +358,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: PyPI has higher priority than homepage
 	properties.Property("PyPI has higher priority than homepage", prop.ForAll(
 		func(pypiURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-python/test",
 				Homepage: pypiURL,
 			}
@@ -391,7 +392,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: npm has higher priority than homepage
 	properties.Property("npm has higher priority than homepage", prop.ForAll(
 		func(npmURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-nodejs/test",
 				Homepage: npmURL,
 			}
@@ -425,7 +426,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: crates.io has higher priority than homepage
 	properties.Property("crates.io has higher priority than homepage", prop.ForAll(
 		func(cratesURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "dev-rust/test",
 				Homepage: cratesURL,
 			}
@@ -459,7 +460,7 @@ func TestDataSourcePriority(t *testing.T) {
 	// Property: Sources are sorted by priority (ascending)
 	properties.Property("sources are sorted by priority", prop.ForAll(
 		func(providedURL, githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -487,7 +488,7 @@ func TestDataSourcePriority(t *testing.T) {
 
 // TestDiscoverDataSourcesBasic tests basic data source discovery
 func TestDiscoverDataSourcesBasic(t *testing.T) {
-	meta := &EbuildMetadata{
+	meta := &ebuilds.EbuildMetadata{
 		Package:  "app-misc/hello",
 		Homepage: "https://github.com/example/hello",
 	}
@@ -515,7 +516,7 @@ func TestDiscoverDataSourcesBasic(t *testing.T) {
 
 // TestDiscoverDataSourcesProvidedURL tests that provided URL has highest priority
 func TestDiscoverDataSourcesProvidedURL(t *testing.T) {
-	meta := &EbuildMetadata{
+	meta := &ebuilds.EbuildMetadata{
 		Package:  "app-misc/hello",
 		Homepage: "https://github.com/example/hello",
 	}
@@ -543,12 +544,12 @@ func TestDiscoverDataSourcesProvidedURL(t *testing.T) {
 func TestDiscoverDataSourcesPyPI(t *testing.T) {
 	testCases := []struct {
 		name     string
-		meta     *EbuildMetadata
+		meta     *ebuilds.EbuildMetadata
 		expected string
 	}{
 		{
 			name: "PyPI homepage",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:  "dev-python/requests",
 				Homepage: "https://pypi.org/project/requests",
 			},
@@ -556,7 +557,7 @@ func TestDiscoverDataSourcesPyPI(t *testing.T) {
 		},
 		{
 			name: "Python dependencies",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:      "dev-python/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{"dev-python/setuptools"},
@@ -589,12 +590,12 @@ func TestDiscoverDataSourcesPyPI(t *testing.T) {
 func TestDiscoverDataSourcesNPM(t *testing.T) {
 	testCases := []struct {
 		name     string
-		meta     *EbuildMetadata
+		meta     *ebuilds.EbuildMetadata
 		expected string
 	}{
 		{
 			name: "npm homepage",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:  "dev-nodejs/typescript",
 				Homepage: "https://www.npmjs.com/package/typescript",
 			},
@@ -602,7 +603,7 @@ func TestDiscoverDataSourcesNPM(t *testing.T) {
 		},
 		{
 			name: "Node.js dependencies",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:      "dev-nodejs/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{"net-libs/nodejs"},
@@ -635,12 +636,12 @@ func TestDiscoverDataSourcesNPM(t *testing.T) {
 func TestDiscoverDataSourcesCrates(t *testing.T) {
 	testCases := []struct {
 		name     string
-		meta     *EbuildMetadata
+		meta     *ebuilds.EbuildMetadata
 		expected string
 	}{
 		{
 			name: "crates.io homepage",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:  "dev-rust/serde",
 				Homepage: "https://crates.io/crates/serde",
 			},
@@ -648,7 +649,7 @@ func TestDiscoverDataSourcesCrates(t *testing.T) {
 		},
 		{
 			name: "Rust dependencies",
-			meta: &EbuildMetadata{
+			meta: &ebuilds.EbuildMetadata{
 				Package:      "dev-rust/mypackage",
 				Homepage:     "https://example.com",
 				Dependencies: []string{"dev-lang/rust"},
@@ -679,7 +680,7 @@ func TestDiscoverDataSourcesCrates(t *testing.T) {
 
 // TestDiscoverDataSourcesHomepageFallback tests homepage as fallback
 func TestDiscoverDataSourcesHomepageFallback(t *testing.T) {
-	meta := &EbuildMetadata{
+	meta := &ebuilds.EbuildMetadata{
 		Package:  "app-misc/hello",
 		Homepage: "https://example.com/hello",
 	}
@@ -706,7 +707,7 @@ func TestDiscoverDataSourcesHomepageFallback(t *testing.T) {
 
 // TestDiscoverDataSourcesNoDuplicateHomepage tests that homepage is not duplicated
 func TestDiscoverDataSourcesNoDuplicateHomepage(t *testing.T) {
-	meta := &EbuildMetadata{
+	meta := &ebuilds.EbuildMetadata{
 		Package:  "app-misc/hello",
 		Homepage: "https://github.com/example/hello",
 	}

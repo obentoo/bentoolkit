@@ -1,4 +1,4 @@
-package autoupdate
+package statefile
 
 import (
 	"bytes"
@@ -36,10 +36,10 @@ func stateDirMutex(dir string) *sync.Mutex {
 	return m
 }
 
-// withStateLock runs fn while holding the in-process mutex and the file lock
+// WithStateLock runs fn while holding the in-process mutex and the file lock
 // of path's config directory. A lock that cannot be taken is returned wrapped
 // naming path; fn does not run and the file on disk is left unchanged.
-func withStateLock(path string, fn func() error) error {
+func WithStateLock(path string, fn func() error) error {
 	dir := filepath.Dir(path)
 	mu := stateDirMutex(dir)
 	mu.Lock()
@@ -53,11 +53,11 @@ func withStateLock(path string, fn func() error) error {
 	return fn()
 }
 
-// snapshotState records, per key, the JSON of each value — the baseline a later
+// SnapshotState records, per key, the JSON of each value — the baseline a later
 // save compares memory against. Comparing JSON rather than Go values keeps a
 // time.Time's monotonic reading, which a value re-read from disk never has,
 // from making an untouched entry look changed.
-func snapshotState[V any](m map[string]V) (map[string]json.RawMessage, error) {
+func SnapshotState[V any](m map[string]V) (map[string]json.RawMessage, error) {
 	out := make(map[string]json.RawMessage, len(m))
 	for k, v := range m {
 		raw, err := json.Marshal(v)
@@ -69,12 +69,12 @@ func snapshotState[V any](m map[string]V) (map[string]json.RawMessage, error) {
 	return out, nil
 }
 
-// mergeState merges three views of one keyed map. A key whose in-memory value
+// MergeState merges three views of one keyed map. A key whose in-memory value
 // differs from the baseline — added, changed or deleted since this instance
 // last loaded or saved — takes the in-memory value (absence meaning delete);
 // every other key takes the value on disk, so entries another process wrote
 // meanwhile survive, and entries it deleted stay deleted.
-func mergeState[V any](memory map[string]V, baseline map[string]json.RawMessage, disk map[string]V) (map[string]V, error) {
+func MergeState[V any](memory map[string]V, baseline map[string]json.RawMessage, disk map[string]V) (map[string]V, error) {
 	merged := make(map[string]V, len(disk)+len(memory))
 	// No size hint: sizing it by the sum of three lengths is an arithmetic
 	// overflow on paper (CodeQL go/allocation-size-overflow) for a hint the map

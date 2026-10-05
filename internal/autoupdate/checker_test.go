@@ -16,6 +16,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // =============================================================================
@@ -1728,7 +1729,7 @@ func (f *fakeLLMProvider) ExtractVersion(_ context.Context, content []byte, prom
 	return f.version, f.err
 }
 
-func (f *fakeLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (f *fakeLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return &SchemaAnalysis{ParserType: "json"}, nil
 }
 

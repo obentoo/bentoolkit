@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -778,7 +779,7 @@ const claudeCodeSchemaJSON = `{
 // optional hint are included to guide the model. When askForJSON is true (the
 // schema-less fallback path) the instruction explicitly asks for a raw JSON
 // response so parseSchemaAnalysis can recover it (S003-R3.3).
-func buildClaudeCodeAnalysisInstruction(meta *EbuildMetadata, hint string, askForJSON bool) string {
+func buildClaudeCodeAnalysisInstruction(meta *ebuilds.EbuildMetadata, hint string, askForJSON bool) string {
 	var sb strings.Builder
 	sb.WriteString("Analyze the piped content and respond with the parser schema as JSON")
 	if askForJSON {
@@ -846,7 +847,7 @@ func stripJSONFences(text string) string {
 //
 // Page content is piped on stdin on both attempts, and both children are
 // spawned from contexts derived from ctx (story 059, R3.3).
-func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Attempt 1: structured request with --json-schema.
 	structuredInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, false)
 	result, err := c.run(ctx, structuredInstruction, content, claudeCodeSchemaJSON)

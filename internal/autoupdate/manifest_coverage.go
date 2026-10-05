@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // ErrManifestIncomplete is returned (wrapped) when the manifest step succeeded
@@ -40,7 +42,7 @@ type missingManifestRecord struct {
 // is a package-scope check, so the scan covers every version in the directory
 // and the records are narrowed to the one this bump wrote.
 func (a *Applier) checkManifestCoverage(ctx context.Context, pkgDir, pkg, version string) error {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return nil
 	}

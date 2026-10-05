@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -838,7 +839,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		if err != nil {
 			// A removed ebuild is not a hard error: auto-disable the orphaned
 			// entry and report it as info so repeated runs stay quiet.
-			if errors.Is(err, autoupdate.ErrNoEbuildFound) {
+			if errors.Is(err, ebuilds.ErrNoEbuildFound) {
 				if derr := checker.DisableOrphans([]string{pkg}); derr != nil {
 					ar.log().Warn("failed to disable orphaned package", "package", pkg, "err", derr)
 				}

@@ -20,6 +20,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"golang.org/x/time/rate"
 )
 
@@ -180,7 +181,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 	// Property: Provided URL takes precedence over discovered sources
 	properties.Property("provided URL takes precedence over discovered sources", prop.ForAll(
 		func(providedURL, githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -201,7 +202,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 	// Property: Provided URL has priority 0 (highest)
 	properties.Property("provided URL has priority 0", prop.ForAll(
 		func(providedURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: "https://example.com",
 			}
@@ -1893,7 +1894,7 @@ type patternLLMStub struct {
 func (s *patternLLMStub) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
 	return "", nil
 }
-func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return s.analysis, nil
 }
 func (s *patternLLMStub) GetModel() string { return "pattern-stub" }

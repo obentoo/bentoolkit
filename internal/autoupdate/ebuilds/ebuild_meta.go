@@ -1,5 +1,4 @@
-// Package autoupdate provides ebuild metadata extraction for autoupdate analysis.
-package autoupdate
+package ebuilds
 
 import (
 	"bufio"
@@ -65,12 +64,12 @@ var (
 	// Host detection for ordinary http(s) URLs is done via net/url (see
 	// findGitHubRepo / urlMatchesHost) to avoid unanchored substring matches.
 	githubSCPRegex = regexp.MustCompile(`^(?:[\w.+-]+@)?github\.com:([^/]+)/(\S+)$`)
-	// pythonDepRegex matches Python-related dependencies
-	pythonDepRegex = regexp.MustCompile(`dev-python/|python-`)
-	// nodeDepRegex matches Node.js-related dependencies
-	nodeDepRegex = regexp.MustCompile(`net-libs/nodejs|dev-nodejs/`)
-	// rustDepRegex matches Rust-related dependencies
-	rustDepRegex = regexp.MustCompile(`dev-lang/rust|virtual/rust|dev-rust/`)
+	// PythonDepRegex matches Python-related dependencies
+	PythonDepRegex = regexp.MustCompile(`dev-python/|python-`)
+	// NodeDepRegex matches Node.js-related dependencies
+	NodeDepRegex = regexp.MustCompile(`net-libs/nodejs|dev-nodejs/`)
+	// RustDepRegex matches Rust-related dependencies
+	RustDepRegex = regexp.MustCompile(`dev-lang/rust|virtual/rust|dev-rust/`)
 )
 
 // ExtractEbuildMetadata extracts metadata from an ebuild file.
@@ -78,7 +77,7 @@ var (
 // HOMEPAGE, SRC_URI, DEPEND, RDEPEND, and detects live/binary packages.
 func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 	// Validate package format (category/package, optionally :slot-suffixed)
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := SplitPkgAtom(pkg)
 	if !ok {
 		return nil, fmt.Errorf("%w: invalid package format %q, expected category/package", ErrPackageNotFound, pkg)
 	}
@@ -92,7 +91,7 @@ func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 	}
 
 	// Find all ebuild files in the package directory
-	ebuilds, err := findEbuilds(pkgDir)
+	ebuilds, err := FindEbuilds(pkgDir)
 	if err != nil {
 		return nil, err
 	}
@@ -129,13 +128,13 @@ func ExtractEbuildMetadata(overlayPath, pkg string) (*EbuildMetadata, error) {
 	meta.Dependencies = extractDependencies(content)
 
 	// Detect binary package
-	meta.IsBinary = detectBinaryPackage(content)
+	meta.IsBinary = DetectBinaryPackage(content)
 
 	return meta, nil
 }
 
-// findEbuilds finds all ebuild files in a package directory
-func findEbuilds(pkgDir string) ([]string, error) {
+// FindEbuilds finds all ebuild files in a package directory
+func FindEbuilds(pkgDir string) ([]string, error) {
 	entries, err := os.ReadDir(pkgDir)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot read directory: %w", ErrEbuildParseFailed, err)
@@ -166,7 +165,7 @@ func selectBestEbuild(ebuildPaths []string) (string, string) {
 		// Remove .ebuild suffix
 		name := strings.TrimSuffix(filename, ".ebuild")
 		// Find the last dash followed by a digit (version separator)
-		version := extractVersionFromFilename(name)
+		version := ExtractVersionFromFilename(name)
 		if version != "" {
 			ebuilds = append(ebuilds, ebuildInfo{path: path, version: version})
 		}
@@ -196,10 +195,10 @@ func selectBestEbuild(ebuildPaths []string) (string, string) {
 	return ebuilds[0].path, ebuilds[0].version
 }
 
-// extractVersionFromFilename extracts version from an ebuild filename.
+// ExtractVersionFromFilename extracts version from an ebuild filename.
 // Format: package-version (without .ebuild suffix)
 // Examples: "hello-1.0.0" -> "1.0.0", "firefox-bin-120.0" -> "120.0"
-func extractVersionFromFilename(name string) string {
+func ExtractVersionFromFilename(name string) string {
 	// Find the last dash followed by a digit
 	for i := len(name) - 1; i >= 0; i-- {
 		if name[i] == '-' && i+1 < len(name) && name[i+1] >= '0' && name[i+1] <= '9' {
@@ -357,8 +356,8 @@ func extractPackageAtom(atom string) string {
 	return atom[:endIdx]
 }
 
-// detectBinaryPackage checks if the ebuild is for a binary package
-func detectBinaryPackage(content []byte) bool {
+// DetectBinaryPackage checks if the ebuild is for a binary package
+func DetectBinaryPackage(content []byte) bool {
 	// Check RESTRICT for bindist
 	if matches := restrictRegex.FindSubmatch(content); matches != nil {
 		restrict := string(matches[1])
@@ -427,13 +426,13 @@ func DetectPackageType(meta *EbuildMetadata) PackageType {
 
 	// Check dependencies for ecosystem hints
 	for _, dep := range meta.Dependencies {
-		if pythonDepRegex.MatchString(dep) {
+		if PythonDepRegex.MatchString(dep) {
 			return PackageTypePyPI
 		}
-		if nodeDepRegex.MatchString(dep) {
+		if NodeDepRegex.MatchString(dep) {
 			return PackageTypeNPM
 		}
-		if rustDepRegex.MatchString(dep) {
+		if RustDepRegex.MatchString(dep) {
 			return PackageTypeCrates
 		}
 	}

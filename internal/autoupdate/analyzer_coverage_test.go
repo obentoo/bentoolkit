@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // stubLLMProvider is a minimal LLMProvider for option testing
@@ -15,7 +17,7 @@ type stubLLMProvider struct{}
 func (s *stubLLMProvider) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
 	return "", nil
 }
-func (s *stubLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+func (s *stubLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*SchemaAnalysis, error) {
 	return &SchemaAnalysis{ParserType: "json"}, nil
 }
 func (s *stubLLMProvider) GetModel() string { return "stub" }
@@ -674,7 +676,7 @@ func TestBuildSchemaAnalysisPromptBasic(t *testing.T) {
 // TestBuildSchemaAnalysisPromptWithMeta tests buildSchemaAnalysisPrompt with metadata
 func TestBuildSchemaAnalysisPromptWithMeta(t *testing.T) {
 	content := []byte(`{"tag_name": "v1.0.0"}`)
-	meta := &EbuildMetadata{
+	meta := &ebuilds.EbuildMetadata{
 		Package:  "app-misc/hello",
 		Version:  "1.0.0",
 		Homepage: "https://example.com",

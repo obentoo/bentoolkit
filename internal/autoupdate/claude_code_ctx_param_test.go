@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 type claudeCodeCtx059Key struct{}
@@ -93,7 +95,7 @@ func TestClaudeCodeEachCallSpawnsFromItsOwnContext(t *testing.T) {
 		// every spawn it makes must carry its label, and its result does not
 		// matter here.
 		{"analyze-content", func(ctx context.Context) error {
-			_, _ = c.AnalyzeContent(ctx, []byte("content"), &EbuildMetadata{}, "")
+			_, _ = c.AnalyzeContent(ctx, []byte("content"), &ebuilds.EbuildMetadata{}, "")
 			return nil
 		}},
 	}

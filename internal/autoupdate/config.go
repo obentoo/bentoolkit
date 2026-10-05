@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -514,7 +515,7 @@ func validateRequires(pkg string, cfg *PackageConfig) error {
 	if len(cfg.Requires) == 0 {
 		return nil
 	}
-	selfCat, selfName, _ := splitPkgAtom(pkg)
+	selfCat, selfName, _ := ebuilds.SplitPkgAtom(pkg)
 	atoms := make([]string, 0, len(cfg.Requires))
 	for atom := range cfg.Requires {
 		atoms = append(atoms, atom)
@@ -563,7 +564,7 @@ func requireAtomError(atom string) error {
 	if strings.Count(atom, "/") != 1 {
 		return errors.New("must be category/package")
 	}
-	_, name, err := parsePkgAtom(atom)
+	_, name, err := ebuilds.ParsePkgAtom(atom)
 	if err != nil {
 		return err
 	}
@@ -1326,12 +1327,12 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
 	// malformed key would otherwise surface much later as a path built from
 	// nonsense — or, for a "../x" key, as a path outside the overlay (S064-R1.4).
-	if _, _, err := parsePkgAtom(pkg); err != nil {
+	if _, _, err := ebuilds.ParsePkgAtom(pkg); err != nil {
 		return fmt.Errorf("package %s: %w: %w", pkg, ErrInvalidPackageKey, err)
 	}
 	// An empty label ("cat/pkg@") is a typo: it makes the key no more unique
 	// than the bare atom while looking like it does.
-	if rest, label := splitPkgLabel(pkg); rest != pkg && label == "" {
+	if rest, label := ebuilds.SplitPkgLabel(pkg); rest != pkg && label == "" {
 		return fmt.Errorf("package %s: %w: the \"@\" label is empty", pkg, ErrInvalidPackageKey)
 	}
 
@@ -1439,7 +1440,7 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 		if !ebuild.IsValidVersion(cfg.Version) {
 			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
 		}
-		if cfg.Series != "" && !newSeriesMatcher(log, cfg.Series).matches(cfg.Version) {
+		if cfg.Series != "" && !ebuilds.NewSeriesMatcher(log, cfg.Series).Matches(cfg.Version) {
 			return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
 		}
 	}
@@ -1668,7 +1669,7 @@ func validateDistinctEntries(pkgs map[string]PackageConfig) error {
 	type scan struct{ atom, slot, series string }
 	seen := make(map[scan]string, len(pkgs))
 	for _, pkg := range sortedKeys(pkgs) {
-		atom, slot := splitPkgSlot(pkg)
+		atom, slot := ebuilds.SplitPkgSlot(pkg)
 		key := scan{atom: atom, slot: slot, series: pkgs[pkg].Series}
 		if other, dup := seen[key]; dup {
 			return fmt.Errorf(

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/statefile"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
@@ -161,11 +162,11 @@ func NewCache(configDir string, opts ...CacheOption) (*Cache, error) {
 // adoptBaseline records the current maps as what this instance last loaded or
 // saved.
 func (c *Cache) adoptBaseline() error {
-	entries, err := snapshotState(c.Entries)
+	entries, err := statefile.SnapshotState(c.Entries)
 	if err != nil {
 		return fmt.Errorf("recording the cache baseline for %s: %w", c.path, err)
 	}
-	preconditions, err := snapshotState(c.Preconditions)
+	preconditions, err := statefile.SnapshotState(c.Preconditions)
 	if err != nil {
 		return fmt.Errorf("recording the cache baseline for %s: %w", c.path, err)
 	}
@@ -324,16 +325,16 @@ func (c *Cache) Save() error {
 // saveUnsafe persists the cache to disk without locking.
 // Caller must hold the write lock.
 func (c *Cache) saveUnsafe() error {
-	return withStateLock(c.path, func() error {
+	return statefile.WithStateLock(c.path, func() error {
 		disk, err := readCacheFileForMerge(c.path)
 		if err != nil {
 			return err
 		}
-		entries, err := mergeState(c.Entries, c.baseEntries, disk.Entries)
+		entries, err := statefile.MergeState(c.Entries, c.baseEntries, disk.Entries)
 		if err != nil {
 			return fmt.Errorf("merging %s: %w", c.path, err)
 		}
-		preconditions, err := mergeState(c.Preconditions, c.basePreconditions, disk.Preconditions)
+		preconditions, err := statefile.MergeState(c.Preconditions, c.basePreconditions, disk.Preconditions)
 		if err != nil {
 			return fmt.Errorf("merging %s: %w", c.path, err)
 		}

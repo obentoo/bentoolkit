@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // recordEndMarker closes every record in packages.toml. TOML has no block
@@ -319,22 +321,22 @@ func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig
 		if cfg.Series != "" {
 			continue
 		}
-		if _, slot := splitPkgSlot(pkg); slot != "" {
+		if _, slot := ebuilds.SplitPkgSlot(pkg); slot != "" {
 			continue
 		}
 
-		dir := pkgDirFor(overlayPath, pkg)
+		dir := ebuilds.PkgDirFor(overlayPath, pkg)
 		if dir == "" {
 			continue
 		}
-		paths, err := findEbuilds(dir)
+		paths, err := ebuilds.FindEbuilds(dir)
 		if err != nil || len(paths) < 2 {
 			continue
 		}
 
 		lines := make(map[string]string, 2) // release line → one example version
 		for _, p := range paths {
-			v := extractVersionFromFilename(filepath.Base(p))
+			v := ebuilds.ExtractVersionFromFilename(filepath.Base(p))
 			if v == "" {
 				continue
 			}

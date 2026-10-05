@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // metadataCacheTimeout bounds one egencache run. It regenerates a single
@@ -34,7 +36,7 @@ func (a *Applier) regenMetadataCache(ctx context.Context, pkg, version string) e
 	if fi, err := os.Stat(filepath.Join(a.overlayPath, "metadata", "md5-cache")); err != nil || !fi.IsDir() {
 		return nil
 	}
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("cannot regenerate the md5-cache of %q: not a category/package atom", pkg)
 	}
