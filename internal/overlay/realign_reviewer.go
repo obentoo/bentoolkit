@@ -3,7 +3,6 @@ package overlay
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"os"
 	"strings"
 
@@ -389,9 +388,11 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 			asked++
 			unanswered++
 			unansweredBy[ReviewEbuildUnreadable]++
-			unreadablePair.say(log,
-				"overlay: the two ebuilds behind a package could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again",
-				"atom", atom)
+			if unreadablePair.first() {
+				log.Warn(
+					"overlay: the two ebuilds behind a package could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again",
+					"atom", atom)
+			}
 			continue
 		}
 		if bytes.Equal(req.Ours, req.Baseline) {
@@ -416,17 +417,21 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 		if err != nil {
 			unanswered++
 			unansweredBy[classifyReviewError(err)]++
-			callFailed.say(log,
-				"overlay: the realignment review of a package failed; it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again",
-				"atom", atom, "err", err)
+			if callFailed.first() {
+				log.Warn(
+					"overlay: the realignment review of a package failed; it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again",
+					"atom", atom, "err", err)
+			}
 			continue
 		}
 		if !realignNoteSpeaks(note) {
 			unanswered++
 			unansweredBy[ReviewUnusableReply]++
-			silentAnswer.say(log,
-				"overlay: the realignment review of a package came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again",
-				"atom", atom)
+			if silentAnswer.first() {
+				log.Warn(
+					"overlay: the realignment review of a package came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again",
+					"atom", atom)
+			}
 			continue
 		}
 
@@ -655,13 +660,13 @@ func candidateWithReading(block, reading string) string {
 // once per section rather than once per row.
 type realignWarnOnce struct{ said bool }
 
-// say warns msg with args on log unless this kind of failure has already been
-// announced. msg is constant; what varies — the package, a model's or a CLI's
-// own error text — travels in args, never inside the message.
-func (o *realignWarnOnce) say(log *slog.Logger, msg string, args ...any) {
+// first reports whether this kind of failure is being announced for the first
+// time, and marks it announced. The caller writes the warning itself, so each
+// message stays a constant at its own call site.
+func (o *realignWarnOnce) first() bool {
 	if o.said {
-		return
+		return false
 	}
 	o.said = true
-	log.Warn(msg, args...)
+	return true
 }

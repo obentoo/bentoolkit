@@ -236,10 +236,10 @@ func parseSecrets(data []byte, name string) (string, bool) {
 	return "", false
 }
 
-// Logger is the minimal logging surface secrets needs. It is defined
-// locally — rather than importing internal/common/logger — to avoid an
-// import cycle. The real *logger.Logger structurally satisfies this
-// interface via its Warn(format string, args ...interface{}) method.
+// Logger is the minimal logging surface secrets needs. It is defined locally
+// so this package keeps depending on the standard library alone: the log/slog
+// logger (internal/common/logging) reads secrets.Resolved, so secrets cannot
+// import it back without a cycle.
 type Logger interface {
 	Warn(format string, args ...interface{})
 }
@@ -270,7 +270,7 @@ var looseWarnOnce = new(sync.Once)
 // world-accessible (mode & 0o077 != 0). It names the path and mode but never the
 // file's contents (R6.1), and never blocks the read (D5). The warning is routed
 // through the package's Logger seam instead of written straight to os.Stderr:
-// the seam keeps this package clear of an internal/common/logger import cycle
+// the seam keeps this package clear of an internal/common/logging import cycle
 // while letting a test observe both the text and the once-per-process count.
 func warnIfLoose(path string) {
 	info, err := os.Stat(path)
