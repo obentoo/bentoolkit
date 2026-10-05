@@ -14,7 +14,7 @@ import (
 // withFakeGentoo substitutes d's resolveGentooProvider so the revive flows
 // resolve the given fake instead of the real ::gentoo repository.
 func withFakeGentoo(d *deps, fake provider.Provider) {
-	d.resolveGentooProvider = func(*config.Config) (provider.Provider, error) { return fake, nil }
+	d.resolveGentooProvider = func(context.Context, *config.Config) (provider.Provider, error) { return fake, nil }
 }
 
 // TestRunRevive_SkipPath drives runRevive's full post-guard path with an on-disk

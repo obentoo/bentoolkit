@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -56,7 +57,7 @@ func seedEselectFallback(t *testing.T) []byte {
 func TestRegistryDownloadBodyCapped(t *testing.T) {
 	t.Run("over the cap", func(t *testing.T) {
 		reg := newTestRegistry(t, registryBodyServer(t, httputil.MaxBodyBytes+1))
-		err := reg.Sync()
+		err := reg.Sync(context.Background())
 		if !errors.Is(err, httputil.ErrResponseTooLarge) {
 			t.Errorf("Sync() = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
 		}
@@ -68,7 +69,7 @@ func TestRegistryDownloadBodyCapped(t *testing.T) {
 	t.Run("over the cap falls back to the eselect cache", func(t *testing.T) {
 		fallback := seedEselectFallback(t)
 		reg := newTestRegistry(t, registryBodyServer(t, 64<<20))
-		data, err := reg.ensureXML()
+		data, err := reg.ensureXML(context.Background())
 		if err != nil {
 			t.Fatalf("ensureXML: %v; want the eselect fallback", err)
 		}
@@ -82,7 +83,7 @@ func TestRegistryDownloadBodyCapped(t *testing.T) {
 
 	t.Run("exactly at the cap", func(t *testing.T) {
 		reg := newTestRegistry(t, registryBodyServer(t, httputil.MaxBodyBytes))
-		if err := reg.Sync(); err != nil {
+		if err := reg.Sync(context.Background()); err != nil {
 			t.Fatalf("Sync() = %v for a body of exactly %d bytes", err, httputil.MaxBodyBytes)
 		}
 		info, err := os.Stat(reg.XMLPath)
@@ -117,7 +118,7 @@ func TestRegistryDownloadTimesOut(t *testing.T) {
 	done := make(chan result, 1)
 	start := time.Now()
 	go func() {
-		data, err := reg.ensureXML()
+		data, err := reg.ensureXML(context.Background())
 		done <- result{data, err}
 	}()
 

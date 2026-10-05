@@ -203,18 +203,18 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	if compareSync {
-		if err := registry.Sync(); err != nil {
+		if err := registry.Sync(ctx); err != nil {
 			logger.Error("Failed to sync repository list: %v", err)
 			return exitWith(1)
 		}
 	}
 
 	// Resolve repository info
-	repoInfo, err := provider.ResolveRepository(repoName, configRepos, registry)
+	repoInfo, err := provider.ResolveRepository(ctx, repoName, configRepos, registry)
 	if err != nil {
 		logger.Error("Repository '%s' not found.", repoName)
-		configNames := provider.ListAvailableRepositories(configRepos, nil)
-		registryNames := provider.ListAvailableRepositories(nil, registry)
+		configNames := provider.ListAvailableRepositories(ctx, configRepos, nil)
+		registryNames := provider.ListAvailableRepositories(ctx, nil, registry)
 		if len(configNames) > 0 {
 			logger.Info("Config repositories: %s", strings.Join(configNames, ", "))
 		}

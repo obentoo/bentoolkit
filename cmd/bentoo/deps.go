@@ -49,7 +49,7 @@ type deps struct {
 	checkInteractive   func() bool
 	// resolveGentooProvider obtains the ::gentoo provider for the revive flows
 	// and for prune, so they can be driven with an on-disk fake.
-	resolveGentooProvider func(cfg *config.Config) (provider.Provider, error)
+	resolveGentooProvider func(ctx context.Context, cfg *config.Config) (provider.Provider, error)
 	// setVersionsForCheck is the ONE way the check could publish. It is
 	// deliberately never called: a test keeps it wired, runs every path and
 	// reads the seam afterwards, so R9.2 is proved rather than asserted.
