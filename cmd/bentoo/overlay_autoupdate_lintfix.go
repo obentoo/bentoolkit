@@ -104,7 +104,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 	// the file on disk can say whether the repair did what it claimed, and this
 	// is the run's own proof that `--lint --fix` followed by `--lint` is silent
 	// except for the findings no repair offers.
-	remaining, err := autoupdate.LintPackagesConfig(overlayPath)
+	remaining, err := autoupdate.LintPackagesConfig(nil, overlayPath)
 	if err != nil {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.

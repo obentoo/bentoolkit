@@ -536,7 +536,7 @@ func (f *reconcileFixture) divergences(t *testing.T) []autoupdate.Divergence {
 	if err != nil {
 		t.Fatalf("load packages.toml: %v", err)
 	}
-	return autoupdate.Reconcile(f.overlayDir, cfg.Packages)
+	return autoupdate.Reconcile(nil, f.overlayDir, cfg.Packages)
 }
 
 // stalePinCount is the number of entries a correct batch writes.

@@ -85,9 +85,9 @@ func TestValidateAuxURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base
 			tc.mutate(&cfg)
-			err := ValidatePackageConfig("app-misc/foo", &cfg)
+			err := ValidatePackageConfig(nil, "app-misc/foo", &cfg)
 			if (err == nil) != tc.ok {
-				t.Errorf("ValidatePackageConfig(aux_url=%q) = %v, want ok=%v", cfg.AuxURL, err, tc.ok)
+				t.Errorf("ValidatePackageConfig(nil, aux_url=%q) = %v, want ok=%v", cfg.AuxURL, err, tc.ok)
 			}
 		})
 	}

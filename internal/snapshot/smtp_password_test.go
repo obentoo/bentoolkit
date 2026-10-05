@@ -62,16 +62,6 @@ func captureSMTP(t *testing.T) *smtpCapture {
 	return sc
 }
 
-// captureWarnings redirects the package warn seam into a buffer.
-func captureWarnings(t *testing.T) *strings.Builder {
-	t.Helper()
-	var b strings.Builder
-	orig := warnLogf
-	t.Cleanup(func() { warnLogf = orig })
-	warnLogf = func(format string, args ...interface{}) { fmt.Fprintf(&b, format, args...) }
-	return &b
-}
-
 // smtpNotifyConfig is an email notify config using the SMTP transport. The
 // password is deliberately absent: it is no longer a config field (R2.1).
 func smtpNotifyConfig(user string) NotifyConfig {
@@ -109,7 +99,7 @@ func TestSMTPPassword_ResolvesFromSecretsFile(t *testing.T) {
 	writeSecret(t, isolateSecrets(t), "BENTOO_SMTP_PASSWORD", want)
 	sent := captureSMTP(t)
 
-	n, err := newNotifier(smtpNotifyConfig("bentoo"))
+	n, err := newNotifier(smtpNotifyConfig("bentoo"), nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -134,7 +124,7 @@ func TestSMTPPassword_TotalMissSendsUnauthenticated(t *testing.T) {
 	isolateSecrets(t) // no secrets file written
 	sent := captureSMTP(t)
 
-	n, err := newNotifier(smtpNotifyConfig("bentoo"))
+	n, err := newNotifier(smtpNotifyConfig("bentoo"), nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -160,9 +150,9 @@ func TestSMTPPassword_UnreadableSecretsFileWarnsAndSends(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	sent := captureSMTP(t)
-	warned := captureWarnings(t)
+	warned := &logCapture{}
 
-	n, err := newNotifier(smtpNotifyConfig("bentoo"))
+	n, err := newNotifier(smtpNotifyConfig("bentoo"), warned.logger())
 	if err != nil {
 		t.Fatalf("newNotifier must not fail over an unreadable secrets file (R1.3): %v", err)
 	}
@@ -187,7 +177,7 @@ func TestSMTPPassword_NoUserMeansNoAuth(t *testing.T) {
 	writeSecret(t, isolateSecrets(t), "BENTOO_SMTP_PASSWORD", "s3cr3t-smtp-pw")
 	sent := captureSMTP(t)
 
-	n, err := newNotifier(smtpNotifyConfig(""))
+	n, err := newNotifier(smtpNotifyConfig(""), nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}

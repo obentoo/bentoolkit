@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // publishedFileMode is the mode promotion gives the files it writes into the
@@ -183,6 +184,7 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 	}
 
 	promoted := &promotion{
+		log:          a.logger(),
 		pkg:          pkg,
 		version:      version,
 		ebuildPath:   dst.ebuildPath,
@@ -225,7 +227,7 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 		if !promoted.manifestExisted {
 			mode = publishedFileMode
 		}
-		if err := writeThenRename(promoted.manifestPath, stagedBody, mode); err != nil {
+		if err := writeThenRename(promoted.log, promoted.manifestPath, stagedBody, mode); err != nil {
 			wrapped := fmt.Errorf("publishing the validated Manifest for %s-%s as %s: %w", pkg, version, promoted.manifestPath, err)
 			promoted.undo(wrapped)
 			return nil, wrapped
@@ -244,6 +246,8 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 // (anything that sets result.Error further down) has to be able to undo a
 // promotion that had already succeeded.
 type promotion struct {
+	// log receives the warnings undo raises; nil discards them.
+	log          *slog.Logger
 	pkg, version string
 	ebuildPath   string
 	manifestPath string
@@ -300,11 +304,12 @@ func (p *promotion) capturePublishedManifest() error {
 // began (R3.11). It never returns an error, by design: it is called on a path that
 // already has one, and the failure that got there must reach the operator intact.
 func (p *promotion) undo(cause error) {
+	log := logging.OrDiscard(p.log)
 	if p.ebuildPublished {
 		if err := os.Remove(p.ebuildPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logger.Warn("failed to remove the published ebuild %s for %s (%s) after a promotion that did not complete: %v "+
-				"(original error preserved: %v); an ebuild no Manifest entry covers is an unclaimed ebuild that `--clean` deletes",
-				p.ebuildPath, p.pkg, p.version, err, cause)
+			log.Warn("failed to remove the published ebuild after a promotion that did not complete "+
+				"(original error preserved); an ebuild no Manifest entry covers is an unclaimed ebuild that `--clean` deletes",
+				"path", p.ebuildPath, "package", p.pkg, "version", p.version, "err", err, "cause", cause)
 		}
 	}
 
@@ -314,16 +319,16 @@ func (p *promotion) undo(cause error) {
 	if !p.manifestExisted {
 		// Nothing was there before, so restoring means removing what was written.
 		if err := os.Remove(p.manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logger.Warn("failed to remove the Manifest %s promotion created for %s (%s) after it did not complete: %v "+
-				"(original error preserved: %v)",
-				p.manifestPath, p.pkg, p.version, err, cause)
+			log.Warn("failed to remove the Manifest the promotion created after it did not complete "+
+				"(original error preserved)",
+				"path", p.manifestPath, "package", p.pkg, "version", p.version, "err", err, "cause", cause)
 		}
 		return
 	}
-	if err := writeThenRename(p.manifestPath, p.manifestBefore, p.manifestMode); err != nil {
-		logger.Warn("failed to restore the published Manifest %s of %s (%s) after a promotion that did not complete: %v "+
-			"(original error preserved: %v); the package directory now holds the Manifest of a bump that was not published",
-			p.manifestPath, p.pkg, p.version, err, cause)
+	if err := writeThenRename(log, p.manifestPath, p.manifestBefore, p.manifestMode); err != nil {
+		log.Warn("failed to restore the published Manifest after a promotion that did not complete "+
+			"(original error preserved); the package directory now holds the Manifest of a bump that was not published",
+			"path", p.manifestPath, "package", p.pkg, "version", p.version, "err", err, "cause", cause)
 	}
 }
 
@@ -359,8 +364,9 @@ func refuseExistingEbuild(dstPath, pkg, version string) error {
 // not tidiness either: a leftover would be a file the published overlay never had,
 // in an overlay that commits and pushes itself, and it would break the very
 // property this story asserts — that a run in which every bump failed leaves the
-// tree byte-identical.
-func writeThenRename(path string, body []byte, mode fs.FileMode) error {
+// tree byte-identical. A temporary file that cannot be removed is a warning to
+// log; nil discards it.
+func writeThenRename(log *slog.Logger, path string, body []byte, mode fs.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".bentoo-*")
 	if err != nil {
@@ -375,7 +381,7 @@ func writeThenRename(path string, body []byte, mode fs.FileMode) error {
 			return
 		}
 		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logger.Warn("failed to remove the temporary file %s left beside %s: %v", tmpName, path, err)
+			logging.OrDiscard(log).Warn("failed to remove the temporary file left beside the target", "tmp", tmpName, "path", path, "err", err)
 		}
 	}()
 
@@ -409,16 +415,16 @@ func writeThenRename(path string, body []byte, mode fs.FileMode) error {
 // It is the code Apply used to register inline right after copyEbuild, moved here
 // unchanged in behaviour and in wording so that both rollbacks — this one and a
 // promotion's — are read side by side. Which of the two an apply arms is the whole
-// difference the staged path makes.
-func orphanEbuildUndo(dstPath, pkg, version string) publishedUndo {
+// difference the staged path makes. The cleanup miss is a warning to log; nil
+// discards it.
+func orphanEbuildUndo(log *slog.Logger, dstPath, pkg, version string) publishedUndo {
+	log = logging.OrDiscard(log)
 	return func(cause error) {
 		if err := os.Remove(dstPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			// Rollback failed: keep the original error, just record the cleanup
 			// miss so the orphan ebuild can be found and removed.
-			logger.Warn(
-				"failed to roll back orphan ebuild %s for %s (%s) after apply failure: %v "+
-					"(original apply error preserved: %v)",
-				dstPath, pkg, version, err, cause)
+			log.Warn("failed to roll back orphan ebuild after apply failure (original apply error preserved)",
+				"path", dstPath, "package", pkg, "version", version, "err", err, "cause", cause)
 		}
 	}
 }

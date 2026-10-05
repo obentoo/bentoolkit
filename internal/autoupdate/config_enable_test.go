@@ -61,7 +61,7 @@ a/b — npm dist-tags.latest is the stable channel.
 		t.Fatalf("EnablePackagesInConfig: %v", err)
 	}
 
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("lint: %v", err)
 	}

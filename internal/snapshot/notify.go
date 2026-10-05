@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/smtp"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 )
@@ -49,12 +51,15 @@ var _ Notifier = noopNotifier{}
 // An unreadable secrets file degrades to an unauthenticated notification (a logged
 // warning), never a hard failure — so the resolution keeps the "never returns a
 // non-nil error" contract above.
-func newNotifier(cfg NotifyConfig) (Notifier, error) {
+//
+// log receives those warnings and the composed notifier's (nil discards). A
+// resolved secret is scrubbed by the invocation logger's redacting handler.
+func newNotifier(cfg NotifyConfig, log *slog.Logger) (Notifier, error) {
 	var notifiers []Notifier
 	if cfg.Ntfy.URL != "" {
 		ntfyToken, _, err := secrets.Lookup("BENTOO_NTFY_TOKEN")
 		if err != nil {
-			warnLogf("snapshot: resolving ntfy token: %v; sending unauthenticated", err)
+			logging.OrDiscard(log).Warn("snapshot: resolving ntfy token failed; sending unauthenticated", "err", err)
 			ntfyToken = ""
 		}
 		notifiers = append(notifiers, ntfyNotifier{url: cfg.Ntfy.URL, token: ntfyToken})
@@ -68,7 +73,7 @@ func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	if len(cfg.Email.To) > 0 {
 		notifiers = append(notifiers, emailNotifier{
 			cfg:          cfg.Email,
-			smtpPassword: resolveSMTPPassword(cfg.Email.SMTP.Host),
+			smtpPassword: resolveSMTPPassword(cfg.Email.SMTP.Host, log),
 			runner:       defaultRunner(),
 		})
 	}
@@ -76,7 +81,7 @@ func newNotifier(cfg NotifyConfig) (Notifier, error) {
 	if len(notifiers) == 0 {
 		return noopNotifier{}, nil
 	}
-	return multiNotifier{notifiers: notifiers, on: cfg.On}, nil
+	return multiNotifier{notifiers: notifiers, on: cfg.On, log: log}, nil
 }
 
 // --- T2.1 shared HTTP helper ---
@@ -309,7 +314,11 @@ type starter interface {
 type multiNotifier struct {
 	notifiers []Notifier
 	on        []string
+	log       *slog.Logger // nil discards
 }
+
+// logger returns the notifier's logger, or a discarding one for a zero value.
+func (m multiNotifier) logger() *slog.Logger { return logging.OrDiscard(m.log) }
 
 // Notify applies the outcome filter once, then fans out to every configured driver
 // in order (R4.2, R4.3). When the run's outcome is not selected by on, no notifier is
@@ -323,7 +332,7 @@ func (m multiNotifier) Notify(ctx context.Context, res RunResult) error {
 	}
 	for _, n := range m.notifiers {
 		if err := n.Notify(ctx, res); err != nil {
-			warnLogf("snapshot: notifier failed: %v", err)
+			m.logger().Warn("snapshot: notifier failed", "err", err)
 		}
 	}
 	return nil
@@ -341,7 +350,7 @@ func (m multiNotifier) Start(ctx context.Context) error {
 			continue
 		}
 		if err := s.Start(ctx); err != nil {
-			warnLogf("snapshot: notifier start failed: %v", err)
+			m.logger().Warn("snapshot: notifier start failed", "err", err)
 		}
 	}
 	return nil
@@ -507,14 +516,15 @@ const smtpPasswordEnv = "BENTOO_SMTP_PASSWORD" //nolint:gosec // G101: this is t
 // "" and "not found" are the same instruction. A non-nil err means a secrets file
 // exists but could not be read (secrets.ErrUnreadable); it warns and returns ""
 // as well, degrading the notification to unauthenticated rather than aborting it
-// (017 R1.3). The warning names the offending path, never a secret value.
-func resolveSMTPPassword(host string) string {
+// (017 R1.3). The warning names the offending path, never a secret value; it
+// goes to log, and a nil log discards it.
+func resolveSMTPPassword(host string, log *slog.Logger) string {
 	if host == "" {
 		return ""
 	}
 	password, _, err := secrets.Lookup(smtpPasswordEnv)
 	if err != nil {
-		warnLogf("snapshot: resolving SMTP password: %v; sending unauthenticated", err)
+		logging.OrDiscard(log).Warn("snapshot: resolving SMTP password failed; sending unauthenticated", "err", err)
 		return ""
 	}
 	return password

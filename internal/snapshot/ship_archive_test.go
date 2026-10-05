@@ -286,23 +286,20 @@ func (f *fakeParentStore) Record(_, _ string, snap Snapshot) error {
 
 var _ parentStore = (*fakeParentStore)(nil)
 
-// captureWarn redirects warnLogf to a recorder for the duration of the test and
-// returns a func yielding every warning emitted so far, FORMATTED. It restores
-// warnLogf via t.Cleanup (the package-var override pattern used by config.go's
-// Validate seam).
+// captureWarn injects a recording logger into a and returns a func yielding
+// every warning a has logged so far, each rendered as its message followed by
+// its attributes (logCapture).
 //
 // It returns the messages rather than a bare "did it warn" because some warnings
 // are required to say WHICH subject they are about: 038 R4.2 asks the on-demand
 // prune to name the subvolume whose prefix is missing, and a boolean cannot tell
 // a warning that names it from one that does not. Callers that only care whether
 // a warn happened test len(...) instead.
-func captureWarn(t *testing.T) (warnings func() []string) {
+func captureWarn(t *testing.T, a *archiveShipper) (warnings func() []string) {
 	t.Helper()
-	orig := warnLogf
-	var got []string
-	warnLogf = func(format string, args ...any) { got = append(got, fmt.Sprintf(format, args...)) }
-	t.Cleanup(func() { warnLogf = orig })
-	return func() []string { return slices.Clone(got) }
+	lc := &logCapture{}
+	a.log = lc.logger()
+	return lc.all
 }
 
 // TestArchiveShipper_Send_Incremental: with a recorded parent and mode
@@ -356,7 +353,7 @@ func TestArchiveShipper_Send_AbsentParentFallback(t *testing.T) {
 	mr := &MockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 
-	warnings := captureWarn(t)
+	warnings := captureWarn(t, a)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -389,7 +386,7 @@ func TestArchiveShipper_Send_FullModeAlwaysFull(t *testing.T) {
 	mr := &MockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "full", compress: "zstd", run: mr, parents: ps}
 
-	warnings := captureWarn(t)
+	warnings := captureWarn(t, a)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -707,7 +704,7 @@ func TestArchiveShipper_Send_PruneFailureNonFatal(t *testing.T) {
 		retention: Retention{Hourly: 2, Daily: 3},
 	}
 
-	warnings := captureWarn(t)
+	warnings := captureWarn(t, a)
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
 	rep, err := a.Send(t.Context(), snap)
@@ -1004,7 +1001,7 @@ func TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes(t *testing.T) {
 
 		// Each subvolume's FIRST ship has no recorded parent, so Send warns and
 		// falls back to a full send — expected, and not what is under test.
-		_ = captureWarn(t)
+		_ = captureWarn(t, a)
 
 		run.modTime = firstShipAt
 		if _, err := a.Send(t.Context(), home); err != nil {
@@ -1050,7 +1047,7 @@ func TestArchiveShipper_Send_DoesNotPruneOtherSubvolumes(t *testing.T) {
 		ps := newMapParentStore()
 		a := newShipper(run, ps)
 
-		_ = captureWarn(t) // the first ship has no parent yet; the second does.
+		_ = captureWarn(t, a) // the first ship has no parent yet; the second does.
 
 		run.modTime = firstShipAt
 		if _, err := a.Send(t.Context(), first); err != nil {
@@ -1119,7 +1116,7 @@ func TestArchiveShipper_Send_LeavesObjectsOutsideEveryPrefixUntouched(t *testing
 		parents:   newMapParentStore(),
 		retention: Retention{Daily: 1},
 	}
-	_ = captureWarn(t) // a subvolume's first ship has no recorded parent and warns
+	_ = captureWarn(t, a) // a subvolume's first ship has no recorded parent and warns
 
 	run.modTime = shipAt
 	if _, err := a.Send(t.Context(), Snapshot{ID: "home.A", Subvolume: "/home", Path: "/snaps/home.A"}); err != nil {
@@ -1448,7 +1445,7 @@ func TestArchiveShipper_PruneOnDemand_MissingRemoteIsNotAFailure(t *testing.T) {
 			}
 
 			subvolumes := []string{"/home", "/root"}
-			warnings := captureWarn(t)
+			warnings := captureWarn(t, a)
 
 			if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
 				t.Fatalf("PruneRemoteOnDemand returned %v, want nil — a path that was never shipped to is nothing to prune", err)
@@ -1748,7 +1745,7 @@ func TestArchiveShipper_PruneOnDemand_MissingPrefixStillPrunesTheRest(t *testing
 		t.Fatalf("fixture gives %q nothing out of policy — that the remaining subvolume was still pruned would be unobservable", "/root")
 	}
 
-	warnings := captureWarn(t)
+	warnings := captureWarn(t, a)
 	if err := a.PruneRemoteOnDemand(t.Context(), subvolumes); err != nil {
 		t.Fatalf("PruneRemoteOnDemand returned %v, want nil — a prefix that was never shipped to is nothing to prune (R4.2)", err)
 	}

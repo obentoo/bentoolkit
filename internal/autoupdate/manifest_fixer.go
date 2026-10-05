@@ -20,11 +20,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -235,6 +237,14 @@ type ClaudeCodeFixer struct {
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// log receives the fixer's diagnostics; read it through logger().
+	log *slog.Logger
+}
+
+// logger returns the fixer's logger, or a discarding one when none
+// was set.
+func (f *ClaudeCodeFixer) logger() *slog.Logger {
+	return logging.OrDiscard(f.log)
 }
 
 // Compile-time assertion that ClaudeCodeFixer satisfies the capability.
@@ -242,6 +252,14 @@ var _ ManifestFixer = (*ClaudeCodeFixer)(nil)
 
 // ClaudeCodeFixerOption configures a ClaudeCodeFixer.
 type ClaudeCodeFixerOption func(*ClaudeCodeFixer)
+
+// WithFixerLogger sets the logger the fixer reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithFixerLogger(l *slog.Logger) ClaudeCodeFixerOption {
+	return func(f *ClaudeCodeFixer) {
+		f.log = logging.OrDiscard(l)
+	}
+}
 
 // WithFixerExecCommand overrides the context-aware exec.Command factory used to
 // spawn `claude`. Mirrors exec.CommandContext so injected commands also observe
@@ -323,7 +341,7 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 // (S051-R2.3, S051-R3.3, S051-R3.5). A PkgDir the rules cannot carry safely is
 // an error, and nothing is spawned (S051-R2.8).
 func (f *ClaudeCodeFixer) buildFixArgs(instruction string, req ManifestFixRequest) ([]string, error) {
-	hosts := upstreamHosts(req.Package, append(append([]string(nil), req.UpstreamURLs...), upstreamURLsIn(req.ManifestError)...)...)
+	hosts := upstreamHosts(f.logger(), req.Package, append(append([]string(nil), req.UpstreamURLs...), upstreamURLsIn(req.ManifestError)...)...)
 	perms, err := agentPermissionArgs(agentPermissions{
 		agent: "manifest fixer",
 		dir:   req.PkgDir,

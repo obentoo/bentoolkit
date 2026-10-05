@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -15,13 +16,32 @@ type Manager struct {
 	retention  Retention
 }
 
+// ManagerOption configures NewManager.
+type ManagerOption func(*managerOptions)
+
+// managerOptions collects what the ManagerOptions set.
+type managerOptions struct {
+	log *slog.Logger
+}
+
+// WithManagerLogger hands the Manager the invocation's logger, which it passes
+// to every engine, ship and notifier it builds (R5.2). Without it they discard
+// their warnings (R5.3).
+func WithManagerLogger(l *slog.Logger) ManagerOption {
+	return func(o *managerOptions) { o.log = l }
+}
+
 // NewManager builds a Manager from cfg using the factories. configPath is the
 // snapshot.toml path; it locates the sibling btrbk.conf the engine drives. run is
 // the injectable subprocess seam (nil → production execRunner); ssh targets are
 // folded into the engine's btrbk.conf so btrbk performs send/receive during
 // Create (AD5).
-func NewManager(cfg Config, configPath string, run Runner) (*Manager, error) {
-	engine, err := newEngine(cfg.Engine, collectShipTargets(cfg.Ship), run)
+func NewManager(cfg Config, configPath string, run Runner, opts ...ManagerOption) (*Manager, error) {
+	var o managerOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	engine, err := newEngine(cfg.Engine, collectShipTargets(cfg.Ship), run, o.log)
 	if err != nil {
 		return nil, err
 	}
@@ -32,14 +52,14 @@ func NewManager(cfg Config, configPath string, run Runner) (*Manager, error) {
 
 	shippers := make([]Shipper, 0, len(cfg.Ship))
 	for _, sh := range cfg.Ship {
-		shipper, err := newShipper(sh, run, cfg.Engine.Retention)
+		shipper, err := newShipper(sh, run, cfg.Engine.Retention, o.log)
 		if err != nil {
 			return nil, err
 		}
 		shippers = append(shippers, shipper)
 	}
 
-	notifier, err := newNotifier(cfg.Notify)
+	notifier, err := newNotifier(cfg.Notify, o.log)
 	if err != nil {
 		return nil, err
 	}

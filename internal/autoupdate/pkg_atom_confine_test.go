@@ -69,17 +69,17 @@ func TestSplitPkgAtomKeepsWellFormedKeys(t *testing.T) {
 func TestValidatePackageConfigNamesRejectedPathElement(t *testing.T) {
 	for _, tt := range unsafePkgKeys {
 		cfg := PackageConfig{URL: "https://example.com/x", Parser: "json", Path: "version"}
-		err := ValidatePackageConfig(tt.key, &cfg)
+		err := ValidatePackageConfig(nil, tt.key, &cfg)
 		if !errors.Is(err, ErrInvalidPackageKey) {
-			t.Errorf("ValidatePackageConfig(%q) = %v, want ErrInvalidPackageKey", tt.key, err)
+			t.Errorf("ValidatePackageConfig(nil, %q) = %v, want ErrInvalidPackageKey", tt.key, err)
 			continue
 		}
 		msg := err.Error()
 		if !strings.Contains(msg, "package "+tt.key+":") {
-			t.Errorf("ValidatePackageConfig(%q) error %q does not name the package", tt.key, msg)
+			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the package", tt.key, msg)
 		}
 		if !strings.Contains(msg, strconv.Quote(tt.rejected)) {
-			t.Errorf("ValidatePackageConfig(%q) error %q does not name the rejected element %q", tt.key, msg, tt.rejected)
+			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the rejected element %q", tt.key, msg, tt.rejected)
 		}
 	}
 }

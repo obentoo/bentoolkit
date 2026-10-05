@@ -59,7 +59,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	}
 
 	t.Run("no series returns the directory's highest version", func(t *testing.T) {
-		got, err := selectCurrentEbuild(overlay, pkg, "")
+		got, err := selectCurrentEbuild(nil, overlay, pkg, "")
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -69,7 +69,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the stable line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(overlay, pkg, `^1\.13\.`)
+		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.13\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -79,7 +79,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the preview line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(overlay, pkg, `^1\.14\.`)
+		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.14\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("a series matching nothing is a config error, not an orphan", func(t *testing.T) {
-		_, err := selectCurrentEbuild(overlay, pkg, `^9\.`)
+		_, err := selectCurrentEbuild(nil, overlay, pkg, `^9\.`)
 		if !errors.Is(err, ErrSeriesNotFound) {
 			t.Fatalf("got %v, want ErrSeriesNotFound", err)
 		}
@@ -101,7 +101,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("an uncompilable series does not narrow the scan", func(t *testing.T) {
-		got, err := selectCurrentEbuild(overlay, pkg, `^(1\.13`)
+		got, err := selectCurrentEbuild(nil, overlay, pkg, `^(1\.13`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -121,7 +121,7 @@ func TestSelectCurrentEbuildSeriesIgnoresRevision(t *testing.T) {
 		createTestEbuild(t, overlay, pkg, v)
 	}
 
-	got, err := selectCurrentEbuild(overlay, pkg, `^1\.8\.3$`)
+	got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.8\.3$`)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -136,12 +136,12 @@ func TestSelectCurrentEbuildSeriesIgnoresRevision(t *testing.T) {
 func TestSelectVersionSeries(t *testing.T) {
 	cands := []string{"26.2.4.1", "26.2.5.2", "26.8.0.1"}
 
-	stable := selectVersion(cands, &PackageConfig{Select: "max", Series: `^26\.2\.`})
+	stable := selectVersion(nil, cands, &PackageConfig{Select: "max", Series: `^26\.2\.`})
 	if stable != "26.2.5.2" {
 		t.Fatalf("stable entry selected %q, want %q", stable, "26.2.5.2")
 	}
 
-	testing_ := selectVersion(cands, &PackageConfig{Select: "max", Series: `^26\.8\.`, Suffix: "_pre"})
+	testing_ := selectVersion(nil, cands, &PackageConfig{Select: "max", Series: `^26\.8\.`, Suffix: "_pre"})
 	if testing_ != "26.8.0.1_pre" {
 		t.Fatalf("testing entry selected %q, want %q", testing_, "26.8.0.1_pre")
 	}
@@ -162,7 +162,7 @@ func TestValidateDistinctEntries(t *testing.T) {
 			"app-office/libreoffice@stable":  with(`^26\.2\.`),
 			"app-office/libreoffice@testing": with(`^26\.8\.`),
 		}}
-		if err := cfg.ValidateAll(); err != nil {
+		if err := cfg.ValidateAll(nil); err != nil {
 			t.Fatalf("rejected: %v", err)
 		}
 	})
@@ -172,7 +172,7 @@ func TestValidateDistinctEntries(t *testing.T) {
 			"net-libs/webkit-gtk:4.1": base,
 			"net-libs/webkit-gtk:6":   base,
 		}}
-		if err := cfg.ValidateAll(); err != nil {
+		if err := cfg.ValidateAll(nil); err != nil {
 			t.Fatalf("rejected: %v", err)
 		}
 	})
@@ -182,7 +182,7 @@ func TestValidateDistinctEntries(t *testing.T) {
 			"app-office/libreoffice@stable":  base,
 			"app-office/libreoffice@testing": base,
 		}}
-		err := cfg.ValidateAll()
+		err := cfg.ValidateAll(nil)
 		if err == nil {
 			t.Fatal("two entries with no filter accepted")
 		}
@@ -193,14 +193,14 @@ func TestValidateDistinctEntries(t *testing.T) {
 
 	t.Run("empty label is rejected", func(t *testing.T) {
 		cfg := base
-		if err := ValidatePackageConfig("app-office/libreoffice@", &cfg); !errors.Is(err, ErrInvalidPackageKey) {
+		if err := ValidatePackageConfig(nil, "app-office/libreoffice@", &cfg); !errors.Is(err, ErrInvalidPackageKey) {
 			t.Fatalf("got %v, want ErrInvalidPackageKey", err)
 		}
 	})
 
 	t.Run("uncompilable series is rejected", func(t *testing.T) {
 		cfg := with(`^(26\.2`)
-		if err := ValidatePackageConfig("app-office/libreoffice@stable", &cfg); err == nil {
+		if err := ValidatePackageConfig(nil, "app-office/libreoffice@stable", &cfg); err == nil {
 			t.Fatal("uncompilable series accepted")
 		}
 	})
@@ -236,7 +236,7 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 		stableKey:  entry(`^26\.2\.`, ""),
 		testingKey: entry(`^26\.8\.`, "_pre"),
 	}}
-	if err := cfg.ValidateAll(); err != nil {
+	if err := cfg.ValidateAll(nil); err != nil {
 		t.Fatalf("config rejected: %v", err)
 	}
 

@@ -131,7 +131,7 @@ func TestS060StalePinBatchOverReconcile(t *testing.T) {
 		"net-misc/rclone":    {Parser: "json", URL: "https://example.invalid/rclone", Path: "version", Version: "1.71.1"},
 	}
 
-	divs := Reconcile(overlayDir, pkgs)
+	divs := Reconcile(nil, overlayDir, pkgs)
 	kinds := map[DivergenceKind]int{}
 	for _, d := range divs {
 		kinds[d.Kind]++
@@ -142,12 +142,12 @@ func TestS060StalePinBatchOverReconcile(t *testing.T) {
 
 	want := map[string]string{"app-editors/neovim": "0.11.1"}
 	if got := StalePinBatch(divs); !reflect.DeepEqual(got, want) {
-		t.Errorf("StalePinBatch(Reconcile(...)) = %v, want %v (R2.1, R2.2)", got, want)
+		t.Errorf("StalePinBatch(Reconcile(nil, ...)) = %v, want %v (R2.1, R2.2)", got, want)
 	}
 
 	// Pin neovim as well: everything left is report-only, so the batch is nil.
 	pkgs["app-editors/neovim"] = PackageConfig{Parser: "json", URL: "https://example.invalid/neovim", Path: "version", Version: "0.11.1"}
-	if got := StalePinBatch(Reconcile(overlayDir, pkgs)); got != nil {
+	if got := StalePinBatch(Reconcile(nil, overlayDir, pkgs)); got != nil {
 		t.Errorf("with only report-only divergences StalePinBatch = %v, want nil (R2.3)", got)
 	}
 }

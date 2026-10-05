@@ -28,7 +28,7 @@ func requiresBaseConfig() PackageConfig {
 func requiresValidate(pkg, atom string, spec RequireSpec) error {
 	cfg := requiresBaseConfig()
 	cfg.Requires = map[string]RequireSpec{atom: spec}
-	return ValidatePackageConfig(pkg, &cfg)
+	return ValidatePackageConfig(nil, pkg, &cfg)
 }
 
 // TestRequiresConfigKeyMustBeAPlainAtom: the key is a bare category/package.
@@ -105,7 +105,7 @@ func TestRequiresConfigPatternNeedsOneCaptureGroup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := requiresValidate("dev-lang/flutter", "dev-lang/dart", RequireSpec{Pattern: tc.pattern, Pin: "~"})
 			if (err == nil) != tc.ok {
-				t.Fatalf("ValidatePackageConfig(pattern=%q) = %v, want ok=%v", tc.pattern, err, tc.ok)
+				t.Fatalf("ValidatePackageConfig(nil, pattern=%q) = %v, want ok=%v", tc.pattern, err, tc.ok)
 			}
 			if err != nil {
 				for _, want := range []string{"dev-lang/flutter", "dev-lang/dart"} {
@@ -165,7 +165,7 @@ func TestRequiresConfigURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := requiresValidate("dev-lang/flutter", "dev-lang/dart", RequireSpec{Pattern: requiresFlutterPattern, URL: tc.url, Pin: "~"})
 			if (err == nil) != tc.ok {
-				t.Fatalf("ValidatePackageConfig(url=%q) = %v, want ok=%v", tc.url, err, tc.ok)
+				t.Fatalf("ValidatePackageConfig(nil, url=%q) = %v, want ok=%v", tc.url, err, tc.ok)
 			}
 			if err != nil && !strings.Contains(err.Error(), "dev-lang/flutter") {
 				t.Errorf("error does not name the record: %v", err)
@@ -200,7 +200,7 @@ func TestRequiresConfigSelfRequirement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := requiresValidate(tc.record, tc.atom, spec)
 			if (err == nil) != tc.ok {
-				t.Fatalf("ValidatePackageConfig(%s requires %s) = %v, want ok=%v", tc.record, tc.atom, err, tc.ok)
+				t.Fatalf("ValidatePackageConfig(nil, %s requires %s) = %v, want ok=%v", tc.record, tc.atom, err, tc.ok)
 			}
 			if err != nil && !strings.Contains(err.Error(), tc.record) {
 				t.Errorf("error does not name the record %s: %v", tc.record, err)
@@ -227,7 +227,7 @@ func TestRequiresConfigLoadsFromTOML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodePackagesConfig: %v", err)
 	}
-	if err := cfg.ValidateAll(); err != nil {
+	if err := cfg.ValidateAll(nil); err != nil {
 		t.Fatalf("ValidateAll: %v", err)
 	}
 	got, ok := cfg.Packages["dev-lang/flutter"].Requires["dev-lang/dart"]

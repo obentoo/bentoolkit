@@ -3,27 +3,12 @@ package overlay
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
-
-// noticeLogf emits the ONE line this pass prints before it starts, and nothing
-// else. It defaults to logger.Info and is a package var for the reason warnLogf
-// next door is one: so a test can read what the pass announced without reading
-// stderr.
-//
-// It is a second deliberate exception to "a library returns errors, it does not
-// log", and the exception is narrower than warnLogf's rather than wider. What it
-// prints is not a diagnostic and not a finding: it is the BILL — how many model
-// calls this pass is about to make — and a bill has to arrive before the money is
-// spent. The report cannot carry it, because the report is printed when the pass
-// has finished; by then the cost has been paid and the operator has agreed to
-// nothing (D7).
-var noticeLogf = logger.Info
 
 // realignAllowedTools is the tool allow-list for the reviewing model, and it
 // holds NOTHING THAT WRITES (R4.5).
@@ -344,8 +329,17 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	// THE BILL, STATED BEFORE IT IS PAID (D7). "At most" is the honest word: the
 	// cache answers some of these for free, and a pair that turns out to be
 	// byte-identical is not a divergence to judge at all.
-	noticeLogf("overlay: %d of the %d compared packages carry a divergence nothing declares; the realignment review will make at most that many model calls, one per package — fewer where neither ebuild has changed since the last run",
-		len(pending), len(report.Results))
+	//
+	// It is the ONE line this pass prints before it starts, at INFO, and it is a
+	// deliberate exception to "a library returns errors, it does not log". It is
+	// not a diagnostic and not a finding: it is the BILL — how many model calls
+	// this pass is about to make — and a bill has to arrive before the money is
+	// spent. The report cannot carry it, because the report is printed when the
+	// pass has finished; by then the cost has been paid and the operator has
+	// agreed to nothing (D7).
+	log := opts.logger()
+	log.Info("overlay: compared packages carry a divergence nothing declares; the realignment review will make at most that many model calls, one per package — fewer where neither ebuild has changed since the last run",
+		"divergences", len(pending), "packages", len(report.Results))
 
 	// The caller's context, and NO deadline of this pass's own: cancelling the
 	// compare must abort an in-flight review, while the per-invocation timeout
@@ -357,10 +351,10 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	// same broken file.
 	dir, err := reviewCacheDirFor()
 	if err != nil {
-		warnLogf("overlay: the realignment verdicts have nowhere to be cached (%v); this run still judges every divergence, stores nothing, and the next one will ask again", err)
+		log.Warn("overlay: the realignment verdicts have nowhere to be cached; this run still judges every divergence, stores nothing, and the next one will ask again", "err", err)
 		dir = ""
 	}
-	cache := newReviewCache(dir)
+	cache := newReviewCache(dir, log)
 
 	// Each failure is announced ONCE PER RUN and counted thereafter. An
 	// unreachable model fails identically for every package, and 237 identical
@@ -385,8 +379,8 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 			// carrying on would bury the report under one identical warning per
 			// package. Stopping leaves the rest with an empty verdict, which reads
 			// as "nothing was said" — which is true.
-			warnLogf("overlay: the realignment review stopped (%v); %d of %d divergences carry no verdict, and the report is otherwise complete",
-				err, len(pending)-n, len(pending))
+			log.Warn("overlay: the realignment review stopped; the remaining divergences carry no verdict, and the report is otherwise complete",
+				"err", err, "unjudged", len(pending)-n, "divergences", len(pending))
 			break
 		}
 
@@ -395,8 +389,9 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 			asked++
 			unanswered++
 			unansweredBy[ReviewEbuildUnreadable]++
-			unreadablePair.say(fmt.Sprintf(
-				"overlay: the two ebuilds behind %s could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again", atom))
+			unreadablePair.say(log,
+				"overlay: the two ebuilds behind a package could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again",
+				"atom", atom)
 			continue
 		}
 		if bytes.Equal(req.Ours, req.Baseline) {
@@ -421,15 +416,17 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 		if err != nil {
 			unanswered++
 			unansweredBy[classifyReviewError(err)]++
-			callFailed.say(fmt.Sprintf(
-				"overlay: the realignment review of %s failed (%v); it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again", atom, err))
+			callFailed.say(log,
+				"overlay: the realignment review of a package failed; it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again",
+				"atom", atom, "err", err)
 			continue
 		}
 		if !realignNoteSpeaks(note) {
 			unanswered++
 			unansweredBy[ReviewUnusableReply]++
-			silentAnswer.say(fmt.Sprintf(
-				"overlay: the realignment review of %s came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again", atom))
+			silentAnswer.say(log,
+				"overlay: the realignment review of a package came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again",
+				"atom", atom)
 			continue
 		}
 
@@ -658,13 +655,13 @@ func candidateWithReading(block, reading string) string {
 // once per section rather than once per row.
 type realignWarnOnce struct{ said bool }
 
-// say emits message unless this kind of failure has already been announced.
-func (o *realignWarnOnce) say(message string) {
+// say warns msg with args on log unless this kind of failure has already been
+// announced. msg is constant; what varies — the package, a model's or a CLI's
+// own error text — travels in args, never inside the message.
+func (o *realignWarnOnce) say(log *slog.Logger, msg string, args ...any) {
 	if o.said {
 		return
 	}
 	o.said = true
-	// The message is an ARGUMENT and never a format string: it may carry a
-	// model's or a CLI's own text.
-	warnLogf("%s", message)
+	log.Warn(msg, args...)
 }

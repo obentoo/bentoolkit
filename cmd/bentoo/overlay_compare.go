@@ -10,6 +10,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -339,6 +340,9 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	logger.Info("Comparing with %s using %s...", repoInfo.Name, prov.GetName())
 
 	opts := overlay.CompareOptions{
+		// The invocation's logger, so the review, realignment and baseline
+		// passes below warn where every other diagnostic of this run goes.
+		Logger:        logging.FromContext(ctx),
 		OnlyOutdated:  compareOnlyOutdated,
 		IncludeSynced: !compareOnlyOutdated, // Include synced unless only-outdated is set
 		// A REVIEW RUN AND ONLY A REVIEW RUN sees the packages ::gentoo does not

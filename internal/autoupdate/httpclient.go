@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- retry jitter (defaultJitter), not a secret
 	"net/http"
@@ -19,7 +20,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httputil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/sony/gobreaker"
 )
@@ -191,6 +192,9 @@ type RetryableHTTPClient struct {
 	githubToken string
 	// h1Client performs the HTTP/1.1 fallback retry (nil disables the fallback)
 	h1Client *http.Client
+	// log receives the client's diagnostics. It is never nil: a client built
+	// without SetLogger discards them.
+	log *slog.Logger
 }
 
 // newDefaultBreaker creates a circuit breaker with the default settings, named
@@ -235,6 +239,7 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 		breakers:        make(map[string]*gobreaker.CircuitBreaker),
 		newBreaker:      newDefaultBreaker,
 		jitter:          defaultJitter,
+		log:             logging.OrDiscard(nil),
 		defaultHeaders: map[string]string{
 			"User-Agent": defaultUserAgent(),
 		},
@@ -295,6 +300,18 @@ func (c *RetryableHTTPClient) breakerFor(host string) *gobreaker.CircuitBreaker 
 func (c *RetryableHTTPClient) SetHTTPClient(client *http.Client) {
 	c.client = client
 	c.h1Client = nil
+}
+
+// SetLogger sets the logger the client reports its diagnostics to. Passing nil
+// discards them.
+func (c *RetryableHTTPClient) SetLogger(l *slog.Logger) {
+	c.log = logging.OrDiscard(l)
+}
+
+// logger returns the client's logger, or a discarding one for a zero-value
+// client that was not built by a constructor.
+func (c *RetryableHTTPClient) logger() *slog.Logger {
+	return logging.OrDiscard(c.log)
 }
 
 // SetHTTP1FallbackClient sets the client used for the HTTP/1.1 fallback retry.
@@ -562,8 +579,8 @@ func (c *RetryableHTTPClient) retryOverHTTP1(ctx context.Context, req *http.Requ
 		return nil
 	}
 
-	logger.Debug("HTTP/2 request to %s returned 403; HTTP/1.1 fallback returned %d",
-		req.URL.Redacted(), h1Resp.StatusCode)
+	c.logger().Debug("HTTP/2 request returned 403; HTTP/1.1 fallback answered",
+		"url", req.URL.Redacted(), "status", h1Resp.StatusCode)
 
 	// The h2 response is being dropped in favour of this one, so drain and close
 	// it to release the connection back to the pool.
@@ -910,11 +927,11 @@ func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, custom
 // allow-list lookup performed by SubstituteEnvVars and as the header key.
 func (c *RetryableHTTPClient) setHeader(req *http.Request, name, value string) {
 	if containsCRLF(name) {
-		warnLogf("rejecting header with CR/LF in its name (possible header injection)")
+		c.logger().Warn("rejecting header with CR/LF in its name (possible header injection)")
 		return
 	}
 	canonical := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name))
-	req.Header.Set(canonical, SubstituteEnvVars(value, canonical))
+	req.Header.Set(canonical, SubstituteEnvVars(c.logger(), value, canonical))
 }
 
 // SubstituteEnvVars replaces ${VAR_NAME} patterns in a header value with the
@@ -932,8 +949,9 @@ func (c *RetryableHTTPClient) setHeader(req *http.Request, name, value string) {
 // On any denial — header not allow-listed, variable not allow-listed, or an
 // allow-listed variable that is unset/empty — the literal ${VAR} text is passed
 // through unchanged and a Warn-level line is emitted identifying the header and
-// variable.
-func SubstituteEnvVars(value, headerName string) string {
+// variable. The line goes to log; nil discards it.
+func SubstituteEnvVars(log *slog.Logger, value, headerName string) string {
+	log = logging.OrDiscard(log)
 	headerAllowed := isAllowedHeaderName(headerName)
 	canonicalHeader := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(headerName))
 
@@ -945,22 +963,21 @@ func SubstituteEnvVars(value, headerName string) string {
 		varName := match[2 : len(match)-1]
 
 		if !headerAllowed {
-			warnLogf("env-var expansion denied: header %q is not in the expansion allow-list; "+
-				"passing ${%s} through literally", headerName, varName)
+			log.Warn("env-var expansion denied: header is not in the expansion allow-list; passing the reference through literally",
+				"header", headerName, "variable", varName)
 			return match
 		}
 
 		if !isAllowedEnvVar(varName) {
-			warnLogf("env-var expansion denied: variable %q is not allow-listed for header %q; "+
-				"passing ${%s} through literally (rename it to %s* to allow)",
-				varName, canonicalHeader, varName, allowedHeaderEnvPrefix)
+			log.Warn("env-var expansion denied: variable is not allow-listed for header; passing the reference through literally (rename it with the allowed prefix to allow)",
+				"variable", varName, "header", canonicalHeader, "allowed_prefix", allowedHeaderEnvPrefix)
 			return match
 		}
 
 		resolved, ok := os.LookupEnv(varName)
 		if !ok || resolved == "" {
-			warnLogf("env-var expansion skipped: allow-listed variable %q is unset or empty "+
-				"for header %q; passing ${%s} through literally", varName, canonicalHeader, varName)
+			log.Warn("env-var expansion skipped: allow-listed variable is unset or empty for header; passing the reference through literally",
+				"variable", varName, "header", canonicalHeader)
 			return match
 		}
 

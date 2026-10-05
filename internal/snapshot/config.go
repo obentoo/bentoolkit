@@ -13,19 +13,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"github.com/BurntSushi/toml"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
-
-// warnLogf emits a non-fatal warning. It is a package var (defaulting to
-// logger.Warn) so tests can capture the warn-but-continue path of Validate,
-// mirroring internal/autoupdate's warnLogf seam.
-var warnLogf = logger.Warn
 
 // Config is the parsed snapshot.toml. The engine produces snapshots, each ship
 // replicates them, notify reports the outcome (no-op until story 005), and
@@ -415,7 +411,17 @@ var ErrShipEngineMismatch = errors.New("ship type not supported by engine")
 // Order matters: every enum is checked first, so an unknown driver string is
 // reported before — and independently of — any missing-binary detection, and
 // both happen before the command writes any file (G3).
+//
+// Validate logs nothing: it is ValidateWith(nil), and a nil logger discards.
 func (c *Config) Validate() error {
+	return c.ValidateWith(nil)
+}
+
+// ValidateWith is Validate with its non-fatal warnings sent to log; a nil log
+// discards them (R5.3). The verdict is the same as Validate's: log changes only
+// where the warnings go.
+func (c *Config) ValidateWith(log *slog.Logger) error {
+	log = logging.OrDiscard(log)
 	switch c.Engine.Driver {
 	case "btrbk", "snapper":
 		// supported
@@ -457,7 +463,7 @@ func (c *Config) Validate() error {
 	// Non-fatal: an empty subvolume list means nothing is snapshotted, but it is
 	// not an error (the autoupdate validate-and-warn pattern, R1.4).
 	if len(c.Engine.Subvolumes) == 0 {
-		warnLogf("snapshot: engine.subvolumes is empty; nothing will be snapshotted")
+		log.Warn("snapshot: engine.subvolumes is empty; nothing will be snapshotted")
 	}
 
 	// Dependency detection for the active drivers (still before any side effect).

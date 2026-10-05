@@ -3,6 +3,7 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // ErrSlotNotFound is returned when a package's directory IS present in the
@@ -206,14 +208,15 @@ type seriesMatcher struct{ re *regexp.Regexp }
 // everything: ValidatePackageConfig rejects it up front, and a scan that got
 // this far must not silently select the wrong ebuild — a filter that fails open
 // is visible (the wrong line gets bumped and the warning says why), one that
-// fails closed looks exactly like a removed package.
-func newSeriesMatcher(series string) seriesMatcher {
+// fails closed looks exactly like a removed package. The warning goes to log;
+// nil discards it.
+func newSeriesMatcher(log *slog.Logger, series string) seriesMatcher {
 	if series == "" {
 		return seriesMatcher{}
 	}
 	re, err := regexp.Compile(series)
 	if err != nil {
-		warnLogf("series: bad regex %q: %v; no series filtering applied", series, err)
+		logging.OrDiscard(log).Warn("series: bad regex; no series filtering applied", "regex", series, "err", err)
 		return seriesMatcher{}
 	}
 	return seriesMatcher{re: re}
@@ -249,13 +252,15 @@ func (m seriesMatcher) active() bool { return m.re != nil }
 // Reading file contents is confined to the slot-filtered path, so the ordinary
 // unfiltered scan still costs one readdir and no file reads (a series filter
 // reads no files at all: it matches on the version in the filename).
-func selectCurrentEbuild(overlayPath, pkg, series string) (ebuildCandidate, error) {
+//
+// A series that does not compile is warned about to log; nil discards it.
+func selectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebuildCandidate, error) {
 	category, pkgName, ok := splitPkgAtom(pkg)
 	if !ok {
 		return ebuildCandidate{}, fmt.Errorf("invalid package name format: %s", pkg)
 	}
 	_, slot := splitPkgSlot(pkg)
-	matcher := newSeriesMatcher(series)
+	matcher := newSeriesMatcher(log, series)
 
 	pkgDir := filepath.Join(overlayPath, category, pkgName)
 	entries, err := os.ReadDir(pkgDir)

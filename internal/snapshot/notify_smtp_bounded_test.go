@@ -99,10 +99,11 @@ func TestEmailNotifier_SMTPStallBoundedByTimeout(t *testing.T) {
 	}
 
 	t.Run("run result and exit unchanged", func(t *testing.T) {
-		warns := captureWarn(t)
+		lc := &logCapture{}
+		warns := lc.all
 		m := &Manager{
 			engine:     s053OKEngine{},
-			notifier:   multiNotifier{notifiers: []Notifier{n}, on: []string{"success", "failure"}},
+			notifier:   multiNotifier{notifiers: []Notifier{n}, on: []string{"success", "failure"}, log: lc.logger()},
 			subvolumes: []string{"/home"},
 		}
 		type out struct {

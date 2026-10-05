@@ -27,7 +27,7 @@ func TestSubstituteEnvVars_LLMKeysDenied(t *testing.T) {
 			t.Setenv(name, "sk-must-not-leave-the-process")
 
 			ref := "${" + name + "}"
-			got := SubstituteEnvVars("Bearer "+ref, "Authorization")
+			got := SubstituteEnvVars(lc.logger(), "Bearer "+ref, "Authorization")
 
 			if got != "Bearer "+ref {
 				t.Errorf("SubstituteEnvVars expanded %s: got %q, want the literal %q", name, got, "Bearer "+ref)
@@ -67,7 +67,7 @@ func TestSubstituteEnvVars_LLMKeysDenied(t *testing.T) {
 		lc := captureWarnLogs(t)
 		t.Setenv("BENTOO_OPENAI_API_KEY", "renamed-value")
 
-		got := SubstituteEnvVars("Bearer ${BENTOO_OPENAI_API_KEY}", "Authorization")
+		got := SubstituteEnvVars(lc.logger(), "Bearer ${BENTOO_OPENAI_API_KEY}", "Authorization")
 		if got != "Bearer renamed-value" {
 			t.Errorf("got %q, want %q — the rename to BENTOO_* is the documented migration", got, "Bearer renamed-value")
 		}

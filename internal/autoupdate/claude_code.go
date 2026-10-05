@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -131,6 +133,14 @@ type ClaudeCodeClient struct {
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// log receives the client's diagnostics; read it through logger().
+	log *slog.Logger
+}
+
+// logger returns the client's logger, or a discarding one when none
+// was set.
+func (c *ClaudeCodeClient) logger() *slog.Logger {
+	return logging.OrDiscard(c.log)
 }
 
 // Compile-time assertion that ClaudeCodeClient satisfies the provider contract.
@@ -142,6 +152,14 @@ var _ LLMProvider = (*ClaudeCodeClient)(nil)
 // with the package-level WithExecCommand (ApplierOption) already defined in this
 // package.
 type ClaudeCodeOption func(*ClaudeCodeClient)
+
+// WithClaudeCodeLogger sets the logger the client reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithClaudeCodeLogger(l *slog.Logger) ClaudeCodeOption {
+	return func(c *ClaudeCodeClient) {
+		c.log = logging.OrDiscard(l)
+	}
+}
 
 // WithClaudeCodeExecCommand overrides the context-aware exec.Command factory used
 // to spawn the `claude` CLI. The function mirrors exec.CommandContext so injected
@@ -477,8 +495,8 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 // errors/subtype and stderr but NEVER the API key.
 //
 // EVERY invocation, by any outcome including success, records its wall-clock
-// duration alongside that outcome as one Info line through the package's
-// infoLogf sink, so the cost of a `claude` call is recoverable from a run's own
+// duration alongside that outcome as one Info line through the client's
+// logger, so the cost of a `claude` call is recoverable from a run's own
 // output without instrumenting for it again (S048-R2.1, S048-R5.1).
 //
 // The client stores no context: each call spawns its child from a context
@@ -500,7 +518,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	}
 	defer func() {
 		if err := os.RemoveAll(dir); err != nil {
-			warnLogf("claude CLI: remove private working directory %s: %v", dir, err)
+			c.logger().Warn("claude CLI: remove private working directory failed", "dir", dir, "err", err)
 		}
 	}()
 
@@ -590,7 +608,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	// outcome and nothing else — never the API key this client injects through
 	// the child environment (S003-R2.4, G5).
 	defer func() {
-		infoLogf("claude CLI invocation finished: outcome=%s elapsed=%s", outcome, elapsed)
+		c.logger().Info("claude CLI invocation finished", "outcome", outcome.String(), "elapsed", elapsed)
 	}()
 
 	// Attempt to parse the envelope regardless of exit code: a non-zero exit

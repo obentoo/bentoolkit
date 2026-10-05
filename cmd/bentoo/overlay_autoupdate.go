@@ -1057,7 +1057,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		return
 	}
 
-	divs := autoupdate.Reconcile(overlayPath, cfg.Packages)
+	divs := autoupdate.Reconcile(nil, overlayPath, cfg.Packages)
 	if len(divs) == 0 {
 		// R3.2 is conditional on divergences existing: with none, print nothing
 		// at all and let the check's own output stand.
@@ -1287,7 +1287,7 @@ func (ar *autoupdateRun) runList(configDir string) error {
 // With --fix it hands over to runLintFix after the report, which repairs what
 // the rules above can repair and then owns the exit code — see there.
 func (ar *autoupdateRun) runLint(overlayPath string) error {
-	issues, err := autoupdate.LintPackagesConfig(overlayPath)
+	issues, err := autoupdate.LintPackagesConfig(nil, overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
 	// parse — a missing marker is worth reporting alongside the syntax error.
 	for _, issue := range issues {

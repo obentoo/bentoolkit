@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
@@ -24,7 +25,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
@@ -460,10 +461,31 @@ type Applier struct {
 	// replaced together with execCommand — see WithExecCommand for why the two
 	// are one seam and not two.
 	lookPath func(name string) (string, error)
+
+	// log receives the applier's diagnostics. Set via WithApplierLogger;
+	// NewApplier leaves it discarding when the option is absent. Read it
+	// through logger().
+	log *slog.Logger
+}
+
+// logger returns the applier's logger, or a discarding one for an applier that
+// was not built by NewApplier.
+func (a *Applier) logger() *slog.Logger {
+	return logging.OrDiscard(a.log)
 }
 
 // ApplierOption is a functional option for configuring Applier
 type ApplierOption func(*Applier)
+
+// WithApplierLogger sets the logger the applier, and every step it runs,
+// reports its diagnostics to. Nil keeps the default, which discards them.
+// Fixers and the bump reviewer are injected already built, and carry the
+// logger their own options gave them.
+func WithApplierLogger(l *slog.Logger) ApplierOption {
+	return func(a *Applier) {
+		a.log = logging.OrDiscard(l)
+	}
+}
 
 // WithApplierPendingList sets a custom pending list for the applier
 func WithApplierPendingList(pending *PendingList) ApplierOption {
@@ -772,6 +794,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
 		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
+		log:         logging.OrDiscard(nil),
 	}
 
 	// Apply options first
@@ -1120,7 +1143,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// Armed the instant the directory can exist, so every exit below — the six
 	// failing ones included — takes it back (R2.1, R2.2). A removal added after
 	// the fact is a removal one path will not have.
-	defer removeStagedDistdir(fetchedDistdir)
+	defer removeStagedDistdir(a.logger(), fetchedDistdir)
 	// And handed to the gates, which are its consumer (R1.1, R1.2). On a host
 	// that has never fetched this release, what this step just downloaded is the
 	// only copy of the candidate's archive in existence locally.
@@ -1282,13 +1305,13 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, result *ApplyResult) {
 	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
 	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
-	// an apply failure — log a Warn (via the package warnLogf sink so tests
-	// can capture it) but keep result.Success == true and result.Error == nil
+	// an apply failure — log a Warn (through the applier's logger, which tests
+	// inject to capture it) but keep result.Success == true and result.Error == nil
 	// so the deferred orphan-rollback (keyed on result.Error == nil) does not
 	// undo the successful apply.
 	if err := a.pendingDeleteFn(pkg); err != nil {
-		warnLogf("pending: failed to remove %s after successful apply: %v "+
-			"(apply itself succeeded; entry can be cleared manually)", pkg, err)
+		a.logger().Warn("pending: failed to remove the entry after successful apply "+
+			"(apply itself succeeded; entry can be cleared manually)", "package", pkg, "err", err)
 	}
 
 	// S021-R2.1: record the version that just landed on disk as the one this
@@ -1306,14 +1329,14 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 	// pin, which is the honest report: nothing recorded the version.
 	//
 	// S021-R2.4: a failed write is a bookkeeping miss, exactly like the pending
-	// delete above — warn through the package warnLogf sink (so tests can capture
-	// it), surface it on the result, and leave result.Success true with
+	// delete above — warn through the applier's logger (which tests inject to
+	// capture it), surface it on the result, and leave result.Success true with
 	// result.Error nil. Setting result.Error here would fire the deferred
 	// orphan-rollback and delete the ebuild this apply just created (S021-UB5).
 	if err := a.setVersionsFn(a.overlayPath, map[string]string{pkg: newVersion}); err != nil {
-		warnLogf("registry: failed to record version = %q for %s in packages.toml: %v "+
+		a.logger().Warn("registry: failed to record version in packages.toml "+
 			"(the update itself succeeded; the next check's reconciliation can write the pin)",
-			newVersion, pkg, err)
+			"version", newVersion, "package", pkg, "err", err)
 		result.RegistryWarning = fmt.Sprintf("could not record version = %q for %s: %v", newVersion, pkg, err)
 	}
 
@@ -1333,7 +1356,7 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 			result.CleanedOldVersion = plan.Remove[n-1]
 		}
 		if err != nil {
-			warnLogf("clean: %v", err)
+			a.logger().Warn("clean: removing the old versions failed", "package", pkg, "err", err)
 			result.CleanWarning = err.Error()
 		}
 	}
@@ -1341,7 +1364,7 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 	// Last, so it sees the directory as --clean left it: the new version gets
 	// its md5-cache entry and every removed version loses its own.
 	if err := a.regenMetadataCache(ctx, pkg, newVersion); err != nil {
-		warnLogf("md5-cache: %v", err)
+		a.logger().Warn("md5-cache: regeneration failed", "package", pkg, "err", err)
 		result.MetadataCacheWarning = err.Error()
 	}
 }
@@ -1415,7 +1438,7 @@ func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, updat
 	// copyEbuild succeeded: a fresh .ebuild now exists in the overlay. If any later
 	// step (manifest, status update, compile) fails, that file is an orphan and
 	// must be removed so the overlay is not left half-applied.
-	undo := orphanEbuildUndo(cand.ebuildPath, pkg, newVersion)
+	undo := orphanEbuildUndo(a.logger(), cand.ebuildPath, pkg, newVersion)
 
 	// Run it HERE rather than handing it back, because a failing substitution is
 	// the one caller that never gets to. Handing back both an error and a rollback
@@ -1606,7 +1629,7 @@ func applySummary(result *ApplyResult) string {
 // possibly-stale current_version. Returns ErrNoEbuildFound when the package
 // directory is absent or holds no parsable, non-live ebuild in the slot.
 func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(a.overlayPath, pkg, a.configs[pkg].Series)
+	best, err := selectCurrentEbuild(a.logger(), a.overlayPath, pkg, a.configs[pkg].Series)
 	if err != nil {
 		return "", err
 	}
@@ -1621,8 +1644,8 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 	result.Obsolete = true
 	result.ObsoleteReason = reason.Error()
 	if err := a.pendingDeleteFn(pkg); err != nil {
-		warnLogf("pending: failed to prune obsolete entry %s: %v "+
-			"(entry can be cleared manually)", pkg, err)
+		a.logger().Warn("pending: failed to prune obsolete entry "+
+			"(entry can be cleared manually)", "package", pkg, "err", err)
 	}
 	return result, nil
 }
@@ -1664,7 +1687,7 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (sweepPlan, error) {
 	cfgs, claimed := a.sweepConfigs(pkg, newVersion)
 
-	plan, err := planSweep(a.overlayPath, cfgs, pkg)
+	plan, err := planSweep(a.logger(), a.overlayPath, cfgs, pkg)
 	if err != nil {
 		return sweepPlan{}, fmt.Errorf("cannot plan the sweep of %s: %w", pkg, err)
 	}
@@ -1707,6 +1730,7 @@ func (a *Applier) sweeper() *sweeper {
 		// sweeper (S030-R1.3).
 		withSweeperDistdir(a.distdir, a.configuredDistdir),
 		withSweeperDistfilesCache(a.distfilesCache),
+		withSweeperLogger(a.logger()),
 	)
 }
 
@@ -2128,10 +2152,10 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// the re-check is computed against fixDistdir, and the gates read what this
 	// returns. Removing it now keeps a superseded copy of a 6 MB archive off the
 	// scratch filesystem for the agent's whole run, not merely for the QA scan.
-	removeStagedDistdir(distdir)
+	removeStagedDistdir(a.logger(), distdir)
 	distdir = fixDistdir
 
-	logger.Info("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version)
+	a.logger().Info("manifest failed; invoking LLM fixer to repair the ebuild", "package", pkg, "version", version)
 	a.reporter.TaskStage(pkg, "llm-fix")
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
@@ -2187,7 +2211,8 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// log and the TUI report can never drift apart.
 	fixLine := fmt.Sprintf("LLM fixer repaired %s-%s using %s: %s",
 		pkg, version, FormatModelUsed(fixRes.Model), fixRes.Summary)
-	logger.Info("%s", fixLine)
+	a.logger().Info("LLM fixer repaired the ebuild",
+		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
 	a.reporter.Log("info", fixLine)
 
 	// Advisory QA gate: the manifest re-run proves the distfile fetches and
@@ -2197,7 +2222,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// applied; the QA notes just travel with the result.
 	if qa := a.runQACheck(ctx, pkgDir, pkg); qa != "" {
 		result.QASummary = qa
-		warnLogf("qa: pkgcheck reported findings for %s-%s after the LLM fix:\n%s", pkg, version, qa)
+		a.logger().Warn("qa: pkgcheck reported findings after the LLM fix", "package", pkg, "version", version, "findings", qa)
 	}
 	return distdir, nil
 }
@@ -2259,7 +2284,8 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 	// belongs to in a run that keeps going.
 	envErr := fmt.Errorf("%s-%s: %w (the LLM fixer was not invoked: the only repair available to it is to rewrite the ebuild, and the ebuild is not what failed)",
 		pkg, version, verdict)
-	warnLogf("%s", envErr.Error())
+	a.logger().Warn("manifest failure is the environment's; the LLM fixer was not invoked",
+		"package", pkg, "version", version, "err", envErr)
 	a.reporter.Log("warn", envErr.Error())
 	return envErr
 }
@@ -2392,7 +2418,7 @@ func environmentVerdict(firstErr error) error {
 // noise. The scan is bounded by qaCheckTimeout.
 func (a *Applier) runQACheck(ctx context.Context, pkgDir, pkg string) string {
 	if _, err := lookPath("pkgcheck"); err != nil {
-		logger.Debug("qa: pkgcheck not on PATH; skipping post-fix QA for %s", pkg)
+		a.logger().Debug("qa: pkgcheck not on PATH; skipping post-fix QA", "package", pkg)
 		return ""
 	}
 
@@ -2410,7 +2436,7 @@ func (a *Applier) runQACheck(ctx context.Context, pkgDir, pkg string) string {
 	_ = cmd.Run() // non-zero exit == findings; ignore the code, keep stdout.
 
 	if diag := strings.TrimSpace(stderr.String()); diag != "" {
-		logger.Debug("qa: pkgcheck stderr for %s (not surfaced): %s", pkg, diag)
+		a.logger().Debug("qa: pkgcheck stderr (not surfaced)", "package", pkg, "stderr", diag)
 	}
 	return strings.TrimSpace(stdout.String())
 }
@@ -2474,16 +2500,17 @@ func (a *Applier) runManifestForIn(ctx context.Context, suppliedDistdir string, 
 // must not forget it is greppable, and so the empty case — the published path,
 // which never had one — is answered in one place instead of at each call.
 //
-// The error is deliberately swallowed and logged rather than returned. A distdir
+// The error is deliberately swallowed and logged to log (nil discards) rather
+// than returned. A distdir
 // that could not be removed is a leaked temporary directory; it is not a reason
 // to fail a bump that passed its gates, and turning it into one would make a
 // full disk reject work that was already proved.
-func removeStagedDistdir(distdir string) {
+func removeStagedDistdir(log *slog.Logger, distdir string) {
 	if distdir == "" {
 		return
 	}
 	if err := os.RemoveAll(distdir); err != nil {
-		logger.Debug("could not remove the staged distdir %q: %v", distdir, err)
+		logging.OrDiscard(log).Debug("could not remove the staged distdir", "distdir", distdir, "err", err)
 	}
 }
 
@@ -2938,7 +2965,8 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	}
 
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
-	logger.Info("%s", fixLine)
+	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
+		"gate", compileGatePhase, "package", pkg, "version", version)
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
@@ -2997,7 +3025,8 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	// path uses, so the operator's log and the TUI report cannot drift apart.
 	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
 		pkg, version, FormatModelUsed(fixRes.Model), summary)
-	logger.Info("%s", repaired)
+	a.logger().Info("LLM build fixer repaired the staged ebuild",
+		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)
 	return "", nil
 }
@@ -3036,7 +3065,8 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 	// belongs to in a run that keeps going.
 	machineErr := fmt.Errorf("%s-%s: %w (%w; the build fixer was not invoked: the only repair available to it is to edit the ebuild, and the ebuild is not what failed)",
 		pkg, version, first.err, verdict)
-	warnLogf("%s", machineErr.Error())
+	a.logger().Warn("build failure is the machine's; the build fixer was not invoked",
+		"package", pkg, "version", version, "err", machineErr)
 	a.reporter.Log("warn", machineErr.Error())
 	return machineErr
 }
@@ -3058,7 +3088,8 @@ func (a *Applier) buildDependencyAnswer(ctx context.Context, cand candidatePaths
 		ExecCommand: a.execCommand,
 	})
 	if err != nil {
-		logger.Debug("build fix gate: could not determine whether %s-%s's build dependencies are satisfied: %v", pkg, version, err)
+		a.logger().Debug("build fix gate: could not determine whether the build dependencies are satisfied",
+			"package", pkg, "version", version, "err", err)
 		return buildDependencyAnswer{}
 	}
 	return buildDependencyAnswer{determined: true, satisfied: ok, missing: missing}

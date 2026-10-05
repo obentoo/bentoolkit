@@ -23,6 +23,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"reflect"
 	"strings"
@@ -69,7 +70,7 @@ func TestS060DepsSubstituteIsUsedOnlyInItsOwnTree(t *testing.T) {
 		gotPath string
 	)
 	d := defaultDeps()
-	d.sweepPlanner = func(overlayPath string, _ map[string]autoupdate.PackageConfig, _ string) (autoupdate.SweepBatch, error) {
+	d.sweepPlanner = func(_ *slog.Logger, overlayPath string, _ map[string]autoupdate.PackageConfig, _ string) (autoupdate.SweepBatch, error) {
 		calls++
 		gotPath = overlayPath
 		return autoupdate.SweepBatch{}, errors.New(s060StubPlannerRefusal)

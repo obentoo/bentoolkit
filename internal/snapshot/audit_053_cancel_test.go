@@ -11,7 +11,6 @@ import (
 // must run on a context the cancellation did not reach, and Send must still
 // report the cancellation (R5.6).
 func TestArchiveShipper_DeleteRunsAfterCancel(t *testing.T) {
-	_ = captureWarn(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	deleted, deleteCtxErr := false, error(nil)

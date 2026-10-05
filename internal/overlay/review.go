@@ -12,7 +12,7 @@ import (
 
 // reviewCacheDirFor names the directory this pass caches notes in.
 //
-// It is a package var, like warnLogf next door and for the same narrow reason:
+// It is a package var, and a test seam rather than configuration, for one reason:
 // the alternative is a test suite that reads and writes the developer's real
 // ~/.cache/bentoo/compare, where one run's stored note would silently answer the
 // next run's assertion about how many times a reviewer was called. Production
@@ -126,10 +126,10 @@ func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer Diverg
 	// could not name a directory is the one holding the reason.
 	dir, err := reviewCacheDirFor()
 	if err != nil {
-		warnLogf("overlay: the review notes have nowhere to be cached (%v); this run still reviews every divergence, stores nothing, and the next one will ask again", err)
+		opts.logger().Warn("overlay: the review notes have nowhere to be cached; this run still reviews every divergence, stores nothing, and the next one will ask again", "err", err)
 		dir = ""
 	}
-	cache := newReviewCache(dir)
+	cache := newReviewCache(dir, opts.Logger)
 
 	for n, i := range pending {
 		// Indexed rather than ranged over a copy: this pass exists to write two

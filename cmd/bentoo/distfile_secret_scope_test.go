@@ -90,7 +90,7 @@ comments = """the story's reproduction"""
 	}
 
 	// Same text: the command prints FetchAuthDistfile's error, and --lint reports it.
-	_, fetchErr := autoupdate.FetchAuthDistfile(context.Background(), autoupdate.AuthDistfileRequest{
+	_, fetchErr := autoupdate.FetchAuthDistfile(context.Background(), nil, autoupdate.AuthDistfileRequest{
 		OverlayPath: overlay, Package: "app-misc/leak", Version: "1.0", DestDir: t.TempDir(),
 	})
 	if fetchErr == nil {
@@ -99,7 +99,7 @@ comments = """the story's reproduction"""
 	if !strings.Contains(errOut, fetchErr.Error()) {
 		t.Errorf("stderr does not carry the refusal text %q; stderr: %s", fetchErr.Error(), errOut)
 	}
-	issues, err := autoupdate.LintPackagesConfig(overlay)
+	issues, err := autoupdate.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}

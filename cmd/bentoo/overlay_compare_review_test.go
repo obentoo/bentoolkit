@@ -33,8 +33,7 @@ const cmdReviewBudget = 90 * time.Second
 //
 // It exists because logger binds its io.Writer at first use and exposes no
 // setter (logger.go:44-52), so the alternative is reading the process's stderr —
-// which the rest of the suite writes to concurrently. The same shape
-// internal/overlay uses for warnLogf, for the same reason.
+// which the rest of the suite writes to concurrently.
 func captureCompareReviewWarnings(d *deps) func() []string {
 	var lines []string
 	d.reviewWarnf = func(format string, args ...any) {

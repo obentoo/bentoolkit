@@ -28,7 +28,6 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 	}
 
 	t.Run("failed pipe deletes its object and returns the pipe error", func(t *testing.T) {
-		_ = captureWarn(t)
 		mr := &MockRunner{RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 			if name == "btrfs" {
 				return nil, sendErr
@@ -48,7 +47,8 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 		}
 	})
 	t.Run("failed delete warns; the pipe error stays the returned error", func(t *testing.T) {
-		warns := captureWarn(t)
+		lc := &logCapture{}
+		warns := lc.all
 		delErr := errors.New("rclone deletefile: 403")
 		mr := &MockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			switch {
@@ -59,7 +59,9 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 			}
 			return nil, nil
 		}}
-		_, err := newShip(mr, &fakeParentStore{}).Send(t.Context(), snap)
+		sh := newShip(mr, &fakeParentStore{})
+		sh.log = lc.logger()
+		_, err := sh.Send(t.Context(), snap)
 		if !errors.Is(err, sendErr) || errors.Is(err, delErr) {
 			t.Errorf("Send = %v, want the pipe error and not the delete error", err)
 		}

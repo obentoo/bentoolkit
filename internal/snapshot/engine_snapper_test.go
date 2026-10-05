@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -220,7 +219,7 @@ func TestSnapperEngine_PruneWrapsError(t *testing.T) {
 // TestNewEngine_SnapperDriver: the factory's `case "snapper"` returns the
 // snapper engine (R1.1, R6.2 — additive: btrbk stays the default-tested path).
 func TestNewEngine_SnapperDriver(t *testing.T) {
-	e, err := newEngine(EngineConfig{Driver: "snapper"}, nil, &MockRunner{})
+	e, err := newEngine(EngineConfig{Driver: "snapper"}, nil, &MockRunner{}, nil)
 	if err != nil {
 		t.Fatalf("newEngine(snapper): %v", err)
 	}
@@ -348,7 +347,7 @@ func TestEnsureSnapperConfigs_ProvisionsUncoveredSubvolume(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, nil) // snapper covers nothing
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 
@@ -375,7 +374,7 @@ func TestEnsureSnapperConfigs_CoveredSubvolumeSkipsCreate(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, map[string]string{"/home": "home"})
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 
@@ -410,7 +409,7 @@ func TestEnsureSnapperConfigs_SetConfigCarriesRetention(t *testing.T) {
 	}}
 	mock := snapperMock(t, map[string]string{"/home": "home"})
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 
@@ -448,7 +447,7 @@ func TestProvision_RemovesEmptyLeftoverSnapshotsDir(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, nil) // not covered: provisioning must happen
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 
@@ -478,7 +477,7 @@ func TestProvision_RefusesToDeleteSnapshotsHoldingEntries(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, nil)
 
-	err := ensureSnapperConfigs(context.Background(), cfg, mock)
+	err := ensureSnapperConfigs(context.Background(), cfg, mock, nil)
 	if err == nil {
 		t.Fatal("ensureSnapperConfigs succeeded over a .snapshots holding snapshots")
 	}
@@ -507,7 +506,7 @@ func TestProvision_FallsBackToUnlinkWhenBtrfsDeleteFails(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, nil, "btrfs") // btrfs refuses
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 	if len(*removed) != 1 || (*removed)[0] != "/home/.snapshots" {
@@ -532,7 +531,7 @@ func TestProvision_RefusesToRemoveDeclaredMountpoint(t *testing.T) {
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, nil) // not covered: provisioning would otherwise run
 
-	err := ensureSnapperConfigs(context.Background(), cfg, mock)
+	err := ensureSnapperConfigs(context.Background(), cfg, mock, nil)
 	if err == nil {
 		t.Fatal("ensureSnapperConfigs cleared a declared mount point")
 	}
@@ -561,17 +560,12 @@ func TestProvision_RefusesToRemoveDeclaredMountpoint(t *testing.T) {
 // subvolume and will not find this config (018 R7).
 func TestEnsureSnapperConfigs_WarnsWhenConfigNameDiverges(t *testing.T) {
 	stubSnapshotsDirSeams(t, nil, "/home/.snapshots")
-	var warnings []string
-	origWarn := warnLogf
-	t.Cleanup(func() { warnLogf = origWarn })
-	warnLogf = func(format string, args ...interface{}) {
-		warnings = append(warnings, fmt.Sprintf(format, args...))
-	}
+	lc := &logCapture{}
 
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
 	mock := snapperMock(t, map[string]string{"/home": "operator-home"})
 
-	if err := ensureSnapperConfigs(context.Background(), cfg, mock); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, mock, lc.logger()); err != nil {
 		t.Fatalf("ensureSnapperConfigs: %v", err)
 	}
 
@@ -587,6 +581,7 @@ func TestEnsureSnapperConfigs_WarnsWhenConfigNameDiverges(t *testing.T) {
 	if len(set) < 2 || set[1] != "operator-home" {
 		t.Errorf("set-config went to %v, not to the config snapper actually holds", set)
 	}
+	warnings := lc.all()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "operator-home") {
 		t.Errorf("the name divergence was not reported to the operator: %v", warnings)
 	}
@@ -607,7 +602,7 @@ func TestEnsureSnapperConfigs_NilRunnerIsNormalized(t *testing.T) {
 	}
 
 	cfg := &Config{Engine: EngineConfig{Driver: "snapper", Subvolumes: []string{"/home"}}}
-	if err := ensureSnapperConfigs(context.Background(), cfg, nil); err != nil {
+	if err := ensureSnapperConfigs(context.Background(), cfg, nil, nil); err != nil {
 		t.Fatalf("ensureSnapperConfigs with a nil Runner: %v", err)
 	}
 }
@@ -749,7 +744,7 @@ func snapperListGolden(t *testing.T) []byte {
 // per real entry, in snapper's own order, with the "current" pseudo-snapshot 0
 // excluded (016 R3.2, R3.3).
 func TestSnapperListParse_GoldenFixture(t *testing.T) {
-	snaps := parseSnapperListJSON(snapperListGolden(t), "/")
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/", nil)
 
 	wantIDs := []string{"1", "16", "2303", "2304"}
 	if len(snaps) != len(wantIDs) {
@@ -777,7 +772,7 @@ func TestSnapperListParse_GoldenFixture(t *testing.T) {
 // through snapperDateLayout, because a wrong layout would fail both sides
 // identically and let the comparison pass on two zero times.
 func TestSnapperListParse_CreatedAtMatchesGoldenDate(t *testing.T) {
-	snaps := parseSnapperListJSON(snapperListGolden(t), "/")
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/", nil)
 	if len(snaps) == 0 {
 		t.Fatal("no snapshots parsed from the fixture")
 	}
@@ -804,7 +799,7 @@ func TestSnapperListParse_CreatedAtMatchesGoldenDate(t *testing.T) {
 // from the table parser. A non-"/" subvolume is used so a stray hardcoded root
 // would show up.
 func TestSnapperListParse_DerivesPathAndSubvolume(t *testing.T) {
-	snaps := parseSnapperListJSON(snapperListGolden(t), "/home")
+	snaps := parseSnapperListJSON(snapperListGolden(t), "/home", nil)
 	if len(snaps) < 2 {
 		t.Fatalf("got %d snapshots, want at least 2", len(snaps))
 	}
@@ -867,8 +862,9 @@ func TestSnapperListParse_EmptyPayloads(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			warnings := captureWarn(t)
-			if got := parseSnapperListJSON([]byte(c.payload), "/"); len(got) != 0 {
+			lc := &logCapture{}
+			warnings := lc.all
+			if got := parseSnapperListJSON([]byte(c.payload), "/", lc.logger()); len(got) != 0 {
 				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
 			}
 			if got := warnings(); len(got) != 0 {
@@ -887,8 +883,9 @@ func TestSnapperListParse_EmptyPayloads(t *testing.T) {
 func TestSnapperListParse_MalformedPayloadWarns(t *testing.T) {
 	for _, payload := range []string{"not json at all", `{"root":`, `{"root":"unexpected"}`} {
 		t.Run(payload, func(t *testing.T) {
-			warnings := captureWarn(t)
-			if got := parseSnapperListJSON([]byte(payload), "/"); len(got) != 0 {
+			lc := &logCapture{}
+			warnings := lc.all
+			if got := parseSnapperListJSON([]byte(payload), "/", lc.logger()); len(got) != 0 {
 				t.Errorf("got %d snapshots, want 0: %+v", len(got), got)
 			}
 			if len(warnings()) == 0 {

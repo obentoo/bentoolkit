@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // Error variables for analyzer errors
@@ -46,12 +47,6 @@ const MaxPatternLen = 512
 // fails to compile; this expression lets validatePattern emit an explicit,
 // actionable diagnostic instead of an opaque compiler error.
 var backrefPattern = regexp.MustCompile(`\\[1-9]`)
-
-// infoLogf is the sink used to emit Info-level diagnostics from the cache
-// revalidation path. It defaults to the shared logger and is a package-private
-// variable so tests can capture the emitted lines. Its signature mirrors
-// logger.Info exactly.
-var infoLogf = logger.Info
 
 // validatePattern checks that an LLM-generated regex pattern is safe to persist
 // and later compile. An empty pattern is valid (the parser simply does not use
@@ -163,6 +158,26 @@ type Analyzer struct {
 	// S054-R6.1 to S054-R6.4). No option sets it. The ctx it receives is the
 	// AnalyzeAll call's own.
 	analyzeFn func(ctx context.Context, pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)
+	// log receives the analyzer's diagnostics. Set via WithAnalyzerLogger;
+	// NewAnalyzer leaves it discarding when the option is absent.
+	log *slog.Logger
+}
+
+// logger returns the analyzer's logger, or a discarding one for an analyzer
+// that was not built by NewAnalyzer.
+func (a *Analyzer) logger() *slog.Logger {
+	return logging.OrDiscard(a.log)
+}
+
+// WithAnalyzerLogger sets the logger the analyzer reports its diagnostics to,
+// and hands it to the analysis cache and HTTP client the analyzer uses. Nil
+// keeps the default, which discards them (and leaves an injected cache's or
+// client's own logger alone).
+func WithAnalyzerLogger(l *slog.Logger) AnalyzerOption {
+	return func(a *Analyzer) error {
+		a.log = l
+		return nil
+	}
 }
 
 // AnalyzerOption is a functional option for configuring Analyzer.
@@ -301,6 +316,16 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 		analyzer.httpClient = NewRetryableHTTPClient()
 	}
 
+	// The cache and the client — injected ones too, since there is one logger
+	// per invocation — report through the analyzer's logger. Without
+	// WithAnalyzerLogger they keep their own, and what the analyzer built
+	// discards.
+	if analyzer.log != nil {
+		analyzer.cache.log = analyzer.log
+		analyzer.httpClient.SetLogger(analyzer.log)
+	}
+	analyzer.log = logging.OrDiscard(analyzer.log)
+
 	return analyzer, nil
 }
 
@@ -379,7 +404,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 		// Cache the analysis result
 		if !opts.NoCache && a.cache != nil {
 			if cacheErr := a.cache.Set(pkg, schema, source.URL); cacheErr != nil {
-				logger.Debug("cache write failed for %s: %v", pkg, cacheErr)
+				a.logger().Debug("cache write failed", "package", pkg, "err", cacheErr)
 			}
 		}
 

@@ -32,7 +32,6 @@ func s053CallsOf(mr *MockRunner, name, sub string) [][]string {
 
 func TestManagerRun_BtrbkArchiveShipsResolvedSnapshot(t *testing.T) {
 	s053RedirectState(t)
-	_ = captureWarn(t)
 	latest := map[string]string{
 		"/home": "/mnt/pool/_btrbk_snap/home.20260923T0400",
 		"/var":  "/mnt/pool/_btrbk_snap/var.20260923T0400",
@@ -117,7 +116,6 @@ func TestManagerRun_SnapperResticMountsDerivedPath(t *testing.T) {
 
 func TestManagerRun_UnidentifiedSnapshotFailsOnlyAddressedShips(t *testing.T) {
 	s053RedirectState(t)
-	_ = captureWarn(t)
 	mr := &MockRunner{} // btrbk run succeeds; `list latest` prints nothing
 	cfg := Config{
 		Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}},

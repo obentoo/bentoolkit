@@ -35,10 +35,9 @@ import (
 
 // The one warning this file is allowed to print — a reviewer that was asked
 // for and could not be built — goes through the reviewWarnf field of deps
-// (deps.go), for the same narrow reason internal/overlay's warnLogf is a seam:
-// logger binds its io.Writer at first use and exposes no setter (logger.go's
-// `func Default`), so without a seam the only way to assert on this line would
-// be to read the process's stderr. Production wires logger.Warn.
+// (deps.go), because logger binds its io.Writer at first use and exposes no
+// setter (logger.go's `func Default`), so without a seam the only way to assert
+// on this line would be to read the process's stderr. Production wires logger.Warn.
 
 // claudeAsker is the slice of *autoupdate.ClaudeCodeClient this adapter uses: one
 // schema-constrained round trip. Declaring it here rather than holding the

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // BtrbkConfPath returns where the rendered btrbk.conf lives for a given
@@ -34,12 +36,15 @@ func WriteBtrbkConf(cfg *Config, configPath string) error {
 // It takes a context and a Runner because the snapper driver reaches snapper to
 // do the work (018 R1) rather than writing /etc itself — a file write is not
 // observed by a running snapperd. The btrbk driver uses neither.
+//
+// The snapper driver's warnings go to the logger ctx carries
+// (logging.FromContext); a ctx without one discards them.
 func WriteEngineConfig(ctx context.Context, cfg *Config, configPath string, run Runner) error {
 	switch cfg.Engine.Driver {
 	case "btrbk":
 		return WriteBtrbkConf(cfg, configPath)
 	case "snapper":
-		return ensureSnapperConfigs(ctx, cfg, run)
+		return ensureSnapperConfigs(ctx, cfg, run, logging.FromContext(ctx))
 	default:
 		return fmt.Errorf("%w: engine driver %q", ErrInvalidDriver, cfg.Engine.Driver)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -89,7 +90,7 @@ type AuthDistfileResult struct {
 // The error is the sentinel-wrapped kind: ErrPackageNotInRegistry,
 // ErrAmbiguousPackageKey and ErrNoAuthFetch describe the request, while
 // ErrAuthFetchSecretMissing and ErrAuthFetchFailed describe the download.
-func FetchAuthDistfile(ctx context.Context, req AuthDistfileRequest) (AuthDistfileResult, error) {
+func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRequest) (AuthDistfileResult, error) {
 	cfg, err := LoadPackagesConfig(req.OverlayPath)
 	if err != nil {
 		return AuthDistfileResult{}, err
@@ -110,7 +111,7 @@ func FetchAuthDistfile(ctx context.Context, req AuthDistfileRequest) (AuthDistfi
 
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
-		best, err := selectCurrentEbuild(req.OverlayPath, key, pkgCfg.Series)
+		best, err := selectCurrentEbuild(log, req.OverlayPath, key, pkgCfg.Series)
 		if err != nil {
 			return AuthDistfileResult{}, fmt.Errorf("resolving the version to fetch for %s: %w", key, err)
 		}

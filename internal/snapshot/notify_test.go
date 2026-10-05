@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -385,14 +384,11 @@ func TestMultiNotifier_FansOutToAll(t *testing.T) {
 }
 
 func TestMultiNotifier_OneErrorsOthersStillCalledAndWarn(t *testing.T) {
-	var warnings int
-	origWarn := warnLogf
-	t.Cleanup(func() { warnLogf = origWarn })
-	warnLogf = func(string, ...interface{}) { warnings++ }
+	lc := &logCapture{}
 
 	bad := &spyNotifier{err: errors.New("boom")}
 	good := &spyNotifier{}
-	m := multiNotifier{notifiers: []Notifier{bad, good}, on: []string{"failure"}}
+	m := multiNotifier{notifiers: []Notifier{bad, good}, on: []string{"failure"}, log: lc.logger()}
 
 	if err := m.Notify(context.Background(), failRun()); err != nil {
 		t.Errorf("Notify returned %v, want nil (best-effort, R5.2)", err)
@@ -400,7 +396,7 @@ func TestMultiNotifier_OneErrorsOthersStillCalledAndWarn(t *testing.T) {
 	if good.calls != 1 {
 		t.Error("the second notifier was not called after the first errored (R5.2)")
 	}
-	if warnings == 0 {
+	if len(lc.all()) == 0 {
 		t.Error("a failing notifier should emit a warning (R5.2)")
 	}
 }
@@ -491,7 +487,7 @@ func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
 			From: "bentoo@example.com",
 			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 587, User: "u"},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -531,10 +527,7 @@ func TestEmailNotifier_OnFilterRespected(t *testing.T) {
 func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
 	const secret = "smtp_supersecret_pw"
 
-	var warned strings.Builder
-	origWarn := warnLogf
-	t.Cleanup(func() { warnLogf = origWarn })
-	warnLogf = func(format string, args ...interface{}) { fmt.Fprintf(&warned, format, args...) }
+	warned := &logCapture{}
 
 	orig := smtpSendMail
 	t.Cleanup(func() { smtpSendMail = orig })
@@ -544,7 +537,7 @@ func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
 
 	// The secret now arrives via the secrets chain rather than snapshot.toml
 	// (017 R1.1, R2.1); the leak guarantee under test is unchanged (008 R1.3). The
-	// warn seam is already captured above, so a warning emitted during resolution
+	// warn capture is already injected below, so a warning emitted during resolution
 	// would be inspected for the secret too.
 	isolateSecrets(t)
 	t.Setenv("BENTOO_SMTP_PASSWORD", secret)
@@ -556,7 +549,7 @@ func TestEmailNotifier_SMTPPasswordNeverInErrorOrLogs(t *testing.T) {
 			From: "b@e.com",
 			SMTP: SMTPConfig{Host: "smtp.example.com", Port: 25, User: "u"},
 		},
-	})
+	}, warned.logger())
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -588,7 +581,7 @@ func TestNewNotifier_BuildsEmailDriver(t *testing.T) {
 	cfg := NotifyConfig{
 		Email: EmailConfig{To: []string{"ops@example.com"}, From: "b@e.com"},
 	}
-	n, err := newNotifier(cfg)
+	n, err := newNotifier(cfg, nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -610,7 +603,7 @@ func TestNewNotifier_BuildsConfiguredDrivers(t *testing.T) {
 		Ntfy:    NtfyConfig{URL: "https://ntfy.sh/topic"},
 		Webhook: WebhookConfig{URL: "https://example.com/hook"},
 	}
-	n, err := newNotifier(cfg)
+	n, err := newNotifier(cfg, nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}
@@ -632,7 +625,7 @@ func TestNewNotifier_NtfyTokenFromEnv(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BENTOO_NTFY_TOKEN", "tk_env")
 
-	n, err := newNotifier(NotifyConfig{Ntfy: NtfyConfig{URL: "https://ntfy.sh/topic"}})
+	n, err := newNotifier(NotifyConfig{Ntfy: NtfyConfig{URL: "https://ntfy.sh/topic"}}, nil)
 	if err != nil {
 		t.Fatalf("newNotifier: %v", err)
 	}

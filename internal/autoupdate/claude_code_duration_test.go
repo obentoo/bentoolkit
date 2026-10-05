@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -25,9 +26,8 @@ import (
 // THE ASSERTION SURFACE IS THE PACKAGE'S LOG SEAM. `run` returns
 // (string, error), so a successful call has no return channel for a duration and
 // widening the signature would publish a number no caller consumes (design D5).
-// The sink is therefore a log line, and this package already exposes its loggers
-// as package variables precisely so tests can read them — infoLogf
-// (analyzer.go:52) and warnLogf (header_allowlist.go:53). Both are captured
+// The sink is therefore a log line, and since story 062 the client reports to the
+// logger WithClaudeCodeLogger injects. Info and Warn are both captured
 // below, because which level a duration belongs at is the implementer's call and
 // nothing in S048-R2.1 depends on the answer.
 
@@ -72,15 +72,17 @@ func recordedElapsedIn(lines []string, lo, hi time.Duration) (time.Duration, str
 	return 0, "", false
 }
 
-// captureRunLogs captures both package log sinks for the duration of the test
-// and returns a function collecting everything either of them received.
-func captureRunLogs(t *testing.T) func() []string {
+// captureRunLogs captures the Info and Warn records of the logger it returns,
+// which the test injects into the client, and returns a function collecting
+// everything either level received.
+func captureRunLogs(t *testing.T) (func() []string, *slog.Logger) {
 	t.Helper()
 	info := captureInfoLogs(t)
 	warn := captureWarnLogs(t)
+	log := slog.New(slog.NewMultiHandler(captureHandler{lc: info}, captureHandler{lc: warn}))
 	return func() []string {
 		return append(info.all(), warn.all()...)
-	}
+	}, log
 }
 
 // childWorkTime is how long the scripted child runs before it finishes. It is
@@ -91,10 +93,10 @@ const childWorkTime = 200 * time.Millisecond
 // TestRun_ASuccessfulInvocationRecordsItsDuration is the case S048-R2.1 exists
 // for and the one no failure path can substitute for.
 func TestRun_ASuccessfulInvocationRecordsItsDuration(t *testing.T) {
-	lines := captureRunLogs(t)
+	lines, runLog := captureRunLogs(t)
 
 	seam, _ := scriptedSeam(`sleep 0.2; printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(30*time.Second))
+	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeLogger(runLog), WithClaudeCodeTimeout(30*time.Second))
 
 	out, err := c.run(t.Context(), "instr", []byte("content"), "")
 	if err != nil {
@@ -121,10 +123,10 @@ func TestRun_ASuccessfulInvocationRecordsItsDuration(t *testing.T) {
 // ended badly still says what it cost. Without it the distribution the
 // measurement reads would be missing precisely the expensive tail.
 func TestRun_AFailedInvocationRecordsItsDuration(t *testing.T) {
-	lines := captureRunLogs(t)
+	lines, runLog := captureRunLogs(t)
 
 	seam, _ := scriptedSeam(`sleep 0.2; exit 3`)
-	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(30*time.Second))
+	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeLogger(runLog), WithClaudeCodeTimeout(30*time.Second))
 
 	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err == nil {
 		t.Fatalf("the scripted invocation exited 3 but run returned no error; this test is about what a FAILED call records")
@@ -159,12 +161,12 @@ func TestRun_AFailedInvocationRecordsItsDuration(t *testing.T) {
 // leaves the "is it really the wall clock" question to the two tests above,
 // where the child's runtime and the budget are two orders of magnitude apart.
 func TestRun_ADeadlineKilledInvocationRecordsItsDuration(t *testing.T) {
-	lines := captureRunLogs(t)
+	lines, runLog := captureRunLogs(t)
 
 	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "sleep", "3600")
 	}
-	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeTimeout(300*time.Millisecond))
+	c := newTestClient(t, LLMConfig{}, WithClaudeCodeExecCommand(seam), WithClaudeCodeLogger(runLog), WithClaudeCodeTimeout(300*time.Millisecond))
 
 	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err == nil {
 		t.Fatalf("a child that outlives its 300ms budget returned no error; there is no killed invocation to time")

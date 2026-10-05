@@ -146,7 +146,7 @@ func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 	cwd, _ := os.Getwd()
 	stuck := `[ "$(pwd -P)" = "` + cwd + `" ] || { mkdir -p locked/inner && : > locked/inner/f && chmod 0500 locked; }; ` + printEnvelopeScript(okEnvelope)
 	seam, spy := agentSeam(stuck)
-	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
+	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam), WithClaudeCodeLogger(lc.logger()))
 	_, runErr := c.run(t.Context(), "instr", []byte("content"), "")
 	dir := spy.last().Dir
 	if dir != "" && dir != cwd {

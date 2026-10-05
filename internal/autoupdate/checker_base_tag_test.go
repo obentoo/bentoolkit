@@ -364,14 +364,14 @@ func TestCurrentEbuildCommit(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			if got := currentEbuildCommit(overlay, pkg, ""); got != tt.want {
+			if got := currentEbuildCommit(nil, overlay, pkg, ""); got != tt.want {
 				t.Errorf("currentEbuildCommit = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
 	t.Run("missing package", func(t *testing.T) {
-		if got := currentEbuildCommit(overlay, "dev-util/absent", ""); got != "" {
+		if got := currentEbuildCommit(nil, overlay, "dev-util/absent", ""); got != "" {
 			t.Errorf("currentEbuildCommit = %q, want \"\" for an absent package", got)
 		}
 	})

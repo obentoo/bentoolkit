@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewEngine_KnownAndUnknown(t *testing.T) {
-	eng, err := newEngine(EngineConfig{Driver: "btrbk"}, nil, &MockRunner{})
+	eng, err := newEngine(EngineConfig{Driver: "btrbk"}, nil, &MockRunner{}, nil)
 	if err != nil {
 		t.Fatalf("newEngine btrbk: %v", err)
 	}
@@ -14,13 +14,13 @@ func TestNewEngine_KnownAndUnknown(t *testing.T) {
 		t.Errorf("newEngine btrbk returned %T, want *btrbkEngine", eng)
 	}
 
-	if _, err := newEngine(EngineConfig{Driver: "zfs"}, nil, nil); !errors.Is(err, ErrInvalidDriver) {
+	if _, err := newEngine(EngineConfig{Driver: "zfs"}, nil, nil, nil); !errors.Is(err, ErrInvalidDriver) {
 		t.Errorf("unknown engine: err = %v, want ErrInvalidDriver", err)
 	}
 }
 
 func TestNewShipper_KnownAndUnknown(t *testing.T) {
-	sh, err := newShipper(ShipConfig{Type: "ssh", Target: "u@h:/p"}, &MockRunner{}, Retention{})
+	sh, err := newShipper(ShipConfig{Type: "ssh", Target: "u@h:/p"}, &MockRunner{}, Retention{}, nil)
 	if err != nil {
 		t.Fatalf("newShipper ssh: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestNewShipper_KnownAndUnknown(t *testing.T) {
 		t.Errorf("newShipper ssh returned %T", sh)
 	}
 
-	rs, err := newShipper(ShipConfig{Type: "restic", Repo: "repo", PasswordFile: "/pw"}, &MockRunner{}, Retention{Daily: 7})
+	rs, err := newShipper(ShipConfig{Type: "restic", Repo: "repo", PasswordFile: "/pw"}, &MockRunner{}, Retention{Daily: 7}, nil)
 	if err != nil {
 		t.Fatalf("newShipper restic: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestNewShipper_KnownAndUnknown(t *testing.T) {
 		t.Errorf("newShipper restic returned %T, want *resticShipper", rs)
 	}
 
-	if _, err := newShipper(ShipConfig{Type: "rsync"}, nil, Retention{}); !errors.Is(err, ErrInvalidDriver) {
+	if _, err := newShipper(ShipConfig{Type: "rsync"}, nil, Retention{}, nil); !errors.Is(err, ErrInvalidDriver) {
 		t.Errorf("unknown ship: err = %v, want ErrInvalidDriver", err)
 	}
 }
@@ -58,7 +58,7 @@ func TestNewScheduler_KnownAndUnknown(t *testing.T) {
 func TestNewNotifier_NoDriversIsNoop(t *testing.T) {
 	// Notifiers are selected by which NotifyConfig sub-tables are populated, not by
 	// a driver enum, so an empty config configures nothing and yields the no-op.
-	n, err := newNotifier(NotifyConfig{})
+	n, err := newNotifier(NotifyConfig{}, nil)
 	if err != nil {
 		t.Fatalf("newNotifier empty: %v", err)
 	}

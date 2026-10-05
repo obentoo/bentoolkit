@@ -11,7 +11,6 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 )
 
@@ -198,6 +197,7 @@ func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, 
 		Overlay:  cand.repoRoot,
 		Distdir:  a.staticGateDistdir(cand),
 		Selector: pkg,
+		Logger:   a.logger(),
 	}
 	if !stagedTreeNamesArchive(cand) {
 		opts.DistNames = publishedDistNames(a.overlayPath, pkg, version)
@@ -474,7 +474,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 		// would let an unreachable reviewer refuse a bump the deterministic gates
 		// never got to judge — the exact authority R7.6 withholds from it.
 		reason := fmt.Sprintf("the bump reviewer could not be asked about %s-%s: %v", pkg, newVersion, err)
-		logger.Debug("%s", reason)
+		a.logger().Debug("the bump reviewer could not be asked", "package", pkg, "version", newVersion, "err", err)
 		*gates = append(*gates, validate.GateResult{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: reason})
 		return floor
 	}
@@ -824,7 +824,8 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 
 	gate := gateForDepth(req.Depth)
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", gate, pkg, version)
-	logger.Info("%s", fixLine)
+	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
+		"gate", gate, "package", pkg, "version", version)
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
@@ -866,7 +867,8 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	result.Fixed = true
 	result.FixSummary = summary
 	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s", pkg, version, FormatModelUsed(fixRes.Model), summary)
-	logger.Info("%s", repaired)
+	a.logger().Info("LLM build fixer repaired the staged ebuild",
+		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)
 	return gates, nil
 }

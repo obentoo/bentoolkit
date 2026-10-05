@@ -84,7 +84,6 @@ func TestTransientMounter_UmountBoundedByTimeout(t *testing.T) {
 // outlives Send's context but runs under a deadline no later than
 // archiveDeleteTimeout.
 func TestArchiveShipper_DeleteBoundedByTimeout(t *testing.T) {
-	_ = captureWarn(t)
 	orig := archiveDeleteTimeout
 	archiveDeleteTimeout = 2 * time.Second
 	t.Cleanup(func() { archiveDeleteTimeout = orig })

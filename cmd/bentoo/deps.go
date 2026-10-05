@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -60,7 +61,7 @@ type deps struct {
 	uiIsTerminal func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
-	sweepPlanner  func(overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
+	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
 	sweepExecutor func(ctx context.Context, overlayPath string, batch autoupdate.SweepBatch, opts ...autoupdate.SweepOption) autoupdate.SweepReport
 	confirmSweep  func(prompt string) bool
 

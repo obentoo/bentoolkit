@@ -1,6 +1,9 @@
 package snapshot
 
-import "fmt"
+import (
+	"fmt"
+	"log/slog"
+)
 
 // Driver factories select a concrete implementation from a config string, in the
 // switch-with-ErrInvalidDriver-default style of internal/common/provider (AD2).
@@ -12,15 +15,20 @@ import "fmt"
 // unchanged — this is a constructor call-surface concern only.
 
 // newEngine builds the engine selected by cfg.Driver. targets are the ssh remote
-// targets contributed to the rendered btrbk.conf; run is the (mockable) seam.
-func newEngine(cfg EngineConfig, targets []string, run Runner) (Engine, error) {
+// targets contributed to the rendered btrbk.conf; run is the (mockable) seam;
+// log receives the engine's warnings (nil discards).
+func newEngine(cfg EngineConfig, targets []string, run Runner, log *slog.Logger) (Engine, error) {
 	switch cfg.Driver {
 	case "btrbk":
-		return newBtrbkEngine(cfg, targets, run), nil
+		e := newBtrbkEngine(cfg, targets, run)
+		e.log = log
+		return e, nil
 	case "snapper":
 		// snapper does not use ship targets — remote transfer is the shippers'
 		// job, so the targets wiring stays btrbk-only (R6.2).
-		return newSnapperEngine(cfg, run), nil
+		e := newSnapperEngine(cfg, run)
+		e.log = log
+		return e, nil
 	default:
 		return nil, fmt.Errorf("%w: engine driver %q", ErrInvalidDriver, cfg.Driver)
 	}
@@ -31,8 +39,10 @@ func newEngine(cfg EngineConfig, targets []string, run Runner) (Engine, error) {
 // mount/backup/forget commands; retention is the engine's policy, mapped to
 // restic's --keep-* flags during forget --prune. The ssh shipper ignores both (its
 // transfer is delegated to btrbk), matching the newEngine(cfg, targets, run)
-// precedent of carrying wiring beyond a single driver's needs.
-func newShipper(cfg ShipConfig, run Runner, retention Retention) (Shipper, error) {
+// precedent of carrying wiring beyond a single driver's needs. log receives the
+// archive shipper's warnings (nil discards); the ssh and restic shippers log
+// nothing.
+func newShipper(cfg ShipConfig, run Runner, retention Retention, log *slog.Logger) (Shipper, error) {
 	if run == nil {
 		run = defaultRunner()
 	}
@@ -45,7 +55,9 @@ func newShipper(cfg ShipConfig, run Runner, retention Retention) (Shipper, error
 		// retention is the [engine.retention] GFS policy; the archive shipper applies
 		// it to the rclone remote after a successful ship (T5.1, R4). An all-zero
 		// policy makes the prune a no-op.
-		return newArchiveShipper(cfg, run, retention), nil
+		a := newArchiveShipper(cfg, run, retention)
+		a.log = log
+		return a, nil
 	default:
 		return nil, fmt.Errorf("%w: ship type %q", ErrInvalidDriver, cfg.Type)
 	}

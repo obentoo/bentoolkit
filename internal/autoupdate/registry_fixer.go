@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +40,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -162,6 +164,14 @@ type ClaudeCodeRegistryFixer struct {
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// log receives the registry fixer's diagnostics; read it through logger().
+	log *slog.Logger
+}
+
+// logger returns the registry fixer's logger, or a discarding one when none
+// was set.
+func (f *ClaudeCodeRegistryFixer) logger() *slog.Logger {
+	return logging.OrDiscard(f.log)
 }
 
 // Compile-time assertion that ClaudeCodeRegistryFixer satisfies the capability.
@@ -169,6 +179,14 @@ var _ RegistryFixer = (*ClaudeCodeRegistryFixer)(nil)
 
 // RegistryFixerOption configures a ClaudeCodeRegistryFixer.
 type RegistryFixerOption func(*ClaudeCodeRegistryFixer)
+
+// WithRegistryFixerLogger sets the logger the registry fixer reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithRegistryFixerLogger(l *slog.Logger) RegistryFixerOption {
+	return func(f *ClaudeCodeRegistryFixer) {
+		f.log = logging.OrDiscard(l)
+	}
+}
 
 // WithRegistryFixerExecCommand overrides the context-aware exec.Command factory
 // used to spawn `claude`. Mirrors exec.CommandContext so injected commands also
@@ -261,7 +279,7 @@ func (f *ClaudeCodeRegistryFixer) buildRegistryFixArgs(instruction string, req R
 		agent: "registry fixer",
 		dir:   req.ConfigDir,
 		tools: registryFixAllowedTools,
-		hosts: upstreamHosts(req.Package, urls...),
+		hosts: upstreamHosts(f.logger(), req.Package, urls...),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry fixer for %s: %w", req.Package, err)

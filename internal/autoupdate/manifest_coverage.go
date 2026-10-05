@@ -45,7 +45,7 @@ func (a *Applier) checkManifestCoverage(ctx context.Context, pkgDir, pkg, versio
 		return nil
 	}
 	if _, err := a.lookPath("pkgcheck"); err != nil {
-		warnLogf("manifest coverage of %s-%s not verified: pkgcheck is not on PATH", pkg, version)
+		a.logger().Warn("manifest coverage not verified: pkgcheck is not on PATH", "package", pkg, "version", version)
 		return nil
 	}
 
@@ -65,14 +65,14 @@ func (a *Applier) checkManifestCoverage(ctx context.Context, pkgDir, pkg, versio
 	missing, decodeErr := missingDistfiles(stdout.Bytes(), version)
 	switch {
 	case decodeErr != nil:
-		warnLogf("manifest coverage of %s-%s not verified: %v", pkg, version, decodeErr)
+		a.logger().Warn("manifest coverage not verified", "package", pkg, "version", version, "err", decodeErr)
 		return nil
 	case len(missing) > 0:
 		return fmt.Errorf("%w: %s-%s fetches %s, which its Manifest does not list",
 			ErrManifestIncomplete, pkg, version, strings.Join(missing, ", "))
 	case runErr != nil:
-		warnLogf("manifest coverage of %s-%s not verified: pkgcheck failed: %v: %s",
-			pkg, version, runErr, strings.TrimSpace(stderr.String()))
+		a.logger().Warn("manifest coverage not verified: pkgcheck failed",
+			"package", pkg, "version", version, "err", runErr, "stderr", strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
