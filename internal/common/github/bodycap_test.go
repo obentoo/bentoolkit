@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // hugeBodyServer answers with status and a body of `size` bytes, streamed in
@@ -49,21 +49,21 @@ func TestGitHubClientBodyCapped(t *testing.T) {
 	t.Run("success body over the cap", func(t *testing.T) {
 		c := newCappedClient(hugeBodyServer(t, http.StatusOK, overCap).URL)
 		_, err := c.GetPackageVersions(t.Context(), "app-misc", "foo")
-		if !errors.Is(err, httputil.ErrResponseTooLarge) {
-			t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
+		if !errors.Is(err, httpx.ErrResponseTooLarge) {
+			t.Errorf("err = %v, want errors.Is(err, httpx.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("error body over the cap", func(t *testing.T) {
 		c := newCappedClient(hugeBodyServer(t, http.StatusInternalServerError, overCap).URL)
 		_, err := c.GetPackageVersions(t.Context(), "app-misc", "foo")
-		if !errors.Is(err, httputil.ErrResponseTooLarge) {
-			t.Errorf("err = %.200v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
+		if !errors.Is(err, httpx.ErrResponseTooLarge) {
+			t.Errorf("err = %.200v, want errors.Is(err, httpx.ErrResponseTooLarge)", err)
 		}
 	})
 	t.Run("success body exactly at the cap", func(t *testing.T) {
-		c := newCappedClient(hugeBodyServer(t, http.StatusOK, httputil.MaxBodyBytes).URL)
+		c := newCappedClient(hugeBodyServer(t, http.StatusOK, httpx.MaxBodyBytes).URL)
 		if _, err := c.GetPackageVersions(t.Context(), "app-misc", "foo"); err != nil {
-			t.Errorf("a %d-byte body (exactly the cap) failed: %.200v", httputil.MaxBodyBytes, err)
+			t.Errorf("a %d-byte body (exactly the cap) failed: %.200v", httpx.MaxBodyBytes, err)
 		}
 	})
 }
@@ -72,7 +72,7 @@ func TestGitHubClientBodyCapped(t *testing.T) {
 func TestGitHubClientRateLimitBodyCapped(t *testing.T) {
 	c := newCappedClient(hugeBodyServer(t, http.StatusOK, overCap).URL)
 	_, _, err := c.GetRateLimitInfo(t.Context())
-	if !errors.Is(err, httputil.ErrResponseTooLarge) {
-		t.Errorf("err = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
+	if !errors.Is(err, httpx.ErrResponseTooLarge) {
+		t.Errorf("err = %v, want errors.Is(err, httpx.ErrResponseTooLarge)", err)
 	}
 }

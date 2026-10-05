@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/version"
@@ -90,17 +90,17 @@ func newNotifier(cfg NotifyConfig, log *slog.Logger) (Notifier, error) {
 const notifyHTTPTimeout = 15 * time.Second
 
 // notifyMaxBodyBytes caps how many bytes are drained from a notifier response
-// (R6.2). It is a var (defaulting to httputil.MaxBodyBytes) so tests can shrink it.
-var notifyMaxBodyBytes = httputil.MaxBodyBytes
+// (R6.2). It is a var (defaulting to httpx.MaxBodyBytes) so tests can shrink it.
+var notifyMaxBodyBytes = httpx.MaxBodyBytes
 
 // notifierUserAgent returns the User-Agent applied to every notifier request — a
 // descriptive UA avoids Go's default string that some upstreams reject (R6.1).
 func notifierUserAgent() string { return "bentoolkit/" + version.Short() }
 
 // notifierClient builds the http.Client shared by the notifier drivers, on
-// httputil.BuildTransport() with a bounded timeout (R6.1).
+// httpx.BuildTransport() with a bounded timeout (R6.1).
 func notifierClient() *http.Client {
-	return &http.Client{Transport: httputil.BuildTransport(), Timeout: notifyHTTPTimeout}
+	return &http.Client{Transport: httpx.BuildTransport(), Timeout: notifyHTTPTimeout}
 }
 
 // sendNotify performs req with the notifier client: it sets the User-Agent, sends

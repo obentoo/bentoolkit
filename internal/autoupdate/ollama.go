@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // OllamaClient implements LLMProvider for local Ollama API.
@@ -19,7 +19,7 @@ type OllamaClient struct {
 	httpClient *http.Client
 	baseURL    string
 	// maxBodyBytes caps how many bytes are read from an API response body.
-	// It defaults to httputil.MaxBodyBytes and can be overridden via
+	// It defaults to httpx.MaxBodyBytes and can be overridden via
 	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
@@ -88,7 +88,7 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 
 	// A non-streaming local inference sends no response headers until it has
 	// finished, so the transport's default header wait would cut it short.
-	transport := httputil.BuildTransport()
+	transport := httpx.BuildTransport()
 	transport.ResponseHeaderTimeout = ollamaClientTimeout
 
 	return &OllamaClient{
@@ -101,16 +101,16 @@ func NewOllamaClient(cfg LLMConfig) (*OllamaClient, error) {
 			Timeout:   ollamaClientTimeout,
 			Transport: transport,
 			// Same redirect policy as every other client (S052-R4.6).
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		baseURL:      baseURL,
-		maxBodyBytes: httputil.MaxBodyBytes,
+		maxBodyBytes: httpx.MaxBodyBytes,
 	}, nil
 }
 
 // WithMaxBodyBytes overrides the maximum number of bytes read from an Ollama API
 // response body and returns the client for chaining. Values <= 0 are ignored so
-// the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. A local Ollama
+// the default (httpx.MaxBodyBytes, 10 MiB) remains in effect. A local Ollama
 // instance can emit JSON larger than the default cap, so a higher limit can be
 // supplied here (S001-R11.2).
 func (c *OllamaClient) WithMaxBodyBytes(n int64) *OllamaClient {

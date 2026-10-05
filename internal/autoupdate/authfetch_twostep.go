@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // This file holds the three things a gated download needs once the vendor stops
@@ -82,7 +82,7 @@ func refuseMethodDowngrade(req *http.Request, via []*http.Request) error {
 //     fetch_url's host, so a redirect that would re-post it to another
 //     hostname is refused and nothing is sent there (S052-R7.1). A 307/308 on
 //     the same hostname is followed (S052-R7.2);
-//  3. httputil.CredentialRedirectPolicy, for the credential headers and the
+//  3. httpx.CredentialRedirectPolicy, for the credential headers and the
 //     redirect limit.
 //
 // This message names hostnames only, never req.URL: on a GET form leg the serial
@@ -99,7 +99,7 @@ func refuseFormRedirect(req *http.Request, via []*http.Request) error {
 		return fmt.Errorf("%w: %s redirected the form to another host (%s); refusing to send the form body there — point %s at the address the redirect names",
 			ErrAuthFetchFailed, via[0].URL.Hostname(), req.URL.Hostname(), metaFetchURL)
 	}
-	return httputil.CredentialRedirectPolicy(req, via)
+	return httpx.CredentialRedirectPolicy(req, via)
 }
 
 // resolveEndpointID fetches the document that publishes the per-release download
@@ -127,9 +127,9 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 
 	// No credential rides here; the policy re-imposes the redirect limit a
 	// custom CheckRedirect would otherwise drop (S052-R4.6).
-	client := &http.Client{Timeout: s.timeout, CheckRedirect: httputil.CredentialRedirectPolicy}
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: httpx.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
-	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time, and no credential rides on this leg (httputil.CredentialRedirectPolicy bounds redirects)
+	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time, and no credential rides on this leg (httpx.CredentialRedirectPolicy bounds redirects)
 	if err != nil {
 		return "", withCtxCause(fmt.Errorf("%w: %s request failed: %v", ErrAuthFetchFailed, metaFetchIDURL, err), err) //nolint:errorlint // the raw transport error may render request data and never enters the Unwrap chain; withCtxCause exposes only its context sentinel
 	}
@@ -186,7 +186,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	// Redirects are FOLLOWED here, unlike on the form leg: this is already a GET
 	// with no body, so nothing can be dropped, and a CDN edge redirecting to a
 	// region is ordinary. The shared policy still applies (S052-R4.6).
-	client := &http.Client{Timeout: s.timeout, CheckRedirect: httputil.CredentialRedirectPolicy}
+	client := &http.Client{Timeout: s.timeout, CheckRedirect: httpx.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {

@@ -502,7 +502,7 @@ func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte,
 	// readBodyForStatus does the status check, the body read and the
 	// translation of an http.MaxBytesReader overflow into ErrResponseTooLarge
 	// (S019-R3.1, S001-R11.3); the cap itself is imposed upstream by GetWithContext at
-	// httputil.MaxBodyBytes, not here. Its errors are already phrased for the
+	// httpx.MaxBodyBytes, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
 	content, err := readBodyForStatus(resp, http.StatusOK)
 	if err != nil {

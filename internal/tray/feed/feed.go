@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/obentoo/bentoolkit/internal/notices"
 )
@@ -97,8 +97,8 @@ func New(rawURL string, client *http.Client, userAgent string) (*Fetcher, error)
 func DefaultClient() *http.Client {
 	return &http.Client{
 		Timeout:       Timeout,
-		Transport:     httputil.BuildTransport(),
-		CheckRedirect: httputil.CredentialRedirectPolicy,
+		Transport:     httpx.BuildTransport(),
+		CheckRedirect: httpx.CredentialRedirectPolicy,
 	}
 }
 

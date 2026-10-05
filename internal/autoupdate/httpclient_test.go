@@ -23,7 +23,7 @@ import (
 	"github.com/leanovate/gopter/prop"
 	"github.com/sony/gobreaker"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // =============================================================================
@@ -1731,7 +1731,7 @@ func FuzzSubstituteEnvVars(f *testing.F) {
 // =============================================================================
 
 // TestGetWithContext_BodyCap verifies that a response body larger than
-// httputil.MaxBodyBytes (10 MiB) cannot be fully read through the body returned
+// httpx.MaxBodyBytes (10 MiB) cannot be fully read through the body returned
 // by GetWithContext: the read trips the http.MaxBytesReader cap and the error
 // classifies as ErrResponseTooLarge (R11.1, R11.3).
 func TestGetWithContext_BodyCap(t *testing.T) {
@@ -1825,7 +1825,7 @@ func TestClassifyBodyReadError(t *testing.T) {
 		t.Errorf("classifyBodyReadError must pass a non-MaxBytes error through, got: %v", got)
 	}
 
-	maxBytes := &http.MaxBytesError{Limit: httputil.MaxBodyBytes}
+	maxBytes := &http.MaxBytesError{Limit: httpx.MaxBodyBytes}
 	got := classifyBodyReadError(maxBytes)
 	if !errors.Is(got, ErrResponseTooLarge) {
 		t.Errorf("classifyBodyReadError(*http.MaxBytesError) must wrap ErrResponseTooLarge, got: %v", got)
@@ -2048,7 +2048,7 @@ func TestReadBodyForStatus(t *testing.T) {
 // oversizedBodyServer streams `size` bytes over a 200 response in 64 KiB
 // chunks, deliberately ignoring any Range header the client sent. It mirrors
 // the oversized-body pattern used by TestGetWithContext_BodyCap so a server can
-// defeat a Range request and push a body past httputil.MaxBodyBytes.
+// defeat a Range request and push a body past httpx.MaxBodyBytes.
 func oversizedBodyServer(size int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2068,7 +2068,7 @@ func oversizedBodyServer(size int) *httptest.Server {
 }
 
 // TestGetWithHeadersContext_BodyCap asserts GetWithHeadersContext caps its
-// returned body at httputil.MaxBodyBytes, mirroring GetWithContext (R1.1,
+// returned body at httpx.MaxBodyBytes, mirroring GetWithContext (R1.1,
 // R1.2, R5.1). A server that ignores the Range header and streams >10 MiB must
 // trip the http.MaxBytesReader cap so classifyBodyReadError can surface
 // ErrResponseTooLarge; a body under the cap must still read byte-identically.

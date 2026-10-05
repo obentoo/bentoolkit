@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // Story 052 — S052-R4.4, run-time addition from the task-2 tech review: a
@@ -42,8 +42,8 @@ func TestDoWithContext_InsecureRedirectIsNotRetried(t *testing.T) {
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-	if !errors.Is(err, httputil.ErrInsecureRedirect) {
-		t.Errorf("err = %v; want errors.Is(err, httputil.ErrInsecureRedirect)", err)
+	if !errors.Is(err, httpx.ErrInsecureRedirect) {
+		t.Errorf("err = %v; want errors.Is(err, httpx.ErrInsecureRedirect)", err)
 	}
 	if n := tlsHits.Load(); n != 1 {
 		t.Errorf("the https host received %d request(s); want 1 — a refusal is not retried", n)

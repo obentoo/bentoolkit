@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // TestSetRequestTimeoutRaisesHeaderTimeout pins R6.3 (and R6.2's 30 s default
@@ -91,7 +91,7 @@ func TestHeaderTimeoutRetriedLikeTimeout(t *testing.T) {
 			MaxDelay:   4 * time.Second,
 			Timeout:    10 * time.Second,
 		})
-		tr := httputil.BuildTransport()
+		tr := httpx.BuildTransport()
 		tr.ResponseHeaderTimeout = 50 * time.Millisecond
 		c.SetHTTPClient(&http.Client{Transport: tr, Timeout: 10 * time.Second})
 		return c

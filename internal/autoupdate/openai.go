@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -27,7 +27,7 @@ type OpenAIClient struct {
 	apiKey     string
 	baseURL    string
 	// maxBodyBytes caps how many bytes are read from an API response body.
-	// It defaults to httputil.MaxBodyBytes and can be overridden via
+	// It defaults to httpx.MaxBodyBytes and can be overridden via
 	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
@@ -122,20 +122,20 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 		},
 		httpClient: &http.Client{
 			Timeout:   DefaultHTTPTimeout,
-			Transport: httputil.BuildTransport(),
+			Transport: httpx.BuildTransport(),
 			// Authorization must not follow a redirect off-host or to http
 			// (S052-R4.6).
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		apiKey:       apiKey,
 		baseURL:      baseURL,
-		maxBodyBytes: httputil.MaxBodyBytes,
+		maxBodyBytes: httpx.MaxBodyBytes,
 	}, nil
 }
 
 // WithMaxBodyBytes overrides the maximum number of bytes read from an OpenAI API
 // response body and returns the client for chaining. Values <= 0 are ignored so
-// the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
+// the default (httpx.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
 // may legitimately exceed the default cap, so a larger limit can be supplied
 // here (S001-R11.2).
 func (c *OpenAIClient) WithMaxBodyBytes(n int64) *OpenAIClient {

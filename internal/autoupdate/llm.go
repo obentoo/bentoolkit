@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -102,12 +102,12 @@ type LLMConfig struct {
 // The body is wrapped in an http.MaxBytesReader bounded by maxBodyBytes; if the
 // payload exceeds the cap the standard library yields an *http.MaxBytesError,
 // which is translated into an error wrapping ErrResponseTooLarge (S001-R11.2, S001-R11.3).
-// A non-positive maxBodyBytes falls back to httputil.MaxBodyBytes so a
+// A non-positive maxBodyBytes falls back to httpx.MaxBodyBytes so a
 // zero-valued client field can never disable the cap.
 func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
 	limit := maxBodyBytes
 	if limit <= 0 {
-		limit = httputil.MaxBodyBytes
+		limit = httpx.MaxBodyBytes
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(nil, body, limit))
 	if err != nil {
@@ -122,7 +122,7 @@ type ClaudeClient struct {
 	httpClient *http.Client
 	apiKey     string
 	// maxBodyBytes caps how many bytes are read from an API response body.
-	// It defaults to httputil.MaxBodyBytes and can be overridden via
+	// It defaults to httpx.MaxBodyBytes and can be overridden via
 	// WithMaxBodyBytes (S001-R11.2).
 	maxBodyBytes int64
 }
@@ -239,18 +239,18 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 		},
 		httpClient: &http.Client{
 			Timeout:   DefaultRequestTimeout,
-			Transport: httputil.BuildTransport(),
+			Transport: httpx.BuildTransport(),
 			// x-api-key must not follow a redirect off-host (S052-R4.6).
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		apiKey:       apiKey,
-		maxBodyBytes: httputil.MaxBodyBytes,
+		maxBodyBytes: httpx.MaxBodyBytes,
 	}, nil
 }
 
 // WithMaxBodyBytes overrides the maximum number of bytes read from a Claude API
 // response body and returns the client for chaining. Values <= 0 are ignored so
-// the default (httputil.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
+// the default (httpx.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
 // may legitimately exceed the default cap, so a larger limit can be supplied
 // here (S001-R11.2).
 func (c *ClaudeClient) WithMaxBodyBytes(n int64) *ClaudeClient {

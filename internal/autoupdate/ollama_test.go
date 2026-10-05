@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 func TestOllamaExtractVersionSuccess(t *testing.T) {
@@ -140,16 +140,16 @@ func TestOllamaExtractVersionEmptyResponse(t *testing.T) {
 
 // TestOllamaClient_WithCustomMaxBody verifies that WithMaxBodyBytes lowers the
 // Ollama response-body cap and that exceeding it surfaces ErrResponseTooLarge.
-// It also asserts the default (no option) equals httputil.MaxBodyBytes (R11.2).
+// It also asserts the default (no option) equals httpx.MaxBodyBytes (R11.2).
 func TestOllamaClient_WithCustomMaxBody(t *testing.T) {
-	// Default cap (no option) must equal httputil.MaxBodyBytes.
+	// Default cap (no option) must equal httpx.MaxBodyBytes.
 	defaultClient, err := NewOllamaClient(LLMConfig{Model: "llama3"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if defaultClient.maxBodyBytes != httputil.MaxBodyBytes {
-		t.Errorf("default maxBodyBytes = %d, want %d (httputil.MaxBodyBytes)",
-			defaultClient.maxBodyBytes, httputil.MaxBodyBytes)
+	if defaultClient.maxBodyBytes != httpx.MaxBodyBytes {
+		t.Errorf("default maxBodyBytes = %d, want %d (httpx.MaxBodyBytes)",
+			defaultClient.maxBodyBytes, httpx.MaxBodyBytes)
 	}
 
 	const limit = 1024 // 1 KiB cap for the test

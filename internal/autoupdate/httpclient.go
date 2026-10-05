@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/sony/gobreaker"
@@ -36,9 +36,9 @@ var (
 	// left before the context deadline.
 	ErrRetryAfterTooLong = errors.New("retry-after too long")
 	// ErrResponseTooLarge is returned when an HTTP response body exceeds the
-	// MaxBodyBytes cap. It is httputil's sentinel, assigned rather than copied,
+	// MaxBodyBytes cap. It is httpx's sentinel, assigned rather than copied,
 	// so errors.Is matches it on the provider paths too.
-	ErrResponseTooLarge = httputil.ErrResponseTooLarge
+	ErrResponseTooLarge = httpx.ErrResponseTooLarge
 	// ErrCredentialHostMismatch is returned, before any network I/O, when a
 	// header references a credential variable that is bound to hosts other
 	// than the one the request goes to (S052-R1.2).
@@ -226,13 +226,13 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 		// plain http (S052-R4.6).
 		client: &http.Client{
 			Timeout:       config.Timeout,
-			Transport:     httputil.BuildTransport(),
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			Transport:     httpx.BuildTransport(),
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		h1Client: &http.Client{
 			Timeout:       config.Timeout,
-			Transport:     httputil.BuildTransportHTTP1(),
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			Transport:     httpx.BuildTransportHTTP1(),
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		config:          config,
 		breakersEnabled: true,
@@ -329,7 +329,7 @@ func (c *RetryableHTTPClient) SetHTTP1FallbackClient(client *http.Client) {
 // ignored so callers can pass an unresolved value safely.
 //
 // The header wait of each *http.Transport is raised to d when d exceeds
-// httputil.DefaultResponseHeaderTimeout, and never lowered, so a user's larger
+// httpx.DefaultResponseHeaderTimeout, and never lowered, so a user's larger
 // http_timeout is not silently capped by the transport default. Other
 // RoundTrippers, and the shared http.DefaultTransport, are left alone.
 func (c *RetryableHTTPClient) SetRequestTimeout(d time.Duration) {
@@ -345,7 +345,7 @@ func (c *RetryableHTTPClient) SetRequestTimeout(d time.Duration) {
 		// http.DefaultTransport is process-wide; mutating it would reach
 		// every other client in the program.
 		if tr, ok := hc.Transport.(*http.Transport); ok && hc.Transport != http.DefaultTransport {
-			tr.ResponseHeaderTimeout = max(httputil.DefaultResponseHeaderTimeout, d)
+			tr.ResponseHeaderTimeout = max(httpx.DefaultResponseHeaderTimeout, d)
 		}
 	}
 }
@@ -488,7 +488,7 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 			// A refused https -> http redirect is the redirect policy's verdict
 			// on the request, not a transient failure: retrying would only
 			// re-send the credential to the original host (S052-R4.4).
-			if errors.Is(err, httputil.ErrInsecureRedirect) {
+			if errors.Is(err, httpx.ErrInsecureRedirect) {
 				return nil, err
 			}
 			// An attempt that failed because the operation's own context
@@ -644,7 +644,7 @@ func (c *RetryableHTTPClient) Get(ctx context.Context, url string) (*http.Respon
 // GetWithContext performs an HTTP GET request with retry logic and context support.
 //
 // The returned response body is wrapped in an http.MaxBytesReader bounded by
-// httputil.MaxBodyBytes (10 MiB). A subsequent read that exceeds the cap yields
+// httpx.MaxBodyBytes (10 MiB). A subsequent read that exceeds the cap yields
 // an *http.MaxBytesError; callers should pass such read errors through
 // classifyBodyReadError so the overflow surfaces as ErrResponseTooLarge.
 func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*http.Response, error) {
@@ -659,7 +659,7 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
 		// memory when a caller reads it (S001-R11.1, AD-12).
-		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+		resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	}
 	return resp, nil
 }
@@ -669,9 +669,9 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 // standard library yields an *http.MaxBytesError; this is translated into an
 // error wrapping ErrResponseTooLarge (S001-R11.3). Any other non-nil error is
 // returned unchanged, and a nil error yields nil. It delegates to
-// httputil.ClassifyBodyReadError, which owns the shared sentinel.
+// httpx.ClassifyBodyReadError, which owns the shared sentinel.
 func classifyBodyReadError(err error) error {
-	return httputil.ClassifyBodyReadError(err)
+	return httpx.ClassifyBodyReadError(err)
 }
 
 // readBodyForStatus validates an HTTP response status against the accepted set
@@ -689,7 +689,7 @@ func classifyBodyReadError(err error) error {
 // an empty body by definition.
 //
 // This helper imposes no cap of its own: the GET helpers already wrap the body
-// in an http.MaxBytesReader bounded by httputil.MaxBodyBytes, so the bound has a
+// in an http.MaxBytesReader bounded by httpx.MaxBodyBytes, so the bound has a
 // single source. A read that trips that cap is translated into an error wrapping
 // ErrResponseTooLarge via classifyBodyReadError (S001-R11.3). The LLM path keeps
 // its own per-client, raisable cap (readCappedBody in llm.go) and deliberately
@@ -842,7 +842,7 @@ func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]stri
 // If the URL is a GitHub API URL and a GitHub token is configured, it will be included.
 //
 // The returned response body is wrapped in an http.MaxBytesReader bounded by
-// httputil.MaxBodyBytes (10 MiB), exactly as GetWithContext does. A subsequent
+// httpx.MaxBodyBytes (10 MiB), exactly as GetWithContext does. A subsequent
 // read that exceeds the cap yields an *http.MaxBytesError; callers should pass
 // such read errors through classifyBodyReadError so the overflow surfaces as
 // ErrResponseTooLarge. The cap holds even when a caller sent a Range header: a
@@ -878,7 +878,7 @@ func (c *RetryableHTTPClient) getWithHeadersScopedContext(ctx context.Context, u
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
 		// memory when a caller reads it (S019-R1.1, AD-12).
-		resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+		resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	}
 	return resp, nil
 }

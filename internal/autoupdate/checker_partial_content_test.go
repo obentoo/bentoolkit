@@ -91,7 +91,7 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 // canonicalises the name before it reaches the wire and Header.Get canonicalises
 // the lookup, so the gate never inspects the caller's headers map. An
 // unsolicited 206 (no Range) must fail safe with the status error, and a server
-// that ignores Range and streams past httputil.MaxBodyBytes must trip
+// that ignores Range and streams past httpx.MaxBodyBytes must trip
 // ErrResponseTooLarge now that GetWithHeadersContext caps the body.
 //
 // RED (before story 019): checker.go accepted 206 unconditionally, so "206
