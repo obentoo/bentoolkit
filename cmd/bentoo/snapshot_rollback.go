@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -42,13 +42,14 @@ reboot — and prompts for confirmation unless --yes is given.`,
 }
 
 func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
+	log := logging.FromContext(commandContext(cmd))
 	id := args[0]
 
 	// Rollback is destructive: load AND validate the config (drivers + deps) so an
 	// unknown driver or missing binary fails fast before any subprocess (R5.1, G3).
-	cfg, _, err := loadSnapshotConfig()
+	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot rollback: %v", err)
+		log.Error("snapshot rollback: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -77,7 +78,7 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 		output.PrintInfo("rollback declined")
 	default:
 		// Includes ErrRollbackUnsupported (R3.3): a refused engine is a hard error.
-		logger.Error("snapshot rollback: %v", err)
+		log.Error("snapshot rollback: failed", "err", err)
 		return exitWith(1)
 	}
 	return nil

@@ -100,7 +100,7 @@ malformed — not a two-component atom.
 func TestBuildDivergenceMap(t *testing.T) {
 	dir := writeLintRegistry(t, divergenceRegistry)
 
-	m, err := buildDivergenceMap(dir)
+	m, err := buildDivergenceMap(discardLog(), dir)
 	if err != nil {
 		t.Fatalf("buildDivergenceMap returned %v, want nil", err)
 	}
@@ -194,7 +194,7 @@ func TestBuildDivergenceMap(t *testing.T) {
 		// No .autoupdate/packages.toml at all. The command warns once and compares
 		// with a nil map; refusing to run would make the registry a hard
 		// dependency of a command that never had one (R2.5).
-		empty, err := buildDivergenceMap(t.TempDir())
+		empty, err := buildDivergenceMap(discardLog(), t.TempDir())
 		if err == nil {
 			t.Error("buildDivergenceMap on a missing registry returned nil error; the caller has nothing to warn about")
 		}

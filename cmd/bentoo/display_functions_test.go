@@ -16,7 +16,7 @@ import (
 
 // TestDisplayPendingUpdatesEmpty tests displayPendingUpdates with no updates.
 func TestDisplayPendingUpdatesEmpty(t *testing.T) {
-	displayPendingUpdates(nil)
+	displayPendingUpdates(discardLog(), nil)
 }
 
 // TestDisplayPendingUpdatesWithItems tests displayPendingUpdates with items.
@@ -30,7 +30,7 @@ func TestDisplayPendingUpdatesWithItems(t *testing.T) {
 			DetectedAt:     time.Now(),
 		},
 	}
-	displayPendingUpdates(updates)
+	displayPendingUpdates(discardLog(), updates)
 }
 
 // TestDisplayPendingUpdatesWithError tests displayPendingUpdates with error field.
@@ -45,7 +45,7 @@ func TestDisplayPendingUpdatesWithError(t *testing.T) {
 			DetectedAt:     time.Now(),
 		},
 	}
-	displayPendingUpdates(updates)
+	displayPendingUpdates(discardLog(), updates)
 }
 
 // TestDisplayPendingUpdatesAllStatuses tests displayPendingUpdates with all status types.
@@ -60,7 +60,7 @@ func TestDisplayPendingUpdatesAllStatuses(t *testing.T) {
 		updates := []autoupdate.PendingUpdate{
 			{Package: "a/pkg", CurrentVersion: "1.0", NewVersion: "2.0", Status: s, DetectedAt: time.Now()},
 		}
-		displayPendingUpdates(updates)
+		displayPendingUpdates(discardLog(), updates)
 	}
 }
 

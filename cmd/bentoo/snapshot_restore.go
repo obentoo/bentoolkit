@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -71,19 +71,20 @@ refuses to guess rather than read another subvolume's backups.`,
 }
 
 func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
+	log := logging.FromContext(commandContext(cmd))
 	id := args[0]
 
 	// Restore is destructive: load AND validate the config (drivers + deps) so an
 	// unknown driver or missing binary fails fast before any subprocess (R6.1, G3).
-	cfg, _, err := loadSnapshotConfig()
+	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot restore: %v", err)
+		log.Error("snapshot restore: failed", "err", err)
 		return exitWith(1)
 	}
 
 	ship, ok := findShipByName(cfg, snapshotRestoreShip)
 	if !ok {
-		logger.Error("snapshot restore: no ship entry named %q", snapshotRestoreShip)
+		log.Error("snapshot restore: no ship entry named", "ship", snapshotRestoreShip)
 		return exitWith(1)
 	}
 
@@ -108,7 +109,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 	// discards the value (RestoreChainFor returns no chain for it).
 	subvolume, err := snapshot.ResolveRestoreSubvolume(cfg, snapshotRestoreSubvolume)
 	if err != nil {
-		logger.Error("snapshot restore: %v", err)
+		log.Error("snapshot restore: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -158,7 +159,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 		// it and return nil — no exit status — so the exit code stays 0 (R5.4).
 		output.PrintInfo("restore declined")
 	default:
-		logger.Error("snapshot restore: %v", err)
+		log.Error("snapshot restore: failed", "err", err)
 		return exitWith(1)
 	}
 	return nil

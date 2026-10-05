@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/fatih/color"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -64,10 +63,8 @@ func s058Env(t *testing.T) *testCLI {
 // error, which is the whole point of the story.
 func s058Execute(t *testing.T, ctx context.Context, d *deps, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	// The package logger captures its writer once; bind it to the real stderr
-	// descriptor before that descriptor is redirected into a pipe.
-	logger.Default()
-
+	// The invocation logger (story 062) reads os.Stderr when the root's pre-run
+	// builds it, so it writes into the redirected descriptor below.
 	readOut := captureStream(t, 1, &os.Stdout)
 	readErr := captureStream(t, 2, &os.Stderr)
 	origColorOut, origNoColor := color.Output, color.NoColor

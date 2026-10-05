@@ -49,7 +49,6 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -477,7 +476,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 
 	pending, err := autoupdate.NewPendingList(configDir)
 	if err != nil {
-		logger.Warn("could not read the pending list, so nothing was validated: %v", err)
+		ar.log().Warn("could not read the pending list, so nothing was validated", "err", err)
 		return nothingValidated(), false
 	}
 	updates := pending.List()
@@ -516,19 +515,19 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 	}
 
 	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		applierFixerOption(llmCfg),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
+		applierFixerOption(ar.log(), llmCfg),
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
-	opts = append(opts, applierLLMOptions(ar.opts.llm, llmCfg, ar.validateCfg)...)
+	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 
 	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
 	// a read-only check has no business owning that switch even by accident.
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
 	if err != nil {
-		logger.Warn("could not initialize the validator, so nothing was validated: %v", err)
+		ar.log().Warn("could not initialize the validator, so nothing was validated", "err", err)
 		// Printed, for the same reason the declined answer above is: the price
 		// reached the screen before this failed, so the caller must not repeat it.
 		return nothingValidated(), true
@@ -702,7 +701,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// three decisions below — whether to render at all, whether to point at
 	// `--list`, whether to announce the registry write — are all about packages,
 	// and the envelope deliberately knows nothing about packages.
-	r := checkPayload(run)
+	r := checkPayload(ar.log(), run)
 
 	// Silent only when the report holds NOTHING, which is a conjunction rather
 	// than the scan alone. CheckAll skips disabled and held entries and
@@ -721,7 +720,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// for this case ("No package is configured for autoupdate.",
 		// versionCheckSection below), which the paragraph above explains this
 		// path must never reach.
-		logger.Info("No packages configured for autoupdate")
+		ar.log().Info("No packages configured for autoupdate")
 	} else {
 		// Two questions, and keeping them apart is the whole of story 046's
 		// Task 2. What the report should SAY — list every up-to-date package,
@@ -737,14 +736,14 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		content := report.SectionOptions{ShowAll: autoupdateAll, SkipPlan: planPrinted}
 		device := render.Options{}
 
-		mode := reportModeOrPlain(ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
+		mode := reportModeOrPlain(ar.log(), ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
 
 		// The sections are built ONCE, here, and every mode below is handed the
 		// same slice — which is what makes "the three modes differ in
 		// presentation and not in content" a fact about the call rather than a
 		// promise about three renderers (R2.1).
 		if err := renderCheckReportIn(mode, run.Sections(content), device); err != nil {
-			logger.Warn("the report could not be rendered: %v", err)
+			ar.log().Warn("the report could not be rendered", "err", err)
 		}
 
 		// S045-R5.2: a run that found something pending names the command
@@ -807,7 +806,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// one export path (report_export.go); this command supplies a report.Run and
 	// decides nothing else about it, which is what lets `overlay manifest` and
 	// `snapshot run` reach the same behaviour with the same one line.
-	exportReport(run)
+	exportReport(ar.log(), run)
 }
 
 // exportContent is what an EXPORT asks the report to say (R9.3, R2.4).

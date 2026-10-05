@@ -36,10 +36,10 @@ import (
 // the gates prove, the maintainer approves, and no two of the three are
 // collapsed; D8c is the shape of the third question).
 //
-// # Where the text goes, and why not through logger
+// # Where the text goes, and why not through the logger
 //
 // STDOUT, through fmt and output/*, exactly as overlay_validate.go states the
-// rule: logger binds os.Stderr once at first use and exposes no setter, so a
+// rule: the invocation's logger (story 062) writes diagnostics to stderr, so a
 // plan on one stream and a build result on the other lose their ordering the
 // moment either is redirected — and the ordering is the requirement here. R7.3
 // is "the plan BEFORE the first build starts", which is only readable as one
@@ -70,10 +70,9 @@ import (
 // it was given, or nil when it can (R7.3).
 //
 // It is a returned value rather than a log line for the reason realignPreflight
-// states beside it: logger binds its io.Writer at first use, so a refusal written
-// there cannot be read by anything but a human watching a terminal, and a
-// returned error is the only shape a test — or a caller that knows where its
-// output goes — can read the reason in.
+// states beside it: a returned error is the shape a test can assert and a
+// caller can wrap or log, and runCompare is the one place that logs it, through
+// the invocation's logger, before failing the run.
 //
 // # No --depth at all is not a refusal, it is the shipped run
 //

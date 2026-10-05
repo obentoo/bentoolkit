@@ -10,7 +10,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -25,13 +25,12 @@ import (
 // # Where the operator-facing text goes
 //
 // Everything the operator must read is printed on STDOUT, through fmt and the
-// output/* colours, and not through logger. logger binds its io.Writer once at
-// first use and it is os.Stderr (`func Default` in logger.go), so a message sent there
-// lands on a different stream from the plan it belongs to — including the
-// failures, which exist precisely to explain the plan that is missing. Splitting
-// one report across two streams costs the operator the ordering between them the
-// moment either is redirected. logger is still used for the one thing that is
-// genuinely an aside: a registry key that is not a category/package atom, which
+// output/* colours, and not through the logger. The invocation's logger (story
+// 062) writes to stderr, so a message sent there lands on a different stream
+// from the plan it belongs to — including the failures, which exist precisely to
+// explain the plan that is missing. Splitting one report across two streams
+// costs the operator the ordering between them the moment either is redirected.
+// The logger is still used for the one thing that is genuinely an aside: a registry key that is not a category/package atom, which
 // leaves the plan complete and merely leaves that key unattributed. A registry
 // that cannot be read AT ALL is the opposite of an aside — it decides the whole
 // run — so it is reported on stdout with everything else, by
@@ -230,6 +229,7 @@ func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 // authority the target is checked against: it is the set of packages that
 // actually exist here.
 func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config, d *deps) error {
+	log := logging.FromContext(ctx)
 	fmt.Println()
 	output.Header.Println("Overlay Prune")
 	fmt.Println()
@@ -273,7 +273,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		return nil
 	}
 
-	prov, err := d.resolveGentooProvider(cfg)
+	prov, err := d.resolveGentooProvider(logging.FromContext(ctx), cfg)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  %v\n", err)
 		return exitWith(1)
@@ -297,7 +297,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// each atom. Both come out of the same .autoupdate/packages.toml, and both are
 	// built HERE because cmd/ is the only package importing internal/overlay and
 	// internal/autoupdate at once: internal/overlay must never learn what TOML is.
-	divergence, divErr := buildDivergenceMap(overlayPath)
+	divergence, divErr := buildDivergenceMap(log, overlayPath)
 	registryKeys, malformed, keyErr := buildPruneRegistryKeys(overlayPath)
 	if err := firstPruneError(divErr, keyErr); err != nil {
 		// A GATE, like the API-only one above, and reported the same way: one
@@ -317,10 +317,11 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		return nil
 	}
 	for _, key := range malformed {
-		logger.Warn("registry key %q is not a category/package atom; it is not listed against any package below", key)
+		log.Warn("registry key is not a category/package atom; it is not listed against any package below", "key", key)
 	}
 
 	report, err := overlay.CompareWithProvider(ctx, packages, prov, overlay.CompareOptions{
+		Logger: log,
 		// Every compared package reaches the plan, so the three buckets account for
 		// the whole scan: a package the report does not mention would read as one
 		// that does not exist. There is no progress callback because there is

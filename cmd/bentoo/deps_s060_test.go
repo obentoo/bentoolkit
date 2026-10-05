@@ -31,7 +31,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +39,6 @@ import (
 // descriptor capture, colour opt-out and runMain entry point.
 func s060RunTree(t *testing.T, root *cobra.Command, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	logger.Default()
 	readOut := captureStream(t, 1, &os.Stdout)
 	readErr := captureStream(t, 2, &os.Stderr)
 	origColorOut, origNoColor := color.Output, color.NoColor

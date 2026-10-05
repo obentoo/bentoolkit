@@ -6,7 +6,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -48,7 +47,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		// Nothing has been written: the plan only reads. A registry that does not
 		// load cannot be migrated either, and failing here is the cheapest place
 		// to say so.
-		logger.Error("failed to plan the disable-origin migration: %v", err)
+		ar.log().Error("failed to plan the disable-origin migration", "err", err)
 		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
@@ -68,7 +67,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		for _, pkg := range plan.UnmatchedExcept {
 			output.Error.Fprintln(os.Stderr, "    "+pkg)
 		}
-		logger.Error("refusing to migrate: %d --except entry(ies) match no record — fix the spelling and re-run", len(plan.UnmatchedExcept))
+		ar.log().Error("refusing to migrate: --except entries match no record — fix the spelling and re-run", "unmatched", len(plan.UnmatchedExcept))
 		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
 		return exitWith(1)
 	}
@@ -93,7 +92,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 	marked, err := autoupdate.MarkAutoDisabled(overlayPath, ar.opts.except)
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
-		logger.Error("failed to record the automatic origin: %v", err)
+		ar.log().Error("failed to record the automatic origin", "err", err)
 		output.Error.Fprintf(os.Stderr, "  packages.toml was NOT modified: %v\n", err)
 		return exitWith(1)
 	}

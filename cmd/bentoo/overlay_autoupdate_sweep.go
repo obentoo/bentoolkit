@@ -88,6 +88,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		// too, so it downloads distfiles too.
 		autoupdate.WithSweepDistdir(ar.dirs.Distdir, ar.dirs.ConfiguredDistdir),
 		autoupdate.WithSweepDistfilesCache(ar.dirs.Cache),
+		autoupdate.WithSweepLogger(ar.log()),
 	)
 	displaySweepReport(report)
 	return nil

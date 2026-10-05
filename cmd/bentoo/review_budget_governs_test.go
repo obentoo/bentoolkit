@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -85,7 +86,7 @@ type reviewBudgetCase struct {
 // consumers, and what it asserts is unchanged.
 func captureReviewBudget(d *deps) func() []time.Duration {
 	var handed []time.Duration
-	d.newClaudeAsker = func(budget time.Duration) (claudeAsker, error) {
+	d.newClaudeAsker = func(_ *slog.Logger, budget time.Duration) (claudeAsker, error) {
 		handed = append(handed, budget)
 		return &fakeAsker{err: errors.New("this asker exists to be counted, never to answer")}, nil
 	}

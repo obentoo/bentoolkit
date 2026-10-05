@@ -313,7 +313,16 @@ func smtpPasswordDestination() string {
 // dead key, where the value belongs, the env-var name, and the consequence of
 // doing nothing. It mirrors the config.yaml diagnostic of story 015 task 5.2.
 // The password VALUE is never read or printed.
-func warnLegacySMTPPassword(path string) {
+//
+// With a logger (story 062) the warning is one WARN record carrying the path,
+// the dead key and where the value belongs; with a nil logger — func LoadFrom,
+// a caller that holds none — it keeps its pre-062 bare line on stderr.
+func warnLegacySMTPPassword(log *slog.Logger, path string) {
+	if log != nil {
+		log.Warn("snapshot.toml carries a key that is no longer read; SMTP mail is sent unauthenticated until it is deleted",
+			"path", path, "key", legacySMTPPasswordKey, "destination", smtpPasswordDestination())
+		return
+	}
 	fmt.Fprintf(os.Stderr,
 		"warning: %s: `%s` is no longer read. %s, then delete the key. "+
 			"Until then, SMTP mail is sent unauthenticated.\n",
@@ -329,7 +338,17 @@ func warnLegacySMTPPassword(path string) {
 // with the MetaData discarded, so behavior, errors, and leniency are unchanged.
 // This is deliberately not a general strict-decode pass: only the single removed
 // key is reported, so forward-compatible additions to snapshot.toml stay silent.
+//
+// LoadFrom is LoadFromWith(path, nil): the migration warning goes to stderr as
+// a bare line.
 func LoadFrom(path string) (*Config, error) {
+	return LoadFromWith(path, nil)
+}
+
+// LoadFromWith is LoadFrom reporting the migration warning on log, the
+// invocation's logger (story 062, R5.2). A nil log keeps LoadFrom's bare
+// stderr line.
+func LoadFromWith(path string, log *slog.Logger) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own --config flag or the XDG config path FindConfigPath resolved
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snapshot.toml: %w", err)
@@ -346,7 +365,7 @@ func LoadFrom(path string) (*Config, error) {
 	// (R3.3). The load itself still succeeds and the password is simply treated as
 	// absent (R3.2).
 	if hasLegacySMTPPassword(md) {
-		warnLegacySMTPPassword(path)
+		warnLegacySMTPPassword(log, path)
 	}
 	return &cfg, nil
 }

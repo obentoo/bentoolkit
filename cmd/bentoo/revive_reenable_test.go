@@ -40,7 +40,7 @@ func TestReviveAppliesAfterReenable(t *testing.T) {
 	}
 	// Loaded while the entry is still disabled, as runRevive does.
 	applier, err := autoupdate.NewApplier(overlay, configDir,
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlay)),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(discardLog(), overlay)),
 		autoupdate.WithApplierPendingList(pending),
 		// Hermetic: never the host's DISTDIR, which a CI runner cannot write.
 		autoupdate.WithApplierDistdir(t.TempDir(), ""),

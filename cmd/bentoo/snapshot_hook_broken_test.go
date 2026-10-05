@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // TestRunSnapshotHook_UninstallRefusesBrokenBlock: the refusal reaches the
@@ -28,6 +32,10 @@ func TestRunSnapshotHook_UninstallRefusesBrokenBlock(t *testing.T) {
 	var code int
 	var exited bool
 	stop := captureStream(t, 2, &os.Stderr)
+	// The invocation's logger (story 062), on the redirected fd 2, as the
+	// root's PersistentPreRunE would install it.
+	snapshotHookCmd.SetContext(logging.NewContext(context.Background(), slog.New(slog.NewTextHandler(os.Stderr, nil))))
+	t.Cleanup(func() { snapshotHookCmd.SetContext(context.Background()) })
 	_ = captureStdout(t, func() {
 		code, exited = exitOf(runSnapshotHook(snapshotHookCmd, nil))
 	})

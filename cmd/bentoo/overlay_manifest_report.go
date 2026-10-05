@@ -21,8 +21,9 @@ package main
 // command tried to use it.
 
 import (
+	"log/slog"
+
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -228,8 +229,8 @@ func manifestTargetFacts(update overlay.ManifestUpdate) report.ManifestTarget {
 // The two are independent answers to the same report. A terminal that went away
 // mid-write is no reason to also withhold the file, which may be the only copy
 // left.
-func presentManifestReport(d *deps, cfg *config.Config, run report.Run) {
-	mode := reportModeOrPlain(cfg, false, d.uiIsTerminal)
+func presentManifestReport(log *slog.Logger, d *deps, cfg *config.Config, run report.Run) {
+	mode := reportModeOrPlain(log, cfg, false, d.uiIsTerminal)
 
 	// Two questions, kept apart. What the report should SAY — list every target
 	// that succeeded, or count them — is report.SectionOptions, answered here
@@ -245,7 +246,7 @@ func presentManifestReport(d *deps, cfg *config.Config, run report.Run) {
 	// needed it and knows nothing about one: it takes sections, and nothing
 	// below it can tell a manifest run from a check.
 	if err := renderCheckReportIn(mode, run.Sections(content), render.Options{}); err != nil {
-		logger.Warn("the report could not be rendered: %v", err)
+		log.Warn("the report could not be rendered", "err", err)
 	}
 
 	// LAST, and unconditional. exportReport is the CLI's one export path
@@ -253,5 +254,5 @@ func presentManifestReport(d *deps, cfg *config.Config, run report.Run) {
 	// rather than fails when the path cannot be written, and it returns nothing
 	// so this run's exit status cannot be altered by a copy of an answer already
 	// delivered above.
-	exportReport(run)
+	exportReport(log, run)
 }

@@ -21,13 +21,11 @@ import (
 	"testing"
 )
 
-const s060ReviveHint = "the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.\n" +
-	"Configure a local gentoo repository in ~/.config/bentoo/config.yaml:\n" +
-	"  repositories:\n" +
-	"    gentoo:\n" +
-	"      provider: local\n" +
-	"      path: /var/db/repos/gentoo\n" +
-	"(or force a clone-backed provider so the package tree is available on disk)\n"
+// s060ReviveHint is the hint as the invocation's slog text handler writes it
+// on stderr (story 062): one record carrying the configuration hint as an
+// attribute.
+const s060ReviveHint = "level=ERROR msg=\"the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.\" " +
+	"hint=\"" + reviveLocalTreeHint + "\"\n"
 
 // TestS060GuardReviveNeedsALocalGentooTree runs both forms of --revive. The
 // "all" form is the hostile one: the check must stay AHEAD of the orphan scan,

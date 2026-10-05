@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 )
@@ -157,7 +157,7 @@ func configuredUIMode(cfg *config.Config) string {
 //
 // A nil config is read as "nothing configured" rather than as a failure; see
 // configuredUIMode.
-func resolveAutoupdateUIMode(cfg *config.Config, noTUI bool, isTerminal func() bool) (report.Mode, error) {
+func resolveAutoupdateUIMode(log *slog.Logger, cfg *config.Config, noTUI bool, isTerminal func() bool) (report.Mode, error) {
 	mode, warning, err := resolveUIMode(uiInputs{
 		Flag:        autoupdateUI,
 		NoTUI:       noTUI,
@@ -168,7 +168,7 @@ func resolveAutoupdateUIMode(cfg *config.Config, noTUI bool, isTerminal func() b
 		return "", err
 	}
 
-	warnUIDowngrade(warning)
+	warnUIDowngrade(log, warning)
 	return mode, nil
 }
 
@@ -207,7 +207,7 @@ func resolveAutoupdateUIMode(cfg *config.Config, noTUI bool, isTerminal func() b
 //
 // What must never happen is the third option, which is what shipped: the value
 // dropped and nothing said, because every producer handed this error to
-// logger.Debug, which sits below the default LevelInfo and reaches no one.
+// a Debug record, which sits below the default LevelInfo and reaches no one.
 //
 // The check producer shipped a FOURTH answer, worse than all three, and 12.3
 // removed it. runAutoupdate resolved the mode before any package work and exited
@@ -261,10 +261,10 @@ func resolveAutoupdateUIMode(cfg *config.Config, noTUI bool, isTerminal func() b
 // file called this shape "already correct" while the run died over the same key
 // on the way in; nothing about that file said otherwise, and only asking here
 // rather than deciding there could have caught it.
-func reportModeOrPlain(cfg *config.Config, noTUI bool, isTerminal func() bool) report.Mode {
-	mode, err := resolveAutoupdateUIMode(cfg, noTUI, isTerminal)
+func reportModeOrPlain(log *slog.Logger, cfg *config.Config, noTUI bool, isTerminal func() bool) report.Mode {
+	mode, err := resolveAutoupdateUIMode(log, cfg, noTUI, isTerminal)
 	if err != nil {
-		logger.Warn("%v — this report is rendered in plain instead", err)
+		log.Warn("the UI mode is unusable — this report is rendered in plain instead", "err", err)
 		return report.ModePlain
 	}
 	return mode
@@ -312,7 +312,7 @@ func modeUsesLiveRegion(mode report.Mode) bool {
 // which is the point: one resolution, so the report and the apply progress
 // cannot disagree about which renderer this run is using.
 func (ar *autoupdateRun) autoupdateUsesTUI() bool {
-	mode, err := resolveAutoupdateUIMode(ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
+	mode, err := resolveAutoupdateUIMode(ar.log(), ar.uiConfig, ar.opts.noTUI, ar.deps.uiIsTerminal)
 	if err != nil {
 		// Reachable, and only from the two AMBIENT sources. S044-R3.9 stops an
 		// unusable --ui and says nothing about the other two; the root has
@@ -333,7 +333,7 @@ func (ar *autoupdateRun) autoupdateUsesTUI() bool {
 		//
 		// False is the fallback for the same reason plain is: it is the answer
 		// that assumes nothing about the terminal.
-		logger.Debug("apply: the UI mode did not resolve, rendering in plain: %v", err)
+		ar.log().Debug("apply: the UI mode did not resolve, rendering in plain", "err", err)
 		return false
 	}
 	return modeUsesLiveRegion(mode)
@@ -376,7 +376,7 @@ func (ar *autoupdateRun) autoupdateUsesTUI() bool {
 // this identical to the tui.Enabled(tui.Options{}) it replaces (S046-R3.7).
 //
 // A nil config reads as "nothing configured" here too; see configuredUIMode.
-func manifestUsesTUI(cfg *config.Config, isTerminal func() bool) bool {
+func manifestUsesTUI(log *slog.Logger, cfg *config.Config, isTerminal func() bool) bool {
 	mode, warning, err := resolveUIMode(uiInputs{
 		Flag:        autoupdateUI,
 		Config:      configuredUIMode(cfg),
@@ -413,11 +413,11 @@ func manifestUsesTUI(cfg *config.Config, isTerminal func() bool) bool {
 		// measurement cheap is the one flag that hides the second voice, so the
 		// evidence was real and the conclusion was not. TestManifestSingleVoice
 		// asserts on a REAL run for exactly that reason.
-		logger.Debug("manifest: the UI mode did not resolve, rendering in plain: %v", err)
+		log.Debug("manifest: the UI mode did not resolve, rendering in plain", "err", err)
 		return false
 	}
 
-	warnUIDowngrade(warning)
+	warnUIDowngrade(log, warning)
 	return modeUsesLiveRegion(mode)
 }
 
@@ -442,11 +442,11 @@ var uiDowngradeReported atomic.Bool
 // The empty string is ResolveMode's success signal and prints nothing: a
 // sentence on every run would train the reader to skip the one run it matters
 // on.
-func warnUIDowngrade(warning string) {
+func warnUIDowngrade(log *slog.Logger, warning string) {
 	if warning == "" || uiDowngradeReported.Swap(true) {
 		return
 	}
-	logger.Warn("%s", warning)
+	log.Warn("the UI mode was downgraded", "reason", warning)
 }
 
 // exportFormat is the syntax an export is written in (R9.2). It is a string

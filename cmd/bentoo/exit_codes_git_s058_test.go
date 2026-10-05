@@ -72,8 +72,8 @@ func s058GitRows() []s058Row {
 		{name: "completion bash", args: []string{"completion", "bash"}, want: 0},
 		// Failures stay 1, each diagnostic printed once.
 		{name: "status outside a git repository", args: []string{"overlay", "status"}, want: 1, once: "git command failed"},
-		{name: "commit outside a git repository", args: []string{"overlay", "commit"}, want: 1, once: "getting status: git command failed"},
-		{name: "log outside a git repository", args: []string{"overlay", "log"}, want: 1, once: "running git log: exit status 128"},
+		{name: "commit outside a git repository", args: []string{"overlay", "commit"}, want: 1, once: `msg="getting status: failed" err="git command failed`},
+		{name: "log outside a git repository", args: []string{"overlay", "log"}, want: 1, once: `msg="running git log: failed" err="exit status 128"`},
 		{name: "diff outside a git repository", args: []string{"overlay", "diff"}, want: 1, once: "running git diff:"},
 		{name: "add outside a git repository", args: []string{"overlay", "add"}, want: 1},
 		{name: "push outside a git repository", args: []string{"overlay", "push"}, want: 1},

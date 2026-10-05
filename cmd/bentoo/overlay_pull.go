@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -50,11 +50,12 @@ func pullModeFromFlags(rebase, merge bool) overlay.PullMode {
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -62,28 +63,28 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	result, err := overlay.Pull(ctx, appCtx.Config, mode, pullDryRun)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("pulling: failed", "err", err)
 		return exitWith(1)
 	}
 
 	if !result.Success {
-		logger.Error("Pull failed: %s", result.Message)
+		log.Error("Pull failed", "message", result.Message)
 		if len(result.Conflicts) > 0 {
-			logger.Error("Conflicting files:")
+			log.Error("Conflicting files:")
 			for _, conflict := range result.Conflicts {
-				logger.Error("  - %s", conflict)
+				log.Error("conflicting file", "file", conflict)
 			}
 			if mode == overlay.PullRebase {
-				logger.Info("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'")
-				logger.Info("Or abort the rebase with 'git rebase --abort'")
+				uiInfo("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'")
+				uiInfo("Or abort the rebase with 'git rebase --abort'")
 			} else {
-				logger.Info("Resolve conflicts manually, then run 'git add' and 'git commit'")
-				logger.Info("Or abort the merge with 'git merge --abort'")
+				uiInfo("Resolve conflicts manually, then run 'git add' and 'git commit'")
+				uiInfo("Or abort the merge with 'git merge --abort'")
 			}
 		}
 		return exitWith(1)
 	}
 
-	logger.Info("%s", result.Message)
+	uiInfo(result.Message)
 	return nil
 }

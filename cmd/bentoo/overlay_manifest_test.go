@@ -147,7 +147,7 @@ func TestNoConfigMatchesLegacyBehaviour(t *testing.T) {
 			legacy := legacyEnabled(tty)
 			cfg := &config.Config{} // no ui block at all
 
-			if got := manifestUsesTUI(cfg, td.uiIsTerminal); got != legacy {
+			if got := manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal); got != legacy {
 				t.Errorf("overlay manifest: new path says %v, tui.Enabled says %v (R3.7)", got, legacy)
 			}
 			if got := (&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI(); got != legacy {
@@ -174,7 +174,7 @@ func TestNoConfigMatchesLegacyBehaviourUnderTheOptOuts(t *testing.T) {
 			}
 
 			cfg := &config.Config{}
-			if manifestUsesTUI(cfg, td.uiIsTerminal) {
+			if manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal) {
 				t.Errorf("overlay manifest turned the TUI on for an operator who set %s (R3.7)", env)
 			}
 			if (&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI() {
@@ -193,12 +193,12 @@ func TestManifestInheritsUIMode(t *testing.T) {
 	stubUIIsTerminal(td, true)
 
 	plain := &config.Config{UI: config.UIConfig{Mode: "plain"}}
-	if manifestUsesTUI(plain, td.uiIsTerminal) {
+	if manifestUsesTUI(discardLog(), plain, td.uiIsTerminal) {
 		t.Error("ui.mode: plain did not reach overlay manifest — it is still deciding on its own (S044-R3.8)")
 	}
 
 	inline := &config.Config{UI: config.UIConfig{Mode: "inline"}}
-	if !manifestUsesTUI(inline, td.uiIsTerminal) {
+	if !manifestUsesTUI(discardLog(), inline, td.uiIsTerminal) {
 		t.Error("ui.mode: inline did not turn the manifest TUI on")
 	}
 }
@@ -217,7 +217,7 @@ func TestFullscreenDoesNotReachTheApplyPath(t *testing.T) {
 	if !(&autoupdateRun{opts: auOpts, deps: td, uiConfig: cfg}).autoupdateUsesTUI() {
 		t.Error("ui.mode: fullscreen turned the apply-path live region off entirely")
 	}
-	if !manifestUsesTUI(cfg, td.uiIsTerminal) {
+	if !manifestUsesTUI(discardLog(), cfg, td.uiIsTerminal) {
 		t.Error("ui.mode: fullscreen turned the manifest live region off entirely")
 	}
 }

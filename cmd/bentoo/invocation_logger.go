@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,11 +66,6 @@ func setUpInvocationLogger(cmd *cobra.Command, verboseFlag, quietFlag bool) (clo
 		"log_file", logFile,
 	)
 
-	cmd.SetContext(logging.NewContext(contextOrBackground(cmd.Context()), l))
-	if root := cmd.Root(); root != cmd {
-		root.SetContext(logging.NewContext(contextOrBackground(root.Context()), l))
-	}
-
 	// A close failure has no exit status to change (R2.5): it is reported on
 	// stderr, which the logger still reaches once its file is gone.
 	closeOnce := sync.OnceFunc(func() {
@@ -78,9 +74,38 @@ func setUpInvocationLogger(cmd *cobra.Command, verboseFlag, quietFlag bool) (clo
 		}
 	})
 	unregister := registerExitCleanup(closeOnce)
-	return func() {
+	closeLog = func() {
 		closeOnce()
 		unregister()
+	}
+
+	cmd.SetContext(withInvocationLog(contextOrBackground(cmd.Context()), l, closeLog))
+	if root := cmd.Root(); root != cmd {
+		root.SetContext(withInvocationLog(contextOrBackground(root.Context()), l, closeLog))
+	}
+	return closeLog
+}
+
+// logCloserKey is the context key under which setUpInvocationLogger stores the
+// func that closes the invocation's log file.
+type logCloserKey struct{}
+
+// withInvocationLog returns a copy of ctx carrying the invocation logger l and
+// closeLog, the func that closes its file.
+func withInvocationLog(ctx context.Context, l *slog.Logger, closeLog func()) context.Context {
+	return context.WithValue(logging.NewContext(ctx, l), logCloserKey{}, closeLog)
+}
+
+// closeInvocationLog closes the log file of the invocation whose logger ctx
+// carries, and does nothing when it carries none. Closing twice is harmless.
+//
+// func execute calls it once ExecuteContext has returned and the failWith cause
+// is logged: cobra skips PersistentPostRunE on an error return, and without
+// this an in-process run that fails keeps its file open, and its exit cleanup
+// registered, until the process ends.
+func closeInvocationLog(ctx context.Context) {
+	if closeLog, ok := ctx.Value(logCloserKey{}).(func()); ok && closeLog != nil {
+		closeLog()
 	}
 }
 

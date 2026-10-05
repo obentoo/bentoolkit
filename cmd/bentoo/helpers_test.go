@@ -50,7 +50,7 @@ func TestTruncatePkgNameShortPadded(t *testing.T) {
 // TestConvertConfigReposNil tests convertConfigRepos with nil repositories.
 func TestConvertConfigReposNil(t *testing.T) {
 	cfg := &config.Config{}
-	result := convertConfigRepos(cfg)
+	result := convertConfigRepos(discardLog(), cfg)
 	if result != nil {
 		t.Errorf("convertConfigRepos with nil repos should return nil, got %v", result)
 	}
@@ -76,7 +76,7 @@ func TestConvertConfigRepos(t *testing.T) {
 			},
 		},
 	}
-	result := convertConfigRepos(cfg)
+	result := convertConfigRepos(discardLog(), cfg)
 	if result == nil {
 		t.Fatal("convertConfigRepos should return non-nil map")
 	}
@@ -109,7 +109,7 @@ func TestConvertConfigReposMultiple(t *testing.T) {
 			"repo2": {Provider: "gitlab", URL: "https://gitlab.com/c/d"},
 		},
 	}
-	result := convertConfigRepos(cfg)
+	result := convertConfigRepos(discardLog(), cfg)
 	if len(result) != 2 {
 		t.Errorf("expected 2 repos, got %d", len(result))
 	}
@@ -159,7 +159,7 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 			},
 		},
 	}
-	result := convertConfigRepos(cfg)
+	result := convertConfigRepos(discardLog(), cfg)
 	repo := result["test"]
 
 	// Verify it's a *provider.RepositoryInfo

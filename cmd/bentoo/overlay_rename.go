@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -65,17 +65,18 @@ Examples:
 }
 
 func runRename(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	// Parse command arguments
 	spec, err := ParseRenameArgs(args)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("parsing the rename arguments: failed", "err", err)
 		return exitWith(1)
 	}
 
 	// Load configuration
 	ctx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -90,23 +91,23 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// Preview mode: find matches first without executing
 	previewResult, err := overlay.RenamePreview(ctx.Config, spec)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("previewing the rename: failed", "err", err)
 		return exitWith(1)
 	}
 
 	// Display any scan warnings
 	for _, w := range previewResult.Warnings {
-		logger.Warn("%s", w)
+		log.Warn("rename warning", "warning", w)
 	}
 
 	// No matches found
 	if len(previewResult.Matches) == 0 {
-		logger.Info("No matching ebuilds found")
+		uiInfo("No matching ebuilds found")
 		return nil
 	}
 
 	// Display preview
-	logger.Info("%s", overlay.FormatRenamePreview(previewResult, spec.Category == "*"))
+	uiInfo(overlay.FormatRenamePreview(previewResult, spec.Category == "*"))
 
 	// Two ebuilds sharing one target cannot be renamed, --force or not, so the
 	// plan is refused here — before the dry-run return, so a script reading the
@@ -114,7 +115,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// asked to confirm it. overlay.Rename refuses it again as a second line.
 	if len(previewResult.Collisions) > 0 {
 		err := &overlay.CollisionError{Collisions: previewResult.Collisions}
-		logger.Error("%v", err)
+		log.Error("the rename would collide", "err", err)
 		return exitWith(1)
 	}
 
@@ -126,20 +127,20 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if isGlobalSearch && !opts.Force {
 		needsConfirmation = true
 		if opts.SkipPrompt {
-			logger.Warn("Global search requires confirmation. Use --force to skip.")
+			uiWarn("Global search requires confirmation. Use --force to skip.")
 		}
 	}
 
 	// Dry-run mode: don't execute
 	if opts.DryRun {
-		logger.Info("Dry-run mode - no changes made")
+		uiInfo("Dry-run mode - no changes made")
 		return nil
 	}
 
 	// Prompt for confirmation if needed
 	if needsConfirmation {
 		if !promptConfirmation() {
-			logger.Info("Operation cancelled")
+			uiInfo("Operation cancelled")
 			return nil
 		}
 	}
@@ -147,13 +148,13 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// Execute rename operation
 	result, err := overlay.Rename(commandContext(cmd), ctx.Config, spec, opts)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("renaming: failed", "err", err)
 		return exitWith(1)
 	}
 
 	// Display results
 	if result != nil {
-		logger.Info("%s", overlay.FormatRenameResult(result, opts.DryRun))
+		uiInfo(overlay.FormatRenameResult(result, opts.DryRun))
 	}
 	return nil
 }

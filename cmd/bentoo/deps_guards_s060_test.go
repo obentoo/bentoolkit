@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,7 +50,7 @@ func TestS060GuardDepsRegistryFixOfferedOnlyOnATerminal(t *testing.T) {
 			fixer := &s060CountingFixer{}
 			var asked atomic.Int32
 			c := newTestCLI(t, withDeps(func(d *deps) {
-				d.checkRegistryFixer = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+				d.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
 				d.checkInteractive = func() bool { asked.Add(1); return interactive }
 			}))
 			const pkg = "app-misc/probe"
@@ -112,12 +113,12 @@ func TestS060GuardDepsDistfilesCacheFlagVersusConfig(t *testing.T) {
 
 	empty := testAutoupdateOptions()
 	empty.distfilesCache = ""
-	if got := empty.resolveAutoupdateDistfileDirs(cfg, true).Cache; got != "" {
+	if got := empty.resolveAutoupdateDistfileDirs(discardLog(), cfg, true).Cache; got != "" {
 		t.Errorf(`--distfiles-cache "" resolved the cache to %q, want "" (lookup off, R5.3)`, got)
 	}
 
 	unpassed := testAutoupdateOptions()
-	if got := unpassed.resolveAutoupdateDistfileDirs(cfg, false).Cache; got != "/srv/configured-cache" {
+	if got := unpassed.resolveAutoupdateDistfileDirs(discardLog(), cfg, false).Cache; got != "/srv/configured-cache" {
 		t.Errorf("an unpassed --distfiles-cache resolved the cache to %q, want the autoupdate.distfiles_cache value (R5.6)", got)
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/spf13/cobra"
@@ -105,20 +104,13 @@ func newRootCmdWith(d *deps) *cobra.Command {
 
 			// Story 062: the invocation's one logger (R5.1), its level from
 			// the flags and BENTOO_LOG_LEVEL, its JSON file opened here. The
-			// file is closed by PersistentPostRunE on a successful return and
-			// by the exitProcess cleanup otherwise: cobra skips the post-run
-			// hooks when RunE fails, and func execute still logs a failWith
-			// cause after ExecuteContext returns, so on that path the file
-			// must stay open until the process ends.
+			// file is closed by PersistentPostRunE on a successful return. cobra
+			// skips the post-run hooks when RunE fails, and func execute still
+			// logs a failWith cause after ExecuteContext returns, so on that
+			// path execute closes it (func closeInvocationLog), and the
+			// exitProcess cleanup covers a process that ends before either.
 			closeLog = setUpInvocationLogger(cmd, verboseFlag, quietFlag)
 
-			// Configure logging based on flags
-			if verbose {
-				logger.SetVerbose(true)
-			}
-			if quiet {
-				logger.SetQuiet(true)
-			}
 			if noColor {
 				output.NoColor()
 			}

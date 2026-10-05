@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -19,17 +19,18 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
 	statuses, err := overlay.Status(ctx, appCtx.Config)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("reading the overlay status: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -46,6 +47,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	//
 	// The text is unchanged, byte for byte, against what this printed off a TTY —
 	// which is every pipe, log and CI run.
-	logger.Info("%s", overlay.FormatStatus(statuses))
+	uiInfo(overlay.FormatStatus(statuses))
 	return nil
 }
