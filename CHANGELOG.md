@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make build` is reproducible, and `make checksums` writes `SHA256SUMS`.**
+  The build date stamped into the binaries was the wall clock, and the
+  checkout's path was embedded, so two builds of one commit never matched.
+  The date now comes from `SOURCE_DATE_EPOCH`, else the last commit, and every
+  build uses `-trimpath`. `make checksums` records the SHA-256 of the binaries
+  in `build/`.
+
 - **`requires` in `packages.toml`: packages that must move together.** A
   record can declare that its ebuild pins another package at a version
   upstream publishes beside its own — dev-lang/flutter pins
