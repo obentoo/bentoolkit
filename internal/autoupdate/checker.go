@@ -24,6 +24,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -257,7 +258,7 @@ type Checker struct {
 	// interface (e.g. a (*ClaudeClient)(nil) boxed by a failed constructor)
 	// would defeat. WithLLMClient therefore rejects a nil argument, and the
 	// CLI wires it only on a successful, non-nil construction.
-	llmClient LLMProvider
+	llmClient llm.LLMProvider
 	// llmProviderConfigured records that the CLI attempted to configure an LLM
 	// provider for this run (autoupdate.llm.provider was non-empty), regardless
 	// of whether construction ultimately succeeded. It gates the "unused
@@ -379,7 +380,7 @@ func WithPendingList(pending *PendingList) CheckerOption {
 // would pass `!= nil` and make fetchUpstreamVersion call ExtractVersion on a
 // nil receiver. Refusing nil here keeps llmClient an untyped nil when no usable
 // provider exists.
-func WithLLMClient(llm LLMProvider) CheckerOption {
+func WithLLMClient(llm llm.LLMProvider) CheckerOption {
 	return func(c *Checker) error {
 		if llm != nil {
 			c.llmClient = llm

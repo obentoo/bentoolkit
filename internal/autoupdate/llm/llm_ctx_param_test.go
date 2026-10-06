@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 // Story 059, sub-task 1.1 (R1.4, R3.5): an HTTP LLM provider sends its request
 // with the context the CALLER passes, so cancelling that context aborts the

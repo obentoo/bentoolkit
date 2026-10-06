@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 import (
 	"strings"
@@ -24,7 +24,7 @@ func TestResolveBare_UsesPassedKey(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveBare(tc.cfg, tc.key); got != tc.want {
+			if got := ResolveBare(tc.cfg, tc.key); got != tc.want {
 				t.Fatalf("resolveBare(%+v, %q) = %v, want %v", tc.cfg, tc.key, got, tc.want)
 			}
 		})
@@ -45,7 +45,7 @@ func TestChildEnv_InjectsResolvedKey(t *testing.T) {
 	t.Setenv("MYKEY", "env-value-should-be-ignored")
 	t.Setenv("ANTHROPIC_API_KEY", "ambient")
 
-	env := childEnv(true, "MYKEY", "resolved-secret", agentEnvExtra{})
+	env := ChildEnv(true, "MYKEY", "resolved-secret", AgentEnvExtra{})
 
 	var keys []string
 	for _, kv := range env {
@@ -65,7 +65,7 @@ func TestChildEnv_NonBareScrubs(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "inherited")
 	t.Setenv("MYKEY", "inherited")
 
-	env := childEnv(false, "MYKEY", "resolved-secret", agentEnvExtra{})
+	env := ChildEnv(false, "MYKEY", "resolved-secret", AgentEnvExtra{})
 
 	if _, ok := lookupEnv(env, "ANTHROPIC_API_KEY"); ok {
 		t.Error("ANTHROPIC_API_KEY survived non-bare scrub")

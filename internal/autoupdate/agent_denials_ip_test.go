@@ -14,6 +14,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // ipLiteralDeniedEnvelope is an is_error envelope whose two WebFetch refusals
@@ -25,26 +27,26 @@ const ipLiteralDeniedEnvelope = `{"type":"result","subtype":"error_during_execut
 
 // webFetchDenial builds one WebFetch refusal whose tool_input carries rawURL
 // JSON-encoded, so no spelling below can break the envelope.
-func webFetchDenial(t *testing.T, rawURL string) claudePermissionDenial {
+func webFetchDenial(t *testing.T, rawURL string) llm.ClaudePermissionDenial {
 	t.Helper()
 	in, err := json.Marshal(map[string]string{"url": rawURL, "prompt": "SENTINEL-PROMPT-072"})
 	if err != nil {
 		t.Fatalf("marshal tool_input for %q: %v", rawURL, err)
 	}
-	return claudePermissionDenial{ToolName: "WebFetch", ToolInput: in}
+	return llm.ClaudePermissionDenial{ToolName: "WebFetch", ToolInput: in}
 }
 
 // deniedEnvelopeFor renders denials as an is_error envelope a scripted child
 // can print. It fails the test if the envelope carries a single quote, which
 // printEnvelopeScript cannot pass through the shell.
-func deniedEnvelopeFor(t *testing.T, denials []claudePermissionDenial) string {
+func deniedEnvelopeFor(t *testing.T, denials []llm.ClaudePermissionDenial) string {
 	t.Helper()
 	body, err := json.Marshal(struct {
-		Type              string                   `json:"type"`
-		Subtype           string                   `json:"subtype"`
-		IsError           bool                     `json:"is_error"`
-		Result            string                   `json:"result"`
-		PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+		Type              string                       `json:"type"`
+		Subtype           string                       `json:"subtype"`
+		IsError           bool                         `json:"is_error"`
+		Result            string                       `json:"result"`
+		PermissionDenials []llm.ClaudePermissionDenial `json:"permission_denials"`
 	}{"result", "error_during_execution", true, "stopped", denials})
 	if err != nil {
 		t.Fatalf("marshal envelope: %v", err)
@@ -64,7 +66,7 @@ func deniedEnvelopeFor(t *testing.T, denials []claudePermissionDenial) string {
 func TestRefusedToolLabels_NameIPLiteralHosts(t *testing.T) {
 	t.Run("labels", func(t *testing.T) {
 		var env struct {
-			PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+			PermissionDenials []llm.ClaudePermissionDenial `json:"permission_denials"`
 		}
 		if err := json.Unmarshal([]byte(ipLiteralDeniedEnvelope), &env); err != nil {
 			t.Fatalf("the test envelope does not parse: %v", err)
@@ -74,7 +76,7 @@ func TestRefusedToolLabels_NameIPLiteralHosts(t *testing.T) {
 			webFetchDenial(t, "http://169.254.169.254:80/latest/user-data"),
 			webFetchDenial(t, "HTTP://127.0.0.0X1/other"),
 		)
-		got := refusedToolLabels(denials)
+		got := llm.RefusedToolLabels(denials)
 		want := []string{"WebFetch(169.254.169.254)", "WebFetch(127.0.0.0x1)"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("refusedToolLabels = %q, want %q — an IPv4-literal host is named, one label per host (R5.4)", got, want)
@@ -127,21 +129,21 @@ var nonDNSHostURLs = []string{
 // and no host text. A DNS-name control proves the harness can produce a host
 // label at all, so the bare results are not vacuous.
 func TestRefusedToolLabels_KeepBareLabelForNonDNSHosts(t *testing.T) {
-	if got, want := refusedToolLabels([]claudePermissionDenial{webFetchDenial(t, "https://ok.example.com/x")}), []string{"WebFetch(ok.example.com)"}; !reflect.DeepEqual(got, want) {
+	if got, want := llm.RefusedToolLabels([]llm.ClaudePermissionDenial{webFetchDenial(t, "https://ok.example.com/x")}), []string{"WebFetch(ok.example.com)"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("control: refusedToolLabels = %q, want %q", got, want)
 	}
 
-	var denials []claudePermissionDenial
+	var denials []llm.ClaudePermissionDenial
 	for _, raw := range nonDNSHostURLs {
 		d := webFetchDenial(t, raw)
 		denials = append(denials, d)
-		if got := refusedToolLabels([]claudePermissionDenial{d}); !reflect.DeepEqual(got, []string{"WebFetch"}) {
+		if got := llm.RefusedToolLabels([]llm.ClaudePermissionDenial{d}); !reflect.DeepEqual(got, []string{"WebFetch"}) {
 			t.Errorf("url %q: refusedToolLabels = %q, want the bare [\"WebFetch\"] (R5.1)", raw, got)
 		}
 	}
-	notString := claudePermissionDenial{ToolName: "WebFetch", ToolInput: json.RawMessage(`{"url":42}`)}
+	notString := llm.ClaudePermissionDenial{ToolName: "WebFetch", ToolInput: json.RawMessage(`{"url":42}`)}
 	denials = append(denials, notString)
-	if got := refusedToolLabels([]claudePermissionDenial{notString}); !reflect.DeepEqual(got, []string{"WebFetch"}) {
+	if got := llm.RefusedToolLabels([]llm.ClaudePermissionDenial{notString}); !reflect.DeepEqual(got, []string{"WebFetch"}) {
 		t.Errorf("non-string url: refusedToolLabels = %q, want the bare [\"WebFetch\"]", got)
 	}
 

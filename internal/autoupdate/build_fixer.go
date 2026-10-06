@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -280,9 +281,9 @@ func WithBuildFixerTimeout(d time.Duration) BuildFixerOption {
 // Like NewClaudeCodeFixer it requires the `claude` CLI on PATH (returns
 // ErrClaudeCodeUnavailable otherwise) and resolves the model (defaulting to
 // sonnet) and the bare/auth mode from cfg.
-func NewClaudeCodeBuildFixer(cfg LLMConfig, opts ...BuildFixerOption) (*ClaudeCodeBuildFixer, error) {
+func NewClaudeCodeBuildFixer(cfg llm.LLMConfig, opts ...BuildFixerOption) (*ClaudeCodeBuildFixer, error) {
 	if !claudeAvailable() {
-		return nil, ErrClaudeCodeUnavailable
+		return nil, llm.ErrClaudeCodeUnavailable
 	}
 
 	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
@@ -308,14 +309,14 @@ func NewClaudeCodeBuildFixer(cfg LLMConfig, opts ...BuildFixerOption) (*ClaudeCo
 
 	model := cfg.Model
 	if model == "" {
-		model = DefaultClaudeCodeModel
+		model = llm.DefaultClaudeCodeModel
 	}
 
 	f := &ClaudeCodeBuildFixer{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
 		apiKey:       key,
-		bareMode:     resolveBare(cfg, key),
+		bareMode:     llm.ResolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
 		execCommand:  exec.CommandContext,
@@ -339,10 +340,10 @@ func NewClaudeCodeBuildFixer(cfg LLMConfig, opts ...BuildFixerOption) (*ClaudeCo
 // S051-R2.3). A pkgDir the rules cannot carry safely is an error, and nothing
 // is spawned (S051-R2.8).
 func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir, pkg string) ([]string, error) {
-	perms, err := agentPermissionArgs(agentPermissions{
-		agent: "build fixer",
-		dir:   pkgDir,
-		tools: buildFixAllowedTools,
+	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
+		Agent: "build fixer",
+		Dir:   pkgDir,
+		Tools: buildFixAllowedTools,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build fixer for %s: %w", pkg, err)
@@ -559,7 +560,7 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{})
+	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -567,7 +568,7 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 
 	runErr := cmd.Run()
 
-	var env claudeCodeEnvelope
+	var env llm.ClaudeCodeEnvelope
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 	stderrStr := strings.TrimSpace(stderr.String())
 

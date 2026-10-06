@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 import (
 	"encoding/json"
@@ -12,13 +12,19 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
-func TestOllamaExtractVersionSuccess(t *testing.T) {
+func TestOpenAIExtractVersionSuccess(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaResponse{Response: "1.2.3", Done: true})
+		json.NewEncoder(w).Encode(openAIResponse{
+			Choices: []openAIChoice{
+				{Message: openAIMessage{Role: "assistant", Content: "1.2.3"}},
+			},
+		})
 	}))
 	defer server.Close()
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,14 +39,22 @@ func TestOllamaExtractVersionSuccess(t *testing.T) {
 	}
 }
 
-func TestOllamaExtractVersionHTTP500(t *testing.T) {
+func TestOpenAIExtractVersionHTTP500(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ollamaErrorResponse{Error: "internal error"})
+		json.NewEncoder(w).Encode(openAIErrorResponse{
+			Error: struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    string `json:"code"`
+			}{Message: "server error", Type: "server_error", Code: "500"},
+		})
 	}))
 	defer server.Close()
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,14 +69,16 @@ func TestOllamaExtractVersionHTTP500(t *testing.T) {
 	}
 }
 
-func TestOllamaExtractVersionMalformedJSON(t *testing.T) {
+func TestOpenAIExtractVersionMalformedJSON(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("not-json{{{"))
 	}))
 	defer server.Close()
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,14 +88,11 @@ func TestOllamaExtractVersionMalformedJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if err.Error() == "" {
-		t.Error("expected non-empty error message")
-	}
-	// Should contain "failed to parse response"
-	found := false
 	msg := err.Error()
-	for i := 0; i <= len(msg)-len("failed to parse response"); i++ {
-		if msg[i:i+len("failed to parse response")] == "failed to parse response" {
+	found := false
+	needle := "failed to parse response"
+	for i := 0; i <= len(msg)-len(needle); i++ {
+		if msg[i:i+len(needle)] == needle {
 			found = true
 			break
 		}
@@ -89,20 +102,26 @@ func TestOllamaExtractVersionMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestOllamaExtractVersionContextCancellation(t *testing.T) {
+func TestOpenAIExtractVersionContextCancellation(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select { // held until the client gives up, or the test releases it
 		case <-r.Context().Done():
 		case <-release:
 		}
-		json.NewEncoder(w).Encode(ollamaResponse{Response: "1.2.3", Done: true})
+		json.NewEncoder(w).Encode(openAIResponse{
+			Choices: []openAIChoice{
+				{Message: openAIMessage{Role: "assistant", Content: "1.2.3"}},
+			},
+		})
 	}))
 	// Cleanups run last-in first-out: release the handler, then close the server.
 	t.Cleanup(server.Close)
 	t.Cleanup(func() { close(release) })
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,18 +132,20 @@ func TestOllamaExtractVersionContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrOllamaConnectionFailed) {
-		t.Errorf("expected ErrOllamaConnectionFailed, got: %v", err)
+	if !errors.Is(err, ErrLLMRequestFailed) {
+		t.Errorf("expected ErrLLMRequestFailed, got: %v", err)
 	}
 }
 
-func TestOllamaExtractVersionEmptyResponse(t *testing.T) {
+func TestOpenAIExtractVersionEmptyResponse(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaResponse{Response: "", Done: true})
+		json.NewEncoder(w).Encode(openAIResponse{Choices: []openAIChoice{}})
 	}))
 	defer server.Close()
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,12 +160,14 @@ func TestOllamaExtractVersionEmptyResponse(t *testing.T) {
 	}
 }
 
-// TestOllamaClient_WithCustomMaxBody verifies that WithMaxBodyBytes lowers the
-// Ollama response-body cap and that exceeding it surfaces ErrResponseTooLarge.
+// TestOpenAIClient_WithCustomMaxBody verifies that WithMaxBodyBytes lowers the
+// OpenAI response-body cap and that exceeding it surfaces ErrResponseTooLarge.
 // It also asserts the default (no option) equals httpx.MaxBodyBytes (R11.2).
-func TestOllamaClient_WithCustomMaxBody(t *testing.T) {
+func TestOpenAIClient_WithCustomMaxBody(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key")
+
 	// Default cap (no option) must equal httpx.MaxBodyBytes.
-	defaultClient, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	defaultClient, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +183,7 @@ func TestOllamaClient_WithCustomMaxBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewOllamaClient(LLMConfig{Model: "llama3"})
+	client, err := NewOpenAIClient(LLMConfig{APIKeyEnv: "OPENAI_TEST_KEY", Model: "gpt-4o-mini"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

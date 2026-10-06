@@ -1,15 +1,4 @@
-package autoupdate
-
-// Authored for story 051 (llm-agent-least-privilege), sub-tasks 1.1 and 1.2 —
-// the agent environment is a fixed allow-list (S051-R1.1..R1.8, S051-R9.2).
-//
-// Every assertion here reads the EXACT slice a spawner assigned to cmd.Env,
-// captured through the spawner's own exec seam. Nothing reads the first or the
-// last match of a name: a name that appears twice is itself a failure (R1.8), so
-// which duplicate os/exec would pick is never what makes a test pass.
-//
-// The file also holds the helpers the other story-051 test files share
-// (agentSeam, the argv readers, the hostile parent environment).
+package llm
 
 import (
 	"context"
@@ -23,8 +12,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
-	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -204,116 +191,151 @@ func assertCleanAgentEnv(t *testing.T, who string, cmd *exec.Cmd, portage bool) 
 }
 
 // ---------------------------------------------------------------------------
-// 1.2 — per-spawner wiring
+// 1.1 — the builder
 // ---------------------------------------------------------------------------
 
-// TestAgentEnv_ManifestFixerGetsPortageAndOneDistdir is R1.3 with its hostile
-// halves: PORTAGE_* crosses, the look-alikes PORTAGE and PORTAGEQ_BIN do not,
-// and an ambient DISTDIR is REPLACED — exactly one DISTDIR entry, whose value is
-// the request's DistDir, never the parent's.
-func TestAgentEnv_ManifestFixerGetsPortageAndOneDistdir(t *testing.T) {
-	setHostileParentEnv(t)
+// TestChildEnv_OnlyAllowListedNamesCross is R1.1/R1.2/R1.6, in both directions.
+// Collapse direction: look-alike names (PATH_EXTRA, TERM_PROGRAM, LANGUAGE,
+// LCX_*, XDGX_*, HTTP_PROXY_PASSWORD) and the named secrets stay out. Split
+// direction: names spelled differently but allowed (lowercase proxies, any
+// LC_*/XDG_*) come through, each with the parent's value. Third element: an
+// api_key_env whose name happens to sit inside the XDG_ prefix is still an auth
+// source and must not cross in non-bare mode.
+func TestChildEnv_OnlyAllowListedNamesCross(t *testing.T) {
+	home := setHostileParentEnv(t)
+	allowed := map[string]string{
+		"LANG":                "C.UTF-8",
+		"TERM":                "xterm-051",
+		"CLAUDE_CONFIG_DIR":   "/cfg/claude051",
+		"NODE_EXTRA_CA_CERTS": "/etc/ssl/ca051.pem",
+		"SSL_CERT_FILE":       "/etc/ssl/cert051.pem",
+		"HTTP_PROXY":          "http://proxy051:3128",
+		"HTTPS_PROXY":         "http://proxy051:3129",
+		"NO_PROXY":            "localhost051",
+		"http_proxy":          "http://lower051:3128",
+		"https_proxy":         "http://lower051:3129",
+		"no_proxy":            "lower-localhost051",
+		"LC_ALL":              "C.UTF-8",
+		"LC_TIME":             "en_DK.UTF-8",
+		"XDG_RUNTIME_DIR":     "/run/user/051",
+	}
+	for k, v := range allowed {
+		t.Setenv(k, v)
+	}
+	allowed["HOME"] = home
+	allowed["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
+	allowed["PATH"] = os.Getenv("PATH")
+
+	const keyEnv = "XDG_BENTOO051_KEY"
+	t.Setenv(keyEnv, "sentinel-key-under-xdg-prefix")
+	t.Setenv("ANTHROPIC_API_KEY", "sentinel-ambient-key")
+
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
-	req := sampleFixRequest(t)
-	if _, err := f.FixManifest(context.Background(), req); err != nil {
-		t.Fatalf("FixManifest: %v", err)
+	c := newTestClient(t, LLMConfig{Bare: "false", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	env := spy.last().Env
+	assertCleanAgentEnv(t, "text client", spy.last(), false)
+	for name, want := range allowed {
+		got := envValuesOf(env, name)
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("%s = %q in the agent environment, want exactly [%q] (R1.1)", name, got, want)
+		}
+	}
+	if v := envValuesOf(env, keyEnv); len(v) != 0 {
+		t.Errorf("the api_key_env name %s crossed in non-bare mode although it is an auth source (R1.6)", keyEnv)
+	}
+	if v := envValuesOf(env, "ANTHROPIC_AUTH_TOKEN"); len(v) != 0 {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN crossed in non-bare mode (R1.6)")
+	}
+}
+
+// TestChildEnv_AmbientKeyYieldsOneResolvedEntry is the G1 hermeticity defect,
+// proved: an ANTHROPIC_API_KEY in the caller's environment must neither survive
+// nor duplicate the resolved key. Exactly ONE entry, holding the resolved key.
+// The converse: bare mode with nothing resolved carries NO key at all — the
+// ambient one does not slip in to fill the gap.
+func TestChildEnv_AmbientKeyYieldsOneResolvedEntry(t *testing.T) {
+	setHostileParentEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-x")
+	const keyEnv = "BENTOO051_RESOLVED_KEY"
+	t.Setenv(keyEnv, "resolved-secret")
+
+	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
+	c := newTestClient(t, LLMConfig{Bare: "auto", APIKeyEnv: keyEnv}, WithClaudeCodeExecCommand(seam))
+	if !c.bareMode {
+		t.Fatal("precondition: a resolved key with api_key_env set must select bare mode")
+	}
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	env := spy.last().Env
+	assertNoDuplicateNames(t, "bare text client", env)
+	if got := envValuesOf(env, "ANTHROPIC_API_KEY"); len(got) != 1 || got[0] != "resolved-secret" {
+		t.Errorf("ANTHROPIC_API_KEY entries = %q, want exactly [\"resolved-secret\"] (R1.5)", got)
+	}
+	if got := envValuesOf(env, keyEnv); len(got) != 0 {
+		t.Errorf("the api_key_env variable %s crossed into the agent environment (R1.2)", keyEnv)
+	}
+
+	// Converse: bare forced on, no key resolved.
+	seam2, spy2 := agentSeam(printEnvelopeScript(okEnvelope))
+	c2 := newTestClient(t, LLMConfig{Bare: "true"}, WithClaudeCodeExecCommand(seam2))
+	if _, err := c2.run(t.Context(), "instr", []byte("content"), ""); err != nil {
+		t.Fatalf("run (bare, no key): %v", err)
+	}
+	if got := envValuesOf(spy2.last().Env, "ANTHROPIC_API_KEY"); len(got) != 0 {
+		t.Errorf("bare mode with no resolved key carries ANTHROPIC_API_KEY=%q; the ambient key must never cross (R1.2)", got)
+	}
+}
+
+// TestChildEnv_NeverNil is R1.7: a parent holding NO allow-listed variable —
+// only secrets — still yields an assigned, empty environment, never nil (nil
+// would make the child inherit everything).
+func TestChildEnv_NeverNil(t *testing.T) {
+	stubLookPathFound(t)
+	for _, kv := range os.Environ() {
+		name, value, _ := strings.Cut(kv, "=")
+		if name == "" {
+			continue
+		}
+		t.Setenv(name, value) // restores the original on cleanup
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatalf("unsetting %s: %v", name, err)
+		}
+	}
+	t.Setenv("GITHUB_TOKEN", "sentinel-github")
+	t.Setenv("BENTOO_NTFY_TOKEN", "sentinel-ntfy")
+
+	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
+	c, err := NewClaudeCodeClient(LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
+	if err != nil {
+		t.Fatalf("NewClaudeCodeClient: %v", err)
+	}
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
+		t.Fatalf("run: %v", err)
 	}
 	cmd := spy.last()
-	assertCleanAgentEnv(t, "manifest fixer", cmd, true)
-	if got := envValuesOf(cmd.Env, "DISTDIR"); len(got) != 1 || got[0] != req.DistDir {
-		t.Errorf("DISTDIR entries = %q, want exactly [%q] (R1.3)", got, req.DistDir)
+	if cmd.Env == nil {
+		t.Fatal("cmd.Env is nil; the child inherits the parent environment verbatim (R1.7)")
 	}
-	if got := envValuesOf(cmd.Env, "PORTAGE_TMPDIR"); len(got) != 1 || got[0] != "/var/tmp/portage051" {
-		t.Errorf("PORTAGE_TMPDIR entries = %q, want the parent's value once (R1.3)", got)
+	if len(cmd.Env) != 0 {
+		t.Errorf("cmd.Env = %q, want empty: the parent held no allow-listed variable (R1.2, R1.7)", cmd.Env)
 	}
 }
 
-// TestAgentEnv_RegistryFixerCarriesNoSecret is R1.2/R1.4 for the registry fixer.
-func TestAgentEnv_RegistryFixerCarriesNoSecret(t *testing.T) {
+// TestAgentEnv_TextClientCarriesNoSecret is R1.2/R1.4 for the text-only client.
+func TestAgentEnv_TextClientCarriesNoSecret(t *testing.T) {
 	setHostileParentEnv(t)
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	stubLookPathFound(t)
-	f, err := NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam))
-	if err != nil {
-		t.Fatalf("NewClaudeCodeRegistryFixer: %v", err)
+	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
+	if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
+		t.Fatalf("run: %v", err)
 	}
-	if _, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t)); err != nil {
-		t.Fatalf("FixRegistry: %v", err)
-	}
-	assertCleanAgentEnv(t, "registry fixer", spy.last(), false)
+	assertCleanAgentEnv(t, "text client", spy.last(), false)
 }
-
-// sampleBuildFixRequest builds a request over a real staged tree, so the child
-// (which starts in the staged package directory) can start.
-func sampleBuildFixRequest(t *testing.T) BuildFixRequest {
-	t.Helper()
-	root := t.TempDir()
-	pkgDir := filepath.Join(root, "media-libs", "foo")
-	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-		t.Fatalf("creating staged package dir: %v", err)
-	}
-	ebuild := filepath.Join(pkgDir, "foo-1.2.ebuild")
-	if err := os.WriteFile(ebuild, []byte("EAPI=8\n"), 0o644); err != nil {
-		t.Fatalf("writing staged ebuild: %v", err)
-	}
-	return BuildFixRequest{
-		Package:    "media-libs/foo",
-		Version:    "1.2",
-		Gate:       validate.GateCompile,
-		StagedDir:  root,
-		EbuildPath: ebuild,
-		BuildLog:   "error: foo.h: No such file or directory",
-		Attempt:    1,
-	}
-}
-
-// TestAgentEnv_BuildFixerCarriesNoSecret is R1.2/R1.4 for the build fixer.
-func TestAgentEnv_BuildFixerCarriesNoSecret(t *testing.T) {
-	setHostileParentEnv(t)
-	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	stubLookPathFound(t)
-	f, err := NewClaudeCodeBuildFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithBuildFixerExecCommand(seam))
-	if err != nil {
-		t.Fatalf("NewClaudeCodeBuildFixer: %v", err)
-	}
-	if _, err := f.FixBuild(context.Background(), sampleBuildFixRequest(t)); err != nil {
-		t.Fatalf("FixBuild: %v", err)
-	}
-	assertCleanAgentEnv(t, "build fixer", spy.last(), false)
-}
-
-// reviewEnvelope is a successful reviewer envelope carrying an empty review.
-const reviewEnvelope = `{"type":"result","subtype":"success","is_error":false,"result":"{\"risks\":[]}"}`
-
-// sampleBumpReviewRequest carries a prepared diff, so no archive is read.
-func sampleBumpReviewRequest() BumpReviewRequest {
-	return BumpReviewRequest{
-		Package:       "media-plugins/gst-plugins-qt6",
-		OldVersion:    "1.28.6",
-		NewVersion:    "1.29.2",
-		BuildFileDiff: "-option('aalib')\n+option('vulkan')\n",
-	}
-}
-
-// TestAgentEnv_BumpReviewerCarriesNoSecret is R1.2/R1.4 for the bump reviewer.
-func TestAgentEnv_BumpReviewerCarriesNoSecret(t *testing.T) {
-	setHostileParentEnv(t)
-	seam, spy := agentSeam(printEnvelopeScript(reviewEnvelope))
-	stubLookPathFound(t)
-	r, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithBumpReviewerExecCommand(seam))
-	if err != nil {
-		t.Fatalf("NewClaudeCodeBumpReviewer: %v", err)
-	}
-	if _, err := r.ReviewBump(context.Background(), sampleBumpReviewRequest()); err != nil {
-		t.Fatalf("ReviewBump: %v", err)
-	}
-	assertCleanAgentEnv(t, "bump reviewer", spy.last(), false)
-}
-
-// ---------------------------------------------------------------------------
-// argv readers shared by the story-051 permission tests
-// ---------------------------------------------------------------------------
 
 // flagValues returns every value given to flag: for each occurrence, the
 // elements that follow it up to the next element starting with "-". It reads a
@@ -490,9 +512,6 @@ func assertPinnedPermissions(t *testing.T, who string, args []string, holdsEdit 
 		t.Errorf("%s: the invocation bypasses permissions", who)
 	}
 }
-
-// shellWord matches a usable-command mention of curl, wget, cat or ls (R3.8).
-var shellWord = regexp.MustCompile(`\b(curl|wget|cat|ls)\b`)
 
 // isolateSecretsPaths points HOME and XDG_CONFIG_HOME at a private directory so
 // secrets.Paths() is deterministic and never names the operator's files.

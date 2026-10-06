@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 // Authored for story 051 (llm-agent-least-privilege), sub-task 5.3 — a
 // regression guard, GREEN today (S051-R5.3).

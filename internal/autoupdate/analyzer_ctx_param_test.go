@@ -16,6 +16,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
@@ -111,9 +112,9 @@ func (l *analyzerCtx059LLM) ExtractVersion(ctx context.Context, content []byte, 
 	return "2.0.0", nil
 }
 
-func (l *analyzerCtx059LLM) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (l *analyzerCtx059LLM) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*llm.SchemaAnalysis, error) {
 	l.record(ctx)
-	return &SchemaAnalysis{ParserType: "json", Path: "version", Confidence: 0.9}, nil
+	return &llm.SchemaAnalysis{ParserType: "json", Path: "version", Confidence: 0.9}, nil
 }
 
 func (l *analyzerCtx059LLM) GetModel() string { return "ctx059" }

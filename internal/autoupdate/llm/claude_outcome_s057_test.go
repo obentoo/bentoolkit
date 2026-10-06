@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 // Authored for story 057, sub-task 2.1 — R2.9, R6.6.
 //

@@ -20,6 +20,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
@@ -140,7 +141,7 @@ type Analyzer struct {
 	// config holds the packages configuration
 	config *registry.PackagesConfig
 	// llmClient handles LLM-based analysis
-	llmClient LLMProvider
+	llmClient llm.LLMProvider
 	// httpClient handles HTTP requests with retry logic
 	httpClient *fetch.RetryableHTTPClient
 	// cache manages LLM analysis caching
@@ -187,7 +188,7 @@ func WithAnalyzerLogger(l *slog.Logger) AnalyzerOption {
 type AnalyzerOption func(*Analyzer) error
 
 // WithAnalyzerLLMClient sets a custom LLM client for the analyzer.
-func WithAnalyzerLLMClient(llm LLMProvider) AnalyzerOption {
+func WithAnalyzerLLMClient(llm llm.LLMProvider) AnalyzerOption {
 	return func(a *Analyzer) error {
 		a.llmClient = llm
 		return nil
@@ -547,7 +548,7 @@ func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *ebu
 }
 
 // schemaFromAnalysis converts LLM analysis to PackageConfig.
-func (a *Analyzer) schemaFromAnalysis(analysis *SchemaAnalysis, source *DataSource) (*registry.PackageConfig, error) {
+func (a *Analyzer) schemaFromAnalysis(analysis *llm.SchemaAnalysis, source *DataSource) (*registry.PackageConfig, error) {
 	schema := &registry.PackageConfig{
 		URL:    source.URL,
 		Parser: analysis.ParserType,

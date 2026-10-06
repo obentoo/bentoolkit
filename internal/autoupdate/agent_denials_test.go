@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // deniedFailureEnvelope is an is_error envelope listing four refusals: a Read
@@ -44,7 +46,7 @@ func runDeniedFixers(t *testing.T, script string) map[string]struct {
 	}{}
 
 	seam, spy := agentSeam(script)
-	mf := newTestFixer(t, LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
+	mf := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
 	_, err := mf.FixManifest(context.Background(), sampleFixRequest(t))
 	out["manifest fixer"] = struct {
 		err    error
@@ -52,7 +54,7 @@ func runDeniedFixers(t *testing.T, script string) map[string]struct {
 	}{err, spy.spawns()}
 
 	seam, spy = agentSeam(script)
-	rf, cerr := NewClaudeCodeRegistryFixer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam))
+	rf, cerr := NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam))
 	if cerr != nil {
 		t.Fatalf("NewClaudeCodeRegistryFixer: %v", cerr)
 	}
@@ -63,7 +65,7 @@ func runDeniedFixers(t *testing.T, script string) map[string]struct {
 	}{err, spy.spawns()}
 
 	seam, spy = agentSeam(script)
-	bf, cerr := NewClaudeCodeBuildFixer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithBuildFixerExecCommand(seam))
+	bf, cerr := NewClaudeCodeBuildFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithBuildFixerExecCommand(seam))
 	if cerr != nil {
 		t.Fatalf("NewClaudeCodeBuildFixer: %v", cerr)
 	}
@@ -142,7 +144,7 @@ func TestApplyManifestFix_RecheckFailureNamesRefusedTools(t *testing.T) {
 		pending.Add(PendingUpdate{Package: pkg, CurrentVersion: oldVersion, NewVersion: newVersion, Status: StatusPending})
 
 		seam, spy := agentSeam(printEnvelopeScript(envelope))
-		fixer := newTestFixer(t, LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
+		fixer := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
 		applier, err := NewApplier(overlayDir, configDir,
 			WithApplierPendingList(pending),
 			WithExecCommand(pkgdevFailsPrinting("SRC_URI is unreachable: 404 Not Found")),

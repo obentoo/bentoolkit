@@ -18,12 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // newTestRegistryFixer constructs a ClaudeCodeRegistryFixer with lookPath stubbed
 // to "find" claude and the given options applied (mirrors newTestFixer).
-func newTestRegistryFixer(t *testing.T, cfg LLMConfig, opts ...RegistryFixerOption) *ClaudeCodeRegistryFixer {
+func newTestRegistryFixer(t *testing.T, cfg llm.LLMConfig, opts ...RegistryFixerOption) *ClaudeCodeRegistryFixer {
 	t.Helper()
 	stubLookPathFound(t)
 	f, err := NewClaudeCodeRegistryFixer(cfg, opts...)
@@ -49,7 +50,7 @@ func sampleRegistryFixRequest(t *testing.T) RegistryFixRequest {
 // TestNewClaudeCodeRegistryFixer_Defaults pins R1.2/R9.3: a constructed fixer has
 // a non-nil exec seam and defaults its timeout to DefaultManifestFixTimeout.
 func TestNewClaudeCodeRegistryFixer_Defaults(t *testing.T) {
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"})
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"})
 	if f.execCommand == nil {
 		t.Error("expected execCommand to default to a non-nil factory")
 	}
@@ -65,7 +66,7 @@ func TestNewClaudeCodeRegistryFixer_UnavailableCLI(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { lookPath = orig })
 
-	if _, err := NewClaudeCodeRegistryFixer(LLMConfig{Provider: "claude-code"}); err == nil {
+	if _, err := NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code"}); err == nil {
 		t.Fatal("expected ErrClaudeCodeUnavailable when claude CLI is absent")
 	}
 }
@@ -73,7 +74,7 @@ func TestNewClaudeCodeRegistryFixer_UnavailableCLI(t *testing.T) {
 // TestWithRegistryFixerTimeout pins R9.3: WithRegistryFixerTimeout overrides the
 // default per-fix timeout.
 func TestWithRegistryFixerTimeout(t *testing.T) {
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"}, WithRegistryFixerTimeout(42*time.Second))
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithRegistryFixerTimeout(42*time.Second))
 	if f.timeout != 42*time.Second {
 		t.Errorf("expected overridden timeout 42s, got %v", f.timeout)
 	}
@@ -87,7 +88,7 @@ func TestFixRegistry_ScopedArgvAndCwd(t *testing.T) {
 	envelope := `{"type":"result","is_error":false,"result":"fixed the html pattern","total_cost_usd":0.03}`
 	factory, cap, last := fixerSeam("printf '%s' '" + envelope + "'")
 
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
 
 	req := sampleRegistryFixRequest(t)
 	res, err := f.FixRegistry(context.Background(), req)
@@ -155,7 +156,7 @@ func TestFixRegistry_ScopedArgvAndCwd(t *testing.T) {
 // page content.
 func TestFixRegistry_InstructionCarriesContext(t *testing.T) {
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
 
 	req := sampleRegistryFixRequest(t)
 	if _, err := f.FixRegistry(context.Background(), req); err != nil {
@@ -181,7 +182,7 @@ func TestFixRegistry_BareModeKeyNeverInArgv(t *testing.T) {
 	t.Setenv(keyEnv, secret)
 
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
 		WithRegistryFixerExecCommand(factory))
 
 	if _, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t)); err != nil {
@@ -205,7 +206,7 @@ func TestFixRegistry_ErrorEnvelope(t *testing.T) {
 	t.Setenv(keyEnv, secret)
 
 	factory, _, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":true,"subtype":"max_turns","errors":["ran out of turns"]}'`)
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
 		WithRegistryFixerExecCommand(factory))
 
 	_, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t))
@@ -223,7 +224,7 @@ func TestFixRegistry_ErrorEnvelope(t *testing.T) {
 // TestFixRegistry_NonZeroExit pins R1.4: a non-zero CLI exit yields an error.
 func TestFixRegistry_NonZeroExit(t *testing.T) {
 	factory, _, _ := fixerSeam("echo boom 1>&2; exit 3")
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
 
 	if _, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t)); err == nil {
 		t.Fatal("expected an error for a non-zero CLI exit")
@@ -233,7 +234,7 @@ func TestFixRegistry_NonZeroExit(t *testing.T) {
 // TestFixRegistry_BudgetFlag pins R9.2: a positive MaxBudgetUSD is forwarded.
 func TestFixRegistry_BudgetFlag(t *testing.T) {
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code", MaxBudgetUSD: 1.5},
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code", MaxBudgetUSD: 1.5},
 		WithRegistryFixerExecCommand(factory))
 
 	if _, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t)); err != nil {
@@ -250,7 +251,7 @@ func TestFixRegistry_BudgetFlag(t *testing.T) {
 // structural fix over llm_prompt.
 func TestRegistryFixGuidance_UntrustedAndScoped(t *testing.T) {
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
+	f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithRegistryFixerExecCommand(factory))
 
 	if _, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t)); err != nil {
 		t.Fatalf("FixRegistry: %v", err)

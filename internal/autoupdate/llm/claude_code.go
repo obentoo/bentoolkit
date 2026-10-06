@@ -1,5 +1,5 @@
-// Package autoupdate provides LLM integration for version extraction and schema analysis.
-//
+package llm
+
 // claude_code.go implements ClaudeCodeClient, an LLMProvider backed by the local
 // `claude` CLI (Claude Code) rather than the Anthropic HTTP API. It shells out to
 // the CLI, piping page content on stdin and passing only a static instruction via
@@ -8,7 +8,6 @@
 // CLI in --bare mode and injects the key solely through the child process
 // environment; otherwise it relies on the CLI's own logged-in session. The API
 // key value never appears in argv, logs, or returned errors (S003-R2.4, G5).
-package autoupdate
 
 import (
 	"bytes"
@@ -186,7 +185,7 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 	}
 }
 
-// resolveBare resolves the tri-state Bare config into a concrete bareMode
+// ResolveBare resolves the tri-state Bare config into a concrete bareMode
 // decision (S003-R2.1, S003-R2.2, S003-R2.3).
 //
 //   - "true"  → always bare (caller must ensure auth is available).
@@ -199,7 +198,7 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 //     non-empty. The key is resolved ONCE by the caller (via secrets.Lookup) and
 //     handed in, so this decision no longer reads the environment itself — a key
 //     that lives only in a secrets file still selects bare.
-func resolveBare(cfg LLMConfig, key string) bool {
+func ResolveBare(cfg LLMConfig, key string) bool {
 	switch cfg.Bare {
 	case "true":
 		return true
@@ -231,23 +230,23 @@ var agentEnvAllowed = map[string]struct{}{
 // trailing underscore is part of the prefix, so LCX_* and XDGX_* stay out.
 var agentEnvAllowedPrefixes = []string{"LC_", "XDG_"}
 
-// agentEnvExtra carries what one spawner adds to the shared allow-list. Only the
+// AgentEnvExtra carries what one spawner adds to the shared allow-list. Only the
 // manifest fixer sets it: it runs `pkgdev manifest`, which reads PORTAGE_* and
 // needs the one DISTDIR the applier computed (S051-R1.3). The zero value is what
 // every other agent gets — no PORTAGE_* and no DISTDIR at all (S051-R1.4).
-type agentEnvExtra struct {
-	// portage admits the parent's PORTAGE_* variables.
-	portage bool
-	// distDir, when non-empty, is emitted as the ONLY DISTDIR entry; a parent
+type AgentEnvExtra struct {
+	// Portage admits the parent's PORTAGE_* variables.
+	Portage bool
+	// DistDir, when non-empty, is emitted as the ONLY DISTDIR entry; a parent
 	// DISTDIR is never admitted beside it, for the reason `buildEnvAllowed` in
 	// validate/build.go gives: two assignments leave the choice to os/exec's
 	// duplicate-key order, which is a decision nobody made.
-	distDir string
+	DistDir string
 }
 
 // agentEnvAllows reports whether the parent variable name may cross into an
 // agent's environment under extra.
-func agentEnvAllows(name string, extra agentEnvExtra) bool {
+func agentEnvAllows(name string, extra AgentEnvExtra) bool {
 	if _, ok := agentEnvAllowed[name]; ok {
 		return true
 	}
@@ -256,10 +255,10 @@ func agentEnvAllows(name string, extra agentEnvExtra) bool {
 			return true
 		}
 	}
-	return extra.portage && strings.HasPrefix(name, "PORTAGE_")
+	return extra.Portage && strings.HasPrefix(name, "PORTAGE_")
 }
 
-// childEnv builds the environment for a spawned `claude` process: the parent's
+// ChildEnv builds the environment for a spawned `claude` process: the parent's
 // allow-listed variables (agentEnvAllowed, agentEnvAllowedPrefixes, plus what
 // extra admits) and nothing else (S051-R1.1, S051-R1.2).
 //
@@ -279,7 +278,7 @@ func agentEnvAllows(name string, extra agentEnvExtra) bool {
 // It always returns a non-nil slice, empty when the parent holds no allowed
 // variable, so callers assign cmd.Env unconditionally: a nil cmd.Env would make
 // the child inherit the parent environment verbatim (S051-R1.7).
-func childEnv(bareMode bool, apiKeyEnv, key string, extra agentEnvExtra) []string {
+func ChildEnv(bareMode bool, apiKeyEnv, key string, extra AgentEnvExtra) []string {
 	parent := os.Environ()
 	env := make([]string, 0, len(agentEnvAllowed)+2)
 	seen := make(map[string]struct{}, len(agentEnvAllowed))
@@ -297,8 +296,8 @@ func childEnv(bareMode bool, apiKeyEnv, key string, extra agentEnvExtra) []strin
 		seen[name] = struct{}{}
 		env = append(env, kv)
 	}
-	if extra.distDir != "" {
-		env = append(env, "DISTDIR="+extra.distDir)
+	if extra.DistDir != "" {
+		env = append(env, "DISTDIR="+extra.DistDir)
 	}
 	if bareMode && key != "" {
 		env = append(env, "ANTHROPIC_API_KEY="+key)
@@ -356,7 +355,7 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
 		apiKey:       key,
-		bareMode:     resolveBare(cfg, key),
+		bareMode:     ResolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultClaudeCodeTimeout,
 		execCommand:  exec.CommandContext,
@@ -376,7 +375,7 @@ func (c *ClaudeCodeClient) GetModel() string {
 	return c.model
 }
 
-// claudeCodeEnvelope is the JSON envelope emitted by `claude --output-format json`.
+// ClaudeCodeEnvelope is the JSON envelope emitted by `claude --output-format json`.
 // Only the fields the provider consumes are modeled.
 //
 // PermissionDenials lists every tool call the CLI refused, on a failed AND on a
@@ -384,25 +383,25 @@ func (c *ClaudeCodeClient) GetModel() string {
 // `"permission_denials":[{"tool_name":"Read","tool_use_id":"toolu_…",
 // "tool_input":{"file_path":"…"}}]`, with `{"command":…}` as a Bash call's
 // input and `{"url":…,"prompt":…}` as a WebFetch call's (S051-R5.1).
-type claudeCodeEnvelope struct {
+type ClaudeCodeEnvelope struct {
 	Type              string                   `json:"type"`
 	Subtype           string                   `json:"subtype"`
 	IsError           bool                     `json:"is_error"`
 	Result            string                   `json:"result"`
 	Errors            []string                 `json:"errors"`
 	TotalCostUSD      float64                  `json:"total_cost_usd"`
-	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+	PermissionDenials []ClaudePermissionDenial `json:"permission_denials"`
 }
 
-// claudePermissionDenial is one refused tool call in the envelope.
+// ClaudePermissionDenial is one refused tool call in the envelope.
 // ToolInput is kept raw on purpose: it is read for a WebFetch host and nothing
 // else, because the full input can echo page content or a secrets path.
-type claudePermissionDenial struct {
+type ClaudePermissionDenial struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 }
 
-// refusedToolLabels names each refused tool once, in the order the CLI refused
+// RefusedToolLabels names each refused tool once, in the order the CLI refused
 // them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
 // — so two refusals of one tool to different hosts stay distinguishable
 // (S051-R5.1). The host is taken from the call's url only when it has the SHAPE
@@ -413,7 +412,7 @@ type claudePermissionDenial struct {
 // refused fetch to 169.254.169.254 is exactly the host the operator needs to
 // see (S051-R5.4). No other part of the input is ever read, so a label can
 // never carry a URL path or query, a fetch prompt or a shell command.
-func refusedToolLabels(denials []claudePermissionDenial) []string {
+func RefusedToolLabels(denials []ClaudePermissionDenial) []string {
 	var labels []string
 	seen := make(map[string]struct{}, len(denials))
 	for _, d := range denials {
@@ -547,7 +546,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// (only via env, never argv/logs — S003-R2.1, S003-R2.4, G5); non-bare scrubs any
 	// inherited API key so the CLI uses its logged-in session.
-	cmd.Env = childEnv(c.bareMode, c.apiKeyEnv, c.apiKey, agentEnvExtra{})
+	cmd.Env = ChildEnv(c.bareMode, c.apiKeyEnv, c.apiKey, AgentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -583,7 +582,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	// is the shape of defect lifting the classifier out removed in the first
 	// place (S048-R1.3). Both errors nil is claudeRanToCompletion — the success
 	// case — so this names every ending, not only the bad ones.
-	outcome := classifyClaudeFailure(ctxErr, runErr)
+	outcome := ClassifyClaudeFailure(ctxErr, runErr)
 
 	// EVERY outcome is recorded, and `defer` is what makes "every" a fact rather
 	// than a claim. run has ten exits below this point — the failure switch's,
@@ -614,7 +613,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 
 	// Attempt to parse the envelope regardless of exit code: a non-zero exit
 	// often still carries a structured error envelope on stdout.
-	var env claudeCodeEnvelope
+	var env ClaudeCodeEnvelope
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 
 	// Surface the CLI's own stderr in error messages, trimmed. It must never
@@ -628,7 +627,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 		// are this client's own, because a review told "claude fixer aborted"
 		// would be told about an operation it never ran (S048-R1.3).
 		switch outcome {
-		case claudeCutShort:
+		case ClaudeCutShort:
 			// WHOSE clock ran out decides what may be claimed. A parent that is
 			// already done ended this run from OUTSIDE — cancelled, or out of a
 			// budget of its own — and this client's budget is then not what
@@ -658,7 +657,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 				endedBy = ctxErr
 			}
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI was stopped before it answered: %w", ErrLLMRequestFailed, endedBy), ErrClaudeStopped)
-		case claudeCouldNotStart:
+		case ClaudeCouldNotStart:
 			// S048-R1.2, S040-R5.6: the process never reached its first
 			// instruction, so there is no exit status to frame it with and none
 			// may be implied. The remedy is on the host — a missing binary, an
@@ -871,4 +870,97 @@ func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, m
 		return nil, fmt.Errorf("claude-code schema analysis could not be parsed (structured: %v; fallback parse: %w)", err, parseErr) //nolint:errorlint // secondary error is context: the structured attempt's failure is superseded by the fallback's, which is the cause
 	}
 	return analysis, nil
+}
+
+// couldNotStart reports whether runErr is a failure to START the fixer process:
+// a non-nil run error carrying no *exec.ExitError. An ExitError exists only
+// once the process ran to an exit status; everything else — a working directory
+// that does not exist, an unrunnable binary — happened before the child's first
+// instruction, so there is no exit code to speak of (S040-R5.6).
+func couldNotStart(runErr error) bool {
+	var exitErr *exec.ExitError
+	return runErr != nil && !errors.As(runErr, &exitErr)
+}
+
+// claudeFailure names WHICH of the ways a `claude` invocation can end badly
+// happened, as a value rather than as a sentence.
+//
+// Two call sites need the same ORDER — a context error outranks any exit-code
+// framing — but must not share the same WORDS. The fixers say "claude fixer
+// aborted"; a review that said that would name the wrong operation, which is
+// the very defect S048 exists to remove. So the answer travels as an outcome
+// and each caller supplies the noun for its own operation (S048-R1.3).
+type claudeFailure int
+
+const (
+	// claudeRanToCompletion is the zero value on purpose, and that ordering is
+	// load-bearing. classifyClaudeFailure is total over its two inputs, and both
+	// nil means the process ran and exited zero — whatever went wrong afterwards
+	// (a self-reported error envelope, stdout that did not parse) is not an
+	// invocation failure and has no exit code. Were this position held by
+	// claudeExitedNonZero instead, a caller that forgot to classify would print
+	// "exit " plus whatever a nil error renders as, promising a number and
+	// delivering a sentence.
+	claudeRanToCompletion claudeFailure = iota
+	// ClaudeCutShort — the run was ended by its context: the caller's own budget
+	// elapsed (DeadlineExceeded) or a parent was cancelled (Canceled). Both land
+	// here because they answer the operator the same way — nothing is wrong with
+	// the host or the binary — while a caller that wants to name them apart is
+	// still free to, from the ctxErr it already holds.
+	ClaudeCutShort
+	// ClaudeCouldNotStart — the process never reached its first instruction, so
+	// there is no exit code to speak of and none may be printed (S040-R5.6).
+	ClaudeCouldNotStart
+	// ClaudeExitedNonZero — the process ran and exited with a status. This is the
+	// only outcome for which an exit code exists.
+	ClaudeExitedNonZero
+)
+
+// String renders an outcome as a readable name, in the kebab-case this package's
+// other kinds already use.
+//
+// Its only reader is a diagnostic: the guard that keeps the three outcomes apart
+// prints the value it got when two of them collapse, and "2" does not tell a
+// maintainer WHICH two. The default arm names the type and the number, so an
+// outcome added without a case here is visible rather than silently blank.
+func (f claudeFailure) String() string {
+	switch f {
+	case claudeRanToCompletion:
+		return "ran-to-completion"
+	case ClaudeCutShort:
+		return "cut-short"
+	case ClaudeCouldNotStart:
+		return "could-not-start"
+	case ClaudeExitedNonZero:
+		return "exited-non-zero"
+	default:
+		return fmt.Sprintf("claudeFailure(%d)", int(f))
+	}
+}
+
+// ClassifyClaudeFailure answers which of the three failures a finished `claude`
+// invocation suffered, in the precedence order this package has always applied
+// but had only ever expressed inside one message switch. Lifting it out is what
+// lets a second call site inherit the order instead of restating it, so the two
+// cannot drift apart (S048-R1.2, S048-R1.3). couldNotStart is reused verbatim,
+// so the "no *exec.ExitError means it never started" test exists exactly once.
+//
+// THE CONTEXT ERROR WINS THE COLLISION, and the collision is not hypothetical:
+// when the deadline elapses before Start, exec.CommandContext returns the
+// context error itself, so no *exec.ExitError is present and couldNotStart is
+// true at the same moment ctxErr is non-nil. A process this program's own budget
+// killed before it ran is a deadline. Reporting it as an unstartable binary
+// sends the operator to check a PATH that is fine, when the remedy is a number
+// in a config file.
+func ClassifyClaudeFailure(ctxErr, runErr error) claudeFailure {
+	switch {
+	case ctxErr != nil:
+		return ClaudeCutShort
+	case couldNotStart(runErr):
+		return ClaudeCouldNotStart
+	case runErr != nil:
+		return ClaudeExitedNonZero
+	default:
+		return claudeRanToCompletion
+	}
 }

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
@@ -223,7 +223,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 	t.Run("an absent claude CLI yields no reviewer and no error", func(t *testing.T) {
 		td := defaultDeps()
 		log, warnings := captureCompareReviewWarnings()
-		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
+		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, llm.ErrClaudeCodeUnavailable })
 
 		reviewer, err := newDivergenceReviewer(log, cmdReviewBudget, td)
 		if err != nil {
@@ -239,7 +239,7 @@ func TestNewDivergenceReviewer(t *testing.T) {
 
 	t.Run("the nil it returns is a nil INTERFACE, not a boxed nil pointer", func(t *testing.T) {
 		td := defaultDeps()
-		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, autoupdate.ErrClaudeCodeUnavailable })
+		stubClaudeAsker(td, func() (claudeAsker, error) { return nil, llm.ErrClaudeCodeUnavailable })
 
 		reviewer, _ := newDivergenceReviewer(discardLog(), cmdReviewBudget, td)
 		// `reviewer != nil` above is already this assertion; reflect states it

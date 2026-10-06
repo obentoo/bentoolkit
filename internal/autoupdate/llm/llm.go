@@ -1,5 +1,4 @@
-// Package autoupdate provides LLM integration for version extraction and schema analysis.
-package autoupdate
+package llm
 
 import (
 	"bytes"
@@ -15,10 +14,14 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
-	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
+
+// defaultHTTPTimeout bounds one request of the HTTP-based LLM clients. It has
+// the value fetch.DefaultHTTPTimeout had when the clients shared it; llm keeps
+// its own copy so it never imports the fetch package (story 061).
+const defaultHTTPTimeout = 30 * time.Second
 
 const (
 	// DefaultClaudeModel is the default Claude model used when none is specified.
@@ -113,7 +116,7 @@ func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(nil, body, limit))
 	if err != nil {
-		return nil, fetch.ClassifyBodyReadError(err)
+		return nil, httpx.ClassifyBodyReadError(err)
 	}
 	return data, nil
 }

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -108,89 +109,6 @@ func assertPrivateDirRun(t *testing.T, who, capture string, cmdDir string) {
 }
 
 // ---------------------------------------------------------------------------
-// 3.1 — the text-only client
-// ---------------------------------------------------------------------------
-
-// TestRun_RunsInAPrivateDirectoryItRemoves is R2.1, R2.9 and R3.7 for the
-// text-only client, in four parts: the tool-free argv; a fresh 0700 directory
-// per invocation (two calls never share one) that is gone afterwards; a
-// directory that cannot be created is an error naming it and wrapping the
-// cause; a directory that cannot be removed is one warning naming it.
-func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
-	isolateSecretsPaths(t)
-
-	var dirs []string
-	for i := 0; i < 2; i++ {
-		capture := filepath.Join(t.TempDir(), "child.txt")
-		seam, spy := agentSeam(privateDirScript(capture, okEnvelope))
-		c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-		if _, err := c.run(t.Context(), "instr", []byte("content"), ""); err != nil {
-			t.Fatalf("run %d: %v", i, err)
-		}
-		if got := flagValues(spy.args, "--tools"); len(got) != 1 || got[0] != "" {
-			t.Errorf("--tools values = %q, want exactly one empty value (R2.1)", got)
-		}
-		if strings.Contains(strings.Join(spy.args, " "), "WebFetch") {
-			t.Errorf("the text client's argv names WebFetch (R3.7): %q", spy.args)
-		}
-		assertPinnedPermissions(t, "text client", spy.args, false)
-		assertPrivateDirRun(t, "text client", capture, spy.last().Dir)
-		dirs = append(dirs, spy.last().Dir)
-	}
-	if dirs[0] == dirs[1] {
-		t.Errorf("two invocations shared the private directory %s; it is per invocation (R2.1)", dirs[0])
-	}
-
-	// Removal failure: the child leaves a directory it cannot delete from. The
-	// guard line keeps the script inert if the client still runs in the test's
-	// own cwd, so nothing is ever created inside the source tree.
-	lc := captureWarnLogs(t)
-	cwd, _ := os.Getwd()
-	stuck := `[ "$(pwd -P)" = "` + cwd + `" ] || { mkdir -p locked/inner && : > locked/inner/f && chmod 0500 locked; }; ` + printEnvelopeScript(okEnvelope)
-	seam, spy := agentSeam(stuck)
-	c := newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam), WithClaudeCodeLogger(lc.logger()))
-	_, runErr := c.run(t.Context(), "instr", []byte("content"), "")
-	dir := spy.last().Dir
-	if dir != "" && dir != cwd {
-		t.Cleanup(func() {
-			_ = os.Chmod(filepath.Join(dir, "locked"), 0o700)
-			_ = os.RemoveAll(dir)
-		})
-	}
-	if runErr != nil {
-		t.Errorf("a failed removal must be logged, not returned: %v (R2.9)", runErr)
-	}
-	named := 0
-	for _, line := range lc.all() {
-		if dir != "" && strings.Contains(line, dir) {
-			named++
-		}
-	}
-	if dir == "" || named != 1 {
-		t.Errorf("removal failure of %q produced %d warnings naming it, want 1 (R2.9); lines = %q", dir, named, lc.all())
-	}
-
-	// Create failure: the temp root does not exist.
-	absent := filepath.Join(t.TempDir(), "absent-root")
-	t.Setenv("TMPDIR", absent)
-	seam, spy = agentSeam(printEnvelopeScript(okEnvelope))
-	c = newTestClient(t, LLMConfig{Bare: "false"}, WithClaudeCodeExecCommand(seam))
-	_, err := c.run(t.Context(), "instr", []byte("content"), "")
-	if err == nil {
-		t.Fatal("run succeeded although its private directory could not be created (R2.9)")
-	}
-	if !strings.Contains(err.Error(), absent) {
-		t.Errorf("create error does not name the directory %s: %v (R2.9)", absent, err)
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("create error does not wrap its cause with %%w: %v (R2.9)", err)
-	}
-	if spy.spawns() != 0 {
-		t.Errorf("claude was spawned %d times although no private directory existed", spy.spawns())
-	}
-}
-
-// ---------------------------------------------------------------------------
 // 3.2 — the manifest fixer
 // ---------------------------------------------------------------------------
 
@@ -201,7 +119,7 @@ func TestRun_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 func TestFixManifest_PermissionArgvIsScoped(t *testing.T) {
 	isolateSecretsPaths(t)
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
 
 	req := sampleFixRequest(t)
 	req.ManifestError = "!!! Couldn't download 'godot-4.7.tar.xz'. Aborting.\n" +
@@ -233,7 +151,7 @@ func TestFixManifest_PermissionArgvIsScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	seam2, spy2 := agentSeam(printEnvelopeScript(okEnvelope))
-	f2 := newTestFixer(t, LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam2))
+	f2 := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam2))
 	_, err := f2.FixManifest(context.Background(), unsafe)
 	if err == nil || spy2.spawns() != 0 {
 		t.Fatalf("PkgDir %q (a space) was accepted: err=%v spawns=%d (R2.8)", unsafe.PkgDir, err, spy2.spawns())
@@ -260,7 +178,7 @@ func TestManifestFix_UpstreamHostsFromConfigAndError(t *testing.T) {
 	pending.Add(PendingUpdate{Package: pkg, CurrentVersion: oldVersion, NewVersion: newVersion, Status: StatusPending})
 
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	fixer := newTestFixer(t, LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
+	fixer := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithFixerExecCommand(seam))
 
 	pkgdevOut := "SRC_URI is unreachable: 404 Not Found: https://dist.example.com/godot-4.7.tar.xz\n" +
 		"also tried ftp://ftp.example.edu/pub/godot-4.7.tar.xz"
@@ -307,7 +225,7 @@ func TestFixRegistry_PermissionArgvIsScoped(t *testing.T) {
 	stubLookPathFound(t)
 
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	f, err := NewClaudeCodeRegistryFixer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam))
+	f, err := NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeRegistryFixer: %v", err)
 	}
@@ -327,7 +245,7 @@ func TestFixRegistry_PermissionArgvIsScoped(t *testing.T) {
 	nilCfg := sampleRegistryFixRequest(t)
 	nilCfg.Config = nil
 	seam2, spy2 := agentSeam(printEnvelopeScript(okEnvelope))
-	f2, _ := NewClaudeCodeRegistryFixer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam2))
+	f2, _ := NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithRegistryFixerExecCommand(seam2))
 	if _, err := f2.FixRegistry(context.Background(), nilCfg); err != nil {
 		t.Fatalf("FixRegistry (nil Config): %v", err)
 	}
@@ -363,7 +281,7 @@ func TestBuildFix_ArgvScopesToStagedDir(t *testing.T) {
 	isolateSecretsPaths(t)
 	stubLookPathFound(t)
 	seam, spy := agentSeam(printEnvelopeScript(okEnvelope))
-	f, err := NewClaudeCodeBuildFixer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithBuildFixerExecCommand(seam))
+	f, err := NewClaudeCodeBuildFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithBuildFixerExecCommand(seam))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeBuildFixer: %v", err)
 	}
@@ -393,7 +311,7 @@ func TestBumpReviewer_RunsInAPrivateDirectoryItRemoves(t *testing.T) {
 	stubLookPathFound(t)
 	capture := filepath.Join(t.TempDir(), "child.txt")
 	seam, spy := agentSeam(privateDirScript(capture, reviewEnvelope))
-	r, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code", Bare: "false"}, WithBumpReviewerExecCommand(seam))
+	r, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code", Bare: "false"}, WithBumpReviewerExecCommand(seam))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeBumpReviewer: %v", err)
 	}

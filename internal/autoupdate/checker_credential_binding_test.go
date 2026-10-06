@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -163,7 +164,7 @@ func TestCheckAll_CredentialMismatchFailsOnlyThatPackage(t *testing.T) {
 // cbCountingLLM counts ExtractVersion calls; every other LLMProvider method is
 // unreachable from the check path under test.
 type cbCountingLLM struct {
-	LLMProvider
+	llm.LLMProvider
 	calls atomic.Int64
 }
 

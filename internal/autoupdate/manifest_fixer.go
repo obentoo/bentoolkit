@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -284,9 +285,9 @@ func WithFixerTimeout(d time.Duration) ClaudeCodeFixerOption {
 // NewClaudeCodeClient it requires the `claude` CLI on PATH (returns
 // ErrClaudeCodeUnavailable otherwise) and resolves the model (defaulting to
 // sonnet) and the bare/auth mode from cfg.
-func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCodeFixer, error) {
+func NewClaudeCodeFixer(cfg llm.LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCodeFixer, error) {
 	if !claudeAvailable() {
-		return nil, ErrClaudeCodeUnavailable
+		return nil, llm.ErrClaudeCodeUnavailable
 	}
 
 	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
@@ -312,14 +313,14 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 
 	model := cfg.Model
 	if model == "" {
-		model = DefaultClaudeCodeModel
+		model = llm.DefaultClaudeCodeModel
 	}
 
 	f := &ClaudeCodeFixer{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
 		apiKey:       key,
-		bareMode:     resolveBare(cfg, key),
+		bareMode:     llm.ResolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
 		execCommand:  exec.CommandContext,
@@ -341,12 +342,12 @@ func NewClaudeCodeFixer(cfg LLMConfig, opts ...ClaudeCodeFixerOption) (*ClaudeCo
 // (S051-R2.3, S051-R3.3, S051-R3.5). A PkgDir the rules cannot carry safely is
 // an error, and nothing is spawned (S051-R2.8).
 func (f *ClaudeCodeFixer) buildFixArgs(instruction string, req ManifestFixRequest) ([]string, error) {
-	hosts := upstreamHosts(f.logger(), req.Package, append(append([]string(nil), req.UpstreamURLs...), upstreamURLsIn(req.ManifestError)...)...)
-	perms, err := agentPermissionArgs(agentPermissions{
-		agent: "manifest fixer",
-		dir:   req.PkgDir,
-		tools: manifestFixAllowedTools,
-		hosts: hosts,
+	hosts := llm.UpstreamHosts(f.logger(), req.Package, append(append([]string(nil), req.UpstreamURLs...), llm.UpstreamURLsIn(req.ManifestError)...)...)
+	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
+		Agent: "manifest fixer",
+		Dir:   req.PkgDir,
+		Tools: manifestFixAllowedTools,
+		Hosts: hosts,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("manifest fixer for %s: %w", req.Package, err)
@@ -466,99 +467,6 @@ func buildManifestFixInstruction(req ManifestFixRequest) string {
 	return sb.String()
 }
 
-// couldNotStart reports whether runErr is a failure to START the fixer process:
-// a non-nil run error carrying no *exec.ExitError. An ExitError exists only
-// once the process ran to an exit status; everything else — a working directory
-// that does not exist, an unrunnable binary — happened before the child's first
-// instruction, so there is no exit code to speak of (S040-R5.6).
-func couldNotStart(runErr error) bool {
-	var exitErr *exec.ExitError
-	return runErr != nil && !errors.As(runErr, &exitErr)
-}
-
-// claudeFailure names WHICH of the ways a `claude` invocation can end badly
-// happened, as a value rather than as a sentence.
-//
-// Two call sites need the same ORDER — a context error outranks any exit-code
-// framing — but must not share the same WORDS. The fixers say "claude fixer
-// aborted"; a review that said that would name the wrong operation, which is
-// the very defect S048 exists to remove. So the answer travels as an outcome
-// and each caller supplies the noun for its own operation (S048-R1.3).
-type claudeFailure int
-
-const (
-	// claudeRanToCompletion is the zero value on purpose, and that ordering is
-	// load-bearing. classifyClaudeFailure is total over its two inputs, and both
-	// nil means the process ran and exited zero — whatever went wrong afterwards
-	// (a self-reported error envelope, stdout that did not parse) is not an
-	// invocation failure and has no exit code. Were this position held by
-	// claudeExitedNonZero instead, a caller that forgot to classify would print
-	// "exit " plus whatever a nil error renders as, promising a number and
-	// delivering a sentence.
-	claudeRanToCompletion claudeFailure = iota
-	// claudeCutShort — the run was ended by its context: the caller's own budget
-	// elapsed (DeadlineExceeded) or a parent was cancelled (Canceled). Both land
-	// here because they answer the operator the same way — nothing is wrong with
-	// the host or the binary — while a caller that wants to name them apart is
-	// still free to, from the ctxErr it already holds.
-	claudeCutShort
-	// claudeCouldNotStart — the process never reached its first instruction, so
-	// there is no exit code to speak of and none may be printed (S040-R5.6).
-	claudeCouldNotStart
-	// claudeExitedNonZero — the process ran and exited with a status. This is the
-	// only outcome for which an exit code exists.
-	claudeExitedNonZero
-)
-
-// String renders an outcome as a readable name, in the kebab-case this package's
-// other kinds already use.
-//
-// Its only reader is a diagnostic: the guard that keeps the three outcomes apart
-// prints the value it got when two of them collapse, and "2" does not tell a
-// maintainer WHICH two. The default arm names the type and the number, so an
-// outcome added without a case here is visible rather than silently blank.
-func (f claudeFailure) String() string {
-	switch f {
-	case claudeRanToCompletion:
-		return "ran-to-completion"
-	case claudeCutShort:
-		return "cut-short"
-	case claudeCouldNotStart:
-		return "could-not-start"
-	case claudeExitedNonZero:
-		return "exited-non-zero"
-	default:
-		return fmt.Sprintf("claudeFailure(%d)", int(f))
-	}
-}
-
-// classifyClaudeFailure answers which of the three failures a finished `claude`
-// invocation suffered, in the precedence order this package has always applied
-// but had only ever expressed inside one message switch. Lifting it out is what
-// lets a second call site inherit the order instead of restating it, so the two
-// cannot drift apart (S048-R1.2, S048-R1.3). couldNotStart is reused verbatim,
-// so the "no *exec.ExitError means it never started" test exists exactly once.
-//
-// THE CONTEXT ERROR WINS THE COLLISION, and the collision is not hypothetical:
-// when the deadline elapses before Start, exec.CommandContext returns the
-// context error itself, so no *exec.ExitError is present and couldNotStart is
-// true at the same moment ctxErr is non-nil. A process this program's own budget
-// killed before it ran is a deadline. Reporting it as an unstartable binary
-// sends the operator to check a PATH that is fine, when the remedy is a number
-// in a config file.
-func classifyClaudeFailure(ctxErr, runErr error) claudeFailure {
-	switch {
-	case ctxErr != nil:
-		return claudeCutShort
-	case couldNotStart(runErr):
-		return claudeCouldNotStart
-	case runErr != nil:
-		return claudeExitedNonZero
-	default:
-		return claudeRanToCompletion
-	}
-}
-
 // exitCodeString renders a process exit status for an error message by
 // extracting the numeric code from an *exec.ExitError (AD5: errors.As +
 // ExitCode). Both call sites sit behind the claudeExitedNonZero outcome, which
@@ -605,20 +513,20 @@ func exitCodeString(runErr error) string {
 // result text, the captured stderr, and — on a parse failure — the raw stdout
 // (S009-R1.4). The returned error always wraps ErrLLMRequestFailed (S009-R3.1). The API key
 // is never one of its inputs, so it can never appear in the output (S009-R2.2).
-func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
+func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
 	var sb strings.Builder
 
 	// One classification, consulted once, so the branches below choose only their
 	// wording. claudeRanToCompletion — both errors nil — reaches neither of the
 	// three cases that name it and falls through to the envelope/parse cases,
 	// which is where a zero exit with a bad answer belongs (S048-R1.3).
-	outcome := classifyClaudeFailure(ctxErr, runErr)
+	outcome := llm.ClassifyClaudeFailure(ctxErr, runErr)
 
 	switch {
-	case outcome == claudeCutShort:
+	case outcome == llm.ClaudeCutShort:
 		// AD4/S009-R1.3: cancellation or deadline takes precedence over exit framing.
 		fmt.Fprintf(&sb, "claude fixer aborted: %v", ctxErr)
-	case outcome == claudeCouldNotStart:
+	case outcome == llm.ClaudeCouldNotStart:
 		// S040-R5.6: the process never ran, so there is no exit code to print.
 		// Rendering the raw error where a number was promised produced the
 		// measured garble "failed: exit chdir …: no such file or directory" — an
@@ -627,11 +535,11 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		// contradiction case because a command that never started cannot have
 		// reported anything: an envelope here would be stale bytes.
 		fmt.Fprintf(&sb, "claude fixer could not start: %v", runErr)
-	case outcome == claudeExitedNonZero && jsonErr == nil && !env.IsError && env.Subtype == "success":
+	case outcome == llm.ClaudeExitedNonZero && jsonErr == nil && !env.IsError && env.Subtype == "success":
 		// AD3/S009-R1.2: non-zero exit but a self-reported success envelope.
 		fmt.Fprintf(&sb, "claude fixer exited %s but reported success (subtype=%s)",
 			exitCodeString(runErr), env.Subtype)
-	case outcome == claudeExitedNonZero:
+	case outcome == llm.ClaudeExitedNonZero:
 		// S009-R1.1: generic non-zero exit (envelope may or may not have parsed).
 		fmt.Fprintf(&sb, "claude fixer failed: exit %s", exitCodeString(runErr))
 		if jsonErr == nil && env.Subtype != "" {
@@ -656,7 +564,7 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 	// is the likeliest reason a scoped agent stopped short, and nothing retries
 	// with more: the operator widens nothing either, because no setting exists
 	// that could (S051-R5.3).
-	if labels := refusedToolLabels(env.PermissionDenials); len(labels) > 0 {
+	if labels := llm.RefusedToolLabels(env.PermissionDenials); len(labels) > 0 {
 		sb.WriteString("; refused tools: ")
 		sb.WriteString(strings.Join(labels, ", "))
 	}
@@ -675,7 +583,7 @@ func formatFixerError(ctxErr, runErr error, env claudeCodeEnvelope, jsonErr erro
 		sb.WriteString(truncateDiagnostic(stdout))
 	}
 
-	return fmt.Errorf("%w: %s", ErrLLMRequestFailed, sb.String())
+	return fmt.Errorf("%w: %s", llm.ErrLLMRequestFailed, sb.String())
 }
 
 // FixManifest drives the agentic `claude` CLI to repair the ebuild in req. It
@@ -714,7 +622,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// DISTDIR, the writable one this request computed (S051-R1.3). Bare injects
 	// the API key solely via env (never argv/logs); non-bare carries none, so the
 	// CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{portage: true, distDir: req.DistDir})
+	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{Portage: true, DistDir: req.DistDir})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -722,7 +630,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 
 	runErr := cmd.Run()
 
-	var env claudeCodeEnvelope
+	var env llm.ClaudeCodeEnvelope
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 	stderrStr := strings.TrimSpace(stderr.String())
 
@@ -746,6 +654,6 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 		CostUSD:      env.TotalCostUSD,
 		Model:        f.model,
 		ModelIsAlias: isModelAlias(f.model),
-		DeniedTools:  refusedToolLabels(env.PermissionDenials),
+		DeniedTools:  llm.RefusedToolLabels(env.PermissionDenials),
 	}, nil
 }

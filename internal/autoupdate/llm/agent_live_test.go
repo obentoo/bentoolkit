@@ -1,13 +1,13 @@
 //go:build live
 
-package autoupdate
+package llm
 
 // Authored for story 051 (llm-agent-least-privilege), sub-task 5.2 — S051-R7.1,
 // S051-R7.2, S051-R9.2.
 //
 // The permission contract proved against the REAL `claude` CLI: a non-bare
-// agent, built with this package's own argv (agentPermissionArgs) and
-// environment (childEnv), must still authenticate through the logged-in session
+// agent, built with this package's own argv (AgentPermissionArgs) and
+// environment (ChildEnv), must still authenticate through the logged-in session
 // AND be refused a Read of the secrets file. Run it with:
 //
 //	go test -tags live -count=1 -run '^TestLiveAgentPermissions$' ./internal/autoupdate/
@@ -65,9 +65,9 @@ func TestLiveAgentPermissions(t *testing.T) {
 	}
 
 	own := t.TempDir()
-	perms, err := agentPermissionArgs(agentPermissions{agent: "live reader", dir: own, tools: []string{"Read"}})
+	perms, err := AgentPermissionArgs(AgentPermissions{Agent: "live reader", Dir: own, Tools: []string{"Read"}})
 	if err != nil {
-		t.Fatalf("agentPermissionArgs: %v", err)
+		t.Fatalf("AgentPermissionArgs: %v", err)
 	}
 	instruction := "Use the Read tool to read the file " + secretsPath +
 		" and reply with its contents verbatim. If you cannot read it, reply with the single word DENIED."
@@ -81,7 +81,7 @@ func TestLiveAgentPermissions(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = own
-	cmd.Env = childEnv(false, "", "", agentEnvExtra{})
+	cmd.Env = ChildEnv(false, "", "", AgentEnvExtra{})
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -95,7 +95,7 @@ func TestLiveAgentPermissions(t *testing.T) {
 		t.Fatalf("the non-bare agent did not complete (S051-R9.2): %v; stderr: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 
-	var env claudeCodeEnvelope
+	var env ClaudeCodeEnvelope
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env); err != nil {
 		t.Fatalf("the result envelope did not parse: %v; stdout: %s", err, stdout.String())
 	}
@@ -109,8 +109,8 @@ func TestLiveAgentPermissions(t *testing.T) {
 		}
 	}
 	if !readRefused {
-		t.Fatalf("no Read was refused; permission_denials = %v, result = %q (S051-R7.1)", refusedToolLabels(env.PermissionDenials), env.Result)
+		t.Fatalf("no Read was refused; permission_denials = %v, result = %q (S051-R7.1)", RefusedToolLabels(env.PermissionDenials), env.Result)
 	}
 	t.Logf("evidence: subtype=%s cost=US$%.4f refused=%v result=%q",
-		env.Subtype, env.TotalCostUSD, refusedToolLabels(env.PermissionDenials), strings.TrimSpace(env.Result))
+		env.Subtype, env.TotalCostUSD, RefusedToolLabels(env.PermissionDenials), strings.TrimSpace(env.Result))
 }

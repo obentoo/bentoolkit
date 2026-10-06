@@ -1,6 +1,6 @@
 //go:build unix
 
-package autoupdate
+package llm
 
 import (
 	"context"

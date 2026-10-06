@@ -55,6 +55,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -317,9 +318,9 @@ func WithBumpReviewerTimeout(d time.Duration) BumpReviewerOption {
 // configuration. Like NewClaudeCodeBuildFixer it requires the `claude` CLI on
 // PATH (returns ErrClaudeCodeUnavailable otherwise) and resolves the model
 // (defaulting to sonnet) and the bare/auth mode from cfg.
-func NewClaudeCodeBumpReviewer(cfg LLMConfig, opts ...BumpReviewerOption) (*ClaudeCodeBumpReviewer, error) {
+func NewClaudeCodeBumpReviewer(cfg llm.LLMConfig, opts ...BumpReviewerOption) (*ClaudeCodeBumpReviewer, error) {
 	if !claudeAvailable() {
-		return nil, ErrClaudeCodeUnavailable
+		return nil, llm.ErrClaudeCodeUnavailable
 	}
 
 	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
@@ -345,14 +346,14 @@ func NewClaudeCodeBumpReviewer(cfg LLMConfig, opts ...BumpReviewerOption) (*Clau
 
 	model := cfg.Model
 	if model == "" {
-		model = DefaultClaudeCodeModel
+		model = llm.DefaultClaudeCodeModel
 	}
 
 	r := &ClaudeCodeBumpReviewer{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
 		apiKey:       key,
-		bareMode:     resolveBare(cfg, key),
+		bareMode:     llm.ResolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
 		execCommand:  exec.CommandContext,
@@ -423,7 +424,7 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(r.bareMode, r.apiKeyEnv, r.apiKey, agentEnvExtra{})
+	cmd.Env = llm.ChildEnv(r.bareMode, r.apiKeyEnv, r.apiKey, llm.AgentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -431,7 +432,7 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 
 	runErr := cmd.Run()
 
-	var env claudeCodeEnvelope
+	var env llm.ClaudeCodeEnvelope
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 	stderrStr := strings.TrimSpace(stderr.String())
 
@@ -473,10 +474,10 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 // skip — whereas a flag combination that the agentic mode may reject would turn
 // every review into a provider failure.
 func (r *ClaudeCodeBumpReviewer) buildArgs(instruction, dir string) ([]string, error) {
-	perms, err := agentPermissionArgs(agentPermissions{
-		agent: "bump reviewer",
-		dir:   dir,
-		tools: bumpReviewAllowedTools,
+	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
+		Agent: "bump reviewer",
+		Dir:   dir,
+		Tools: bumpReviewAllowedTools,
 	})
 	if err != nil {
 		return nil, err
@@ -613,7 +614,7 @@ func sortedMissing(have, other map[string]bool) []string {
 // Order matters. A cancelled parent and an elapsed budget both surface as a
 // non-zero exit plus a context error, and reporting either as "the agent is
 // broken" would send someone to debug a host that is fine.
-func (r *ClaudeCodeBumpReviewer) classifyRunFailure(parent, runCtx context.Context, env claudeCodeEnvelope, diag error) string {
+func (r *ClaudeCodeBumpReviewer) classifyRunFailure(parent, runCtx context.Context, env llm.ClaudeCodeEnvelope, diag error) string {
 	switch {
 	case parent.Err() != nil:
 		return formatBumpReviewSkipCancelled(parent.Err())
@@ -635,7 +636,7 @@ func (r *ClaudeCodeBumpReviewer) classifyRunFailure(parent, runCtx context.Conte
 // match is a substring and the classification is best-effort BY DESIGN: when it
 // misses, the run is reported as a provider failure, which is a less specific
 // truth rather than a false one.
-func mentionsBudgetCap(env claudeCodeEnvelope) bool {
+func mentionsBudgetCap(env llm.ClaudeCodeEnvelope) bool {
 	if strings.Contains(strings.ToLower(env.Subtype), "budget") {
 		return true
 	}

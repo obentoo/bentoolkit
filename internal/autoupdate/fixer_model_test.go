@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // successEnvelope is a minimal well-formed CLI result envelope, so both fixers
@@ -35,14 +37,14 @@ func TestManifestFixResultCarriesResolvedModel(t *testing.T) {
 		configure string // LLMConfig.Model
 		want      string
 	}{
-		{name: "falls back to the default", configure: "", want: DefaultClaudeCodeModel},
+		{name: "falls back to the default", configure: "", want: llm.DefaultClaudeCodeModel},
 		{name: "honours the configured model", configure: "claude-opus-4-8", want: "claude-opus-4-8"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			factory, cap, _ := fixerSeam("printf '%s' '" + successEnvelope + "'")
-			f := newTestFixer(t, LLMConfig{Provider: "claude-code", Model: tc.configure},
+			f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Model: tc.configure},
 				WithFixerExecCommand(factory))
 
 			res, err := f.FixManifest(context.Background(), sampleFixRequest(t))
@@ -74,14 +76,14 @@ func TestRegistryFixResultCarriesResolvedModel(t *testing.T) {
 		configure string
 		want      string
 	}{
-		{name: "falls back to the default", configure: "", want: DefaultClaudeCodeModel},
+		{name: "falls back to the default", configure: "", want: llm.DefaultClaudeCodeModel},
 		{name: "honours the configured model", configure: "claude-opus-4-8", want: "claude-opus-4-8"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			factory, cap, _ := fixerSeam("printf '%s' '" + successEnvelope + "'")
-			f := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code", Model: tc.configure},
+			f := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code", Model: tc.configure},
 				WithRegistryFixerExecCommand(factory))
 
 			res, err := f.FixRegistry(context.Background(), sampleRegistryFixRequest(t))
@@ -140,7 +142,7 @@ func TestAliasModelIsFlaggedAsAlias(t *testing.T) {
 
 	// End to end, on both fixers: an aliased config yields ModelIsAlias == true.
 	factory, _, _ := fixerSeam("printf '%s' '" + successEnvelope + "'")
-	mf := newTestFixer(t, LLMConfig{Provider: "claude-code", Model: "opus"}, WithFixerExecCommand(factory))
+	mf := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Model: "opus"}, WithFixerExecCommand(factory))
 	mres, err := mf.FixManifest(context.Background(), sampleFixRequest(t))
 	if err != nil {
 		t.Fatalf("FixManifest: %v", err)
@@ -150,7 +152,7 @@ func TestAliasModelIsFlaggedAsAlias(t *testing.T) {
 	}
 
 	rfactory, _, _ := fixerSeam("printf '%s' '" + successEnvelope + "'")
-	rf := newTestRegistryFixer(t, LLMConfig{Provider: "claude-code", Model: "opus"},
+	rf := newTestRegistryFixer(t, llm.LLMConfig{Provider: "claude-code", Model: "opus"},
 		WithRegistryFixerExecCommand(rfactory))
 	rres, err := rf.FixRegistry(context.Background(), sampleRegistryFixRequest(t))
 	if err != nil {
@@ -180,7 +182,7 @@ func TestPinnedModelIdIsNotFlaggedAsAlias(t *testing.T) {
 	}
 
 	factory, _, _ := fixerSeam("printf '%s' '" + successEnvelope + "'")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code", Model: "claude-opus-4-8"},
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", Model: "claude-opus-4-8"},
 		WithFixerExecCommand(factory))
 	res, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err != nil {
@@ -206,7 +208,7 @@ func TestFixResultNeverContainsTheAPIKey(t *testing.T) {
 	const secret = "sk-ant-do-not-leak-me-030"
 	t.Setenv(keyEnv, secret)
 
-	cfg := LLMConfig{Provider: "claude-code", Model: "opus", APIKeyEnv: keyEnv, Bare: "true"}
+	cfg := llm.LLMConfig{Provider: "claude-code", Model: "opus", APIKeyEnv: keyEnv, Bare: "true"}
 
 	// --- Non-vacuity guard 1: the fixer really holds the key. ---
 	envFile := filepath.Join(t.TempDir(), "child.env")

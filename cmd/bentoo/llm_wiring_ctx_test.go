@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -97,8 +97,8 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 	if !errors.Is(gotErr, context.Canceled) && !strings.Contains(gotErr.Error(), context.Canceled.Error()) {
 		t.Errorf("ExtractVersion error = %v; want it to name the cancellation (%v)", gotErr, context.Canceled)
 	}
-	if !errors.Is(gotErr, autoupdate.ErrLLMRequestFailed) {
-		t.Errorf("ExtractVersion error = %v; want it to wrap %v", gotErr, autoupdate.ErrLLMRequestFailed)
+	if !errors.Is(gotErr, llm.ErrLLMRequestFailed) {
+		t.Errorf("ExtractVersion error = %v; want it to wrap %v", gotErr, llm.ErrLLMRequestFailed)
 	}
 
 	deadline := time.Now().Add(time.Second)
@@ -146,9 +146,9 @@ func testClaudeProviderAbsentIsATrueNil(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	p, err := newConfiguredLLMProvider(discardLog(), config.LLMConfig{Provider: "claude-code"})
-	if !errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
+	if !errors.Is(err, llm.ErrClaudeCodeUnavailable) {
 		t.Fatalf("newConfiguredLLMProvider(discardLog(), claude-code) with no claude on PATH: error = %v, want %v",
-			err, autoupdate.ErrClaudeCodeUnavailable)
+			err, llm.ErrClaudeCodeUnavailable)
 	}
 	if !isTrueNil(p) {
 		t.Errorf("provider returned beside the error is a boxed %T, want a true nil", p)

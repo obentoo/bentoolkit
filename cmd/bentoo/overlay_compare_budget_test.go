@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // Authored for story 048, sub-task 3.3 — S048-R3.1, S048-R4.1, S048-R5.1.
@@ -17,7 +17,7 @@ import (
 // deps.newClaudeAsker (default newClaudeCodeAsker) is the ONE construction seam
 // both review paths are built through, and it passes no timeout option at all —
 // so every review this program has ever run has run on
-// autoupdate.DefaultClaudeCodeTimeout, whatever the operator configured.
+// llm.DefaultClaudeCodeTimeout, whatever the operator configured.
 // S048-R3.1 makes the configured budget the one in force, and Success Metric 5
 // says that must be shown "end to end rather than at the getter".
 //
@@ -178,8 +178,8 @@ func TestConfiguredReviewBudgetIsTheDeadlineInForce(t *testing.T) {
 				t.Errorf("an invocation configured with a %s budget ran for %s before it was killed.\n"+
 					"The configured key did not reach the invocation: newClaudeAsker "+
 					"(overlay_compare_review.go:64) is the one seam both review paths are built through, and until it "+
-					"passes autoupdate.WithClaudeCodeTimeout every review runs on autoupdate.DefaultClaudeCodeTimeout "+
-					"(%s) no matter what the config says (S048-R3.1, S048-R4.1).", want, got.Round(time.Millisecond), autoupdate.DefaultClaudeCodeTimeout)
+					"passes autoupdate.WithClaudeCodeTimeout every review runs on llm.DefaultClaudeCodeTimeout "+
+					"(%s) no matter what the config says (S048-R3.1, S048-R4.1).", want, got.Round(time.Millisecond), llm.DefaultClaudeCodeTimeout)
 			}
 		})
 	}

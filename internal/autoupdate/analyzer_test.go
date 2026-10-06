@@ -22,6 +22,7 @@ import (
 	"github.com/leanovate/gopter/prop"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
@@ -1890,15 +1891,17 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 // caller-supplied SchemaAnalysis. It is used to drive invalid LLM output into
 // the analyzer's save path.
 type patternLLMStub struct {
-	analysis *SchemaAnalysis
+	analysis *llm.SchemaAnalysis
 }
 
 func (s *patternLLMStub) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
 	return "", nil
 }
-func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+
+func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*llm.SchemaAnalysis, error) {
 	return s.analysis, nil
 }
+
 func (s *patternLLMStub) GetModel() string { return "pattern-stub" }
 
 // captureInfoLogs returns a capture of Info-level records (the logCapture type
@@ -2068,7 +2071,7 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 	}
 
 	// LLM returns a regex schema with a backreference: invalid output.
-	llm := &patternLLMStub{analysis: &SchemaAnalysis{
+	llm := &patternLLMStub{analysis: &llm.SchemaAnalysis{
 		ParserType: "regex",
 		Pattern:    `(\d+)\1`,
 	}}

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // exitErrWithCode runs a trivial `sh -c "exit N"` to manufacture a real
@@ -26,7 +28,7 @@ func exitErrWithCode(t *testing.T, code int) error {
 
 // newTestFixer constructs a ClaudeCodeFixer with lookPath stubbed to "find"
 // claude and the given options applied.
-func newTestFixer(t *testing.T, cfg LLMConfig, opts ...ClaudeCodeFixerOption) *ClaudeCodeFixer {
+func newTestFixer(t *testing.T, cfg llm.LLMConfig, opts ...ClaudeCodeFixerOption) *ClaudeCodeFixer {
 	t.Helper()
 	stubLookPathFound(t)
 	f, err := NewClaudeCodeFixer(cfg, opts...)
@@ -68,15 +70,15 @@ func sampleFixRequest(t *testing.T) ManifestFixRequest {
 }
 
 func TestNewClaudeCodeFixer_Defaults(t *testing.T) {
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"})
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"})
 	if f.execCommand == nil {
 		t.Error("expected execCommand to default to a non-nil factory")
 	}
 	if f.timeout != DefaultManifestFixTimeout {
 		t.Errorf("expected default timeout == %v, got %v", DefaultManifestFixTimeout, f.timeout)
 	}
-	if f.model != DefaultClaudeCodeModel {
-		t.Errorf("expected default model %q, got %q", DefaultClaudeCodeModel, f.model)
+	if f.model != llm.DefaultClaudeCodeModel {
+		t.Errorf("expected default model %q, got %q", llm.DefaultClaudeCodeModel, f.model)
 	}
 }
 
@@ -85,7 +87,7 @@ func TestNewClaudeCodeFixer_UnavailableCLI(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { lookPath = orig })
 
-	_, err := NewClaudeCodeFixer(LLMConfig{Provider: "claude-code"})
+	_, err := NewClaudeCodeFixer(llm.LLMConfig{Provider: "claude-code"})
 	if err == nil {
 		t.Fatal("expected ErrClaudeCodeUnavailable when claude CLI is absent")
 	}
@@ -99,7 +101,7 @@ func TestFixManifest_AgenticArgvAndCwd(t *testing.T) {
 	envelope := `{"type":"result","is_error":false,"result":"changed SRC_URI to the -stable asset","total_cost_usd":0.02}`
 	factory, cap, last := fixerSeam("printf '%s' '" + envelope + "'")
 
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	req := sampleFixRequest(t)
 	res, err := f.FixManifest(context.Background(), req)
@@ -175,7 +177,7 @@ func TestFixManifest_AgenticArgvAndCwd(t *testing.T) {
 // the -p instruction (not page content on stdin), so the agent knows what to fix.
 func TestFixManifest_InstructionCarriesContext(t *testing.T) {
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	req := sampleFixRequest(t)
 	if _, err := f.FixManifest(context.Background(), req); err != nil {
@@ -204,7 +206,7 @@ func TestFixManifest_BareModeKeyNeverInArgv(t *testing.T) {
 	t.Setenv(keyEnv, secret)
 
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
 		WithFixerExecCommand(factory))
 
 	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err != nil {
@@ -228,7 +230,7 @@ func TestFixManifest_BareModeKeyNeverInArgv(t *testing.T) {
 // error without leaking internals.
 func TestFixManifest_ErrorEnvelope(t *testing.T) {
 	factory, _, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":true,"subtype":"max_turns","errors":["ran out of turns"]}'`)
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err == nil {
@@ -242,7 +244,7 @@ func TestFixManifest_ErrorEnvelope(t *testing.T) {
 // TestFixManifest_NonZeroExit verifies a non-zero CLI exit yields an error.
 func TestFixManifest_NonZeroExit(t *testing.T) {
 	factory, _, _ := fixerSeam("echo boom 1>&2; exit 3")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err == nil {
 		t.Fatal("expected an error for a non-zero CLI exit")
@@ -252,7 +254,7 @@ func TestFixManifest_NonZeroExit(t *testing.T) {
 // TestFixManifest_BudgetFlag verifies a positive MaxBudgetUSD is forwarded.
 func TestFixManifest_BudgetFlag(t *testing.T) {
 	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code", MaxBudgetUSD: 1.5},
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", MaxBudgetUSD: 1.5},
 		WithFixerExecCommand(factory))
 
 	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err != nil {
@@ -271,7 +273,7 @@ func TestFixManifest_BudgetFlag(t *testing.T) {
 // CI, where bash's single-command exec optimisation does not apply).
 func TestFixManifest_TimeoutHonored(t *testing.T) {
 	factory, _, _ := fixerSeam("exec sleep 3600")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"},
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"},
 		WithFixerExecCommand(factory), WithFixerTimeout(150*time.Millisecond))
 
 	start := time.Now()
@@ -291,7 +293,7 @@ func TestFixManifest_TimeoutHonored(t *testing.T) {
 func TestFixManifest_ContradictoryExit(t *testing.T) {
 	env := `{"type":"result","subtype":"success","is_error":false,"result":"renamed asset not found upstream","errors":[]}`
 	factory, _, _ := fixerSeam("printf '%s' '" + env + "'; exit 1")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err == nil {
@@ -306,7 +308,7 @@ func TestFixManifest_ContradictoryExit(t *testing.T) {
 	if strings.HasSuffix(strings.TrimRight(msg, " "), ":") {
 		t.Errorf("message has an empty tail after the colon: %q", msg)
 	}
-	if !errors.Is(err, ErrLLMRequestFailed) {
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
 		t.Error("error must wrap ErrLLMRequestFailed")
 	}
 }
@@ -315,7 +317,7 @@ func TestFixManifest_ContradictoryExit(t *testing.T) {
 // stdout surfaces the raw stdout (bounded) plus stderr.
 func TestFixManifest_NonJSONStdout(t *testing.T) {
 	factory, _, _ := fixerSeam(`printf 'boom\npartial'; printf 'panic: x' 1>&2; exit 1`)
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err == nil {
@@ -334,7 +336,7 @@ func TestFixManifest_NonJSONStdout(t *testing.T) {
 func TestFixManifest_IsErrorEnvelopeOnExit(t *testing.T) {
 	env := `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool denied"],"result":"stopped"}`
 	factory, _, _ := fixerSeam("printf '%s' '" + env + "'; exit 1")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err == nil {
@@ -352,7 +354,7 @@ func TestFixManifest_IsErrorEnvelopeOnExit(t *testing.T) {
 // context reports the timeout/cancellation, not a bare CLI failure.
 func TestFixManifest_CancellationNamed(t *testing.T) {
 	factory, _, _ := fixerSeam("exec sleep 3600")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"},
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"},
 		WithFixerExecCommand(factory), WithFixerTimeout(150*time.Millisecond))
 
 	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
@@ -370,7 +372,7 @@ func TestFixManifest_CancellationNamed(t *testing.T) {
 func TestFixManifest_SuccessPathUnchanged(t *testing.T) {
 	env := `{"type":"result","is_error":false,"result":"changed SRC_URI","total_cost_usd":0.05}`
 	factory, _, _ := fixerSeam("printf '%s' '" + env + "'")
-	f := newTestFixer(t, LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
 
 	res, err := f.FixManifest(context.Background(), sampleFixRequest(t))
 	if err != nil {
@@ -505,7 +507,7 @@ func TestTruncateManifestError_UnchangedBudget(t *testing.T) {
 // subtype, the result text, and explicit contradiction framing — never an empty
 // tail (R1.1, R1.2; AD3).
 func TestFormatFixerError_Contradiction(t *testing.T) {
-	env := claudeCodeEnvelope{Subtype: "success", IsError: false, Result: "could not locate the renamed vcpkg asset", Errors: nil}
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", IsError: false, Result: "could not locate the renamed vcpkg asset", Errors: nil}
 	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "", "")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -519,7 +521,7 @@ func TestFormatFixerError_Contradiction(t *testing.T) {
 	if strings.HasSuffix(strings.TrimRight(msg, " "), ":") {
 		t.Errorf("message has an empty tail after the colon: %q", msg)
 	}
-	if !errors.Is(err, ErrLLMRequestFailed) {
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
 		t.Error("error must wrap ErrLLMRequestFailed")
 	}
 }
@@ -528,7 +530,7 @@ func TestFormatFixerError_Contradiction(t *testing.T) {
 // context is reported as timeout/cancellation, taking precedence over exit framing.
 func TestFormatFixerError_Timeout(t *testing.T) {
 	err := formatFixerError(context.DeadlineExceeded, exitErrWithCode(t, 1),
-		claudeCodeEnvelope{Subtype: "success"}, nil, "", "")
+		llm.ClaudeCodeEnvelope{Subtype: "success"}, nil, "", "")
 	msg := strings.ToLower(err.Error())
 	if !strings.Contains(msg, "deadline") && !strings.Contains(msg, "timeout") && !strings.Contains(msg, "cancel") {
 		t.Errorf("message %q should name the timeout/cancellation", msg)
@@ -536,7 +538,7 @@ func TestFormatFixerError_Timeout(t *testing.T) {
 	if strings.Contains(msg, "reported success") {
 		t.Errorf("ctx error must take precedence over exit/contradiction framing: %q", msg)
 	}
-	if !errors.Is(err, ErrLLMRequestFailed) {
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
 		t.Error("error must wrap ErrLLMRequestFailed")
 	}
 }
@@ -544,7 +546,7 @@ func TestFormatFixerError_Timeout(t *testing.T) {
 // TestFormatFixerError_IsError covers R1.5: an explicit error envelope surfaces
 // subtype, errors, result, and stderr together.
 func TestFormatFixerError_IsError(t *testing.T) {
-	env := claudeCodeEnvelope{Subtype: "error_max_turns", IsError: true, Result: "stopped mid-edit", Errors: []string{"ran out of turns"}}
+	env := llm.ClaudeCodeEnvelope{Subtype: "error_max_turns", IsError: true, Result: "stopped mid-edit", Errors: []string{"ran out of turns"}}
 	err := formatFixerError(nil, nil, env, nil, "", "panic: boom")
 	msg := err.Error()
 	for _, want := range []string{"error_max_turns", "ran out of turns", "stopped mid-edit", "panic: boom"} {
@@ -559,7 +561,7 @@ func TestFormatFixerError_IsError(t *testing.T) {
 func TestFormatFixerError_Bounded(t *testing.T) {
 	bigResult := strings.Repeat("R", diagnosticsBudget*2)
 	bigStderr := strings.Repeat("E", diagnosticsBudget*2)
-	env := claudeCodeEnvelope{Subtype: "success", Result: bigResult}
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", Result: bigResult}
 	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "", bigStderr)
 	msg := err.Error()
 	// Each embedded stream is independently bounded; the whole message stays well
@@ -578,7 +580,7 @@ func TestFormatFixerError_NoKeyLeak(t *testing.T) {
 	const secret = "sk-super-secret-value"
 	// The key is never an input; assert it is absent for a representative secret
 	// even when diagnostics are present.
-	env := claudeCodeEnvelope{Subtype: "success", Result: "done"}
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", Result: "done"}
 	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "stdout-noise", "stderr-noise")
 	if strings.Contains(err.Error(), secret) {
 		t.Fatal("formatter output must never contain the API key value")
@@ -615,7 +617,7 @@ func TestFormatFixerError_AStartFailureIsSaidAsOne(t *testing.T) {
 		t.Fatalf("instrument: running in a nonexistent directory succeeded; no start failure to render")
 	}
 
-	got := formatFixerError(nil, startErr, claudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	got := formatFixerError(nil, startErr, llm.ClaudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
 	if !strings.Contains(got, "could not start") {
 		t.Errorf("a start failure is rendered as %q; it must say the command could not start rather than "+
 			"framing the raw error as an exit code", got)
@@ -634,7 +636,7 @@ func TestFormatFixerError_AnExitFailureKeepsItsCode(t *testing.T) {
 		t.Fatalf("instrument: `false` exited zero; no exit failure to render")
 	}
 
-	got := formatFixerError(nil, exitErr, claudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	got := formatFixerError(nil, exitErr, llm.ClaudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
 	if !strings.Contains(got, "exit 1") {
 		t.Errorf("a non-zero exit is rendered as %q; the numeric code is the contract today's operators "+
 			"and tests read, and the start-failure fix must not reword it", got)

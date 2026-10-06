@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // Story 064, R2.6: when runManifestWithFix combines the manifest failure with the
@@ -98,7 +100,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 		// The fixer's error wraps a sentinel a report classifies on. Before
 		// R2.6 it answered errors.Is from the apply's error; it must not.
 		const fixText = "s064 fixer gave up"
-		fixErr := fmt.Errorf("%s: %w", fixText, ErrClaudeTimedOut)
+		fixErr := fmt.Errorf("%s: %w", fixText, llm.ErrClaudeTimedOut)
 		fixer.err = fixErr
 
 		result, err := applier.Apply(t.Context(), pkg, false)
@@ -113,7 +115,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 			t.Fatalf("applyErr does not come from the \"LLM fix attempt failed\" site\napplyErr: %v", err)
 		}
 
-		s064AssertManifestFailureIsTheCause(t, err, fixText, fixErr, ErrClaudeTimedOut)
+		s064AssertManifestFailureIsTheCause(t, err, fixText, fixErr, llm.ErrClaudeTimedOut)
 	})
 
 	t.Run("manifest fix skipped", func(t *testing.T) {

@@ -1,5 +1,4 @@
-// Package autoupdate provides Ollama LLM integration for version extraction and schema analysis.
-package autoupdate
+package llm
 
 import (
 	"bytes"

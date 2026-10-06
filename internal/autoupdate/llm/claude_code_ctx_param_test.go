@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 // Story 059, sub-task 1.2 (R1.4, R3.3): one ClaudeCodeClient serves many calls,
 // and each call spawns its `claude` child from a context derived from THAT

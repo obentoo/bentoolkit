@@ -55,6 +55,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
@@ -120,7 +121,7 @@ func newReviewSeam(spy *reviewSeam, stdout string) func(ctx context.Context, nam
 func TestBumpReviewer_MissingPreviousArchiveIsSkippedNamingIt(t *testing.T) {
 	stubLookPathFound(t)
 	spy := &reviewSeam{}
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerExecCommand(newReviewSeam(spy, "{}")))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
@@ -169,7 +170,7 @@ func TestBumpReviewer_RisksAreNeverEmittedAtSeverityError(t *testing.T) {
 		`],\"proposed_depth\":\"compile\",\"reason\":\"the build files moved substantially\"}"}`
 
 	spy := &reviewSeam{}
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerExecCommand(newReviewSeam(spy, envelope)))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
@@ -217,7 +218,7 @@ func TestBumpReviewer_RisksAreNeverEmittedAtSeverityError(t *testing.T) {
 func TestBumpReviewer_ReadsThePreparedDiffAndReachesNoNetwork(t *testing.T) {
 	stubLookPathFound(t)
 	spy := &reviewSeam{}
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"result":"{\"risks\":[]}"}`)))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
@@ -268,7 +269,7 @@ func TestBumpReviewer_ChildEnvironmentFollowsTheStrippingDiscipline(t *testing.T
 
 	spy := &reviewSeam{}
 	reviewer, err := NewClaudeCodeBumpReviewer(
-		LLMConfig{Provider: "claude-code", Bare: "false"},
+		llm.LLMConfig{Provider: "claude-code", Bare: "false"},
 		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"result":"{\"risks\":[]}"}`)))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
@@ -342,7 +343,7 @@ func TestBumpReviewer_SourceReachesNoNetworkPackage(t *testing.T) {
 func TestBumpReviewer_AProviderErrorIsSkippedNamingIt(t *testing.T) {
 	stubLookPathFound(t)
 	spy := &reviewSeam{}
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerExecCommand(func(ctx context.Context, _ string, arg ...string) *exec.Cmd {
 			spy.spawns++
 			spy.args = arg
@@ -392,7 +393,7 @@ func TestBumpReviewer_AProviderErrorIsSkippedNamingIt(t *testing.T) {
 func TestBumpReviewer_AnElapsedTimeoutIsSkippedNamingIt(t *testing.T) {
 	stubLookPathFound(t)
 	spy := &reviewSeam{}
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerTimeout(50*time.Millisecond),
 		WithBumpReviewerExecCommand(func(ctx context.Context, _ string, arg ...string) *exec.Cmd {
 			spy.spawns++
@@ -450,7 +451,7 @@ func TestBumpReviewer_EverySkipCauseIsDistinguishable(t *testing.T) {
 
 	reasons := map[string]string{}
 	for name, seam := range seams {
-		reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+		reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 			WithBumpReviewerTimeout(50*time.Millisecond),
 			WithBumpReviewerExecCommand(seam))
 		if err != nil {
@@ -470,7 +471,7 @@ func TestBumpReviewer_EverySkipCauseIsDistinguishable(t *testing.T) {
 	}
 
 	// The missing-archive cause, for comparison.
-	reviewer, err := NewClaudeCodeBumpReviewer(LLMConfig{Provider: "claude-code"},
+	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
 		WithBumpReviewerExecCommand(newReviewSeam(&reviewSeam{}, "{}")))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)

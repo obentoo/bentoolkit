@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -126,17 +126,17 @@ func blameCases() []struct {
 		{
 			name:      "a deadline elapsed",
 			causeText: "claude CLI failed: the review's 90s deadline elapsed",
-			cause:     autoupdate.ErrLLMRequestFailed,
+			cause:     llm.ErrLLMRequestFailed,
 		},
 		{
 			name:      "the CLI could not start",
 			causeText: "claude CLI failed: fork/exec /usr/bin/claude: permission denied",
-			cause:     autoupdate.ErrLLMRequestFailed,
+			cause:     llm.ErrLLMRequestFailed,
 		},
 		{
 			name:      "the CLI exited non-zero",
 			causeText: "claude CLI failed (error_during_execution): the model returned no result",
-			cause:     autoupdate.ErrLLMRequestFailed,
+			cause:     llm.ErrLLMRequestFailed,
 		},
 	}
 }

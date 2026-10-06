@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 // Authored for story 051 (llm-agent-least-privilege), sub-task 2.1 — one
 // permission-argv builder (S051-R2.3, R2.5..R2.8, R4.1, R4.2).
@@ -19,9 +19,9 @@ import (
 	"testing"
 )
 
-func mustPermArgs(t *testing.T, p agentPermissions) []string {
+func mustPermArgs(t *testing.T, p AgentPermissions) []string {
 	t.Helper()
-	args, err := agentPermissionArgs(p)
+	args, err := AgentPermissionArgs(p)
 	if err != nil {
 		t.Fatalf("agentPermissionArgs(%+v): %v", p, err)
 	}
@@ -34,7 +34,7 @@ func mustPermArgs(t *testing.T, p agentPermissions) []string {
 func TestAgentPermissionArgs_OneElementPerRule(t *testing.T) {
 	isolateSecretsPaths(t)
 	dir := t.TempDir()
-	args := mustPermArgs(t, agentPermissions{agent: "manifest fixer", dir: dir, tools: []string{"Read", "Edit", "Write", "Bash", "WebFetch"}})
+	args := mustPermArgs(t, AgentPermissions{Agent: "manifest fixer", Dir: dir, Tools: []string{"Read", "Edit", "Write", "Bash", "WebFetch"}})
 
 	allow := flagValues(args, "--allowedTools")
 	if len(allow) == 0 {
@@ -84,7 +84,7 @@ func TestAgentPermissionArgs_WriteIsScopedAsEdit(t *testing.T) {
 		{"write-only", []string{"Read", "Write"}},
 		{"edit-and-write", []string{"Read", "Edit", "Write"}},
 	} {
-		args := mustPermArgs(t, agentPermissions{agent: "registry fixer", dir: dir, tools: tc.tools})
+		args := mustPermArgs(t, AgentPermissions{Agent: "registry fixer", Dir: dir, Tools: tc.tools})
 		allow := flagValues(args, "--allowedTools")
 		if n := countOf(allow, dirRule("Edit", dir)); n != 1 {
 			t.Errorf("%s: %q appears %d times in --allowedTools, want 1 (R2.3); allow = %q", tc.name, dirRule("Edit", dir), n, allow)
@@ -111,7 +111,7 @@ func TestAgentPermissionArgs_WriteIsScopedAsEdit(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(neutral, ".config"))
 	dir = neutral
 
-	args := mustPermArgs(t, agentPermissions{agent: "bump reviewer", dir: dir, tools: []string{"Read"}})
+	args := mustPermArgs(t, AgentPermissions{Agent: "bump reviewer", Dir: dir, Tools: []string{"Read"}})
 	joined := strings.Join(args, " ")
 	for _, word := range []string{"Edit", "Write", "Bash", "WebFetch", "--add-dir"} {
 		if strings.Contains(joined, word) {
@@ -131,7 +131,7 @@ func TestAgentPermissionArgs_DeniesSecretsPaths(t *testing.T) {
 	home := isolateSecretsPaths(t)
 	dir := t.TempDir()
 
-	args := mustPermArgs(t, agentPermissions{agent: "build fixer", dir: dir, tools: []string{"Read", "Edit"}})
+	args := mustPermArgs(t, AgentPermissions{Agent: "build fixer", Dir: dir, Tools: []string{"Read", "Edit"}})
 	assertPinnedPermissions(t, "build fixer", args, true)
 	deny := ruleList(t, "build fixer", args, "deny")
 	for _, want := range []string{
@@ -147,7 +147,7 @@ func TestAgentPermissionArgs_DeniesSecretsPaths(t *testing.T) {
 
 	moved := filepath.Join(t.TempDir(), "xdg")
 	t.Setenv("XDG_CONFIG_HOME", moved)
-	args = mustPermArgs(t, agentPermissions{agent: "build fixer", dir: dir, tools: []string{"Read", "Edit"}})
+	args = mustPermArgs(t, AgentPermissions{Agent: "build fixer", Dir: dir, Tools: []string{"Read", "Edit"}})
 	deny = ruleList(t, "build fixer", args, "deny")
 	if want := fileRule("Read", filepath.Join(moved, "bentoo", "secrets")); !containsRule(deny, want) {
 		t.Errorf("after XDG_CONFIG_HOME moved, deny rules lack %q; the secrets paths were cached (R2.5)", want)
@@ -159,8 +159,8 @@ func TestAgentPermissionArgs_DeniesSecretsPaths(t *testing.T) {
 func TestAgentPermissionArgs_PinsSettings(t *testing.T) {
 	isolateSecretsPaths(t)
 	dir := t.TempDir()
-	assertPinnedPermissions(t, "read-only agent", mustPermArgs(t, agentPermissions{agent: "bump reviewer", dir: dir, tools: []string{"Read"}}), false)
-	assertPinnedPermissions(t, "editing agent", mustPermArgs(t, agentPermissions{agent: "manifest fixer", dir: dir, tools: []string{"Read", "Edit", "Write", "Bash", "WebFetch"}}), true)
+	assertPinnedPermissions(t, "read-only agent", mustPermArgs(t, AgentPermissions{Agent: "bump reviewer", Dir: dir, Tools: []string{"Read"}}), false)
+	assertPinnedPermissions(t, "editing agent", mustPermArgs(t, AgentPermissions{Agent: "manifest fixer", Dir: dir, Tools: []string{"Read", "Edit", "Write", "Bash", "WebFetch"}}), true)
 }
 
 // TestAgentPermissionArgs_RejectsUnsafeDir is R2.8 in both directions: a
@@ -179,7 +179,7 @@ func TestAgentPermissionArgs_RejectsUnsafeDir(t *testing.T) {
 		"/tmp/pkg\nRead(//etc/**)",
 		"",
 	} {
-		_, err := agentPermissionArgs(agentPermissions{agent: "manifest fixer", dir: dir, tools: []string{"Read", "Edit"}})
+		_, err := AgentPermissionArgs(AgentPermissions{Agent: "manifest fixer", Dir: dir, Tools: []string{"Read", "Edit"}})
 		if err == nil {
 			t.Errorf("dir %q was accepted; it is not absolute or carries a character outside [A-Za-z0-9._+@/-] (R2.8)", dir)
 			continue
@@ -193,7 +193,7 @@ func TestAgentPermissionArgs_RejectsUnsafeDir(t *testing.T) {
 	}
 
 	ok := "/var/db/repos/bentoo_overlay/dev-libs/libfoo+bar@2.0-r1"
-	args, err := agentPermissionArgs(agentPermissions{agent: "manifest fixer", dir: ok, tools: []string{"Read", "Edit"}})
+	args, err := AgentPermissionArgs(AgentPermissions{Agent: "manifest fixer", Dir: ok, Tools: []string{"Read", "Edit"}})
 	if err != nil {
 		t.Fatalf("dir %q uses only allowed characters and was refused: %v (R2.8)", ok, err)
 	}

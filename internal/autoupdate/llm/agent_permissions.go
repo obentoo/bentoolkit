@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 import (
 	"errors"
@@ -55,24 +55,24 @@ var agentFixedHosts = []string{"github.com", "codeload.github.com", "objects.git
 // JSON and pin both settings.
 const agentPinnedSettings = `{"permissions":{"blockReadsOutsideWorkingDirectories":true,"disableBypassPermissionsMode":"disable"}}`
 
-// agentPermissions describes what one `claude` agent may do.
-type agentPermissions struct {
-	// agent names the agent in errors ("manifest fixer", "bump reviewer").
-	agent string
-	// dir is the agent's own absolute directory: the only place its Read, Edit
+// AgentPermissions describes what one `claude` agent may do.
+type AgentPermissions struct {
+	// Agent names the Agent in errors ("manifest fixer", "bump reviewer").
+	Agent string
+	// Dir is the agent's own absolute directory: the only place its Read, Edit
 	// and Write reach. It may be empty only when tools holds none of the three.
-	dir string
-	// tools lists the built-in tools the agent holds. An entry is a bare name
+	Dir string
+	// Tools lists the built-in Tools the agent holds. An entry is a bare name
 	// ("Read", "WebFetch") or a name with one specifier ("Bash(pkgdev *)"); the
-	// name goes to --tools, and a specifier entry is also granted verbatim as an
+	// name goes to --Tools, and a specifier entry is also granted verbatim as an
 	// allow rule. A bare Bash is granted no allow rule at all.
-	tools []string
-	// hosts are the WebFetch domains, each already passed through
+	Tools []string
+	// Hosts are the WebFetch domains, each already passed through
 	// upstreamHosts. They are ignored unless tools holds WebFetch.
-	hosts []string
+	Hosts []string
 }
 
-// agentPermissionArgs turns p into the argv block every spawner appends:
+// AgentPermissionArgs turns p into the argv block every spawner appends:
 // --tools, --allowedTools, --disallowedTools, --permission-mode dontAsk,
 // --setting-sources "", the pinned --settings and --strict-mcp-config.
 //
@@ -103,11 +103,11 @@ type agentPermissions struct {
 // `Edit(//<path>)` when the agent holds Edit or Write (S051-R2.5). The paths are
 // read on every call, because secrets.Paths() follows HOME and
 // XDG_CONFIG_HOME. A Read-only agent's argv therefore names no Edit at all.
-func agentPermissionArgs(p agentPermissions) ([]string, error) {
+func AgentPermissionArgs(p AgentPermissions) ([]string, error) {
 	var names []string
 	var allow []string
 	holdsRead, holdsEdit, holdsWebFetch := false, false, false
-	for _, entry := range p.tools {
+	for _, entry := range p.Tools {
 		name, spec, scoped := strings.Cut(entry, "(")
 		names = append(names, name)
 		switch name {
@@ -123,22 +123,22 @@ func agentPermissionArgs(p agentPermissions) ([]string, error) {
 		}
 	}
 
-	if p.dir != "" || holdsRead || holdsEdit {
-		if err := checkAgentDir(p.dir); err != nil {
-			return nil, fmt.Errorf("agent permissions for %s: own directory %q: %w", p.agent, p.dir, err)
+	if p.Dir != "" || holdsRead || holdsEdit {
+		if err := checkAgentDir(p.Dir); err != nil {
+			return nil, fmt.Errorf("agent permissions for %s: own directory %q: %w", p.Agent, p.Dir, err)
 		}
 	}
 	if holdsRead {
-		allow = append(allow, "Read(/"+p.dir+"/**)")
+		allow = append(allow, "Read(/"+p.Dir+"/**)")
 	}
 	if holdsEdit {
-		allow = append(allow, "Edit(/"+p.dir+"/**)")
+		allow = append(allow, "Edit(/"+p.Dir+"/**)")
 	}
 	if holdsWebFetch {
-		for _, h := range p.hosts {
+		for _, h := range p.Hosts {
 			rule, err := webFetchDomainRule(h)
 			if err != nil {
-				return nil, fmt.Errorf("agent permissions for %s: %w", p.agent, err)
+				return nil, fmt.Errorf("agent permissions for %s: %w", p.Agent, err)
 			}
 			allow = append(allow, rule)
 		}
@@ -235,12 +235,12 @@ func isIPv4Literal(host string) bool {
 // would.
 var upstreamURLPattern = regexp.MustCompile(`https?://[^\s"'<>()]+`)
 
-// upstreamURLsIn returns every http(s) URL in text, in order.
-func upstreamURLsIn(text string) []string {
+// UpstreamURLsIn returns every http(s) URL in text, in order.
+func UpstreamURLsIn(text string) []string {
 	return upstreamURLPattern.FindAllString(text, -1)
 }
 
-// upstreamHosts returns the WebFetch host set for pkg: the lowercased host of
+// UpstreamHosts returns the WebFetch host set for pkg: the lowercased host of
 // every http or https URL in urls that is a DNS name, plus agentFixedHosts,
 // de-duplicated and sorted so the argv is stable (S051-R3.3).
 //
@@ -249,7 +249,7 @@ func upstreamURLsIn(text string) []string {
 // and the rejected value in attributes (S051-R3.6); nil log discards it. A trailing dot is not
 // trimmed: `example.com.` is rejected like any other non-DNS spelling, so the
 // host a rule names is always the one the operator can read in packages.toml.
-func upstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
+func UpstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
 	log = logging.OrDiscard(log)
 	set := make(map[string]struct{}, len(urls)+len(agentFixedHosts))
 	for _, h := range agentFixedHosts {

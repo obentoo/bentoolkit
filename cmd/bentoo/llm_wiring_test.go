@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -131,13 +132,13 @@ func TestNewConfiguredLLMProvider(t *testing.T) {
 			name:      "unknown provider returns ErrLLMUnsupportedProvider",
 			cfg:       config.LLMConfig{Provider: "bogus"},
 			wantErr:   true,
-			wantErrIs: autoupdate.ErrLLMUnsupportedProvider,
+			wantErrIs: llm.ErrLLMUnsupportedProvider,
 		},
 		{
 			name:        "claude without API key returns ErrLLMAPIKeyMissing",
 			cfg:         config.LLMConfig{Provider: "claude", APIKeyEnv: claudeKeyEnv},
 			wantErr:     true,
-			wantErrIs:   autoupdate.ErrLLMAPIKeyMissing,
+			wantErrIs:   llm.ErrLLMAPIKeyMissing,
 			clearKeyEnv: true,
 		},
 	}

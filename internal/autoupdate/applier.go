@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -2198,7 +2199,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	result.Fixed = true

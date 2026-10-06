@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 import (
 	"errors"
@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -32,7 +31,7 @@ func unreadableUserSecrets(t *testing.T) {
 // For a subscription run `api_key_env` is legitimately empty: the agentic
 // `claude` CLI authenticates itself and bentoo injects no credential. The three
 // constructors below resolve the key through the unified chain, but unlike
-// NewClaudeClient (llm.go:206) and NewOpenAIClient (openai.go:86) they carried
+// NewClaudeClient (go:206) and NewOpenAIClient (openai.go:86) they carried
 // no APIKeyEnv == "" guard, so they called secrets.Lookup(""). That lookup
 // misses the environment (os.Getenv("") is always "") and falls through to the
 // user-scope file — and an unreadable one turns "no key requested" into a hard
@@ -41,10 +40,9 @@ func unreadableUserSecrets(t *testing.T) {
 func TestConstructors_EmptyAPIKeyEnv_SkipsLookup(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(llm.LLMConfig) error
+		call func(LLMConfig) error
 	}{
-		{"manifest_fixer", func(c llm.LLMConfig) error { _, err := NewClaudeCodeFixer(c); return err }},
-		{"registry_fixer", func(c llm.LLMConfig) error { _, err := NewClaudeCodeRegistryFixer(c); return err }},
+		{"claude_code_client", func(c LLMConfig) error { _, err := NewClaudeCodeClient(c); return err }},
 	}
 
 	for _, tc := range cases {
@@ -53,12 +51,26 @@ func TestConstructors_EmptyAPIKeyEnv_SkipsLookup(t *testing.T) {
 			unreadableUserSecrets(t)
 
 			// APIKeyEnv empty: the subscription shape. No secret is being asked for.
-			err := tc.call(llm.LLMConfig{Provider: "claude", Bare: "auto"})
+			err := tc.call(LLMConfig{Provider: "claude", Bare: "auto"})
 
 			if errors.Is(err, secrets.ErrUnreadable) {
 				t.Fatalf("constructor failed with ErrUnreadable for an empty api_key_env; "+
 					"no secret was requested, so the secrets file must not be consulted: %v", err)
 			}
 		})
+	}
+}
+
+// TestConstructors_EmptyAPIKeyEnv_StillResolvesWhenNamed is the companion guard:
+// the fix must skip the lookup only when the name is empty, never suppress a
+// genuine ErrUnreadable for a caller that did name a secret.
+func TestConstructors_EmptyAPIKeyEnv_StillResolvesWhenNamed(t *testing.T) {
+	stubLookPathFound(t)
+	unreadableUserSecrets(t)
+
+	_, err := NewClaudeCodeClient(LLMConfig{Provider: "claude", APIKeyEnv: "BENTOO_TEST_NAMED_KEY", Bare: "auto"})
+
+	if !errors.Is(err, secrets.ErrUnreadable) {
+		t.Fatalf("a named api_key_env must still surface ErrUnreadable from an unreadable secrets file, got: %v", err)
 	}
 }

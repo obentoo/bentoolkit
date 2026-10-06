@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -213,9 +214,9 @@ func WithRegistryFixerTimeout(d time.Duration) RegistryFixerOption {
 // configuration. Like NewClaudeCodeFixer it requires the `claude` CLI on PATH
 // (returns ErrClaudeCodeUnavailable otherwise) and resolves the model (defaulting
 // to sonnet) and the bare/auth mode from cfg.
-func NewClaudeCodeRegistryFixer(cfg LLMConfig, opts ...RegistryFixerOption) (*ClaudeCodeRegistryFixer, error) {
+func NewClaudeCodeRegistryFixer(cfg llm.LLMConfig, opts ...RegistryFixerOption) (*ClaudeCodeRegistryFixer, error) {
 	if !claudeAvailable() {
-		return nil, ErrClaudeCodeUnavailable
+		return nil, llm.ErrClaudeCodeUnavailable
 	}
 
 	// Resolve the API key EXACTLY ONCE through the unified secrets chain (env →
@@ -241,14 +242,14 @@ func NewClaudeCodeRegistryFixer(cfg LLMConfig, opts ...RegistryFixerOption) (*Cl
 
 	model := cfg.Model
 	if model == "" {
-		model = DefaultClaudeCodeModel
+		model = llm.DefaultClaudeCodeModel
 	}
 
 	f := &ClaudeCodeRegistryFixer{
 		model:        model,
 		apiKeyEnv:    cfg.APIKeyEnv,
 		apiKey:       key,
-		bareMode:     resolveBare(cfg, key),
+		bareMode:     llm.ResolveBare(cfg, key),
 		maxBudgetUSD: cfg.MaxBudgetUSD,
 		timeout:      DefaultManifestFixTimeout,
 		execCommand:  exec.CommandContext,
@@ -276,11 +277,11 @@ func (f *ClaudeCodeRegistryFixer) buildRegistryFixArgs(instruction string, req R
 	if req.Config != nil {
 		urls = req.Config.UpstreamURLs()
 	}
-	perms, err := agentPermissionArgs(agentPermissions{
-		agent: "registry fixer",
-		dir:   req.ConfigDir,
-		tools: registryFixAllowedTools,
-		hosts: upstreamHosts(f.logger(), req.Package, urls...),
+	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
+		Agent: "registry fixer",
+		Dir:   req.ConfigDir,
+		Tools: registryFixAllowedTools,
+		Hosts: llm.UpstreamHosts(f.logger(), req.Package, urls...),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry fixer for %s: %w", req.Package, err)
@@ -403,7 +404,7 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 	// Resolve the child environment from the auth mode: bare injects the API key
 	// solely via env (never argv/logs); non-bare scrubs any inherited API key so
 	// the CLI uses its logged-in session.
-	cmd.Env = childEnv(f.bareMode, f.apiKeyEnv, f.apiKey, agentEnvExtra{})
+	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -411,7 +412,7 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 
 	runErr := cmd.Run()
 
-	var env claudeCodeEnvelope
+	var env llm.ClaudeCodeEnvelope
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
 	stderrStr := strings.TrimSpace(stderr.String())
 
@@ -434,7 +435,7 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 		CostUSD:      env.TotalCostUSD,
 		Model:        f.model,
 		ModelIsAlias: isModelAlias(f.model),
-		DeniedTools:  refusedToolLabels(env.PermissionDenials),
+		DeniedTools:  llm.RefusedToolLabels(env.PermissionDenials),
 	}, nil
 }
 

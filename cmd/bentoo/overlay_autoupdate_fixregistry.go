@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // promptRegistryFixes drives the interactive per-package LLM registry-fix loop.
@@ -104,7 +105,7 @@ loop:
 			// back to (S030-R4.1). It also names the tools the agent was refused,
 			// the likeliest reason its fix fell short, never their input (S051-R5.2).
 			fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
-				pkg, autoupdate.FormatModelUsed(a.Result.Model), a.Result.Summary, autoupdate.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
+				pkg, autoupdate.FormatModelUsed(a.Result.Model), a.Result.Summary, llm.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
 			fmt.Print("Keep the edit anyway? [y/N] ")
 			if readAnswer(reader) == "y" {
 				// User chose to keep a still-failing edit (R5.3).

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 const registryDeniedSuccessEnvelope = `{"type":"result","subtype":"success","is_error":false,"result":"tried a new path","permission_denials":[` +
@@ -48,7 +49,7 @@ func runRegistryFixLoop(t *testing.T, envelope string) string {
 		spawns++
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "printf '%s' '"+envelope+"'")
 	}
-	fixer, err := autoupdate.NewClaudeCodeRegistryFixer(autoupdate.LLMConfig{Provider: "claude-code", Bare: "false"},
+	fixer, err := autoupdate.NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"},
 		autoupdate.WithRegistryFixerExecCommand(seam))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeRegistryFixer: %v", err)

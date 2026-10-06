@@ -1,4 +1,4 @@
-package autoupdate
+package llm
 
 import (
 	"net/http"

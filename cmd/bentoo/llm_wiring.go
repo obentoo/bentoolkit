@@ -5,22 +5,23 @@ import (
 	"log/slog"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
 // llmConfigToAutoupdate converts the CLI-facing LLM config (config.LLMConfig)
-// into the autoupdate provider config (autoupdate.LLMConfig).
+// into the autoupdate provider config (llm.LLMConfig).
 //
 // It lives in package main because cmd/bentoo already imports both packages,
 // which keeps the config and autoupdate packages free of a mutual import
 // dependency.
 //
 // Every CLI-reachable field is carried across. BaseURL is intentionally NOT
-// mapped: it exists only on autoupdate.LLMConfig and is populated internally
+// mapped: it exists only on llm.LLMConfig and is populated internally
 // for HTTP providers (e.g. the Claude endpoint), with no config-side source.
 // A field-parity test guards against future config drift (R-config-drift).
-func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
-	return autoupdate.LLMConfig{
+func llmConfigToAutoupdate(c config.LLMConfig) llm.LLMConfig {
+	return llm.LLMConfig{
 		Provider:     c.Provider,
 		APIKeyEnv:    c.APIKeyEnv,
 		Model:        c.Model,
@@ -39,7 +40,7 @@ func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
 // This helper is shared by the analyze wiring (T4) and the --check wiring (T5),
 // so it stays general: the only policy it encodes is the empty-provider
 // short-circuit; every other decision (which provider, defaults) lives in
-// autoupdate.NewLLMProvider via the existing llmConfigToAutoupdate mapper.
+// llm.NewLLMProvider via the existing llmConfigToAutoupdate mapper.
 //
 // # Where the caller's context goes
 //
@@ -55,18 +56,18 @@ func llmConfigToAutoupdate(c config.LLMConfig) autoupdate.LLMConfig {
 // error first, and a boxed nil would make a `p != nil` check lie (the same
 // discipline as newConfiguredBuildFixer below). The error travels unwrapped, as
 // it did through NewLLMProvider; each caller's Warn line names the provider.
-func newConfiguredLLMProvider(log *slog.Logger, c config.LLMConfig) (autoupdate.LLMProvider, error) {
+func newConfiguredLLMProvider(log *slog.Logger, c config.LLMConfig) (llm.LLMProvider, error) {
 	switch c.Provider {
 	case "":
 		return nil, nil
 	case "claude-code":
-		client, err := autoupdate.NewClaudeCodeClient(llmConfigToAutoupdate(c), autoupdate.WithClaudeCodeLogger(log))
+		client, err := llm.NewClaudeCodeClient(llmConfigToAutoupdate(c), llm.WithClaudeCodeLogger(log))
 		if err != nil {
 			return nil, err
 		}
 		return client, nil
 	default:
-		return autoupdate.NewLLMProvider(llmConfigToAutoupdate(c))
+		return llm.NewLLMProvider(llmConfigToAutoupdate(c))
 	}
 }
 
