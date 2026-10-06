@@ -1,5 +1,4 @@
-// Package autoupdate provides version parsing functionality for ebuild autoupdate.
-package autoupdate
+package parse
 
 import (
 	"encoding/json"
@@ -57,7 +56,7 @@ func (p *JSONParser) Parse(content []byte) (string, error) {
 	}
 
 	// Navigate the path
-	result, err := navigateJSONPath(data, p.Path)
+	result, err := NavigateJSONPath(data, p.Path)
 	if err != nil {
 		return "", err
 	}
@@ -71,9 +70,9 @@ func (p *JSONParser) Parse(content []byte) (string, error) {
 	return version, nil
 }
 
-// navigateJSONPath navigates through JSON data following the given path.
+// NavigateJSONPath navigates through JSON data following the given path.
 // Supports dot notation (field.subfield) and array indexing (field[0]).
-func navigateJSONPath(data interface{}, path string) (interface{}, error) {
+func NavigateJSONPath(data interface{}, path string) (interface{}, error) {
 	if path == "" {
 		return data, nil
 	}

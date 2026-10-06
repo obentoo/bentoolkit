@@ -1,4 +1,4 @@
-package autoupdate
+package parse
 
 import (
 	"encoding/json"

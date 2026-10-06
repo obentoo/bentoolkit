@@ -23,6 +23,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
@@ -2027,7 +2028,7 @@ func TestValidateXPath(t *testing.T) {
 					t.Errorf("validateXPath(%q) = nil, want error", tc.xpath)
 					return
 				}
-				if !errors.Is(err, ErrInvalidXPath) {
+				if !errors.Is(err, parse.ErrInvalidXPath) {
 					t.Errorf("validateXPath(%q): error %v does not wrap ErrInvalidXPath", tc.xpath, err)
 				}
 			} else if err != nil {

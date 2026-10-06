@@ -25,6 +25,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -1302,8 +1303,8 @@ func (c *Checker) resolveType(pkg string, cfg *registry.PackageConfig) string {
 // otherwise order junk below every real version and silently report no update —
 // see ebuild.IsValidVersion).
 func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparable bool) {
-	u := stripVersionPrefix(strings.TrimSpace(upstream))
-	cur := stripVersionPrefix(strings.TrimSpace(current))
+	u := parse.StripVersionPrefix(strings.TrimSpace(upstream))
+	cur := parse.StripVersionPrefix(strings.TrimSpace(current))
 	if !ebuild.IsValidVersion(u) || !ebuild.IsValidVersion(cur) {
 		return false, false
 	}
@@ -1366,7 +1367,7 @@ func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *registry.PackageConfig
 		}
 		return ""
 	}
-	sha, err := (&JSONParser{Path: cfg.CommitSHAPath}).Parse(content)
+	sha, err := (&parse.JSONParser{Path: cfg.CommitSHAPath}).Parse(content)
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to parse commit sha at %q: %w", cfg.CommitSHAPath, err)
@@ -1674,18 +1675,18 @@ func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *registry.PackageConf
 
 	// Extract date of the latest commit (path points to [0].commit.committer.date
 	// or [0].committed_date, etc.) then apply transforms to get YYYYMMDD.
-	dateParser := &JSONParser{Path: cfg.Path}
+	dateParser := &parse.JSONParser{Path: cfg.Path}
 	raw, err := dateParser.Parse(content)
 	if err != nil {
 		return nil, fmt.Errorf("commit date: %w", err)
 	}
-	date := applyTransforms(c.logger(), raw, cfg.Transform)
+	date := parse.ApplyTransforms(c.logger(), raw, cfg.Transform)
 	if date == "" {
 		return nil, fmt.Errorf("commit date: empty after transform (raw: %q)", raw)
 	}
 
 	// Extract SHA of the latest commit.
-	shaParser := &JSONParser{Path: cfg.CommitSHAPath}
+	shaParser := &parse.JSONParser{Path: cfg.CommitSHAPath}
 	sha, err := shaParser.Parse(content)
 	if err != nil {
 		return nil, fmt.Errorf("commit sha: %w", err)
@@ -1800,7 +1801,7 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 		if err := json.Unmarshal(raw, &elem); err != nil {
 			continue
 		}
-		val, err := navigateJSONPath(elem, messageRelPath)
+		val, err := parse.NavigateJSONPath(elem, messageRelPath)
 		if err != nil {
 			continue
 		}
@@ -1847,8 +1848,8 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *reg
 	// operator confirms. Stripping before applySuffix keeps the suffix logic
 	// working on a bare version, and the strip is idempotent for entries whose
 	// transform already removed the prefix.
-	version = NormalizeUpstreamVersion(version)
-	version = applySuffix(c.logger(), version, cfg)
+	version = parse.NormalizeUpstreamVersion(version)
+	version = parse.ApplySuffix(c.logger(), version, cfg)
 
 	// An entry restricted to a release line must never report a version from
 	// another one: it would be compared against — and could bump — the ebuild of
@@ -1856,9 +1857,9 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *reg
 	// per candidate; this covers the paths that yield a single value (first
 	// match, script, fallback, LLM). Failing loudly is the point: the entry's
 	// source moved, or its series is wrong, and both need a human.
-	if m := ebuilds.NewSeriesMatcher(c.logger(), cfg.Series); m.Active() && !m.Matches(stripVersionPrefix(version)) {
+	if m := ebuilds.NewSeriesMatcher(c.logger(), cfg.Series); m.Active() && !m.Matches(parse.StripVersionPrefix(version)) {
 		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
-			ErrNoVersionFound, version, cfg.Series)
+			parse.ErrNoVersionFound, version, cfg.Series)
 	}
 	return version, nil
 }
@@ -2035,7 +2036,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *registr
 
 	// select path: collect all candidates, transform each, then pick one.
 	if cfg.Select != "" && cfg.Select != "first" {
-		extractor, exErr := newSelectExtractor(cfg)
+		extractor, exErr := parse.NewSelectExtractor(cfg)
 		if exErr != nil {
 			return "", fmt.Errorf("failed to create select extractor: %w", exErr)
 		}
@@ -2044,10 +2045,10 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *registr
 			if cErr != nil {
 				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
 			}
-			best := selectVersion(c.logger(), cands, cfg)
+			best := parse.SelectVersion(c.logger(), cands, cfg)
 			if best == "" {
 				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
-					ErrNoVersionFound, len(cands), cfg.Select)
+					parse.ErrNoVersionFound, len(cands), cfg.Select)
 			}
 			return best, nil
 		}
@@ -2057,7 +2058,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *registr
 	}
 
 	// Create parser. NewParserFromConfig handles json/regex/html uniformly.
-	parser, err := NewParserFromConfig(cfg)
+	parser, err := parse.NewParserFromConfig(cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create parser: %w", err)
 	}
@@ -2067,7 +2068,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *registr
 	if err != nil {
 		return "", fmt.Errorf("failed to parse version: %w", err)
 	}
-	version = applyTransforms(c.logger(), version, cfg.Transform)
+	version = parse.ApplyTransforms(c.logger(), version, cfg.Transform)
 
 	return version, nil
 }

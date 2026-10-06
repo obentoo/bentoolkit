@@ -1,4 +1,4 @@
-package autoupdate
+package parse
 
 import (
 	"testing"
@@ -76,7 +76,7 @@ func TestApplySuffix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := applySuffix(nil, tt.in, tt.cfg); got != tt.want {
+			if got := ApplySuffix(nil, tt.in, tt.cfg); got != tt.want {
 				t.Fatalf("applySuffix(nil, %q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
@@ -90,7 +90,7 @@ func TestSelectVersionAppliesSuffix(t *testing.T) {
 	cands := []string{"26.2.5.2", "26.8.0.1", "26.2.4.1"}
 	cfg := &registry.PackageConfig{Select: "max", Suffix: "_pre", SuffixWhen: `^26\.8\.`}
 
-	if got, want := selectVersion(nil, cands, cfg), "26.8.0.1_pre"; got != want {
+	if got, want := SelectVersion(nil, cands, cfg), "26.8.0.1_pre"; got != want {
 		t.Fatalf("selectVersion = %q, want %q", got, want)
 	}
 }
@@ -102,7 +102,7 @@ func TestSelectVersionSuffixOrdersBelowRelease(t *testing.T) {
 	// Both candidates land in the same series; only the first is marked _pre.
 	cfg := &registry.PackageConfig{Select: "max", Suffix: "_pre", SuffixWhen: `^26\.8\.0\.1$`}
 
-	got := selectVersion(nil, []string{"26.8.0.1", "26.8.0.4"}, cfg)
+	got := SelectVersion(nil, []string{"26.8.0.1", "26.8.0.4"}, cfg)
 	if got != "26.8.0.4" {
 		t.Fatalf("selectVersion = %q, want %q (bare release must outrank the _pre one)", got, "26.8.0.4")
 	}

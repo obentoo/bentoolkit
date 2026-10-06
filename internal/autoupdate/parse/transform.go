@@ -1,6 +1,4 @@
-// Package autoupdate provides post-extraction version transformation and
-// multi-candidate selection for ebuild autoupdate.
-package autoupdate
+package parse
 
 import (
 	"log/slog"
@@ -13,12 +11,12 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
-// applyTransforms applies ordered regex substitutions to an extracted version.
+// ApplyTransforms applies ordered regex substitutions to an extracted version.
 // Each rule is [regex, repl]; repl follows regexp.ReplaceAllString semantics.
 // A malformed rule (wrong arity or uncompilable regex) is warned and skipped,
 // so a single bad rule never aborts a check (ValidatePackageConfig warns too).
 // The warning goes to log; nil discards it.
-func applyTransforms(log *slog.Logger, v string, rules [][]string) string {
+func ApplyTransforms(log *slog.Logger, v string, rules [][]string) string {
 	for _, r := range rules {
 		if len(r) != 2 {
 			continue
@@ -37,7 +35,7 @@ func applyTransforms(log *slog.Logger, v string, rules [][]string) string {
 // with or without a trailing revision (1.2.3_pre, 1.2.3_rc1-r2).
 var existingSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc|p)[0-9]*(-r[0-9]+)?$`)
 
-// applySuffix appends cfg.Suffix to v when the record declares a pre-release
+// ApplySuffix appends cfg.Suffix to v when the record declares a pre-release
 // channel, i.e. when the version upstream publishes is a development release its
 // own numbering does not mark (LibreOffice's testing line ships a plain
 // "26.8.0.1"). With cfg.SuffixWhen set the suffix applies only to a version
@@ -54,7 +52,7 @@ var existingSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc|p)[0-9]*(-r[0-
 // A malformed suffix_when is warned and ignored rather than fatal: the record is
 // rejected up front by ValidatePackageConfig, and a check that got this far must
 // not die on the annotation. The warning goes to log; nil discards it.
-func applySuffix(log *slog.Logger, v string, cfg *registry.PackageConfig) string {
+func ApplySuffix(log *slog.Logger, v string, cfg *registry.PackageConfig) string {
 	if cfg == nil || cfg.Suffix == "" || v == "" {
 		return v
 	}
@@ -74,7 +72,7 @@ func applySuffix(log *slog.Logger, v string, cfg *registry.PackageConfig) string
 	return v + cfg.Suffix
 }
 
-// selectVersion picks one version from a candidate list according to cfg.Select.
+// SelectVersion picks one version from a candidate list according to cfg.Select.
 // Each candidate is transformed BEFORE validation/comparison, because a raw
 // candidate such as "7.1.2-24" is not a valid Gentoo version until the transform
 // runs — selecting before transforming would discard every candidate. The
@@ -88,7 +86,7 @@ func applySuffix(log *slog.Logger, v string, cfg *registry.PackageConfig) string
 // Non-comparable candidates (per ebuild.IsValidVersion, after transform and
 // prefix stripping) are skipped. Returns "" when no candidate is comparable.
 // A malformed rule is warned about to log; nil discards the warning.
-func selectVersion(log *slog.Logger, cands []string, cfg *registry.PackageConfig) string {
+func SelectVersion(log *slog.Logger, cands []string, cfg *registry.PackageConfig) string {
 	var transform [][]string
 	mode, series := "", ""
 	if cfg != nil {
@@ -99,8 +97,8 @@ func selectVersion(log *slog.Logger, cands []string, cfg *registry.PackageConfig
 	matcher := ebuilds.NewSeriesMatcher(log, series)
 	best := ""
 	for _, c := range cands {
-		c = applyTransforms(log, strings.TrimSpace(c), transform)
-		cc := applySuffix(log, stripVersionPrefix(c), cfg)
+		c = ApplyTransforms(log, strings.TrimSpace(c), transform)
+		cc := ApplySuffix(log, StripVersionPrefix(c), cfg)
 		if !ebuild.IsValidVersion(cc) {
 			continue
 		}

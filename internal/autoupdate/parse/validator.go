@@ -1,5 +1,4 @@
-// Package autoupdate provides schema validation functionality for ebuild autoupdate.
-package autoupdate
+package parse
 
 import (
 	"errors"
@@ -110,8 +109,8 @@ func compareVersionStrings(extracted, ebuild string) bool {
 	}
 
 	// Try comparing with common version prefixes stripped
-	strippedExtracted := stripVersionPrefix(normalizedExtracted)
-	strippedEbuild := stripVersionPrefix(normalizedEbuild)
+	strippedExtracted := StripVersionPrefix(normalizedExtracted)
+	strippedEbuild := StripVersionPrefix(normalizedEbuild)
 
 	return strippedExtracted == strippedEbuild
 }
@@ -131,11 +130,11 @@ func normalizeVersion(version string) string {
 // run classifying different values is exactly the bug this exists to prevent
 // ("v3.2.3" charged as major in the plan, run as patch by Validate).
 func NormalizeUpstreamVersion(version string) string {
-	return stripVersionPrefix(strings.TrimSpace(version))
+	return StripVersionPrefix(strings.TrimSpace(version))
 }
 
-// stripVersionPrefix removes common version prefixes like 'v', 'V', 'version-', etc.
-func stripVersionPrefix(version string) string {
+// StripVersionPrefix removes common version prefixes like 'v', 'V', 'version-', etc.
+func StripVersionPrefix(version string) string {
 	// Common prefixes to strip (ordered from longest to shortest to avoid partial matches)
 	prefixes := []string{
 		"version-", "Version-",

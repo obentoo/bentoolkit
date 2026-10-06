@@ -21,6 +21,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
@@ -89,7 +90,7 @@ func validateXPath(x string) error {
 		return nil
 	}
 	if _, err := xpath.Compile(x); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidXPath, err)
+		return fmt.Errorf("%w: %w", parse.ErrInvalidXPath, err)
 	}
 	return nil
 }
@@ -449,7 +450,7 @@ func (a *Analyzer) validateResult(ctx context.Context, result *AnalyzeResult, op
 	}
 
 	// Validate schema
-	validationResult := ValidateSchema(content, result.SuggestedSchema, result.EbuildVersion)
+	validationResult := parse.ValidateSchema(content, result.SuggestedSchema, result.EbuildVersion)
 	result.ExtractedVersion = validationResult.ExtractedVersion
 	result.Validated = validationResult.Valid
 
@@ -640,7 +641,7 @@ func detectJSONPath(content []byte) string {
 	}
 
 	for _, path := range commonPaths {
-		parser := &JSONParser{Path: path}
+		parser := &parse.JSONParser{Path: path}
 		if _, err := parser.Parse(content); err == nil {
 			return path
 		}

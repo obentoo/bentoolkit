@@ -1,5 +1,4 @@
-// Package autoupdate provides HTML parsing functionality for ebuild autoupdate.
-package autoupdate
+package parse
 
 import (
 	"bytes"

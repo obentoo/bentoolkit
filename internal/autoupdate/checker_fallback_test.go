@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/sony/gobreaker"
 )
@@ -100,7 +101,7 @@ func TestIsUpstreamUnreachable(t *testing.T) {
 		{"host does not exist", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded,
 			&net.DNSError{Err: "no such host", Name: "dowloads.isc.org", IsNotFound: true}), false},
 		{"cancelled by the operator", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded, context.Canceled), false},
-		{"no version in the page", ErrNoVersionFound, false},
+		{"no version in the page", parse.ErrNoVersionFound, false},
 		{"plain error", errors.New("HTTP 404"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

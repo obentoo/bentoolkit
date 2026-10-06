@@ -1,5 +1,4 @@
-// Package autoupdate provides version history extraction functionality for ebuild autoupdate.
-package autoupdate
+package parse
 
 import (
 	"bytes"
@@ -104,7 +103,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 				}
 			} else {
 				// Navigate to nested field
-				result, navErr := navigateJSONPath(item, remainingPath)
+				result, navErr := NavigateJSONPath(item, remainingPath)
 				if navErr != nil {
 					continue // Skip items where path doesn't exist
 				}
@@ -130,7 +129,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 	}
 
 	// Handle regular path that points to an array
-	result, err := navigateJSONPath(data, path)
+	result, err := NavigateJSONPath(data, path)
 	if err != nil {
 		return nil, err
 	}
@@ -341,12 +340,12 @@ func (e *RegexVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 	return versions, nil
 }
 
-// newSelectExtractor builds a list extractor for the "select" path, dispatching
+// NewSelectExtractor builds a list extractor for the "select" path, dispatching
 // on cfg.Parser and reusing the primary path/pattern/selector fields. The cap is
 // disabled (Limit=-1) so select="max" sees the whole list and is not defeated by
 // truncation of an ascending list. Returns (nil, nil) when the parser cannot
 // produce a list (e.g. "script"); callers then fall back to first-match behavior.
-func newSelectExtractor(cfg *registry.PackageConfig) (VersionHistoryExtractor, error) {
+func NewSelectExtractor(cfg *registry.PackageConfig) (VersionHistoryExtractor, error) {
 	switch cfg.Parser {
 	case "json":
 		// JSONVersionHistoryExtractor walks an array; a primary path like

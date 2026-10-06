@@ -23,6 +23,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -915,7 +916,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// `pkgdev manifest` rejects it with "does not follow correct package syntax".
 	// Validate up front so a non-version (or a string still invalid after
 	// stripping) fails with a clear error instead of a cryptic portage one.
-	newVersion := stripVersionPrefix(strings.TrimSpace(update.NewVersion))
+	newVersion := parse.StripVersionPrefix(strings.TrimSpace(update.NewVersion))
 	if !ebuild.IsValidVersion(newVersion) {
 		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {

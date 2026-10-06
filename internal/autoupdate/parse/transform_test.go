@@ -1,4 +1,4 @@
-package autoupdate
+package parse
 
 import (
 	"testing"
@@ -43,7 +43,7 @@ func TestApplyTransforms(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := applyTransforms(nil, tt.in, tt.rules); got != tt.want {
+			if got := ApplyTransforms(nil, tt.in, tt.rules); got != tt.want {
 				t.Fatalf("applyTransforms(nil, %q, %v) = %q, want %q", tt.in, tt.rules, got, tt.want)
 			}
 		})
@@ -53,7 +53,7 @@ func TestApplyTransforms(t *testing.T) {
 func TestApplyTransforms_BadRegexWarnsAndSkips(t *testing.T) {
 	lc := captureWarnLogs(t)
 	// "[" is an invalid regex: it must be skipped, the valid rule still applies.
-	got := applyTransforms(lc.logger(), "7-1", [][]string{{"[", "X"}, {"-", "."}})
+	got := ApplyTransforms(lc.logger(), "7-1", [][]string{{"[", "X"}, {"-", "."}})
 	if got != "7.1" {
 		t.Fatalf("got %q, want %q", got, "7.1")
 	}
@@ -126,7 +126,7 @@ func TestSelectVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &registry.PackageConfig{Transform: tt.transform, Select: tt.mode}
-			if got := selectVersion(nil, tt.cands, cfg); got != tt.want {
+			if got := SelectVersion(nil, tt.cands, cfg); got != tt.want {
 				t.Fatalf("selectVersion(nil, %v, %v, %q) = %q, want %q",
 					tt.cands, tt.transform, tt.mode, got, tt.want)
 			}
