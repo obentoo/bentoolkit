@@ -18,17 +18,19 @@ func markdownSection(doc, heading string) string {
 	level := len(heading) - len(strings.TrimLeft(heading, "#"))
 	var out []string
 	in, fence := false, ""
+lines:
 	for _, line := range strings.Split(doc, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if fence == "" && (strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")) {
+		switch {
+		case fence == "" && (strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")):
 			fence = trimmed[:3]
-		} else if fence != "" && strings.HasPrefix(trimmed, fence) {
+		case fence != "" && strings.HasPrefix(trimmed, fence):
 			fence = ""
-		} else if fence == "" && strings.HasPrefix(line, "#") {
+		case fence == "" && strings.HasPrefix(line, "#"):
 			hashes := len(line) - len(strings.TrimLeft(line, "#"))
 			isHeading := strings.HasPrefix(line[hashes:], " ")
 			if in && isHeading && hashes <= level {
-				break
+				break lines
 			}
 			if !in && line == heading {
 				in = true
