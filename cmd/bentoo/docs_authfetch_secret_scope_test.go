@@ -58,7 +58,7 @@ func s068TableRow(section, key string) string {
 func s068Paragraphs(section string) []string { return strings.Split(section, "\n\n") }
 
 func TestREADME_DocumentsAuthFetchSecretScope(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	secretsSec := s068DocSection(t, readme, "### Secrets")
 	model := s068DocSection(t, readme, "#### The record model")
 	headersSec := s068DocSection(t, readme, "### Headers and environment variables")

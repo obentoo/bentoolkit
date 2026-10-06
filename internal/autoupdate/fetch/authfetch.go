@@ -917,7 +917,7 @@ func (s *authFetchSpec) buildRequest(ctx context.Context, endpoint string, creds
 //
 // So the rule is deliberately the smallest one that works: exactly the two
 // literals true and false become booleans, everything else stays a string. It is
-// documented beside the key in the README, because a coercion nobody can predict
+// documented beside the key in docs/autoupdate.md, because a coercion nobody can predict
 // produces a request nobody can explain.
 func jsonForm(fields url.Values) ([]byte, error) {
 	obj := make(map[string]any, len(fields))

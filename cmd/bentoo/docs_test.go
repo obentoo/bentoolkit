@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -22,6 +25,51 @@ func readRepoDoc(t *testing.T, name string) string {
 	return string(data)
 }
 
+// readDocSet reads the repository's documentation set: README.md, then every
+// Markdown page under docs/. A test pinning a documented phrase reads the set,
+// so the phrase may live in whichever page documents it.
+func readDocSet(t *testing.T) string {
+	t.Helper()
+	return readDocSetAt(t, filepath.Join("..", ".."))
+}
+
+// readDocSetAt returns root/README.md followed by every root/docs/**/*.md in
+// lexical path order, each file starting on a line of its own. A missing docs/
+// directory is not an error; an unreadable file fails the test with its path.
+func readDocSetAt(t *testing.T, root string) string {
+	t.Helper()
+	paths := []string{filepath.Join(root, "README.md")}
+	var pages []string
+	docs := filepath.Join(root, "docs")
+	err := filepath.WalkDir(docs, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".md") {
+			pages = append(pages, path)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("walking %s: %v", docs, err)
+	}
+	sort.Strings(pages)
+	paths = append(paths, pages...)
+
+	var b strings.Builder
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", path, err)
+		}
+		if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+			b.WriteByte('\n')
+		}
+		b.Write(data)
+	}
+	return b.String()
+}
+
 // requireContains fails the test when haystack does not contain every needle.
 func requireContains(t *testing.T, doc, haystack string, needles ...string) {
 	t.Helper()
@@ -33,7 +81,7 @@ func requireContains(t *testing.T, doc, haystack string, needles ...string) {
 }
 
 func TestREADME_DocumentsExitCodes(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"### Exit codes",
 		"`0`",
@@ -44,7 +92,7 @@ func TestREADME_DocumentsExitCodes(t *testing.T) {
 }
 
 func TestREADME_DocumentsConcurrency(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"### Concurrency",
 		"--concurrency",
@@ -54,7 +102,7 @@ func TestREADME_DocumentsConcurrency(t *testing.T) {
 }
 
 func TestREADME_DocumentsHeaderAllowlist(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"### Headers and environment variables",
 		"BENTOO_",
@@ -68,7 +116,7 @@ func TestREADME_DocumentsHeaderAllowlist(t *testing.T) {
 }
 
 func TestREADME_DocumentsHTTP2(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"### HTTP/2",
 		"BENTOO_DISABLE_HTTP2",
@@ -77,7 +125,7 @@ func TestREADME_DocumentsHTTP2(t *testing.T) {
 }
 
 func TestREADME_DocumentsFilesystem(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"### Filesystem assumptions",
 		"0600",
@@ -93,7 +141,7 @@ func TestREADME_DocumentsFilesystem(t *testing.T) {
 // in pairs). An ebuild's pkg_nofetch points here, so a rename that leaves this
 // section behind sends the user to instructions for a command that moved.
 func TestREADME_DocumentsGatedDistfileFetch(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"#### Fetch a gated distfile",
 		"bentoo distfile fetch",

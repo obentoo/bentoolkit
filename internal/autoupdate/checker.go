@@ -715,7 +715,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		for _, name := range names {
 			checker.log.Warn("package sets llm_prompt but no LLM is wired into "+
 				"the check path; this field is consumed only by "+
-				"'bentoo overlay analyze' (see README)", "package", name)
+				"'bentoo overlay analyze' (see docs/autoupdate.md)", "package", name)
 		}
 	}
 

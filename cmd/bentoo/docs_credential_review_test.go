@@ -30,7 +30,7 @@ func collapseSpace(s string) string {
 }
 
 func TestREADME_StatesWhatBentooBindingProtects(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 
 	headers := sectionFrom(readme, "### Headers and environment variables")
 	if headers == "" {
