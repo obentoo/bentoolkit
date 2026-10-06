@@ -19,6 +19,7 @@ import (
 	"github.com/antchfx/xpath"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -140,11 +141,11 @@ type Analyzer struct {
 	// llmClient handles LLM-based analysis
 	llmClient LLMProvider
 	// httpClient handles HTTP requests with retry logic
-	httpClient *RetryableHTTPClient
+	httpClient *fetch.RetryableHTTPClient
 	// cache manages LLM analysis caching
 	cache *AnalysisCache
 	// rateLimiter manages request rate limiting
-	rateLimiter *RateLimiter
+	rateLimiter *fetch.RateLimiter
 	// configDir is the directory for storing cache files
 	configDir string
 	// opTimeout bounds a single outbound HTTP operation. Defaults to
@@ -193,7 +194,7 @@ func WithAnalyzerLLMClient(llm LLMProvider) AnalyzerOption {
 }
 
 // WithAnalyzerHTTPClient sets a custom HTTP client for the analyzer.
-func WithAnalyzerHTTPClient(client *RetryableHTTPClient) AnalyzerOption {
+func WithAnalyzerHTTPClient(client *fetch.RetryableHTTPClient) AnalyzerOption {
 	return func(a *Analyzer) error {
 		a.httpClient = client
 		return nil
@@ -209,7 +210,7 @@ func WithAnalyzerCache(cache *AnalysisCache) AnalyzerOption {
 }
 
 // WithAnalyzerRateLimiter sets a custom rate limiter for the analyzer.
-func WithAnalyzerRateLimiter(limiter *RateLimiter) AnalyzerOption {
+func WithAnalyzerRateLimiter(limiter *fetch.RateLimiter) AnalyzerOption {
 	return func(a *Analyzer) error {
 		a.rateLimiter = limiter
 		return nil
@@ -309,12 +310,12 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 
 	// Initialize rate limiter if not provided
 	if analyzer.rateLimiter == nil {
-		analyzer.rateLimiter = NewRateLimiter()
+		analyzer.rateLimiter = fetch.NewRateLimiter()
 	}
 
 	// Initialize HTTP client if not provided
 	if analyzer.httpClient == nil {
-		analyzer.httpClient = NewRetryableHTTPClient()
+		analyzer.httpClient = fetch.NewRetryableHTTPClient()
 	}
 
 	// The cache and the client — injected ones too, since there is one logger
@@ -505,7 +506,7 @@ func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte,
 	// (S019-R3.1, S001-R11.3); the cap itself is imposed upstream by GetWithContext at
 	// httpx.MaxBodyBytes, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
-	content, err := readBodyForStatus(resp, http.StatusOK)
+	content, err := fetch.ReadBodyForStatus(resp, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -170,7 +171,7 @@ func reportDistfileFetchError(requested string, err error) {
 		fmt.Fprintln(os.Stderr, "  Nothing to do: emerge fetches this package's distfile from a mirror by itself.")
 	case errors.Is(err, autoupdate.ErrPackageNotInRegistry):
 		fmt.Fprintf(os.Stderr, "  The overlay tracks no record named %s, so there is no download recorded for it.\n", requested)
-	case errors.Is(err, autoupdate.ErrAuthFetchSecretMissing):
+	case errors.Is(err, fetch.ErrAuthFetchSecretMissing):
 		fmt.Fprintln(os.Stderr, "  The serial is read at runtime and never stored in the overlay: export it, or add it to the secrets file named above.")
 	}
 }

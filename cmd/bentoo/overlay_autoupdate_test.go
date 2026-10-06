@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -216,9 +217,9 @@ func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
 	// the writer honoured 60 s; we then probe the entry against the same TTL
 	// with injected times to confirm the freshness window.
 	now := time.Now()
-	cacheAtT59, err := autoupdate.NewCache(autoupdateConfigDir,
-		autoupdate.WithTTL(60*time.Second),
-		autoupdate.WithNowFunc(func() time.Time { return now.Add(59 * time.Second) }),
+	cacheAtT59, err := fetch.NewCache(autoupdateConfigDir,
+		fetch.WithTTL(60*time.Second),
+		fetch.WithNowFunc(func() time.Time { return now.Add(59 * time.Second) }),
 	)
 	if err != nil {
 		t.Fatalf("reload cache (t+59s): %v", err)
@@ -227,9 +228,9 @@ func TestRunAutoupdate_CacheTTLFromConfig(t *testing.T) {
 		t.Errorf("cache entry for %s should be fresh at t+59s under TTL=60s (R2.1)", pkg)
 	}
 
-	cacheAtT61, err := autoupdate.NewCache(autoupdateConfigDir,
-		autoupdate.WithTTL(60*time.Second),
-		autoupdate.WithNowFunc(func() time.Time { return now.Add(61 * time.Second) }),
+	cacheAtT61, err := fetch.NewCache(autoupdateConfigDir,
+		fetch.WithTTL(60*time.Second),
+		fetch.WithNowFunc(func() time.Time { return now.Add(61 * time.Second) }),
 	)
 	if err != nil {
 		t.Fatalf("reload cache (t+61s): %v", err)

@@ -20,8 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -122,56 +120,5 @@ func TestCheckerLogsToTheInjectedLogger(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr) != "" {
 		t.Errorf("with a logger injected, the checker still wrote to stderr:\n%s", stderr)
-	}
-}
-
-// TestHTTPClientLogsToTheInjectedLogger: a denied header expansion is reported
-// to the logger given with SetLogger, naming the variable in an attribute, and
-// nothing reaches stderr. A header name carrying CR/LF is reported the same way.
-func TestHTTPClientLogsToTheInjectedLogger(t *testing.T) {
-	s062IsolateAutoupdate(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{}"))
-	}))
-	t.Cleanup(srv.Close)
-
-	for _, tc := range []struct {
-		name    string
-		headers map[string]string
-		naming  string
-	}{
-		{"denied expansion", map[string]string{"X-S062-Probe": "${S062_NOT_ALLOWED_VAR}"}, "S062_NOT_ALLOWED_VAR"},
-		{"CR/LF in the header name", map[string]string{"X-S062-Bad\r\nInjected": "v"}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := &s062Recorder{}
-			client := NewRetryableHTTPClient()
-			client.SetLogger(rec.logger())
-
-			stderr := s062CaptureStderr(t, func() {
-				resp, err := client.GetWithHeaders(srv.URL, tc.headers)
-				if err == nil {
-					_ = resp.Body.Close()
-				}
-			})
-
-			recs := rec.records(t)
-			var warns []map[string]any
-			if tc.naming != "" {
-				warns = s062WarnsNaming(t, recs, tc.naming)
-			} else {
-				for _, r := range recs {
-					if r["level"] == "WARN" {
-						warns = append(warns, r)
-					}
-				}
-			}
-			if len(warns) == 0 {
-				t.Errorf("the injected logger got no WARN record for the %s\nrecords: %v", tc.name, recs)
-			}
-			if strings.TrimSpace(stderr) != "" {
-				t.Errorf("with a logger injected, the HTTP client still wrote to stderr:\n%s", stderr)
-			}
-		})
 	}
 }

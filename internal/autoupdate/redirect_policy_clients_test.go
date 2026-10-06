@@ -14,13 +14,7 @@ import (
 // default policy forwards X-Api-Key, X-Auth-Token and Private-Token there, so
 // removing the policy from any one constructor turns its subtest red.
 func TestAllHTTPClients_HaveCredentialRedirectPolicy(t *testing.T) {
-	constructors := append(autoupdateHTTPClientConstructors(), httpClientConstructor{
-		name: "NewRetryableHTTPClientWithConfig.h1Client",
-		build: func(t *testing.T) *http.Client {
-			t.Helper()
-			return NewRetryableHTTPClientWithConfig(DefaultRetryConfig()).h1Client
-		},
-	})
+	constructors := autoupdateHTTPClientConstructors()
 	credentials := []string{"Authorization", "X-Api-Key", "X-Auth-Token", "PRIVATE-TOKEN"}
 
 	for _, ctor := range constructors {

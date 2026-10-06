@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -139,7 +140,7 @@ const DefaultOpTimeout = 30 * time.Second
 // the HTTP client; a zero/blank rc still yields a budget >= perReq. The backoff
 // is summed from backoffCeilingFor, the same ceiling the retry wait draws its
 // jitter below, so a jittered wait never exceeds what the budget allows for.
-func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
+func deriveOpTimeout(perReq time.Duration, rc fetch.RetryConfig) time.Duration {
 	maxRetries := rc.MaxRetries
 	if maxRetries < 0 {
 		maxRetries = 0
@@ -149,7 +150,7 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 
 	// Sum the longest wait the retry loop can take before each retry.
 	for i := 1; i <= maxRetries; i++ {
-		total += backoffCeilingFor(rc, i)
+		total += fetch.BackoffCeilingFor(rc, i)
 	}
 
 	return total + time.Second
@@ -244,7 +245,7 @@ type Checker struct {
 	// WithTypeFilter.
 	typeFilter string
 	// cache manages version query caching
-	cache *Cache
+	cache *fetch.Cache
 	// pending manages pending updates
 	pending *PendingList
 	// llmClient handles LLM-based version extraction (optional). It is the
@@ -266,7 +267,7 @@ type Checker struct {
 	// defaults false so existing direct callers are unaffected.
 	llmProviderConfigured bool
 	// httpClient handles HTTP requests with retry logic
-	httpClient *RetryableHTTPClient
+	httpClient *fetch.RetryableHTTPClient
 	// configDir is the directory for storing cache and pending files
 	configDir string
 	// opTimeout bounds a single outbound operation. Each fetch derives a child
@@ -315,7 +316,7 @@ type Checker struct {
 	// fetchContent then calls fetchContentUncached directly, which is the
 	// pre-story path byte for byte. NewChecker builds one in the struct literal
 	// below, so deduplication is on by default.
-	bodies *bodyCache
+	bodies *fetch.BodyCache
 
 	// hostSlots caps the requests in flight to one host (DefaultPerHostConcurrency
 	// unless WithPerHostConcurrency says otherwise). Nil means no cap.
@@ -350,7 +351,7 @@ func WithLogger(l *slog.Logger) CheckerOption {
 }
 
 // WithCache sets a custom cache for the checker
-func WithCache(cache *Cache) CheckerOption {
+func WithCache(cache *fetch.Cache) CheckerOption {
 	return func(c *Checker) error {
 		c.cache = cache
 		return nil
@@ -402,7 +403,7 @@ func WithLLMProviderConfigured(configured bool) CheckerOption {
 }
 
 // WithHTTPClient sets a custom HTTP client for the checker
-func WithHTTPClient(client *RetryableHTTPClient) CheckerOption {
+func WithHTTPClient(client *fetch.RetryableHTTPClient) CheckerOption {
 	return func(c *Checker) error {
 		c.httpClient = client
 		return nil
@@ -570,7 +571,7 @@ func WithFetchCache(enabled bool) CheckerOption {
 			return nil
 		}
 		if c.bodies == nil {
-			c.bodies = newDefaultBodyCache()
+			c.bodies = fetch.NewDefaultBodyCache()
 		}
 		return nil
 	}
@@ -596,7 +597,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		// simply sets the field back to nil — instead of a flag threaded through
 		// the fetch path. fetchContent then has one branch on one field, and the
 		// off state is the pre-story code verbatim.
-		bodies:    newDefaultBodyCache(),
+		bodies:    fetch.NewDefaultBodyCache(),
 		hostSlots: newHostSlots(DefaultPerHostConcurrency),
 	}
 
@@ -621,11 +622,11 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// the user-configured `autoupdate.cache_ttl` is honoured (S002-R2.1). When the
 	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
 	if checker.cache == nil {
-		cacheOpts := []CacheOption{}
+		cacheOpts := []fetch.CacheOption{}
 		if checker.cacheTTL > 0 {
-			cacheOpts = append(cacheOpts, WithTTL(checker.cacheTTL))
+			cacheOpts = append(cacheOpts, fetch.WithTTL(checker.cacheTTL))
 		}
-		cache, err := NewCache(checker.configDir, cacheOpts...)
+		cache, err := fetch.NewCache(checker.configDir, cacheOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize cache: %w", err)
 		}
@@ -643,7 +644,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Initialize HTTP client if not provided
 	if checker.httpClient == nil {
-		checker.httpClient = NewRetryableHTTPClient()
+		checker.httpClient = fetch.NewRetryableHTTPClient()
 	}
 	// The client reports through the checker's logger — an injected client
 	// too, since there is one logger per invocation. Without WithLogger the
@@ -684,7 +685,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
 	// have a nil rateLimiter: fetchContent unconditionally waits on it (S001-R10.3).
 	if checker.rateLimiter == nil {
-		checker.rateLimiter = NewRateLimiter()
+		checker.rateLimiter = fetch.NewRateLimiter()
 	}
 
 	// S003-R5.3 / S002-R4.2: a non-empty llm_prompt only drives --check when an LLM
@@ -743,9 +744,9 @@ func isUpstreamUnreachable(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	return errors.Is(err, ErrMaxRetriesExceeded) ||
-		errors.Is(err, ErrRequestTimeout) ||
-		errors.Is(err, ErrRetryAfterTooLong) ||
+	return errors.Is(err, fetch.ErrMaxRetriesExceeded) ||
+		errors.Is(err, fetch.ErrRequestTimeout) ||
+		errors.Is(err, fetch.ErrRetryAfterTooLong) ||
 		errors.Is(err, gobreaker.ErrOpenState) ||
 		errors.Is(err, gobreaker.ErrTooManyRequests) ||
 		errors.Is(err, context.DeadlineExceeded)
@@ -1387,7 +1388,7 @@ func (c *Checker) resolveAuxValue(ctx context.Context, cfg *PackageConfig, resul
 	}
 	source, headers := cfg.URL, cfg.Headers
 	if cfg.AuxURL != "" {
-		source = strings.ReplaceAll(cfg.AuxURL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+		source = strings.ReplaceAll(cfg.AuxURL, fetch.VersionPlaceholder, url.PathEscape(result.UpstreamVersion))
 		headers = nonCredentialHeaders(cfg.Headers)
 	}
 	content, err := c.fetchContent(ctx, source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
@@ -1441,14 +1442,14 @@ func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *Pack
 		spec := cfg.Requires[atom]
 		source, headers := cfg.URL, cfg.Headers
 		if spec.URL != "" {
-			source = strings.ReplaceAll(spec.URL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+			source = strings.ReplaceAll(spec.URL, fetch.VersionPlaceholder, url.PathEscape(result.UpstreamVersion))
 			headers = nonCredentialHeaders(cfg.Headers)
 		}
 		content, err := c.fetchContent(ctx, source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 		if err != nil {
 			return nil, fmt.Errorf("%w for %s requiring %s: fetching %s: %w", ErrRequirementUnresolved, pkg, atom, hostForError(source), err)
 		}
-		pattern := strings.ReplaceAll(spec.Pattern, versionPlaceholder, regexp.QuoteMeta(result.UpstreamVersion))
+		pattern := strings.ReplaceAll(spec.Pattern, fetch.VersionPlaceholder, regexp.QuoteMeta(result.UpstreamVersion))
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			return nil, fmt.Errorf("%w for %s requiring %s: pattern %q: %w", ErrRequirementUnresolved, pkg, atom, spec.Pattern, err)
@@ -1884,7 +1885,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 
 	// A credential refusal is a verdict on the record, not a failed source:
 	// neither the fallback nor the LLM stage may run after it (S052-R2.2).
-	if errors.Is(err, ErrCredentialHostMismatch) {
+	if errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		return "", fmt.Errorf("all version extraction methods failed: %w", err)
 	}
 
@@ -1923,7 +1924,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 func nonCredentialHeaders(headers map[string]string) map[string]string {
 	var out map[string]string
 	for name, value := range headers {
-		if isAllowedHeaderName(name) || containsCRLF(name) {
+		if fetch.IsAllowedHeaderName(name) || fetch.ContainsCRLF(name) {
 			continue
 		}
 		if out == nil {
@@ -1945,7 +1946,7 @@ func nonCredentialHeaders(headers map[string]string) map[string]string {
 // read, which is the record's fault and the registry repair's business.
 func (c *Checker) probeWithMirrors(cfg *PackageConfig, probe func(*PackageConfig) (string, error)) (string, error) {
 	version, err := probe(cfg)
-	if err == nil || len(cfg.Mirrors) == 0 || errors.Is(err, ErrCredentialHostMismatch) {
+	if err == nil || len(cfg.Mirrors) == 0 || errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		return version, err
 	}
 
@@ -2098,8 +2099,8 @@ func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, er
 	// The key cannot collide with an HTTP body's: it carries a prefix no URL has.
 	// The lookup precedes the rate-limit wait for the reason fetchContent's does.
 	digest := sha256.Sum256([]byte(body))
-	key := "script" + keySeparator + hex.EncodeToString(digest[:]) + keySeparator + bodyKey(cfg.URL, cfg.Headers)
-	out, err := c.bodies.do(ctx, key, func() ([]byte, error) {
+	key := "script" + fetch.KeySeparator + hex.EncodeToString(digest[:]) + fetch.KeySeparator + fetch.BodyKey(cfg.URL, cfg.Headers)
+	out, err := c.bodies.Do(ctx, key, func() ([]byte, error) {
 		v, err := c.evaluateLive(ctx, cfg, body)
 		return []byte(v), err
 	})
@@ -2201,8 +2202,8 @@ func (c *Checker) evaluateLive(ctx context.Context, cfg *PackageConfig, body str
 // cache would let a later cancelled call succeed. The refusal keeps the raw
 // context error as its cause, so errors.Is(err, context.Canceled) and
 // errors.Is(err, context.DeadlineExceeded) hold for every caller.
-func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
-	if err := checkCredentialBinding(rawURL, headers, scope); err != nil {
+func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
+	if err := fetch.CheckCredentialBinding(rawURL, headers, scope); err != nil {
 		return nil, err
 	}
 
@@ -2214,7 +2215,7 @@ func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[s
 		return c.fetchContentUncached(ctx, rawURL, headers, scope, opTimeout)
 	}
 
-	return c.bodies.do(ctx, bodyKey(rawURL, headers), func() ([]byte, error) {
+	return c.bodies.Do(ctx, fetch.BodyKey(rawURL, headers), func() ([]byte, error) {
 		return c.fetchContentUncached(ctx, rawURL, headers, scope, opTimeout)
 	})
 }
@@ -2247,7 +2248,7 @@ func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[s
 // the Authorization token, and any TOML-declared headers on the wire. scope is
 // handed to that GET so the client re-checks the credential binding against the
 // package's hosts, not the request's own (S052-R1.4).
-func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
+func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -2290,7 +2291,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	opCtx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
 
-	resp, err := c.httpClient.getWithHeadersScopedContext(opCtx, rawURL, headers, scope)
+	resp, err := c.httpClient.GetWithHeadersScopedContext(opCtx, rawURL, headers, scope)
 	if err != nil {
 		// Name the host and the per-request cap so a timeout points the user at
 		// the slow endpoint and the knob to raise (autoupdate.http_timeout /
@@ -2331,7 +2332,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	// ErrResponseTooLarge (S019-R3.1, S019-R3.2, S001-R11.3). The cap is imposed upstream by
 	// GetWithHeadersContext, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
-	content, err := readBodyForStatus(resp, acceptedStatuses...)
+	content, err := fetch.ReadBodyForStatus(resp, acceptedStatuses...)
 	if err != nil {
 		return nil, err
 	}
@@ -2572,7 +2573,7 @@ func (c *Checker) logFetchCacheStats() {
 		return
 	}
 
-	stats := c.bodies.snapshot()
+	stats := c.bodies.Snapshot()
 	c.logger().Debug("fetch cache",
 		"hits", stats.Hits, "joins", stats.Joins, "misses", stats.Misses, "refetches", stats.Refetches,
 		"not_retained_oversize", stats.Oversize, "not_retained_budget_full", stats.BudgetFull)
@@ -2584,7 +2585,7 @@ func (c *Checker) Config() *PackagesConfig {
 }
 
 // Cache returns the cache instance.
-func (c *Checker) Cache() *Cache {
+func (c *Checker) Cache() *fetch.Cache {
 	return c.cache
 }
 
@@ -2596,4 +2597,25 @@ func (c *Checker) Pending() *PendingList {
 // OverlayPath returns the overlay path.
 func (c *Checker) OverlayPath() string {
 	return c.overlayPath
+}
+
+// packageCredentialScope is the scope of a package record: the hostnames of
+// its url and base_url (S052-R1.4). An empty or unparseable field contributes
+// no host, so a record whose url cannot be read has no own host and any
+// BENTOO_* reference in it is refused. fallback_url is deliberately not a
+// scope host: a BENTOO_* credential stays with the record's primary source.
+func packageCredentialScope(cfg *PackageConfig) fetch.CredentialScope {
+	var scope fetch.CredentialScope
+	if cfg == nil {
+		return scope
+	}
+	for _, raw := range []string{cfg.URL, cfg.BaseURL} {
+		if raw == "" {
+			continue
+		}
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			scope.OwnHosts = append(scope.OwnHosts, u.Hostname())
+		}
+	}
+	return scope
 }

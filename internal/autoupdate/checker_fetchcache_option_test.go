@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // =============================================================================
@@ -46,7 +48,7 @@ func TestWithFetchCache(t *testing.T) {
 		}
 
 		for i := 0; i < 3; i++ {
-			if _, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read %d returned an unexpected error: %v", i, err)
 			}
 		}
@@ -73,7 +75,7 @@ func TestWithFetchCache(t *testing.T) {
 		}
 
 		for i := 0; i < 3; i++ {
-			if _, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read %d returned an unexpected error: %v", i, err)
 			}
 		}
@@ -111,12 +113,12 @@ func TestWithFetchCache(t *testing.T) {
 		checker := newRateLimitTestChecker(t, serverA.URL, WithRateLimiter(unlimitedRateLimiter()))
 
 		for _, u := range []string{serverA.URL, serverA.URL, serverB.URL} {
-			if _, err := checker.fetchContent(t.Context(), u, nil, credentialScope{}, checker.operationTimeout(nil)); err != nil {
+			if _, err := checker.fetchContent(t.Context(), u, nil, fetch.CredentialScope{}, checker.operationTimeout(nil)); err != nil {
 				t.Fatalf("read of %s returned an unexpected error: %v", u, err)
 			}
 		}
 
-		stats := checker.bodies.snapshot()
+		stats := checker.bodies.Snapshot()
 		if stats.Misses != 2 {
 			t.Errorf("stats.Misses = %d, want 2 (two distinct identities were fetched)", stats.Misses)
 		}
@@ -144,12 +146,12 @@ func TestWithFetchCache(t *testing.T) {
 		server := newCountingServer(t, &requests)
 
 		first := newRateLimitTestChecker(t, server.URL, WithRateLimiter(unlimitedRateLimiter()))
-		if _, err := first.fetchContent(t.Context(), server.URL, nil, credentialScope{}, first.operationTimeout(nil)); err != nil {
+		if _, err := first.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, first.operationTimeout(nil)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		second := newRateLimitTestChecker(t, server.URL, WithRateLimiter(unlimitedRateLimiter()))
-		if _, err := second.fetchContent(t.Context(), server.URL, nil, credentialScope{}, second.operationTimeout(nil)); err != nil {
+		if _, err := second.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, second.operationTimeout(nil)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 

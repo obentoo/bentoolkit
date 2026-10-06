@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // This file is the ONE exported door onto the authenticated fetch.
@@ -103,7 +104,7 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 		return AuthDistfileResult{}, err
 	}
 
-	spec, enabled, err := parseAuthFetchSpec(pkgCfg.Meta)
+	spec, enabled, err := fetch.ParseAuthFetchSpec(pkgCfg.Meta)
 	if err != nil {
 		return AuthDistfileResult{}, err
 	}
@@ -120,11 +121,11 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 		version = best.Version
 	}
 
-	path, err := spec.fetchDistfile(ctx, version, req.DestDir)
+	path, err := spec.FetchDistfile(ctx, version, req.DestDir)
 	if err != nil {
 		return AuthDistfileResult{}, err
 	}
-	return AuthDistfileResult{Package: key, Version: version, Path: path, SerialEnv: spec.serialEnv}, nil
+	return AuthDistfileResult{Package: key, Version: version, Path: path, SerialEnv: spec.SerialEnv}, nil
 }
 
 // resolveRegistryKey turns what the user typed into the registry key of exactly

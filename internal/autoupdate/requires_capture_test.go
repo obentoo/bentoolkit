@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // --check captures, for every requires entry, the version its pattern reads
@@ -63,7 +65,7 @@ func requiresCaptureChecker(t *testing.T, cfg PackageConfig) *Checker {
 		WithConfigDir(filepath.Join(tmp, "config")),
 		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{requiresCapturePkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+		WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 		WithFetchCache(true),
 	)
 	if err != nil {

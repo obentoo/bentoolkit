@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
@@ -173,7 +174,7 @@ func TestOllamaClient_WithCustomMaxBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an oversized response body, got nil")
 	}
-	if !errors.Is(err, ErrResponseTooLarge) {
+	if !errors.Is(err, fetch.ErrResponseTooLarge) {
 		t.Errorf("expected ErrResponseTooLarge, got: %v", err)
 	}
 }

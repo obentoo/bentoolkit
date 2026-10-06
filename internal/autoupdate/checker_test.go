@@ -17,6 +17,7 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // =============================================================================
@@ -517,7 +518,7 @@ func TestNewCheckerWithOptions(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "config")
 
 	// Create custom components
-	customCache, _ := NewCache(configDir)
+	customCache, _ := fetch.NewCache(configDir)
 	customPending, _ := NewPendingList(configDir)
 	customConfig := &PackagesConfig{
 		Packages: map[string]PackageConfig{
@@ -629,7 +630,7 @@ func TestCheckPackageUsesCache(t *testing.T) {
 
 	// Create cache with entry
 	fixedNow := time.Date(2026, 1, 22, 12, 0, 0, 0, time.UTC)
-	cache, _ := NewCache(configDir, WithNowFunc(func() time.Time { return fixedNow }))
+	cache, _ := fetch.NewCache(configDir, fetch.WithNowFunc(func() time.Time { return fixedNow }))
 	cache.Set(pkgName, cachedVersion, "https://example.com")
 
 	checker, err := NewChecker(overlayDir,
@@ -683,7 +684,7 @@ func TestCheckPackageBypassesCache(t *testing.T) {
 
 	// Create cache with entry
 	fixedNow := time.Date(2026, 1, 22, 12, 0, 0, 0, time.UTC)
-	cache, _ := NewCache(configDir, WithNowFunc(func() time.Time { return fixedNow }))
+	cache, _ := fetch.NewCache(configDir, fetch.WithNowFunc(func() time.Time { return fixedNow }))
 	cache.Set(pkgName, cachedVersion, server.URL)
 
 	checker, err := NewChecker(overlayDir,
@@ -1150,7 +1151,7 @@ func TestCheckAll_ReturnsBatchResult(t *testing.T) {
 	}
 
 	// Disable HTTP retries so the failing package fails fast.
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -1211,7 +1212,7 @@ func TestCheckAll_ErrorsOnStderr(t *testing.T) {
 		createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 	}
 
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -1590,8 +1591,8 @@ func TestWithCacheTTL_DefaultWhenAbsent(t *testing.T) {
 		t.Fatalf("NewChecker failed: %v", err)
 	}
 
-	if got := checker.Cache().TTL; got != DefaultCacheTTL {
-		t.Errorf("Cache().TTL = %v, want default %v (R2.2)", got, DefaultCacheTTL)
+	if got := checker.Cache().TTL; got != fetch.DefaultCacheTTL {
+		t.Errorf("Cache().TTL = %v, want default %v (R2.2)", got, fetch.DefaultCacheTTL)
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // Story 052, sub-task 1.3 — the two cases the Test Advisor could not reach
@@ -75,7 +77,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 			srv, hits, _ := scopeTestServer(t)
 			checker := newRateLimitTestChecker(t, srv.URL, WithRateLimiter(&recordingRateLimiter{}))
 			_, err := checker.fetchContent(t.Context(), srv.URL+"/data", headers, packageCredentialScope(cfg), time.Second)
-			if !errors.Is(err, ErrCredentialHostMismatch) {
+			if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 				t.Fatalf("err = %v; want ErrCredentialHostMismatch", err)
 			}
 			for _, needle := range []string{"X-Api-Key", "BENTOO_T", "127.0.0.1"} {
@@ -132,7 +134,7 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 	// declared headers: same cache key. It must be refused, not served.
 	foreign := packageCredentialScope(&PackageConfig{URL: "https://vendor.example/latest"})
 	body, err := checker.fetchContent(t.Context(), target, headers, foreign, time.Second)
-	if !errors.Is(err, ErrCredentialHostMismatch) {
+	if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		t.Fatalf("fetchContent = (%q, %v); want ErrCredentialHostMismatch even with a cached body", body, err)
 	}
 	if body != nil {
@@ -156,7 +158,7 @@ func TestPackageCredentialScope(t *testing.T) {
 		{"unparseable and empty fields contribute nothing", &PackageConfig{URL: "://broken", BaseURL: ""}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := packageCredentialScope(tc.cfg).ownHosts; !slices.Equal(got, tc.want) {
+			if got := packageCredentialScope(tc.cfg).OwnHosts; !slices.Equal(got, tc.want) {
 				t.Errorf("ownHosts = %v, want %v", got, tc.want)
 			}
 		})

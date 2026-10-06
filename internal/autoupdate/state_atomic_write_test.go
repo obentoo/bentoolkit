@@ -70,26 +70,6 @@ func s056AssertStateFileSound(t *testing.T, dir, name, victim string) {
 	s056AssertEntries(t, dir, name, name+".tmp")
 }
 
-func TestCacheAtomicWrite_StaleFixedTempNameIsNeverUsed(t *testing.T) {
-	dir := t.TempDir()
-	victim := s056PlantStaleTmp(t, dir, "cache.json")
-	c, err := NewCache(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Set("x/a", "1.0", "https://example.invalid"); err != nil {
-		t.Fatalf("Set with a stale cache.json.tmp beside the cache: %v", err)
-	}
-	s056AssertStateFileSound(t, dir, "cache.json", victim)
-	reloaded, err := NewCache(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e, ok := reloaded.GetEntry("x/a"); !ok || e.Version != "1.0" {
-		t.Errorf("reloaded cache has x/a = %+v, %v; want version 1.0", e, ok)
-	}
-}
-
 func TestPendingListAtomicWrite_StaleFixedTempNameIsNeverUsed(t *testing.T) {
 	dir := t.TempDir()
 	victim := s056PlantStaleTmp(t, dir, "pending.json")

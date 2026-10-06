@@ -50,6 +50,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // buildPhaseReport matches Portage's own "which phase died" line, e.g.
@@ -266,7 +268,7 @@ func (a *Applier) recordUnmetPrecondition(pkg, transcript string) {
 		return
 	}
 
-	cache, err := NewCache(a.configDir)
+	cache, err := fetch.NewCache(a.configDir)
 	if err != nil {
 		a.logger().Warn("could not open the cache to record the unmet precondition", "package", pkg, "precondition", required, "err", err)
 		return
@@ -429,7 +431,7 @@ func (a *Applier) unmetPrecondition(pkg string) (string, bool) {
 		return "", false
 	}
 
-	cache, err := NewCache(a.configDir)
+	cache, err := fetch.NewCache(a.configDir)
 	if err != nil {
 		a.logger().Debug("could not open the cache to check for a recorded precondition, so the build gate runs", "package", pkg, "err", err)
 		return "", false

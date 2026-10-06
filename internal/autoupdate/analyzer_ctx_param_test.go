@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"golang.org/x/time/rate"
 )
 
@@ -31,9 +32,9 @@ func analyzerCtx059Upstream(t *testing.T) *httptest.Server {
 func newAnalyzerCtx059(t *testing.T, overlayDir, upstreamURL string, opts ...AnalyzerOption) *Analyzer {
 	t.Helper()
 	// No waiting in the limiter: these tests are about contexts, not pacing.
-	rl := NewRateLimiter()
+	rl := fetch.NewRateLimiter()
 	rl.SetLLMLimit(rate.Inf, 1)
-	domain, err := extractDomain(upstreamURL)
+	domain, err := fetch.ExtractDomain(upstreamURL)
 	if err != nil {
 		t.Fatalf("extractDomain(%s): %v", upstreamURL, err)
 	}

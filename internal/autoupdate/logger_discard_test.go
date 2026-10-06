@@ -19,8 +19,6 @@ package autoupdate
 import (
 	"bytes"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,26 +95,5 @@ func TestCheckerWithoutALoggerWritesNothingToStderr(t *testing.T) {
 	})
 	if strings.TrimSpace(stderr) != "" {
 		t.Errorf("a checker built without a logger wrote to stderr (R5.3: it must discard):\n%s", stderr)
-	}
-}
-
-// TestHTTPClientWithoutALoggerWritesNothingToStderr: a denied header expansion
-// on a client built with no logger goes nowhere.
-func TestHTTPClientWithoutALoggerWritesNothingToStderr(t *testing.T) {
-	s062IsolateAutoupdate(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{}"))
-	}))
-	t.Cleanup(srv.Close)
-
-	client := NewRetryableHTTPClient()
-	stderr := s062CaptureStderr(t, func() {
-		resp, err := client.GetWithHeaders(srv.URL, map[string]string{"X-S062-Probe": "${S062_NOT_ALLOWED_VAR}"})
-		if err == nil {
-			_ = resp.Body.Close()
-		}
-	})
-	if strings.TrimSpace(stderr) != "" {
-		t.Errorf("an HTTP client built without a logger wrote to stderr (R5.3: it must discard):\n%s", stderr)
 	}
 }

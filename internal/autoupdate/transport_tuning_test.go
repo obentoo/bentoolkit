@@ -28,13 +28,6 @@ type httpClientConstructor struct {
 func autoupdateHTTPClientConstructors() []httpClientConstructor {
 	return []httpClientConstructor{
 		{
-			name: "NewRetryableHTTPClientWithConfig",
-			build: func(t *testing.T) *http.Client {
-				t.Helper()
-				return NewRetryableHTTPClientWithConfig(DefaultRetryConfig()).client
-			},
-		},
-		{
 			name: "NewClaudeClient",
 			build: func(t *testing.T) *http.Client {
 				t.Helper()

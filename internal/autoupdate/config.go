@@ -18,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -529,7 +530,7 @@ func validateRequires(pkg string, cfg *PackageConfig) error {
 		if atom == selfCat+"/"+selfName {
 			return fmt.Errorf("package %s: requires its own package %q", pkg, atom)
 		}
-		sample := strings.ReplaceAll(spec.Pattern, versionPlaceholder, regexp.QuoteMeta("0.0.0"))
+		sample := strings.ReplaceAll(spec.Pattern, fetch.VersionPlaceholder, regexp.QuoteMeta("0.0.0"))
 		re, err := regexp.Compile(sample)
 		switch {
 		case spec.Pattern == "":
@@ -543,10 +544,10 @@ func validateRequires(pkg string, cfg *PackageConfig) error {
 			return fmt.Errorf("package %s: requires %s: pin %q is not one of %s", pkg, atom, spec.Pin, strings.Join(requirePins, ", "))
 		}
 		if spec.URL != "" {
-			switch urlTemplateFault(spec.URL) {
-			case templateNotHTTP:
+			switch fetch.URLTemplateFault(spec.URL) {
+			case fetch.TemplateNotHTTP:
 				return fmt.Errorf("package %s: requires %s: url %q is not an absolute http(s) URL with a host", pkg, atom, spec.URL)
-			case templatePlaceholderInHost:
+			case fetch.TemplatePlaceholderInHost:
 				return fmt.Errorf("package %s: requires %s: url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, atom, spec.URL)
 			}
 		}
@@ -1599,10 +1600,10 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 		if cfg.AuxPattern == "" {
 			return fmt.Errorf("package %s: aux_url requires aux_var and aux_pattern", pkg)
 		}
-		switch urlTemplateFault(cfg.AuxURL) {
-		case templateNotHTTP:
+		switch fetch.URLTemplateFault(cfg.AuxURL) {
+		case fetch.TemplateNotHTTP:
 			return fmt.Errorf("package %s: aux_url %q is not an absolute http(s) URL with a host", pkg, cfg.AuxURL)
-		case templatePlaceholderInHost:
+		case fetch.TemplatePlaceholderInHost:
 			return fmt.Errorf("package %s: aux_url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, cfg.AuxURL)
 		}
 	}
@@ -1638,7 +1639,7 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	// is claimed by the map, so the decoder's unknown-key check cannot see into
 	// it — this sub-validator is the only thing standing between a typo there and
 	// an authenticated download that never runs.
-	if err := validateMetaFetch(pkg, cfg.Meta); err != nil {
+	if err := fetch.ValidateMetaFetch(pkg, cfg.Meta); err != nil {
 		return err
 	}
 

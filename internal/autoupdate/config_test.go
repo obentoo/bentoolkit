@@ -13,6 +13,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // genValidURL generates valid URL strings
@@ -1129,7 +1130,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for a fetch_* block without fetch_url")
 		}
-		if !errors.Is(err, ErrMetaFetchURLRequired) {
+		if !errors.Is(err, fetch.ErrMetaFetchURLRequired) {
 			t.Errorf("Expected ErrMetaFetchURLRequired, got %v", err)
 		}
 		if !strings.Contains(err.Error(), "net-ftp/filezilla-pro") {
@@ -1149,7 +1150,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for a blank fetch_url")
 		}
-		if !errors.Is(err, ErrMetaFetchURLRequired) {
+		if !errors.Is(err, fetch.ErrMetaFetchURLRequired) {
 			t.Errorf("Expected ErrMetaFetchURLRequired, got %v", err)
 		}
 	})
@@ -1179,7 +1180,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for fetch_method = \"PUT\"")
 		}
-		if !errors.Is(err, ErrInvalidMetaFetchMethod) {
+		if !errors.Is(err, fetch.ErrInvalidMetaFetchMethod) {
 			t.Errorf("Expected ErrInvalidMetaFetchMethod, got %v", err)
 		}
 		if !strings.Contains(err.Error(), "PUT") {
@@ -1197,7 +1198,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for the misspelled fetch_seral_env")
 		}
-		if !errors.Is(err, ErrUnknownMetaFetchKey) {
+		if !errors.Is(err, fetch.ErrUnknownMetaFetchKey) {
 			t.Errorf("Expected ErrUnknownMetaFetchKey, got %v", err)
 		}
 		if !strings.Contains(err.Error(), "fetch_seral_env") {
@@ -1239,7 +1240,7 @@ func TestValidatePackageConfigMetaFetch(t *testing.T) {
 		for _, key := range []string{"fetch_serial_env", "fetch_serial_field", "fetch_filename"} {
 			meta := filezillaMeta()
 			delete(meta, key)
-			_, _, perr := parseAuthFetchSpec(meta)
+			_, _, perr := fetch.ParseAuthFetchSpec(meta)
 			if perr == nil {
 				t.Fatalf("missing %s: expected parseAuthFetchSpec to reject it", key)
 			}

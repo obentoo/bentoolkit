@@ -15,6 +15,7 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
@@ -692,7 +693,7 @@ func TestClaudeClient_WithCustomMaxBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an oversized response body, got nil")
 	}
-	if !errors.Is(err, ErrResponseTooLarge) {
+	if !errors.Is(err, fetch.ErrResponseTooLarge) {
 		t.Errorf("expected ErrResponseTooLarge, got: %v", err)
 	}
 }

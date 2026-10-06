@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -91,7 +92,7 @@ func (f *requiresReportFixture) check(t *testing.T) *CheckResult {
 		WithPendingList(f.pending),
 		WithGentooPath(f.gentoo),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+		WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -296,7 +297,7 @@ func TestRequiresReportPendingIndependentOfCheckOrder(t *testing.T) {
 				WithGentooPath(gentoo),
 				WithConcurrency(1),
 				WithRateLimiter(unlimitedRateLimiter()),
-				WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+				WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 			)
 			if err != nil {
 				t.Fatalf("NewChecker: %v", err)

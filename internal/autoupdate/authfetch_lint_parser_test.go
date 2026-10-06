@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // Story 068, sub-task 2.1 — R2.1-R2.4, R5.1: --lint runs the same
@@ -77,14 +79,14 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 			if len(got) != 1 {
 				t.Fatalf("lint reported %d invalid-config issues for %s, want 1: %q", len(got), pkg, got)
 			}
-			_, _, perr := parseAuthFetchSpec(cfg.Packages[pkg].Meta)
+			_, _, perr := fetch.ParseAuthFetchSpec(cfg.Packages[pkg].Meta)
 			if perr == nil {
 				t.Errorf("parseAuthFetchSpec accepted %s; the fixture expects a refusal", pkg)
 			} else if !strings.Contains(got[0], perr.Error()) {
 				t.Errorf("lint message %q does not carry the parser's text %q", got[0], perr.Error())
 			}
 			if pkg == "app-misc/leak" {
-				for _, needle := range []string{"GITHUB_TOKEN", metaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
+				for _, needle := range []string{"GITHUB_TOKEN", fetch.MetaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
 					if !strings.Contains(got[0], needle) {
 						t.Errorf("lint message %q does not name %q", got[0], needle)
 					}
@@ -101,8 +103,8 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 	})
 	t.Run("a fetch_* key without fetch_url keeps today's message", func(t *testing.T) {
 		got := s068InvalidConfigIssues(issues, "app-misc/notrigger")
-		if len(got) != 1 || !strings.Contains(got[0], ErrMetaFetchURLRequired.Error()) {
-			t.Errorf("lint reported %q, want one issue carrying %q", got, ErrMetaFetchURLRequired)
+		if len(got) != 1 || !strings.Contains(got[0], fetch.ErrMetaFetchURLRequired.Error()) {
+			t.Errorf("lint reported %q, want one issue carrying %q", got, fetch.ErrMetaFetchURLRequired)
 		}
 	})
 	t.Run("a valid record naming an unset BENTOO_FETCH_ variable is clean: lint never resolves", func(t *testing.T) {
@@ -131,7 +133,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
-	_, _, parserErr := parseAuthFetchSpec(cfg.Packages["app-misc/leak"].Meta)
+	_, _, parserErr := fetch.ParseAuthFetchSpec(cfg.Packages["app-misc/leak"].Meta)
 	if parserErr == nil {
 		t.Error("parseAuthFetchSpec accepted fetch_serial_env = \"GITHUB_TOKEN\"; want the R1 refusal")
 	}
@@ -143,7 +145,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 			return
 		}
 		msg := err.Error()
-		for _, needle := range []string{"GITHUB_TOKEN", metaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
+		for _, needle := range []string{"GITHUB_TOKEN", fetch.MetaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
 			if !strings.Contains(msg, needle) {
 				t.Errorf("%s: %q does not name %q", path, msg, needle)
 			}
@@ -172,7 +174,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 		OverlayPath: overlay, Package: "app-misc/leak", Version: "1.0", DestDir: t.TempDir(),
 	})
 	check("distfile", distErr)
-	if distErr != nil && !errors.Is(distErr, ErrAuthFetchFailed) {
+	if distErr != nil && !errors.Is(distErr, fetch.ErrAuthFetchFailed) {
 		t.Errorf("distfile: %v is not ErrAuthFetchFailed", distErr)
 	}
 

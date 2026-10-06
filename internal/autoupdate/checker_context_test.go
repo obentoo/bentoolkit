@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // slowServer returns an httptest.Server whose handler blocks until the request
@@ -98,7 +100,7 @@ func TestChecker_ContextCancelled(t *testing.T) {
 	outcome := make(chan fetchOutcome, 1)
 	go func() {
 		start := time.Now()
-		_, err := checker.fetchContent(ctx, server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+		_, err := checker.fetchContent(ctx, server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil))
 		outcome <- fetchOutcome{err: err, elapsed: time.Since(start)}
 	}()
 
@@ -147,7 +149,7 @@ func TestChecker_ContextDeadlineExceeded(t *testing.T) {
 	)
 
 	start := time.Now()
-	_, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+	_, err := checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil))
 	elapsed := time.Since(start)
 
 	if err == nil {

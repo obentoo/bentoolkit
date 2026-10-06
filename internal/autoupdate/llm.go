@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -112,7 +113,7 @@ func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(nil, body, limit))
 	if err != nil {
-		return nil, classifyBodyReadError(err)
+		return nil, fetch.ClassifyBodyReadError(err)
 	}
 	return data, nil
 }

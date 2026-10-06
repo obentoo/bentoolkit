@@ -22,6 +22,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -773,7 +774,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// hosts that dominate packages.toml), every other host at the conservative
 		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
 		// the ~220 GitHub/GitLab packages, making a large --concurrency pointless.
-		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
 		// Share one response across every record that declares the same URL — on
 		// by default (S024-R7.2). --no-fetch-cache turns it off, restoring one
 		// request per read exactly as before story 024, so a suspicious result can
@@ -2012,7 +2013,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 		autoupdate.WithConcurrency(ar.opts.concurrency),
 		autoupdate.WithTypeFilter(ar.opts.only),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
-		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
 		// Same escape hatch as runCheck (S024-R7.1, R7.2). Setting it HERE is what
 		// covers all three revive Checkers at once — both listing paths and the
 		// apply path build their options through this helper — so the flag cannot

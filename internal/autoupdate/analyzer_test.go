@@ -21,6 +21,7 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"golang.org/x/time/rate"
 )
 
@@ -31,7 +32,7 @@ import (
 // createTestAnalyzer creates an analyzer with fast rate limiting for tests
 func createTestAnalyzer(t *testing.T, tmpDir string, opts ...AnalyzerOption) (*Analyzer, error) { //nolint:unused // test helper
 	// Create fast rate limiter for testing
-	rateLimiter := NewRateLimiter()
+	rateLimiter := fetch.NewRateLimiter()
 	// Set very high limits to effectively disable rate limiting in tests
 	rateLimiter.SetLLMLimit(rate.Inf, 1000)
 
@@ -42,7 +43,7 @@ func createTestAnalyzer(t *testing.T, tmpDir string, opts ...AnalyzerOption) (*A
 }
 
 // setFastHTTPLimit sets a fast HTTP limit for a specific server URL
-func setFastHTTPLimit(rateLimiter *RateLimiter, serverURL string) {
+func setFastHTTPLimit(rateLimiter *fetch.RateLimiter, serverURL string) {
 	parsed, err := url.Parse(serverURL)
 	if err == nil {
 		rateLimiter.SetHTTPLimit(parsed.Host, rate.Inf, 1000)
@@ -50,8 +51,8 @@ func setFastHTTPLimit(rateLimiter *RateLimiter, serverURL string) {
 }
 
 // createFastRateLimiter creates a rate limiter with fast limits for all common domains
-func createFastRateLimiter() *RateLimiter {
-	rateLimiter := NewRateLimiter()
+func createFastRateLimiter() *fetch.RateLimiter {
+	rateLimiter := fetch.NewRateLimiter()
 	rateLimiter.SetLLMLimit(rate.Inf, 1000)
 	// Pre-set common domains
 	rateLimiter.SetHTTPLimit("github.com", rate.Inf, 1000)
@@ -138,7 +139,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -390,7 +391,7 @@ HOMEPAGE="https://example.com"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -440,7 +441,7 @@ HOMEPAGE="https://example.com"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -503,7 +504,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create analyzer with fast rate limiter and fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0, // No retries for faster test
 				Timeout:    5 * time.Second,
 			})
@@ -652,7 +653,7 @@ HOMEPAGE="https://example.com"
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, server.URL)
 
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -719,7 +720,7 @@ KEYWORDS="~amd64"
 			analyzer, err := NewAnalyzer(tmpDir,
 				WithAnalyzerConfigDir(t.TempDir()),
 				WithAnalyzerRateLimiter(rateLimiter),
-				WithAnalyzerHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{
+				WithAnalyzerHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 					MaxRetries: 0,
 					Timeout:    5 * time.Second,
 				})),
@@ -887,7 +888,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1018,7 +1019,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1114,7 +1115,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1212,7 +1213,7 @@ func TestAnalyzeAll_ReturnsBatchResult(t *testing.T) {
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, okServer.URL)
 	setFastHTTPLimit(rateLimiter, failServer.URL)
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -2073,7 +2074,7 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, server.URL)
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})
 
 	analyzer, err := NewAnalyzer(tmpDir,
 		WithAnalyzerLLMClient(llm),
@@ -2251,7 +2252,7 @@ func TestFetchContentFromURL_ViaHelper(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(tt.handler))
 			defer server.Close()
 
-			client := NewRetryableHTTPClientWithConfig(RetryConfig{
+			client := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -2281,7 +2282,7 @@ func TestFetchContentFromURL_ViaHelper(t *testing.T) {
 			if tt.wantStatus && !strings.Contains(err.Error(), "returned status") {
 				t.Errorf("error %q does not name the offending status", err)
 			}
-			if tt.wantOverflow && !errors.Is(err, ErrResponseTooLarge) {
+			if tt.wantOverflow && !errors.Is(err, fetch.ErrResponseTooLarge) {
 				t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
 			}
 		})

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
@@ -122,7 +123,7 @@ func NewOpenAIClient(cfg LLMConfig) (*OpenAIClient, error) {
 			BaseURL:   baseURL,
 		},
 		httpClient: &http.Client{
-			Timeout:   DefaultHTTPTimeout,
+			Timeout:   fetch.DefaultHTTPTimeout,
 			Transport: httpx.BuildTransport(),
 			// Authorization must not follow a redirect off-host or to http
 			// (S052-R4.6).

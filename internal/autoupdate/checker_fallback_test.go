@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/sony/gobreaker"
 )
 
@@ -89,15 +90,15 @@ func TestIsUpstreamUnreachable(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"retries exhausted", fmt.Errorf("%w: tls: EOF", ErrMaxRetriesExceeded), true},
-		{"request timeout", fmt.Errorf("%w: i/o timeout", ErrRequestTimeout), true},
+		{"retries exhausted", fmt.Errorf("%w: tls: EOF", fetch.ErrMaxRetriesExceeded), true},
+		{"request timeout", fmt.Errorf("%w: i/o timeout", fetch.ErrRequestTimeout), true},
 		{"breaker open", fmt.Errorf("circuit breaker open: %w", gobreaker.ErrOpenState), true},
 		{"operation deadline", fmt.Errorf("request to x deadline exceeded: %w", context.DeadlineExceeded), true},
 		{"wrapped by the extraction chain", fmt.Errorf("all version extraction methods failed: %w",
-			fmt.Errorf("%w: connection reset", ErrMaxRetriesExceeded)), true},
-		{"host does not exist", fmt.Errorf("%w: %w", ErrMaxRetriesExceeded,
+			fmt.Errorf("%w: connection reset", fetch.ErrMaxRetriesExceeded)), true},
+		{"host does not exist", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded,
 			&net.DNSError{Err: "no such host", Name: "dowloads.isc.org", IsNotFound: true}), false},
-		{"cancelled by the operator", fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, context.Canceled), false},
+		{"cancelled by the operator", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded, context.Canceled), false},
 		{"no version in the page", ErrNoVersionFound, false},
 		{"plain error", errors.New("HTTP 404"), false},
 	} {

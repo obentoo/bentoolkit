@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // deadURL returns the URL of a server that is already closed, so a request to
@@ -34,7 +36,7 @@ func mirrorChecker(t *testing.T, pkg string, cfg PackageConfig) *Checker {
 		WithConfigDir(filepath.Join(tmpDir, "config")),
 		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+		WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)

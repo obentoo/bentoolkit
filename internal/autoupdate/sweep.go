@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -781,7 +782,7 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 	if !ok {
 		return nil
 	}
-	spec, enabled, err := parseAuthFetchSpec(cfg.Meta)
+	spec, enabled, err := fetch.ParseAuthFetchSpec(cfg.Meta)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrManifestFailed, err)
 	}
@@ -793,13 +794,13 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 	// serial would otherwise log "serial via $" — a sentence stating that a
 	// credential came from an env var nobody named.
 	provenance := "no serial configured"
-	if spec.usesSerial() {
-		provenance = "serial via $" + spec.serialEnv
+	if spec.UsesSerial() {
+		provenance = "serial via $" + spec.SerialEnv
 	}
 	s.log.Info("authenticated fetch: downloading distfile",
 		"package", pkg, "version", version, "provenance", provenance)
 
-	dest, err := spec.fetchDistfile(ctx, version, distdir)
+	dest, err := spec.FetchDistfile(ctx, version, distdir)
 	if err != nil {
 		return err
 	}
@@ -871,9 +872,9 @@ func (s *sweeper) expectedDistfiles(pkg, pkgDir, pkgName string, manifestNames, 
 	// not reported here: prefetchAuthDistfile runs minutes later on the same
 	// config and fails the package with the message that belongs to it.
 	if cfg, ok := s.configs[pkg]; ok {
-		if spec, enabled, err := parseAuthFetchSpec(cfg.Meta); err == nil && enabled {
+		if spec, enabled, err := fetch.ParseAuthFetchSpec(cfg.Meta); err == nil && enabled {
 			for _, version := range versions {
-				add(spec.resolvedFilename(version))
+				add(spec.ResolvedFilename(version))
 			}
 		}
 	}
