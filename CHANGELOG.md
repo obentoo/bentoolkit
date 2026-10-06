@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **`bentoo-tray` has its own version, starting at 0.1.0.** It printed
+  bentoolkit's release under the wrong name (`bentoo version 0.33.0`); its
+  version now lives in `internal/tray/version/VERSION`, embedded at build
+  time, and moves only when the tray changes. `bentoo-tray --version` reads
+  `bentoo-tray version 0.1.0`, with the bentoolkit release it was built from
+  on the next line (`bentoolkit: 0.33.1`). The startup log line gains a
+  `bentoolkit` attribute beside `version`, and the feed request's User-Agent
+  is `bentoo-tray/0.1.0`. `bentoo --version` is unchanged.
+
 ## [0.33.0] - 2026-10-06
 
 ### Added

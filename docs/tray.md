@@ -28,6 +28,27 @@ make build
 sudo make install PREFIX=/usr
 ```
 
+### Versioning
+
+`bentoo-tray` has a version of its own, independent of bentoolkit's release
+number. It lives in `internal/tray/version/VERSION` and is embedded into the
+binary at build time, so `make build`, a distribution package and a plain
+`go build` all report the same number with no build flag.
+
+A change to the tray bumps that file in the same change, following
+semantic versioning. The tray still ships inside the bentoolkit release
+tarball, so `--version` names both — the tray first, then the release it was
+built from:
+
+```text
+$ bentoo-tray --version
+bentoo-tray version 0.1.0
+  bentoolkit: 0.33.1
+```
+
+The feed request carries the tray's version too, as
+`User-Agent: bentoo-tray/<version>`.
+
 ### Autostart
 
 Pick one — both start it with the graphical session:
