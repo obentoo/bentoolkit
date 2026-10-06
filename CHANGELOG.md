@@ -129,11 +129,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 - **Messages and flag help no longer cite internal tracker IDs.** A handful of
   operator-visible strings ended in references such as `(R9.6)` or `(S042-D7)`
   that pointed at planning notes outside the repository; the reference is gone
-  and every other word is unchanged. The `llm_prompt` warning now points at
-  `docs/autoupdate.md` instead of the README. Source comments were cleaned the
-  same way and shortened to the contract and its reason, and the new
-  `make audit-comments` target, run by `make audit` and the CI lint job, fails
-  on a tracker ID or a comment block of 20+ lines in non-test Go code.
+  and the rest of the sentence is kept. The `overlay validate` export note says
+  "A later change" where it named a planning story. The `llm_prompt` warning
+  now points at `docs/autoupdate.md` instead of the README. Source comments
+  were cleaned the same way and shortened to the contract and its reason, and
+  the new `make audit-comments` target, run by `make audit` and the CI lint
+  job, fails on a tracker ID or a comment block of 20+ lines in non-test Go
+  code.
 
 ### Removed
 

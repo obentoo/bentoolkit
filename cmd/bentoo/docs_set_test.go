@@ -141,7 +141,7 @@ func TestDocsSet_PutsTheREADMEFirstThenPagesByName(t *testing.T) {
 
 // readDocSet reads the repository's own documentation, README first.
 func TestDocsSet_ReadsTheRepositoryDocs(t *testing.T) {
-	readme := strings.TrimRight(readDocSet(t), "\n")
+	readme := strings.TrimRight(readRepoDoc(t, "README.md"), "\n")
 	got := readDocSet(t)
 	if !strings.HasPrefix(got, readme) {
 		t.Errorf("readDocSet does not start with the repository README (%d bytes read, README is %d)", len(got), len(readme))
