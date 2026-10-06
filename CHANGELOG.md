@@ -117,6 +117,24 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   client, and godbus is pure Go, so the binaries stay `CGO_ENABLED=0`.
   v5.2.2 was published on 2025-12-29.
 
+- **The README is a front page; the reference moved to `docs/`.** Installation,
+  build and test stay in `README.md`; configuration, every command family,
+  runtime behaviour (exit codes, timeouts, headers), snapshots, the tray and
+  development notes now live in `docs/configuration.md`, `docs/overlay.md`,
+  `docs/distfiles.md`, `docs/notices.md`, `docs/autoupdate.md`,
+  `docs/behaviour.md`, `docs/snapshot.md`, `docs/tray.md` and
+  `docs/development.md`, moved unrewritten. Releases 0.1.0 to 0.29.1 moved to
+  `docs/changelog/0.1.0-0.29.1.md`, also unrewritten.
+
+- **Messages and flag help no longer cite internal tracker IDs.** A handful of
+  operator-visible strings ended in references such as `(R9.6)` or `(S042-D7)`
+  that pointed at planning notes outside the repository; the reference is gone
+  and every other word is unchanged. The `llm_prompt` warning now points at
+  `docs/autoupdate.md` instead of the README. Source comments were cleaned the
+  same way and shortened to the contract and its reason, and the new
+  `make audit-comments` target, run by `make audit` and the CI lint job, fails
+  on a tracker ID or a comment block of 20+ lines in non-test Go code.
+
 ### Removed
 
 - **The playwright-go backend of the `script` parser, and its `playwright`

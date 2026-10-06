@@ -175,16 +175,17 @@ audit-ctx:
 
 # Audit production comments and strings: comments must stand on their own for a
 # reader who has no access to the gitignored planning notes, so a tracker ID
-# (S058, S042-D7, R4.4, "(D9)", "sub-task 13.4", "story 060") in a non-test Go
+# (S058, S042-D7, R4.4, "(D9)", "sub-task 13.4", "story 060", also right before
+# an underscore as in "_Requirements: R7.3_") in a non-test Go
 # file fails, and so does a run of 20+ consecutive // lines unless it is the
 # package doc comment directly above the package clause. A false positive is
 # fixed by rewording the line: there is no allowlist. A missing directory is an
 # error, never a clean result.
 AUDIT_COMMENTS_DIRS ?= cmd internal
 AUDIT_COMMENTS_MAX_BLOCK := 20
-AUDIT_COMMENTS_ID_RE := -e '\bS[0-9]{3}\b' \
+AUDIT_COMMENTS_ID_RE := -e '\bS[0-9]{3}(\b|_)' \
 	-e '\bS[0-9]{3}-[A-Z]+[0-9]+' \
-	-e '\b[A-Z][0-9]{1,2}(\.[0-9]+)+\b' \
+	-e '\b[A-Z][0-9]{1,2}(\.[0-9]+)+(\b|_)' \
 	-e '\([^)]*\b[A-HQRT][0-9]{1,2}\b[^)]*\)' \
 	-e '\b[Ss]ub-?tasks? [0-9]+(\.[0-9]+)?\b' \
 	-e '\b[Ss]tor(y|ies) [0-9]{3}\b'
@@ -195,7 +196,7 @@ audit-comments:
 	for dir in $(AUDIT_COMMENTS_DIRS); do \
 		if [ ! -d "$$dir" ]; then echo "audit-comments: $$dir: no such directory" >&2; exit 2; fi; \
 	done; \
-	files="$$(find $(AUDIT_COMMENTS_DIRS) -type f -name '*.go' ! -name '*_test.go' | LC_ALL=C sort)"; \
+	files="$$(find $(AUDIT_COMMENTS_DIRS) -type f -name '*.go' ! -name '*_test.go' | LC_ALL=C sort -u)"; \
 	ids=""; blocks=""; \
 	if [ -n "$$files" ]; then \
 		ids="$$(printf '%s\n' "$$files" | xargs -d '\n' grep -nHE $(AUDIT_COMMENTS_ID_RE) -- | sed -E 's/^([^:]+:[0-9]+):/\1: tracker ID: /' || true)"; \
@@ -218,7 +219,7 @@ audit-comments:
 
 # Security audit
 .PHONY: audit
-audit: audit-ctx
+audit: audit-ctx audit-comments
 	$(GOMOD) verify
 	@echo "Module verification passed"
 	@# govulncheck is supplied by the `tool` directive in go.mod, so it lives in
