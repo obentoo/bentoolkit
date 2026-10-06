@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -41,7 +42,7 @@ func TestEndToEnd_GentooResolvesToGitHub(t *testing.T) {
 		url:      server.URL,
 	}
 
-	info, err := ResolveRepository("gentoo", nil, registry)
+	info, err := ResolveRepository(context.Background(), "gentoo", nil, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestEndToEnd_GitLabRepoResolves(t *testing.T) {
 		url:      server.URL,
 	}
 
-	info, err := ResolveRepository("gitlab-repo", nil, registry)
+	info, err := ResolveRepository(context.Background(), "gitlab-repo", nil, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestEndToEnd_GenericGitRepoResolves(t *testing.T) {
 		url:      server.URL,
 	}
 
-	info, err := ResolveRepository("generic-repo", nil, registry)
+	info, err := ResolveRepository(context.Background(), "generic-repo", nil, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestEndToEnd_ConfigOverrideBeatsRegistry(t *testing.T) {
 		},
 	}
 
-	info, err := ResolveRepository("gentoo", configRepos, registry)
+	info, err := ResolveRepository(context.Background(), "gentoo", configRepos, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestEndToEnd_UnknownRepoReturnsError(t *testing.T) {
 		url:      server.URL,
 	}
 
-	_, err := ResolveRepository("does-not-exist", nil, registry)
+	_, err := ResolveRepository(context.Background(), "does-not-exist", nil, registry)
 	if err == nil {
 		t.Fatal("expected error for unknown repo")
 	}

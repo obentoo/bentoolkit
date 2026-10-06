@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -158,15 +159,24 @@ func NewRepositoryRegistry() (*RepositoryRegistry, error) {
 	}, nil
 }
 
-func (r *RepositoryRegistry) ensureXML() ([]byte, error) {
+// ensureXML returns the registry XML: the cache while it is younger than its
+// TTL, else a fresh download, else the eselect cache. A download cut short by
+// ctx is returned as the caller's cancellation and never falls back: the caller
+// asked to stop, and answering from the eselect cache would carry on past it.
+func (r *RepositoryRegistry) ensureXML(ctx context.Context) ([]byte, error) {
 	info, err := os.Stat(r.XMLPath)
 	if err == nil && time.Since(info.ModTime()) < r.CacheTTL {
 		return os.ReadFile(r.XMLPath)
 	}
 
-	data, err := r.download()
+	data, err := r.download(ctx)
 	if err == nil {
 		return data, nil
+	}
+	// Decided by the caller's context, never by the transport error: a client
+	// timeout also reads as a deadline error, and it must still fall back.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("fetching registry %s: %w", r.url, ctxErr)
 	}
 
 	home, _ := os.UserHomeDir()
@@ -180,8 +190,12 @@ func (r *RepositoryRegistry) ensureXML() ([]byte, error) {
 	return nil, fmt.Errorf("failed to fetch repository list: %w. Run `eselect repository list` to populate cache, or use --sync to retry", err)
 }
 
-func (r *RepositoryRegistry) download() ([]byte, error) {
-	resp, err := r.client().Get(r.url)
+func (r *RepositoryRegistry) download(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building registry request %s: %w", r.url, err)
+	}
+	resp, err := r.client().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching registry %s: %w", r.url, err)
 	}
@@ -206,13 +220,16 @@ func (r *RepositoryRegistry) download() ([]byte, error) {
 	return data, nil
 }
 
-func (r *RepositoryRegistry) Sync() error {
-	_, err := r.download()
+// Sync forces a download of the registry, cancellable through ctx.
+func (r *RepositoryRegistry) Sync(ctx context.Context) error {
+	_, err := r.download(ctx)
 	return err
 }
 
-func (r *RepositoryRegistry) Resolve(name string) (*RepositoryInfo, error) {
-	data, err := r.ensureXML()
+// Resolve looks name up in the registry; a download it needs is cancellable
+// through ctx.
+func (r *RepositoryRegistry) Resolve(ctx context.Context, name string) (*RepositoryInfo, error) {
+	data, err := r.ensureXML(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +248,10 @@ func (r *RepositoryRegistry) Resolve(name string) (*RepositoryInfo, error) {
 	return nil, fmt.Errorf("%w: %s", ErrRepositoryNotFound, name)
 }
 
-func (r *RepositoryRegistry) List() ([]string, error) {
-	data, err := r.ensureXML()
+// List returns every repository name in the registry, sorted; a download it
+// needs is cancellable through ctx.
+func (r *RepositoryRegistry) List(ctx context.Context) ([]string, error) {
+	data, err := r.ensureXML(ctx)
 	if err != nil {
 		return nil, err
 	}
