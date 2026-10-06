@@ -34,6 +34,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/tray/feed"
 	"github.com/obentoo/bentoolkit/internal/tray/icons"
 	"github.com/obentoo/bentoolkit/internal/tray/state"
+	trayversion "github.com/obentoo/bentoolkit/internal/tray/version"
 )
 
 // Exit codes.
@@ -71,7 +72,7 @@ func run(args []string, stderr io.Writer, getenv func(string) string) int {
 
 	switch {
 	case len(args) == 1 && args[0] == "--version":
-		fmt.Println(version.Info())
+		fmt.Println(trayversion.Info())
 		return exitOK
 	case len(args) > 0:
 		log.Error("unknown arguments; the only option is --version", "args", strings.Join(args, " "))
@@ -159,7 +160,7 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 	ticks, stopTicks := minuteTicks()
 	defer stopTicks()
 
-	log.Info("bentoo-tray starting", "version", version.Short(), "feed_url", feedURL, "state", statePath)
+	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state", statePath)
 
 	app := tray.New(tray.Deps{
 		Log:    log,
