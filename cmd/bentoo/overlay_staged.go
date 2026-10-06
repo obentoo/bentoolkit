@@ -12,43 +12,24 @@ import (
 )
 
 // This file is `bentoo overlay staged clean`: the caller the staged-tree
-// sweeper shipped without. The sweeper landed in 0.25.0 with no production
-// caller at all, so every staged tree an `overlay validate --depth` or an
-// `overlay autoupdate --apply` run left behind stayed there permanently.
+// sweeper shipped without, so the staged trees an `overlay validate --depth` or
+// an `overlay autoupdate --apply` run leaves behind can be removed.
 //
-// # Why a subcommand of its own and not a flag on the command that stages
+// It is a subcommand of its own, not a flag on the command that stages, for two
+// reasons. A sweeper hosted inside another operation inherits its blind spots:
+// the residue removed here is left precisely by runs that end without applying
+// anything, so hanging it off an apply would never reach it. And a case added
+// to the mode switch in `func runAutoupdate` above the two `--apply` cases would
+// turn every existing `--apply … --clean` invocation into a whole-root sweep;
+// outside that switch no existing invocation can change meaning.
 //
-// A sweeper hosted inside another operation inherits that operation's blind
-// spots. Story 027 had to UNDO exactly that shape one level up: the overlay
-// sweep once lived inside an apply's success path, so a package already at its
-// upstream version could never be swept — no check produces a pending entry for
-// it, so no apply happens, so no sweep happens. The residue this command
-// removes is left precisely by runs that end without applying anything, so
-// hanging it off an apply would reproduce that hole on purpose.
+// The word is `staged`, not `sweep`: `sweep` and `--clean` already mean A
+// DELETION FROM A PUBLISHED TREE, while this removes scratch copies under the
+// autoupdate config directory, and `staging` is taken by `overlay add`.
 //
-// The second reason is the mode dispatch inside `func runAutoupdate` in
-// overlay_autoupdate.go — the switch guarding the two `--apply` cases. A
-// case added to that switch above the two `--apply` cases converts every
-// existing `--apply … --clean` invocation into a whole-root sweep. This command
-// is not in that switch at all, so there is no ordering here to get wrong, and
-// no existing invocation changes meaning (R6.2).
-//
-// # Why the word is `staged` and not `sweep`
-//
-// `sweep` and `--clean` already mean, on this overlay, A DELETION FROM A
-// PUBLISHED TREE that auto-commits and pushes within minutes. What goes here is
-// a scratch copy under the autoupdate config directory — the inverse risk
-// profile — and a `--clean-staging` flag would have sat one keystroke from the
-// flag that publishes deletions. `staging` was taken too: `overlay add` uses it
-// in the git sense. `staged` names what is actually removed.
-//
-// # Where the operator-facing text goes
-//
-// STDOUT, through fmt and output/*, never through logger — the rule
-// overlay_prune.go states, for the reason it states: logger binds os.Stderr
-// once at first use, so a report split across two streams loses its ordering
-// the moment either is redirected. Here the plan and the reason beside each
-// entry are what an operator approves, so they have to arrive together.
+// Operator-facing text goes to STDOUT, never the logger (the rule
+// overlay_prune.go states): the plan and the reason beside each entry are what
+// an operator approves, so they have to arrive on one stream, together.
 
 // The confirmation seam the CLI tests drive is the confirmStagedClean field
 // of deps (deps.go), defaulting to the real prompt so a caller that supplies
@@ -162,7 +143,7 @@ Examples:
 // overlay path and the staging root as parameters so the whole flow is drivable
 // from a test — the same split runPrune and runSweep use.
 //
-// # Both resolutions refuse rather than fall back (R6.1)
+// # Both resolutions refuse rather than fall back
 //
 // The staging root comes from autoupdateStagingRoot(), which is the ONE
 // spelling of that path: the producers join it too, so a second derivation here
@@ -202,14 +183,12 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string, d *deps) error {
 // # The order is the safety property
 //
 // Plan, print, confirm, execute, with the executor unreachable until a gate has
-// passed. Producing the plan removes nothing at all (R1.1): PlanStagedSweep
-// walks the root and classifies, and ExecuteStagedSweep is the only thing that
-// acts. That is the same argument overlay_prune.go and
-// overlay_autoupdate_sweep.go make, transposed one directory over.
+// passed. Producing the plan removes nothing at all: PlanStagedSweep walks the
+// root and classifies, and ExecuteStagedSweep is the only thing that acts.
 //
 // ctx is carried because the executor consults it before each removal, so an
 // interrupted sweep leaves the tree it had not reached whole and reports it as
-// a keep naming the interruption (R3.1).
+// a keep naming the interruption.
 //
 // A standalone run passes an EMPTY InScope, and that is deliberate rather than
 // an omission: InScope names what the CURRENT run still needs, and there is no
@@ -232,7 +211,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 
 	printStagedCleanPlan(plan)
 
-	// R1.3: there is nothing to confirm, so nothing is asked. "Remove 0 tree(s)?"
+	// There is nothing to confirm, so nothing is asked. "Remove 0 tree(s)?"
 	// trains an operator to answer yes without reading, and the next prompt they
 	// meet is one that removes something.
 	//
@@ -242,8 +221,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 	// declining to touch them — because a deciding gate FAILED, or because no
 	// record says what happened — contradicts the very list printed above it, and
 	// leaves the operator concluding the staging root is empty when it is full of
-	// artifacts they still need. S027-R7.1 made exactly this correction for the
-	// overlay sweep; this is the same rule at a new command.
+	// artifacts they still need. The overlay sweep follows the same rule.
 	//
 	// Which of the two it is, is read from the plan's own partition rather than
 	// from a second walk: Remove and Kept together cover everything the walk saw,
@@ -260,11 +238,12 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 	// THE ORDER IS THE GUARANTEE, and this early return is where it is spent.
 	//
 	// A declined run leaves here, and there is no path from this point to
-	// ExecuteStagedSweep — so R2.1's "byte-identical" holds because the removal
-	// path was never entered, not because the remover behaved well once inside
-	// it. Handing consent to the executor as a parameter would move the guarantee
-	// into the loop that deletes, where one wrong branch removes a tree; kept out
-	// here, the worst a wrong branch can do is fail to remove one.
+	// ExecuteStagedSweep — so a declined run leaves the root byte-identical
+	// because the removal path was never entered, not because the remover
+	// behaved well once inside it. Handing consent to the executor as a
+	// parameter would move the guarantee into the loop that deletes, where one
+	// wrong branch removes a tree; kept out here, the worst a wrong branch can do
+	// is fail to remove one.
 	if !confirmStagedClean(plan, d) {
 		return nil
 	}
@@ -272,7 +251,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 	// The plan, unmodified, and this run's own context. ExecuteStagedSweep reads
 	// plan.Remove and nothing else, so what is removed is what was displayed and
 	// agreed to rather than a second verdict reached on a root that has moved
-	// since (R1.4) — a tree staged between the printing and the answer is
+	// since — a tree staged between the printing and the answer is
 	// removable by every rule in the policy and appears in no list the operator
 	// saw. It consults ctx between trees, so a SIGINT lands with the next tree
 	// still whole and reported as a keep naming the interruption.
@@ -284,28 +263,22 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 // confirmStagedClean takes ONE confirmation covering the whole plan, and is the
 // only thing between the plan printed above and the executor below.
 //
-// # The three gates, in order of how much they trust the caller
+// Three gates, in order of how much they trust the caller. --yes removes
+// unattended and says so before acting, so "why is this directory gone" is
+// answerable from the output afterwards. An interactive terminal is asked.
+// Anything else is REFUSED OUT LOUD, naming the flag that would have authorized
+// it: a silent refusal is indistinguishable from an empty staging root, and the
+// operator would walk away believing their machine is clean.
 //
-// --yes removes unattended, because the operator asked for exactly that in so
-// many words — and it says so before acting. An unattended run has nobody
-// watching, but it still leaves output somebody reads afterwards, and "why is
-// this directory gone" has to be answerable from it (R2.3).
+// deps.registryPromptIsInteractive is reused rather than re-derived, and it
+// requires BOTH stdin and stdout to be terminals: confirmAction reads os.Stdin,
+// so `yes | bentoo overlay staged clean` would answer for a human who is not
+// there, and with stdout redirected the plan this consent is about reached
+// nobody's eyes.
 //
-// An interactive terminal is asked. Anything else is REFUSED OUT LOUD, naming
-// the flag that would have authorized it: a silent refusal is indistinguishable
-// from a staging root with nothing in it, and the operator walks away believing
-// their machine is clean when it is full of trees (R2.2). That is the same
-// defect S027-R7.1 corrected one directory over, arriving by a different route.
-//
-// deps.registryPromptIsInteractive is reused rather than re-derived, and it requires
-// BOTH stdin and stdout to be terminals. Either half alone leaves a hole:
-// confirmAction reads os.Stdin, so `yes | bentoo overlay staged clean` would
-// answer for a human who is not there, and with stdout redirected the plan this
-// consent is about reached nobody's eyes.
-//
-// ONE prompt for the whole plan, never one per tree. A question asked per tree is
-// answered by reflex from the third one on, which turns a careful operator into a
-// rubber stamp — and the line they stop reading is the one that was wrong.
+// ONE prompt for the whole plan, never one per tree: a question asked per tree
+// is answered by reflex from the third one on, and the line the operator stops
+// reading is the one that was wrong.
 func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	if stagedCleanYes {
 		output.Warning.Printf("  --yes given: removing %d staged tree(s) without a prompt.\n", len(plan.Remove))
@@ -374,7 +347,7 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 	output.Success.Printf("  Removed %d of the %d tree(s) the plan named.\n", len(report.Removed), planned)
 }
 
-// printStagedCleanPlan prints the whole plan before anything is removed (R1.2).
+// printStagedCleanPlan prints the whole plan before anything is removed.
 //
 // The full list, never a sample: the operator approves one batch on one
 // keystroke, and a truncated list hides exactly the line that is wrong — the
@@ -383,7 +356,7 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 //
 // Both lists are printed, not only the removals. A plan naming only what it will
 // delete leaves no way to tell "this tree is protected" from "the sweep never
-// saw it", and the second is the failure this whole story exists to correct: the
+// saw it", and the second is the failure this command exists to correct: the
 // sweeper shipped with no caller, so a staging root nothing had ever swept
 // looked exactly like one that had just been cleaned.
 //
@@ -424,7 +397,7 @@ func printStagedCleanPlan(plan validate.StagedSweepPlan) {
 // stagedKeepReason is the reason printed beside one kept entry, and never a
 // blank line.
 //
-// Every branch of the retention policy records a reason (R6.4), so the fallback
+// Every branch of the retention policy records a reason, so the fallback
 // is unreachable through today's planner. It is here because a path printed with
 // nothing under it reads as "no reason was needed", which is the one thing an
 // unexplained keep does not mean — the same choice keptLines makes for a version

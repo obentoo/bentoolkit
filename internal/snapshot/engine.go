@@ -8,18 +8,18 @@ import (
 
 // ErrInvalidDriver is returned by the factories (and by Config.Validate) when an
 // engine.driver, ship.type, or schedule.backend names an unknown driver. It is
-// the single shared sentinel for "unknown driver string" across the package
-// (R1.3), mirroring provider.ErrInvalidProvider.
+// the single shared sentinel for "unknown driver string" across the package,
+// mirroring provider.ErrInvalidProvider.
 var ErrInvalidDriver = errors.New("invalid snapshot driver")
 
 // ErrEngineFailed wraps a non-zero exit from the underlying engine binary
 // (e.g. `btrbk run`). Stage errors in a RunResult are built by joining this with
-// the captured stderr (design §6).
+// the captured stderr.
 var ErrEngineFailed = errors.New("snapshot engine command failed")
 
 // ErrSnapshotUnidentified is returned by the ships that address a snapshot by
-// its Path and ID (archive, restic) when the engine could not resolve them
-// (053 R2.1, R2.2). The snapshot exists; the ship cannot find it.
+// its Path and ID (archive, restic) when the engine could not resolve them.
+// The snapshot exists; the ship cannot find it.
 var ErrSnapshotUnidentified = errors.New("snapshot has no path or id")
 
 // Snapshot describes a single point-in-time btrfs snapshot. ParentID is empty for
@@ -33,9 +33,9 @@ type Snapshot struct {
 	ParentID  string // "" = full
 }
 
-// Engine is the snapshot engine contract. Drivers (btrbk here; snapper in 007)
-// create, prune, and list snapshots for a subvolume. Retention is delegated to
-// the native tool (R2.3, AD6) — Prune passes the policy through rather than
+// Engine is the snapshot engine contract. Drivers (btrbk, snapper) create,
+// prune, and list snapshots for a subvolume. Retention is delegated to the
+// native tool — Prune passes the policy through rather than
 // computing GFS in Go.
 type Engine interface {
 	Name() string

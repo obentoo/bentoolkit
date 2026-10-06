@@ -28,9 +28,9 @@ func TestTailBuffer_KeepsLastBytes(t *testing.T) {
 // the tail rather than the head.
 func TestExecRunner_PipeCapsStderr(t *testing.T) {
 	s053NeedTools(t, "sh", "head", "tr", "cat")
-	stages := []pipeStage{
-		{name: "sh", args: []string{"-c", `head -c 300000 /dev/zero | tr '\0' a >&2; printf END-OF-STDERR >&2; exit 1`}},
-		{name: "cat"},
+	stages := []PipeStage{
+		{Name: "sh", Args: []string{"-c", `head -c 300000 /dev/zero | tr '\0' a >&2; printf END-OF-STDERR >&2; exit 1`}},
+		{Name: "cat"},
 	}
 	_, err := runPipe(t.Context(), execRunner{}, stages)
 	if err == nil {
@@ -89,7 +89,7 @@ func TestArchiveShipper_DeleteBoundedByTimeout(t *testing.T) {
 	t.Cleanup(func() { archiveDeleteTimeout = orig })
 	var left time.Duration
 	var hasDeadline bool
-	mr := &MockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
+	mr := &mockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		switch {
 		case name == "btrfs":
 			return nil, errors.New("send failed")

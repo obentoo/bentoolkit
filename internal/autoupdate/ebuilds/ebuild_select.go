@@ -43,25 +43,21 @@ var (
 var ErrSlotNotFound = errors.New("no ebuild in the package directory declares the requested slot")
 
 // A package key in packages.toml is normally a plain "category/package" atom.
-// Two suffixes may narrow it, and both exist for the same reason: the overlay
-// holds several ebuilds for one package, and one entry cannot track them all —
-// taking the directory's highest version means one of them is bumped forever and
-// the rest never are.
+// Two suffixes may narrow it, because one entry cannot track several parallel
+// ebuilds of one package: the highest version would be bumped forever and the
+// rest never.
 //
-//   - ":slot" — "net-libs/webkit-gtk:4.1", mirroring Portage's atom syntax. The
-//     entry considers only ebuilds whose SLOT= declares that slot.
-//   - "@label" — "app-office/libreoffice@testing". A free identifier that only
-//     makes the key unique, for a package whose parallel ebuilds share one SLOT
-//     and are told apart by release LINE instead: the stable 26.2 series and the
-//     testing 26.8 one, or zed-bin's 1.13 stable next to its 1.14 preview. The
-//     line itself is declared by the entry's `series` field; the label just names
-//     it. A separate character is used because ":" already means SLOT — both may
-//     appear ("cat/pkg:4.1@stable"), and reading a label as a slot would filter
-//     on a SLOT= value no ebuild declares.
+//   - ":slot" — "net-libs/webkit-gtk:4.1", as in Portage's atom syntax: only
+//     ebuilds whose SLOT= declares that slot.
+//   - "@label" — "app-office/libreoffice@testing": a free identifier that only
+//     makes the key unique when parallel ebuilds share one SLOT and differ by
+//     release line (declared by the entry's `series` field). It is not ":"
+//     because both may appear ("cat/pkg:4.1@stable"), and a label read as a
+//     slot would filter on a SLOT= no ebuild declares.
 //
-// Both are part of the identity used to key pending.json, cache.json and the
-// config map, and NEITHER is part of any filesystem path: every path-building
-// site must strip them first.
+// Both are part of the identity keying pending.json, cache.json and the config
+// map, and NEITHER is part of any filesystem path: every path-building site
+// must strip them first.
 
 // SplitPkgLabel splits a package key into everything before its "@label" and the
 // label itself. A key with no "@" yields an empty label. The label carries no
@@ -96,8 +92,8 @@ func SplitPkgSlot(key string) (atom, slot string) {
 // Both halves are joined under the overlay (and the staged tree) as directory
 // names, and the key comes from packages.toml, so each half must name exactly
 // one directory: "../x" or "cat/.." would otherwise be accepted as an atom and
-// build a path outside the package directory (S064-R1.4). parsePkgAtom says
-// which half was refused and why.
+// build a path outside the package directory. parsePkgAtom says which half
+// was refused and why.
 func SplitPkgAtom(key string) (category, pkgName string, ok bool) {
 	category, pkgName, err := ParsePkgAtom(key)
 	if err != nil {
@@ -241,27 +237,20 @@ func (m seriesMatcher) Matches(version string) bool {
 func (m seriesMatcher) Active() bool { return m.re != nil }
 
 // SelectCurrentEbuild returns the highest-version, non-live ebuild for pkg in
-// the overlay. It is the single implementation behind the checker's
-// getCurrentVersion/currentEbuildPath and the applier's resolveCurrentVersion,
-// which were three byte-for-byte copies of the same scan.
-//
-// Two filters narrow the scan, and an entry uses whichever tells its package's
-// parallel ebuilds apart:
+// the overlay — the one scan behind the checker's getCurrentVersion and
+// currentEbuildPath and the applier's resolveCurrentVersion. Two filters narrow
+// it, and an entry uses whichever tells its package's parallel ebuilds apart:
 //
 //   - ":slot" in the key — only ebuilds whose SLOT= declares that slot.
 //   - `series` — only ebuilds whose version matches that regex, for a package
 //     whose parallel ebuilds share one SLOT and differ by release line.
 //
-// Without them the scan returns the directory's highest PV whatever line it
-// belongs to, so one line is bumped forever and the rest never are. That is not
-// hypothetical: with zed-bin-1.13.1 and zed-bin-1.14.1_pre both in the overlay
-// and one entry tracking the stable channel, every stable release below 1.14.1
-// compares older than the preview ebuild and reports "up to date" — the stable
-// line silently stops being updated.
+// Without them the scan returns the highest PV whatever its line: with
+// zed-bin-1.13.1 and zed-bin-1.14.1_pre both present, an entry tracking stable
+// would see every stable release as older than the preview and stop updating.
 //
-// Reading file contents is confined to the slot-filtered path, so the ordinary
-// unfiltered scan still costs one readdir and no file reads (a series filter
-// reads no files at all: it matches on the version in the filename).
+// Only the slot filter reads file contents; the unfiltered and series scans
+// cost one readdir (series matches on the version in the filename).
 //
 // A series that does not compile is warned about to log; nil discards it.
 func SelectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebuildCandidate, error) {

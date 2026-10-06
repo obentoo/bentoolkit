@@ -38,7 +38,7 @@ func TestRenderTimerUnit_PersistentNil_Golden(t *testing.T) {
 
 func TestSystemdApply_WritesUnitsAndOrdersSystemctl(t *testing.T) {
 	dir := t.TempDir()
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", mock)
 	s.unitDir = dir
 
@@ -69,7 +69,7 @@ func TestSystemdApply_WritesUnitsAndOrdersSystemctl(t *testing.T) {
 
 func TestSystemdApply_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", &MockRunner{})
+	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", &mockRunner{})
 	s.unitDir = dir
 	cfg := ScheduleConfig{OnCalendar: "daily"}
 
@@ -96,7 +96,7 @@ func TestSystemdApply_Idempotent(t *testing.T) {
 
 func TestSystemdRemove_DisablesAndUnlinks(t *testing.T) {
 	dir := t.TempDir()
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", mock)
 	s.unitDir = dir
 

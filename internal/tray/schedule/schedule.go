@@ -12,20 +12,19 @@ const (
 	backoffCap   = 24 * time.Hour
 )
 
-// StartupDelay returns the delay before the first fetch, 1 to 5 minutes
-// (S072-R2.1).
+// StartupDelay returns the delay before the first fetch, 1 to 5 minutes.
 func StartupDelay(r float64) time.Duration {
 	return minStartup + time.Duration(r*float64(startupRange))
 }
 
-// NextInterval returns base varied by ±20%: base × [0.8, 1.2) (S072-R2.2).
+// NextInterval returns base varied by ±20%: base × [0.8, 1.2).
 func NextInterval(base time.Duration, r float64) time.Duration {
 	return time.Duration(float64(base) * (0.8 + 0.4*r))
 }
 
 // Backoff returns the delay after the given number of consecutive failures:
-// 5 minutes doubled per failure beyond the first, capped at 24 hours
-// (S072-R2.7), and never shorter than retryAfter (S072-R2.13). The doubling
+// 5 minutes doubled per failure beyond the first, capped at 24 hours,
+// and never shorter than retryAfter. The doubling
 // stops at the cap before it could overflow; a count below 1 is treated as 1.
 func Backoff(failures int, retryAfter time.Duration) time.Duration {
 	d := backoffBase

@@ -11,17 +11,17 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
-// This file is the command half of `--lint --fix`. internal/autoupdate/lintfix.go
+// This file is the command half of `--lint --fix`. registry.RepairPackagesConfig
 // computes the repair and proves it inert; this shows it to a human and decides
 // whether it may land.
 //
 // The split exists for one reason. packages.toml lives in an overlay that
 // auto-commits and pushes, so a repair written unattended is a repair PUBLISHED
 // unattended — a wrong rewrite is not a local mistake to undo before anyone
-// notices, it is a released one. Hence R7.3: print the diff, gate the write, and
+// notices, it is a released one. Hence: print the diff, gate the write, and
 // only then let RepairResult.Write re-run the inertness gate and rename the file.
 //
-// The gates are story 021's, not a second set: the same --yes flag, the same
+// The gates are the existing ones, not a second set: the same --yes flag, the same
 // deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
 // same deps.confirmRegistryWrite seam that guard the post-check version pins. Two
 // idioms for "may I publish?" in one command is one too many.
@@ -119,7 +119,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 //
 // The distinction it draws is the point: `--fix` deliberately declines to guess
 // at some findings — an entry tracking commits with no base source cannot be
-// repaired without knowing where upstream versions itself (R6.1) — so a run that
+// repaired without knowing where upstream versions itself — so a run that
 // ended on "repaired!" while those remain would imply a clean registry that the
 // next --lint will contradict.
 func reportUnrepaired(remaining []registry.LintIssue) error {
@@ -154,7 +154,7 @@ func summarizeUnrepaired(remaining []registry.LintIssue) error {
 	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
 
-// confirmLintRepair is the write gate (R7.3): three gates, in order of how much
+// confirmLintRepair is the write gate: three gates, in order of how much
 // they trust the caller. --yes writes unattended because the operator asked for
 // that in so many words; an interactive terminal is asked; anything else has
 // printed the diff and writes nothing.

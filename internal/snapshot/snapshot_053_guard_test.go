@@ -20,7 +20,7 @@ func TestManagerRun_BtrbkSSHDelegatedWhenUnidentified(t *testing.T) {
 	orig := StateDir
 	StateDir = func() string { return dir }
 	t.Cleanup(func() { StateDir = orig })
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	ship := ShipConfig{Name: "offsite", Type: "ssh", Target: "u@h:/b"}
 	m, err := NewManager(Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}, Ship: []ShipConfig{ship}},
 		filepath.Join(t.TempDir(), "snapshot.toml"), mr)
@@ -44,7 +44,7 @@ func TestManagerRun_BtrbkSSHDelegatedWhenUnidentified(t *testing.T) {
 // R9.2 through the unchanged Apply signature: ordinary values render the goldens.
 func TestSystemdApply_OrdinaryUnitsMatchGoldens(t *testing.T) {
 	dir := t.TempDir()
-	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", &MockRunner{})
+	s := newSystemdScheduler("/etc/bentoo/snapshot.toml", &mockRunner{})
 	s.unitDir = dir
 	if err := s.Apply(t.Context(), ScheduleConfig{OnCalendar: "daily", Persistent: boolPtr(true), RandomizedDelay: "5m"}); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -76,11 +76,11 @@ func TestExecRunner_PipeByteIdenticalToSequential(t *testing.T) {
 	if err := exec.Command("sh", "-c", `head -c 4194304 /dev/urandom > "$1"`, "sh", in).Run(); err != nil {
 		t.Fatal(err)
 	}
-	stages := func(out string) []pipeStage {
-		return []pipeStage{
-			{name: "sh", args: []string{"-c", `cat "$1"`, "sh", in}},
-			{name: "gzip", args: []string{"-n", "-c"}},
-			{name: "sh", args: []string{"-c", `cat > "$1"`, "sh", out}},
+	stages := func(out string) []PipeStage {
+		return []PipeStage{
+			{Name: "sh", Args: []string{"-c", `cat "$1"`, "sh", in}},
+			{Name: "gzip", Args: []string{"-n", "-c"}},
+			{Name: "sh", Args: []string{"-c", `cat > "$1"`, "sh", out}},
 		}
 	}
 	pipeOut, seqOut := filepath.Join(dir, "pipe.gz"), filepath.Join(dir, "seq.gz")
@@ -89,9 +89,9 @@ func TestExecRunner_PipeByteIdenticalToSequential(t *testing.T) {
 	}
 	var prev []byte
 	for _, st := range stages(seqOut) {
-		out, err := execRunner{}.Run(t.Context(), st.name, st.args, prev)
+		out, err := execRunner{}.Run(t.Context(), st.Name, st.Args, prev)
 		if err != nil {
-			t.Fatalf("sequential %s: %v", st.name, err)
+			t.Fatalf("sequential %s: %v", st.Name, err)
 		}
 		prev = out
 	}
@@ -185,7 +185,7 @@ func s053Email(t *testing.T, addr string) emailNotifier {
 	for _, ch := range port {
 		cfg.SMTP.Port = cfg.SMTP.Port*10 + int(ch-'0')
 	}
-	return emailNotifier{cfg: cfg, runner: &MockRunner{}}
+	return emailNotifier{cfg: cfg, runner: &mockRunner{}}
 }
 
 // R8.4: plain delivery to a local server behaves as smtp.SendMail does.

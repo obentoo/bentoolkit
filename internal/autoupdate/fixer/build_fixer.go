@@ -1,26 +1,19 @@
 package fixer
 
 // build_fixer.go implements BuildFixer, the third agentic fixer beside
-// ManifestFixer (manifest_fixer.go) and RegistryFixer (registry_fixer.go). Where
-// the manifest fixer repairs a SRC_URI/manifest breakage in the OVERLAY and the
-// registry fixer repairs an extraction entry in .autoupdate/packages.toml, this
-// one repairs an ebuild whose staged validation BUILD failed — a patch that no
-// longer applies, a configure option upstream dropped, an S= that no longer
-// matches, a missing build dependency.
+// ManifestFixer (manifest_fixer.go) and RegistryFixer (registry_fixer.go). It
+// repairs an ebuild whose staged validation BUILD failed — a patch that no
+// longer applies, a dropped configure option, a stale S=, a missing build
+// dependency.
 //
-// It differs from both in exactly one way that matters, and it is a security
-// difference: it gets `Read` and `Edit` and nothing else. See
-// buildFixAllowedTools for why.
+// It differs from the other two in one security-relevant way: it gets `Read`
+// and `Edit` and nothing else (see buildFixAllowedTools). Every other mechanic
+// mirrors ClaudeCodeFixer — auth/model resolution, childEnv key injection, the
+// exec seam, claudeCodeEnvelope, formatFixerError, the wait-delay and turn
+// caps, and truncateMiddle.
 //
-// It mirrors ClaudeCodeFixer for every other mechanic — auth/model resolution,
-// the bare/key-injection discipline (childEnv), the exec seam, the envelope
-// (claudeCodeEnvelope), formatFixerError, the wait-delay and turn caps, and the
-// argv-size guard (truncateMiddle). Only the request/result types, the allowlist,
-// the guidance, the instruction builder and the --add-dir/cwd target are new.
-//
-// As with the other two, a nil error is NOT proof the build now passes: the
-// authoritative answer is the caller's own re-run of the same gate (R8.2), never
-// the agent's self-report.
+// A nil error is NOT proof the build now passes: the authoritative answer is
+// the caller's own re-run of the same gate, never the agent's self-report.
 
 import (
 	"bytes"
@@ -41,31 +34,24 @@ import (
 )
 
 // buildFixAllowedTools is the narrowest allowlist in this codebase, and the
-// narrowness is the point (D7, R8.3).
+// narrowness is the point.
 //
-// `--add-dir` scopes the agent's FILE writes to the staged package directory. It
-// does NOT scope a shell: a `Bash(...)` entry, however tightly its pattern is
-// written, hands the agent a process that can write anywhere the bentoo user can
-// — including the real overlay, which auto-commits and publishes. A scoped Bash
-// pattern is therefore not a smaller version of the same permission; it is the
-// same hole with a narrower doorway. So there is no `Bash` here in ANY form,
-// which is also why the fixer never runs the build: the re-run that decides is
-// the caller's (R8.2), not the agent's.
+// `--add-dir` scopes the agent's FILE writes to the staged package directory,
+// but not a shell: any `Bash(...)` entry, however tight its pattern, hands the
+// agent a process that can write anywhere the bentoo user can — including the
+// real overlay, which auto-commits and publishes. So there is no `Bash` in ANY
+// form, which is also why the fixer never runs the build: the re-run that
+// decides is the caller's, not the agent's.
 //
-// There is no `Write` either, for a plainer reason: the fixer only ever modifies
-// an ebuild that Stage already copied into the staged tree. A capability to
-// CREATE files is not needed to change one that exists, and an unused capability
-// is only a liability.
+// There is no `Write` either: the fixer only modifies an ebuild Stage already
+// copied, and an unused capability to CREATE files is only a liability.
 //
-// This is strictly narrower than `var manifestFixAllowedTools` (manifest_fixer.go),
-// which holds `Write` and `Bash(pkgdev *)` — defensible there, because running
-// `pkgdev manifest` is that fixer's whole job, and the tree it edits is already
-// the overlay. Here the staged tree is the last boundary between a bad agent edit
-// and the published overlay, so the allowlist is the boundary's enforcement and
-// build_fixer_test.go asserts it rather than trusting this comment.
-//
-// Anything outside this set is denied by the CLI without an interactive prompt,
-// which keeps the run non-interactive WITHOUT --dangerously-skip-permissions.
+// This is strictly narrower than `var manifestFixAllowedTools`, whose `Write`
+// and `Bash(pkgdev *)` suit a fixer whose job is running `pkgdev manifest` on
+// the overlay. Here the staged tree is the last boundary before the published
+// overlay, so build_fixer_test.go asserts this list rather than trusting this
+// comment. Anything outside it is denied by the CLI without a prompt, which
+// keeps the run non-interactive WITHOUT --dangerously-skip-permissions.
 var buildFixAllowedTools = []string{
 	"Read",
 	"Edit",
@@ -90,7 +76,7 @@ var buildFixAllowedTools = []string{
 const buildLogBudget = 64 * 1024
 
 // buildFixMaxAttempts bounds how many times the fixer may be invoked for a single
-// gate (R8.4). Two, not one and not five:
+// gate. Two, not one and not five:
 //
 //   - The first attempt sees the original failure. The second sees the failure
 //     that SURVIVED the first fix, which is genuinely new information — a wrong
@@ -105,7 +91,7 @@ const buildLogBudget = 64 * 1024
 const buildFixMaxAttempts = 2
 
 // ErrBuildFixAttemptsExhausted reports that the per-gate attempt bound was
-// reached (R8.4). The fixer refuses the call itself rather than trusting every
+// reached. The fixer refuses the call itself rather than trusting every
 // caller to count: the bound is only a bound if the thing being bounded enforces
 // it. Callers match it with errors.Is to distinguish "we stopped on purpose" from
 // "the agent failed".
@@ -114,7 +100,7 @@ var ErrBuildFixAttemptsExhausted = errors.New("build fix attempt bound reached")
 // ErrBuildFixScope reports that the agent's write scope could not be confined to
 // the staged tree, either because the request did not carry the paths needed to
 // derive it or because the staged ebuild resolves OUTSIDE the staged tree it
-// claims to live in (R8.3). Both are refusals, never widenings: the one thing the
+// claims to live in. Both are refusals, never widenings: the one thing the
 // fixer must never do when it is unsure of its scope is pick a broader one.
 var ErrBuildFixScope = errors.New("build fix write scope could not be confined to the staged tree")
 
@@ -156,7 +142,7 @@ type BuildFixRequest struct {
 	// (…/<staging-root>/<category>/<package>/<version>): the directory holding
 	// profiles/, metadata/ and the candidate's category directory. It is the
 	// CONFINEMENT boundary — every write the agent may make must fall inside it
-	// (R8.3) — not the scope handed to --add-dir, which is narrower still (see
+	// — not the scope handed to --add-dir, which is narrower still (see
 	// stagedPackageDir).
 	StagedDir string
 	// EbuildPath is the full path to the staged ebuild the agent must fix. Its
@@ -168,26 +154,26 @@ type BuildFixRequest struct {
 	BuildLog string
 	// Attempt is the 1-based attempt number for this gate. Values below 1 are
 	// read as the first attempt; anything above buildFixMaxAttempts is refused
-	// with ErrBuildFixAttemptsExhausted (R8.4).
+	// with ErrBuildFixAttemptsExhausted.
 	Attempt int
 }
 
 // BuildFixResult reports the outcome of an agentic build-fix attempt. Summary is
 // the agent's own one-line description of the edit it made, and it is what the
-// caller surfaces to satisfy R8.6 — the library returns the sentence, the applier
-// and the handlers decide to print it.
+// caller surfaces to the operator — the library returns the sentence, the
+// applier and the handlers decide to print it.
 type BuildFixResult struct {
-	// Summary is the agent's one-line description of the change it made (R8.6).
+	// Summary is the agent's one-line description of the change it made.
 	// Empty means it reported no change.
 	Summary string
 	// CostUSD is the reported spend for the invocation, when the CLI provides it.
 	CostUSD float64
-	// Model is the exact string this invocation passed to --model (S030-R4.1):
-	// the RESOLVED model, not the configured one.
+	// Model is the exact string this invocation passed to --model: the
+	// RESOLVED model, not the configured one.
 	Model string
 	// ModelIsAlias reports that Model is a CLI alias ("sonnet", "opus") rather
-	// than a pinned identifier (S030-R4.2). Derived from isModelAlias — the same
-	// single rule the other two fixers use, never a second copy.
+	// than a pinned identifier. Derived from isModelAlias — the same single
+	// rule the other two fixers use, never a second copy.
 	ModelIsAlias bool
 	// Attempt is the normalized attempt number this result belongs to, so a
 	// report can say which of the buildFixMaxAttempts tries produced the change.
@@ -205,7 +191,7 @@ type BuildFixer interface {
 	// or an error if the agent could not be run, if the attempt bound was reached
 	// (ErrBuildFixAttemptsExhausted), or if the write scope could not be confined
 	// to the staged tree (ErrBuildFixScope). A nil error does NOT by itself mean
-	// the gate now passes — the caller re-runs it to decide (R8.2).
+	// the gate now passes — the caller re-runs it to decide.
 	FixBuild(ctx context.Context, req BuildFixRequest) (BuildFixResult, error)
 }
 
@@ -335,9 +321,8 @@ func NewClaudeCodeBuildFixer(cfg llm.LLMConfig, opts ...BuildFixerOption) (*Clau
 //
 // pkgDir — the staged package directory, already confined by stagedPackageDir —
 // is the sole --add-dir scope, and buildFixAllowedTools is the sole tool grant,
-// with Read and Edit confined to pkgDir by `func agentPermissionArgs` (S051-R2.2,
-// S051-R2.3). A pkgDir the rules cannot carry safely is an error, and nothing
-// is spawned (S051-R2.8).
+// with Read and Edit confined to pkgDir by `func agentPermissionArgs`. A pkgDir
+// the rules cannot carry safely is an error, and nothing is spawned.
 func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir, pkg string) ([]string, error) {
 	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
 		Agent: "build fixer",
@@ -374,7 +359,7 @@ func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir, pkg string) ([]str
 // to: the parent of the staged ebuild, which also holds the package's files/
 // (patches) and metadata.xml. That is narrower than the staged repository root —
 // the agent has no business editing profiles/ or an eclass to make a build pass —
-// and R8.3 asks for the narrowest scope that still lets the fix happen.
+// and the scope must be the narrowest that still lets the fix happen.
 //
 // It refuses, rather than widens, in both failure cases: a request that does not
 // carry the paths, and an ebuild path that lexically escapes StagedDir. The check
@@ -424,8 +409,8 @@ func normalizeBuildFixAttempt(attempt int) int {
 }
 
 // formatBuildFixBoundReached renders the sentence reported when the per-gate
-// attempt bound is reached (R8.4). It names the gate, the attempt that was
-// refused and the bound itself, because "we stopped trying" is only actionable
+// attempt bound is reached. It names the gate, the attempt that was refused
+// and the bound itself, because "we stopped trying" is only actionable
 // when the reader can see how many tries that was.
 func formatBuildFixBoundReached(gate string, attempt int) string {
 	return fmt.Sprintf("gate %s: refusing fix attempt %d; the bound is %d attempt(s) per gate",
@@ -478,8 +463,8 @@ func buildFixInstruction(req BuildFixRequest) string {
 	sb.WriteString(strconv.Itoa(buildFixMaxAttempts))
 	sb.WriteString(".")
 	if attempt >= buildFixMaxAttempts {
-		// R8.4, stated to the agent as well as to the operator: knowing this is
-		// the last try is what makes "change nothing and say why" the right move
+		// The bound is stated to the agent as well as to the operator: knowing
+		// this is the last try is what makes "change nothing and say why" the right move
 		// instead of a guess that nobody will get to correct.
 		sb.WriteString(" This is the LAST attempt for this gate; there will be no further one.")
 	}
@@ -503,12 +488,11 @@ func buildFixInstruction(req BuildFixRequest) string {
 }
 
 // FixBuild drives the agentic `claude` CLI to repair the staged ebuild in req. It
-// refuses before spending anything when the attempt bound is reached (R8.4) or
-// when the write scope cannot be confined to the staged tree (R8.3); otherwise it
+// refuses before spending anything when the attempt bound is reached or when
+// the write scope cannot be confined to the staged tree; otherwise it
 // builds a scoped, non-interactive invocation (cwd = the staged package
 // directory, --add-dir the same, Read/Edit only), runs it under the configured
-// timeout/budget, and returns the agent's one-line summary of what it changed
-// (R8.6).
+// timeout/budget, and returns the agent's one-line summary of what it changed.
 //
 // The API key is injected only via the child environment in bare mode and never
 // appears in argv or in a returned error.
@@ -517,14 +501,14 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 
 	// The bound is enforced HERE, by the thing being bounded, rather than left to
 	// each caller's loop: a bound that only holds while every caller remembers it
-	// is not a bound (R8.4).
+	// is not a bound.
 	if attempt > buildFixMaxAttempts {
 		return BuildFixResult{Attempt: attempt}, fmt.Errorf("%w: %s",
 			ErrBuildFixAttemptsExhausted, formatBuildFixBoundReached(req.Gate, attempt))
 	}
 
 	// Derive the agent's ONLY writable directory before anything is spawned, so a
-	// request whose scope cannot be confined never reaches the model (R8.3).
+	// request whose scope cannot be confined never reaches the model.
 	pkgDir, err := stagedPackageDir(req)
 	if err != nil {
 		return BuildFixResult{Attempt: attempt}, err

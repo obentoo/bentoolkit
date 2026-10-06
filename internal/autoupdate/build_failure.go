@@ -1,22 +1,22 @@
 // build_failure.go decides, after a staged build has exited non-zero, whether
 // the failure belongs to the machine or to the ebuild. It is the gate that keeps
-// a machine fault away from the build fixer (S033-R8.5), and it is the sibling of
+// a machine fault away from the build fixer, and it is the sibling of
 // manifest_failure.go, which answers the same question about `pkgdev manifest`.
 //
 // # Why environmentVerdict is NOT reused, and must not be "simplified" back into
 //
-// applier.go:1487's environmentVerdict answers this question for the manifest
+// applier.go's environmentVerdict answers this question for the manifest
 // step, and it cannot answer it here. It keys on three things — distfiles.
 // ErrDistdirNotWritable, distfiles.ErrDistfileLocked and *manifestRunError — and
 // a failed BUILD carries none of them: it carries an exit status and a
 // transcript. Handed one, environmentVerdict matches nothing and falls straight
 // through to nil, which means "repairable" — INCLUDING for a compile that died
-// because the build device filled up. That is precisely the answer story 030
+// because the build device filled up. That is precisely the answer that was
 // removed from the manifest path, so routing build failures through it would
 // reinstate the defect on a new path while looking like tidy code reuse.
 //
-// What IS reused is story 030's recorded lesson (applier.go:1511): mark the
-// PHASE, do not enumerate causes. An enumeration means every future way a build
+// What IS reused is the manifest path's recorded lesson: mark the PHASE, do not
+// enumerate causes. An enumeration means every future way a build
 // can die on the host is a clause somebody must remember to add, and the clause
 // that gets forgotten is the one that spends an agent invocation on a correct
 // ebuild.
@@ -85,8 +85,8 @@ const enospcReport = "no space left on device"
 // Portage, no staged tree, a resolve that failed — and an unanswerable question is
 // not a machine fault. Reading a bare `!satisfied` as "a dependency is missing"
 // would refuse a repair on the strength of knowing nothing, which is the opposite
-// of the bargain story 030 struck (applier.go:1462): a wrong classification must
-// cost a wasted fixer invocation, never a lost repair.
+// of the bargain the manifest path struck: a wrong classification must cost a
+// wasted fixer invocation, never a lost repair.
 type buildDependencyAnswer struct {
 	// determined reports that Portage answered at all.
 	determined bool
@@ -123,28 +123,19 @@ type buildFaultEvidence struct {
 // buildFaultVerdict returns an ErrBuildEnvironment-wrapped verdict when a failed
 // build belongs to the machine, and nil when the ebuild may still be at fault.
 //
-// The rungs are checked in the order design D6 states them, and the order is the
-// order of CONFIDENCE, not of cost: Portage's own answer about dependencies
-// outranks a phase marker, and a phase marker outranks a string in a log.
+// The rungs run in order of CONFIDENCE, not of cost:
 //
-//  1. Unsatisfied dependencies. `ebuild … compile` never installs anything, so a
-//     candidate whose build dependencies are simply absent here fails for a reason
-//     that has nothing to do with the bump.
-//
-//  2. The phase. A run that never got INTO src_prepare died in setup, in the
-//     fetch or in unpack — the host's and the distfile's business. From prepare
-//     onward it is the ebuild's, which is why the marker asked about is the one
-//     that opens prepare and not the one that closes it; see
-//     validate.SourcePrepareStarted for the full argument.
-//
-//  3. The two sentinels for host faults a phase cannot distinguish, because both
-//     strike from prepare onward and would otherwise read as the ebuild's fault:
+//  1. Unsatisfied dependencies: `ebuild … compile` installs nothing, so absent
+//     build dependencies fail the build for a reason unrelated to the bump.
+//  2. The phase: a run that never got INTO src_prepare died in setup, fetch or
+//     unpack — the host's business; from prepare onward it is the ebuild's (see
+//     validate.SourcePrepareStarted).
+//  3. Host faults a phase cannot tell apart, because both strike after prepare:
 //     the build device running out of space, and an unwritable PORTAGE_TMPDIR.
 //
-// It never spawns anything and never writes anything except the probe file
-// distfiles.Probe creates and removes; every input it reasons from was gathered
-// by the caller. A nil-safe zero evidence value yields nil — no evidence is not a
-// verdict.
+// It spawns nothing and writes only the probe file distfiles.Probe creates and
+// removes; the caller gathered every input. A zero evidence value yields nil —
+// no evidence is not a verdict.
 func buildFaultVerdict(ev buildFaultEvidence) error {
 	// Rung 1 — Portage's own answer, and only when it gave one.
 	if ev.deps.determined && !ev.deps.satisfied {
@@ -152,7 +143,7 @@ func buildFaultVerdict(ev buildFaultEvidence) error {
 			strings.Join(ev.deps.missing, ", "))
 	}
 
-	// Rung 2 — the phase, marked rather than enumerated (story 030's lesson).
+	// Rung 2 — the phase, marked rather than enumerated.
 	if !validate.SourcePrepareStarted(ev.transcript) {
 		return fmt.Errorf("%w: %w", ErrBuildEnvironment, errBuildBeforePrepare)
 	}
@@ -177,28 +168,18 @@ func buildFaultVerdict(ev buildFaultEvidence) error {
 // reportsNoSpaceLeft reports whether a build transcript carries the kernel's own
 // out-of-space report.
 //
-// # Why this reads a message when manifest_failure.go bans reading messages
+// It reads a message, which manifest_failure.go bans, because nothing else is
+// left: a full device ERASES ITS OWN EVIDENCE (partial objects are removed and
+// Portage cleans its work directory), so a later statfs finds room. The
+// transcript is the only witness that survives.
 //
-// Because here there is nothing else left to read. A full device is the one host
-// fault that ERASES ITS OWN EVIDENCE: the failing build's partial objects are
-// removed and Portage cleans its work directory, so a statfs taken after the exit
-// finds a device with room and would answer "repairable" on a machine that just
-// failed for exactly this. The transcript is the only witness that survives.
-//
-// # What it costs, and in which direction
-//
-// The match is the C-locale strerror, so a build child running under a translated
-// locale is NOT recognised — the applier's compile gate inherits the invoking
-// environment through sudo/doas, so that is a real case and not a theoretical
-// one. Its consequence is one wasted fixer invocation on a machine that was out
-// of space, which is the direction story 030 chose deliberately (applier.go:1462):
-// a wrong classification must cost a wasted invocation, never a lost repair.
-//
-// The other direction — an upstream source tree that happens to contain this
-// exact sentence, in an error-message table, being read as a full device — costs
-// a repair that was available. It is accepted because the message names itself in
-// the operator's error, so the misdiagnosis is visible rather than silent, and
-// because the string is only ever looked for in a transcript that ALREADY failed.
+// The match is the C-locale strerror, so a child under a translated locale is
+// NOT recognised — a real case, since the compile gate inherits the invoking
+// environment through sudo/doas. That costs one wasted fixer invocation, the
+// chosen direction: a wrong classification must cost a wasted invocation, never
+// a lost repair. The reverse — a source tree quoting this sentence, read as a
+// full device — costs an available repair; it is accepted because the operator's
+// error names the message, and only a transcript that ALREADY failed is read.
 func reportsNoSpaceLeft(transcript string) bool {
 	return strings.Contains(strings.ToLower(transcript), enospcReport)
 }

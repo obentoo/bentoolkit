@@ -15,6 +15,7 @@ import "github.com/charmbracelet/lipgloss"
 // A box-drawing character is printable Unicode and carries no escape sequence;
 // a lipgloss STYLE applied to one does. Plain therefore takes segments from
 // this value and assembles them itself (see rule), and never asks lipgloss to
-// render anything — which is what keeps R2.1 true by construction rather than
-// by remembering not to set a colour. The boxed modes style it freely.
+// render anything — which is what keeps plain escape-free by construction
+// rather than by remembering not to set a colour. The boxed modes style it
+// freely.
 var borderStyle = lipgloss.RoundedBorder()

@@ -24,7 +24,7 @@ type Passed struct {
 // Unresolved is an option name the ebuild builds at runtime instead of writing
 // out, so no static reader can say what it will be.
 //
-// It is REPORTED, never dropped (R2.3). Dropping it is exactly the false-clean
+// It is REPORTED, never dropped. Dropping it is exactly the false-clean
 // this project has already measured once and removed: the gate would say
 // "nothing wrong here" about an ebuild it could not fully read.
 type Unresolved struct {
@@ -115,7 +115,7 @@ func collectPassedOptions(text string, line int, base string, passed *Passed) {
 		case name == "":
 			// `-D=value` assigns nothing; there is no name to compare.
 		case strings.Contains(name, "$"):
-			// R2.3: reported with the text as written, never dropped.
+			// Reported with the text as written, never dropped.
 			passed.Unresolved = append(passed.Unresolved, Unresolved{
 				Text: "-D" + name + "=",
 				Line: line,

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ func stubRollbackConfirm(d *deps, decision bool) *bool {
 func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRollbackFlags(t, true)
@@ -83,7 +83,7 @@ func TestRunSnapshotRollback_YesInvokesSnapper(t *testing.T) {
 func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRollbackFlags(t, false) // no --yes → confirm gate
@@ -107,7 +107,7 @@ func TestRunSnapshotRollback_ConfirmDeniedCleanAbort(t *testing.T) {
 func TestRunSnapshotRollback_ConfirmApprovedProceeds(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRollbackFlags(t, false)
@@ -135,7 +135,7 @@ func TestRunSnapshotRollback_ConfirmApprovedProceeds(t *testing.T) {
 func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	writeSnapshotConfig(t, rollbackTOMLBtrbk)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRollbackFlags(t, false)
@@ -163,7 +163,7 @@ func TestRunSnapshotRollback_NonSnapperEngineRefused(t *testing.T) {
 func TestRunSnapshotRollback_DryRunPrintsActionsZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "snapper")
 	writeSnapshotConfig(t, rollbackTOMLSnapper)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 

@@ -1,44 +1,24 @@
 package fixer
 
-// bump_reviewer.go implements BumpReviewer, the fourth and NARROWEST agentic
-// capability in this package, beside ManifestFixer (manifest_fixer.go),
-// RegistryFixer (registry_fixer.go) and BuildFixer (build_fixer.go). The other
-// three exist to CHANGE a file. This one exists to read one difference and say
-// what it worries about, and it is built so that it cannot do anything else.
+// bump_reviewer.go implements BumpReviewer, the NARROWEST agentic capability
+// here: the other fixers exist to CHANGE a file, this one only reads one
+// difference and says what worries it. Its safety is structural:
 //
-// Two properties are what make it safe, and both are structural rather than
-// remembered:
+//   - It holds no capability that can modify a file: the grant is
+//     bumpReviewAllowedTools, whose contents bump_reviewer_test.go asserts.
+//   - It never emits a finding at severity error: Report.ExitCode counts error
+//     findings from every gate but qa, so clampBumpReviewSeverity is the ceiling
+//     between a model's opinion and a failed bump.
+//   - It reaches no network: its input is the difference between the two
+//     versions' upstream build declarations, computed from the archives already
+//     on disk by validate.OptionsFromArchive (a selective `tar -xO` that never
+//     unpacks or fetches). TestBumpReviewer_SourceReachesNoNetworkPackage
+//     asserts the import half of that.
 //
-//   - It holds no capability that can modify a file (R7.4). The grant is
-//     bumpReviewAllowedTools, and bump_reviewer_test.go asserts its contents
-//     rather than trusting this comment.
-//   - It can never emit a finding at severity error (R7.6). Report.ExitCode
-//     counts error findings from every gate but qa — the reviewer is
-//     deliberately NOT excluded there — so the severity ceiling in
-//     clampBumpReviewSeverity is the single thing standing between a model's
-//     opinion and a failed bump. It is a function with exactly two returns,
-//     neither of which is validate.SeverityError, so the ceiling cannot be
-//     lifted by editing a prompt.
-//
-// IT REACHES NO NETWORK (design D8). Its input is the difference between the two
-// versions' upstream build declarations, computed HERE from the two release
-// archives already on disk, through validate.OptionsFromArchive — the selective
-// `tar -xO` extraction story 031 already implements, which never unpacks and
-// never fetches. The agent is handed that text; it is not handed a capability to
-// go and find text. The import-level half of that property is asserted by
-// TestBumpReviewer_SourceReachesNoNetworkPackage over this file's own imports.
-//
-// EVERY WAY IT CANNOT RUN IS A REPORTED OUTCOME, NEVER AN ERROR (R7.7). A
-// missing archive, an unreadable one, a provider failure, the spend cap, an
-// elapsed autoupdate.validate.timeout, a cancelled run and an unreadable answer
-// each produce a SKIPPED report naming ITSELF, and ReviewBump returns a nil
-// error in all of them. Failing a bump because the advisory reviewer failed
-// would let a model decide after all, by the back door.
-//
-// It mirrors ClaudeCodeBuildFixer for every shared mechanic — auth/model
-// resolution, the bare/key-injection discipline (childEnv), the exec seam, the
-// envelope (claudeCodeEnvelope), formatFixerError, the wait delay, and the
-// argv-size guard (truncateMiddle).
+// Every way it cannot run is a SKIPPED report naming its cause, never an error:
+// failing a bump because the advisory reviewer failed would let a model decide
+// by the back door. It mirrors ClaudeCodeBuildFixer's shared mechanics (auth and
+// model resolution, childEnv, the exec seam, the envelope, truncateMiddle).
 
 import (
 	"bytes"
@@ -61,39 +41,24 @@ import (
 )
 
 // bumpReviewAllowedTools is the narrowest allowlist in this codebase, narrower
-// even than buildFixAllowedTools (build_fixer.go), and the narrowness is the
-// whole of R7.4.
+// even than buildFixAllowedTools: `Read` and nothing else, the only CLI tool that
+// cannot alter anything. Each other capability is excluded for a reason:
 //
-// It is `Read` and nothing else. Read is the only tool the CLI offers that
-// cannot alter anything: it opens a file and returns bytes. Every other
-// capability the other three fixers hold is excluded for a specific reason, not
-// by omission:
+//   - No `Edit` or `Write`: editing is the build fixer's job, kept in a separate
+//     type so exactly one of them can change a file, and the reviewer has no tree
+//     whose files it could legitimately create.
+//   - No `Bash` in ANY form: a shell writes wherever the bentoo user can and
+//     --add-dir does not scope it, so a narrow pattern is the same hole with a
+//     narrower doorway (see buildFixAllowedTools).
+//   - No `WebFetch`/`WebSearch`: the input is a LOCALLY computed diff, and a
+//     fetch would put the no-network property back in question.
 //
-//   - No `Edit`. Editing is the BUILD FIXER's capability, and the two are kept
-//     in separate types precisely so that exactly one of them can change a file.
-//     A reviewer that could also edit would make "advisory" a matter of prompt
-//     wording.
-//   - No `Write`, for the same reason and one more: the reviewer is not given a
-//     tree to work in, so a capability to CREATE files would have no legitimate
-//     target at all.
-//   - No `Bash` in ANY form, including a scoped pattern. A shell writes wherever
-//     the bentoo user can, and --add-dir does not scope a shell — so a narrow
-//     Bash pattern is not a smaller permission, it is the same hole with a
-//     narrower doorway (the note on buildFixAllowedTools works this out in
-//     full).
-//   - No `WebFetch`/`WebSearch`. The reviewer's input is a LOCALLY computed diff
-//     (D8); a fetch would put this package's no-network property back in
-//     question for the sake of information the instruction already carries.
-//
-// The invocation also passes no --add-dir. It runs in a private 0700 directory
-// made for that one review and removed afterwards, and `Read` is granted only
-// inside it (`Read(//<dir>/**)`), with the secrets files denied besides
-// (S051-R2.3, S051-R2.4). The reviewer's input is already in its instruction, so
-// the directory is empty: the scope exists so that an injected "read ~/.config"
-// reaches nothing, not so the reviewer can find something there.
-//
-// Anything outside this set is denied by the CLI without an interactive prompt,
-// which keeps the run non-interactive WITHOUT --dangerously-skip-permissions.
+// No --add-dir is passed. The run happens in a private 0700 directory removed
+// afterwards; `Read` is granted only inside it (`Read(//<dir>/**)`) with the
+// secrets files denied besides. The directory is empty — the scope exists so an
+// injected "read ~/.config" reaches nothing. Anything else is denied without a
+// prompt, which keeps the run non-interactive WITHOUT
+// --dangerously-skip-permissions.
 var bumpReviewAllowedTools = []string{
 	"Read",
 }
@@ -128,10 +93,10 @@ const bumpReviewDiffBudget = 32 * 1024
 // truncated rather than allowed to turn the report into one.
 const bumpReviewDetailBudget = 1024
 
-// bumpReviewMaxRisks bounds how many risks are carried out of one review. R7.3
-// asks for the risks the reviewer names to be reported, not for an unbounded
-// list to be pasted into every bump's report: past a couple of dozen entries a
-// finding list stops being read at all, which would lose the risks that matter.
+// bumpReviewMaxRisks bounds how many risks are carried out of one review. The
+// risks the reviewer names are reported, but not as an unbounded list pasted into
+// every bump's report: past a couple of dozen entries a finding list stops being
+// read at all, which would lose the risks that matter.
 const bumpReviewMaxRisks = 20
 
 // bumpReviewAnswerSample bounds the quotation of an unreadable agent answer in
@@ -182,7 +147,7 @@ type BumpReviewRequest struct {
 	NewVersion string
 	// BuildFileDiff is the already-computed difference between the two versions'
 	// upstream build declarations. When non-empty it is used as given, which is
-	// what keeps the reviewer's input text rather than a capability (D8).
+	// what keeps the reviewer's input text rather than a capability.
 	BuildFileDiff string
 	// OldArchive is the path to the previous version's release archive, already
 	// on disk. Used only when BuildFileDiff is empty.
@@ -201,20 +166,19 @@ type BumpReviewRequest struct {
 // and names no risk" a property of the type rather than a thing every caller
 // must check.
 type BumpReviewReport struct {
-	// Risks are the risks the reviewer named (R7.3), each already clamped to
-	// info or warning and attributed to validate.GateReview. Never error
-	// (R7.6).
+	// Risks are the risks the reviewer named, each already clamped to info or
+	// warning and attributed to validate.GateReview. Never error.
 	Risks []validate.Finding
 	// ProposedDepth is the validation depth the reviewer asks for, or nil when
 	// it asked for nothing. It is a PROPOSAL: combining it with the policy's
-	// floor is the caller's job (sub-task 10.2's Escalate), and a nil here means
-	// the run continues at exactly the depth the policy selected (R7.7).
+	// floor is the caller's job (validate.Escalate), and a nil here means the
+	// run continues at exactly the depth the policy selected.
 	ProposedDepth *validate.Depth
 	// Reason is the reviewer's own one-line justification for ProposedDepth.
 	Reason string
 	// Skipped reports that the reviewer could not run at all.
 	Skipped bool
-	// SkipReason names WHICH cause it was (R7.7). Every cause renders its own
+	// SkipReason names WHICH cause it was. Every cause renders its own
 	// sentence: "fetch the previous archive", "fix the host", "raise the budget"
 	// and "raise the timeout" are four different next actions, and one shared
 	// string would make all four unactionable at once.
@@ -233,8 +197,7 @@ type BumpReviewer interface {
 	// It returns a non-nil error ONLY for a programming fault, never for a
 	// failure of the review itself: a reviewer that could not run reports
 	// Skipped with a reason and a nil error, because an advisory capability that
-	// failed must not fail a bump the deterministic gates would have passed
-	// (R7.6, R7.7).
+	// failed must not fail a bump the deterministic gates would have passed.
 	ReviewBump(ctx context.Context, req BumpReviewRequest) (BumpReviewReport, error)
 }
 
@@ -374,10 +337,10 @@ func NewClaudeCodeBumpReviewer(cfg llm.LLMConfig, opts ...BumpReviewerOption) (*
 // unattended sweep cannot stop on a hung agent.
 //
 // It returns a nil error on every failure of the review itself. That is not
-// laxity: the reviewer is advisory (R7.6), so surfacing its failure as an error
-// would let a model's bad day fail a bump that the deterministic gates would
-// have passed. Each failure becomes a SKIPPED report naming its own cause
-// (R7.7), and the run continues at the depth the policy selected.
+// laxity: the reviewer is advisory, so surfacing its failure as an error would
+// let a model's bad day fail a bump that the deterministic gates would have
+// passed. Each failure becomes a SKIPPED report naming its own cause, and the
+// run continues at the depth the policy selected.
 func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewRequest) (BumpReviewReport, error) {
 	runCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
@@ -390,9 +353,9 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	}
 
 	// The agent runs in a private 0700 directory made for this one review and
-	// removed after the child exits, never in bentoo's own cwd (S051-R2.4). The
-	// reviewer is advisory, so a directory that cannot be made is a named skip
-	// like every other provider failure, not an error (R7.6, S051-R2.9); one
+	// removed after the child exits, never in bentoo's own cwd. The reviewer is
+	// advisory, so a directory that cannot be made is a named skip like every
+	// other provider failure, not an error; one
 	// that cannot be removed is a warning, because the review is already in hand.
 	dir, err := os.MkdirTemp("", "bentoo-bump-review-")
 	if err != nil {
@@ -503,7 +466,7 @@ func (r *ClaudeCodeBumpReviewer) buildArgs(instruction, dir string) ([]string, e
 // bumpReviewSkipped builds the SKIPPED report for one named cause.
 //
 // It is the ONLY way a skip is constructed, which is how "a skipped reviewer
-// proposes no depth and names no risk" (R7.7) stays true: both fields are left
+// proposes no depth and names no risk" stays true: both fields are left
 // at their zero value here rather than cleared by each caller, so a future skip
 // path cannot forget.
 func bumpReviewSkipped(reason string) BumpReviewReport {
@@ -514,9 +477,9 @@ func bumpReviewSkipped(reason string) BumpReviewReport {
 // review or the reason the review must be skipped. Exactly one of the two is
 // non-empty.
 //
-// A caller-supplied BuildFileDiff wins outright: it is the D8 shape, where the
-// reviewer is handed text and never touches the filesystem. Without one, the
-// difference is computed HERE from the two archives through
+// A caller-supplied BuildFileDiff wins outright: it is the no-network shape,
+// where the reviewer is handed text and never touches the filesystem. Without
+// one, the difference is computed HERE from the two archives through
 // validate.OptionsFromArchive — one index pass plus a `tar -xO` of the option
 // files, no unpacking and no network — and every way that can fail names itself.
 func preparedDiff(ctx context.Context, req BumpReviewRequest) (diff, skip string) {
@@ -605,7 +568,7 @@ func sortedMissing(have, other map[string]bool) []string {
 	return missing
 }
 
-// classifyRunFailure names WHICH way a spawned review failed (R7.7). Every
+// classifyRunFailure names WHICH way a spawned review failed. Every
 // branch renders a different sentence, because each asks a different thing of
 // the operator: wait for the run to finish, raise the timeout, raise the spend
 // cap, or fix the host.
@@ -779,7 +742,7 @@ type bumpReviewPayload struct {
 
 // parseBumpReview turns the agent's answer into a report.
 //
-// It is where R7.6 is enforced: every risk is stamped with validate.GateReview
+// It is where the severity ceiling is enforced: every risk is stamped with validate.GateReview
 // and passed through clampBumpReviewSeverity, so neither the gate a finding is
 // attributed to nor the severity it carries is ever taken from the model.
 func parseBumpReview(result string) (BumpReviewReport, error) {
@@ -834,7 +797,7 @@ func parseBumpReview(result string) (BumpReviewReport, error) {
 //
 // The severity is the caller's, but every caller obtains it from
 // clampBumpReviewSeverity or writes a literal, and neither can produce
-// SeverityError (R7.6).
+// SeverityError.
 func reviewFinding(severity validate.Severity, detail string) validate.Finding {
 	return validate.Finding{
 		Gate:     validate.GateReview,
@@ -876,7 +839,7 @@ var bumpReviewLowSeverities = map[string]bool{
 }
 
 // clampBumpReviewSeverity maps whatever severity the model chose onto the two
-// this reviewer is allowed to emit. THIS FUNCTION IS THE CEILING (R7.6).
+// this reviewer is allowed to emit. THIS FUNCTION IS THE CEILING.
 //
 // Report.ExitCode counts findings of severity error from every gate but qa, and
 // the reviewer is deliberately not excluded there — so if the reviewer could
@@ -884,10 +847,10 @@ var bumpReviewLowSeverities = map[string]bool{
 // because this function has exactly two return statements and neither names
 // validate.SeverityError. That makes "a reviewer never decides a gate" a
 // property of the type rather than a rule somebody has to keep in mind while
-// editing a prompt, which is story 025's R4.5 restated for a model.
+// editing a prompt.
 //
 // A model writing "error" is therefore not ignored — its words are carried
-// verbatim in the finding's Detail (R7.3) — it simply cannot pick the one field
+// verbatim in the finding's Detail — it simply cannot pick the one field
 // that has teeth.
 func clampBumpReviewSeverity(raw string) validate.Severity {
 	if bumpReviewLowSeverities[strings.ToLower(strings.TrimSpace(raw))] {

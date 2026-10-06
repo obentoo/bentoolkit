@@ -152,12 +152,12 @@ type ApplyResult struct {
 	//
 	// It is empty when the compile did not run at all — including the run
 	// --require-isolation refused — and when this run resolved no directory of
-	// its own, which is R3.2's honest answer rather than an invented default:
+	// its own, which is the honest answer rather than an invented default:
 	// Portage then answers from its own configuration.
 	CompileDistdir string
 	// CompileDistdirEnforced reports whether that directory actually reached the
 	// ebuild child, and it is a separate fact because the privilege tool decides
-	// it. Measured on this host (story 040, sub-task 2.1): sudo's env_reset
+	// it. Measured on this host: sudo's env_reset
 	// discards an exported DISTDIR, so what carries the value is sudo's own
 	// argument form, `sudo DISTDIR=<dir> ebuild …`. `doas` has no such form —
 	// handed one it would try to execute a program named "DISTDIR=…" — so on a
@@ -175,9 +175,9 @@ type ApplyResult struct {
 	// was off, removed nothing, or was blocked.
 	CleanedOldVersion string
 	// CleanKept maps each version --clean left in place to the registry entry
-	// key that claims it (R6.1). An empty value means the version was kept by a
+	// key that claims it. An empty value means the version was kept by a
 	// rule rather than by an entry — the live -9999 rule or the last-non-live
-	// floor (R4.3) — since a registry key is never itself empty.
+	// floor — since a registry key is never itself empty.
 	CleanKept map[string]string
 	// CleanRemoved lists the versions whose ebuilds --clean actually deleted,
 	// ascending. It is the executed plan, not the intended one: a sweep stopped
@@ -187,7 +187,7 @@ type ApplyResult struct {
 	// itself still succeeded). Empty on success.
 	CleanWarning string
 	// RegistryWarning records a non-fatal failure to write the applied version
-	// back into packages.toml (S021-R2.4). It is deliberately NOT CleanWarning:
+	// back into packages.toml. It is deliberately NOT CleanWarning:
 	// the two report different steps — the pin is written on every successful
 	// apply, the sweep only under --clean — and the CLI prints CleanWarning on a
 	// line labelled "Clean:", so reusing it would blame the wrong step for a
@@ -228,9 +228,9 @@ type ApplyResult struct {
 	ObsoleteReason string
 	// Fixed indicates a gate failed and was recovered by an LLM fixer: the ebuild
 	// was edited and BENTOO'S OWN re-run of that same gate then succeeded. Two
-	// gates can set it — the manifest step (`pkgdev manifest`) and, since story
-	// 033, the build gate — and in both cases the flag records the re-run's
-	// verdict, never the agent's self-report (S033-R8.2). A bump whose re-run
+	// gates can set it — the manifest step (`pkgdev manifest`) and the build
+	// gate — and in both cases the flag records the re-run's verdict, never the
+	// agent's self-report. A bump whose re-run
 	// still failed leaves this false, because a "fixed" flag on something still
 	// broken is worse than no flag. Only meaningful on the success path.
 	Fixed bool
@@ -248,25 +248,20 @@ type ApplyResult struct {
 	// OUTSIDE the published overlay.
 	//
 	// It is set as soon as the tree exists and kept through every failure, because
-	// it is what makes a failure inspectable (S033-R3.6): the operator can read the
-	// exact ebuild the gates read and re-run a gate by hand, without repeating the
-	// work that produced it. Retention is expressed by the path itself — one tree
-	// per package and version — so there is no index to consult and nothing to
-	// unlock. The reports name it: applySummary appends it to the failure line, and
-	// the CLI prints it under "Staged:".
+	// it is what makes a failure inspectable: the operator can read the exact
+	// ebuild the gates read and re-run a gate by hand, without repeating the work
+	// that produced it. Retention is expressed by the path itself — one tree per
+	// package and version — so there is no index to consult and nothing to unlock.
+	// applySummary appends it to the failure line; the CLI prints it as "Staged:".
 	//
-	// A COMPLETED promotion clears it again. The staged tree has served its purpose
-	// once its bytes are in the overlay, and naming a path beside a success invites
-	// the operator to go and read a tree that says nothing the overlay does not
-	// already say — while the field's meaning stays the single one worth carrying:
-	// "here is the evidence of what went wrong".
-	//
-	// Empty, therefore, in three cases: a successful apply, an apply that ran
-	// without a staging root, and one that failed before staging.
+	// A COMPLETED promotion clears it again: once the bytes are in the overlay the
+	// tree says nothing new, and the field keeps its one meaning — "here is the
+	// evidence of what went wrong". Empty, therefore, after a successful apply,
+	// an apply with no staging root, and one that failed before staging.
 	StagedPath string
 	// DepthRequested is how far this bump was ASKED to be validated: the depth
-	// class, tier, configuration and the operator's flags resolved to (S033-R2,
-	// R2.2, R2.7), raised by a reviewer escalation where one applied (R7.5).
+	// class, tier, configuration and the operator's flags resolved to, raised by
+	// a reviewer escalation where one applied.
 	//
 	// It is a string and not a validate.Depth for the reason
 	// validate.EbuildResult states: Depth is an int whose ORDERING is its
@@ -277,20 +272,20 @@ type ApplyResult struct {
 	// DepthReached is how far validation ACTUALLY got — the deepest rung whose
 	// own gate reported PASS, never deeper than DepthRequested.
 	//
-	// The pair is the R4 rule ("an outcome names its own reach") applied to the
+	// The pair is the rule "an outcome names its own reach" applied to the
 	// ladder itself: a bump promoted with its build gates skipped for want of an
 	// installed dependency has DepthRequested "configure" and DepthReached
-	// short of it, so nobody can read the green as "it builds" (R3.12).
+	// short of it, so nobody can read the green as "it builds".
 	DepthReached string
 	// DepthReason names the input that decided the depth, and — when the two
 	// depths differ — why validation stopped short, naming the atoms or the host
 	// condition that stopped it. It is never empty on a staged apply.
 	DepthReason string
-	// ValidationSource says which of R10's two paths this bump took: "staged"
-	// when a retained tree that had already been proved was promoted as it stood
-	// (R10.1), "this-run" when the gates ran here (R10.2). It is R10.3 — state
-	// per package which of the two happened — carried on the result so the
-	// reports and the summary line can both say it.
+	// ValidationSource says which of the two validation paths this bump took:
+	// "staged" when a retained tree that had already been proved was promoted as
+	// it stood, "this-run" when the gates ran here. It states per package which
+	// of the two happened, carried on the result so the reports and the summary
+	// line can both say it.
 	//
 	// Empty on an apply that ran with no staging root at all, because on that
 	// path no gate runs and neither answer would be true. The two constants are
@@ -335,7 +330,7 @@ type Applier struct {
 	// configDir is the bentoo autoupdate config directory — in production
 	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
 	// cache.json in it is where a host-caused build failure records the
-	// precondition it found unmet (S043-R3.1). The record may live NOWHERE else;
+	// precondition it found unmet. The record may live NOWHERE else;
 	// the obvious alternative, packages.toml, sits in an overlay that
 	// auto-commits and pushes within minutes, so one workstation's unreadable key
 	// would be published as a claim about everyone's. Empty means "no cache to
@@ -348,16 +343,16 @@ type Applier struct {
 	// cancelled context kills the spawned manifest/compile process.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
 	// pendingDeleteFn is the function Apply invokes to remove a package from
-	// pending.json after the full success path (S002-R3.1). It defaults to
+	// pending.json after the full success path. It defaults to
 	// a.pending.Delete and is overridable via WithApplierPendingDeleteFunc
-	// purely for tests that need to simulate a Delete failure (S002-R3.4).
+	// purely for tests that need to simulate a Delete failure.
 	// Production callers never supply this option.
 	pendingDeleteFn func(pkg string) error
 	// setVersionsFn is the function Apply invokes to record the version it just
-	// applied in the overlay's registry (S021-R2.1). It defaults to
+	// applied in the overlay's registry. It defaults to
 	// SetPackageVersions and is overridable via WithApplierSetVersionsFunc
 	// purely for tests that need to force a write failure without a real
-	// registry (S021-R2.4). Production callers never supply this option.
+	// registry. Production callers never supply this option.
 	setVersionsFn func(overlayPath string, pins map[string]string) error
 	// isolationProbe measures whether this process can create a network
 	// namespace, so a compile-gate pass can state the fidelity it actually
@@ -368,8 +363,8 @@ type Applier struct {
 	// unisolated: an unisolated compile after the operator asked for isolation
 	// produces exactly the meaningless green they asked to avoid. Set via
 	// WithApplierRequireIsolation, which is the only way in: whether the value
-	// came from the --require-isolation flag or from the config key story 033
-	// added for it (autoupdate.validate.require_isolation, default false), it
+	// came from the --require-isolation flag or from the config key
+	// autoupdate.validate.require_isolation (default false), it
 	// arrives through that option, so this field stays the single input the
 	// gate reads.
 	requireIsolation bool
@@ -394,28 +389,28 @@ type Applier struct {
 	// attributable to the ebuild (a patch that no longer applies, a configure
 	// option upstream dropped): it drives an LLM agent to repair the STAGED ebuild,
 	// after which the applier re-runs the same gate and that re-run — never the
-	// agent's self-report — decides the outcome (S033-R8.1, S033-R8.2). Set via
+	// agent's self-report — decides the outcome. Set via
 	// WithApplierBuildFixer; nil keeps the original fail-fast behaviour.
 	buildFixer fixer.BuildFixer
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
-	// every existing test stays byte-identical (S010-R3.3).
+	// every existing test stays byte-identical.
 	reporter tui.Reporter
 	// runAttached executes the compile-test command and returns its combined
 	// output. The privileged child needs the REAL terminal for the sudo/doas
-	// password prompt (S010-R4.1), which rules out capturing its stdout/stderr through
+	// password prompt, which rules out capturing its stdout/stderr through
 	// a StreamCapture pipe the way runManifest does. The default (set in
 	// NewApplier) is exactly cmd.CombinedOutput, so the compile-log path stays
-	// byte-identical to the pre-TUI behaviour (S010-R3.3/S010-R7.1). The apply driver
-	// (sub-task 4.1) overrides it via WithApplierRunAttached to release the
+	// byte-identical to the pre-TUI behaviour. The apply driver
+	// overrides it via WithApplierRunAttached to release the
 	// terminal for the prompt and tee the raw output to the TTY and a capture
 	// buffer. A nil override is normalized back to the CombinedOutput default.
 	runAttached func(cmd *exec.Cmd) ([]byte, error)
 	// distdir, configuredDistdir and distfilesCache are carried, unread, from
 	// the CLI to the sweeper this applier builds for the Manifest step: the
 	// --distdir flag, autoupdate.distdir, and the read-only cache named by
-	// --distfiles-cache / autoupdate.distfiles_cache (S030-R1.3). Nothing on
+	// --distfiles-cache / autoupdate.distfiles_cache. Nothing on
 	// Applier interprets them — see sweeper() and runManifest, which own the
 	// precedence — and all three empty is the production default that lands on
 	// the host's own DISTDIR with no cache lookup.
@@ -423,15 +418,13 @@ type Applier struct {
 	configuredDistdir string
 	distfilesCache    string
 	// stagingRoot is the directory the staged trees are built under — in
-	// production <configDir>/staging (S033-D1). Non-empty is what turns the whole
+	// production <configDir>/staging. Non-empty is what turns the whole
 	// staged pipeline on: the candidate is materialised there instead of in the
 	// published overlay, every gate reads it there, and the overlay is written
-	// exactly once, by promotion, at the end (S033-R3.2).
+	// exactly once, by promotion, at the end.
 	//
-	// Empty is the pre-staging path, byte for byte what every release before story
-	// 033 did, and it is what a caller that omits WithApplierStagingRoot gets. The
-	// three construction sites in cmd/ are wired by sub-task 12.1, which is also
-	// where the gates that make the staged path worth taking are inserted.
+	// Empty is the pre-staging path, byte for byte what every release before
+	// staging did, and it is what a caller that omits WithApplierStagingRoot gets.
 	stagingRoot string
 	// validatePolicy is the configured depth table and its per-package
 	// exceptions, translated out of autoupdate.validate by whoever built the
@@ -445,16 +438,15 @@ type Applier struct {
 	// and a zero value indistinguishable from "unset" is the one confusion that
 	// switches validation off in silence (validate.DepthRequest.FlagDepth).
 	flagDepth *validate.Depth
-	// requireProof refuses to promote a bump whose build gates were SKIPPED
-	// (S033-R3.13). It is the opt-in counterweight to R3.12: false — the default
-	// — publishes such a bump with the depth it did not reach named, because a
+	// requireProof refuses to promote a bump whose build gates were SKIPPED. It
+	// is the opt-in counterweight to the default: false publishes such a bump
+	// with the depth it did not reach named, because a
 	// host that lacks a build dependency says nothing about the bump and
 	// refusing every one of them would make the feature inert on an ordinary
 	// workstation.
 	requireProof bool
 	// reviewer, when non-nil, reads the two versions' build-declaration
-	// difference and may ask for MORE validation than policy chose (S033-R7,
-	// R7.5). Its proposal is advisory and one-way: validate.Escalate combines it
+	// difference and may ask for MORE validation than policy chose. Its proposal is advisory and one-way: validate.Escalate combines it
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
 	// nil skips the review entirely.
 	reviewer fixer.BumpReviewer
@@ -497,7 +489,6 @@ func WithApplierPendingList(pending *PendingList) ApplierOption {
 	}
 }
 
-// WithLogsDir sets a custom logs directory for the applier
 // WithApplierGentooPath sets the ::gentoo tree consulted before an ebuild is
 // renamed forward. An empty path disables the comparison, which is what tests
 // that do not care about it get by default: a missing tree must not fail a bump.
@@ -507,6 +498,7 @@ func WithApplierGentooPath(dir string) ApplierOption {
 	}
 }
 
+// WithLogsDir sets a custom logs directory for the applier.
 func WithLogsDir(dir string) ApplierOption {
 	return func(a *Applier) {
 		a.logsDir = dir
@@ -533,13 +525,12 @@ func WithApplierIsolationProbe(fn func() (bool, string)) ApplierOption {
 
 // WithApplierRequireIsolation makes the compile gate REFUSE to run unisolated.
 //
-// Story 031 kept this out of configuration (its Constraints): a registry key is
-// expensive to move once written, and the block that would own the setting did
-// not exist yet. Story 033 added that block — autoupdate.validate.require_isolation
-// in config.yaml, where an unknown key is a warning rather than a silently
-// disabled record, defaulting to false so 031's behaviour is unchanged
-// (S033-R6.6). This option remains the only way the value reaches the Applier,
-// from the flag or from that key alike.
+// The setting lives in config.yaml as autoupdate.validate.require_isolation,
+// not in the registry: a registry key is expensive to move once written, and in
+// config.yaml an unknown key is a warning rather than a silently disabled
+// record. It defaults to false, the behaviour before the key existed. This
+// option remains the only way the value reaches the Applier, from the flag or
+// from that key alike.
 func WithApplierRequireIsolation(require bool) ApplierOption {
 	return func(a *Applier) {
 		a.requireIsolation = require
@@ -570,9 +561,9 @@ func WithExecCommand(fn func(ctx context.Context, name string, arg ...string) *e
 }
 
 // WithApplierPendingDeleteFunc overrides the function Apply invokes to remove
-// a package from pending.json after a successful apply (S002-R3.1). The default is
+// a package from pending.json after a successful apply. The default is
 // a.pending.Delete. This option exists for tests that need to simulate a
-// Delete failure (S002-R3.4); a nil fn is ignored.
+// Delete failure; a nil fn is ignored.
 func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 	return func(a *Applier) {
 		if fn != nil {
@@ -582,9 +573,9 @@ func WithApplierPendingDeleteFunc(fn func(pkg string) error) ApplierOption {
 }
 
 // WithApplierSetVersionsFunc overrides the function Apply invokes to record the
-// applied version in packages.toml after a successful apply (S021-R2.1). The
+// applied version in packages.toml after a successful apply. The
 // default is SetPackageVersions. This option exists for tests that need to
-// simulate a write failure (S021-R2.4) or to observe the pin without a registry
+// simulate a write failure or to observe the pin without a registry
 // on disk; a nil fn is ignored. Production callers never supply it.
 func WithApplierSetVersionsFunc(fn func(overlayPath string, pins map[string]string) error) ApplierOption {
 	return func(a *Applier) {
@@ -628,9 +619,8 @@ func WithApplierFixer(fixer fixer.ManifestFixer) ApplierOption {
 
 // WithApplierBuildFixer wires an LLM build fixer into the applier. When the build
 // gate fails for a reason attributable to the ebuild, the applier asks the fixer
-// to repair the STAGED ebuild and then re-runs the same gate to decide
-// (S033-R8.1, S033-R8.2). A nil fixer is ignored, preserving the fail-fast
-// behaviour.
+// to repair the STAGED ebuild and then re-runs the same gate to decide. A nil
+// fixer is ignored, preserving the fail-fast behaviour.
 //
 // The nil discipline is WithApplierFixer's, deliberately and to the letter: a
 // provider that could not be constructed leaves the applier exactly as it was
@@ -647,7 +637,7 @@ func WithApplierBuildFixer(fixer fixer.BuildFixer) ApplierOption {
 // WithApplierReporter wires a progress reporter into the applier so Apply emits
 // its lifecycle (TaskStart → TaskStage → TaskDone) to the TUI/plain sink. A nil
 // reporter is normalized to tui.Noop(), preserving the silent, fully-buffered
-// behaviour predating the TUI (S010-R3.3).
+// behaviour predating the TUI.
 func WithApplierReporter(r tui.Reporter) ApplierOption {
 	return func(a *Applier) {
 		if r == nil {
@@ -659,11 +649,11 @@ func WithApplierReporter(r tui.Reporter) ApplierOption {
 
 // WithApplierRunAttached overrides how the compile test executes. The default
 // (cmd.CombinedOutput) buffers the child's output, which is byte-identical to the
-// pre-TUI behaviour (S010-R3.3/S010-R7.1) but swallows the sudo/doas password prompt. The
-// apply driver (sub-task 4.1) supplies a variant that hands the child the real
-// terminal so the prompt is visible (S010-R4.1) while teeing its raw output to the TTY
-// and a capture buffer (the captured bytes still feed saveCompileLog on failure,
-// S010-R7.1). A nil fn is normalized back to the CombinedOutput default.
+// pre-TUI behaviour but swallows the sudo/doas password prompt. The apply
+// driver supplies a variant that hands the child the real terminal so the
+// prompt is visible while teeing its raw output to the TTY and a capture buffer
+// (the captured bytes still feed saveCompileLog on failure). A nil fn is
+// normalized back to the CombinedOutput default.
 func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOption {
 	return func(a *Applier) {
 		if fn == nil {
@@ -675,9 +665,9 @@ func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOptio
 
 // WithApplierDistdir supplies the two configurable rungs of the distdir the
 // Manifest step gives pkgdev: explicit is the --distdir flag, configured is
-// autoupdate.distdir from the config file (S030-R1.3). Both empty — what a
+// autoupdate.distdir from the config file. Both empty — what a
 // caller that omits this option gets — is the production default: the DISTDIR
-// the host's own package manager reports (S030-R1.2).
+// the host's own package manager reports.
 func WithApplierDistdir(explicit, configured string) ApplierOption {
 	return func(a *Applier) {
 		a.distdir = explicit
@@ -696,14 +686,13 @@ func WithApplierDistfilesCache(dir string) ApplierOption {
 // WithApplierStagingRoot points the applier at the directory its staged trees are
 // built under, and by doing so turns the staged pipeline on: the candidate is
 // materialised outside the published overlay, every gate reads it there, and the
-// overlay is written exactly once, by promotion, after the gates have passed
-// (S033-R3.2, S033-R3.3).
+// overlay is written exactly once, by promotion, after the gates have passed.
 //
 // An empty (or blank) root is ignored, exactly as WithApplierFixer ignores a nil
 // fixer and for the same reason: the caller that does not supply one keeps the
 // behaviour it has always had — the candidate written straight into the overlay
 // and rolled back on failure — rather than getting a half-configured pipeline. The
-// production root is <configDir>/staging (S033-D1); Stage never picks one itself,
+// production root is <configDir>/staging; Stage never picks one itself,
 // because the path is where the retention rule is recorded.
 func WithApplierStagingRoot(dir string) ApplierOption {
 	return func(a *Applier) {
@@ -714,8 +703,7 @@ func WithApplierStagingRoot(dir string) ApplierOption {
 }
 
 // WithApplierValidatePolicy supplies the configured depth table and its
-// per-package exceptions, which is how far each class of bump is validated
-// (S033-R2, R2.2, R2.4).
+// per-package exceptions, which is how far each class of bump is validated.
 //
 // The policy is expressed in the validate package's own types rather than in
 // config's strings, so translating `autoupdate.validate` — including rejecting a
@@ -730,7 +718,7 @@ func WithApplierValidatePolicy(policy validate.DepthPolicy) ApplierOption {
 }
 
 // WithApplierDepth is `--depth`: the one input allowed to REPLACE the class, the
-// package tier and configuration alike, in either direction (S033-R2.7).
+// package tier and configuration alike, in either direction.
 //
 // It is the only lowering that is not reported as a skip, because the operator
 // typing it is looking at one package and knows something the policy does not.
@@ -744,15 +732,15 @@ func WithApplierDepth(depth validate.Depth) ApplierOption {
 }
 
 // WithApplierRequireProof refuses to promote a bump whose build gates were
-// SKIPPED (S033-R3.13), for a host where an unproved publish is not acceptable —
+// SKIPPED, for a host where an unproved publish is not acceptable —
 // a builder box, or a maintainer who would rather the sweep stopped than shipped
 // something unbuilt.
 //
-// It is the opt-in counterweight to R3.12 and not its contradiction: the default
-// publishes such a bump with the depth it did not reach NAMED, because "this host
-// lacks a build dependency" says nothing about the bump, and turning every one of
-// those into a refusal would make the feature inert for exactly the reason D11
-// refuses to require isolation by default.
+// It is an opt-in counterweight, not a contradiction: the default publishes
+// such a bump with the depth it did not reach NAMED, because "this host lacks a
+// build dependency" says nothing about the bump, and turning every one of those
+// into a refusal would make the feature inert — the same reason isolation is
+// not required by default.
 func WithApplierRequireProof(require bool) ApplierOption {
 	return func(a *Applier) {
 		a.requireProof = require
@@ -761,7 +749,7 @@ func WithApplierRequireProof(require bool) ApplierOption {
 
 // WithApplierBumpReviewer wires an LLM bump reviewer into the applier. It reads
 // the difference between the two versions' upstream build declarations and may
-// ask for MORE validation than policy chose (S033-R7, R7.5); validate.Escalate
+// ask for MORE validation than policy chose; validate.Escalate
 // applies the proposal and can only ever raise the depth.
 //
 // A nil reviewer is ignored, exactly as WithApplierFixer ignores a nil fixer and
@@ -793,9 +781,9 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: the real PATH lookup the build gates ask before spawning;
 		// replaced together with execCommand (see WithExecCommand).
 		lookPath: exec.LookPath,
-		reporter: tui.Noop(), // SAFE: silent default; replaced by WithApplierReporter (S010-R3.3)
+		reporter: tui.Noop(), // SAFE: silent default; replaced by WithApplierReporter
 		// SAFE: default == today's behaviour (CombinedOutput), so the compile-log
-		// path is byte-identical (S010-R3.3/S010-R7.1); replaced by WithApplierRunAttached.
+		// path is byte-identical; replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 		log:         logging.OrDiscard(nil),
 	}
@@ -833,7 +821,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 
 	// Same shape for the registry writer: a nil field means "production path",
 	// so a caller that never passes WithApplierSetVersionsFunc gets the real
-	// raw-text write into <overlay>/.autoupdate/packages.toml (S021-R2.1).
+	// raw-text write into <overlay>/.autoupdate/packages.toml.
 	if applier.setVersionsFn == nil {
 		applier.setVersionsFn = registry.SetPackageVersions
 	}
@@ -871,7 +859,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// every return path (mirrors the deferred orphan-rollback below, keyed on the
 	// same named result). The package name doubles as both the task id and its
 	// display label. Under the default Noop reporter these are no-ops, so the
-	// silent, fully-buffered behaviour is byte-identical to before (S010-R3.3).
+	// silent, fully-buffered behaviour is byte-identical to before.
 	a.reporter.TaskStart(pkg, pkg)
 	defer func() {
 		if result == nil {
@@ -997,7 +985,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		result.Waiting = waiting
 		return result, nil
 	}
-	// R2/R2.2/R2.7: how deep this bump is validated, and on whose authority.
+	// How deep this bump is validated, and on whose authority.
 	// Resolved HERE, before anything is staged, for two reasons: the report can
 	// then name the depth even for a bump whose tree was never built, and every
 	// gate below reads one decision rather than each re-deriving its own.
@@ -1007,8 +995,8 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 
 	// From here to promotion nothing writes into the published overlay, and
 	// promotion is the last thing this function does. Everything in between is
-	// preparation and gates, and R3.2 says the overlay must stay byte-identical
-	// while any of them runs.
+	// preparation and gates, and the overlay must stay byte-identical while any
+	// of them runs.
 	//
 	// rollbackPublished is that promise's counterweight. It stays nil until this
 	// apply has actually placed something in the published overlay, and then undoes
@@ -1016,8 +1004,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// rollback this function used to register right after copyEbuild: that was
 	// correct while the candidate was written into the overlay first, and is wrong
 	// the moment the candidate lives in a staged tree, where the published path does
-	// not exist yet and the tree that does exist must be RETAINED (R3.6), not
-	// removed.
+	// not exist yet and the tree that does exist must be RETAINED, not removed.
 	var rollbackPublished publishedUndo
 	defer func() {
 		if result == nil || result.Error == nil || rollbackPublished == nil {
@@ -1028,15 +1015,15 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 
 	// gates accumulates every outcome this run produces, and it is declared here
 	// rather than where the first one is assigned so that the record written
-	// beside the staged tree (R10.4, below) sees the WHOLE list however this
+	// beside the staged tree (below) sees the WHOLE list however this
 	// function returns — including the failing exits, whose record is the one that
 	// stops the next run promoting a rejected bump.
 	var gates []validate.GateResult
 
-	// R10: what an earlier run already proved about this exact bump.
+	// What an earlier run already proved about this exact bump.
 	//
 	// Taken BEFORE anything is staged, for the reason staging itself makes
-	// unavoidable: validate.Stage replaces the retained tree (R3.7), so a question
+	// unavoidable: validate.Stage replaces the retained tree, so a question
 	// asked after it is a question about a tree this run just rebuilt.
 	//
 	// retainedVerdict is what that question was ANSWERED with, kept in a variable
@@ -1045,9 +1032,9 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// on the promoting path — which returns before that line — and every REFUSAL
 	// this file computes ("its record shows configure FAILED", "no readable
 	// record", "produced by validate rather than by the applier") reaches the
-	// operator as an ordinary slow apply with no explanation attached. R10.3 is
-	// "state per package which of the two happened", and the half that is worth
-	// stating is the half where the retained tree was NOT used.
+	// operator as an ordinary slow apply with no explanation attached. Each
+	// package states which of the two happened, and the half worth stating is
+	// the half where the retained tree was NOT used.
 	var (
 		inputs          stagedInputs
 		retainedVerdict string
@@ -1059,14 +1046,14 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		}
 		inputs = captured
 
-		// R10.3: one of the two answers is recorded on every staged apply, and
+		// One of the two answers is recorded on every staged apply, and
 		// the default is the honest one — the gates below run in this run unless
 		// the retained tree takes their place.
 		result.ValidationSource = ValidationSourceThisRun
 
 		reuse := a.reusableStagedTree(pkg, newVersion, inputs, depth.Depth)
 		if reuse.root != "" {
-			// Only when a tree was actually there. R10.3's "which of the two
+			// Only when a tree was actually there. "Which of the two
 			// happened" is already on the result and in the summary line; what
 			// this adds is the WHY, and "there was no retained tree" explains
 			// nothing an operator did not know from the absence of one.
@@ -1082,7 +1069,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 			return a.failApply(pkg, result, reuse.err)
 		}
 		if reuse.promote {
-			// R10.1: the hours were already spent. Nothing between here and the
+			// The hours were already spent. Nothing between here and the
 			// published write runs a gate, which is the entire economic argument
 			// — an operator who pays for `--check --llm` and then pays again for
 			// `--apply` stops running the check first.
@@ -1097,7 +1084,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 			rollbackPublished = promoted
 
 			result.Success = true
-			// R3.6's other direction, exactly as on the validating path: the
+			// Retention's other direction, exactly as on the validating path: the
 			// retained tree is a failure's evidence, and there is no failure here.
 			result.StagedPath = ""
 			a.completeApply(ctx, pkg, newVersion, result)
@@ -1124,13 +1111,13 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		return a.failApply(pkg, result, prepErr)
 	}
 
-	// R10.4: a record of what the gates said, beside the tree they said it about,
+	// A record of what the gates said, beside the tree they said it about,
 	// written however this apply ends.
 	//
 	// A defer rather than a call at each exit, and that is not brevity: there are
 	// six ways out from here down, and the ONE that must never be forgotten is the
-	// failing one — an unrecorded failed tree is promoted by the next run's R10.1
-	// on a match alone. The closure reads `gates` and `depth` at return time, so it
+	// failing one — an unrecorded failed tree would be promoted by the next run's
+	// reuse path on a match alone. The closure reads `gates` and `depth` at return time, so it
 	// records the final list and the depth a reviewer's escalation may have raised.
 	if stagedRoot := result.StagedPath; stagedRoot != "" {
 		defer func() { a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
@@ -1144,10 +1131,10 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	a.reporter.TaskStage(pkg, "manifest")
 	fetchedDistdir, manifestErr := a.runManifestWithFix(ctx, cand, pkg, newVersion, result)
 	// Armed the instant the directory can exist, so every exit below — the six
-	// failing ones included — takes it back (R2.1, R2.2). A removal added after
+	// failing ones included — takes it back. A removal added after
 	// the fact is a removal one path will not have.
 	defer removeStagedDistdir(a.logger(), fetchedDistdir)
-	// And handed to the gates, which are its consumer (R1.1, R1.2). On a host
+	// And handed to the gates, which are its consumer. On a host
 	// that has never fetched this release, what this step just downloaded is the
 	// only copy of the candidate's archive in existence locally.
 	cand.fetchedDistdir = fetchedDistdir
@@ -1159,17 +1146,17 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		return a.failApply(pkg, result, err)
 	}
 
-	// The static gates — the Meson option gate and the advisory QA scan (story
-	// 031's gate, reused verbatim). They read files that already exist, so they
-	// cost no build and can sit ahead of StatusValidated below. That placement is
-	// the whole point of the slot: a gate added ABOVE that line instead of below
-	// it would silently undo sub-task 4.1's move, and the state's meaning —
-	// "passed the static gates" — would quietly go back to "the manifest ran".
+	// The static gates — the Meson option gate and the advisory QA scan, reused
+	// verbatim. They read files that already exist, so they cost no build and can
+	// sit ahead of StatusValidated below. That placement is the whole point of
+	// the slot: a gate added ABOVE that line instead of below it would silently
+	// undo the move below, and the state's meaning — "passed the static gates" —
+	// would quietly go back to "the manifest ran".
 	gates = a.runStaticGates(ctx, cand, pkg, newVersion)
 
 	// Update status to validated.
 	//
-	// MOVED (S033-D13, protocol §5.7): this used to be written the moment the
+	// MOVED: this used to be written the moment the
 	// manifest step returned. It now sits after the static gates, and the state's
 	// MEANING NARROWS with the move — it says "passed the static gates", not "ready
 	// to publish" and, on the staged path, no longer "the ebuild is in the
@@ -1180,7 +1167,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		return result, result.Error
 	}
 
-	// R7: the optional bump reviewer, after the static gates and before anything
+	// The optional bump reviewer, after the static gates and before anything
 	// is built — it reads a diff and may only ask for MORE gates, never fewer.
 	// A run with no reviewer wired passes the policy depth straight through.
 	depth = a.reviewBump(ctx, cand, pkg, currentVersion, newVersion, depth, &gates)
@@ -1190,7 +1177,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// back beside it. Assigning depth.Reason alone here is what used to drop it.
 	result.DepthReason = appendDepthReason(depth.Reason, retainedVerdict)
 
-	// The build gates, at the depth selected above (R3, R5, R6). They are the
+	// The build gates, at the depth selected above. They are the
 	// generalisation of the compile gate below, so the two never both run: with
 	// --compile the shipped gate keeps its prompt, its privilege and its repair
 	// path, and running the depth gates beside it would build the same tree twice.
@@ -1218,13 +1205,13 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		gates = append(gates, a.compileGateResult(cand, pkg, newVersion, result)...)
 	}
 
-	// R3.12 in one line: the outcome states its own reach, and says why it stops
+	// The outcome states its own reach, and says why it stops
 	// where it does, whether or not this apply is about to succeed.
 	a.recordDepthReached(result, gates, depth.Depth)
 
-	// R3.13: a host that asked for proof does not get a publish built on skips.
+	// A host that asked for proof does not get a publish built on skips.
 	// It is deliberately NOT folded into PromotionDecision: that function's rule
-	// is R3.3's ("PASS or SKIPPED promotes"), and this is the operator subtracting
+	// is "PASS or SKIPPED promotes", and this is the operator subtracting
 	// from it, which is a different authority and belongs where it can be seen.
 	// The same invariant, said early so the operator reads the interruption
 	// instead of refuseUnproved's "proof at depth X is required" — true, but it
@@ -1237,26 +1224,25 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		return a.failApply(pkg, result, err)
 	}
 
-	// R3.3: the candidate may be published only once every gate up to the selected
+	// The candidate may be published only once every gate up to the selected
 	// depth has reported PASS or SKIPPED. The rule lives in one pure function so it
 	// is asserted directly rather than only through a real promotion, and so that a
 	// gate added above cannot reach the overlay without passing through it.
 	//
 	// The staging error is nil by construction: a tree that could not be prepared
-	// already withdrew the bump in prepareInStagingTree (R3.10), so a promotion
-	// decision is only ever reached WHERE a staged tree exists — which is R3.3's
-	// second half.
+	// already withdrew the bump in prepareInStagingTree, so a promotion
+	// decision is only ever reached WHERE a staged tree exists.
 	//
 	// The refusal is enriched with the failing gates' own error findings before it
 	// leaves here (refusalWithFindings): PromotionDecision names the gate, and an
 	// apply's only channel to the operator is this one error — "the options gate
 	// reported FAILED" without the option it found would send them off to diff two
-	// tarballs by hand, which is the work this story replaces.
+	// tarballs by hand, which is the work these gates replace.
 	if ok, reason := validate.PromotionDecision(gates, nil); !ok {
 		return a.failApply(pkg, result, refusalWithFindings(reason, gates))
 	}
 
-	// The published overlay's first and only write of this apply (R3.4). On the
+	// The published overlay's first and only write of this apply. On the
 	// pre-staging path there is nothing to promote: copyEbuild already put the
 	// candidate there and `pkgdev manifest` already regenerated the Manifest in
 	// place.
@@ -1273,7 +1259,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 
 	result.Success = true
 
-	// R3.6, the other direction: the retained tree is a FAILURE's evidence, so the
+	// Retention, the other direction: the retained tree is a FAILURE's evidence, so the
 	// path is dropped the moment there is no failure to explain. Cleared here and
 	// not earlier because this line is where success is finally decided — every way
 	// of not being promoted has already returned through failApply, carrying the
@@ -1283,7 +1269,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	//
 	// The tree itself is left on disk. Removing it would be a filesystem operation
 	// whose failure this path has no honest way to report, and it would buy nothing:
-	// the next attempt at this same package and version restages over it (R3.7), so
+	// the next attempt at this same package and version restages over it, so
 	// what is left is one directory per version, not a growing pile per run.
 	result.StagedPath = ""
 
@@ -1295,19 +1281,19 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 // overlay holds it: the pending entry is dropped, the registry pin is written and
 // `--clean` sweeps.
 //
-// It is a function rather than the tail of Apply because story 033 gave promotion
-// TWO routes to this point — the gates ran here, or a retained tree that had
-// already been proved was promoted as it stood (R10.1) — and a bump that reached
+// It is a function rather than the tail of Apply because promotion has TWO
+// routes to this point — the gates ran here, or a retained tree that had
+// already been proved was promoted as it stood — and a bump that reached
 // the overlay by the second route needs exactly the same three steps. Two copies
 // would diverge in the direction that hurts: a promotion with no pin leaves
 // `--clean` aiming at the only ebuild present.
 //
 // NOTHING HERE MAY FAIL THE APPLY. Every miss is a warning on the result with
 // Success left true and Error left nil — setting Error would fire the deferred
-// rollback and delete the ebuild this apply just published (S021-UB5).
+// rollback and delete the ebuild this apply just published.
 func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, result *ApplyResult) {
-	// S002-R3.1: remove the now-applied package from pending.json so `--list` no
-	// longer surfaces it. S002-R3.4: a Delete failure is a bookkeeping miss, not
+	// Remove the now-applied package from pending.json so `--list` no
+	// longer surfaces it. A Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (through the applier's logger, which tests
 	// inject to capture it) but keep result.Success == true and result.Error == nil
 	// so the deferred orphan-rollback (keyed on result.Error == nil) does not
@@ -1317,25 +1303,23 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 			"(apply itself succeeded; entry can be cleared manually)", "package", pkg, "err", err)
 	}
 
-	// S021-R2.1: record the version that just landed on disk as the one this
-	// registry entry keeps. Reached only here, past the manifest step, past the
-	// compile test and — since story 033 — past a COMPLETED promotion, because the
-	// registry must never claim a file that is not there: `--clean` removes every
-	// ebuild no entry claims, so a pin written ahead of the file would aim that
-	// rule at the only ebuild present and a failed update would become a deleted
-	// package (S021-R2.2). "Validated but not promoted" is the case story 033 adds
-	// to that list, and it reaches this line by exactly one route — it does not:
-	// every way of not being promoted returns above through failApply.
+	// Record the version that just landed on disk as the one this registry
+	// entry keeps. Reached only here, past the manifest step, the compile test
+	// and a COMPLETED promotion, because the registry must never claim a file
+	// that is not there: `--clean` removes every ebuild no entry claims, so a pin
+	// written ahead of the file would aim that rule at the only ebuild present
+	// and a failed update would become a deleted package. A "validated but not
+	// promoted" bump never reaches this line: it returns above through failApply.
 	// The value written is newVersion — what was applied — never the pending
-	// entry's upstream target, which stays pending.json's business alone
-	// (S021-UB4). An overlay with no packages.toml gets a warning here and no
-	// pin, which is the honest report: nothing recorded the version.
+	// entry's upstream target, which stays pending.json's business alone. An
+	// overlay with no packages.toml gets a warning here and no pin, which is the
+	// honest report: nothing recorded the version.
 	//
-	// S021-R2.4: a failed write is a bookkeeping miss, exactly like the pending
-	// delete above — warn through the applier's logger (which tests inject to
-	// capture it), surface it on the result, and leave result.Success true with
+	// A failed write is a bookkeeping miss, exactly like the pending delete
+	// above — warn through the applier's logger (which tests inject to capture
+	// it), surface it on the result, and leave result.Success true with
 	// result.Error nil. Setting result.Error here would fire the deferred
-	// orphan-rollback and delete the ebuild this apply just created (S021-UB5).
+	// orphan-rollback and delete the ebuild this apply just created.
 	if err := a.setVersionsFn(a.overlayPath, map[string]string{pkg: newVersion}); err != nil {
 		a.logger().Warn("registry: failed to record version in packages.toml "+
 			"(the update itself succeeded; the next check's reconciliation can write the pin)",
@@ -1343,11 +1327,11 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 		result.RegistryWarning = fmt.Sprintf("could not record version = %q for %s: %v", newVersion, pkg, err)
 	}
 
-	// --clean (R4.1): sweep the package directory against the registry's pins so
+	// --clean: sweep the package directory against the registry's pins so
 	// only the ebuilds an entry claims are left. This runs only on the full
 	// success path and is best-effort — a blocked plan, a failed removal or a
 	// failed Manifest regeneration is surfaced as a warning on the result and
-	// never flips Success, because the update itself is done (R4.4).
+	// never flips Success, because the update itself is done.
 	if a.clean {
 		plan, err := a.cleanPackageDir(ctx, pkg, newVersion)
 		result.CleanKept = plan.Keep
@@ -1376,7 +1360,7 @@ func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, res
 // keeping the ones already there.
 //
 // The depth reason is the only free-text field an operator reads to understand
-// why a bump was treated the way it was, and R10.3's answer ("the gates ran here"
+// why a bump was treated the way it was, and the validation source ("the gates ran here"
 // or "an earlier run had already proved this") has to sit BESIDE the depth
 // decision rather than replace it — the two answer different questions and both
 // are needed to make sense of a four-second apply.
@@ -1407,13 +1391,12 @@ func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyR
 	return result, result.Error
 }
 
-// prepareInOverlay materialises the candidate the way every release before story
-// 033 did: the new version's ebuild is copied into the PUBLISHED package directory
-// and the per-package substitutions are applied to it there.
+// prepareInOverlay materialises the candidate the way every release before
+// staging did: the new version's ebuild is copied into the PUBLISHED package
+// directory and the per-package substitutions are applied to it there.
 //
 // It is kept for exactly one reason — a caller that supplied no staging root gets
-// the behaviour it has always had, byte for byte, until sub-task 12.1 wires the
-// staging root into the three construction sites in cmd/.
+// the behaviour it has always had, byte for byte.
 //
 // The rollback is RETURNED rather than registered, so Apply arms it only once this
 // function has succeeded. That leaves a window this function must close itself: a
@@ -1455,14 +1438,14 @@ func (a *Applier) prepareInOverlay(pkg, currentVersion, newVersion string, updat
 }
 
 // prepareInStagingTree materialises the candidate in a tree of its own, outside
-// the published overlay, and returns where the gates will find it (R3, R3.1).
+// the published overlay, and returns where the gates will find it.
 //
 // Nothing here writes into the overlay: the source ebuild is READ out of it and
 // the candidate is written into the staged tree. That is the whole difference from
-// prepareInOverlay, and it is what lets R3.2 be stated as "the overlay is
+// prepareInOverlay, and it is what lets the rule be stated as "the overlay is
 // byte-identical while any gate runs" rather than as "it is put back afterwards".
 //
-// A staged tree that could not be built WITHDRAWS the bump (R3.10) instead of
+// A staged tree that could not be built WITHDRAWS the bump instead of
 // letting it through as "no gate failed": every build gate would report SKIPPED,
 // nothing would have FAILED, and a candidate no gate ever read would be published.
 // validate.PromotionDecision documents that vacuity at length; this function is
@@ -1504,7 +1487,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 		// ways it can.
 		return candidatePaths{}, fmt.Errorf("staging %s-%s for validation: %w", pkg, newVersion, err)
 	}
-	// R3.6: named on the result the moment it exists, so it is named even when
+	// Named on the result the moment it exists, so it is named even when
 	// everything after this fails. A retained tree nobody can find is not an
 	// inspectable failure.
 	result.StagedPath = stagedRoot
@@ -1568,8 +1551,8 @@ func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpda
 // obsolete prune the reason, and otherwise the failure's error text followed by
 // the staged tree that failure left behind. A nil result yields the empty string.
 //
-// Naming the tree here is the second half of R3.6, and it is the half that makes
-// the first half worth having: a tree retained on disk that no report points at is
+// Naming the tree here is the second half of retention, and it is the half that
+// makes the first half worth having: a tree retained on disk that no report points at is
 // not an inspectable failure, it is a directory the operator will only find by
 // going looking for it — which is exactly the "re-run the bump from scratch to see
 // what happened" cost retention exists to remove. A success names nothing, because
@@ -1585,7 +1568,7 @@ func applySummary(result *ApplyResult) string {
 		if result.Fixed {
 			summary += " (fixed)"
 		}
-		// R10.3 at the surface the operator actually reads. Without it a fast
+		// The validation source at the surface the operator reads. Without it a fast
 		// green and a proved green are the same line: an apply that took four
 		// seconds because an earlier run paid for the gates looks exactly like one
 		// that took four seconds because nothing was checked.
@@ -1657,36 +1640,20 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 // it deletes every non-live ebuild no entry claims, regenerates the Manifest
 // once, and returns the plan it actually executed so the caller can report it.
 //
-// The predecessor removed a single file by name. That was safe only because it
-// never looked at the rest of the directory — and equally blind to everything
-// the bump left behind (an older release still on disk, a version bumped and
-// superseded between two cleans). Deciding by claim instead of by name is what
-// makes removing more than one file survivable.
+// Deciding by claim instead of by file name is what makes removing more than
+// one file survivable, and it also catches what a bump left behind. The plan
+// is computed against a COPY of a.configs with pkg's entry pinned to newVersion:
+// the pin on disk is written by a separate step of the same run, and the
+// PRE-apply registry may be pinless, which would block every clean. The
+// overlaid pin is the fact packages.toml is about to record. It covers one entry
+// only, so a pinless SIBLING (the other release line) still blocks the directory.
 //
-// The plan is computed against a COPY of a.configs in which pkg's entry is
-// pinned to newVersion. The pin on disk is written by a separate step of the
-// same run, so planning against a.configs verbatim would use the PRE-apply
-// registry — where every record is pinless today, meaning every clean would
-// block and the feature would ship dead. The overlaid pin is not a prediction:
-// the version just applied IS the one this entry now keeps, and writing it to
-// packages.toml records that same fact in the other file. The overlay covers
-// exactly one entry, so a pinless SIBLING — the other release line of a
-// two-entry directory — still has no pin here and still blocks the whole
-// directory (UB3).
-//
-// Nothing is removed at all in three cases. Each is returned as an error, which
-// the caller surfaces as a warning without failing the apply (R4.4):
-//
-//   - a claiming entry declares no pin (R5.1); the error names it (R6.2);
-//   - pkg has no entry in the registry at all, so nothing here authorises a
-//     deletion. This is reachable in production — loadPackagesConfigForApply
-//     returns nil when packages.toml cannot be read — and refusing to sweep is
-//     exactly right then. The guard is explicit rather than left to planSweep's
-//     no-claims block because a SIBLING entry can still claim the atom WITH a
-//     pin, and that plan would cheerfully delete the ebuild this very apply
-//     just created;
-//   - the package directory cannot be read, which planSweep reports as an
-//     error rather than as an empty plan.
+// Nothing is removed in three cases, each returned as an error the caller
+// surfaces as a warning without failing the apply: a claiming entry declares no
+// pin (the error names it); pkg has no registry entry (reachable when
+// packages.toml cannot be read — checked explicitly because a SIBLING entry with
+// a pin could otherwise delete the ebuild this apply just created); or the
+// package directory cannot be read.
 func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (sweepPlan, error) {
 	cfgs, claimed := a.sweepConfigs(pkg, newVersion)
 
@@ -1695,7 +1662,7 @@ func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (
 		return sweepPlan{}, fmt.Errorf("cannot plan the sweep of %s: %w", pkg, err)
 	}
 
-	// R5.1/R6.2 first: this is the blocked case that HAS an entry to name, and
+	// The unpinned entry first: this is the blocked case that HAS an entry to name, and
 	// naming it is what lets a maintainer unblock the directory.
 	if plan.Blocked != "" {
 		return plan, fmt.Errorf("nothing removed from %s: registry entry %q has no version pin, "+
@@ -1712,17 +1679,17 @@ func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (
 	}
 
 	// Execute the plan. The removal loop and the Manifest regeneration live on
-	// sweeper (S027-D3) so the standalone overlay sweep runs the same code rather
+	// sweeper so the standalone overlay sweep runs the same code rather
 	// than a second implementation of "delete these ebuilds". newVersion is the
 	// version this apply just created, and it is the one that remains in the
-	// directory — which is what the Manifest step needs (S027-G2).
+	// directory — which is what the Manifest step needs.
 	return a.sweeper().execute(ctx, pkg, plan, newVersion)
 }
 
 // sweeper builds the executor for this applier's overlay, carrying the fields
 // the removal loop and the Manifest step need. Deliberately no fixer: the LLM
 // manifest repair stays behind runManifestWithFix on Applier, so no sweep can
-// reach it (S027-R4.5).
+// reach it.
 func (a *Applier) sweeper() *sweeper {
 	return newSweeper(a.overlayPath,
 		withSweeperExec(a.execCommand),
@@ -1730,7 +1697,7 @@ func (a *Applier) sweeper() *sweeper {
 		withSweeperConfigs(a.configs),
 		// Both distfile directories reach the Manifest step through here, which
 		// is the only path Applier has to it: runManifest delegates to this
-		// sweeper (S030-R1.3).
+		// sweeper.
 		withSweeperDistdir(a.distdir, a.configuredDistdir),
 		withSweeperDistfilesCache(a.distfilesCache),
 		withSweeperLogger(a.logger()),
@@ -1764,7 +1731,7 @@ func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]registry.Pack
 }
 
 // wouldRemoveSuffix renders the candidates a blocked plan left alone, for the
-// tail of its warning (R5.1's report). It is empty when there were none, so the
+// tail of its warning. It is empty when there were none, so the
 // message never trails a dangling "would have removed:".
 func wouldRemoveSuffix(versions []string) string {
 	if len(versions) == 0 {
@@ -1897,53 +1864,24 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 }
 
 // substituteCommitHash replaces the commit-hash variable assignment in an
-// ebuild with newHash. It handles the four variable names used in the overlay:
+// ebuild with newHash: EGIT_COMMIT="<sha>", GIT_COMMIT="<sha>",
+// BUILD_ID="<sha>" (SHA part of SRC_URI), COMMIT="<sha>" and unquoted
+// COMMIT=<sha>. COMMIT is spelled BOTH ways on purpose: a gap between the two
+// patterns once failed a copied bump on a COMMIT= line that was right there,
+// leaving an orphan in the published overlay.
 //
-//	EGIT_COMMIT="<sha>"   (vulkan-*, spirv-*)
-//	GIT_COMMIT="<sha>"    (glslang, modemmanager)
-//	BUILD_ID="<sha>"      (cursor — version-tracked; SHA is part of the SRC_URI)
-//	COMMIT="<sha>"        (asus-ec-sensors)
-//	COMMIT=<sha>          (sqlitebrowser — no quotes)
+// The match is deliberately narrow — a 40-hex-char SHA, one of the four names,
+// start of line — so it cannot corrupt other content. The left-hand anchor
+// decides which variables get their VALUE replaced: without it every
+// `<ANYTHING>_COMMIT` would, including the revisions of vendored components
+// (app-editors/zed's seven `local *_COMMIT`, media-libs/mesa's
+// VENUS_PROTOCOL_COMMIT). Overwriting those fails silently until build time on
+// a user's machine; zed shipped broken four times that way.
 //
-// COMMIT is spelled BOTH ways on purpose. It used to appear only in the unquoted
-// pattern, written from the one package that omits the quotes, and the quoted
-// pattern listed the other three names — so COMMIT="<sha>" fell through the gap
-// between them and was reported as "no commit hash variable found" against an
-// ebuild whose COMMIT= line is right there. That failure lands AFTER the ebuild
-// has been copied, which is how it left an orphan in the published overlay.
-//
-// The substitution is deliberately narrow (40-hex-char SHA + one of the four
-// names + start of line) so it cannot corrupt other content.
-//
-// The left-hand anchor is load-bearing, and the reasoning that once said it was
-// not is the bug it fixes. That reasoning was: a match starting at the COMMIT
-// inside EGIT_COMMIT is harmless, because group 1 captures the whole assignment
-// and is written back verbatim, so the EGIT_ prefix survives. True — and beside
-// the point. Preserving the PREFIX is not the question; the question is which
-// variables get their VALUE replaced. Without an anchor, every `<ANYTHING>_COMMIT`
-// in the file is one of them.
-//
-// An ebuild that vendors a second component pins that component's revision in
-// exactly that shape, and those revisions have nothing to do with the package's
-// own commit:
-//
-//	app-editors/zed   seven `local *_COMMIT` in src_prepare (async-process,
-//	                  async-task, calloop, livekit, windows-capture, notify,
-//	                  tree-sitter) — the rev= of its git dependencies
-//	media-libs/mesa   VENUS_PROTOCOL_COMMIT — the venus-protocol subproject
-//
-// Overwriting those does not fail loudly: the ebuild still parses, the manifest
-// still generates, and the damage only surfaces at build time on a user's
-// machine. zed shipped broken four times this way (bentoo 05d42b09b, 47b3011e7,
-// 14f85bd9c, 1dca170e7) before the anchor was added.
-//
-// `^[ \t]*` — and not `\b` — because the target is a top-level assignment. A
-// word boundary would still match the `_COMMIT` suffix, and allowing arbitrary
-// leading whitespace is what keeps mesa's tab-indented GIT_COMMIT matching while
-// excluding `local ASYNC_PROCESS_COMMIT=`, where a keyword sits between the
-// margin and the name. This mirrors the checker, which has always read the same
-// assignment with `(?m)^\s*` (checker.go, ebuildCommitRegex, whose own comment
-// already claimed the two shared this anchoring).
+// `^[ \t]*`, not `\b`: a word boundary still matches the `_COMMIT` suffix, while
+// leading whitespace keeps mesa's tab-indented GIT_COMMIT and excludes
+// `local ASYNC_PROCESS_COMMIT=`. It mirrors checker.go's ebuildCommitRegex,
+// which reads the same assignment with `(?m)^\s*`.
 func substituteCommitHash(ebuildPath, newHash string) error {
 	content, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate path candidateIn built from a package key splitPkgAtom confines and a version ebuild.IsValidVersion gated
 	if err != nil {
@@ -2075,37 +2013,28 @@ func literalReplacement(value string) string {
 // configured, performs a single agentic repair-and-retry:
 //
 //  1. Run `pkgdev manifest`; on success, return nil (no fix needed).
-//  2. Classify the failure. When it belongs to the machine and not to the
-//     ebuild, report that and return — no fixer is constructed or invoked
-//     (S030-R3.3/R3.4; see refuseFixOnEnvironmentFailure).
+//  2. When the failure belongs to the machine, not the ebuild, report that and
+//     return without invoking a fixer (see refuseFixOnEnvironmentFailure).
 //  3. If no fixer is wired, return the original error (legacy fail-fast).
-//  4. Otherwise invoke the fixer to edit the ebuild in place, then re-run
-//     `pkgdev manifest` ONCE. That second run — bentoo's own, not the agent's
-//     self-report — is the authoritative success check:
-//     - success  → record result.Fixed/FixSummary and return nil.
-//     - failure  → return a combined error (original + post-fix) so the caller
-//     marks the apply failed; the deferred orphan-rollback in Apply removes the
-//     half-applied ebuild.
+//  4. Otherwise let the fixer edit the ebuild, then re-run `pkgdev manifest`
+//     ONCE; that run — bentoo's own, not the agent's self-report — decides:
+//     success records result.Fixed/FixSummary, failure returns a combined error
+//     and Apply's deferred orphan-rollback removes the half-applied ebuild.
 //
-// Exactly one fix attempt is made per apply: the agent iterates internally (bounded
-// by its --max-turns), so there is no external retry loop here.
-//
-// Every path here is scoped to cand, never to a.overlayPath: on the staged path the
-// manifest runs in the staged tree and the fixer edits the staged ebuild, so a fix
-// attempt is itself covered by R3.2 — an agent rewriting SRC_URI must not be doing
-// it inside a repository that commits and pushes itself.
-// The returned path is the private distdir whose contents the caller's gates must
-// read, and which the caller then removes (S035-D1). When the fixer runs, the
-// directory the AGENT downloaded into becomes that path (S043-R2.1): it is handed
-// to the authoritative re-check below and returned from here, so the first
-// distdir is superseded and is removed at the moment it stops being the answer.
+// One fix attempt per apply: the agent iterates internally (bounded by its
+// --max-turns). Every path is scoped to cand, never a.overlayPath, so on the
+// staged path an agent rewriting SRC_URI does it outside the overlay that
+// commits and pushes itself.
+// The returned path is the private distdir the caller's gates read and the
+// caller then removes. When the fixer runs, the directory the AGENT downloaded
+// into becomes that path, and the first distdir is removed when superseded.
 func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	distdir, firstErr := a.runManifestFor(ctx, cand, pkg, version)
 	if firstErr == nil {
 		return distdir, nil
 	}
 
-	// The gate (S030-D6). It sits between the failed manifest and everything
+	// The environment gate. It sits between the failed manifest and everything
 	// that would set a fix attempt up, because the cheapest fixer invocation is
 	// the one that never happens.
 	if envErr := a.refuseFixOnEnvironmentFailure(pkg, version, firstErr); envErr != nil {
@@ -2128,9 +2057,9 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// WHO removes it does: see the transfer below.
 	//
 	// The ROOT it is made under does. An empty root means os.TempDir(), which on
-	// the host S030 was measured on is a 31 GB tmpfs, so the agent's own
-	// verification downloads landed in RAM — the very defect R1.1 removes from
-	// the manifest step, on a second path no task in 1-6 reached. fixSandboxRoot
+	// the measured host is a 31 GB tmpfs, so the agent's own verification
+	// downloads landed in RAM — the same defect the manifest step avoids, on a
+	// second path. fixSandboxRoot
 	// asks the host for PORTAGE_TMPDIR and answers "" when it cannot, which is
 	// what os.MkdirTemp already means by "use the default": a host without
 	// portageq keeps exactly today's behaviour.
@@ -2140,10 +2069,10 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
-	// THE TRANSFER (S043-R2.1, D2). From this line the agent's directory is what
+	// THE TRANSFER. From this line the agent's directory is what
 	// this function returns, on every path below including the failing ones, and
 	// the caller's `defer removeStagedDistdir` is what takes it back — the same
-	// single removal that already covers the ordinary path (S035-D1, R2.2). It
+	// single removal that already covers the ordinary path. It
 	// used to be a `defer os.RemoveAll(fixDistdir)` here, which deleted the only
 	// copy of the candidate's archive on this host before any gate had looked at
 	// it: measured 2026-08-22 on media-libs/mesa, where 134 MB the repair had
@@ -2179,21 +2108,16 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// self-report.
 	//
 	// It runs IN the directory the agent downloaded into, so what it verifies and
-	// what the gates below then read are the same bytes (S043-R2.1). It used to
-	// fetch into a second, empty private distdir, and the claim that it fetched
-	// was false exactly when the fix had SUCCEEDED: the agent leaves a COMPLETE
-	// Manifest behind, pkgdev finds nothing to do, downloads nothing and exits 0.
-	// So the second directory stayed empty, the gates fell back to the shared
-	// DISTDIR, and on a host that had never fetched the release they read an empty
-	// room — which is the defect this replaces.
+	// what the gates below read are the same bytes. A second, empty distdir would
+	// verify nothing when the fix SUCCEEDED: the agent leaves a COMPLETE Manifest,
+	// pkgdev downloads nothing, and the gates fall back to a shared DISTDIR that
+	// may never have held the release.
 	//
-	// KNOWN LIMIT, stated rather than solved (D2). `--force` (added by
+	// KNOWN LIMIT, stated rather than solved. `--force` (added by
 	// runStagedManifestIn for a supplied directory) re-digests the bytes THE AGENT
-	// BROUGHT. That makes the surviving Manifest bentoo's own rather than the
-	// agent's self-report, which is what "authoritative" means here — but it is
-	// not independent verification of the content against upstream. Re-downloading
-	// everything into an empty distdir would be, and it was rejected on cost:
-	// ~133 MB per media-libs/mesa bump, and mesa bumps daily.
+	// BROUGHT: the surviving Manifest is bentoo's own, but the content is not
+	// independently checked against upstream. Re-downloading would be, and was
+	// rejected on cost: ~133 MB per media-libs/mesa bump, and mesa bumps daily.
 	//
 	// The path returned is whatever the re-check ran against, on its failure paths
 	// too — the caller must be able to take the directory back however this ends.
@@ -2206,8 +2130,8 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 
 	result.Fixed = true
 	result.FixSummary = fixRes.Summary
-	// Name the model that made the edit, and SAY SO when it was an alias
-	// (S030-R4.1/R4.2). FormatModelUsed renders "model alias \"opus\"" rather
+	// Name the model that made the edit, and SAY SO when it was an alias.
+	// FormatModelUsed renders "model alias \"opus\"" rather
 	// than a bare "opus", because the same alias resolves to a different model
 	// over time: an audit of a bad edit months from now must not read the bare
 	// word as a pinned identity. One string feeds both sinks so the operator's
@@ -2231,51 +2155,24 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 }
 
 // refuseFixOnEnvironmentFailure decides whether a failed manifest step is one
-// the LLM fixer must never see, and it is the whole of S030-D6.
+// the LLM fixer must never see.
 //
-// It returns a non-nil error ONLY for an environment verdict: the apply fails
-// with it, and the caller returns before anything constructs a fix attempt
-// (S030-R3.3). The error names the package, states that the cause was the
-// environment and NOT the ebuild, gives the reason the classifier observed, and
-// carries what `pkgdev manifest` printed — everything R3.4 asks be reported. For
-// every other verdict it returns nil, which means "carry on", and today's path
-// runs unchanged down to the authoritative re-run of pkgdev that decides success.
+// It returns a non-nil error ONLY for an environment verdict, so the apply
+// fails before a fix attempt exists; the error says the environment, NOT the
+// ebuild, caused it, with the classifier's reason and pkgdev's output. Any
+// other verdict returns nil and the path runs on to the authoritative re-run.
 //
-// # Why refuse at all
+// A fixer handed a machine failure can only rewrite SRC_URI, so it spends
+// minutes and quota concluding a correct ebuild is wrong, in a repository that
+// commits and pushes itself; measured cases later applied with nothing changed.
+// It is the same rule promptRegistryFixes applies (only ErrFetchFailed is
+// offered a repair), keyed on a classification instead of one sentinel.
 //
-// An LLM fixer handed a machine failure has exactly one repair available to it —
-// rewrite SRC_URI — so it spends ten minutes and up to thirty turns concluding
-// that a correct ebuild is wrong, and this repository commits and pushes on its
-// own. The measured case is sharper still: both packages applied on a later run
-// with nothing changed (S030-M3a). The fixer was billed against quota for a
-// condition that had already stopped existing.
-//
-// The precedent is overlay_autoupdate_fixregistry.go's `func promptRegistryFixes`,
-// which already refuses to offer a repair unless the failure wraps ErrFetchFailed.
-// This is the same rule moved to the manifest path, keyed on a classification
-// rather than on a single sentinel.
-//
-// # Why it runs before the `a.fixer == nil` early return
-//
-// The verdict is a fact about the failure, not about the configuration: an
-// operator whose distdir filled up needs to read that it was the distdir whether
-// or not an LLM happens to be wired, or the same failure gets a different
-// diagnosis on two machines and the one without a fixer hand-edits an ebuild
-// that was never broken. Nothing is spent to get it — the classifier only
-// observes state that is already there — and on a healthy machine the verdict is
-// "repairable" and the error is returned byte-for-byte as before.
-//
-// # When there is nothing to classify
-//
-// Some failures raised before pkgdev ran are genuinely unanswerable — an invalid
-// package atom says nothing about any machine — and those still fall through.
-// R3.5 makes an unanswerable check mean "repairable": a wrong classification
-// must cost a wasted fixer invocation, never a lost repair.
-//
-// A distdir that could not be prepared is NOT one of them, and treating it as
-// one was this gate's original defect (found by `stories validate 030`). Probe
-// answers that question definitively, before pkgdev is ever spawned, and R3.1
-// requires the answer to reach here. See environmentVerdict.
+// It runs before the `a.fixer == nil` return because the verdict is a fact
+// about the failure, not the configuration: without it a machine with no fixer
+// would hand-edit an ebuild that was never broken. Failures nothing can
+// classify (an invalid atom) fall through as "repairable": a wrong
+// classification must cost a wasted fixer invocation, never a lost repair.
 func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr error) error {
 	verdict := environmentVerdict(firstErr)
 	if verdict == nil {
@@ -2295,90 +2192,34 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 
 // environmentVerdict returns an ErrManifestEnvironment-wrapped verdict when the
 // failure is the machine's rather than the ebuild's, and nil when the ebuild
-// still might be at fault.
+// still might be at fault. Three classes are recognised, none of them uncertain:
 //
-// There are two ways to reach a verdict, and they are not interchangeable.
+//   - Before pkgdev ran: a distdir that could not be prepared, or a distfile
+//     another writer still held after the wait — nothing had read the ebuild.
+//   - A command that could not start: fs.ErrNotExist in a chain with no
+//     *exec.ExitError (an ExitError means the command RAN, which is evidence
+//     about the ebuild). Keyed on that property, not on which site raised it.
+//   - After pkgdev ran: ClassifyManifestFailure over the state recovered from
+//     *manifestRunError, never re-derived — the distdir precedence could now
+//     answer differently.
 //
-// # Before pkgdev ran
-//
-// The manifest step refuses to start on a distdir it could not prepare
-// (S030-R1.4) and on a distfile another writer still holds when the wait runs
-// out (S030-R2.4). Both are answered, by observation, before the ebuild is read
-// by anything — so neither is a statement about the ebuild, and R3.5's
-// "uncertain means repairable" has nothing to say about them: nothing was
-// uncertain.
-//
-// # A command that could not start
-//
-// The third recognised class (S040-R5.5) is a spawned command whose working
-// directory does not exist: chdir fails before the child's first instruction,
-// so pkgdev never read the ebuild and nothing about the failure is a statement
-// about it. It is keyed on a PROPERTY of the failure — the chain satisfies
-// errors.Is(_, fs.ErrNotExist) and carries no *exec.ExitError — not on which
-// site raised it. The ExitError guard is what keeps the key honest: an
-// ExitError exists only once the command RAN, and a command that ran is
-// evidence about the ebuild no matter what ENOENT text its output happened to
-// wrap, so it must still reach the fixer. Measured (2026-08-19, S040-D4): a
-// suffixed registry key staged content under the suffixed name, the manifest
-// step chdir-failed into the clean directory this gate did not recognise, and
-// the fixer was invoked with the same nonexistent directory as its own cwd.
-//
-// # What this does NOT cover, and why it is not fixed here
-//
-// Three more pre-pkgdev refusals are equally the machine's and still fall
-// through to the fixer: a Quarantine that could not stat or rename
-// (sweep.go, via internal/common/distfiles/quarantine.go), and the three
-// non-timeout error returns in acquireLock — the lock file could not be
-// created, taken, or inspected (internal/common/distfiles/lock.go). None of
-// them carries a sentinel, so none of them is recognisable here.
-//
-// Adding one more errors.Is against an enumerated CAUSE is deliberately NOT
-// the fix. This gate was already keyed on one condition and missed the
-// pre-flight; keying it on an enumeration means every future step that can
-// refuse is a clause somebody must remember to add, and the rung that gets
-// forgotten is the one that invokes an agent against a machine fault. The
-// shape that closes all of them at once is to mark the PHASE rather than the
-// cause — every refusal raised while preparing the shared directory is, by
-// construction, not a verdict about an ebuild pkgdev never read. That is a
-// change to this gate's contract and belongs in its own story, not bolted on
-// here.
-//
-// The missing-workdir check is not that enumerated clause. Could-not-start
-// plus ENOENT is a fact the failure itself carries, observable on any chain
-// from any raiser without anyone remembering to enrol a new one — the same
-// kind of key the paragraph above asks for. It marks a different phase (the
-// spawn itself) than the one still missing (preparing the shared directory).
-//
-// Missing this was the original gap. The pre-flight failure carries no
-// *manifestRunError — that type is built only where pkgdev itself fails — so a
-// gate keyed on the type alone let every one of these through. On a host whose
-// invoking user is outside group `portage` (S030-M2) that meant the whole batch
-// went to the fixer, and the fixer's own sandbox distdir (see runManifestWithFix)
-// is a writable temp dir, so the agent could not even reproduce the failure: its
-// one remaining conclusion is that SRC_URI is wrong, on an ebuild that is not.
-//
-// The two sentinels are kept apart because they are different news for the
-// operator, exactly as distfiles.ErrDistfileLocked's own documentation asks:
-// a held distfile is transient and the next run gets it, while an unwritable
-// distdir will still be unwritable next time. The decision about the fixer is
-// the same for both — it is not invoked — and it is the wrapped message that
-// differs.
-//
-// # After pkgdev ran
-//
-// The state pkgdev actually ran in, recovered rather than re-derived: by now the
-// distdir precedence could answer differently, and classifying against a
-// directory the failure never saw would be worse than not classifying.
+// Not covered: a Quarantine that could not stat or rename, and acquireLock's
+// non-timeout errors (internal/common/distfiles); they carry no sentinel and
+// still reach the fixer. The fix is to mark the PHASE (preparing the shared
+// directory) rather than enumerate causes — a contract change of its own, since
+// every enumerated clause is one somebody must remember to add.
 func environmentVerdict(firstErr error) error {
 	if errors.Is(firstErr, distfiles.ErrDistdirNotWritable) ||
 		errors.Is(firstErr, distfiles.ErrDistfileLocked) {
 		// Wrapped, not replaced: %w keeps both the sentinel above and everything
 		// under it reachable, so the operator still reads which directory or
-		// which distfile, and which process held it.
+		// which distfile, and which process held it. The two sentinels stay
+		// apart because they are different news: a held distfile is transient,
+		// an unwritable distdir will still be unwritable next run.
 		return fmt.Errorf("%w: %w", ErrManifestEnvironment, firstErr)
 	}
 
-	// The spawned command's working directory does not exist (S040-R5.5): a
+	// The spawned command's working directory does not exist: a
 	// failure to start, never a failure of what ran. The guard is structural —
 	// any *exec.ExitError in the chain means the command DID run, and then this
 	// class must not fire whatever ENOENT its wrapped output mentions. It sits
@@ -2445,7 +2286,7 @@ func (a *Applier) runQACheck(ctx context.Context, pkgDir, pkg string) string {
 }
 
 // runManifest regenerates the Manifest file with pkgdev, delegating to the
-// sweeper that owns the step (S027-D3). It stays on Applier because
+// sweeper that owns the step. It stays on Applier because
 // runManifestWithFix and the apply path both call it, and because keeping the
 // name here left every existing caller and test untouched.
 func (a *Applier) runManifest(ctx context.Context, pkg, version string) error {
@@ -2463,7 +2304,7 @@ func (a *Applier) runManifest(ctx context.Context, pkg, version string) error {
 // The returned path is the private distdir the STAGED step fetched into, and is
 // "" on the published path — which has no private directory, having written into
 // the shared one all along. A caller that receives a non-empty path owns it and
-// must remove it (S035-D1); removeStagedDistdir is that removal.
+// must remove it; removeStagedDistdir is that removal.
 func (a *Applier) runManifestFor(ctx context.Context, cand candidatePaths, pkg, version string) (string, error) {
 	// An empty supplied distdir means "whatever this path would have created for
 	// itself", which is the entire difference between the two entry points.
@@ -2474,19 +2315,16 @@ func (a *Applier) runManifestFor(ctx context.Context, cand candidatePaths, pkg, 
 //
 // The one caller that supplies one is the authoritative re-check after an LLM
 // fix, which hands over the directory the agent downloaded into so that the
-// Manifest that survives is computed from the bytes the gates will read
-// (S043-R2.1, D2). runStagedManifestIn carries what changes with a supplied
-// directory: the seeding step is skipped and `--force` joins the pkgdev argv,
-// because pkgdev does not re-manifest a package whose Manifest is already
-// complete (S043-R2.2, R2.3).
+// Manifest that survives is computed from the bytes the gates will read.
+// runStagedManifestIn carries what changes with a supplied directory: the
+// seeding step is skipped and `--force` joins the pkgdev argv, because pkgdev
+// does not re-manifest a package whose Manifest is already complete.
 //
-// The published branch takes the supplied path no further than its own return
-// value: `pkgdev manifest` there writes into the directory the whole machine
-// shares, exactly as it always has — that path never had a private distdir, and
-// giving it one here would move a pre-flight and three shared-directory
-// protections that story 030's gate is keyed on. What it DOES do is carry the
-// supplied path back out, so the fix distdir reaches the caller's gates and the
-// caller's removal on this path too.
+// The published branch only carries the supplied path back out, so the fix
+// distdir reaches the caller's gates and removal on this path too. Its `pkgdev
+// manifest` writes into the shared directory as it always has: giving it a
+// private distdir would move a pre-flight and three shared-directory
+// protections the environment gate is keyed on.
 //
 // Both branches therefore keep runManifestFor's contract: what comes back is the
 // directory the caller owns and must remove, and "" only where there is none.
@@ -2521,36 +2359,20 @@ func removeStagedDistdir(log *slog.Logger, distdir string) {
 // It prompts for user confirmation before executing.
 // Returns the log path if compilation fails.
 //
-// # What story 031 added here, and what it deliberately did not
+// Before anything runs, the isolation probe measures whether this process can
+// create a network namespace, and the answer goes on the result so a pass
+// states its own fidelity. With --require-isolation and no namespace the
+// compile is skipped and the result says why — running anyway would produce
+// the meaningless green the operator asked to avoid. The prompt, the sudo/doas
+// requirement and the runAttached seam are otherwise unchanged.
 //
-// It added a LABEL and a SKIP. Before running anything, the isolation probe
-// measures whether this process can create a network namespace, and the answer
-// is carried onto the result so a pass can state its own fidelity: a compile
-// that succeeded without a namespace is still a pass, but it is no longer
-// printed as the same pass as one that had it (R7.2, R7.3). With
-// --require-isolation and no namespace available, the compile does not happen
-// at all and the result says why (R7.4) — running it anyway would produce
-// exactly the meaningless green the operator asked to avoid.
+// The ebuild and repository are TOLD to it (cand), not recomputed from
+// a.overlayPath: on the staged path that is the staged tree, so the build never
+// reads an unvalidated candidate out of a tree that auto-commits.
 //
-// Everything else is untouched (R7.5). The confirmation prompt, the sudo/doas
-// requirement, the runAttached seam and both existing success and failure
-// conditions are exactly as they were; the probe sits ahead of all of them and
-// the only new exit is the skip.
-//
-// # What story 033 added, and what it deliberately did not
-//
-// The ebuild it builds and the repository it builds from are now TOLD to it
-// (cand) instead of recomputed from a.overlayPath. On the staged path that is the
-// staged tree, which is what keeps the compile gate inside S033-R3.2: a build
-// reading the published overlay would be reading a candidate that has not been
-// published yet, and running it there is precisely the "unvalidated ebuild sitting
-// in a tree that auto-commits" this story removes.
-//
-// It also added the REPAIR path. A failure no longer ends the gate outright: when
-// the failure is attributable to the ebuild and a build fixer is wired, an agent
-// edits the staged ebuild and this same gate runs again, with the RE-RUN deciding
-// (S033-R8.1, S033-R8.2). Everything up to the first failure is unchanged, and a
-// run with no fixer wired still ends exactly where it used to.
+// A failure attributable to the ebuild, with a build fixer wired, goes to the
+// REPAIR path: an agent edits the staged ebuild and this same gate runs again,
+// the RE-RUN deciding. With no fixer wired a failure ends the gate as before.
 func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	// Measured before the prompt: asking the operator to confirm a compile that
 	// --require-isolation will refuse to run would be a question with no
@@ -2585,7 +2407,7 @@ func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, vers
 	first := a.compileOnce(ctx, cand, pkg, version, privTool)
 	// Recorded as soon as a child has actually run, and on both outcomes: the
 	// gate below has to be able to say which directory this build read and
-	// whether the privilege tool could be made to honour it (S040-R2.3). The
+	// whether the privilege tool could be made to honour it. The
 	// paths above return before any build, and leave both facts unset — there is
 	// nothing to state about a compile that did not happen.
 	recordCompileDistdir(result, first)
@@ -2593,10 +2415,10 @@ func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, vers
 		return "", nil
 	}
 
-	// S054-R3.5. A compile its context stopped is not a failure to repair: it
+	// A compile its context stopped is not a failure to repair: it
 	// says nothing about the ebuild, and the fixer is an LLM invocation the
 	// operator has just asked this run to stop. compileOnce has already kept the
-	// partial transcript (R3.6), so returning here throws no evidence away.
+	// partial transcript, so returning here throws no evidence away.
 	if ctx.Err() != nil {
 		return first.logPath, first.err
 	}
@@ -2607,7 +2429,7 @@ func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, vers
 // compileGatePhase is the `ebuild` phase the compile gate runs.
 //
 // It is spelled as validate.GateCompile rather than as a bare "compile" to state
-// an invariant R8.2 rests on: the gate NAMED to the fixer and the phase the
+// an invariant the repair rests on: the gate NAMED to the fixer and the phase the
 // authoritative re-run actually runs are the same thing. A fixer told it must fix
 // the configure gate, followed by a re-run of a shallower phase, would produce a
 // green that proves nothing about the failure it claims to have repaired.
@@ -2624,7 +2446,7 @@ type buildAttempt struct {
 	logPath string
 	// err is the failure, already wrapped in ErrCompileFailed, or nil. A build
 	// its context stopped is not a failure: err then wraps ctx.Err() and never
-	// ErrCompileFailed (S054-R3.5).
+	// ErrCompileFailed.
 	err error
 	// resolvedDistdir is the directory this attempt resolved for the build's
 	// archives, and enforcedDistdir the one the privilege tool actually carried
@@ -2648,30 +2470,20 @@ type buildAttempt struct {
 // the privilege boundary, returning the argument that carries it and the
 // directory the child will therefore really read.
 //
-// # The mechanism was measured, not assumed (S040-R2.2)
+// The mechanism was measured, not assumed (2026-08-20, sudo-rs 0.2.14): with
+// env_reset in force an exported DISTDIR reaches `ebuild` not at all, while
+// sudo's own argument form, `sudo DISTDIR=<dir> ebuild …`, crosses. It beats
+// --preserve-env because the value is a LITERAL ARGUMENT this run computed, so
+// nothing crosses from the operator's shell — the same assigned-versus-
+// allow-listed distinction validate/build.go draws.
 //
-// Measured on this host as the real operator, 2026-08-20, under sudo-rs 0.2.14
-// (.epic/stories/040-unreached-producers/.draft/d2-privilege-env-evidence.md):
-// with env_reset in force NOTHING Portage-related survives into what the child
-// sees, so an exported DISTDIR — anything this process puts in cmd.Env — reaches
-// `ebuild` not at all. What DOES cross is sudo's own argument form,
-// `sudo DISTDIR=<dir> ebuild …`, which that host granted. It is chosen over
-// --preserve-env because the value is then a LITERAL ARGUMENT this run computed:
-// nothing crosses from the operator's shell, which is R2.4 in its strongest
-// reading and the same distinction validate/build.go draws between an assigned
-// value and an allow-listed one.
+// The tool is a BRANCH for correctness: `doas` has no VAR=value form and would
+// try to execute a program named "DISTDIR=…", failing on every doas host (which
+// detectPrivilegeTool PREFERS). doas was not measured, so nothing is invented:
+// it runs as before, and the gate says the distdir was not enforced.
 //
-// # The tool is a BRANCH, and that is correctness rather than caution
-//
-// `doas` has no VAR=value argument form at all: handed one it would try to
-// execute a program literally named "DISTDIR=…", and the compile gate would fail
-// outright on every host that has doas — which detectPrivilegeTool PREFERS. doas
-// was not installed on the measured host, so per R2.3 nothing is invented for it:
-// it runs exactly as it ran before, and the gate says the distdir could not be
-// enforced rather than letting a PASS imply a hermeticity the run never had.
-//
-// EMPTY RESOLVES TO NOTHING (R3.2, mirroring validate/build.go): no assignment
-// and no invented default, so Portage answers from its own configuration.
+// EMPTY RESOLVES TO NOTHING, mirroring validate/build.go: no assignment and no
+// invented default, so Portage answers from its own configuration.
 func privilegedDistdirArgs(privTool, distdir string) (assignment []string, enforced string) {
 	if distdir == "" {
 		return nil, ""
@@ -2685,8 +2497,8 @@ func privilegedDistdirArgs(privTool, distdir string) (assignment []string, enfor
 }
 
 // recordCompileDistdir carries one compile attempt's distdir facts onto the
-// result, so the gate that reports this run can tell apart the three states R2.3
-// needs: nothing resolved, resolved and enforced, resolved and uncarriable.
+// result, so the gate that reports this run can tell apart the three states:
+// nothing resolved, resolved and enforced, resolved and uncarriable.
 //
 // It is called for every attempt that actually SPAWNED a child, including the
 // authoritative re-run after a repair, because the last build that ran is the
@@ -2701,28 +2513,20 @@ func recordCompileDistdir(result *ApplyResult, attempt buildAttempt) {
 // compileOnce spawns the build child EXACTLY ONCE and, on failure, retains its
 // log.
 //
-// It is the single place this gate's argv is spelled, and that is what makes
-// R8.2's "the SAME gate is re-run" a property of the code rather than a promise:
-// the authoritative re-run after a repair calls this same function with the same
-// candidate, so it cannot drift to a shallower phase where a successful prepare
-// would clear a configure failure.
+// It is the single place this gate's argv is spelled, so "the SAME gate is
+// re-run" is a property of the code rather than a promise: the authoritative
+// re-run after a repair calls this same function with the same candidate, and
+// cannot drift to a shallower phase where a prepare would clear a configure
+// failure.
 //
-// The seam and the log are story 010's, unchanged: the privileged child needs the
-// real TTY for the sudo/doas password prompt (S010-R4.1), which rules out
-// capturing its streams through a StreamCapture pipe, and the default runAttached
-// is exactly cmd.CombinedOutput so the retained log stays byte-identical to the
-// pre-TUI behaviour (S010-R3.3/S010-R7.1).
+// The privileged child needs the real TTY for the sudo/doas password prompt, so
+// its streams cannot go through a StreamCapture pipe; the default runAttached is
+// exactly cmd.CombinedOutput, keeping the retained log byte-identical.
 //
-// # The distdir this run resolved is the one the child reads (S040-R2.1)
-//
-// It used to read whatever the host's Portage configuration happened to name,
-// while the unprivileged ladder has exported a computed DISTDIR since story 039
-// — one word, "PASS", covering two different amounts of evidence. The directory
-// is resolved by staticGateDistdir, the SAME resolver the option gate and the
-// depth-driven build gates use: a build reading a different directory from the
-// gate that vetted its archive is the divergence one resolver exists to prevent.
-// How it crosses the privilege boundary, and when it cannot, is
-// privilegedDistdirArgs' decision and its comment carries the measurement.
+// The distdir is resolved by staticGateDistdir, the SAME resolver the option
+// gate and the depth-driven build gates use, so the build reads the directory
+// the gate vetted rather than whatever the host's Portage names. How it crosses
+// the privilege boundary is privilegedDistdirArgs' decision.
 func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, version, privTool string) buildAttempt {
 	distdir := a.staticGateDistdir(cand)
 	assignment, enforced := privilegedDistdirArgs(privTool, distdir)
@@ -2768,7 +2572,7 @@ func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, ver
 	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
 	cmd := a.execCommand(ctx, privTool, args...)
 	cmd.Dir = cand.repoRoot
-	// S054-R3.3/R3.4. Foreground and not Group: sudo and doas ask for the
+	// Foreground and not Group: sudo and doas ask for the
 	// password on the terminal, and a child moved into a process group of its
 	// own is a BACKGROUND group there, stopped by SIGTTIN at its first read — a
 	// compile hung on a prompt nobody can answer. In the caller's group a cancel
@@ -2782,7 +2586,7 @@ func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, ver
 	procgroup.Foreground(cmd)
 	stopRefused := keepStopRefusal(cmd)
 
-	// cmd.Env is deliberately left nil here (S040-R2.4), which is a MEASURED
+	// cmd.Env is deliberately left nil here, which is a MEASURED
 	// decision and not an omission. validate/build.go installs an allow-list on
 	// its child because that child inherits this process's environment; this one
 	// does not — the measurement showed sudo's env_reset discarding the inherited
@@ -2796,15 +2600,15 @@ func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, ver
 	output, err := a.runAttached(cmd)
 	// Foreground's WaitDelay also runs after a NORMAL exit: a compile that exited
 	// 0 while a helper it left behind still held the output pipe comes back as
-	// exec.ErrWaitDelay, and that is a success (S054-R1.5).
+	// exec.ErrWaitDelay, and that is a success.
 	err = procgroup.Result(cmd, err)
 	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
 	if err != nil {
 		attempt.logPath = a.saveCompileLog(pkg, version, output)
-		// S054-R3.5. Checked on the context and not on err: a compile stopped by
+		// Checked on the context and not on err: a compile stopped by
 		// SIGTERM reports `signal: terminated`, which wraps nothing. The log above
 		// is written first and on purpose — an interrupted compile's partial
-		// transcript is evidence too (R3.6).
+		// transcript is evidence too.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			pid, refused := stopRefused()
 			attempt.err = interruptedCompileError(pkg, version, privTool, ctxErr, pid, refused)
@@ -2834,14 +2638,13 @@ func killedAfterGrace(cmd *exec.Cmd) bool {
 }
 
 // interruptedCompileError is what a privileged compile its context stopped
-// returns (S054-R3.5): it wraps ctxErr, says "interrupted", and wraps no
+// returns: it wraps ctxErr, says "interrupted", and wraps no
 // ErrCompileFailed, because an interrupt is no verdict on the ebuild.
 //
 // refused is the stop the privilege tool could not be sent — EPERM, from a tool
 // that now runs as root — and pid the process it was refused for (see
 // keepStopRefusal). The build is then not known to have stopped, and the error
-// says so and names the process, so the operator knows what to look for
-// (S054-R3.7).
+// says so and names the process, so the operator knows what to look for.
 func interruptedCompileError(pkg, version, privTool string, ctxErr error, pid int, refused error) error {
 	interrupted := fmt.Errorf("the compile of %s-%s was interrupted, so it says nothing about this ebuild: %w", pkg, version, ctxErr)
 	if refused == nil {
@@ -2854,17 +2657,12 @@ func interruptedCompileError(pkg, version, privTool string, ctxErr error, pid in
 // keepStopRefusal wraps cmd.Cancel, as procgroup.Foreground configured it, so
 // that a stop the child could not be sent is kept. The returned function reads
 // it once Wait (or Run) has returned: the pid the stop was refused for and the
-// refusal, or a nil error when every stop was delivered (S054-R3.7).
+// refusal, or a nil error when every stop was delivered.
 //
-// # Why Wait's error cannot carry it
-//
-// Foreground's Cancel does return the refusal, wrapped and naming the pid, but
-// os/exec hands that error to Wait's caller only when the child then exits 0.
-// Once WaitDelay expires os/exec calls Process.Kill, and a Kill refused as well
-// REPLACES it with its own error; and against a child nothing can signal, Wait
-// returns only when that child exits by itself, with whatever status it chose.
-// The one moment the refusal is certain to exist is when Cancel returns it, so
-// that is where it is kept.
+// Wait's error cannot carry it: os/exec surfaces Cancel's error only when the
+// child then exits 0, a refused Process.Kill after WaitDelay REPLACES it, and a
+// child nothing can signal exits with whatever status it chose. The one moment
+// the refusal surely exists is when Cancel returns it, so it is kept there.
 //
 // os/exec calls Cancel before it hands the context's outcome to Wait, so a
 // Cancel that ran has returned before Wait does; the mutex covers a runner that
@@ -2904,39 +2702,23 @@ func keepStopRefusal(cmd *exec.Cmd) func() (pid int, refused error) {
 
 // repairBuildAndRerun is what happens after the build gate has failed once: the
 // failure is attributed, and only if it is the EBUILD's does an agent get to see
-// it — after which this gate runs again and that re-run is the verdict
-// (S033-R8.1, S033-R8.2, S033-R8.5).
+// it — after which this gate runs again and that re-run is the verdict.
 //
-// # The order, and why the gate is asked twice
+// The attribution runs on FREE evidence first — the transcript already held —
+// and its verdict is reported whether or not a fixer is wired, for the reason
+// refuseFixOnEnvironmentFailure gives: it is a fact about the failure, not the
+// configuration. The two rungs that spend something (a pretend `emerge -p`
+// resolve, a probe write into PORTAGE_TMPDIR) are asked only once a fixer is
+// about to run, since they exist to be cheaper than the agent they prevent.
+// The rung order never changes; only which rungs have evidence does. So a free
+// verdict PRE-EMPTS a paid one — the saving, not a bug: a build that died in
+// unpack and lacked dependencies is reported as the phase; both are the
+// machine's, and the action (no fixer) is the same.
 //
-// The attribution gate runs on FREE evidence first — the transcript this run
-// already holds — and its verdict is reported whether or not a fixer is wired.
-// That is the argument applier.go's `func refuseFixOnEnvironmentFailure` makes,
-// and its precondition in one: the verdict is a fact about the failure and not
-// about the configuration, and it may be taken unconditionally exactly while
-// nothing is spent to get it, or two machines would give the same failure two
-// diagnoses.
-//
-// The two rungs that DO spend something — a pretend `emerge -p` resolve, and a
-// probe write into PORTAGE_TMPDIR — are asked only once a fixer is about to be
-// invoked, because their whole purpose is to be cheaper than the agent
-// invocation they prevent. The rungs are always evaluated in design D6's order;
-// only which of them have evidence to speak from changes.
-//
-// One consequence, stated so it is not mistaken for a bug: a free verdict
-// PRE-EMPTS a paid one, because the paid evidence is never gathered — that is the
-// saving. So a build that both died in unpack and lacked its dependencies is
-// reported as the phase, not as the dependencies. Both are the machine's, the
-// action is identical (no fixer), and only the sentence the operator reads
-// differs.
-//
-// # Exactly one attempt, and no counter here
-//
-// The attempt bound is enforced inside FixBuild (R8.4) — a bound only the caller
-// remembers is not a bound — and this gate makes one attempt per apply, the same
-// shape runManifestWithFix has: the agent iterates internally under its own
-// --max-turns, and every extra external attempt costs a FULL rebuild, which for a
-// real package is measured in hours.
+// FixBuild enforces the attempt bound — a bound only the caller remembers is
+// not one — and this gate makes one attempt per apply, like runManifestWithFix:
+// the agent iterates under its own --max-turns, and each extra external attempt
+// costs a FULL rebuild.
 func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, pkg, version, privTool string, first buildAttempt, result *ApplyResult) (string, error) {
 	// The free rungs. Reported to every operator, LLM or not.
 	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, buildFaultEvidence{transcript: first.transcript}); machineErr != nil {
@@ -2947,10 +2729,10 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		return first.logPath, first.err
 	}
 
-	// R8.3/D7: the agent is only ever pointed at a STAGED tree. On the pre-staging
+	// The agent is only ever pointed at a STAGED tree. On the pre-staging
 	// path the candidate lives in the published overlay — the repository that
 	// auto-commits and pushes — and handing an agent Edit access there is the exact
-	// thing this story's staging boundary exists to prevent. FixBuild would refuse
+	// thing the staging boundary exists to prevent. FixBuild would refuse
 	// it too (ErrBuildFixScope), but refusing before anything is constructed keeps
 	// the boundary visible at the call site rather than only inside the callee.
 	if !cand.staged {
@@ -2980,7 +2762,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		StagedDir:  cand.repoRoot,
 		EbuildPath: cand.ebuildPath,
 		BuildLog:   first.transcript,
-		// One attempt per apply; FixBuild owns the bound (R8.4) and this states
+		// One attempt per apply; FixBuild owns the bound and this states
 		// which try it is rather than counting tries here.
 		Attempt: 1,
 	})
@@ -3003,14 +2785,14 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		return first.logPath, fmt.Errorf("%w (the build fixer reported no change, so the %s gate was not re-run)", first.err, compileGatePhase)
 	}
 
-	// R8.2. The authoritative re-run: bentoo's own build of the same phase, never
+	// The authoritative re-run: bentoo's own build of the same phase, never
 	// the agent's account of what it did.
 	a.reporter.TaskStage(pkg, "re-check")
 	second := a.compileOnce(ctx, cand, pkg, version, privTool)
-	// The re-run is the verdict (R8.2), so its distdir facts are the ones the
+	// The re-run is the verdict, so its distdir facts are the ones the
 	// gate must report: this build is the one the PASS would be about.
 	recordCompileDistdir(result, second)
-	// S054-R3.5 holds for the re-run as well: a re-run its context stopped is no
+	// The interrupt rule holds for the re-run as well: a re-run its context stopped is no
 	// verdict on the edit, so it is returned as the interrupt it is — never as the
 	// first failure "still" standing, which would wrap ErrCompileFailed.
 	if second.err != nil && ctx.Err() != nil {
@@ -3023,8 +2805,8 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 
 	result.Fixed = true
 	result.FixSummary = summary
-	// Name the model that made the edit, and SAY SO when it was an alias
-	// (S030-R4.1/R4.2) — the same one string into both sinks that the manifest fix
+	// Name the model that made the edit, and SAY SO when it was an alias —
+	// the same one string into both sinks that the manifest fix
 	// path uses, so the operator's log and the TUI report cannot drift apart.
 	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
 		pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
@@ -3035,7 +2817,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 }
 
 // refuseBuildFixOnMachineFault decides whether a failed build is one the build
-// fixer must never see, and reports it when it is (S033-R8.5).
+// fixer must never see, and reports it when it is.
 //
 // It returns a non-nil error ONLY for a machine verdict: the apply fails with it,
 // and the caller returns before anything constructs a fix attempt. For every other
@@ -3045,15 +2827,15 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 // It is refuseFixOnEnvironmentFailure's counterpart for the build gate, and it is
 // deliberately a separate function rather than a second caller of it: that one
 // classifies through environmentVerdict, which a build failure falls straight
-// through (see build_failure.go for why that would silently reinstate story 030's
-// defect on this path).
+// through (see build_failure.go for why that would silently reinstate the
+// manifest path's old defect on this path).
 func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildAttempt, ev buildFaultEvidence) error {
 	verdict := buildFaultVerdict(ev)
 	if verdict == nil {
 		return nil
 	}
 
-	// S043-R3.1. The verdict says the machine is at fault; this asks the same
+	// The verdict says the machine is at fault; this asks the same
 	// transcript WHAT the machine was missing and writes it against the package,
 	// so the next run has something to decline on instead of rebuilding into the
 	// identical failure. It cannot fail this call: the apply is already failing
@@ -3079,8 +2861,8 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 //
 // An UNDETERMINED answer — no Portage, a resolve that failed, a staged tree that
 // is not there — becomes the zero value, which the classifier reads as "this rung
-// has nothing to say" and not as "a dependency is missing". That is R3.5's bargain
-// applied here: a question this host could not answer must cost at most a wasted
+// has nothing to say" and not as "a dependency is missing". That is the
+// "uncertain means repairable" bargain applied here: a question this host could not answer must cost at most a wasted
 // fixer invocation, never a repair that was available.
 //
 // Only the exec seam is injected. LookPath is deliberately left at the validate
@@ -3150,8 +2932,8 @@ func defaultConfirmFunc(prompt string) bool {
 // candidate is written straight into the published overlay).
 //
 // It is exported because the staging root is where the EVIDENCE lives: the
-// retained tree of every bump that was not promoted (R3.6) and the record beside
-// it (R10.4). A caller that has to tell an operator where to look — or that wants
+// retained tree of every bump that was not promoted and the record beside
+// it. A caller that has to tell an operator where to look — or that wants
 // to prove that a promotion really came from a tree an earlier run left there —
 // cannot do either from the option it passed in, because the applier is the thing
 // that decides what to do with it.

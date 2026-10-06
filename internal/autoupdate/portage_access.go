@@ -14,35 +14,21 @@ import (
 // portageGroupName is the group Portage's own unprivileged uid belongs to, and
 // the whole reason this file exists.
 //
-// # The defect it fixes, measured on this host 2026-08-21
-//
-// The compile gate escalates: `sudo ebuild <path> clean compile` (compileOnce).
-// Running as root is PRECISELY what makes Portage honour
-// FEATURES="userpriv userfetch", so from that moment the repository is READ, and
-// the distfiles are FETCHED, by uid `portage` — not by the operator who started
-// the sweep.
-//
-// Everything the gate hands it, though, is built for that operator alone: a
-// staged tree is 0750/0600 (validate/stage.go) and a private distdir is whatever
-// os.MkdirTemp makes, 0700. uid `portage` belongs to the `portage` group and to
-// nothing else, so it could not so much as TRAVERSE the staged tree, and the
-// gate died on its first read of the repository:
-//
-//	bash: <distdir>/.__portage_test_write__: Permission denied
-//	!!! Permission Denied: <staged>/profiles/thirdpartymirrors
-//
-// before unpack, before src_prepare, before anything about the candidate had
-// been exercised. Every bump reaching a privileged compile failed identically,
-// and the attribution gate correctly called it the host's fault — which did not
-// help anyone, because it was still a bump that could not be applied.
+// The compile gate escalates (`sudo ebuild <path> clean compile`), and running
+// as root makes Portage honour FEATURES="userpriv userfetch": the repository is
+// READ, and distfiles FETCHED, by uid `portage`, not by the operator. But a
+// staged tree is 0750/0600 (validate/stage.go) and a private distdir is 0700,
+// and uid `portage` belongs only to the `portage` group, so it could not even
+// traverse them. Every privileged compile died on its first read
+// (`Permission denied` on <distdir> and <staged>/profiles/thirdpartymirrors)
+// before anything about the candidate had been exercised.
 //
 // # Why the GROUP, and not simply a wider mode
 //
-// Widening the staged tree to 0755/0644 would fix it in three lines and was
-// rejected. stage.go states, and means, that a candidate nobody has reviewed —
-// together with whatever a fixer wrote into it — does not belong in a
+// Widening the staged tree to 0755/0644 was rejected: a candidate nobody has
+// reviewed, plus whatever a fixer wrote into it, does not belong in a
 // world-readable directory. Granting the single group that HAS to read it keeps
-// that stance intact and grants strictly less than the mode change would.
+// that stance and grants strictly less.
 const portageGroupName = "portage"
 
 // portageGroupID answers this host's gid for portageGroupName.
@@ -71,28 +57,19 @@ var portageGroupID = func() (int, bool) {
 // `portage` group: the group comes to own every entry, and every entry's group
 // bits are opened to mirror its owner's.
 //
-// # writable is the distdir/staged-tree distinction, and it is not cosmetic
-//
-// A staged repository is READ by uid `portage`, so g+rx on directories and g+r
-// on files is the whole of what it may have. A private distdir is WRITTEN into
-// — that is what a fetch under `userfetch` does — so it gets g+w as well.
-// Handing the staged tree g+w would let the unprivileged half of a build edit
-// the very candidate it is being judged on.
+// writable is the distdir/staged-tree distinction. A staged repository is only
+// READ by uid `portage`, so it gets g+rx/g+r; a private distdir is WRITTEN by a
+// fetch under `userfetch`, so it gets g+w too. g+w on the staged tree would let
+// the unprivileged half of a build edit the candidate it is being judged on.
 //
 // A host with no `portage` group is a no-op, not a failure — see portageGroupID.
 //
-// Symlinks are chowned through Lchown and never chmodded: a symlink's own mode
-// is consulted by nothing, and following it would change the mode of a file
-// that may sit outside the tree entirely.
-//
-// That skip is a SAFEGUARD AND NOT AN OBSERVABLE BEHAVIOUR on Linux, which is
-// worth saying out loud because no test can hold it down here: a Linux symlink
-// is always lstat'd as 0777, so groupBitsFor already asks for nothing new and
-// the Chmod below is skipped by the `want == mode` check whether or not this
-// branch exists. Deleting it would therefore break nothing TODAY and would make
-// the walk follow links the moment groupBitsFor learns to ask for a bit 0777
-// does not already carry — or the moment this runs somewhere a symlink has a
-// mode of its own.
+// Symlinks are chowned through Lchown and never chmodded: their own mode is
+// consulted by nothing, and following them could change a file outside the
+// tree. On Linux that skip is a SAFEGUARD no test can observe — a symlink
+// lstats as 0777, so the `want == mode` check already skips it — but it stops
+// the walk following links once groupBitsFor asks for a bit 0777 lacks, or on
+// a platform where a symlink has a mode of its own.
 func grantPortageAccess(root string, writable bool) error {
 	if root == "" {
 		return nil
@@ -209,42 +186,21 @@ func (a *Applier) grantCompileAccess(cand candidatePaths) error {
 // grantPortageTraversal opens the DIRECTORIES BETWEEN upto and from to the
 // `portage` group.
 //
-// # Why the grant cannot stop at the staged tree's own root
+// grantPortageAccess opens a tree downward, but a tree nobody can REACH is not
+// opened at all: a staged root sits at <staging>/<category>/<package>/<version>,
+// each level created 0750 and owned by the operator, so uid `portage` was
+// refused at `<staging>` before it ever saw the tree.
 //
-// grantPortageAccess opens a tree downward, and a tree nobody can REACH is not
-// opened at all. A staged root sits three directories below the staging root
+// It re-points each directory's group with Lchown (always — that, not the bit,
+// is what was missing) and adds x only where the group lacks it. It never adds
+// r: a directory its group could not list stays unlistable, so the names of
+// other packages being staged do not leak as a side effect. This widens
+// nothing a 0750 ancestor did not already grant; it re-points it.
 //
-//	<staging>/<category>/<package>/<version>
-//
-// and every one of them is created at stagedDirMode, 0750, owned by the
-// operator. Measured on this host 2026-08-21, that is the outer half of the same
-// defect: uid `portage` was refused at `<staging>` and never saw the tree whose
-// permissions were the visible symptom.
-//
-// # It adds x where x is missing, and never adds r
-//
-// On the layout this actually runs against the chmod is usually a no-op: a
-// stagedDirMode directory is 0750, which already grants its group r-x. What was
-// missing was never the BIT, it was WHOSE group those bits belong to — which is
-// the Lchown, and is why that happens unconditionally while the chmod does not.
-//
-// The chmod is there for a directory whose group cannot traverse it at all
-// (0700, say, from a caller that made one itself), and it grants x alone. r is
-// never added by this function: a directory that did not let its group list it
-// still does not, so the names of other packages being staged do not become
-// readable as a side effect of opening a path to one of them. What a 0750
-// ancestor already granted its own group, of course, it goes on granting to the
-// new one — this widens nothing, it re-points it.
-//
-// # from is exclusive, upto inclusive
-//
-// from is the staged root, which grantPortageAccess has already opened as a
-// whole; re-opening it here would be harmless and is skipped anyway to keep one
-// directory from having its mode decided in two places.
-//
-// upto must be an ancestor of from or nothing happens at all. That check is the
-// bound on the walk, and it is a real one rather than a formality: without it a
-// mistaken pair of paths would climb to / opening every directory on the way.
+// from is exclusive (grantPortageAccess already opened it, and one directory's
+// mode is decided in one place), upto inclusive. upto must be an ancestor of
+// from or nothing happens at all: that bound stops a mistaken pair of paths
+// from climbing to / opening every directory on the way.
 func grantPortageTraversal(from, upto string) error {
 	if from == "" || upto == "" {
 		return nil

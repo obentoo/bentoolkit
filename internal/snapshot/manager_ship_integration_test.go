@@ -20,7 +20,7 @@ func s053RedirectState(t *testing.T) {
 	t.Cleanup(func() { StateDir = orig })
 }
 
-func s053CallsOf(mr *MockRunner, name, sub string) [][]string {
+func s053CallsOf(mr *mockRunner, name, sub string) [][]string {
 	var out [][]string
 	for _, c := range mr.Calls {
 		if c.Name == name && (sub == "" || (len(c.Args) > 0 && c.Args[0] == sub)) {
@@ -36,7 +36,7 @@ func TestManagerRun_BtrbkArchiveShipsResolvedSnapshot(t *testing.T) {
 		"/home": "/mnt/pool/_btrbk_snap/home.20260923T0400",
 		"/var":  "/mnt/pool/_btrbk_snap/var.20260923T0400",
 	}
-	mr := &MockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
+	mr := &mockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		if name == "btrbk" && slices.Contains(args, "list") {
 			sv := args[len(args)-1]
 			return []byte("type='snapshot' source_url='/mnt/pool" + sv + "' snapshot_path='/mnt/pool/_btrbk_snap'" +
@@ -79,7 +79,7 @@ func TestManagerRun_SnapperResticMountsDerivedPath(t *testing.T) {
 	s053RedirectState(t)
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
-	mr := &MockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
+	mr := &mockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		if name == "snapper" && slices.Contains(args, "create") {
 			return []byte("42\n"), nil
 		}
@@ -116,7 +116,7 @@ func TestManagerRun_SnapperResticMountsDerivedPath(t *testing.T) {
 
 func TestManagerRun_UnidentifiedSnapshotFailsOnlyAddressedShips(t *testing.T) {
 	s053RedirectState(t)
-	mr := &MockRunner{} // btrbk run succeeds; `list latest` prints nothing
+	mr := &mockRunner{} // btrbk run succeeds; `list latest` prints nothing
 	cfg := Config{
 		Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}},
 		Ship: []ShipConfig{

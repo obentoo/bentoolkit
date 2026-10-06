@@ -1,11 +1,11 @@
 package tui
 
-// Reporter is the single sink command code emits progress to (design §5). Both
+// Reporter is the single sink command code emits progress to. Both
 // backends implement it: teaReporter forwards each call as a tea.Msg through
 // program.Send, plainReporter writes deterministic lines to an io.Writer.
 //
-// A nil or Noop reporter is exactly equivalent to the pre-story behavior:
-// silent, fully-buffered execution (R3.3). Command code holding a possibly-nil
+// A nil or Noop reporter is exactly equivalent to having no progress
+// reporting: silent, fully-buffered execution. Command code holding a possibly-nil
 // Reporter should normalize it through orNoop before use.
 type Reporter interface {
 	// BatchStart opens a run; total is an optional denominator (0 = unknown).
@@ -19,7 +19,7 @@ type Reporter interface {
 	// TaskLine emits one tail update for a task. eol=false is an in-place
 	// replacement of the live line (carriage-return / partial flush); eol=true
 	// commits the line into the bounded tail (it ended with a newline). See
-	// TaskLineMsg for the model-side semantics (R1.2).
+	// TaskLineMsg for the model-side semantics.
 	TaskLine(id string, stream Stream, text string, eol bool)
 	// TaskDone terminates a task; capturedOutput carries the full buffer for
 	// the error path (the Output: %s contract at applier.go is preserved).
@@ -31,7 +31,7 @@ type Reporter interface {
 }
 
 // noopReporter discards every event. It is the default so command code that
-// supplies no reporter behaves exactly as before this package existed (R3.3).
+// supplies no reporter behaves exactly as before this package existed.
 type noopReporter struct{}
 
 func (noopReporter) BatchStart(int)                        {}
@@ -43,7 +43,7 @@ func (noopReporter) TaskDone(string, bool, string, string) {}
 func (noopReporter) Log(string, string)                    {}
 func (noopReporter) BatchDone(string)                      {}
 
-// Noop returns a Reporter that discards all events (R3.3).
+// Noop returns a Reporter that discards all events.
 func Noop() Reporter { return noopReporter{} }
 
 // orNoop normalizes a possibly-nil Reporter to a non-nil one, so call sites can

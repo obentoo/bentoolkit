@@ -20,21 +20,21 @@ func BtrbkConfPath(snapshotConfPath string) string {
 }
 
 // WriteBtrbkConf renders the btrbk.conf for cfg and writes it next to the
-// snapshot.toml at configPath (R5.2). Called by `apply` and by `run` so the run
+// snapshot.toml at configPath. Called by `apply` and by `run` so the run
 // is self-contained even if `apply` was never executed.
 func WriteBtrbkConf(cfg *Config, configPath string) error {
 	return writeBtrbkConf(BtrbkConfPath(configPath), cfg.Engine, collectShipTargets(cfg.Ship))
 }
 
 // WriteEngineConfig materializes the native config for the configured engine
-// driver (R2.1): "btrbk" renders btrbk.conf next to the snapshot.toml at
-// configPath (behavior unchanged, R6.2); "snapper" provisions the per-subvolume
+// driver: "btrbk" renders btrbk.conf next to the snapshot.toml at
+// configPath; "snapper" provisions the per-subvolume
 // configs through snapper's own create-config/set-config (configPath is unused
 // there — snapper's config location is fixed). An unknown driver fails with
 // ErrInvalidDriver.
 //
 // It takes a context and a Runner because the snapper driver reaches snapper to
-// do the work (018 R1) rather than writing /etc itself — a file write is not
+// do the work rather than writing /etc itself — a file write is not
 // observed by a running snapperd. The btrbk driver uses neither.
 //
 // The snapper driver's warnings go to the logger ctx carries
@@ -50,7 +50,7 @@ func WriteEngineConfig(ctx context.Context, cfg *Config, configPath string, run 
 	}
 }
 
-// Apply materializes the native config and scheduler for cfg (R5.2, R4.1, R2.2):
+// Apply materializes the native config and scheduler for cfg:
 // it renders+writes the engine's native config (driver-aware) and, when a
 // systemd schedule is configured, installs and enables the timer. run is the
 // injectable subprocess seam.
@@ -68,7 +68,7 @@ func Apply(ctx context.Context, cfg *Config, configPath string, run Runner) erro
 	return sched.Apply(ctx, cfg.Schedule)
 }
 
-// List returns the local snapshots per configured subvolume (R5.4). A subvolume
+// List returns the local snapshots per configured subvolume. A subvolume
 // that errors aborts the listing with that error.
 func (m *Manager) List(ctx context.Context) (map[string][]Snapshot, error) {
 	out := make(map[string][]Snapshot, len(m.subvolumes))
@@ -85,7 +85,7 @@ func (m *Manager) List(ctx context.Context) (map[string][]Snapshot, error) {
 // Subvolumes exposes the configured subvolumes (for CLI iteration/reporting).
 func (m *Manager) Subvolumes() []string { return m.subvolumes }
 
-// RemoteGroup is one remote source's contribution to `list --remote` (008 R5.2).
+// RemoteGroup is one remote source's contribution to `list --remote`.
 // Label names the source for display ("btrbk targets", or the restic ship's
 // name); Err, when non-nil, marks the source as failed — its listing is absent
 // but the other groups are unaffected (lenient, read-only).
@@ -96,7 +96,7 @@ type RemoteGroup struct {
 }
 
 // remoteLister is implemented by drivers that can enumerate snapshots held on a
-// remote (008 R5.2), mirroring the remotePruner type-assert pattern: the btrbk
+// remote, mirroring the remotePruner type-assert pattern: the btrbk
 // engine lists its btrbk.conf targets' backups and the restic shipper lists its
 // repository. The snapper engine (no remote concept) and the ssh/archive
 // shippers (ssh targets ARE the btrbk targets; archive enumeration is out of
@@ -107,8 +107,8 @@ type remoteLister interface {
 
 // ListRemote collects the remote snapshot listings of every capable source in
 // deterministic order — the engine's target backups first, then each ship in
-// config order (008 R5.2). A failing source is recorded in its group's Err and
-// does NOT abort the others, keeping `list` lenient and read-only (A3).
+// config order. A failing source is recorded in its group's Err and
+// does NOT abort the others, keeping `list` lenient and read-only.
 func (m *Manager) ListRemote(ctx context.Context) []RemoteGroup {
 	var groups []RemoteGroup
 	if rl, ok := m.engine.(remoteLister); ok {
@@ -131,7 +131,7 @@ func (m *Manager) ListRemote(ctx context.Context) []RemoteGroup {
 }
 
 // TimerState reports the systemd timer's enablement via
-// `systemctl is-enabled bentoo-snapshot.timer` (R5.5). It is best-effort: a
+// `systemctl is-enabled bentoo-snapshot.timer`. It is best-effort: a
 // non-zero exit (e.g. the timer is disabled or absent) is mapped to the trimmed
 // output rather than a hard error, so `status` always has something to print.
 func TimerState(ctx context.Context, run Runner) string {
@@ -147,7 +147,7 @@ func TimerState(ctx context.Context, run Runner) string {
 }
 
 // TimerNextRun reports the timer's next scheduled run via
-// `systemctl list-timers bentoo-snapshot.timer --no-pager` (008 R5.1). Like
+// `systemctl list-timers bentoo-snapshot.timer --no-pager`. Like
 // TimerState it is best-effort: it returns the trimmed data line naming the
 // timer unit, or "" when no such line is available (callers print "unknown").
 func TimerNextRun(ctx context.Context, run Runner) string {

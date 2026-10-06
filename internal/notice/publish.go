@@ -30,14 +30,14 @@ type Result struct {
 	// Paths lists every file written, the news item first.
 	Paths []string
 	// YAML is the site document, for the command to print when no
-	// notice.site_path is configured (R4.2).
+	// notice.site_path is configured.
 	YAML []byte
-	// Warnings are the news renderer's (R3.5).
+	// Warnings are the news renderer's.
 	Warnings []string
 }
 
 // NewsPath is the news item of id in overlay:
-// metadata/news/<id>/<id>.en.txt (R3.1).
+// metadata/news/<id>/<id>.en.txt.
 func NewsPath(overlay, id string) string {
 	return filepath.Join(overlay, "metadata", "news", id, id+".en.txt")
 }
@@ -47,16 +47,16 @@ func SiteNoticesDir(sitePath string) string {
 	return filepath.Join(sitePath, "src", "content", "notices")
 }
 
-// SitePath is the site notice file of id (R4.1).
+// SitePath is the site notice file of id.
 func SitePath(sitePath, id string) string {
 	return filepath.Join(SiteNoticesDir(sitePath), id+".yaml")
 }
 
 // Publish writes n as a news item in overlay and, when sitePath is not empty,
 // as a site notice file. Every destination is checked before anything is
-// written (R1.7, R1.8, R4.3, R4.4); both files are created without replacing
+// written; both files are created without replacing
 // anything; and when the site file cannot be written the news item is removed
-// again, so the ID stays free (R4.5).
+// again, so the ID stays free.
 func Publish(ctx context.Context, n Notice, overlay, sitePath string) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("publishing notice %s: %w", n.ID, err)
@@ -117,7 +117,7 @@ func Publish(ctx context.Context, n Notice, overlay, sitePath string) (Result, e
 	return res, nil
 }
 
-// createNewsDir creates the item's directory, 0755 whatever the umask (R3.7).
+// createNewsDir creates the item's directory, 0755 whatever the umask.
 // os.Mkdir, unlike a check followed by MkdirAll, fails when the directory
 // appeared since the pre-check, so a concurrent publish of the same ID loses.
 func createNewsDir(dir string) error {

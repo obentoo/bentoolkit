@@ -10,7 +10,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
-// The four structural axes of D4, spelled once so a consumer selects on these
+// The four structural axes, spelled once so a consumer selects on these
 // rather than on a string it typed a second time.
 const (
 	// axisInherit is the axis that would have caught issue #33, and the reason
@@ -55,18 +55,16 @@ const axisBaselineLabel = "::" + baselineRepo
 // It exists because of the very case this file was written for: 85 option names
 // on one line is not a finding anybody reads, and the number is what carries the
 // meaning anyway. The count of the omitted names is always printed, so the SIZE
-// of the difference survives the truncation (R2.4).
+// of the difference survives the truncation.
 const axisNameSample = 5
 
 // AxisFinding is one structural difference between our ebuild and the ::gentoo
-// baseline, on one of the four axes of D4.
+// baseline, on one of the four structural axes.
 //
 // It renders NOTHING at its zero value, and a nil slice of them is the "nothing
 // to say" state rather than a missing answer. That is what lets the field ride
 // on an existing result without changing a byte of what `overlay compare`
 // prints for a run that did not ask for a baseline review.
-//
-// _Requirements: R2, R2.4_
 type AxisFinding struct {
 	// Axis is the property that differs: inherit, options, iuse or deps.
 	Axis string
@@ -84,29 +82,17 @@ type AxisFinding struct {
 // directories: an axis is a property of one ebuild's text, and a directory would
 // force this to guess which version it was asked about.
 //
-// # No model, no network, no provider
+// No model, no network: it opens two files and nothing else: no process, no host, no git, no
+// reviewer. A provider is not a parameter, so the signature is the guarantee —
+// with `overlay compare --no-review` these findings still answer, and the axis
+// that would have caught issue #33 (see axisInherit) is the cheapest one.
 //
-// It opens two files and reads nothing else. It starts no process, resolves no
-// host, consults no git and takes no reviewer — a provider is not merely absent
-// here, it is not a parameter, so the signature itself is the guarantee. That is
-// deliberate and is the point of the whole file: `--no-review` already exists on
-// `overlay compare`, and with it these findings still answer. See axisInherit
-// for the case that makes this non-negotiable — the one axis that would have
-// caught issue #33 is also the cheapest thing in the report.
+// A set difference is ONE finding naming what moved, not one per element: four
+// "we now inherit X" lines are one sentence read four times and bury the name
+// that matters. The size of each difference is carried in the detail.
 //
-// # One finding per axis, not per element
-//
-// A set difference is reported as ONE finding naming what moved, because four
-// findings saying "we no longer inherit gstreamer-meson", "we now inherit
-// meson", "we now inherit python-any-r1", "we now inherit xdg-utils" is the same
-// sentence read four times, and it buries the one name that matters. The size of
-// each difference is carried in the detail (R2.4).
-//
-// The error return is for a file that will not read, and for nothing else: two
-// ebuilds that differ on every axis are four findings and a nil error, and two
-// identical ebuilds are no findings and a nil error.
-//
-// _Requirements: R2, R2.4_
+// The error return is for a file that will not read, and for nothing else:
+// differing axes are findings with a nil error.
 func CompareAxes(ourPath, baselinePath string) ([]AxisFinding, error) {
 	ours, err := readAxisEbuild(ourPath)
 	if err != nil {
@@ -117,7 +103,7 @@ func CompareAxes(ourPath, baselinePath string) ([]AxisFinding, error) {
 		return nil, fmt.Errorf("comparing the structural axes: reading the %s baseline ebuild: %w", axisBaselineLabel, err)
 	}
 
-	// Emitted in the order D4's table lists them, so a report reads the same way
+	// Emitted in a fixed order, so a report reads the same way
 	// twice. Map iteration decides nothing here.
 	axes := []struct {
 		name   string
@@ -293,7 +279,7 @@ func axisWords(rest string) []string {
 //
 // It is the definition internal/autoupdate/validate.OptionsFromEbuild already
 // uses, re-stated rather than imported because internal/overlay imports nothing
-// from internal/autoupdate and keeps it that way on purpose (D8b).
+// from internal/autoupdate and keeps it that way on purpose.
 //
 // Only the name side is taken. Values are irrelevant to this comparison and
 // ignoring them is what keeps it quiet: `-Dexamples=$(usex test enabled
@@ -657,7 +643,7 @@ func axisUnique(names []string) []string {
 }
 
 // axisSample lists names up to axisNameSample and counts the rest, so a
-// difference of 85 is legible on one line and still reports its size (R2.4).
+// difference of 85 is legible on one line and still reports its size.
 func axisSample(names []string) string {
 	if len(names) <= axisNameSample {
 		return strings.Join(names, ", ")

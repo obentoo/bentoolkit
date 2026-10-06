@@ -3,5 +3,5 @@
 //
 // It depends only on the standard library and internal/common/ebuild, so both
 // internal/overlay and internal/autoupdate/validate can import it without one
-// importing the other (story 061, audit finding F6).
+// importing the other.
 package repo

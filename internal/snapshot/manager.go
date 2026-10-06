@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Manager wires the configured drivers and runs the snapshot pipeline (AD10).
+// Manager wires the configured drivers and runs the snapshot pipeline.
 type Manager struct {
 	engine     Engine
 	shippers   []Shipper
@@ -25,8 +25,8 @@ type managerOptions struct {
 }
 
 // WithManagerLogger hands the Manager the invocation's logger, which it passes
-// to every engine, ship and notifier it builds (R5.2). Without it they discard
-// their warnings (R5.3).
+// to every engine, ship and notifier it builds. Without it they discard
+// their warnings.
 func WithManagerLogger(l *slog.Logger) ManagerOption {
 	return func(o *managerOptions) { o.log = l }
 }
@@ -35,7 +35,7 @@ func WithManagerLogger(l *slog.Logger) ManagerOption {
 // snapshot.toml path; it locates the sibling btrbk.conf the engine drives. run is
 // the injectable subprocess seam (nil → production execRunner); ssh targets are
 // folded into the engine's btrbk.conf so btrbk performs send/receive during
-// Create (AD5).
+// Create.
 func NewManager(cfg Config, configPath string, run Runner, opts ...ManagerOption) (*Manager, error) {
 	var o managerOptions
 	for _, opt := range opts {
@@ -74,15 +74,15 @@ func NewManager(cfg Config, configPath string, run Runner, opts ...ManagerOption
 }
 
 // Run executes the pipeline per subvolume — Create → Prune → Send for each
-// shipper — accumulating a RunResult (R7, R7.1). A failed stage is recorded and
+// shipper — accumulating a RunResult. A failed stage is recorded and
 // the run continues so other subvolumes/ships are still attempted; a cancelled
-// context short-circuits before the next subvolume (R8.1). The Notifier hook is
-// invoked exactly once with the final result (R7.3).
+// context short-circuits before the next subvolume. The Notifier hook is
+// invoked exactly once with the final result.
 func (m *Manager) Run(ctx context.Context) (RunResult, error) {
 	start := time.Now()
 	result := RunResult{StartedAt: start}
 
-	// Best-effort pre-run signal (e.g. healthchecks /start, R2.3). It is
+	// Best-effort pre-run signal (e.g. healthchecks /start). It is
 	// outcome-independent and never changes the run — any error is ignored.
 	if s, ok := m.notifier.(starter); ok {
 		_ = s.Start(ctx)
@@ -131,7 +131,7 @@ func (m *Manager) Run(ctx context.Context) (RunResult, error) {
 		}
 	}
 
-	// Notify once with the accumulated result (no-op default until story 005).
+	// Notify once with the accumulated result.
 	_ = m.notifier.Notify(ctx, result)
 
 	result.Duration = time.Since(start)
@@ -142,7 +142,7 @@ func (m *Manager) Run(ctx context.Context) (RunResult, error) {
 }
 
 // remotePruner is implemented by shippers that can apply the GFS retention
-// policy to their remote on demand (008 R3.1). Manager.Prune type-asserts it to
+// policy to their remote on demand. Manager.Prune type-asserts it to
 // select which shippers participate — currently only the archive shipper: ssh
 // retention is delegated to btrbk's target_preserve, and restic prunes via
 // forget --prune during Send, so neither has an out-of-band remote prune.
@@ -150,16 +150,16 @@ type remotePruner interface {
 	PruneRemoteOnDemand(ctx context.Context, subvolumes []string) error
 }
 
-// Prune applies the [engine.retention] policy on demand (008 R3.1): the
+// Prune applies the [engine.retention] policy on demand: the
 // engine-native prune per subvolume (btrbk clean / snapper cleanup timeline),
 // then the remote GFS sweep per archive ship. A non-empty shipScope narrows the
-// prune to the named destination ONLY (008 R3.2): the engine-local prune is
+// prune to the named destination ONLY: the engine-local prune is
 // skipped entirely and just that ship's remote is pruned; an unknown scope
 // returns an error before any stage runs. UNLIKE the post-ship best-effort
 // prune inside Send, every failure here is recorded as a failed stage — a
 // user-invoked prune must not hide errors — and, mirroring Run, a failed
 // result yields a non-nil error. A cancelled context short-circuits before the
-// next stage (R8.1).
+// next stage.
 func (m *Manager) Prune(ctx context.Context, shipScope string) (RunResult, error) {
 	start := time.Now()
 	result := RunResult{StartedAt: start}

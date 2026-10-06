@@ -80,8 +80,8 @@ func refuseMethodDowngrade(req *http.Request, via []*http.Request) error {
 //  2. a host check for a request that still carries its body (307/308): the
 //     body holds the serial and the identity fields, and it was addressed to
 //     fetch_url's host, so a redirect that would re-post it to another
-//     hostname is refused and nothing is sent there (S052-R7.1). A 307/308 on
-//     the same hostname is followed (S052-R7.2);
+//     hostname is refused and nothing is sent there. A 307/308 on the same
+//     hostname is followed;
 //  3. httpx.CredentialRedirectPolicy, for the credential headers and the
 //     redirect limit.
 //
@@ -126,7 +126,7 @@ func (s *authFetchSpec) resolveEndpointID(ctx context.Context, version string) (
 	req.Header.Set("User-Agent", authFetchUserAgent)
 
 	// No credential rides here; the policy re-imposes the redirect limit a
-	// custom CheckRedirect would otherwise drop (S052-R4.6).
+	// custom CheckRedirect would otherwise drop.
 	client := &http.Client{Timeout: s.timeout, CheckRedirect: httpx.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req) //nolint:gosec // G704: req targets the packages.toml fetch_id_url, fetched by design; checkFetchURLTemplates fixes its host at parse time, and no credential rides on this leg (httpx.CredentialRedirectPolicy bounds redirects)
@@ -185,7 +185,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 
 	// Redirects are FOLLOWED here, unlike on the form leg: this is already a GET
 	// with no body, so nothing can be dropped, and a CDN edge redirecting to a
-	// region is ordinary. The shared policy still applies (S052-R4.6).
+	// region is ordinary. The shared policy still applies.
 	client := &http.Client{Timeout: s.timeout, CheckRedirect: httpx.CredentialRedirectPolicy}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)

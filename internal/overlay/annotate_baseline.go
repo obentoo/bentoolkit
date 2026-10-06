@@ -11,69 +11,22 @@ import (
 
 // AnnotateBaseline measures every compared package against the ::gentoo ebuild
 // it should be compared with, and writes the answers onto the finished report:
-// which baseline was used (R1.1), how the two ebuilds differ structurally
-// (R2.4), what our ebuild declares about those differences (R3.1), and what the
-// three-way reduction made of the diff (R2.4, R2.5).
+// which baseline was used, how the two ebuilds differ structurally, what our
+// ebuild declares about those differences, and what the three-way reduction made
+// of the diff. It follows AnnotateAuthorship and AnnotateReviews.
 //
-// It follows AnnotateAuthorship and AnnotateReviews exactly, which is the point
-// of it existing at all. Each of those producers already answers its own
-// question; without one pass writing the answers onto CompareResult, every one
-// of them returns a value into the air and no renderer can read it.
+// It runs ONLY when the review was requested: FormatReport never learns the
+// flags, so every field written here renders nothing at its zero value, and
+// nothing may call this from CompareWithProvider — that keeps `overlay compare`
+// without `--realign` byte-identical. It runs after the sorted comparison and
+// changes no Verdict, Status, count or ordering.
 //
-// # It runs ONLY when the review was requested
-//
-// That is the whole mechanism behind the promise that `overlay compare` without
-// `--realign` is byte-identical to the shipped command (R7.2). FormatReport
-// takes a *CompareReport and never learns which flags were passed, so the gate
-// cannot live in the renderer: instead every field this pass writes renders
-// nothing at its zero value, and the pass that fills them is called by the
-// caller that asked for the review. Nothing calls it from inside
-// CompareWithProvider, and nothing may — a plain comparison must leave every one
-// of these fields untouched.
-//
-// # It runs AFTER the comparison, and changes nothing the comparison decided
-//
-// Like both passes it mirrors, it runs once the concurrent comparison has
-// returned and the results are sorted, so nothing here is concurrent. It writes
-// five fields onto CompareResult plus one counter on the report, and reads
-// everything else. No Verdict, no Status, no count and no ordering can change
-// (R4.3, R5.8): zero those six fields again and the rendering is byte-identical
-// to the one the comparison produced.
-//
-// # It returns nothing, deliberately — and it does leave its FINDINGS behind
-//
-// What it does not leave to a renderer is WHAT IT ESTABLISHED. Before story 046
-// every one of those answers existed only as a line this package had already
-// composed and coloured, so a caller holding the report could print it and do
-// nothing else with it: no export, no second rendering, no count, and no test
-// that did not capture stdout (S046-R5.1, R5.2; design.md D7). The answers are
-// values now, and this pass finishes by asking EstablishFindings to rebuild
-// report.Findings, so the caller is holding them the moment the pass returns.
-//
-// Rebuilding rather than appending is what makes that safe to do twice. The
-// findings are a pure function of the report, so a second call — and
-// `overlay compare` makes one, once all four annotation passes have run —
-// produces the same list rather than a doubled one. An append here would be
-// erased by that later call, which is the failure the rebuild avoids by
-// construction.
-//
-// Every PER-PACKAGE way this can fail is a way of NOT KNOWING — an ebuild that
-// will not read, an atom that names no package — and the zero value already says
-// that, in the one way the report can print: by saying nothing.
-//
-// The RUN-LEVEL failure, "there is no ::gentoo tree at all", is the one thing
-// that may not render as silence, so it is recorded rather than returned:
-// MarkBaselineSkipped writes it onto the report, and the caller derives the exit
-// code from that field (D9). The command still asks LocateBaselineTree for itself
-// before any comparison is run — this pass does not replace that check, it stops
-// the same state from being unreported when the pass is reached without one,
-// which AnnotateRealignVerdicts does whenever a caller has not annotated yet.
-//
-// It reads only files, inside the two trees it was given. It runs no command,
-// resolves no host and consults no git — the local ::gentoo is a shallow clone
-// whose history is absent by construction (R1.4).
-//
-// _Requirements: R1, R1.1, R2, R2.4, R6, R6.1, R6.4_
+// It ends by rebuilding report.Findings with EstablishFindings; rebuilding
+// rather than appending keeps a second call from doubling the list. A
+// per-package failure is a way of NOT KNOWING and leaves the zero value; the
+// run-level failure (no ::gentoo tree) is recorded by MarkBaselineSkipped, and
+// the caller derives the exit code from it. It reads only files in the two
+// trees: no command, no host, no git (the local ::gentoo is a shallow clone).
 func AnnotateBaseline(report *CompareReport, prov provider.Provider, opts CompareOptions) {
 	if report == nil {
 		return
@@ -81,31 +34,22 @@ func AnnotateBaseline(report *CompareReport, prov provider.Provider, opts Compar
 
 	// The ::gentoo tree is reached THROUGH THE PROVIDER and never through a path
 	// of its own. A review run is refused unless the provider is a
-	// PackageDirProvider on ::gentoo (R7.4), so the provider IS the tree, and a
+	// PackageDirProvider on ::gentoo, so the provider IS the tree, and a
 	// second way to name it would be a second thing to disagree with the first.
 	tree, ok := baselineTreeOf(prov, report.Results)
 	if !ok {
 		// No ::gentoo tree behind this provider at all, so NOTHING was examined —
-		// and that is the one outcome this review may not render as silence
-		// (R1.5). Omitting every baseline field would leave the run
-		// indistinguishable from one whose packages all matched ::gentoo exactly,
-		// which is "we could not look" reported as "nothing differs".
+		// the one outcome this review may not render as silence: omitting every
+		// baseline field would report "we could not look" as "nothing differs".
 		//
-		// NoBaselineCount deliberately stays 0 beside it. "We could not look" is
-		// not "::gentoo carries none of them", and the second is precisely what a
-		// count of len(Results) would assert. The two states travel in different
-		// channels: this one is the run's, and Baseline.Unexamined is the
-		// package's.
-		// It reaches the caller as a FINDING as well as a field, and
-		// MarkBaselineSkipped is what does both. A field is something a renderer
-		// has to know to look at; the run that examined nothing would otherwise be
-		// missing from every export and every count that walks the findings, which
-		// is "we could not look" reported as silence by another route (S046-R5.1).
+		// NoBaselineCount deliberately stays 0: "we could not look" is not
+		// "::gentoo carries none of them", which a count of len(Results) would
+		// assert. This state is the run's; Baseline.Unexamined is the package's.
 		//
-		// It is established THERE rather than by a second call here so that every
-		// caller of MarkBaselineSkipped gets it — `overlay compare` marks the skip
-		// itself, before this pass is ever reached — instead of only the one path
-		// that remembered to ask.
+		// MarkBaselineSkipped records it as both a field and a FINDING, so the run
+		// is not missing from every export and count that walks the findings. It
+		// does both there rather than here so every caller gets it — `overlay
+		// compare` marks the skip itself, before this pass is reached.
 		MarkBaselineSkipped(report, baselineTreeCandidateOf(prov))
 		return
 	}
@@ -116,15 +60,14 @@ func AnnotateBaseline(report *CompareReport, prov provider.Provider, opts Compar
 		annotateOneBaseline(&report.Results[i], tree, opts)
 	}
 
-	// R6.4, computed as the very sentence the requirement states: how many
-	// results ::gentoo carries no version of. It is deliberately a separate walk
+	// How many results ::gentoo carries no version of. It is a separate walk
 	// over the finished results rather than a counter incremented above, so the
 	// number and the rows can never disagree — a report claiming 3 while 4 rows
 	// carry no baseline is the one failure a count like this has.
 	report.NoBaselineCount = countNoBaseline(report.Results)
 
-	// Everything the review just established, as values the caller receives
-	// (S046-R5.1). It is LAST because it reads the fields written above: a
+	// Everything the review just established, as values the caller receives.
+	// It is LAST because it reads the fields written above: a
 	// rebuild placed before the loop would produce the list this pass was called
 	// to replace.
 	EstablishFindings(report)
@@ -152,7 +95,7 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 
 	if !baseline.Found || baseline.Unexamined != "" || baseline.Path == "" {
 		// Nothing readable to compare against. Baseline.Unexamined already
-		// carries the reason where there is one (D2), so the three content
+		// carries the reason where there is one, so the three content
 		// answers below stay empty rather than restating it three times.
 		return
 	}
@@ -162,7 +105,7 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 		return
 	}
 
-	// The structural axes (R2.4). CompareAxes errs only on a file that will not
+	// The structural axes. CompareAxes errs only on a file that will not
 	// read; the baseline side was read a moment ago by ResolveBaseline, so a
 	// failure here is our own ebuild moving underneath the run — the same rare
 	// case AnnotateReviews warns about, and worth the same one line, because it
@@ -175,9 +118,8 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 	}
 	r.Axes = axes
 
-	// What the ebuild declares about those differences (R3.1), with Expired
-	// decided against the tree by production rather than by whoever reads it
-	// (R3.3).
+	// What the ebuild declares about those differences, with Expired decided
+	// against the tree by production rather than by whoever reads it.
 	//
 	// The error and the value are BOTH used, which is ParseDivergences' own
 	// contract: a malformed tag is reported while the well-formed declarations
@@ -192,31 +134,23 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 		r.Declarations = EvaluateDeclarations(declared, gentooTree, atom)
 	}
 
-	// The three-way reduction (R2.4, R2.5). The HUNKS are discarded: the report
-	// prints how many differences fell into each class and never their text,
-	// because rendering the baseline's own lines is indistinguishable from
-	// offering them as a replacement — which is the wholesale-realignment
-	// proposal this story exists to prevent.
+	// The three-way reduction. The HUNKS are discarded: the report prints how
+	// many differences fell into each class and never their text, because
+	// rendering the baseline's own lines is indistinguishable from offering them
+	// as a replacement — the wholesale-realignment proposal this review exists to
+	// prevent.
 	//
-	// The third point is CHOSEN here rather than left nil (R3). The chooser
-	// offers a ::gentoo version above the baseline where one exists, and our own
-	// previous version otherwise — the third point this overlay actually has, in
-	// 86 of the 158 packages whose version differs from ::gentoo's. Where it has
-	// neither, nil still travels, and the report says no third point was
-	// available rather than pretending one was subtracted (R3.3).
-	//
-	// What it costs is ONE MORE DIRECTORY LISTING per package, at most two: the
-	// ::gentoo package directory ResolveBaseline listed a moment ago is listed
-	// again for the versions above the baseline, and our own is listed only when
-	// that found nothing. No extra ebuild is read here — ReduceDiff reads the
-	// pair itself, and refuses it unread when the span is too wide — and no
-	// command is run, on the same terms as everything else on this path (R1.4).
+	// The third point is CHOSEN here rather than left nil: a ::gentoo version
+	// above the baseline where one exists, our own previous version otherwise (86
+	// of the 158 packages whose version differs from ::gentoo's have one). Where
+	// neither exists nil travels, and the report says no third point was
+	// available. It costs at most two directory listings per package and reads
+	// no extra ebuild — ReduceDiff reads the pair itself.
 	//
 	// The WIDTH of what is offered is not checked here and must not be:
-	// reduceSpan owns that bound (R3.4), and a chooser that withheld a wide pair
-	// itself would report Span 0 — "no third point existed" — for a package where
-	// one existed and was refused for being too wide. Those are different facts
-	// about the same package, and the report distinguishes them (R2.5).
+	// reduceSpan owns that bound, and a chooser that withheld a wide pair would
+	// report Span 0 — "no third point existed" — where one existed and was
+	// refused for being too wide. The report distinguishes those two facts.
 	move := baselineVersionMove(gentooTree, opts.OverlayPath, atom, r.LocalVersion, baseline)
 	classified, _ := ReduceDiff(ourEbuild, baseline.Path, move)
 	r.Classified = classified
@@ -224,41 +158,20 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 
 // baselineVersionMove chooses the third point the reduction subtracts for one
 // package — the pair of ebuilds whose difference IS a version move — or nil when
-// this overlay has none to offer (R3, R3.3).
+// this overlay has none: preference 1 is a ::gentoo version above the baseline,
+// preference 2 our own previous version.
 //
-// It answers from the CONTENT of the two trees and nothing else: one directory
-// listing each, read through the same carriedVersions the baseline itself is
-// chosen with, so nothing here is a second notion of what an ebuild filename is.
-// It runs no command and consults no git, for the reason ResolveBaseline does not
-// either — the local ::gentoo is a shallow clone whose history is absent by
-// construction, so a chooser that read a log would work on a fixture and answer
-// nothing on the host (R1.4).
+// It answers from the CONTENT of the two trees: one directory listing each,
+// through the same carriedVersions the baseline is chosen with. It runs no
+// command and consults no git — the local ::gentoo is a shallow clone without
+// history. A directory that will not list yields no third point, not an error.
 //
-// # It states D3's order and nothing else
-//
-// Preference 1 is a ::gentoo version above the baseline, preference 2 is our own
-// previous version, and where neither exists the answer is nil (R3.3). Each
-// preference decides for itself, below, what it will offer and why; this
-// function's whole content is which of them is asked first.
-//
-// # It does not judge the WIDTH of what it offers
-//
-// reduceSpan owns that bound (R3.4), and this story leaves reduce.go untouched. A
-// pair withheld here for being wide would reach the report as no pair at all —
-// Span 0 — while a pair offered and refused reports the width that refused it,
-// and those are different facts about the same package (R2.5). Under a corrected
-// nearest-version baseline preference 1 is refused by that bound every time
-// today (D4); it stays first and stays implemented because R3.2 makes it a
-// capability. Whether a REFUSED preference 1 should fall back to preference 2 is
-// deliberately not decided here: nothing in the overlay pins it, and a fallback
-// chosen quietly inside a chooser is a subtraction nobody agreed to.
-//
-// A directory that will not list yields NO THIRD POINT rather than an error, as
-// everything on this path already degrades: this is a report, and "we could not
-// look for a third point" renders as "there was none" — the same sentence, and
-// the same exit code.
-//
-// _Requirements: R2, R2.1, R3, R3.1, R3.2, R3.3, R3.4_
+// It does not judge the WIDTH of what it offers: reduceSpan owns that bound, and
+// a pair withheld here would reach the report as Span 0 rather than as the width
+// that refused it. Under a nearest-version baseline preference 1 is refused by
+// that bound every time today; it stays first because it is a capability.
+// Whether a refused preference 1 falls back to preference 2 is deliberately not
+// decided: a fallback chosen quietly here is a subtraction nobody agreed to.
 func baselineVersionMove(gentooTree, overlayPath, atom, ourVersion string, baseline Baseline) *VersionMove {
 	if ourVersion == "" || !baseline.Found || baseline.Version == "" || baseline.Path == "" {
 		// No baseline to move away from, or no version of ours to move to. Both
@@ -282,9 +195,8 @@ func baselineVersionMove(gentooTree, overlayPath, atom, ourVersion string, basel
 	return ourPreviousVersionMove(overlayPath, category, pkg, ourVersion)
 }
 
-// gentooVersionMoveAbove is D3's first preference: the move from the baseline up
-// to the next version ::gentoo carries, or nil when it carries none above it
-// (R3.2).
+// gentooVersionMoveAbove is the first preference: the move from the baseline up
+// to the next version ::gentoo carries, or nil when it carries none above it.
 //
 // It is FIRST because the move is then written in ::gentoo's own hand — better
 // provenance for the same subtraction than a move written in ours, since nobody
@@ -296,8 +208,6 @@ func baselineVersionMove(gentooTree, overlayPath, atom, ourVersion string, basel
 // baseline; and the file the reduction subtracts from is then the very one the
 // report named as the baseline, rather than a second answer to where that ebuild
 // is.
-//
-// _Requirements: R3, R3.2_
 func gentooVersionMoveAbove(gentooTree, category, pkg string, baseline Baseline) *VersionMove {
 	dir := filepath.Join(gentooTree, category, pkg)
 	newer, ok := adjacentVersion(carriedIn(dir, category, pkg), baseline.Version, versionAbove)
@@ -307,20 +217,18 @@ func gentooVersionMoveAbove(gentooTree, category, pkg string, baseline Baseline)
 	return &VersionMove{From: baseline.Path, To: filepath.Join(dir, newer.filename)}
 }
 
-// ourPreviousVersionMove is D3's second preference: the move OUR OWN last bump
+// ourPreviousVersionMove is the second preference: the move OUR OWN last bump
 // made, from the version we carried before this one to the one we carry now, or
-// nil when the overlay carries no previous version (R3.1, R3.3).
+// nil when the overlay carries no previous version.
 //
 // This is the third point this overlay actually has — 86 of its 158
 // different-version packages carry one, against 1 that has a ::gentoo version
-// above the baseline — and D3 proved by execution that the shipped matching rule
+// above the baseline — and running the shipped matching rule proved that it
 // reads it correctly. What our bump changed on text that still agreed with the
 // baseline renders as the same two-sided hunk in both diffs and is subtracted as
 // version noise; a divergence that predates the bump is absent from the move
 // entirely and stays ours, which is the deliberate work the reduction exists to
 // leave behind.
-//
-// _Requirements: R3, R3.1, R3.3_
 func ourPreviousVersionMove(overlayPath, category, pkg, ourVersion string) *VersionMove {
 	if overlayPath == "" {
 		return nil
@@ -344,7 +252,7 @@ func ourPreviousVersionMove(overlayPath, category, pkg, ourVersion string) *Vers
 	previous, ok := adjacentVersion(carried, ourVersion, versionBelow)
 	if !ok {
 		// Nothing of ours below our own version — the answer for the 72 of the 158
-		// this overlay carries no previous version of. D3's third preference is
+		// this overlay carries no previous version of. The rule is
 		// that there is then no third point, not a worse one.
 		return nil
 	}
@@ -398,27 +306,20 @@ func carriedAt(carried []carriedEbuild, version string) (carriedEbuild, bool) {
 // adjacentVersion is the carried version NEXT TO pivot on one side: the lowest
 // above it, or the highest below it.
 //
-// The NEIGHBOUR is what both preferences want, and that is the width bound's
-// doing rather than a preference for small numbers. reduceSpan refuses a third
-// point spanning further than the baseline is from us (R3.4), so the narrowest
-// pair is the one most likely to be accepted at all — offering ::gentoo's newest
-// version, or our oldest, offers a pair that is refused more often and subtracts
-// nothing when it is. A wider pair does carry more changes and could match more
-// of our differences; that is the argument AGAINST it, not for it, on the same
-// reasoning the bound itself rests on: more churn in the move is more room for a
-// deliberate divergence of ours to be subtracted as version noise.
+// The NEIGHBOUR is what both preferences want because of the width bound:
+// reduceSpan refuses a third point spanning further than the baseline is from
+// us, so the narrowest pair is the one most likely to be accepted. A wider pair
+// carries more changes and could match more of our differences — that is the
+// argument against it: more churn in the move is more room for a deliberate
+// divergence of ours to be subtracted as version noise.
 //
-// Both sides are answered by one function because they are one question asked in
-// two directions, and because the ordering behind them must be the same in both.
-// That ordering is ebuild.CompareVersions — the repository's own, never a second
-// opinion assembled here, and never versionDistance, which measures a magnitude
-// and cannot say which of two versions is later.
+// The ordering is ebuild.CompareVersions, the same in both directions — never
+// versionDistance, which measures a magnitude and cannot say which version is
+// later.
 //
 // A candidate that orders EQUAL to the pivot (1.0-r0 beside 1.0) is on neither
-// side and is skipped: the two are different ebuilds, but the difference between
-// them is not a version move, and a pair built from them would subtract one
-// file's text from the other's under a name nothing supports. 1.0.0 is not such
-// a candidate — it is a real version above 1.0 and is offered as its neighbour.
+// side and is skipped: the difference between them is not a version move. 1.0.0
+// is not such a candidate — it is a real version above 1.0.
 func adjacentVersion(carried []carriedEbuild, pivot string, direction int) (carriedEbuild, bool) {
 	var nearest carriedEbuild
 	found := false
@@ -438,42 +339,21 @@ func adjacentVersion(carried []carriedEbuild, pivot string, direction int) (carr
 // baselineTreeOf resolves the ::gentoo repository root behind a provider. ok is
 // false when the provider has no local tree at all, which is the API-only case.
 //
-// It is derived from LocalPackagePath — the one capability the comparison itself
-// already type-asserts for (resolvePackagePaths) — rather than from a path
-// parameter, because the review is refused outright unless the provider is a
-// PackageDirProvider on ::gentoo (R7.4). Both implementations answer
+// It is derived from LocalPackagePath — the capability the comparison already
+// type-asserts for — because the review is refused unless the provider is a
+// PackageDirProvider on ::gentoo. Both implementations answer
 // <root>/<category>/<package>, so the root is what remains once the two names
-// the caller supplied are taken back off, and the two names are CHECKED against
-// the answer rather than assumed: a provider that resolved a package somewhere
-// else entirely would otherwise have its parent's parent read as a repository
-// root, and every baseline in the report would come from a directory nobody
-// named.
+// are taken back off, and the names are CHECKED against the answer: a provider
+// that resolved a package elsewhere would otherwise yield a root nobody named.
 //
-// It walks the results rather than asking about one, because the first package
-// need not be one ::gentoo carries: a real provider answers ErrNotFound for the
-// 84 packages that have no counterpart, and taking that for "no tree" would
-// disable the review on an overlay whose first category happens to be
-// Bentoo's own.
-//
-// # A result set that answers for NONE of them is still a tree
-//
-// The walk needs one package ::gentoo carries to be IN VIEW, and a run can
-// legitimately have none: `--realign --only-outdated` where nothing outdated has
-// a counterpart, or any selection that lands entirely on the overlay's own work.
-// Read as "no tree", that made the whole review a silent no-op at exit 0 over a
-// repository that was synced and perfectly readable — the same failure R1.5
-// exists to prevent, arriving through which packages the operator asked to see.
-//
-// So when the walk answers for nobody, the provider is asked where its own tree
-// is, and the answer is RECOGNISED rather than trusted: LocateBaselineTree wants
-// Portage's own marker, so a directory standing where a repository should be is
-// refused here exactly as it is refused to the command. That check stats two
-// paths and reads nothing.
-//
-// The walk comes FIRST and keeps every answer it used to give, which is not only
-// conservatism: for a `--clone` provider the walk's own LocalPackagePath calls are
-// what bring the tree onto disk, and a marker looked for before that would be
-// looked for in a directory nothing had cloned into yet.
+// It walks the results because the first package need not be one ::gentoo
+// carries (84 packages answer ErrNotFound). When the walk answers for NONE of
+// them — `--realign --only-outdated` with nothing outdated in ::gentoo — that is
+// still a tree: the provider is asked where its tree is, and the answer is
+// RECOGNISED through LocateBaselineTree's Portage marker rather than trusted.
+// Reading it as "no tree" made the review a silent no-op at exit 0. The walk
+// comes FIRST because for a `--clone` provider its LocalPackagePath calls are
+// what bring the tree onto disk.
 func baselineTreeOf(prov provider.Provider, results []CompareResult) (string, bool) {
 	dirProv, ok := prov.(provider.PackageDirProvider)
 	if !ok {
@@ -537,7 +417,7 @@ func baselineTreeCandidateOf(prov provider.Provider) string {
 // It is built here rather than through resolvePackagePaths because that resolver
 // refuses two DIFFERENT versions on purpose — it exists to compare like with
 // like — and a baseline is most interesting precisely when ::gentoo is at
-// another version. R2.1 says the content is compared regardless of the version
+// another version. The content is compared regardless of the version
 // relationship, so this side is named from what the scan already found.
 //
 // Nothing here comes from registry input. Category and Package are the directory
@@ -552,8 +432,7 @@ func ourBaselineEbuild(r CompareResult, opts CompareOptions) string {
 	return filepath.Join(opts.OverlayPath, r.Category, r.Package, r.Package+"-"+r.LocalVersion+".ebuild")
 }
 
-// countNoBaseline is R6.4's number: how many results ::gentoo carries no version
-// of (R1.3).
+// countNoBaseline is how many results ::gentoo carries no version of.
 //
 // It counts Baseline.Found and nothing else. Every other candidate definition —
 // results with no Axes, results the comparison called not-in-remote — answers a
@@ -569,32 +448,23 @@ func countNoBaseline(results []CompareResult) int {
 	return missing
 }
 
-// Story 047, sub-task 4.2 addendum: baselineFindingLead and baselineClassLead
-// stood here, the two indents the per-package classification block printed
-// under. Their only readers were renderClassificationLines and
-// classificationClassLines, deleted below with the renderer 4.2 removed, so
-// keeping them would leave this package holding an opinion about an indent it no
-// longer prints. The indent an operator sees is decided by the renderer in
+// The per-package indents (baselineFindingLead, baselineClassLead) were removed
+// with their renderer: the indent an operator sees is decided by the renderer in
 // internal/common/report, over the notes cmd/bentoo builds from the findings.
 
 // baselineRunFindings is what the baseline review established about the RUN
 // rather than about any one package: today, exactly the outcome that may never
-// render as silence (R1.5).
+// render as silence.
 //
 // It reads report.BaselineSkipped rather than re-deciding anything, so the
-// finding and the field cannot come to disagree, and it produces nothing when
-// the field is empty — which is every run that reached a ::gentoo tree, and
-// every run that asked for no review at all (R7.2).
+// finding and the field cannot disagree, and produces nothing when the field is
+// empty — every run that reached a ::gentoo tree, and every run that asked for
+// no review at all.
 //
-// # Why the run-level outcome has to be a finding at all
-//
-// "We could not look" and "we looked and everything matched" produce the same
-// per-package output: no baseline lines either way. A consumer that receives
-// only the per-package findings therefore reads the first as the second — it is
-// told that nothing differs from ::gentoo when nothing was compared against it,
-// which is the exact failure S034-R1.5 exists to prevent. The field alone does
-// not fix that: it is a field a renderer has to know to look at, so it goes
-// missing from every export and every count that walks the findings (S046-R5.1).
+// It has to be a finding because "we could not look" and "we looked and
+// everything matched" produce the same per-package output; a consumer of the
+// per-package findings alone would read the first as the second, and the field
+// alone goes missing from every export and count that walks the findings.
 //
 // It carries NO ATOM, and Finding.Atom's own doc says why that is this one
 // kind's property and nobody else's.
@@ -624,7 +494,7 @@ func baselineResultsFindings(results []CompareResult) []Finding {
 
 // baselineResultFindings is one package's baseline review as VALUES, or nil when
 // the review has nothing to say about it — which is every package of every run
-// that requested no review, and is what carries R7.2's byte-identical promise
+// that requested no review, and is what carries the byte-identical promise
 // through to the rendering.
 //
 // The ORDER is the order the report prints: what we measured against, how the
@@ -651,9 +521,9 @@ func baselineResultFindings(r CompareResult) []Finding {
 	// counted.
 	//
 	// The AXIS WORD stays inside the sentence rather than becoming a field of
-	// its own. Finding's fields are the ones a consumer keys on, and the one
-	// R5.1 names is the atom; a field nothing reads yet is a guess at what 047
-	// will want, and 047 is where the report's content is redesigned.
+	// its own. Finding's fields are the ones a consumer keys on, and the one it
+	// keys on is the atom; a field nothing reads yet is a guess at what a later
+	// redesign of the report's content will want.
 	for _, axis := range r.Axes {
 		findings = append(findings, Finding{
 			Kind:     FindingAxisDivergence,
@@ -681,7 +551,7 @@ func baselineResultFindings(r CompareResult) []Finding {
 	// that a renderer which wants to label the guess rather than repeat this
 	// sentence has the guess as a value. Detail keeps the whole sentence for the
 	// reason Detail's doc gives: today's rendered line survives the move
-	// unchanged, and 047 has a before to diff its rewrite against.
+	// unchanged, and a later rewrite has a before to diff against.
 	if verdict := oneLine(r.RealignVerdict); verdict != "" {
 		findings = append(findings, Finding{
 			Kind:     FindingRealignVerdict,
@@ -701,7 +571,7 @@ func baselineResultFindings(r CompareResult) []Finding {
 }
 
 // measuredAgainstFindings names the ebuild this package was measured against
-// (R1.1), or says that the one that should have been read could not be.
+// or says that the one that should have been read could not be.
 //
 // The zero Baseline yields NOTHING, and that is load-bearing rather than
 // tidiness: a package ::gentoo does not carry has the zero value, and so does
@@ -712,14 +582,14 @@ func baselineResultFindings(r CompareResult) []Finding {
 // The two states it can report are separate FINDINGS rather than one with a
 // hedge in it, because a consumer counting "how many packages could not be
 // measured" must be able to do so without reading prose — which is the whole of
-// why the findings are values (S046-R5.1).
+// why the findings are values.
 func measuredAgainstFindings(atom string, r CompareResult) []Finding {
 	baseline := r.Baseline
 	if baseline == (Baseline{}) {
 		return nil
 	}
 
-	// The repository is NAMED and never assumed (R1), which is what the field is
+	// The repository is NAMED and never assumed, which is what the field is
 	// for. baselineRepo stands in only for a value built by hand without one:
 	// this package refuses a realignment run against any other repository long
 	// before this line, so the fallback restates that invariant rather than
@@ -767,7 +637,7 @@ func measuredAgainstFindings(atom string, r CompareResult) []Finding {
 // baselineDistanceProse says how far the baseline is from our version, in the
 // release steps versionDistance measures.
 //
-// It is printed because it BOUNDS what the comparison is worth (D2): a baseline
+// It is printed because it BOUNDS what the comparison is worth: a baseline
 // one patch release away and one three series away are not the same kind of
 // evidence, and a difference measured against the second is a question rather
 // than a finding. The number alone would not say that, so the zero case gets
@@ -784,19 +654,19 @@ func baselineDistanceProse(distance int) string {
 }
 
 // baselineDeclarationFinding states one `# BENTOO-DIVERGENCE:` declaration the
-// ebuild carries (R3.1).
+// ebuild carries.
 //
 // An EXPIRED declaration is the loud one and is its own KIND, not a word inside
 // the sentence. Its condition was evaluated against the tree and is met, so the
 // divergence it was protecting is back in front of the review — and a finding a
 // renderer could not tell apart from every other declaration would leave it
-// quiet forever, which is the failure R3.3 exists to prevent. Said as a kind,
+// quiet forever. Said as a kind,
 // the distinction survives into a count, a filter and the export; said only as
 // the word "EXPIRED" inside prose, it survives into a terminal and nowhere else.
 func baselineDeclarationFinding(atom string, r CompareResult, declaration DeclaredDivergence) Finding {
 	// The axis and the reason are the maintainer's own words, verbatim: nothing
-	// here normalises the spelling, because §7 writes INHERIT and D4 writes
-	// inherit and neither side is authoritative.
+	// here normalises the spelling, because the tag format writes INHERIT, the
+	// axes write inherit, and neither side is authoritative.
 	detail := fmt.Sprintf("(%s) — %s", declaration.Axis, oneLine(declaration.Reason))
 	if declaration.DropWhen != "" {
 		detail += fmt.Sprintf(" · drop-when: %s", oneLine(declaration.DropWhen))
@@ -822,38 +692,31 @@ func baselineDeclarationFinding(atom string, r CompareResult, declaration Declar
 	return finding
 }
 
-// Story 047, sub-task 4.2 addendum — S047-R8.1: classificationLines stood
-// here. Sub-task 4.2 deleted renderBaselineFindings, its last production caller,
-// which left it exercised only by tests — code nothing calls cannot fail for its
-// own reason, and the eleven green tests over it were reporting on nothing.
-//
-// The RATIONALE it carried outlives it and is restated on the value below,
-// because it is about the classification and not about its rendering: the three
+// The classification rationale outlives the removed classificationLines
+// renderer, because it is about the value and not its rendering: the three
 // classes are three NUMBERS rather than one, so "how many differences are
 // unclassified" can be read without arithmetic; the denominator is the
 // arithmetic classifiedTotal states rather than a fourth number typed out, since
 // a total computed twice eventually disagrees with itself; and the REACH is
 // carried beside the counts, because a share whose reach is invisible is
-// indistinguishable from a guess (R2.5).
-//
-// _Requirements: R2, R2.3, R2.4, R2.5, R7.2, S047-R8.1_
+// indistinguishable from a guess.
 
 // classificationFinding is one package's classification as a VALUE, and false
 // when nothing was classified for it.
 //
 // Every result of every run that requested no review is in exactly that state,
-// which is what keeps R7.2's byte-identical promise mechanical here: no
+// which is what keeps the byte-identical promise mechanical here: no
 // classification, no finding, no lines, nothing to join.
 //
 // An UNCLASSIFIED difference is counted in Unclassified and in NEITHER of the
-// other two fields (R2.3). Pushing it into Ours would invite a realignment of
+// other two fields. Pushing it into Ours would invite a realignment of
 // something nobody read, and pushing it into VersionMove would subtract
 // deliberate work as noise. That rule used to be stated by the renderer that
 // printed the three classes on three lines; it is a property of the value, so it
 // is stated and asserted here instead.
 //
 // The COUNTS ride on the finding as numbers, in Classified, beside the sentence
-// that reads them out. That is the whole of R5.2 for this block: a consumer
+// that reads them out. That is the point of this block: a consumer
 // summing unclassified differences across a run, or exporting them as JSON,
 // reads three integers instead of parsing digits back out of a sentence — and
 // the sentence is still there, verbatim, for the report that prints it.
@@ -872,14 +735,9 @@ func classificationFinding(r CompareResult) (Finding, bool) {
 	}, true
 }
 
-// Story 047, sub-task 4.2 addendum — S047-R8.1: renderClassificationLines and
-// classificationClassLines stood here. The first was classificationLines' only
-// helper and the second was its only reader, so both fell with it: a renderer
-// whose last caller is gone is not a renderer, and a test asserting its output
-// asserts nothing an operator can see. What they laid out — the lead sentence,
-// then the three per-class counts under it — is now built by
-// `func comparePkgFacts` in cmd/bentoo from the finding below, carried on
-// ComparePkg.FurtherFindings, and rendered by internal/common/report.
+// The per-class lines (the lead sentence, then the three per-class counts under
+// it) are built by `func comparePkgFacts` in cmd/bentoo from classificationFinding's value,
+// carried on ComparePkg.FurtherFindings, and rendered by internal/common/report.
 
 // classifiedTotal is the denominator every one of the three counts is a share
 // of: the number of differences the reduction actually looked at.
@@ -888,8 +746,6 @@ func classificationFinding(r CompareResult) (Finding, bool) {
 // per-package block and the run-level one can never disagree about what the
 // total is — and so that a class added to Classified later is added to the total
 // in the one place that decides it.
-//
-// _Requirements: R2.4, R2.5_
 func classifiedTotal(classified Classified) int {
 	return classified.VersionMove + classified.Ours + classified.Unclassified
 }
@@ -898,25 +754,17 @@ func classifiedTotal(classified Classified) int {
 // fields Classified reports it in: whether a third point was accepted, how wide
 // it was, and how much of the diff it actually explained.
 //
-// The COUNT is read as well as the pair, and that is the whole of D5. `Reduced`
-// says a third point was accepted, never that it attributed anything, and a third
-// point can be accepted and explain nothing — which is exactly what our own
-// previous version does for a package whose every difference predates its bump.
-// Written from the pair alone the sentence then reads `reduced against a third
-// point spanning N release steps` over a subtraction of zero: the claim R2.3
-// forbids, and a confident sentence about work that did not happen is worse than
-// the honest one it replaces.
+// The COUNT is read as well as the pair. `Reduced` says a third point was
+// accepted, never that it attributed anything, and our own previous version can
+// be accepted and explain nothing for a package whose every difference predates
+// its bump. Written from the pair alone the sentence would read `reduced against
+// a third point spanning N release steps` over a subtraction of zero — a
+// confident sentence about work that did not happen.
 //
-// The count is read OFF THE VALUE rather than taken as a second parameter,
-// because it is already in there. A caller that had to pass the same number
-// alongside the struct carrying it would be a second way of saying what was
-// attributed, and eventually a second answer.
-//
-// `Reduced` itself is unchanged, and deliberately: what moves is what is SAID
-// about an accepted third point that attributed nothing, not whether one was
-// accepted. The field keeps its meaning and the three counts keep theirs.
-//
-// _Requirements: R2, R2.2, R2.3, R2.5_
+// The count is read OFF THE VALUE rather than taken as a second parameter, so
+// there is no second way of saying what was attributed. `Reduced` keeps its
+// meaning: only what is SAID about an accepted third point that attributed
+// nothing changes.
 func baselineReachProse(classified Classified) string {
 	switch {
 	case classified.Reduced && classified.Span == 0:
@@ -936,7 +784,7 @@ func baselineReachProse(classified Classified) string {
 		//
 		// The WIDTH is still stated. A third point existed, and the span is the
 		// only thing that tells this state apart from the one where none was
-		// available (R2.5).
+		// available.
 		return fmt.Sprintf("a third point spanning %d release steps explained nothing", classified.Span)
 	case classified.Reduced:
 		return fmt.Sprintf("reduced against a third point spanning %d release steps", classified.Span)
@@ -947,7 +795,7 @@ func baselineReachProse(classified Classified) string {
 	}
 }
 
-// baselineOtherRepoFinding states one repository other than ::gentoo (R6.1).
+// baselineOtherRepoFinding states one repository other than ::gentoo.
 //
 // The NOT CHECKED case is the reason this has three arms instead of two.
 // "Registered but not available locally" and "looked, and it does not carry it"
@@ -955,16 +803,16 @@ func baselineReachProse(classified Classified) string {
 // repository nobody consulted as one that has nothing.
 //
 // Every arm says INFORMATIVE ONLY in one form or another, because that is the
-// requirement (R6.2): a repository outside ::gentoo has not been through the
+// requirement: a repository outside ::gentoo has not been through the
 // same review, and nothing here proposes a realignment from one.
 //
 // NEITHER Version NOR Upstream is filled, and that is not an omission. Both name
 // a side of the ::gentoo comparison — Finding.Version is ours, Upstream is
 // ::gentoo's — and the version this finding is about belongs to a third
 // repository that is explicitly never a baseline. Putting it in Upstream would
-// label another repository's ebuild as ::gentoo's, which is the one thing R6.2
-// is written to prevent, so it stays inside the sentence until the report's
-// content is redesigned with somewhere honest to put it.
+// label another repository's ebuild as ::gentoo's, which is the one thing the
+// informative-only rule prevents, so it stays inside the sentence until the
+// report's content is redesigned with somewhere honest to put it.
 func baselineOtherRepoFinding(atom string, other OtherRepo) Finding {
 	finding := Finding{Kind: FindingOtherRepo, Atom: atom}
 	switch {

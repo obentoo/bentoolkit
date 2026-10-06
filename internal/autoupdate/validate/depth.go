@@ -8,27 +8,22 @@ import (
 )
 
 // Depth is how far validation runs for a given bump — the ladder a policy points
-// at when it decides what a bump has earned (R2, R2.1).
+// at when it decides what a bump has earned.
 //
-// THE LADDER IS CUMULATIVE. Each depth includes every depth before it:
-// DepthConfigure means "run everything up to and including configure", not "run
-// configure". A reader who takes the constants as a menu rather than a ladder
-// writes a runner that skips the patch gate on a configure request — which is a
-// validation hole that still reports as a pass.
+// THE LADDER IS CUMULATIVE. DepthConfigure means "run everything up to and
+// including configure", not "run configure". A runner that reads the constants
+// as a menu skips the patch gate on a configure request — a validation hole that
+// still reports as a pass.
 //
-// THE INTEGER ORDERING IS THE CONTRACT, NOT A LABELLING. The rungs are declared
-// shallowest first so that `<` means "shallower than" and the policy resolver can
-// combine a floor with a reviewer's proposal as max(floor, proposed). Reordering
-// the constants does not rename anything — it silently changes which validation
-// a bump gets.
+// THE INTEGER ORDERING IS THE CONTRACT. The rungs are declared shallowest first
+// so that `<` means "shallower than" and the policy resolver can combine a floor
+// with a reviewer's proposal as max(floor, proposed). Reordering the constants
+// silently changes which validation a bump gets.
 //
-// QMERGE IS DELIBERATELY ABSENT, AND ALWAYS WILL BE. The ladder stops at
-// DepthInstall, which assembles the package IMAGE under ${D} inside
-// PORTAGE_TMPDIR. The phase that touches the running system is qmerge, and it is
-// not a deeper rung of this ladder — it is a different activity. This ladder
-// answers "does this bump still hold together"; installing a package onto the
-// host answers "do I want this version", which is the package manager's question
-// and not a validator's (S042-D2).
+// QMERGE IS DELIBERATELY ABSENT. The ladder stops at DepthInstall, which
+// assembles the package IMAGE under ${D} inside PORTAGE_TMPDIR. qmerge touches
+// the running system and answers "do I want this version" — the package
+// manager's question, not a validator's.
 type Depth int
 
 const (
@@ -68,11 +63,11 @@ const (
 	// it.
 	//
 	// It costs a compile plus src_install, not two compiles: the phases cascade
-	// inside a single `ebuild` invocation (S042-D4).
+	// inside a single `ebuild` invocation.
 	//
 	// The gate additionally disables src_test, which runs between compile and
 	// install, so that the verdict is a fact about the CANDIDATE rather than
-	// about the host's FEATURES (S042-D3). A pass states both omissions.
+	// about the host's FEATURES. A pass states both omissions.
 	DepthInstall
 )
 
@@ -125,7 +120,7 @@ func (d Depth) String() string {
 // and the first surprise there is a config that reads as one depth and runs as
 // another.
 //
-// Every rejection names the offender AND lists the valid set (R2.1). An error
+// Every rejection names the offender AND lists the valid set. An error
 // that said only "invalid depth" would send the operator to read the source for
 // five short words.
 func ParseDepth(s string) (Depth, error) {

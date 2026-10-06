@@ -1,44 +1,24 @@
 package main
 
 // `overlay autoupdate --check --llm`: prove what would survive an apply, and
-// apply none of it (S033-R9).
-//
-// The command has two halves that can go wrong, and the code below is arranged
-// around them rather than around the data.
+// apply none of it. The code is arranged around the two halves that can go wrong.
 //
 // THE COST. A gate above `options` unpacks and builds, so a check can silently
 // cost hours and a pile of downloaded tarballs. Everything the operator needs to
 // price that — how many packages, at what depth, how many distfiles, and how the
 // depths are distributed — is printed BEFORE anything is asked and before the
-// first gate runs (R9.3), and one confirmation covers the whole run (R9.4). The
-// confirmation is confirmSweep's shape, gate for gate
-// (`func confirmSweep` in overlay_autoupdate_sweep.go), so the two commands
-// read alike.
+// first gate runs, and one confirmation covers the whole run, in confirmSweep's
+// shape (overlay_autoupdate_sweep.go) so the two commands read alike.
 //
 // THE REACH. `--check` is documented read-only and the overlay it would write
 // to auto-commits and pushes. Nothing here writes to the overlay on any path:
 // deps.setVersionsForCheck is the one call that could, and it exists precisely
-// so that a test can watch a seam that is never used (R9.2).
+// so that a test can watch a seam that is never used.
 //
-// WHAT IT SAYS AFTERWARDS is not built here any more (S044). This file used to
-// format each section at the moment it printed it — a padded plan block, a
-// verdict line per package, a three-column tally — so nothing held "what this
-// run found" as a value and nothing could be exported, re-rendered or counted
-// without running the command again. Now the run is assembled into
-// internal/common/report's view model, whole, before any of it is displayed
-// (S044-R1.4), and internal/common/report/render prints it in the mode this run
-// resolved to (S044-R2). Two things still print from here, and both are events
-// of the RUN rather than findings about a package: the price above, which has to
-// precede the first gate, and a raise held at the confirmed depth (R9.6).
-//
-// The four hard-coded field widths this file used to declare are gone with that
-// move. A width typed into a format string cannot be right — the correct one
-// depends on the packages this run produced, which is knowable only after it has
-// produced them — and the renderer measures instead (S044-R6.3).
-//
-// That sentence deliberately does not spell the format verb out. A test greps
-// this file for one and fails on any match, comments included, which is the
-// right reading: a width in a comment is one somebody copies back into code.
+// Findings go into internal/common/report's view model, whole, and render
+// measures its own columns, so this file declares no field width (a test greps
+// it for one, comments included). Only events of the RUN print from here: the
+// price, and a raise held at the confirmed depth.
 
 import (
 	"context"
@@ -82,12 +62,12 @@ type validationPlanEntry struct {
 	Reason string
 	// Skipped marks an entry no gate will run for — a binary record, or a
 	// package policy lowered below what its class earns. It is carried as a
-	// field rather than derived at print time because R9.3 requires the reason
-	// to travel with it (R2.6's "counted as skipped, not validated").
+	// field rather than derived at print time because the reason has to
+	// travel with it: such a package is counted as skipped, not validated.
 	Skipped bool
 	// ConfirmedDepth is the deepest depth the operator approved for the WHOLE
-	// run, handed to the gate runner with each entry. It is the ceiling R9.6 is
-	// about: a reviewer may raise a bump up to it without asking again, and a
+	// run, handed to the gate runner with each entry. It is the ceiling for
+	// escalation: a reviewer may raise a bump up to it without asking again, and a
 	// raise past it is held here rather than spent unasked. runValidationCheck
 	// fills it in; buildValidationPlan leaves it empty, because until the plan
 	// is run nothing has been confirmed.
@@ -103,13 +83,13 @@ type validationPlanEntry struct {
 type validationPlan struct {
 	// Entries holds EVERY pending update, including the ones that resolve to
 	// depth none. A plan that dropped them would produce a reassuring tally
-	// about the easy packages and quietly say nothing about the rest (R9.1).
+	// about the easy packages and quietly say nothing about the rest.
 	Entries []validationPlanEntry
 	// DistfilesToFetch is how many packages this run has to hold a tarball for.
 	// Every depth above `none` reads the new archive, so each such package needs
 	// its distfile: on a metered connection or a laptop that number is what
 	// decides whether the answer is yes, and it appears nowhere else in the
-	// output (R9.3).
+	// output.
 	//
 	// It is an upper bound per package, not a download count: a distfile the
 	// host already holds is not fetched again, and a package with several
@@ -135,13 +115,13 @@ type validationPlan struct {
 // report.Classify through buildReport rather than by a switch here. The
 // invariant it protected is unchanged and is now checkable rather than merely
 // intended: each planned package lands in exactly one column, and
-// report.AutoupdateCheck.Reconciles reports whether the columns sum to the plan (R5.5).
+// report.AutoupdateCheck.Reconciles reports whether the columns sum to the plan.
 // A package counted twice, or in two columns, is worse than no tally at all —
 // it turns the one number anybody remembers into a number nobody can reconcile
 // with the list above it.
 
 // buildValidationPlan prices a run: it resolves the depth for every pending
-// update and nothing else (R9.1, R9.3).
+// update and nothing else.
 //
 // It performs no I/O. The plan is what the operator approves, so producing it
 // must cost nothing and must give the same answer twice — and a plan that had
@@ -250,7 +230,7 @@ func packageTierFromName(update autoupdate.PendingUpdate) string {
 }
 
 // deepest is the deepest depth anywhere in the plan — the ceiling one
-// confirmation covers, and the yardstick R9.6 measures a reviewer's raise
+// confirmation covers, and the yardstick a reviewer's raise is measured
 // against.
 func (p validationPlan) deepest() validate.Depth {
 	deepest := validate.DepthNone
@@ -263,7 +243,7 @@ func (p validationPlan) deepest() validate.Depth {
 }
 
 // building counts the packages that run a gate above `options` — the ones that
-// unpack and build, and therefore the only reason to ask anything (R9.4).
+// unpack and build, and therefore the only reason to ask anything.
 func (p validationPlan) building() int {
 	building := 0
 	for _, entry := range p.Entries {
@@ -275,36 +255,21 @@ func (p validationPlan) building() int {
 }
 
 // printValidationPrice puts the PRICE of the run on screen before any of it is
-// spent (S033-R9.3): how many packages, each one's depth, which are not
-// validated, how many distfiles the run needs, and how the depths are
-// distributed.
+// spent: how many packages, each one's depth, which are not validated, how many
+// distfiles the run needs, and how the depths are distributed.
 //
-// # What it no longer prints, and why that is the point
+// It prints no reasons: the plan's PRESENTATION is a section of the report
+// (validationPlanSection), rendered once when the run is over, and printing the
+// reasons here as well would put the same sentence on screen twice in one run.
 //
-// This is what printValidationPlan used to be. It has lost the three-line
-// block per package — the padded package line, the class line and the whole
-// 230-character reason — because the plan's PRESENTATION is now a section of
-// the report (validationPlanSection, below), rendered once when the run is
-// over, aligned to columns measured from the packages this run actually
-// produced. Printing the reasons here as well would put the same sentence on
-// screen twice in one run, which is the defect R7.2 exists to remove.
-//
-// # It is not a second renderer of the view model
-//
-// It renders the PLAN, which is a producer artefact, at a moment when the
-// model of the run cannot exist yet: nothing has been evaluated, so there is
-// no report to take a value from. R1.3 binds a renderer that displays the view
-// model, and the run-level facts below are precisely the ones the model cannot
-// answer for — `deepest` and the distribution's ordering both need the depth
+// It is not a second renderer of the view model. It renders the PLAN, a
+// producer artefact, at a moment when no report exists yet, and the run-level
+// facts below — `deepest` and the distribution's ordering — need the depth
 // ladder, which the model deliberately does not carry.
 //
-// # There is no width here to get wrong
-//
-// The old lines padded the package to a typed 45 cells, which was too narrow
-// for `gst-plugins-adaptivedemux2@stable` and too wide for everything else.
-// The replacement is not a measured column: it is no column at all. A pre-run
-// price is a list of facts, and the aligned table is the report's job — so
-// this function has nothing left to declare a width for (R6.3).
+// It declares no column width: a pre-run price is a list of facts, and the
+// aligned table is the report's job, measured from the packages this run
+// actually produced rather than typed into a format string.
 func printValidationPrice(plan validationPlan) {
 	fmt.Println()
 	output.Header.Println("Validation Plan")
@@ -377,7 +342,7 @@ func depthDistributionLine(plan validationPlan) string {
 	return strings.Join(parts, ", ")
 }
 
-// confirmValidationRun takes ONE confirmation for the whole run (R9.4).
+// confirmValidationRun takes ONE confirmation for the whole run.
 //
 // The three gates are confirmSweep's, in the same order and for the same
 // reasons: --yes proceeds unattended because the operator asked for that in so
@@ -422,54 +387,25 @@ func (ar *autoupdateRun) confirmValidationRun(plan validationPlan) bool {
 		"Evaluate %d package(s), %d of them up to depth %s?", len(plan.Entries), builds, deepest))
 }
 
-// runPendingValidation is R9.1 reaching the CLI: after a check has recorded what
-// is pending, every one of those bumps is put through the gates at its resolved
-// depth — priced first (R9.3), asked about once (R9.4), tallied at the end
-// (R9.5), and published never (R9.2).
+// runPendingValidation puts every bump a check recorded as pending through the
+// gates at its resolved depth — priced first, asked about once, tallied at the
+// end, and published never.
 //
-// # It returns the validation half; it does not draw it
+// It returns the validation half and does not draw it. Scanned is left nil, so
+// the half MUST be joined before display; runCheck, the one place holding both
+// the scan and the validation, joins it, which leaves exactly one report per
+// run. The second value is whether the plan was already printed, so the caller
+// does not show it again under a second heading; it is true on every path past
+// that print, including a declined confirmation.
 //
-// What comes back is the run buildReport assembles from the plan and the
-// results — the half of it only this function sees. Scanned is left nil in its
-// payload deliberately, and that nil is not harmless: a report rendered with it
-// exports `"scanned": null` and draws an empty version-check section. So it is a
-// half that MUST be joined before anything is displayed, and it is joined by
-// runCheck, the one place in the command that holds both the scan that ran and
-// the validation that followed it. Joining there rather than here is what leaves
-// exactly one report per run (S045-R1.1); filling Scanned in on both sides would
-// turn the join into a question of which copy wins.
+// It is gated on --llm because a gate above `options` unpacks and builds (and
+// even `options` fetches a distfile): running it on every `--check` would turn
+// seconds into hours for someone typing the command they always typed. The gate
+// decides validation only — without --llm it yields nothingValidated's run and
+// the caller still draws the scan, so --ui, --all and --export keep working.
 //
-// The second value is whether the plan has already been printed — whether the
-// pre-confirmation printValidationPrice below ran. It travels back so the caller
-// can set report.SectionOptions.SkipPlan and not show the operator the same plan again
-// under a second heading (S045-R2.3). It is true on every path that got past
-// that print, INCLUDING the ones that then gave up: a declined confirmation saw
-// the plan, and a false here would redraw it for the operator who has just read
-// it and said no.
-//
-// # Why it is gated on --llm, and what that gate no longer decides
-//
-// R9's command is `--check --llm`, and the gate is not a technicality. A gate
-// above `options` unpacks and builds, and even `options` fetches a distfile, so
-// running this on every `--check` would turn a network read that takes seconds
-// into one that takes hours the first time somebody typed the command they have
-// always typed. `--llm` is the flag that already means "spend real resources on
-// validating this run", so it is the flag that turns the gates on here too; the
-// confirmation below still asks before anything builds.
-//
-// The gate decides validation and nothing else. It used to decide the drawing
-// too — not by saying so, but because the only path to the render ran through
-// it, which is what made --ui, --all and --export silent no-ops on a run without
-// --llm (S045-R3.1, S045-R3.2, S045-R3.3). It still means "do not validate", and
-// it says so by yielding nothingValidated's run and "nothing printed": there is
-// no half to contribute, so the caller draws the scan it already holds.
-//
-// # It publishes nothing, and the guarantee is structural
-//
-// The one function in this file that could write to the overlay,
-// deps.setVersionsForCheck, is never called — from here or from anywhere. The applier
-// built below runs Validate and never Apply: promotion, the version pin and the
-// `--clean` sweep all live in Apply, which this path does not reach.
+// It publishes nothing, structurally: deps.setVersionsForCheck is never called,
+// and the applier runs Validate, never Apply (promotion, pin, `--clean`).
 func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, configDir string, checked []autoupdate.CheckResult, llmCfg config.LLMConfig) (report.Run, bool) {
 	if !ar.opts.llm {
 		return nothingValidated(), false
@@ -537,7 +473,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 	finished := runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
 		// The ceiling one confirmation covered. It travels per entry so a
 		// reviewer's raise is held against what the operator approved rather than
-		// against this bump's own depth (R9.6). A depth the plan could not spell
+		// against this bump's own depth. A depth the plan could not spell
 		// is no ceiling at all, which is the honest reading — nothing was
 		// confirmed about a number nobody printed.
 		ceiling, err := validate.ParseDepth(entry.ConfirmedDepth)
@@ -551,28 +487,20 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 }
 
 // runValidationCheck evaluates every planned package through `run` and returns
-// the whole run as the view model (R9.1, R1.4).
+// the whole run as the view model.
 //
-// THE PRICE IS PRINTED HERE, not left to the caller. "A plan is printed" is
-// satisfied by printing it beside the results, which is worth nothing: by then
-// the hours are spent. Printing it as the first thing this function does makes
-// "the whole plan precedes the first gate" a property of the function rather
-// than of a calling convention somebody can forget. A caller that already showed
-// the price in order to ask about it sets plan.Printed and is not repeated.
+// THE PRICE IS PRINTED HERE, not left to the caller: a plan printed beside the
+// results is worth nothing, because by then the hours are spent. Printing it
+// first makes "the whole plan precedes the first gate" a property of the
+// function rather than of a calling convention somebody can forget. A caller
+// that already showed the price to ask about it sets plan.Printed.
 //
-// # It RETURNS the report; it does not render it
-//
-// The report is assembled whole, from the plan and every result, and handed
-// back — so a run that then fails to render, or is interrupted on its way to
-// the screen, still holds a complete description of what it found (R1.4). It is
-// also what lets the caller fill in the half this function never sees (the
-// scan) before anything is displayed, and what keeps `--export` a decision of
-// the command rather than of the loop.
-//
-// The counts come from that report and are computed nowhere else: the switch
-// this function used to run over WorstOutcome is now report.Classify's, reached
-// through buildReport, so the tally on screen and the tally in the JSON export
-// cannot disagree (R1.3).
+// It RETURNS the report and does not render it: a run that then fails to
+// render, or is interrupted on its way to the screen, still holds a complete
+// description of what it found, the caller can join the scan half before
+// anything is displayed, and `--export` stays the command's decision. The
+// counts come from report.Classify through buildReport and nowhere else, so the
+// tally on screen and in the JSON export cannot disagree.
 //
 // It publishes nothing, on every path — see deps.setVersionsForCheck.
 func runValidationCheck(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult) report.Run {
@@ -583,7 +511,7 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 
 	// The ceiling the confirmation covered. Every entry carries it into the
 	// runner so a reviewer's raise is measured against what the operator
-	// approved rather than against the entry's own depth (R9.6).
+	// approved rather than against the entry's own depth.
 	confirmed := plan.deepest()
 
 	// results[i] answers plan.Entries[i]. buildReport's contract is positional,
@@ -601,102 +529,24 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 }
 
 // presentCheckReport puts the finished report in front of the operator: the
-// terminal first, then the export (R2, R9.1, R9.5).
+// terminal first, then the export. A bad export path must never cost the
+// operator the report itself, and it changes no verdict, count or exit status;
+// a failed render does not withhold the file, which may be the only copy left.
 //
-// # The terminal render happens first, and that ordering is R9.5
+// The mode is resolved here through reportModeOrPlain, so every error reaching
+// it is an AMBIENT one (BENTOO_UI or ui.mode — the root already stopped a bad
+// --ui): it falls back to plain, states the refusal once, and the exit status
+// does not move. This is the ONLY voice for that refusal; the gate in
+// runAutoupdate records its own failure at debug level.
 //
-// An export is a convenience; the report on the terminal is the answer. Writing
-// the file first would make a bad path — a directory that does not exist, a
-// read-only mount — able to cost the operator the report itself. Rendering
-// first makes that impossible rather than merely unlikely, and the export
-// failure is then reported as a warning: it changes no verdict, no count and no
-// exit status (R9.6), because a run's findings do not depend on whether a copy
-// of them could be filed.
-//
-// # A render that fails is reported and does not stop the export
-//
-// The two are independent answers to the same report. A terminal that went away
-// mid-write is no reason to also withhold the file, which may be the only copy
-// left.
-//
-// # The mode is resolved here, not passed in
-//
-// reportModeOrPlain is a pure function of the flags, the configuration and the
-// terminal, so asking here gives the same answer any other caller gets — and
-// --ui is the root's flag now, so the answer is the CLI's rather than one
-// command's (R3.1).
-//
-// What stood here was resolveAutoupdateUIMode and a claim that its error was
-// unreachable, because runAutoupdate rejected an unusable --ui before any
-// package work (S044-R3.9). That rule names the FLAG and nothing else; the root
-// has enforced it for all 30 commands since Task 4, and the gate this function
-// was trusting has stopped exiting on the sources it never governed. So every
-// error that reaches this line is an AMBIENT one — a BENTOO_UI or a ui.mode,
-// inherited from a shell profile or a config file rather than typed for this
-// run — and it is refused at this call: the render falls back to plain, the
-// refusal is STATED naming the source, the value and the mode used instead, and
-// the exit status does not move (R3.7). The rule and the measurements behind it
-// are on reportModeOrPlain, which the manifest and snapshot producers call too,
-// so a typo answered on one command cannot be swallowed on this one.
-//
-// This is also the ONLY voice the run has for that refusal, which is R3.6. The
-// gate in runAutoupdate resolves the same value to route the downgrade sentence
-// and records its own failure at debug level; a second sentence from there would
-// answer one typo twice, in two voices, about a value the operator typed once.
-//
-// # The `--list` hint is printed from here, and that placement IS the decision
-//
-// S045-R5.2's hint names a bentoo subcommand. The section that lists the very
-// updates it is about — versionCheckSection — builds a report.Section, which
-// internal/common/report/render prints for every command in the toolkit: put
-// the sentence in the section and every future report carries this one
-// command's advice. So the section lists what is
-// pending and this function says what to do about it (S045-D5).
-//
-// S045-R1.4 permits it, because a hint is none of the four things that rule
-// reserves for the report: it is not a package name, not a version, not a plan
-// entry and not a tally. R5.1's `Checked N source, M bin` IS a count over the
-// scanned packages, which is exactly why that one went inside the section
-// instead (sub-task 2.1).
-//
-// # planPrinted is the ONE thing the caller knows and this function cannot
-//
-// Whether the operator has already read this plan is a fact about what reached
-// the screen earlier in the run — the pre-confirmation printValidationPrice —
-// and nothing in a report records it. So it is a parameter rather than a field:
-// putting it on the model would make "has this been shown" a property of the
-// run's findings, and the file the same report is exported to would then carry
-// an answer about a terminal it never touched (S045-R2.4).
-//
-// It reaches the SCREEN only. The export below is built by renderExport, which
-// gives Markdown and JSON no Options at all and builds the plain export its own
-// — so a plan skipped here is still stated in full in the file (S045-R2.4).
-//
-// # The run arrives BUILT, and that is R1.3
-//
-// What comes in is the whole run — the envelope naming its kind and stating how
-// far down its plan it got, around the payload holding what it found — assembled
-// by the adapter before this function is entered. So the screen and the file are
-// two renderings of ONE value rather than two wraps that could disagree about
-// whether the run finished, and "the report is complete before any part of it is
-// rendered" is a property of the call rather than of what happens next.
-//
-// # A run that scanned nothing reaches the file, and not the screen
-//
-// The one report this function does NOT draw is the empty one, and the reason
-// is `--quiet` (S045-R5.3, S045-D4). Its entire effect is
-// logger.SetQuiet(true), applied in `func main` in cmd/bentoo/main.go: it
-// reaches the logger and
-// reaches neither the output package nor os.Stdout. So today a `--check
-// --quiet` over an empty registry prints nothing at all, while one with
-// packages prints the whole table anyway — an asymmetry that already exists,
-// and which drawing the report on the empty scan would remove by making the
-// silent case newly noisy. The sentence stays where it can still be silenced.
-//
-// The EXPORT is unconditional even so, because `--export` has no empty-scan
-// carve-out (S045-R3.3) and a file that records "this run scanned nothing" is
-// the absence carried honestly (S045-R4.3). No file at all would be
-// indistinguishable from a command that never ran.
+// The `--list` hint is printed from here, not from versionCheckSection: render
+// prints sections for every command, so a hint in the section would make every
+// report carry this one command's advice. planPrinted is a parameter, not a
+// model field, because "has the plan been shown" is about this terminal and
+// must not reach the export, which always states the plan in full. An empty
+// scan is not drawn — --quiet reaches only the logger, so the logged sentence
+// keeps an empty `--check --quiet` silent — but it is still exported: no file
+// at all would be indistinguishable from a command that never ran.
 func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// This command's own facts, read back out of the run that carries them: the
 	// three decisions below — whether to render at all, whether to point at
@@ -710,9 +560,9 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// "every entry disabled, and a pending.json still on disk from an earlier
 	// run" yields an empty Scanned beside a plan that was built, confirmed and
 	// evaluated. Keying on the scan alone would discard that report — hours of
-	// gate work the operator waited for and approved. S045-R5.3's subject is a
-	// run with nothing to say, and a run holding results has something to say
-	// however its scan came out.
+	// gate work the operator waited for and approved. Silence is for a run with
+	// nothing to say, and a run holding results has something to say however
+	// its scan came out.
 	if len(r.Scanned) == 0 && len(r.Plan) == 0 {
 		// Verbatim the sentence the retired legacy check printer emitted at
 		// its own `len(results) == 0` guard, on the same channel. The
@@ -723,17 +573,16 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// path must never reach.
 		ar.log().Info("No packages configured for autoupdate")
 	} else {
-		// Two questions, and keeping them apart is the whole of story 046's
-		// Task 2. What the report should SAY — list every up-to-date package,
-		// state the plan — is report.SectionOptions, answered here from the
-		// flags. What the DEVICE allows is render.Options, and its Width is
-		// left at zero: "ask the device". A number typed here would be a
-		// hard-coded field width in the one path R6.3 binds.
+		// Two questions, kept apart. What the report should SAY — list every
+		// up-to-date package, state the plan — is report.SectionOptions,
+		// answered here from the flags. What the DEVICE allows is
+		// render.Options, and its Width is left at zero: "ask the device". A
+		// number typed here would be a hard-coded field width.
 		//
 		// SkipPlan omits the report's own plan section on a run whose price
 		// was already printed to ask the confirmation question: the operator
 		// has just read that list, and drawing it again under a second heading
-		// is the duplication S045-R2.3 removes.
+		// would say the same thing twice.
 		content := report.SectionOptions{ShowAll: autoupdateAll, SkipPlan: planPrinted}
 		device := render.Options{}
 
@@ -742,34 +591,26 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// The sections are built ONCE, here, and every mode below is handed the
 		// same slice — which is what makes "the three modes differ in
 		// presentation and not in content" a fact about the call rather than a
-		// promise about three renderers (R2.1).
+		// promise about three renderers.
 		if err := renderCheckReportIn(mode, run.Sections(content), device); err != nil {
 			ar.log().Warn("the report could not be rendered", "err", err)
 		}
 
-		// S045-R5.2: a run that found something pending names the command
-		// that lists it. This is the last of the three facts that have to
-		// outlive the retired legacy check printer — R5.1's tally went into
-		// the section (sub-task 2.1) and R5.3's empty-scan sentence into the
-		// arm above (3.3).
+		// A run that found something pending names the command that lists it.
 		//
 		// AFTER the render, deliberately: the render is the answer, and this
-		// is a footnote about what to do next.
+		// is a footnote about what to do next. Once per run, because the gate
+		// asks about the scan as a whole and not about a row — neither the
+		// number of sections nor --all can multiply it — and never on the
+		// empty arm, which does not reach this line.
 		//
-		// Once per run, because the gate asks about the scan as a whole and
-		// not about a row — neither the number of sections nor --all can
-		// multiply it — and never on the empty arm, which does not reach this
-		// line and would find nothing to point at if it did.
+		// output.Info is the channel the sentence always came out on, and it
+		// is not one --quiet can reach; moving it to a quieter channel would
+		// be a silent behaviour change.
 		//
-		// output.Info is the channel the sentence came out on before, and it
-		// is not one --quiet can reach. Keeping it is the parity S045-R5.4
-		// exists for: moving a line to a quieter channel while reporting no
-		// behaviour change is precisely the silent regression that requirement
-		// is there to catch.
-		//
-		// A render that failed above does not withhold it. R5.2 is about what
-		// the run FOUND, not about whether the terminal accepted the table,
-		// and that failure has already been reported on its own line.
+		// A render that failed above does not withhold it: the hint is about
+		// what the run FOUND, not about whether the terminal accepted the
+		// table, and that failure has already been reported on its own line.
 		if scanFoundPendingUpdate(r.Scanned) {
 			output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
 		}
@@ -777,19 +618,17 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// The registry was WRITTEN, and that is not something the report can
 		// say. CheckAll auto-disables an entry whose ebuild has vanished and
 		// warns only when the write fails, so a successful one would otherwise
-		// mutate a hand-maintained packages.toml in silence — the retired
-		// legacy check printer was what said it, and its last caller went away
-		// in this story (S045-R5.4).
+		// mutate a hand-maintained packages.toml in silence.
 		//
-		// It belongs here for D5's reason, one step stronger than the hint's:
+		// It belongs here for the hint's reason, one step stronger:
 		// internal/common/report/render must not name a bentoo subcommand, and
 		// it must certainly not know that packages.toml exists. The report
 		// already states the orphan COUNT; this states the consequence.
 		//
 		// One sentence for the run, because DisableOrphans performs one batched
-		// write. The single-package path never lost this — it says the same
-		// thing at overlay_autoupdate.go and returns before reaching here, so
-		// the two cannot both fire.
+		// write. The single-package path says the same thing at
+		// overlay_autoupdate.go and returns before reaching here, so the two
+		// cannot both fire.
 		if orphans := scanDisabledOrphans(r.Scanned); orphans > 0 {
 			output.Warning.Printf("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)\n", orphans)
 		}
@@ -798,55 +637,36 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 	// Reached on BOTH arms above, and the `else` is what makes that true: the
 	// empty scan skips the render and nothing else. An early return there would
 	// have made `--export` silently conditional on the scan finding something,
-	// which S045-R3.3 does not allow and S045-R4.3 asks for the opposite of.
+	// while a file recording "this run scanned nothing" is the absence carried
+	// honestly.
 	//
-	// LAST, after the render, and that ordering is R3.5's: an export is an
-	// additional copy of an answer already delivered — rendered above, or stated
-	// by the logger on the empty scan — so a path that cannot be written must
-	// cost neither that answer nor the exit status. exportReport is the CLI's
-	// one export path (report_export.go); this command supplies a report.Run and
-	// decides nothing else about it, which is what lets `overlay manifest` and
-	// `snapshot run` reach the same behaviour with the same one line.
+	// LAST, after the render: an export is an additional copy of an answer
+	// already delivered — rendered above, or stated by the logger on the empty
+	// scan — so a path that cannot be written must cost neither that answer nor
+	// the exit status. exportReport is the CLI's one export path
+	// (report_export.go); this command supplies a report.Run and decides nothing
+	// else about it, which is what lets `overlay manifest` and `snapshot run`
+	// reach the same behaviour with the same one line.
 	exportReport(ar.log(), run)
 }
 
-// exportContent is what an EXPORT asks the report to say (R9.3, R2.4).
+// exportContent is what an EXPORT asks the report to say.
 //
-// # It is a caller's decision, which is why it is in cmd and not in the model
+// It is a caller's decision, which is why it is in cmd and not in the model:
+// report.AutoupdateCheck.Sections ANSWERS these two questions, and whether a
+// record lists every scanned package and states the plan is a property of the
+// artefact being produced. --export is the root's flag, so the answer is the
+// CLI's and the same for every producer.
 //
-// report.AutoupdateCheck.Sections ANSWERS these two questions; nothing in the model gets
-// to choose them. Whether a record lists every scanned package or counts them,
-// and whether it states the plan, is a property of the artefact being produced
-// — and cmd/bentoo is the layer that knows it is producing a file rather than a
-// screen. It is no longer this COMMAND's decision either: --export is the root's
-// now, so the answer below is the CLI's and is the same for every producer.
+// It is built here rather than in overlay_autoupdate_ui.go, where the export
+// lives, because a report.SectionOptions names the field that omits the plan
+// and a source-text guard over that file forbids the name there — precisely so
+// an export can never acquire one. keepThePlan says why the plan stays.
 //
-// # It is built here rather than in overlay_autoupdate_ui.go, where the export lives
-//
-// Constructing a report.SectionOptions means writing down the field that omits
-// the plan, and a source-text guard over that file forbids the name there —
-// precisely so an export can never acquire one. The value is keepThePlan,
-// declared beside the export it belongs to: a record missing the plan answers no
-// question later, because the plan is where a package's reason is stated at all
-// (R7.2).
-//
-// # It takes no argument, and that is R3.4 written as a signature
-//
-// It used to take a listEvery bool, because the Markdown export LISTED every
-// package a run found up to date while the plain export COUNTED them. That
-// disagreement was inherited verbatim from the renderers story 046 replaced —
-// preserved deliberately at the time, since changing it then would have moved a
-// render nobody had asked to move, and left open.
-//
-// R3.4 closes it: the file carries the complete report, every unit, nothing
-// shortened, whatever the terminal was told. Two answers cannot both be that,
-// and the plain export was the one that was not — an operator who opened a
-// .log instead of a .md got a record that could not answer "was this package
-// checked at all". Both formats now ask for everyScannedPackage.
-//
-// The parameter went with it rather than being passed the same constant twice.
-// A knob that shortens an export is a knob an export can be shortened by, and a
-// function with no parameter cannot be handed one in a hurry.
+// It takes no argument: the file carries the complete report whatever the
+// terminal was told, so both formats ask for everyScannedPackage. A knob that
+// shortens an export is a knob an export can be shortened by, and a function
+// with no parameter cannot be handed one in a hurry.
 func exportContent() report.SectionOptions {
 	return report.SectionOptions{ShowAll: everyScannedPackage, SkipPlan: keepThePlan}
 }
@@ -866,27 +686,18 @@ func scanDisabledOrphans(scanned []report.PackageResult) int {
 }
 
 // scanFoundPendingUpdate reports whether the scan turned up at least one
-// pending update — the condition S045-R5.2 gates its hint on.
+// pending update — the condition the `--list` hint is gated on.
 //
-// # It reads HasUpdate, and never compares the two version strings
-//
+// It reads HasUpdate and never compares the two version strings:
 // report.PackageResult.HasUpdate is false whenever the candidate could not be
-// ordered against the current version, and NotComparable is carried separately
-// so a broken parser is never read as "up to date". A `candidate != current`
-// comparison would count exactly those packages as pending: the operator would
-// be sent to a list the package does not appear in, because a version nothing
-// could order was never recorded as an update in the first place.
+// ordered against the current version, so a `candidate != current` comparison
+// would send the operator to a list the package does not appear in.
 //
-// # It answers a boolean rather than a count, and that is S045-R1.4
-//
-// The hint states no number. The count over these same packages is the
-// report's own — the section's lead says "N package(s) checked, M with a
-// pending update" — and a second one produced out here would be a tally
-// printed from outside the report, which R1.4 does not allow.
-//
-// An empty scan therefore answers false by construction, which is what keeps
-// presentCheckReport's empty arm silent (S045-R5.3): a run that looked at
-// nothing found nothing, and there is no branch to get that wrong in.
+// It answers a boolean rather than a count because the hint states no number:
+// the count is the report's own ("N package(s) checked, M with a pending
+// update"), and a second one printed from outside the report would be a tally
+// the report does not own. An empty scan answers false by construction, which
+// keeps presentCheckReport's empty arm silent.
 func scanFoundPendingUpdate(scanned []report.PackageResult) bool {
 	for _, pkg := range scanned {
 		if pkg.HasUpdate {
@@ -897,30 +708,20 @@ func scanFoundPendingUpdate(scanned []report.PackageResult) bool {
 }
 
 // reportDepthEscalation says what happened to a bump the reviewer took past the
-// depth the operator confirmed (R9.6).
+// depth the operator confirmed.
 //
-// # It is what remains of reportValidationOutcome, and the rest is the report's
+// It is printed here, not in the report, because a raise past the ceiling is an
+// event of the RUN, not a finding about the package: the model describes what a
+// run found and has no field for what the run declined to spend.
 //
-// The three verdict lines this function used to print — proved, FAILED, not
-// validated, each padded to a typed 45 cells — are now rows of the report's
-// results section, rendered once at the end from values the model carries. What
-// could not move is this: a raise past the ceiling is an event of the RUN, not
-// a finding about the package. The model describes what a run found; it has no
-// field for what the run declined to spend, and inventing one would put a
-// sentence about the operator's confirmation into a record about packages.
-//
-// THE CHOICE THIS IMPLEMENTATION MAKES IS TO HOLD. R9.6 allows either answer,
-// and holding is the one that keeps the promise the plan made: a run whose plan
-// resolved entirely to `options` asks for nothing, so a reviewer raising a bump
-// to `compile` afterwards would spend hours the operator was never shown. The
-// ceiling travels with every entry (validationPlanEntry.ConfirmedDepth) so the
-// runner can hold there, and the lines below name the package, the raise and
-// the ceiling so the hold is never silent — a held bump the operator cannot see
-// is just a missing result.
-//
-// It names the package itself, because it no longer prints under a verdict line
-// that did. A warning about "this bump" with no atom in it is unactionable in a
-// run of forty packages.
+// The choice is to HOLD. Holding keeps the promise the plan made: a run whose
+// plan resolved entirely to `options` asks for nothing, so a reviewer raising a
+// bump to `compile` afterwards would spend hours the operator was never shown.
+// The ceiling travels with every entry (validationPlanEntry.ConfirmedDepth) so
+// the runner can hold there, and the lines below name the package, the raise
+// and the ceiling so the hold is never silent — a held bump the operator cannot
+// see is just a missing result. The atom is named because a warning about "this
+// bump" is unactionable in a run of forty packages.
 func reportDepthEscalation(entry validationPlanEntry, result validate.EbuildResult, confirmed validate.Depth) {
 	// ParseDepth failing means the runner did not report a depth at all, which
 	// is not an escalation — only a depth it NAMED can be compared against the
@@ -931,7 +732,7 @@ func reportDepthEscalation(entry validationPlanEntry, result validate.EbuildResu
 	}
 	output.Warning.Printf("  %s: the reviewer raised this bump to %s, past the %s this run's plan confirmed.\n",
 		entry.Package, actual, confirmed)
-	output.Info.Printf("      A raise past the confirmed depth is held at %s rather than spent unasked (R9.6); re-run with --yes to approve the deeper gates for the whole run.\n",
+	output.Info.Printf("      A raise past the confirmed depth is held at %s rather than spent unasked; re-run with --yes to approve the deeper gates for the whole run.\n",
 		confirmed)
 }
 
@@ -972,10 +773,9 @@ func skipReason(result validate.EbuildResult, entry validationPlanEntry) string 
 	return "no reason reported: neither the gates, the depth nor the plan stated one"
 }
 
-// The tally that used to be printed here is validationSummarySection,
-// and it now has FOUR counts rather than three: the old "not validated" column
-// held both the packages policy excluded and the packages the toolkit could not
-// evaluate, so a defect in the toolkit was reported in the same number as the
-// operator's own choice (R5.1). Proved and errored count exactly what they
-// counted before (R5.7). The reminder that a check publishes nothing moved with
-// it, so it is still the last sentence a reader sees.
+// The tally is validationSummarySection, with FOUR counts: "not validated" is
+// split so that the packages policy excluded and the packages the toolkit could
+// not evaluate are no longer one number — a toolkit defect must not be reported
+// as the operator's own choice. Proved and errored count what they always did.
+// The reminder that a check publishes nothing moved with it, so it is still the
+// last sentence a reader sees.

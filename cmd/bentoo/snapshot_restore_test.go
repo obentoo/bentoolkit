@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 	"github.com/spf13/pflag"
 )
 
@@ -143,7 +144,7 @@ func stubRestoreConfirm(d *deps, decision bool) {
 
 // hasCall reports whether calls contains an invocation of name whose first args
 // match prefix (e.g. {"receive", "/mnt/r"} for `btrfs receive /mnt/r`).
-func hasCall(calls []snapshot.RunnerCall, name string, prefix ...string) bool {
+func hasCall(calls []snapshottest.RunnerCall, name string, prefix ...string) bool {
 	for _, c := range calls {
 		if c.Name != name || len(c.Args) < len(prefix) {
 			continue
@@ -162,7 +163,7 @@ func hasCall(calls []snapshot.RunnerCall, name string, prefix ...string) bool {
 func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
@@ -191,7 +192,7 @@ func TestRunSnapshotRestore_ArchiveHappyPath(t *testing.T) {
 func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "restic")
 	writeSnapshotConfig(t, restoreTOMLRestic)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
@@ -216,7 +217,7 @@ func TestRunSnapshotRestore_ResticHappyPath(t *testing.T) {
 func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false) // no --yes → confirm gate
@@ -240,7 +241,7 @@ func TestRunSnapshotRestore_ConfirmDeniedCleanAbort(t *testing.T) {
 func TestRunSnapshotRestore_ConfirmApprovedProceeds(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false)
@@ -264,7 +265,7 @@ func TestRunSnapshotRestore_ConfirmApprovedProceeds(t *testing.T) {
 func TestRunSnapshotRestore_UnknownShipExits1(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchive)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "does-not-exist", true)
@@ -314,7 +315,7 @@ func TestRunSnapshotRestore_MissingTargetErrors(t *testing.T) {
 func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "restic")
 	writeSnapshotConfig(t, restoreTOMLRestic)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 
@@ -392,7 +393,7 @@ func TestRunSnapshotRestore_DryRunPrintsActionsZeroExec(t *testing.T) {
 func TestRunSnapshotRestore_TwoSubvolumesWithoutFlagRefusesBeforeAnySubprocess(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true) // --yes: the confirm gate cannot be the reason nothing ran
@@ -432,7 +433,7 @@ func TestRunSnapshotRestore_TwoSubvolumesWithoutFlagRefusesBeforeAnySubprocess(t
 func TestRunSnapshotRestore_SubvolumeFlagPicksThatPrefix(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
@@ -474,7 +475,7 @@ func TestRunSnapshotRestore_SubvolumeFlagPicksThatPrefix(t *testing.T) {
 func TestRunSnapshotRestore_UnknownSubvolumeRefusesBeforeAnySubprocess(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
@@ -503,7 +504,7 @@ func TestRunSnapshotRestore_UnknownSubvolumeRefusesBeforeAnySubprocess(t *testin
 func TestRunSnapshotRestore_DeployedSingleSubvolumeNeedsNoFlag(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveDeployed)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", true)
@@ -542,7 +543,7 @@ func TestRunSnapshotRestore_DeployedSingleSubvolumeNeedsNoFlag(t *testing.T) {
 func TestRunSnapshotRestore_DryRunOnAmbiguousConfigAlsoRefuses(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "rclone")
 	writeSnapshotConfig(t, restoreTOMLArchiveTwoSubvolumes)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 	setRestoreFlags(t, "/mnt/r", "cloud", false)

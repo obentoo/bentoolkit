@@ -40,12 +40,12 @@ type publishedUndo func(cause error)
 // candidatePaths says where this apply's candidate ebuild lives and which
 // repository a gate has to run in to read it.
 //
-// The distinction it carries is not cosmetic. Before this story the two were
+// The distinction it carries is not cosmetic. Before staging the two were
 // always the published overlay, so every step — the manifest, the LLM fix, the
 // compile — simply recomputed the path from a.overlayPath. With the candidate
 // validated in a staged tree, a step that recomputes instead of being told would
-// silently address the published tree, which is exactly what R3.2 forbids while a
-// gate is running.
+// silently address the published tree, which must not change while a gate is
+// running.
 type candidatePaths struct {
 	// staged is true when the candidate lives in a tree validate.Stage built,
 	// outside the published overlay. False is the pre-staging path, kept until
@@ -62,11 +62,10 @@ type candidatePaths struct {
 	// the candidate's archive into, and "" when no manifest step ran or the
 	// candidate is not staged.
 	//
-	// # Why it rides here and not on Applier (S035-D2)
+	// # Why it rides here and not on Applier
 	//
 	// A field on Applier is the obvious shortcut and it is wrong for the reason
-	// story 033 kept staging keyed by path rather than by an index:
-	// ApplyAll runs its workers CONCURRENTLY, so a per-Applier field
+	// staging is keyed by path rather than by an index: ApplyAll runs its workers CONCURRENTLY, so a per-Applier field
 	// would be shared mutable state across packages being staged at the same
 	// time, and package A's gate could be handed package B's distdir.
 	// candidatePaths is already the per-bump carrier that reaches both
@@ -110,54 +109,36 @@ func stagedCandidate(stagedRoot, pkg, version string) (candidatePaths, error) {
 	return cand, nil
 }
 
-// promote publishes the exact bytes the gates read (R3.3, R3.4) and returns the
-// rollback that takes them back again.
+// promote publishes the exact bytes the gates read and returns the rollback
+// that takes them back again.
 //
-// # Why this exists instead of copyEbuild happening earlier
+// It exists so the candidate is never in the published overlay while it is
+// unvalidated: copyEbuild used to write it there BEFORE the manifest step and
+// every gate, rolling it back afterwards. This overlay auto-commits and pushes,
+// and "we roll it back afterwards" is not "it was never there".
 //
-// copyEbuild used to write the candidate into the published overlay BEFORE the
-// manifest step and before every gate, and the deferred orphan rollback removed it
-// again afterwards. The endpoints matched, so a before/after comparison saw
-// nothing — but for the whole duration of the manifest run and every gate, the
-// overlay really did hold an ebuild nothing had validated. This overlay
-// auto-commits and pushes. "We roll it back afterwards" is not the same promise as
-// "it was never there", and R3.2 asks for the second one.
+// The ebuild is written first, the Manifest second, and their rollbacks differ:
+//   - The ebuild did not exist before, so removing it restores the state — and
+//     MUST happen, since an ebuild no Manifest covers is one `--clean` deletes.
+//   - The Manifest DID exist, so removing it would destroy a file; its bytes are
+//     captured before the overwrite and put back if any later step fails. The
+//     capture is unconditional and doubles as a precondition: a Manifest that
+//     is not a regular file is refused before anything is overwritten.
 //
-// # The order, and the two different levers
-//
-// The ebuild is written first and the Manifest second, and the rollback for each
-// is deliberately NOT the same operation:
-//
-//   - The ebuild did not exist before this apply, so removing it restores the
-//     previous state exactly. It is also the removal that MUST happen: an ebuild
-//     no Manifest entry covers is an unclaimed ebuild, which `--clean` deletes and
-//     `overlay validate` reports.
-//   - The Manifest DID exist, so removing it does not restore anything — it
-//     destroys a file the overlay had before this apply ran, and an overlay with no
-//     Manifest is worse than one with a stale Manifest. Its bytes are captured
-//     before the overwrite and put back if any later step fails (R3.11).
-//
-// The capture is unconditional, taken even when the staged tree turns out to have
-// no Manifest to publish. It is a precondition as much as a backup: a package
-// directory whose Manifest cannot be read as a regular file is not one a promotion
-// can leave consistent, and finding that out before overwriting is the difference
-// between a refusal and a half-applied package.
-//
-// The registry pin is NOT written here. It is written by Apply, after this
-// returns, so that a promotion which did not complete can never leave a pin aiming
-// `--clean` at the only ebuild present (the hazard applier.go's own comment
-// spells out).
+// The registry pin is NOT written here but by Apply after this returns, so an
+// incomplete promotion can never leave a pin aiming `--clean` at the only
+// ebuild present.
 func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version string) (publishedUndo, error) {
 	// The invariant, at the single function that writes into the published
-	// overlay. Both call sites pass through here — the validating path and R10.1's
-	// reuse path, which reaches a published write without consulting
+	// overlay. Both call sites pass through here — the validating path and the
+	// proof-reuse path, which reaches a published write without consulting
 	// PromotionDecision at all.
 	if err := a.refuseOnInterrupt(ctx, pkg, version); err != nil {
 		return nil, err
 	}
 
 	if !cand.staged {
-		// R3.3's second half: promotion happens only WHERE a staged tree holding
+		// Promotion happens only WHERE a staged tree holding
 		// the validated candidate exists. Publishing from the published tree would
 		// be a copy of a file onto itself dressed up as a promotion.
 		return nil, fmt.Errorf("promoting %s-%s: the candidate was never staged, so there are no validated bytes to publish", pkg, version)
@@ -169,8 +150,8 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 	}
 
 	// The exact bytes a gate read. Read out of the staged tree rather than rebuilt
-	// from the source ebuild plus the substitutions, because R3.4 is a statement
-	// about identity: anything that re-derives the file publishes a file no gate
+	// from the source ebuild plus the substitutions, because the promise is one
+	// of identity: anything that re-derives the file publishes a file no gate
 	// ever saw, however faithful the derivation.
 	body, err := os.ReadFile(cand.ebuildPath)
 	if err != nil {
@@ -270,7 +251,7 @@ type promotion struct {
 }
 
 // capturePublishedManifest reads the Manifest the published package directory
-// already holds, before promotion overwrites it (R3.11).
+// already holds, before promotion overwrites it.
 //
 // A missing Manifest is not an error: a package directory can legitimately have
 // none, and "there was none" is a state undo can restore by removing what it
@@ -302,7 +283,7 @@ func (p *promotion) capturePublishedManifest() error {
 }
 
 // undo restores the published overlay to the state it held before this promotion
-// began (R3.11). It never returns an error, by design: it is called on a path that
+// began. It never returns an error, by design: it is called on a path that
 // already has one, and the failure that got there must reach the operator intact.
 func (p *promotion) undo(cause error) {
 	log := logging.OrDiscard(p.log)
@@ -364,7 +345,7 @@ func refuseExistingEbuild(dstPath, pkg, version string) error {
 // Every exit but the successful rename takes the temporary file with it. That is
 // not tidiness either: a leftover would be a file the published overlay never had,
 // in an overlay that commits and pushes itself, and it would break the very
-// property this story asserts — that a run in which every bump failed leaves the
+// property staging promises — that a run in which every bump failed leaves the
 // tree byte-identical. A temporary file that cannot be removed is a warning to
 // log; nil discards it.
 func writeThenRename(log *slog.Logger, path string, body []byte, mode fs.FileMode) error {

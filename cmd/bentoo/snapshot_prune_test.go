@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,8 +52,8 @@ func setPruneFlags(t *testing.T, ship string, dryRun bool) {
 
 // pruneMockRunner returns a MockRunner whose rclone lsjson calls yield an empty
 // object list (valid JSON), so GFS selection runs without any deletefile.
-func pruneMockRunner() *snapshot.MockRunner {
-	return &snapshot.MockRunner{
+func pruneMockRunner() *snapshottest.MockRunner {
+	return &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			if name == "rclone" && len(args) > 0 && args[0] == "lsjson" {
 				return []byte("[]"), nil
@@ -64,7 +65,7 @@ func pruneMockRunner() *snapshot.MockRunner {
 
 // callsWith reports whether calls contains an invocation of name whose args
 // include every one of want (in any position).
-func callsWith(calls []snapshot.RunnerCall, name string, want ...string) bool {
+func callsWith(calls []snapshottest.RunnerCall, name string, want ...string) bool {
 	for _, c := range calls {
 		if c.Name != name {
 			continue

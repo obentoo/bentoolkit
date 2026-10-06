@@ -11,7 +11,7 @@ import (
 )
 
 func TestDocsNotice_READMEDocumentsBothCommands(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	requireContains(t, "README.md", readme,
 		"bentoo notice new",
 		"bentoo notice revise",
@@ -23,7 +23,7 @@ func TestDocsNotice_READMEDocumentsBothCommands(t *testing.T) {
 
 // Every `bentoo notice <word>` the README names resolves to a real command.
 func TestDocsNotice_READMENamesOnlyRealCommands(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 	subs := regexp.MustCompile(`bentoo notice ([a-z][a-z-]*)`).FindAllStringSubmatch(readme, -1)
 	if len(subs) == 0 {
 		t.Fatal("the README names no `bentoo notice` command")

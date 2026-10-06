@@ -49,9 +49,9 @@ func TestRestoreArchive_FailedDownloadNeverReceives(t *testing.T) {
 }
 
 // TestRestoreArchive_DoesNotStream pins that restore never goes through the
-// piper seam: its stages run one after another through Run.
+// Piper seam: its stages run one after another through Run.
 func TestRestoreArchive_DoesNotStream(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	if err := Restore(t.Context(), "full", "/mnt/restore", s053RestoreOpts(mr)); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestRestoreArchive_DoesNotStream(t *testing.T) {
 }
 
 // TestRestoreArchive_RunOnlyRunner pins that restore needs only Run: a Runner
-// without the piper seam restores instead of being refused.
+// without the Piper seam restores instead of being refused.
 func TestRestoreArchive_RunOnlyRunner(t *testing.T) {
 	r := &s053RunOnlyRunner{}
 	if err := Restore(t.Context(), "full", "/mnt/restore", s053RestoreOpts(r)); err != nil {

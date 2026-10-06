@@ -20,7 +20,7 @@ import (
 
 // defaultHTTPTimeout bounds one request of the HTTP-based LLM clients. It has
 // the value fetch.DefaultHTTPTimeout had when the clients shared it; llm keeps
-// its own copy so it never imports the fetch package (story 061).
+// its own copy so it never imports the fetch package.
 const defaultHTTPTimeout = 30 * time.Second
 
 const (
@@ -106,7 +106,7 @@ type LLMConfig struct {
 // readCappedBody reads an HTTP response body while enforcing a maximum size.
 // The body is wrapped in an http.MaxBytesReader bounded by maxBodyBytes; if the
 // payload exceeds the cap the standard library yields an *http.MaxBytesError,
-// which is translated into an error wrapping ErrResponseTooLarge (S001-R11.2, S001-R11.3).
+// which is translated into an error wrapping ErrResponseTooLarge.
 // A non-positive maxBodyBytes falls back to httpx.MaxBodyBytes so a
 // zero-valued client field can never disable the cap.
 func readCappedBody(body io.ReadCloser, maxBodyBytes int64) ([]byte, error) {
@@ -128,7 +128,7 @@ type ClaudeClient struct {
 	apiKey     string
 	// maxBodyBytes caps how many bytes are read from an API response body.
 	// It defaults to httpx.MaxBodyBytes and can be overridden via
-	// WithMaxBodyBytes (S001-R11.2).
+	// WithMaxBodyBytes.
 	maxBodyBytes int64
 }
 
@@ -191,7 +191,7 @@ func NewLLMProvider(cfg LLMConfig) (LLMProvider, error) {
 	case "claude-code":
 		// NewClaudeCodeClient returns (*ClaudeCodeClient, error); since
 		// *ClaudeCodeClient implements LLMProvider, the pair satisfies the
-		// (LLMProvider, error) return signature directly (S003-R1.1, S003-R8, S003-R8.1).
+		// (LLMProvider, error) return signature directly.
 		return NewClaudeCodeClient(cfg)
 	case "":
 		return nil, ErrLLMNotConfigured
@@ -245,7 +245,7 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 		httpClient: &http.Client{
 			Timeout:   DefaultRequestTimeout,
 			Transport: httpx.BuildTransport(),
-			// x-api-key must not follow a redirect off-host (S052-R4.6).
+			// x-api-key must not follow a redirect off-host.
 			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		apiKey:       apiKey,
@@ -257,7 +257,7 @@ func NewClaudeClient(cfg LLMConfig) (*ClaudeClient, error) {
 // response body and returns the client for chaining. Values <= 0 are ignored so
 // the default (httpx.MaxBodyBytes, 10 MiB) remains in effect. LLM responses
 // may legitimately exceed the default cap, so a larger limit can be supplied
-// here (S001-R11.2).
+// here.
 func (c *ClaudeClient) WithMaxBodyBytes(n int64) *ClaudeClient {
 	if n > 0 {
 		c.maxBodyBytes = n
@@ -311,7 +311,7 @@ func (c *ClaudeClient) ExtractVersion(ctx context.Context, content []byte, promp
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
+	// Read response body, capped at c.maxBodyBytes
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
@@ -388,7 +388,7 @@ func (c *ClaudeClient) AnalyzeContent(ctx context.Context, content []byte, meta 
 	}
 	defer resp.Body.Close()
 
-	// Read response body, capped at c.maxBodyBytes (S001-R11.2)
+	// Read response body, capped at c.maxBodyBytes
 	body, err := readCappedBody(resp.Body, c.maxBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
@@ -699,7 +699,7 @@ func NewLLMClientWithHTTPClient(cfg LLMConfig, httpClient *http.Client) (*LLMCli
 
 // Compile-time assertion that *LLMClient satisfies LLMProvider. The legacy
 // wrapper must remain a valid LLMProvider so it stays accepted by
-// WithLLMClient after the Checker was reprogrammed to the interface (AD2): it
+// WithLLMClient after the Checker was reprogrammed to the interface: it
 // delegates every interface method to its embedded provider below.
 var _ LLMProvider = (*LLMClient)(nil)
 
@@ -709,7 +709,7 @@ func (c *LLMClient) ExtractVersion(ctx context.Context, content []byte, prompt s
 }
 
 // AnalyzeContent delegates schema analysis to the embedded provider so
-// *LLMClient satisfies the full LLMProvider interface (AD2). The legacy API
+// *LLMClient satisfies the full LLMProvider interface. The legacy API
 // historically exposed only ExtractVersion; this method exists purely to keep
 // *LLMClient a valid WithLLMClient argument now that the option takes an
 // LLMProvider.
@@ -718,7 +718,7 @@ func (c *LLMClient) AnalyzeContent(ctx context.Context, content []byte, meta *eb
 }
 
 // GetModel delegates to the embedded provider so *LLMClient satisfies
-// LLMProvider (AD2).
+// LLMProvider.
 func (c *LLMClient) GetModel() string {
 	return c.provider.GetModel()
 }

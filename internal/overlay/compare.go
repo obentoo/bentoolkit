@@ -82,11 +82,11 @@ type CompareResult struct {
 	Authorship Authorship
 	// ProvedBy names the file that proves it, relative to the package directory
 	// ("files/<name>"), so the operator can confirm the claim by looking instead
-	// of re-deriving the path from what ${FILESDIR} expands to (R2.2). It is
+	// of re-deriving the path from what ${FILESDIR} expands to. It is
 	// empty whenever Authorship is unproved: there is then no file to name.
 	ProvedBy string
 	// Review is a MODEL's reading of an undeclared divergence: printed beside the
-	// finding and never an input to anything this report decides (R5.8). It sits
+	// finding and never an input to anything this report decides. It sits
 	// on the result for the reason Authorship does — the pass that fills it
 	// (AnnotateReviews, review.go) runs after the comparison and writes back onto
 	// the report the caller is holding — and it is deliberately a THIRD field
@@ -106,10 +106,10 @@ type CompareResult struct {
 	// covers four unrelated causes at once, so "is Review empty?" answers "no
 	// review reached this" and cannot answer "did anybody read this?" — a
 	// package nobody asked about and a package whose reviewer was killed both
-	// carry the zero note, and only this field tells them apart (S047-R3.1).
+	// carry the zero note, and only this field tells them apart.
 	//
 	// It is filled by AnnotateReviews (review.go), the same pass that fills
-	// Review (S047-R4.1). Its zero value, ReadingNotRequested, is what every
+	// Review. Its zero value, ReadingNotRequested, is what every
 	// result that pass never reached already carries, so a run with no review
 	// is correct without anything being set.
 	Reading Reading
@@ -139,44 +139,43 @@ type CompareResult struct {
 	// nicety: FormatReport takes a *CompareReport and never learns which flags
 	// were passed, so a zero value is the only mechanism by which `overlay
 	// compare` without a review can keep printing exactly what it printed
-	// yesterday (R7.2). A field read by no renderer would satisfy that promise
+	// yesterday. A field read by no renderer would satisfy that promise
 	// and empty it of meaning, so each of these is rendered — see
 	// formatBaselineFindings.
 
-	// Baseline is the ::gentoo ebuild this package was measured against (R1.1).
+	// Baseline is the ::gentoo ebuild this package was measured against.
 	// Its zero value is "no review ran, or ::gentoo does not carry this
 	// package"; the run-level NoBaselineCount below is what turns the second of
 	// those into a number, because the two are indistinguishable per package by
 	// construction.
 	Baseline Baseline
 	// Axes are the structural differences between our ebuild and that baseline
-	// — inherit, options, IUSE, dependencies (R2.4). A nil slice means nothing
+	// — inherit, options, IUSE, dependencies. A nil slice means nothing
 	// was compared or nothing differs, which is the same thing to a report that
 	// prints only what it found.
 	Axes []AxisFinding
 	// Classified is what the three-way reduction concluded about the
-	// differences: how many fell into each class and how much evidence it had
-	// (R2.4, R2.5).
+	// differences: how many fell into each class and how much evidence it had.
 	Classified Classified
 	// Declarations are the `# BENTOO-DIVERGENCE:` tags our ebuild carries, with
-	// Expired decided against the ::gentoo tree (R3.1, R3.3). They are the
+	// Expired decided against the ::gentoo tree. They are the
 	// EBUILD axis and never CompareOptions.Divergence, which is the registry
 	// one.
 	Declarations []DeclaredDivergence
 	// RealignVerdict is a MODEL's opinion on whether an undeclared divergence is
-	// still justified, and why (R4.1). It is written by the realignment reviewer
-	// (task 5.1) and never by AnnotateBaseline: a verdict nobody produced is
-	// worse than none, so an unreachable model leaves it empty (R4.4).
+	// still justified, and why. It is written by the realignment reviewer and
+	// never by AnnotateBaseline: a verdict nobody produced is
+	// worse than none, so an unreachable model leaves it empty.
 	//
 	// It is COMMENTARY. Nothing that decides a Verdict or an exit code may read
-	// it (R4.3), on the same fence DiffAdded/DiffRemoved already sit behind.
+	// it, on the same fence DiffAdded/DiffRemoved already sit behind.
 	RealignVerdict string
 	// Others are the repositories other than ::gentoo that carry this package,
-	// for the 84 of 321 packages ::gentoo does not (R6.1). They are INFORMATIVE
-	// ONLY and no realignment is ever proposed from one (R6.2): a repository
+	// for the 84 of 321 packages ::gentoo does not. They are INFORMATIVE
+	// ONLY and no realignment is ever proposed from one: a repository
 	// outside ::gentoo has not been through the same review.
 	//
-	// They are filled by task 6.2's OtherRepositories, which needs the list of
+	// They are filled by OtherRepositories, which needs the list of
 	// locally available repositories — something AnnotateBaseline is not given
 	// and deliberately does not go looking for.
 	Others []OtherRepo
@@ -309,12 +308,12 @@ const (
 	// difference came from. It is the ZERO VALUE by construction, so every
 	// result nobody examined — the identical ones, every API-only run — reads as
 	// "cannot tell" rather than as a claim about anybody. It is NEVER "the
-	// change is upstream's" (R2.3).
+	// change is upstream's".
 	AuthorshipUnproved Authorship = iota
 	// AuthorshipOverlay means our ebuild references a file under ${FILESDIR}
 	// that ::gentoo does not provide for that package. A reference to a patch
 	// upstream never had cannot have been inherited from upstream, which is the
-	// one thing two ebuilds and two directories can prove between them (R2.1).
+	// one thing two ebuilds and two directories can prove between them.
 	AuthorshipOverlay
 )
 
@@ -330,7 +329,7 @@ const (
 // finding that is not an undeclared divergence — so reading "Review is empty"
 // as "nobody looked" reports the same thing for a package nobody was ever asked
 // about and for one whose review was killed mid-flight. That conflation is the
-// defect this vocabulary exists to remove (S047-R3.1), and collapsing Reading
+// defect this vocabulary exists to remove, and collapsing Reading
 // back into Verification or into Review would reproduce it exactly.
 //
 // The vocabulary lives here with the rest of the compare types, exactly as
@@ -479,37 +478,18 @@ type CompareReport struct {
 	Results          []CompareResult
 
 	// Findings is everything the run established for the operator, as VALUES
-	// rather than as the lines this package used to compose and colour
-	// (S046-R5.1, R5.2). One entry per compared package says how its two
-	// versions relate; a package that also carries a divergence, a stale
-	// declaration or a registry declaration carries a second entry saying so.
+	// rather than composed, coloured lines. One entry per compared package says
+	// how its two versions relate; a package that also carries a divergence, a
+	// stale declaration or a registry declaration carries a second entry.
 	//
-	// # It is a MATERIALISED VIEW of Results, and that is what keeps it honest
+	// It is a MATERIALISED VIEW of Results: compareFindings is a pure function of
+	// them, refreshed by CompareWithProvider once sorted and by EstablishFindings
+	// after the annotation passes have run — a list built earlier would report a
+	// divergence as unproved after the content had proved it ours.
 	//
-	// compareFindings is a pure function of the results, and this field holds
-	// nothing that function would not produce again from the same slice. Two
-	// places refresh it: CompareWithProvider, once the results are sorted, and
-	// EstablishFindings, which the caller runs after the annotation passes have
-	// written Authorship, Review and the rest back onto the report it is
-	// holding. A finding built at comparison time cannot know what a pass that
-	// had not run yet would discover, and a stale list is worse than none: it
-	// would report an undeclared divergence as unproved after the content had
-	// proved it ours.
-	//
-	// # The ORDER is information
-	//
-	// Findings follow Results, which CompareWithProvider sorts by
-	// category/package. A set-shaped answer would leave every renderer to invent
-	// an order of its own, which is how two modes come to disagree about what one
-	// run said.
-	//
-	// # It is the COMPUTATION, not the view
-	//
-	// A caller that narrows Results for display — `overlay compare` does, for
-	// --only-redundant and --only-patched — narrows what its TABLE shows and
-	// nothing this field says, exactly as it narrows none of the counts above.
-	// The findings are what the comparison established about the overlay; which
-	// rows the operator asked to look at is a different question.
+	// The ORDER is Results' (category/package), so no renderer invents its own.
+	// Narrowing Results for display (--only-redundant, --only-patched) narrows the
+	// TABLE and nothing this field says, as it narrows none of the counts above.
 	Findings []Finding
 
 	// Per-Verdict counts sit ALONGSIDE the per-Status counts above and never
@@ -524,22 +504,22 @@ type CompareReport struct {
 
 	// BaselineSkipped is non-empty when the review could not run at all: no
 	// ::gentoo tree could be located, so NOTHING was examined. The text names
-	// what was looked for (R1.5), and MarkBaselineSkipped is what writes it.
+	// what was looked for, and MarkBaselineSkipped is what writes it.
 	//
 	// It is the report's only RUN-level state, and it is deliberately not the
 	// per-package one. A baseline that exists but will not read is
-	// Baseline.Unexamined on that package alone (D2) and never reaches here:
+	// Baseline.Unexamined on that package alone and never reaches here:
 	// collapsing the two would have one unreadable ebuild declare that a run
 	// which examined 320 packages examined none.
 	//
 	// Its ZERO VALUE renders nothing (formatBaselineSkipped), which is what keeps
-	// a run that requested no review printing exactly what it printed yesterday
-	// (R7.2). Without it the same run prints "All packages are up-to-date!" over
+	// a run that requested no review printing exactly what it printed before.
+	// Without it the same run prints "All packages are up-to-date!" over
 	// a comparison that never happened.
 	BaselineSkipped string
 
 	// NoBaselineCount is how many results ::gentoo carries no version of at all
-	// (R6.4) — 84 of 321 packages on the measured overlay. It is written by
+	// — 84 of 321 packages on the measured overlay. It is written by
 	// AnnotateBaseline and is, by construction, the number of Results whose
 	// Baseline.Found is false: any second definition would be a second answer to
 	// one question.
@@ -548,15 +528,15 @@ type CompareReport struct {
 	// package ::gentoo does not carry has the ZERO Baseline, which is also what
 	// a package no review examined has, so a per-package line would say "no
 	// baseline" over every row of a plain `overlay compare`. Counted here it is
-	// reported once, with its denominator, and renders nothing at 0 (R7.2).
+	// reported once, with its denominator, and renders nothing at 0.
 	NoBaselineCount int
 
 	// RealignAsked and RealignNoVerdict are the realignment review's own
 	// arithmetic: how many divergences were put to the model, and how many of
-	// those came back with no verdict (R4.4). Both are written by
+	// those came back with no verdict. Both are written by
 	// AnnotateRealignVerdicts and by nothing else.
 	//
-	// The second exists because an unreachable model is EXIT 0 (D9) and leaves an
+	// The second exists because an unreachable model is EXIT 0 and leaves an
 	// EMPTY RealignVerdict on every package it could not judge — which renders as
 	// silence, and silence reads as "every divergence was judged and none
 	// objected". This is the number that says otherwise, and the first is the
@@ -566,7 +546,7 @@ type CompareReport struct {
 	// They are RUN-level for the reason NoBaselineCount is: the per-package fact
 	// is an absent field, indistinguishable from the same absent field on every
 	// row of a plain `overlay compare`. Counted here they are stated once and
-	// render nothing at 0 (R7.2).
+	// render nothing at 0.
 	RealignAsked     int
 	RealignNoVerdict int
 	// RealignNoVerdictBy splits RealignNoVerdict by why each divergence came
@@ -580,36 +560,20 @@ type CompareReport struct {
 	// end of the package list it was handed: the context fired mid-scan, so some
 	// packages were never compared at all.
 	//
-	// It is the one RUN-level fact CompareWithProvider writes itself. The three
-	// above are written by annotation passes that run after it returns; this one
-	// is knowable only inside the dispatch loop, the only code that sees the
-	// difference between "the list ended" and "we stopped".
+	// It is the one RUN-level fact CompareWithProvider writes itself: only the
+	// dispatch loop sees the difference between "the list ended" and "we
+	// stopped".
 	//
-	// # Complete is !Interrupted, and NEVER NotEvaluated == 0
+	// Complete is !Interrupted, NEVER NotEvaluated == 0: a run cut short just
+	// after its LAST package lost nothing, yet was still cut short, and the
+	// operator who pressed ctrl+c must not read that it ended normally.
 	//
-	// A run cut short in the instant after its LAST package completed lost
-	// nothing to look at: the gap below is zero and the run was still cut short.
-	// Deriving completeness from that gap would tell the operator who pressed
-	// ctrl+c that their scan ended normally. ManifestResult.Interrupted carries
-	// the same fact for the same reason, and the report envelope negates this
-	// field rather than reading any count (S047-R5.1).
+	// The unreached gap is exactly TotalPackages - ComparedPackages, because
+	// ComparedPackages++ runs for every result reaching the collector — every
+	// status, filtered or not — so only a worker that never ran is missing.
 	//
-	// # The unreached gap is TotalPackages - ComparedPackages, exactly
-	//
-	// ComparedPackages++ runs once per result reaching the collector: before the
-	// switch that splits results by Status, and outside the include filter that
-	// decides what lands in Results. So StatusNotInRemote and StatusError are
-	// counted like any other status, and a row filtered out of Results is
-	// counted too. A package missing from that number is therefore a package
-	// whose worker never ran, and the subtraction has nothing else in it
-	// (S047-R5.2).
-	//
-	// # False is the safe zero value, which is why the field is not named Complete
-	//
-	// A CompareReport built by hand — in a test, or by a caller assembling one —
-	// gets false, and false here means "not interrupted". A Complete bool would
-	// default to "this run was cut short" and quietly draw the interrupted block
-	// over every such report.
+	// The field is not named Complete so that false, the zero value of a
+	// hand-built report, means "not interrupted" rather than "cut short".
 	Interrupted bool
 }
 
@@ -871,7 +835,7 @@ func CompareWithProvider(ctx context.Context, localPackages []repo.PackageInfo, 
 
 	// The findings the caller receives, established AFTER the sort so their order
 	// is the results' order rather than whichever order the goroutines finished
-	// in (R5.1). A partial report gets them too: a cancelled scan established
+	// in. A partial report gets them too: a cancelled scan established
 	// facts about everything it did reach, and dropping them would make a SIGINT
 	// cost more than the packages it did not get to.
 	EstablishFindings(report)
@@ -885,36 +849,20 @@ func CompareWithProvider(ctx context.Context, localPackages []repo.PackageInfo, 
 // EstablishFindings rebuilds report.Findings from the report, and is what a
 // caller runs after the annotation passes have written back onto it.
 //
-// It exists because the comparison and the passes that annotate it happen at
-// different times. CompareWithProvider fills Status, Verdict, Patched and the
-// content check; AnnotateAuthorship, AnnotateReviews, AnnotateBaseline and
-// AnnotateRealignVerdicts each run afterwards, on the report the caller is
-// holding, and each writes facts a finding built before them could not have
-// known. Rebuilding is the whole of keeping up: the findings are a pure function
-// of the report, so a second call over an annotated report produces the list the
-// first call would have produced had the annotations been there.
+// The annotation passes (AnnotateAuthorship, AnnotateReviews, AnnotateBaseline,
+// AnnotateRealignVerdicts) run after CompareWithProvider and write facts an
+// earlier finding could not have known; the findings are a pure function of the
+// report, so rebuilding is the whole of keeping up.
 //
-// It is IDEMPOTENT and it never appends: the field is replaced, so calling it
-// twice cannot double the list. A nil report is a no-op rather than a panic — a
-// caller that has nothing to establish findings over is not an error condition.
+// It is IDEMPOTENT: the field is replaced, never appended to, and a nil report is
+// a no-op. It is the ONE place report.Findings is written — `overlay compare`
+// calls it again after all passes, so anything a producer appended would be
+// silently discarded; every producer is a pure function this composes instead.
 //
-// # It is the ONE place report.Findings is written
-//
-// The baseline review appends nothing of its own, and may not: `overlay compare`
-// calls this once more after all four passes have run, and an appended list
-// would be silently discarded by that call — a producer that had done its work
-// correctly, reporting nothing. So every producer writes a pure function of the
-// report instead, and this composes them.
-//
-// # The ORDER is the report's own order
-//
-// The run-level outcome first, because it opens the rendered report and because
-// "nothing was compared against ::gentoo" qualifies everything printed under it;
-// then the comparison's findings, one per package plus its exceptions; then the
-// baseline review's, which is what the section prints beneath the same table.
-// Nothing here sorts: report.Results was sorted by CompareWithProvider, and a
-// second arrangement invented here is how two renderers come to disagree about
-// what one run said.
+// Order: the run-level outcome first, since "nothing was compared against
+// ::gentoo" qualifies everything under it; then the comparison's findings per
+// package; then the baseline review's. Nothing here sorts: Results is already
+// sorted, and a second arrangement is how two renderers come to disagree.
 func EstablishFindings(report *CompareReport) {
 	if report == nil {
 		return
@@ -953,7 +901,7 @@ func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov 
 	// version comparison, and it is deliberately placed above the annotation
 	// below: it therefore cannot read the declaration it is checking, and the
 	// Verdict — computed from Status and the declaration alone — cannot read it
-	// back. One mechanism decides, the other only checks (D4, R4.5), and the
+	// back. One mechanism decides, the other only checks, and the
 	// order of these three statements is what makes that structural rather than
 	// a convention someone must remember.
 	check := verifyAgainstLocalContent(result, prov, opts)
@@ -961,7 +909,7 @@ func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov 
 	result.DiffAdded, result.DiffRemoved = check.added, check.removed
 
 	// A REFUSAL IS RECORDED WHERE IT HAPPENS, on the line after the check that
-	// refused (S047-R3.3). Everything about this package's content is decided by
+	// refused. Everything about this package's content is decided by
 	// the statement above, so nothing further along the run can be asked to
 	// remember it — see noteContentRefusal for the report that went out complete
 	// while six pairs had gone uncompared.
@@ -1040,27 +988,19 @@ func comparePackageVersions(ctx context.Context, pkg repo.PackageInfo, prov prov
 
 // verifyAgainstLocalContent compares the overlay's ebuild against the upstream
 // copy of the same version, byte for byte, and reports which of the three
-// verification states holds (R4.1). It never decides anything: its result is
-// reported beside the Verdict, never instead of it (R4.5).
+// verification states holds. It never decides anything: its result is
+// reported beside the Verdict, never instead of it.
 //
-// It runs only when the package resolves on both sides (resolvePackagePaths,
-// which states the three conditions and why each one is a condition) and both
-// ebuilds read. Any of that failing is simply NotVerified rather than an error
-// (R4.4) — absence of evidence is not evidence, so the declaration stands
-// unverified rather than being contradicted.
+// It runs only when the package resolves on both sides (resolvePackagePaths)
+// and both ebuilds read; anything else is NotVerified, not an error — absence of
+// evidence leaves the declaration unverified rather than contradicted. Both
+// reads are local, so it takes no context.
 //
-// Both reads are local: this issues no network request and takes no context.
-//
-// The comparison is raw, per the design: a copyright-year bump or a stray
-// trailing newline alone reads as a divergence. Should that show up in practice
-// the answer is a normalisation rule, which is a policy decision of its own —
-// and the failure direction is the safe one, since the finding only ever warns.
-//
-// PruneVerification (prune.go) asks a different question — whether deleting the
-// overlay's whole package would lose anything, across every shared version and
-// the files/ tree — but the two agree wherever they overlap, since both are
-// bytes.Equal over the same two files. It is separate code precisely so that a
-// removal criterion cannot change what this compare reports.
+// The comparison is raw: a copyright-year bump alone reads as a divergence. A
+// normalisation rule would be a policy decision of its own, and the failure
+// direction is safe since the finding only ever warns. PruneVerification asks
+// the whole-package deletion question; both are bytes.Equal where they overlap,
+// and they are separate code so a removal criterion cannot change this report.
 func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opts CompareOptions) contentCheck {
 	paths, ok := resolvePackagePaths(result, prov, opts)
 	if !ok {
@@ -1089,48 +1029,23 @@ func verifyAgainstLocalContent(result CompareResult, prov provider.Provider, opt
 }
 
 // noteContentRefusal records, on one result, that the content check RAN AND
-// REFUSED the pair — as opposed to nobody having asked for a reading
-// (S047-R3.3, S047-R4.1).
+// REFUSED the pair — as opposed to nobody having asked for a reading.
 //
-// # It is called where the refusal happens, and that placement IS the fix
+// It is called where the refusal happens, and that placement IS the fix. Written
+// only inside AnnotateReviews, it was skipped whenever the reviewer was nil — and
+// with no `claude` on PATH nobody had narrowed anything: the refused pairs went
+// uncounted, the document claimed `complete: true, not_evaluated: 0`, and a fact
+// the presence of a CLI can erase is not a fact about the run.
 //
-// It used to be written only inside AnnotateReviews (review.go), which returns
-// at its first statement when the reviewer is nil. A reviewer is nil in two
-// unrelated situations: `--no-review`, which is the operator narrowing the run,
-// and no `claude` on PATH, which is most CI and which nobody narrowed. In the
-// second one the content check had still run and still refused pairs, and
-// nothing wrote it down — so `func compareNotEvaluated`
-// (cmd/bentoo/overlay_compare_report.go) counted zero, the document went out
-// `complete: true, not_evaluated: 0`, and the same overlay reported six
-// unestablished facts with a reviewer and none without one. A fact that the
-// presence of a CLI can erase is not a fact about the run (S047-R5.1,
-// S047-R5.2) — and `CompareRun.Unread` was counting those same six packages on
-// the wire, so the document contradicted itself.
+// The population is exactly `Verified == NotVerified`, written in the same pass
+// as Verified so the two cannot disagree. Every other result keeps
+// ReadingNotRequested, which compareNotEvaluated does not count, so
+// `--no-review` over a run that refused nothing still reports itself complete.
 //
-// The counterpart is Verified itself: NotVerified means "the check ran and
-// could not compare", never "no check was attempted", precisely because
-// verifyAgainstLocalContent runs on every dispatched package whatever else the
-// run was asked to do. This writes the reading in the same pass, on the same
-// condition, so the two can never come to disagree.
-//
-// # It cannot mark a run the operator merely NARROWED
-//
-// The population is exactly `Verified == NotVerified`. Every other result keeps
-// ReadingNotRequested, which `func compareNotEvaluated` deliberately does not
-// count — so `--no-review` over a run that refused nothing still reports
-// itself complete (S047-R5.3). The distinction being drawn is "nobody asked"
-// against "the check refused", and only this end of the code knows which.
-//
-// # It can never overwrite a reading
-//
-// Its population and the reviewed one are DISJOINT BY CONSTRUCTION:
-// isUndeclaredDivergence requires VerifiedDiffers, and no result is both
-// VerifiedDiffers and NotVerified. AnnotateReviews calls this same function
-// over the report it is handed — one rule, one spelling, two callers, on the
-// argument that made isUndeclaredDivergence one function — so a report a caller
-// assembled without CompareWithProvider still says which of its rows were
-// refused, and the second application writes the value the first one already
-// wrote.
+// It can never overwrite a reading: isUndeclaredDivergence requires
+// VerifiedDiffers, so the reviewed population is disjoint. AnnotateReviews calls
+// this same function, so a report assembled without CompareWithProvider still
+// says which rows were refused.
 func noteContentRefusal(result *CompareResult) {
 	if result == nil {
 		return
@@ -1173,31 +1088,19 @@ func (p packagePaths) upstreamEbuild() string { return filepath.Join(p.upstreamD
 // resolvePackagePaths locates one compared package on both sides. ok is false
 // when any part of that cannot be had.
 //
-// It is ONE resolution in ONE place because two passes need exactly these
-// strings: verifyAgainstLocalContent above, which reads both ebuilds, and
-// AnnotateAuthorship (authorship.go), which reads ours and looks for the files
-// it references under upstream's files/. Resolved twice, they would be two
-// things to keep in step, and the one that drifted would report on a package it
-// had never opened.
-//
-// A false ok is never an error in either caller, and both read it as the same
-// thing — nothing is known. The content check reports NotVerified (R4.4) and the
-// authorship check reports unproved (R2.3). Three conditions must hold, each
-// failing for its own reason:
+// It is ONE resolution in ONE place because the content check, the authorship
+// pass and the review need exactly these strings, and a copy that drifted would
+// report on a package it had never opened. A false ok is never an error: it
+// means nothing is known (NotVerified, unproved). Three conditions must hold:
 //
 //   - the caller said where the overlay is (opts.OverlayPath). PackageInfo
 //     carries no path, so without it there is no overlay-side file to open;
-//   - the two versions are equal. Two different versions differ for reasons that
-//     say nothing about whether we changed anything. An EMPTY version is refused
-//     by the same guard for a second reason: it names no ebuild at all, and it
-//     is the shape a not-in-remote or failed comparison leaves behind — where
-//     RemoteVersion is empty too, so the equality would otherwise hold and send
-//     doomed reads at a file called "<pkg>-.ebuild";
-//   - the provider has the compared repository on disk, which is exactly the
-//     capability provider.PackageDirProvider names. The git-clone and local
-//     providers satisfy it and the API providers do not; failing that assertion
-//     IS the "API-only" signal, and an API provider could supply content only at
-//     the cost of one extra rate-limited request per package.
+//   - the two versions are equal, since different versions differ for reasons
+//     that say nothing about our changes. An EMPTY version (a not-in-remote or
+//     failed comparison) is refused too: it would read "<pkg>-.ebuild";
+//   - the provider has the repository on disk (provider.PackageDirProvider).
+//     Failing that assertion IS the "API-only" signal; an API provider could
+//     supply content only at one rate-limited request per package.
 //
 // Everything here is local: it issues no network request and takes no context.
 func resolvePackagePaths(result CompareResult, prov provider.Provider, opts CompareOptions) (packagePaths, bool) {
@@ -1242,30 +1145,19 @@ func resolvePackagePaths(result CompareResult, prov provider.Provider, opts Comp
 // diffLineCounts reports how many lines ours holds that theirs does not, and
 // vice versa, as a real line diff rather than a count of differing bytes.
 //
-// The argument ORDER is the report's point of view: theirs is the "before" and
-// ours the "after", so added is what our overlay carries on top of ::gentoo's
-// ebuild — the same orientation as `diff -u <gentoo> <ours>`, which is what an
-// operator checking the finding by hand will run.
+// The argument ORDER is the report's point of view: theirs is "before", ours
+// "after" — the orientation of `diff -u <gentoo> <ours>`, which an operator
+// checking the finding by hand will run.
 //
-// udiff.Lines is already this repository's diff (cmd/bentoo/overlay_autoupdate_lintfix.go
-// renders the registry repair with it), so this adds no dependency and no second
-// notion of what a line difference is. Each Edit replaces the byte range
-// [Start,End) of before with New, and udiff.Lines aligns those ranges to line
-// boundaries, so counting the lines on each side of every edit yields the totals.
+// udiff.Lines is already this repository's diff, so this adds no second notion
+// of a line difference; udiff.Lines aligns each Edit's [Start,End) to line
+// boundaries, so counting lines on each side of every edit yields the totals.
 //
-// THE ORIENTATION MATCHES `diff`; THE MAGNITUDE NEED NOT. lcs.DiffLines stops
-// searching for a minimal edit script after maxDiffs = 100 (lcs/old.go) and
-// returns a valid but larger one past that point. Measured on
-// net-libs/nodejs-26.7.0, our biggest real divergence: this reports +622/-254
-// where GNU diff reports +430/-62. Both are correct edit scripts — the line
-// totals reconcile either way — but only the small ones agree.
-//
-// That is acceptable HERE and would not be elsewhere, because of what the number
-// is for. The question it answers is "one line, or hundreds?", and it is asked
-// precisely to separate a copy that fell behind from work of our own. A count
-// inflated at the top of that range still answers it; an operator who wants the
-// exact edit script runs `diff -u`, which is what the caveat beneath the finding
-// tells them to do anyway. Nothing downstream computes on these values.
+// THE ORIENTATION MATCHES `diff`; THE MAGNITUDE NEED NOT: lcs.DiffLines stops
+// minimising after 100 diffs, so nodejs-26.7.0 reads +622/-254 where GNU diff
+// says +430/-62. That is acceptable because the number only answers "one line,
+// or hundreds?"; the exact script is `diff -u`, as the caveat beneath the
+// finding says. Nothing downstream computes on these values.
 //
 // Neither count is a verdict and neither feeds one: a large diff does not
 // authorise anything and a small one forbids nothing. See CompareResult.DiffAdded.
@@ -1315,67 +1207,35 @@ const patchedReasonCap = 72
 //
 // It is ONE predicate in ONE place because two things ask it — the two loud arms
 // of formatVerificationFindings below, and AnnotateReviews (review.go), which
-// submits exactly this set to the model (R5.1). Spelled twice, they would be two
+// submits exactly this set to the model. Spelled twice, they would be two
 // things to keep in step, and the one that drifted would either ask a model
 // about a package the report never warned about or print commentary under a
 // finding that does not exist.
 //
 // It reads neither DiffAdded nor DiffRemoved, and must not: the size of a
-// difference decides nothing (R1.3, compare_diff_counts_fence_test.go).
+// difference decides nothing (compare_diff_counts_fence_test.go).
 func isUndeclaredDivergence(r CompareResult) bool {
 	return r.Verified == VerifiedDiffers && !r.Patched
 }
 
-// compareFindings is where every finding this comparison establishes is written
-// down, once, as a value (S046-R5.1). It is the ONE definition of what the
-// report has to say about a package, and the rendered lines beneath each table
-// are produced from its output rather than composed a second time — so the
-// sentence an operator reads and the sentence a caller receives cannot come to
-// disagree.
+// compareFindings writes every finding this comparison establishes, once, as a
+// value — the ONE definition of what the report says about a package, so the
+// line an operator reads and the value a caller receives cannot disagree.
 //
-// A finding is DERIVED from the fields that already carry the facts — Status and
-// the two versions (how they relate), Verified (what the two ebuilds' bytes
-// say), Patched (what the registry says), Authorship (what the overlay's files/
-// tree proves) and Review (what a model said) — instead of being stored on
-// CompareResult. There is therefore no further copy that can disagree with them,
-// and no state to keep in step; CompareReport.Findings holds the output of this
-// function and nothing else, which is why EstablishFindings can simply rebuild
-// it after an annotation pass.
+// Findings are DERIVED from Status, the versions, Verified, Patched, Authorship
+// and Review rather than stored, so there is no copy to keep in step and
+// EstablishFindings can simply rebuild them. Every package gets a
+// FindingCompared, making the list a complete account; the loud findings are a
+// second entry. Of the four verification combinations only two speak (a real,
+// declared divergence is the system working), and the undeclared one splits on
+// Authorship, naming the proving file when there is one. A third case states
+// the declaration itself, since an API-only run never verifies and a patched
+// package would otherwise print exactly like an unpatched one.
 //
-// # Every package gets a FindingCompared, and only some get a second entry
-//
-// The row-level entry is what makes the list a complete account of the run
-// rather than a list of its exceptions: a consumer holding it can say what
-// happened to each package without also holding Results. The four loud findings
-// below are additional, so a package that carries one appears twice — once for
-// how its versions relate, once for what is wrong.
-//
-// Only two of the four verification combinations say anything (R4.2, R4.3). The
-// other two are silent on purpose: a divergence that is both real and declared
-// is the system working, and a redundancy confirmed by identical bytes is a
-// Verdict that has simply been checked rather than a problem.
-//
-// The loud one of the two then splits on Authorship (R2.2, R2.3). It is one
-// finding with two things to say: the content either proved the difference
-// originates here — in which case the finding names the file that proves it — or
-// it did not, which is not a finding about ::gentoo.
-//
-// A THIRD case (R3.8) states the declaration itself, and it is what makes a
-// patched package visible at all. Verification needs a local copy of the
-// compared repository; with an API-only provider Verified is always NotVerified,
-// so before this case existed a patched package printed exactly like an
-// unpatched one — same Verdict "keep", no column, no line — and the operator was
-// back to answering "does this carry changes of our own?" from memory.
-//
-// The case ORDER is the whole mechanism, twice over. "stale" is tested first, so
-// a declaration already known to be obsolete keeps its warning and is not also
-// restated as fact one line below. And the PROVED undeclared case is tested
-// before the unproved one, which is only a narrowing of it: a package whose
-// authorship the content settled must not fall through to the sentence that says
-// nobody knows.
-//
-// Nothing here can change a Verdict (R4.5) — it turns finished CompareResults
-// into values.
+// The case ORDER is the mechanism: "stale" first, so an obsolete declaration is
+// not also restated as fact; PROVED undeclared before unproved, so a settled
+// package never falls through to "nobody knows". Nothing here can change a
+// Verdict.
 func compareFindings(results []CompareResult) []Finding {
 	findings := make([]Finding, 0, len(results))
 
@@ -1391,7 +1251,7 @@ func compareFindings(results []CompareResult) []Finding {
 
 		switch {
 		case r.Verified == VerifiedIdentical && r.Patched:
-			// R4.2: the entry describes a divergence that no longer exists, so it
+			// The entry describes a divergence that no longer exists, so it
 			// is suppressing a removal recommendation for nothing. Naming the
 			// entry is the point of the finding: that is what has to be edited.
 			entry := declaringEntry(r)
@@ -1409,7 +1269,7 @@ func compareFindings(results []CompareResult) []Finding {
 				Effect: declared(r.PatchedReason),
 			})
 		case isUndeclaredDivergence(r) && r.Authorship == AuthorshipOverlay:
-			// R2.2: the same finding as below, except that the overlay's own
+			// The same finding as below, except that the overlay's own
 			// content settled the question the two ebuilds could not. Our ebuild
 			// references a file ::gentoo does not ship for this package, and a
 			// reference to a file upstream never had cannot have been inherited
@@ -1429,23 +1289,23 @@ func compareFindings(results []CompareResult) []Finding {
 				"undeclared divergence (+%d/-%d), proved ours — our %s ebuild references %s, which ::gentoo does not ship, so removing this package would discard work of our own that no entry declares",
 				r.DiffAdded, r.DiffRemoved, r.LocalVersion, r.ProvedBy)))
 		case isUndeclaredDivergence(r):
-			// R4.3: the loud case. Nothing declares this package, so it is about
+			// The loud case. Nothing declares this package, so it is about
 			// to be reported as a removal candidate — and its ebuild is not the
 			// one ::gentoo ships.
 			//
 			// The finding carries the SIZE of the difference and stops there.
 			// Nothing in the content proved whose change it is — which is not a
-			// finding that the change is ::gentoo's (R2.3) — and the caveat the
+			// finding that the change is ::gentoo's — and the caveat the
 			// renderer prints once beneath the section says so rather than hedging
 			// on every row.
 			findings = append(findings, undeclaredFinding(r, atom, r.DiffAdded, r.DiffRemoved, fmt.Sprintf(
 				"undeclared divergence (+%d/-%d) — our %s ebuild differs from ::gentoo's, and no entry declares why",
 				r.DiffAdded, r.DiffRemoved, r.LocalVersion)))
 		case r.Patched:
-			// R3.8: the declaration, stated wherever it has not already been
+			// The declaration, stated wherever it has not already been
 			// contradicted above. This is the common case in practice — every
-			// API-only run reaches it — so it carries the whole weight of R2.2's
-			// "SHALL name the declaring entry in the report".
+			// API-only run reaches it — so it carries the whole weight of naming
+			// the declaring entry in the report.
 			//
 			// The declared reason is the most trusted answer to "what does this
 			// divergence do?" there is, because a maintainer committed it on
@@ -1479,7 +1339,7 @@ func compareFindings(results []CompareResult) []Finding {
 // compare_diff_counts_fence_test.go permits exactly two functions to name
 // DiffAdded and DiffRemoved — the one that fills them and the one that states
 // them — because anything between those two ends is a computation on the SIZE of
-// a divergence, which R1.3 forbids outright. Taking them as plain ints keeps this
+// a divergence, which is forbidden outright. Taking them as plain ints keeps this
 // constructor off that list: compareFindings is the single place the fields are
 // read, and this one only copies what it was handed.
 func undeclaredFinding(r CompareResult, atom string, added, removed int, detail string) Finding {
@@ -1495,10 +1355,10 @@ func undeclaredFinding(r CompareResult, atom string, added, removed int, detail 
 		ProvedBy:   r.ProvedBy,
 	}
 
-	// A model's reading of this same difference (R5.2-R5.4). The same judgement
+	// A model's reading of this same difference. The same judgement
 	// the annotator applies (reviewNoteSpeaks, review.go) is held here too: a note
-	// missing its classification or its summary has answered neither R5.2 nor
-	// R5.3, and a finding-shaped value stating nothing is worse than none. A note
+	// missing its classification or its summary has answered neither question,
+	// and a finding-shaped value stating nothing is worse than none. A note
 	// that arrived by some other route — a hand-edited cache, a later caller — is
 	// refused on the same terms.
 	//
@@ -1510,7 +1370,7 @@ func undeclaredFinding(r CompareResult, atom string, added, removed int, detail 
 	f.Origin = r.Review.Origin
 	f.Effect = reviewed(r.Review.Summary)
 
-	// R5.4 attaches a proposal to ONE classification. `both` is deliberately not
+	// A proposal is attached to ONE classification. `both` is deliberately not
 	// it: a copy that carries work of ours AND has fallen behind ::gentoo needs
 	// the rebase first, and declaring `patched` on it would record the whole
 	// difference as intentional, permanently suppressing the recommendation for
@@ -1590,14 +1450,13 @@ func oneLine(s string) string {
 }
 
 // The two colour pickers that used to sit here — one mapping a CompareStatus to
-// a colour, one a Verdict — are GONE, and their absence is the point (S046-R5.2).
+// a colour, one a Verdict — are GONE, and their absence is the point.
 //
 // A library that can answer "what colour is `redundant`?" has decided how its
 // facts look before its caller has seen them, and a cell that arrives already
 // carrying an escape sequence cannot be exported to JSON, written into Markdown
-// or logged plain — the three things R5.2 exists to make possible. Status and
-// Verdict are values with String() methods; whoever renders them picks what they
-// look like, and from story 047 that is the report.
+// or logged plain. Status and Verdict are values with String() methods; whoever
+// renders them picks what they look like, and that is the report.
 
 // truncateString truncates a string to maxLen with ellipsis
 func truncateString(s string, maxLen int) string {

@@ -16,9 +16,9 @@ import (
 // parentStore persists, per (subvolume, ship), the last successfully shipped
 // snapshot so an incremental archive send can reference it as its -p parent.
 //
-// The interface is kept small and mockable (design §5) so the archive shipper
-// (T3) can be tested against a fake. The "record only after a successful ship"
-// rule (R3.2) is the CALLER's contract: parentStore records whenever Record is
+// The interface is kept small and mockable so the archive shipper can be
+// tested against a fake. The "record only after a successful ship" rule is
+// the CALLER's contract: parentStore records whenever Record is
 // called and makes no judgement about ship success.
 type parentStore interface {
 	// Last returns the recorded parent for (subvol, ship). ok is false (nil err)
@@ -29,8 +29,8 @@ type parentStore interface {
 }
 
 // parentRecord is the JSON shape persisted per (subvol, ship). It mirrors the
-// load-bearing fields of Snapshot needed to drive an incremental `btrfs send -p`
-// (R3): the parent's ID and on-disk Path, plus enough provenance to make the
+// load-bearing fields of Snapshot needed to drive an incremental `btrfs send -p`:
+// the parent's ID and on-disk Path, plus enough provenance to make the
 // record self-describing. It is a dedicated struct (rather than marshalling
 // Snapshot directly) so the on-disk schema is explicit and stable.
 type parentRecord struct {
@@ -42,11 +42,11 @@ type parentRecord struct {
 }
 
 // fileParentStore persists parent records as one JSON file per (subvol, ship)
-// under StateDir()/parents/ (R3.1). Writes are atomic (temp + rename via
+// under StateDir()/parents/. Writes are atomic (temp + rename via
 // atomicWrite) and owner-only (0o600) — the records reference backup lineage.
 type fileParentStore struct{}
 
-// newParentStore returns the default production parentStore. T3's archive
+// newParentStore returns the default production parentStore. The archive
 // shipper uses it as the default value of its `parents` field.
 func newParentStore() *fileParentStore { return &fileParentStore{} }
 

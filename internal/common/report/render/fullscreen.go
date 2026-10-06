@@ -38,7 +38,7 @@ const (
 
 	// fullscreenPad is the breathing room between the rule and the text. A
 	// section heading starts at column zero — the shared writer's own
-	// convention, which this mode does not get to overrule (R2.4) — so without
+	// convention, which this mode does not get to overrule — so without
 	// it every title would sit flush against the border.
 	fullscreenPad = 1
 )
@@ -48,7 +48,7 @@ const (
 //
 // # Why the takeover is a variable
 //
-// R4.2 names four exit paths — normal completion, the quit key, an interrupt
+// Fullscreen has four exit paths — normal completion, the quit key, an interrupt
 // and a panic — and not one of them can be driven through a real alternate
 // screen under `go test`, where stdout is a pipe and there is no terminal to
 // take over. This repository already answers that with a seam:
@@ -60,60 +60,28 @@ const (
 // Only the takeover. Fullscreen's own behaviour — capturing the report before
 // the program starts, the deferred recover, joining the errors and printing on
 // the way out — runs for real whether the seam is stubbed or not, so a test
-// that swaps it still measures the thing R4.1 and R4.2 are about.
+// that swaps it still measures the dump on the way out and every exit path.
 var runProgram = func(m tea.Model, opts ...tea.ProgramOption) (tea.Model, error) {
 	return tea.NewProgram(m, opts...).Run()
 }
 
-// Fullscreen renders blocks in an alternate screen and prints the whole report
-// to the scrollback when that screen goes away (R2.3, R2.4, R4.1, R4.2).
+// Fullscreen renders blocks in an alternate screen, then prints the whole
+// report to the scrollback when that screen goes away.
 //
-// # The report is held HERE, not in the program
+// The report is the blocks argument, never the finished model: every exit path
+// prints that slice, so the dump survives a model that crashed and a program
+// that never started.
 //
-// blocks is a parameter, and every path below prints THAT slice — preceded at
-// most by the one section an interrupt adds. Nothing reads the finished
-// bubbletea model — the blank in `_, err :=` is the design and not an oversight
-// — because a report that lived in the model would be lost by exactly the
-// failure the dump exists to survive: a panic inside View() takes the model with
-// it, and a scrollback dump reading a wrecked model has nothing to print (D7).
+// Bubble Tea catches a panic in Update or View by default: it leaves the
+// alternate screen and Run returns ErrProgramPanic, so that case prints through
+// the errors.Join at the end like any other return. The deferred recover covers
+// what Bubble Tea does not catch: a panic outside Run, or in a program started
+// without its panic handler. It restores the terminal itself, prints the report
+// and re-panics, since swallowing the panic would turn a crash into a silent
+// wrong answer.
 //
-// The dump therefore does not depend on the TUI having run at all. A render that
-// dies before bubbletea starts still owes the operator the report, and it has
-// one, because the sections were finished before this function was called.
-//
-// # Every exit path prints, including the one that crashes
-//
-// The deferred recover is the panic path. It restores the terminal itself,
-// prints, and re-panics: printing while SWALLOWING the panic would turn a
-// crash into a silent wrong answer, which is worse than the crash. The two
-// ordinary paths — the program returning, and the quit key — leave through the
-// errors.Join below, so the print is on the single return rather than repeated
-// per branch.
-//
-// # Why the deferred branch restores the terminal by hand
-//
-// tea.WithAltScreen leaves the alternate screen when the program shuts down,
-// which is R4.4 already satisfied for a program that RETURNS. A panic does not
-// go through that teardown, so the alternate screen would still be up and the
-// report would be printed onto the buffer the terminal is about to discard.
-// Restoring first is what makes the scrollback receive text and not a screen
-// nobody will ever see again.
-//
-// # An interrupted view is labelled on the way out
-//
-// ctrl+c leaves one bit behind, and this function turns it into one extra
-// section at the top of the dump (R4.3). It says only what a renderer is in a
-// position to know — the report was interrupted before it was read out — and
-// deliberately states no count: how many units a run never reached is a fact
-// about the RUN, and it belongs to whoever built these sections. See
-// interruptNotice below.
-//
-// # It takes no io.Writer, for Inline's reason
-//
-// The destination is a terminal, not an arbitrary byte sink: it is the device
-// whose alternate screen was taken over, and the dump belongs in the
-// scrollback that screen was hiding. A test that wants to read the output
-// captures the descriptor.
+// ctrl+c adds one section, interruptNotice, at the top of the dump. Output goes
+// to os.Stdout: the dump belongs in the scrollback the alternate screen hid.
 func Fullscreen(blocks []report.Section, opts Options) error {
 	defer func() {
 		rec := recover()
@@ -136,7 +104,7 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 	}()
 
 	// interrupted is the whole of what travels back from the model: one bit,
-	// written on ctrl+c and owned here (D7). It is a pointer precisely so the
+	// written on ctrl+c and owned here. It is a pointer precisely so the
 	// answer does NOT ride home inside the model — bubbletea hands Update a
 	// copy of a value model, and reading the returned model back is the
 	// dependency this design exists to refuse.
@@ -156,7 +124,7 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 	// The screen showed the report unlabelled, and that is correct: the
 	// interrupt had not happened while it was up. The dump is the artefact
 	// somebody keeps, pastes and reads later, and it is the one that has to
-	// admit it is partial (R4.3).
+	// admit it is partial.
 	dump := blocks
 	if interrupted.Load() {
 		dump = append([]report.Section{interruptNotice}, blocks...)
@@ -165,7 +133,7 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 	return errors.Join(err, Plain(os.Stdout, dump, opts))
 }
 
-// interruptNotice is the section ctrl+c adds to the dump (R4.3).
+// interruptNotice is the section ctrl+c adds to the dump.
 //
 // # A renderer states this one, and only this one
 //
@@ -179,9 +147,9 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 // The sentence this replaces named how many planned units the run never reached.
 // That number is a fact about the RUN — it is read off the report's own plan and
 // results — and a renderer that computed one would have to be handed the run to
-// do it, which is the coupling story 046 removes. Whoever builds the sections
-// states the count, in its own vocabulary, in its own leading section; this
-// states only what happened at the terminal.
+// do it — the coupling that taking sections instead of a report removed.
+// Whoever builds the sections states the count, in its own vocabulary, in its
+// own leading section; this states only what happened at the terminal.
 var interruptNotice = report.Section{
 	Title: "Run Interrupted",
 	Lead: []string{
@@ -192,7 +160,7 @@ var interruptNotice = report.Section{
 	},
 }
 
-// restoreTerminal puts the alternate screen away and the cursor back (R4.4).
+// restoreTerminal puts the alternate screen away and the cursor back.
 //
 // The sequences come from termenv's own constants rather than being typed here,
 // so this file is not a second place where an escape is spelled out. The write
@@ -228,8 +196,7 @@ func newInterruptibleModel(blocks []report.Section, opts Options, interrupted *a
 // "The report is never read from the model" is a rule someone has to keep, and
 // a model holding a payload is a model somebody can read one out of. It holds
 // the sections it was handed, so the rule is a fact about the type rather than a
-// discipline about the code — and since sub-task 2.3 the same is true one level
-// up: Fullscreen never held a report either, so there is no second copy of
+// discipline about the code — and the same is true one level up: Fullscreen never held a report either, so there is no second copy of
 // anything to reach for.
 //
 // # What the fields are not
@@ -240,8 +207,8 @@ func newInterruptibleModel(blocks []report.Section, opts Options, interrupted *a
 type fullscreenModel struct {
 	// blocks is the report as structure: the identical []report.Section plain,
 	// Markdown and inline are written from — the same slice value, handed to
-	// every mode by one caller — which is what makes S044-R2.4 ("the same content in
-	// every mode") hold by construction here too.
+	// every mode by one caller — which is what makes "the same content in every
+	// mode" hold by construction here too.
 	blocks []report.Section
 	// askedWidth is opts.Width, kept alone rather than the whole Options.
 	// Width is the only field Options has, and unpacking it here says what the
@@ -273,8 +240,8 @@ func (m fullscreenModel) Init() tea.Cmd { return nil }
 //
 // ctrl+c both records the interrupt and quits. Recording it is what lets
 // Fullscreen tell an interrupted run from a completed one without reading this
-// model back (D7); quitting rather than dying is what lets bubbletea take the
-// alternate screen down on its own, so R4.4 needs no second answer here.
+// model back; quitting rather than dying is what lets bubbletea take the
+// alternate screen down on its own, so restoring it needs no second answer here.
 func (m fullscreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -301,7 +268,7 @@ func (m fullscreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // The body is laid out by the SAME writer plain and inline use, at the width
 // left over once the box has taken its two cells, so a heading, a column width
-// or a shortened reason is never decided twice (R2.4). What this function adds
+// or a shortened reason is never decided twice. What this function adds
 // is the frame and the height budget — the two things a full screen has and a
 // scrollback does not.
 func (m fullscreenModel) View() string {
@@ -316,7 +283,7 @@ func (m fullscreenModel) View() string {
 		// lipgloss rewrites a tab as four spaces by default. A reason string
 		// comes from a subprocess, so that default would let this mode print a
 		// line the other modes print differently — a content difference
-		// produced by the frame, which is exactly R2.4's failure.
+		// produced by the frame, which the modes must never have.
 		TabWidth(lipgloss.NoTabConversion).
 		Render(strings.Join(body, "\n"))
 
@@ -329,7 +296,7 @@ func (m fullscreenModel) View() string {
 // The live resize goes in front because it is the only one of the three that
 // can change while the program is running. The other two are Options.cells's
 // question, asked through Options.cells so that "0 means ask the device" is
-// answered in one place for every mode (D8) rather than a third time here.
+// answered in one place for every mode rather than a third time here.
 func (m fullscreenModel) frameWidth() int {
 	if m.width > 0 {
 		return m.width
@@ -358,8 +325,8 @@ func (m fullscreenModel) rowBudget() int {
 //
 // Naming the dump is not decoration. An operator who does not know the report
 // will be printed on the way out has every reason to sit in a screen they
-// cannot scroll rather than leave it, and R4.1 is only useful to someone who
-// knows it holds.
+// cannot scroll rather than leave it, and the dump on exit is only useful to
+// someone who knows it happens.
 func (m fullscreenModel) hint(cells int) string {
 	line := strings.Repeat(" ", indent) + "q/esc quit · ctrl+c interrupt · the whole report prints on exit"
 	return shortenTo(decorate(m.paint.detail, line), cells)
@@ -403,7 +370,7 @@ func (m fullscreenModel) layout(cells int) pane {
 	return p
 }
 
-// fit reduces the pane to budget rows, STATING what it dropped (S044-R2.5).
+// fit reduces the pane to budget rows, STATING what it dropped.
 //
 // # The last row buys the sentence that explains the others
 //
@@ -462,7 +429,7 @@ func (p pane) sectionsBelow(shown int) int {
 //
 // Going through write rather than reimplementing the layout is what keeps this
 // mode from becoming a fourth answer to how a heading, a column or a note is
-// written (D8).
+// written.
 func sectionLines(s report.Section, st style) []string {
 	var buf bytes.Buffer
 	if err := write(&buf, []report.Section{s}, st); err != nil {

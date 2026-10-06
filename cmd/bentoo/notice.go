@@ -13,9 +13,9 @@ import (
 )
 
 // This file is `bentoo notice`: authoring the overlay's GLEP 42 news item and
-// the site's notice file from one input, with one ID (story 071). The logic
+// the site's notice file from one input, with one ID. The logic
 // lives in internal/notice; this file parses flags, supplies the terminal and
-// the clock, and prints. It performs no git operation (R6.2).
+// the clock, and prints. It performs no git operation.
 
 // newNoticeCmd builds `notice` and its two subcommands.
 func newNoticeCmd() *cobra.Command {
@@ -183,7 +183,7 @@ func runNoticeRevise(cmd *cobra.Command, id string, changes notice.Changes, body
 }
 
 // printNoticeResult prints what was written and what the operator does next.
-// The next steps are printed, never run (R6.2).
+// The next steps are printed, never run.
 func printNoticeResult(out, errOut io.Writer, res notice.Result, id, overlay, sitePath, verb string) {
 	for _, w := range res.Warnings {
 		fmt.Fprintf(errOut, "warning: %s\n", w)

@@ -14,7 +14,7 @@ import (
 // overlayFlagName is the root persistent flag naming the overlay to work on for
 // this run, outranking both the current directory and overlay.path. It is read
 // off the running command (overlayFlagValue), never kept in a package variable:
-// cmd/bentoo holds no new globals (story 060, R8.4).
+// cmd/bentoo holds no new globals.
 const overlayFlagName = "overlay"
 
 // overlayFlagValue returns --overlay as the running command sees it: the root
@@ -97,7 +97,7 @@ func selectOverlay(cfg *config.Config, flag string) (configured string, moved bo
 }
 
 // selectOverlayLogged is selectOverlay reporting a move to the current
-// directory's checkout on log, at INFO (story 062, R6.2).
+// directory's checkout on log, at INFO.
 func selectOverlayLogged(log *slog.Logger, cfg *config.Config, flag string) {
 	if configured, moved := selectOverlay(cfg, flag); moved {
 		log.Info("using the overlay checkout at the current directory instead of overlay.path; pass --overlay to choose explicitly",

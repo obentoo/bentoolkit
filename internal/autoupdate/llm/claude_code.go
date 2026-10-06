@@ -7,7 +7,7 @@ package llm
 // hybrid: when an API key env var is configured and populated the client runs the
 // CLI in --bare mode and injects the key solely through the child process
 // environment; otherwise it relies on the CLI's own logged-in session. The API
-// key value never appears in argv, logs, or returned errors (S003-R2.4, G5).
+// key value never appears in argv, logs, or returned errors.
 
 import (
 	"bytes"
@@ -33,24 +33,24 @@ const (
 	// DefaultClaudeCodeModel is the default model used by ClaudeCodeClient when
 	// none is specified in the config. It is intentionally distinct from
 	// DefaultClaudeModel (the haiku model used by the HTTP ClaudeClient): the
-	// claude-code CLI provider defaults to sonnet (S003-R1.4, AD7).
+	// claude-code CLI provider defaults to sonnet.
 	//
 	// The value is the CLI's "sonnet" alias rather than a pinned ID such as
 	// "claude-sonnet-4-6": `claude --model` resolves the alias to the latest
-	// sonnet, which matches AD7's "latest sonnet" intent and is drift-proof as
-	// new sonnet releases ship. (Verified against claude 2.1.159 --help: --model
+	// sonnet, which is the intent ("latest sonnet") and is drift-proof as new
+	// sonnet releases ship. (Verified against claude 2.1.159 --help: --model
 	// accepts an alias like 'sonnet'/'opus' or a full ID like 'claude-opus-4-8';
 	// a bare "claude-sonnet-4" is neither and would not resolve.)
 	DefaultClaudeCodeModel = "sonnet"
 
 	// DefaultClaudeCodeTimeout bounds a single `claude` CLI invocation. The CLI
 	// performs a full agentic round-trip (model call plus tool turns), so it gets
-	// a generous-but-finite budget of at least 120s per S003-R7.3.
+	// a generous-but-finite budget of at least 120s.
 	DefaultClaudeCodeTimeout = 120 * time.Second
 )
 
 // ErrClaudeCodeUnavailable is returned by NewClaudeCodeClient when the `claude`
-// CLI cannot be found on PATH (S003-R6.1). Callers can use errors.Is to fall back to
+// CLI cannot be found on PATH. Callers can use errors.Is to fall back to
 // another provider.
 var ErrClaudeCodeUnavailable = errors.New("claude CLI not available on PATH")
 
@@ -95,7 +95,7 @@ func withClaudeOutcome(err, outcome error) error {
 // regardless of the host PATH.
 var lookPath = exec.LookPath
 
-// claudeAvailable reports whether the `claude` CLI is resolvable on PATH (S003-R6.1).
+// claudeAvailable reports whether the `claude` CLI is resolvable on PATH.
 func claudeAvailable() bool {
 	_, err := lookPath("claude")
 	return err == nil
@@ -103,8 +103,7 @@ func claudeAvailable() bool {
 
 // ClaudeCodeClient implements LLMProvider by driving the local `claude` CLI
 // (Claude Code). Page content is piped on the command's stdin and the static
-// instruction is the value of the -p flag; content never appears in argv
-// (S003-R1.2, AD8).
+// instruction is the value of the -p flag; content never appears in argv.
 type ClaudeCodeClient struct {
 	// model is the resolved model name passed via --model.
 	model string
@@ -118,16 +117,16 @@ type ClaudeCodeClient struct {
 	// and the child-env injection, so a key present only in a secrets file cannot
 	// flip bare on yet be missing from the spawned CLI. It is injected solely
 	// through the child env in bare mode and never appears in argv, logs, or
-	// returned errors (S003-R2.4, G5).
+	// returned errors.
 	apiKey string
 	// bareMode is the resolved tri-state auth decision (see resolveBare). When
 	// true the CLI runs with --bare and the API key is injected via the child
 	// process env; when false the CLI uses its own logged-in session.
 	bareMode bool
 	// maxBudgetUSD, when > 0, is passed to the CLI as --max-budget-usd to cap
-	// spend (S003-R7.2).
+	// spend.
 	maxBudgetUSD float64
-	// timeout bounds a single CLI invocation (S003-R7.3). Defaults to
+	// timeout bounds a single CLI invocation. Defaults to
 	// DefaultClaudeCodeTimeout.
 	timeout time.Duration
 	// execCommand creates the *exec.Cmd bound to a context. It defaults to
@@ -174,7 +173,7 @@ func WithClaudeCodeExecCommand(fn func(ctx context.Context, name string, arg ...
 	}
 }
 
-// WithClaudeCodeTimeout overrides the per-invocation timeout (S003-R7.3). A
+// WithClaudeCodeTimeout overrides the per-invocation timeout. A
 // non-positive duration is ignored so the default (DefaultClaudeCodeTimeout)
 // remains in effect.
 func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
@@ -186,7 +185,7 @@ func WithClaudeCodeTimeout(d time.Duration) ClaudeCodeOption {
 }
 
 // ResolveBare resolves the tri-state Bare config into a concrete bareMode
-// decision (S003-R2.1, S003-R2.2, S003-R2.3).
+// decision.
 //
 //   - "true"  → always bare (caller must ensure auth is available).
 //   - "false" → never bare; rely on the CLI's logged-in session. Any inherited
@@ -210,10 +209,10 @@ func ResolveBare(cfg LLMConfig, key string) bool {
 }
 
 // agentEnvAllowed names the parent variables a spawned `claude` agent may
-// receive, byte for byte (S051-R1.1). Everything else stays in bentoo's own
-// process: GITHUB_TOKEN, the notifier tokens, every BENTOO_* value and any
-// ANTHROPIC_* auth source (S051-R1.2). An agent reads untrusted upstream pages,
-// so what it inherits is what one prompt injection can exfiltrate.
+// receive, byte for byte. Everything else stays in bentoo's own process:
+// GITHUB_TOKEN, the notifier tokens, every BENTOO_* value and any ANTHROPIC_*
+// auth source. An agent reads untrusted upstream pages, so what it inherits is
+// what one prompt injection can exfiltrate.
 //
 // HOME, CLAUDE_CONFIG_DIR and the XDG_* prefix stay because the CLI finds its
 // logged-in (subscription) credentials through them; the proxy and CA names stay
@@ -226,14 +225,14 @@ var agentEnvAllowed = map[string]struct{}{
 	"http_proxy": {}, "https_proxy": {}, "no_proxy": {},
 }
 
-// agentEnvAllowedPrefixes admits whole families by prefix (S051-R1.1). The
-// trailing underscore is part of the prefix, so LCX_* and XDGX_* stay out.
+// agentEnvAllowedPrefixes admits whole families by prefix. The trailing
+// underscore is part of the prefix, so LCX_* and XDGX_* stay out.
 var agentEnvAllowedPrefixes = []string{"LC_", "XDG_"}
 
 // AgentEnvExtra carries what one spawner adds to the shared allow-list. Only the
 // manifest fixer sets it: it runs `pkgdev manifest`, which reads PORTAGE_* and
-// needs the one DISTDIR the applier computed (S051-R1.3). The zero value is what
-// every other agent gets — no PORTAGE_* and no DISTDIR at all (S051-R1.4).
+// needs the one DISTDIR the applier computed. The zero value is what every
+// other agent gets — no PORTAGE_* and no DISTDIR at all.
 type AgentEnvExtra struct {
 	// Portage admits the parent's PORTAGE_* variables.
 	Portage bool
@@ -260,24 +259,19 @@ func agentEnvAllows(name string, extra AgentEnvExtra) bool {
 
 // ChildEnv builds the environment for a spawned `claude` process: the parent's
 // allow-listed variables (agentEnvAllowed, agentEnvAllowedPrefixes, plus what
-// extra admits) and nothing else (S051-R1.1, S051-R1.2).
+// extra admits) and nothing else.
 //
-//   - bare mode: one ANTHROPIC_API_KEY entry set to key — the single credential
-//     the caller already resolved via secrets.Lookup — appended only when key is
-//     non-empty (S051-R1.5). ANTHROPIC_API_KEY is on no list, so a key the parent
-//     happens to export never crosses and can never sit beside the resolved one
-//     as a duplicate whose order decides which the CLI reads. The value travels
-//     solely through the env, never argv or logs.
-//   - non-bare mode: no API key at all, and apiKeyEnv is dropped even when its
-//     name falls inside an allowed prefix such as XDG_, so the CLI falls back to
-//     its own logged-in session (S051-R1.6).
+//   - bare mode: one ANTHROPIC_API_KEY entry set to key (already resolved via
+//     secrets.Lookup), only when key is non-empty. ANTHROPIC_API_KEY is on no
+//     list, so a key the parent exports never crosses to sit beside it as a
+//     duplicate. The value travels solely through the env, never argv or logs.
+//   - non-bare mode: no API key at all, and apiKeyEnv is dropped even inside an
+//     allowed prefix such as XDG_, so the CLI uses its logged-in session.
 //
-// No name appears twice (S051-R1.8): a parent environment carrying a duplicate
-// keeps its first assignment, the one os.Getenv reads in this process.
-//
-// It always returns a non-nil slice, empty when the parent holds no allowed
-// variable, so callers assign cmd.Env unconditionally: a nil cmd.Env would make
-// the child inherit the parent environment verbatim (S051-R1.7).
+// No name appears twice: a duplicate in the parent keeps its first assignment,
+// the one os.Getenv reads in this process. The slice is never nil, so callers
+// assign cmd.Env unconditionally: a nil cmd.Env would make the child inherit
+// the parent environment verbatim.
 func ChildEnv(bareMode bool, apiKeyEnv, key string, extra AgentEnvExtra) []string {
 	parent := os.Environ()
 	env := make([]string, 0, len(agentEnvAllowed)+2)
@@ -305,18 +299,17 @@ func ChildEnv(bareMode bool, apiKeyEnv, key string, extra AgentEnvExtra) []strin
 	return env
 }
 
-// NewClaudeCodeClient constructs a ClaudeCodeClient from configuration (S003-R1, S003-R1.1,
-// S003-R7.3, AD6). It resolves the model (defaulting to sonnet) and the auth mode,
-// applies defaults (exec.CommandContext seam, DefaultClaudeCodeTimeout), then
-// applies any options. If the `claude` CLI is
-// not on PATH it returns ErrClaudeCodeUnavailable (S003-R6.1) so callers can
-// fall back.
+// NewClaudeCodeClient constructs a ClaudeCodeClient from configuration. It
+// resolves the model (defaulting to sonnet) and the auth mode, applies defaults
+// (exec.CommandContext seam, DefaultClaudeCodeTimeout), then applies any
+// options. If the `claude` CLI is not on PATH it returns
+// ErrClaudeCodeUnavailable so callers can fall back.
 //
 // The timeout it applies is a DEFAULT and not the budget every caller runs
 // under. Options are applied last, so a caller handing WithClaudeCodeTimeout a
 // POSITIVE duration — as the `overlay compare` review does, with the operator's
-// configured value — runs under that one instead (S048-R3.1). A non-positive one
-// is ignored and the default stands, which is the option's own documented rule.
+// configured value — runs under that one instead. A non-positive one is
+// ignored and the default stands, which is the option's own documented rule.
 func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeClient, error) {
 	if !claudeAvailable() {
 		return nil, ErrClaudeCodeUnavailable
@@ -370,7 +363,7 @@ func NewClaudeCodeClient(cfg LLMConfig, opts ...ClaudeCodeOption) (*ClaudeCodeCl
 	return c, nil
 }
 
-// GetModel returns the resolved model name used by this client (S003-R1.4).
+// GetModel returns the resolved model name used by this client.
 func (c *ClaudeCodeClient) GetModel() string {
 	return c.model
 }
@@ -382,7 +375,7 @@ func (c *ClaudeCodeClient) GetModel() string {
 // successful run. Its shape was observed on claude 2.1.281 (2026-09-23):
 // `"permission_denials":[{"tool_name":"Read","tool_use_id":"toolu_…",
 // "tool_input":{"file_path":"…"}}]`, with `{"command":…}` as a Bash call's
-// input and `{"url":…,"prompt":…}` as a WebFetch call's (S051-R5.1).
+// input and `{"url":…,"prompt":…}` as a WebFetch call's.
 type ClaudeCodeEnvelope struct {
 	Type              string                   `json:"type"`
 	Subtype           string                   `json:"subtype"`
@@ -403,15 +396,15 @@ type ClaudePermissionDenial struct {
 
 // RefusedToolLabels names each refused tool once, in the order the CLI refused
 // them: the tool name, plus the host for a WebFetch — `WebFetch(evil.example.com)`
-// — so two refusals of one tool to different hosts stay distinguishable
-// (S051-R5.1). The host is taken from the call's url only when it has the SHAPE
-// of a lowercase DNS name (dnsHost); anything else leaves the bare tool name, so
-// no injected text can ride into a label. The shape check is deliberately
-// weaker than `func checkWebFetchHost`: a label is text shown to the operator,
-// a rule is a grant, and an IPv4 literal is safe text but not a safe grant — a
-// refused fetch to 169.254.169.254 is exactly the host the operator needs to
-// see (S051-R5.4). No other part of the input is ever read, so a label can
-// never carry a URL path or query, a fetch prompt or a shell command.
+// — so two refusals of one tool to different hosts stay distinguishable. The
+// host is taken from the call's url only when it has the SHAPE of a lowercase
+// DNS name (dnsHost); anything else leaves the bare tool name, so no injected
+// text can ride into a label. The shape check is deliberately weaker than
+// `func checkWebFetchHost`: a label is text shown to the operator, a rule is a
+// grant, and an IPv4 literal is safe text but not a safe grant — a refused
+// fetch to 169.254.169.254 is exactly the host the operator needs to see. No
+// other part of the input is ever read, so a label can never carry a URL path
+// or query, a fetch prompt or a shell command.
 func RefusedToolLabels(denials []ClaudePermissionDenial) []string {
 	var labels []string
 	seen := make(map[string]struct{}, len(denials))
@@ -441,20 +434,19 @@ func RefusedToolLabels(denials []ClaudePermissionDenial) []string {
 	return labels
 }
 
-// buildArgs assembles the CLI argument vector (S003-R1.2, S003-R1.3, S003-R1.5, S003-R7, S003-R7.2).
+// buildArgs assembles the CLI argument vector.
 //
-// The static instruction is always the value of -p (S003-R1.2); page content is NEVER
+// The static instruction is always the value of -p; page content is NEVER
 // placed here — it is piped on stdin by run. The fixed flags --output-format json,
 // --max-turns 2 and --allowedTools "" lock the CLI into a single structured,
-// tool-free round-trip (S003-R1.3, S003-R1.5). --bare is added in bare mode; --json-schema
+// tool-free round-trip. --bare is added in bare mode; --json-schema
 // is added only for a structured request with a non-empty schema; --max-budget-usd
 // is added when a positive cap is configured.
 //
 // --allowedTools "" only removes pre-approval: read-only tools need none inside
 // the working directory. So the client also holds no tool at all (`--tools ""`)
 // and runs under the pinned permission flags every agent gets — dontAsk, no
-// settings sources, no MCP servers, the secrets deny rules (S051-R2.1, S051-R3.7,
-// `func agentArgv`).
+// settings sources, no MCP servers, the secrets deny rules (`func agentArgv`).
 func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema string) []string {
 	args := []string{
 		"-p", instruction,
@@ -477,41 +469,32 @@ func (c *ClaudeCodeClient) buildArgs(instruction string, structured bool, schema
 }
 
 // run executes the `claude` CLI for a single request and returns the envelope
-// result string (S003-R1.2, S003-R2.4, S003-R7, S003-R7.1).
+// result string.
 //
-// Page content is piped on stdin (AD8); the instruction travels in -p. The call
-// is bound to a child context derived from the caller's ctx with c.timeout, so a
-// cancelled parent or an elapsed timeout stops the child and its descendants, and run
-// returns within procgroup.GracePeriod of it (S003-R7.1, story 054 R4.1). In
-// bare mode the API key is injected ONLY through the child environment (never
-// argv/logs — S003-R2.1, S003-R2.4). stdout and stderr are captured separately.
+// Page content is piped on stdin; the instruction travels in -p. The call is
+// bound to a child context of ctx with c.timeout, so a cancelled parent or an
+// elapsed timeout stops the child and its descendants, and run returns within
+// procgroup.GracePeriod of it. In bare mode the API key is injected ONLY
+// through the child environment, never argv or logs.
 //
-// A FAILED invocation is classified before any exit-code framing, in the
-// precedence the package keeps in one place (S048-R1.1, S048-R1.2, S048-R1.3):
-// a run this client's own deadline ended says so and names the budget that
-// elapsed, a process that never started says that, and only a process that ran
-// and exited with a status is framed by that status. An is_error envelope or
-// non-JSON stdout on a zero exit each yield an error that includes the envelope
-// errors/subtype and stderr but NEVER the API key.
+// A FAILED invocation is classified (ClassifyClaudeFailure) before any
+// exit-code framing: an own-deadline stop names the budget that elapsed, a
+// process that never started says so, and only a process that exited with a
+// status is framed by it. An is_error envelope or non-JSON stdout on a zero
+// exit yields an error with the envelope errors/subtype and stderr, NEVER the
+// API key. EVERY invocation logs its duration and outcome as one Info line.
 //
-// EVERY invocation, by any outcome including success, records its wall-clock
-// duration alongside that outcome as one Info line through the client's
-// logger, so the cost of a `claude` call is recoverable from a run's own
-// output without instrumenting for it again (S048-R2.1, S048-R5.1).
-//
-// The client stores no context: each call spawns its child from a context
-// derived from the ctx it was given, so one client can serve calls with
-// different lifetimes and a call that was cancelled cannot end the next one
-// (story 059, R3.3).
+// The client stores no context, so one client can serve calls with different
+// lifetimes and a cancelled call cannot end the next one.
 func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content []byte, schema string) (string, error) {
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	// The child runs in a private 0700 directory made for this one invocation
 	// and removed afterwards, never in bentoo's own cwd, which a read-only tool
-	// could otherwise read (S051-R2.1). A directory that cannot be made stops the
-	// call before anything is spawned; one that cannot be removed is a warning,
-	// because the answer is already in hand (S051-R2.9).
+	// could otherwise read. A directory that cannot be made stops the call
+	// before anything is spawned; one that cannot be removed is a warning,
+	// because the answer is already in hand.
 	dir, err := os.MkdirTemp("", "bentoo-claude-")
 	if err != nil {
 		return "", fmt.Errorf("%w: claude CLI: create private working directory: %w", ErrLLMRequestFailed, err)
@@ -525,8 +508,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	cmd := c.execCommand(callCtx, "claude", c.buildArgs(instruction, schema != "", schema)...)
 	cmd.Dir = dir
 
-	// GROUP MODE (story 054, R4.1). exec.CommandContext alone stops only the
-	// direct child, and a helper the CLI started inherits the stdout pipe: Wait
+	// GROUP MODE. exec.CommandContext alone stops only the direct child, and a helper the CLI started inherits the stdout pipe: Wait
 	// does not return while that helper runs, so a budget of seconds lasted as
 	// long as the helper did. The child now leads its own process group. When
 	// callCtx is done the whole group gets SIGTERM, whatever is left of it gets
@@ -540,12 +522,12 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	// typed at the terminal reaches the child only through the caller's ctx.
 	procgroup.Group(cmd)
 
-	// Page content goes on stdin, never in argv (S003-R1.2, AD8).
+	// Page content goes on stdin, never in argv.
 	cmd.Stdin = bytes.NewReader(content)
 
 	// Resolve the child environment from the auth mode: bare injects the API key
-	// (only via env, never argv/logs — S003-R2.1, S003-R2.4, G5); non-bare scrubs any
-	// inherited API key so the CLI uses its logged-in session.
+	// (only via env, never argv/logs); non-bare scrubs any inherited API key so
+	// the CLI uses its logged-in session.
 	cmd.Env = ChildEnv(c.bareMode, c.apiKeyEnv, c.apiKey, AgentEnvExtra{})
 
 	var stdout, stderr bytes.Buffer
@@ -555,9 +537,8 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	startedAt := time.Now()
 	// procgroup.Result turns exec.ErrWaitDelay after a ZERO exit into success:
 	// WaitDelay's timer also starts on a normal exit, and a helper still holding
-	// the pipe then would fail a CLI that answered (story 054, R1.5). Every other
-	// error passes through unchanged, so each ending is classified as it was
-	// before.
+	// the pipe then would fail a CLI that answered. Every other error passes
+	// through unchanged.
 	runErr := procgroup.Result(cmd, cmd.Run())
 
 	// The context is read HERE, before anything frames this failure, because the
@@ -566,47 +547,36 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 	// out — names neither the deadline nor the budget, and a message built from
 	// it sends whoever reads it looking for a broken CLI. Reading the context
 	// afterwards would print that noise first and reach the cause too late to
-	// say it (S048-R1.1). It is also why group mode cannot turn a deadline into
-	// a non-zero exit: whatever signal ended the group, callCtx.Err() outranks it in
-	// classifyClaudeFailure (story 054, R4.2).
+	// say it. It is also why group mode cannot turn a deadline into a non-zero
+	// exit: whatever signal ended the group, callCtx.Err() outranks it in
+	// classifyClaudeFailure.
 	ctxErr := callCtx.Err()
 
 	// The elapsed time is taken at the same boundary and for a related reason:
-	// what S048-R2.1 asks to record is what the CLI COST, not what this function
-	// spends afterwards parsing the envelope and composing a sentence.
+	// what is recorded is what the CLI COST, not what this function spends
+	// afterwards parsing the envelope and composing a sentence.
 	elapsed := time.Since(startedAt)
 
 	// WHICH outcome this was is decided ONCE, here, and read twice: by the line
 	// below and by the failure switch further down. Classifying separately for
 	// the record and for the message would be two answers free to drift, which
-	// is the shape of defect lifting the classifier out removed in the first
-	// place (S048-R1.3). Both errors nil is claudeRanToCompletion — the success
-	// case — so this names every ending, not only the bad ones.
+	// is the defect lifting the classifier out removed. Both errors nil is
+	// claudeRanToCompletion — the success case — so this names every ending.
 	outcome := ClassifyClaudeFailure(ctxErr, runErr)
 
-	// EVERY outcome is recorded, and `defer` is what makes "every" a fact rather
-	// than a claim. run has ten exits below this point — the failure switch's,
-	// the exit-code framing's, the two output-shape paths' and the success
-	// path's — and the runtime executes a deferred call on each one, on a panic
-	// unwinding through it, and on any return a later edit adds. A statement
-	// written in the straight line would have to be re-checked against every
-	// exit each time the function grows one, and the exit it missed would be
-	// silence rather than an error.
+	// EVERY outcome is recorded, and `defer` makes "every" a fact: run has ten
+	// exits below, and a deferred call runs on each, on a panic, and on any
+	// return a later edit adds. A straight-line statement would miss some exit
+	// silently.
 	//
-	// The success case is the one this exists for: a budget cannot be derived
-	// from the failures, because the failures are exactly the runs that hit the
-	// ceiling, and the value a new ceiling must clear is the distribution of the
-	// runs that did not (S048-R2.1, S048-R5.1). `run` returns (string, error),
-	// so a successful call has no return channel for a duration and widening the
-	// signature would publish a number no caller consumes — a log line at the
-	// boundary of the external call is the sink, as this project's convention
-	// for external calls already asks (D5).
+	// Successes matter most: a budget cannot be derived from the failures,
+	// which are exactly the runs that hit the ceiling. `run` has no return
+	// channel for a duration, so a log line at the external-call boundary is
+	// the sink, as the project convention asks.
 	//
-	// Info, not Warn: a call that finished at its ordinary cost is an event, not
-	// a degradation, and sending the failures to a different sink would split
-	// one measurement across two readers. The line carries a duration and an
-	// outcome and nothing else — never the API key this client injects through
-	// the child environment (S003-R2.4, G5).
+	// Info, not Warn: a call at its ordinary cost is an event, not a
+	// degradation, and one measurement must not be split across two sinks. The
+	// line carries a duration and an outcome only — never the API key.
 	defer func() {
 		c.logger().Info("claude CLI invocation finished", "outcome", outcome.String(), "elapsed", elapsed)
 	}()
@@ -625,7 +595,7 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 		// WHICH failure this is, is decided once by the classifier the fixers use
 		// too, so the two cannot drift apart on the order; only the words below
 		// are this client's own, because a review told "claude fixer aborted"
-		// would be told about an operation it never ran (S048-R1.3).
+		// would be told about an operation it never ran.
 		switch outcome {
 		case ClaudeCutShort:
 			// WHOSE clock ran out decides what may be claimed. A parent that is
@@ -634,8 +604,8 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 			// elapsed, so quoting it would quote a number that never ran out.
 			endedBy := ctx.Err()
 			if endedBy == nil && errors.Is(ctxErr, context.DeadlineExceeded) {
-				// S048-R1.1: the budget is read from the client's own field —
-				// the value ACTUALLY in force — and never from the package
+				// The budget is read from the client's own field — the value
+				// ACTUALLY in force — and never from the package
 				// default, because a caller that passed WithClaudeCodeTimeout
 				// makes the two differ, and the remedy for this failure is to
 				// raise the number that elapsed and not the one that did not.
@@ -644,33 +614,30 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 				//
 				// ctxErr rides on the outcome side, so the deadline stays a
 				// deadline to errors.Is(err, context.DeadlineExceeded) — including
-				// when the group it stopped died of a signal (story 054, R4.2) —
-				// while the sentence stays byte-identical (story 057, R6.6).
+				// when the group it stopped died of a signal — while the sentence
+				// stays byte-identical.
 				return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI ran out of time: its %s budget elapsed before it answered",
 					ErrLLMRequestFailed, c.timeout), errors.Join(ErrClaudeTimedOut, ctxErr))
 			}
 			// Ended by anything other than this client's own budget: the cause
 			// travels verbatim and no number is claimed. One sentence, written
-			// once, because two spellings of one outcome is the shape of defect
-			// this story exists to remove.
+			// once, because two spellings of one outcome would drift apart.
 			if endedBy == nil {
 				endedBy = ctxErr
 			}
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI was stopped before it answered: %w", ErrLLMRequestFailed, endedBy), ErrClaudeStopped)
 		case ClaudeCouldNotStart:
-			// S048-R1.2, S040-R5.6: the process never reached its first
-			// instruction, so there is no exit status to frame it with and none
+			// The process never reached its first instruction, so there is no exit status to frame it with and none
 			// may be implied. The remedy is on the host — a missing binary, an
 			// unreachable working directory — and it is the opposite of the
 			// deadline's, which is why the two sentences must not be one.
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI could not start: %w", ErrLLMRequestFailed, runErr), ErrClaudeCouldNotStart)
 		}
 
-		// claudeExitedNonZero: the process ran and exited with a status. This is
-		// the outcome S048 does not touch, and its three messages are byte for
-		// byte the ones four existing tests and every operator already read
-		// (S048-R4.2). Prefer the structured errors/subtype from the envelope
-		// when available; fall back to stderr.
+		// claudeExitedNonZero: the process ran and exited with a status. Its
+		// three messages are byte for byte the ones existing tests and every
+		// operator already read. Prefer the structured errors/subtype from the
+		// envelope when available; fall back to stderr.
 		if jsonErr == nil && (len(env.Errors) > 0 || env.Subtype != "") {
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI failed (%s): %s", ErrLLMRequestFailed, env.Subtype, strings.Join(env.Errors, "; ")), ErrClaudeExitedNonZero)
 		}
@@ -699,30 +666,23 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 // AskJSON runs ONE schema-constrained round trip through the `claude` CLI and
 // returns the model's reply verbatim, exactly as the envelope carried it.
 //
-// It is the EXPORTED spelling of run, and it exists so a caller outside this
-// package can reach the CLI without rebuilding the parts of run that are not
-// about its own question. Those parts are the security-relevant ones: the
-// instruction travels in -p while content is piped on stdin (AD8), the child
-// environment is resolved by childEnv — which in non-bare mode STRIPS every
-// inherited API key so the CLI falls back to its own logged-in session — and the
-// invocation is bound to the caller's ctx with c.timeout. All three are unexported, so a
-// second call site spelling its own exec.Command would be a second, divergent
-// answer to each of them.
+// It is the EXPORTED spelling of run, so a caller outside this package reuses
+// run's security-relevant parts instead of spelling its own exec.Command: the
+// instruction in -p with content on stdin, the child environment from childEnv
+// (which in non-bare mode STRIPS every inherited API key), and the bound to the
+// caller's ctx with c.timeout.
 //
-// The reply is returned UNTOUCHED. Callers with a schema know what shape they
-// asked for; ExtractVersion and AnalyzeContent above each normalize for their
-// own, and doing it here would impose one of those on everybody.
-//
-// Its one production caller today is the divergence-review adapter in
-// cmd/bentoo/overlay_compare_review.go, which asks for a three-field JSON object
-// describing how two ebuilds differ.
+// The reply is returned UNTOUCHED: callers with a schema know what shape they
+// asked for, as ExtractVersion and AnalyzeContent each normalize for their own.
+// Its one production caller is the divergence-review adapter in
+// cmd/bentoo/overlay_compare_review.go.
 func (c *ClaudeCodeClient) AskJSON(ctx context.Context, instruction string, content []byte, schema string) (string, error) {
 	return c.run(ctx, instruction, content, schema)
 }
 
 // buildVersionInstruction builds the static instruction for version extraction.
 // The page content is NOT embedded (it is piped on stdin); the caller's prompt is
-// appended as extra guidance when non-empty (S003-R1.2).
+// appended as extra guidance when non-empty.
 func buildClaudeCodeVersionInstruction(prompt string) string {
 	var sb strings.Builder
 	sb.WriteString("Extract the version number from the piped content. ")
@@ -734,11 +694,11 @@ func buildClaudeCodeVersionInstruction(prompt string) string {
 	return sb.String()
 }
 
-// ExtractVersion extracts a version string from content using the `claude` CLI
-// (S003-R1.2). The content is piped on stdin; only a static instruction (plus the
+// ExtractVersion extracts a version string from content using the `claude`
+// CLI. The content is piped on stdin; only a static instruction (plus the
 // caller's optional prompt) travels in -p. The envelope result is normalized via
 // the shared cleanVersionString helper. The child is spawned from a context
-// derived from ctx (story 059, R3.3).
+// derived from ctx.
 func (c *ClaudeCodeClient) ExtractVersion(ctx context.Context, content []byte, prompt string) (string, error) {
 	instruction := buildClaudeCodeVersionInstruction(prompt)
 
@@ -755,8 +715,8 @@ func (c *ClaudeCodeClient) ExtractVersion(ctx context.Context, content []byte, p
 }
 
 // claudeCodeSchemaJSON is the JSON Schema describing the SchemaAnalysis shape that
-// the CLI is asked to satisfy via --json-schema (S003-R3, S003-R3.1). It mirrors the field
-// set parseSchemaAnalysis understands.
+// the CLI is asked to satisfy via --json-schema. It mirrors the field set
+// parseSchemaAnalysis understands.
 const claudeCodeSchemaJSON = `{
   "type": "object",
   "properties": {
@@ -777,7 +737,7 @@ const claudeCodeSchemaJSON = `{
 // page content is NOT embedded (it is piped on stdin); package metadata and the
 // optional hint are included to guide the model. When askForJSON is true (the
 // schema-less fallback path) the instruction explicitly asks for a raw JSON
-// response so parseSchemaAnalysis can recover it (S003-R3.3).
+// response so parseSchemaAnalysis can recover it.
 func buildClaudeCodeAnalysisInstruction(meta *ebuilds.EbuildMetadata, hint string, askForJSON bool) string {
 	var sb strings.Builder
 	sb.WriteString("Analyze the piped content and respond with the parser schema as JSON")
@@ -834,18 +794,18 @@ func stripJSONFences(text string) string {
 }
 
 // AnalyzeContent analyzes content via the `claude` CLI and returns a suggested
-// parser configuration (S003-R3, S003-R3.1, S003-R3.2, S003-R3.3).
+// parser configuration.
 //
 // Control flow:
 //  1. Attempt a structured request that passes --json-schema; on success parse
 //     the result (stripping any markdown fences) via parseSchemaAnalysis.
 //  2. If the structured request ERRORS (e.g. the CLI build does not support
 //     --json-schema), retry WITHOUT a schema, asking for a raw JSON response, and
-//     parse that (S003-R3.3).
+//     parse that.
 //  3. If both attempts fail, return the resulting error.
 //
 // Page content is piped on stdin on both attempts, and both children are
-// spawned from contexts derived from ctx (story 059, R3.3).
+// spawned from contexts derived from ctx.
 func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*SchemaAnalysis, error) {
 	// Attempt 1: structured request with --json-schema.
 	structuredInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, false)
@@ -858,7 +818,7 @@ func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, m
 		}
 	}
 
-	// Attempt 2 (fallback, S003-R3.3): retry without a schema, asking for raw JSON.
+	// Attempt 2 (fallback): retry without a schema, asking for raw JSON.
 	fallbackInstruction := buildClaudeCodeAnalysisInstruction(meta, hint, true)
 	fallbackResult, fallbackErr := c.run(ctx, fallbackInstruction, content, "")
 	if fallbackErr != nil {
@@ -876,7 +836,7 @@ func (c *ClaudeCodeClient) AnalyzeContent(ctx context.Context, content []byte, m
 // a non-nil run error carrying no *exec.ExitError. An ExitError exists only
 // once the process ran to an exit status; everything else — a working directory
 // that does not exist, an unrunnable binary — happened before the child's first
-// instruction, so there is no exit code to speak of (S040-R5.6).
+// instruction, so there is no exit code to speak of.
 func couldNotStart(runErr error) bool {
 	var exitErr *exec.ExitError
 	return runErr != nil && !errors.As(runErr, &exitErr)
@@ -888,8 +848,8 @@ func couldNotStart(runErr error) bool {
 // Two call sites need the same ORDER — a context error outranks any exit-code
 // framing — but must not share the same WORDS. The fixers say "claude fixer
 // aborted"; a review that said that would name the wrong operation, which is
-// the very defect S048 exists to remove. So the answer travels as an outcome
-// and each caller supplies the noun for its own operation (S048-R1.3).
+// a defect in itself. So the answer travels as an outcome
+// and each caller supplies the noun for its own operation.
 type claudeFailure int
 
 const (
@@ -909,7 +869,7 @@ const (
 	// still free to, from the ctxErr it already holds.
 	ClaudeCutShort
 	// ClaudeCouldNotStart — the process never reached its first instruction, so
-	// there is no exit code to speak of and none may be printed (S040-R5.6).
+	// there is no exit code to speak of and none may be printed.
 	ClaudeCouldNotStart
 	// ClaudeExitedNonZero — the process ran and exited with a status. This is the
 	// only outcome for which an exit code exists.
@@ -942,8 +902,8 @@ func (f claudeFailure) String() string {
 // invocation suffered, in the precedence order this package has always applied
 // but had only ever expressed inside one message switch. Lifting it out is what
 // lets a second call site inherit the order instead of restating it, so the two
-// cannot drift apart (S048-R1.2, S048-R1.3). couldNotStart is reused verbatim,
-// so the "no *exec.ExitError means it never started" test exists exactly once.
+// cannot drift apart. couldNotStart is reused verbatim, so the "no
+// *exec.ExitError means it never started" test exists exactly once.
 //
 // THE CONTEXT ERROR WINS THE COLLISION, and the collision is not hypothetical:
 // when the deadline elapses before Start, exec.CommandContext returns the

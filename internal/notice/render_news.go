@@ -11,11 +11,11 @@ const newsWidth = 72
 
 // RenderNews renders n as a GLEP 42 news item (format 2.0): the headers in
 // order, one Display-If-Installed per affects entry, one blank line, then the
-// body wrapped at 72 columns with tabs expanded (R3.2 to R3.6).
+// body wrapped at 72 columns with tabs expanded.
 //
 // Display-If-Installed headers combine with OR, while the ranges of one feed
 // entry combine with AND, so an entry with several ranges cannot be one
-// header: it is written as the bare package and reported in warnings (R3.5).
+// header: it is written as the bare package and reported in warnings.
 func RenderNews(n Notice) (text string, warnings []string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Title: %s\nAuthor: %s\nPosted: %s\nRevision: %d\nNews-Item-Format: 2.0\n",
@@ -34,7 +34,7 @@ func RenderNews(n Notice) (text string, warnings []string) {
 
 // newsAtom maps one affects entry to an EAPI 5 atom: no range is the bare
 // package, one range is `<op>cat/pkg-<ver>[:slot]`, several are the bare
-// package plus a warning (R3.3 to R3.5).
+// package plus a warning.
 func newsAtom(a Affects) (atom, warning string) {
 	slot := ""
 	if a.Slot != "" {

@@ -80,9 +80,9 @@ type Content struct {
 
 const (
 	// pruneNoVersionInCommonReason is the exact wording required when the two
-	// trees hold no version to compare (R3.3). It is a single literal in a single
+	// trees hold no version to compare. It is a single literal in a single
 	// place because the operator is asked to tell this apart from the OTHER
-	// unverifiable case — a tree that could not be read at all (R2.3) — and a
+	// unverifiable case — a tree that could not be read at all — and a
 	// reason that varies by call site cannot be recognised in a report. One sends
 	// them to look at the overlay, the other at the provider.
 	pruneNoVersionInCommonReason = "no version in common"
@@ -99,7 +99,7 @@ const (
 // The filename is kept rather than rebuilt from the version because it is what
 // the directory listing actually returned: reading the file back through the
 // listed name means no path this function opens was ever assembled from a string
-// of our own (R3.5).
+// of our own.
 type pruneEbuild struct {
 	version  string
 	filename string
@@ -129,38 +129,22 @@ func unverifiable(reason string, checked []string) Content {
 // PruneVerification reports whether the overlay's copy of pkg carries anything
 // its upstream counterpart does not, comparing the two package directories byte
 // for byte. It answers the only question that may authorise a removal, and it
-// answers it about the WHOLE package: every version the two trees share (R3.1)
-// plus the files/ tree, recursively (R3.2).
+// answers it about the WHOLE package: every version the two trees share
+// plus the files/ tree, recursively.
 //
-// ourDir and theirDir are the two PACKAGE directories, already resolved by the
-// caller — from the overlay scan on our side and from the provider on theirs.
-// This function joins no category and no package name of its own, which is what
-// keeps registry-sourced traversal structurally absent (R3.5): the same argument
-// written at verifyAgainstLocalContent's path construction in compare.go applies
-// here, and this is a second site with the same exposure. SplitPackageKey now
-// refuses a "." or ".." half, but the STRUCTURE is what keeps traversal out
-// here, not that check. Keep it that way. pkg is used only
-// to recognise the "<pkg>-<pv>.ebuild" filename shape — it is never joined into
-// a path.
+// ourDir and theirDir are PACKAGE directories the caller already resolved. This
+// function joins no category or package name of its own — pkg only recognises
+// the "<pkg>-<pv>.ebuild" shape — so registry-sourced traversal is absent by
+// STRUCTURE, not by SplitPackageKey's check. Keep it that way.
 //
-// Manifest and metadata.xml are never read, and never listed (R3.4). Manifest
-// holds distfile hashes that legitimately vary by version and revision, and
-// metadata.xml names a maintainer — ours differs from Gentoo's on all 314
-// packages the overlay carries. Comparing either would mark the entire overlay
-// divergent, and a criterion that authorises nothing has stopped being one.
+// Manifest and metadata.xml are never read: distfile hashes vary by revision and
+// the maintainer differs on all 314 packages, so comparing either would mark
+// the whole overlay divergent. verifyAgainstLocalContent (compare.go) compares
+// ONE ebuild for a report; this compares the whole package to decide a
+// deletion, and both are bytes.Equal wherever they overlap, so they agree.
 //
-// Relation to verifyAgainstLocalContent (compare.go): that function answers a
-// narrower question for a different command — it compares ONE ebuild, only when
-// LocalVersion == RemoteVersion, ignores files/, and its result is only ever
-// reported beside a Verdict. This one compares the whole package to decide
-// whether a deletion is safe. They agree wherever they overlap, because both are
-// bytes.Equal over the same two files: an ebuild pair the compare calls
-// identical is one this function also calls identical.
-//
-// It returns no error by design. Every failure is a Content whose Result is
-// ContentUnverifiable and whose Reason names what failed — "no answer" must
-// never be reported as "identical", and an error return would invite a caller to
-// treat a failed read as a nil-error zero value.
+// It returns no error by design: every failure is ContentUnverifiable with a
+// Reason, because "no answer" must never read as "identical".
 func PruneVerification(ourDir, theirDir string, pkg string) Content {
 	ours, err := listPruneEbuilds(ourDir, pkg)
 	if err != nil {
@@ -171,13 +155,13 @@ func PruneVerification(ourDir, theirDir string, pkg string) Content {
 		// Distinct from pruneNoVersionInCommonReason on purpose: both leave us
 		// with no upstream ebuild to compare, but a read failure is a provider
 		// problem while an empty intersection is ::gentoo having dropped our
-		// versions. Collapsing them sends the operator to the wrong tree (R2.3).
+		// versions. Collapsing them sends the operator to the wrong tree.
 		return unverifiable(fmt.Sprintf("cannot read the upstream copy: %v", err), nil)
 	}
 
 	// The intersection is computed BEFORE any comparison, and its emptiness is
 	// handled before the loop, because a loop over an empty intersection finds no
-	// difference and would report success by vacuous truth (R3.3). That is the
+	// difference and would report success by vacuous truth. That is the
 	// bug this ordering exists to prevent: no evidence is not evidence of
 	// sameness.
 	shared := sharedEbuilds(ours, theirs)
@@ -187,7 +171,7 @@ func PruneVerification(ourDir, theirDir string, pkg string) Content {
 
 	// EVERY shared version is compared, not the newest one. The tempting
 	// shortcut — reuse the version the verdict already looked at — passes a
-	// package whose old ebuild is the one carrying our patch (R3.1). The first
+	// package whose old ebuild is the one carrying our patch. The first
 	// difference wins, deterministically, because sharedEbuilds preserves the
 	// listing order; that order is not version order and does not need to be,
 	// since all of them are compared either way. Ordering versions is
@@ -244,7 +228,7 @@ func PruneVerification(ourDir, theirDir string, pkg string) Content {
 // meaning a version string carries is ebuild.CompareVersions' business.
 //
 // Manifest and metadata.xml fail the suffix test and are therefore never even
-// listed, let alone read (R3.4).
+// listed, let alone read.
 func listPruneEbuilds(dir, pkg string) ([]pruneEbuild, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -327,7 +311,7 @@ func sameFileBytes(ourPath, theirPath string) (bool, error) {
 // genuinely do not know what is in it.
 //
 // The digest is keyed by relative path so that a path present on one side only
-// is visible as a difference (R3.2) — the sha256 answers "same bytes?" and the
+// is visible as a difference — the sha256 answers "same bytes?" and the
 // key answers "same tree?", and both questions have to be asked.
 func prunePackageFilesDigest(dir string) (map[string]string, error) {
 	root := filepath.Join(dir, pruneFilesDir)
@@ -379,7 +363,7 @@ func prunePackageFilesDigest(dir string) (map[string]string, error) {
 // files/, or "" when the two trees match. Paths are visited in sorted order so
 // that "first" means the same thing on every run.
 //
-// A path on ONE SIDE ONLY is a difference in both directions (R3.2). Ours alone
+// A path on ONE SIDE ONLY is a difference in both directions. Ours alone
 // is the obvious case: the file would be deleted with the directory. Theirs
 // alone matters too — the shared ebuilds are already known byte-identical at
 // this point, so an upstream file we lack means our copy may not even build what
@@ -417,7 +401,7 @@ func firstFilesDifference(ours, theirs map[string]string) string {
 //
 // It is deliberately not "what this run will do about it" — that is
 // PrunePlan.Eligible, and the two are kept apart so the plan can print a
-// diverging package, with its reason, on a run that will not touch it (R1.4).
+// diverging package, with its reason, on a run that will not touch it.
 // The operator's next question about a package missing from the output is always
 // "why not this one", and a report that answers it is the whole point of having
 // three buckets instead of one list.
@@ -426,7 +410,7 @@ type PruneClass int
 const (
 	// PruneRefused means no run of this command may remove the package: its
 	// verdict is not redundant, its content could not be compared at all, or the
-	// overlay's own content PROVES the difference originates here (R6.1). It is
+	// overlay's own content PROVES the difference originates here. It is
 	// the ZERO VALUE for the same reason ContentUnverifiable is: a PrunePlan
 	// nobody filled in must not read as permission to delete.
 	PruneRefused PruneClass = iota
@@ -437,8 +421,8 @@ const (
 	// PruneDiverging means the package is redundant BY VERSION but something of
 	// ours is in it — either a declared `patched` entry or an undeclared
 	// difference the byte comparison found — AND nothing proves who wrote that
-	// difference. Only --include-patched may act on it (R4.1); a difference the
-	// content proves is ours is refused outright instead (R6.1), because the flag
+	// difference. Only --include-patched may act on it; a difference the
+	// content proves is ours is refused outright instead, because the flag
 	// says "I accept discarding local work" and cannot say it about work the
 	// report has just named the file for.
 	PruneDiverging
@@ -466,8 +450,7 @@ func (c PruneClass) String() string {
 // about one package: what would go, and what this run may do about it.
 type PrunePlan struct {
 	// Category and Package come from the compare result, which comes from the
-	// overlay scan. They are the only two names any path here is built from
-	// (R3.5).
+	// overlay scan. They are the only two names any path here is built from.
 	Category string
 	Package  string
 
@@ -481,8 +464,8 @@ type PrunePlan struct {
 	// the plan prints category/package as its heading, so repeating it on every
 	// line is noise.
 	//
-	// Manifest and metadata.xml ARE listed even though the comparison ignores them
-	// (R3.4). They are not evidence about whether the copy is ours, but the
+	// Manifest and metadata.xml ARE listed even though the comparison ignores
+	// them. They are not evidence about whether the copy is ours, but the
 	// removal deletes them all the same, and a plan that hid them would understate
 	// what it is about to do.
 	//
@@ -495,7 +478,7 @@ type PrunePlan struct {
 	// package, exactly as the caller supplied them — every one of them, since 90
 	// of 321 atoms carry more than one entry and leaving one behind orphans it.
 	// This package never looks them up: internal/overlay does not know what TOML
-	// is, which is the layer rule 025 established.
+	// is, which is the layering rule.
 	RegistryKeys []string
 
 	// Eligible is what THIS RUN may do about the package: true only when the
@@ -524,7 +507,7 @@ type PruneBatch struct {
 	Identical []PrunePlan
 	// Diverging holds the packages that carry something of ours, declared or not.
 	// They are planned and printed either way; they are Eligible only under
-	// --include-patched (R4.1).
+	// --include-patched.
 	Diverging []PrunePlan
 	// Refused holds everything no flag may act on, each with its reason.
 	Refused []PrunePlan
@@ -537,7 +520,7 @@ type PruneOptions struct {
 	// comparison is OverlayPath/category/package.
 	OverlayPath string
 	// IncludePatched is the --include-patched flag: the operator saying out loud
-	// that they accept discarding local work (R4.1). It moves nothing between
+	// that they accept discarding local work. It moves nothing between
 	// classes — it only decides whether the diverging batch is Eligible.
 	IncludePatched bool
 	// RegistryKeys maps "category/package" to every registry key for that atom.
@@ -551,7 +534,7 @@ type PruneOptions struct {
 }
 
 // pruneNoLocalTreeReason is the refusal for a provider with nothing on disk to
-// compare against (design D6). The wording here is deliberately about the
+// compare against. The wording here is deliberately about the
 // PROVIDER rather than about a flag: the command layer owns what it tells the
 // operator to do about it, and internal/overlay names no CLI flag.
 const pruneNoLocalTreeReason = "the provider exposes no local tree to compare against"
@@ -559,40 +542,26 @@ const pruneNoLocalTreeReason = "the provider exposes no local tree to compare ag
 // PlanPrune turns the compare's results into three buckets, each package
 // carrying the reason it is in the one it is in.
 //
-// The filter order — verdict, then declaration, then content — is the
-// requirement, not an implementation detail:
+// The filter order — verdict, then declaration, then content — is the contract:
 //
 //  1. A verdict other than redundant refuses the package and its content is
-//     NEVER compared (R2.5). That is a correctness rule — a `keep` package is one
-//     the overlay carries on purpose, and "identical to ::gentoo right now" is not
-//     an argument against that — and it is also what keeps a scan cheap: 240 of
-//     the overlay's 314 packages are not redundant, and reading all of them would
-//     be most of the work of an answer nobody asked for.
+//     NEVER compared: a `keep` package is carried on purpose, and skipping 240
+//     of 314 packages is also what keeps the scan cheap.
 //  2. A `patched` declaration moves the package out of the removable batch
-//     REGARDLESS of what the bytes say (R2.4). A declaration that has gone stale
-//     is 025's finding to report and the operator's to clear; overruling it here
-//     on our own reading of the bytes would settle that disagreement in the one
-//     direction that cannot be undone.
-//  3. Only then does content decide (R2.1, R2.2, R2.3) — and where the content
-//     also PROVES the difference is ours, no flag may act on it (R6.1).
+//     REGARDLESS of the bytes: a stale declaration is compare's to report and
+//     the operator's to clear, not ours to overrule irreversibly.
+//  3. Only then does content decide — and where the content also PROVES the
+//     difference is ours, no flag may act on it.
 //
-// Every step can only move a package AWAY from a removal, never towards one,
-// which is why they compose: the answer is the strictest step's answer.
-//
-// The function removes nothing and takes no confirmation callback. R1.1 —
-// "without --apply, remove nothing" — is a property of this structure rather than
-// of a well-placed condition: the planner has no capability to delete (design
-// D3). Its only I/O is reading the two trees in order to compare them.
-//
-// It returns no error, for the same reason PruneVerification does not: a failure
-// is a refusal with a reason, and an error return would invite a caller to treat
-// a failed read as an empty batch — which reads as "nothing qualified" when the
-// truth is "nothing was examined" (R1.5).
+// Every step only moves a package AWAY from removal. "Without --apply, remove
+// nothing" is structural: the planner cannot delete, and only reads the two
+// trees. It returns no error, like PruneVerification: a failed read must read
+// as "nothing was examined", not as an empty batch.
 func PlanPrune(results []CompareResult, prov provider.Provider, opts PruneOptions) PruneBatch {
 	// The capability check runs ONCE, before the loop, and it asks the provider
-	// nothing: a type assertion is not a call, so it cannot break R2.5's promise
+	// nothing: a type assertion is not a call, so it cannot break the promise
 	// that a non-redundant package is never looked up. A provider that fails it is
-	// API-only and has no tree to read (design D6); the failed assertion leaves a
+	// API-only and has no tree to read; the failed assertion leaves a
 	// nil interface, which planPrunePackage tests for rather than dereferences, so
 	// such a run yields refusals instead of a panic.
 	dirProv, _ := prov.(provider.PackageDirProvider)
@@ -609,7 +578,7 @@ func PlanPrune(results []CompareResult, prov provider.Provider, opts PruneOption
 			batch.Refused = append(batch.Refused, plan)
 		default:
 			// A class with no bucket would vanish from the report entirely, which is
-			// the one outcome R1.4 forbids. It is downgraded to a refusal first, so
+			// the one outcome the plan must never produce. It is downgraded to a refusal first, so
 			// an unrecognised class cannot arrive in a bucket still carrying
 			// Eligible. The raw integer is deliberate: String() would print the word
 			// for a class this branch exists because it does not recognise.
@@ -625,7 +594,7 @@ func PlanPrune(results []CompareResult, prov provider.Provider, opts PruneOption
 //
 // The gates are in the order PlanPrune's comment fixes, and each one returns:
 // nothing below a gate runs for a package the gate already refused. That is what
-// makes R2.5 observable as an ABSENCE OF WORK — a non-redundant package produces
+// makes "a non-redundant package is never examined" observable as an ABSENCE OF WORK — a non-redundant package produces
 // no directory listing, no provider lookup and no read — rather than as a message
 // printed after the work was done anyway.
 //
@@ -646,7 +615,7 @@ func planPrunePackage(result CompareResult, prov provider.Provider, dirProv prov
 	}
 
 	// Past the gate the package is one some run could act on, so it gets an
-	// inventory: R1.4 asks the plan to say exactly what would go. The inventory is
+	// inventory: the plan must say exactly what would go. The inventory is
 	// taken from OUR directory only — the upstream tree is evidence, never
 	// something this command removes.
 	ourDir := filepath.Join(opts.OverlayPath, result.Category, result.Package)
@@ -678,7 +647,7 @@ func planPrunePackage(result CompareResult, prov provider.Provider, dirProv prov
 
 	content := PruneVerification(ourDir, theirDir, result.Package)
 
-	// R6.1/R6.2 — and the planner asks the question itself rather than expecting
+	// Authorship proof, which the planner asks for itself rather than expecting
 	// the answer on its input. `overlay compare` fills Authorship by running
 	// AnnotateAuthorship over its finished report (authorship.go); `overlay prune`
 	// calls CompareWithProvider and nothing else, so every result arriving here
@@ -717,7 +686,7 @@ func planPrunePackage(result CompareResult, prov provider.Provider, dirProv prov
 //
 // An UNVERIFIABLE result is not a divergence. Nothing was compared, so nothing is
 // known in either direction, and such a package is already refused by row 1 of
-// classifyPrune's table with the reason R2.3 asks for — which is the reason the
+// classifyPrune's table with the unverifiable reason — which is the reason the
 // operator needs, not a second one about a file.
 func pruneDivergence(result CompareResult, content Content) bool {
 	if content.Result == ContentUnverifiable {
@@ -774,47 +743,28 @@ func pruneStatedReason(reason string) string {
 	return reason
 }
 
-// classifyPrune applies R2's and R6's table to a package the verdict already let
-// through. It is read TOP TO BOTTOM, first match wins:
+// classifyPrune applies the content and authorship table to a package the
+// verdict already let through. It is read TOP TO BOTTOM, first match wins:
 //
-//  1. content unverifiable  -> Refused, never eligible (R2.3)
-//  2. divergence proved ours-> Refused, never eligible (R6.1, R6.2)
-//  3. `patched` declared    -> Diverging, eligible only with --include-patched (R2.4)
-//  4. content differs       -> Diverging, likewise (R2.2)
-//  5. identical, undeclared -> Identical, eligible (R2.1)
+//  1. content unverifiable  -> Refused, never eligible
+//  2. divergence proved ours-> Refused, never eligible
+//  3. `patched` declared    -> Diverging, eligible only with --include-patched
+//  4. content differs       -> Diverging, likewise
+//  5. identical, undeclared -> Identical, eligible
 //
-// Row 1 sits above row 3 even though the declaration is the earlier FILTER,
-// because the two can hold at once and then the stricter class has to win. R4.1
-// names R2.2 and R2.4 as the refusals --include-patched may override and
-// pointedly not R2.3: a flag can say "I know I am discarding local work", and no
-// flag can say "I know I am discarding work nobody could look at". Putting a
-// patched-and-unverifiable package in Diverging would make it removable under the
-// flag, so it goes to Refused.
-//
-// ROW 2 IS THE SAME ARGUMENT ONE STEP FURTHER, and it is why it sits ABOVE both
-// diverging rows rather than beside them. Those two rows are exactly what
-// --include-patched acts on, and a package whose files PROVE the difference
-// originates here is work that exists in no other tree: ::gentoo cannot restore
-// it, because ::gentoo never had it. The flag means "I accept discarding local
-// work"; it cannot mean that about work the report has this instant named the
-// file for (R6.1). Below row 1 because an unverifiable package was never
-// compared, and R2.3's reason is the one that sends the operator to the right
-// tree.
-//
-// Row 2 requires a DIVERGENCE, via pruneDivergence, and that condition is
-// load-bearing rather than defensive. An identical package holds nothing to
-// attribute — every byte of it is in ::gentoo — and a stale ${FILESDIR}
-// reference in an ebuild both trees share would otherwise refuse it. 66 of the 74
-// packages the live plan would remove are in that batch, so a refusal leaking
-// there stops `prune` removing anything at all.
-//
-// Row 3 above row 4 is R2.4's "regardless of content": identical bytes never
-// promote a declared package into the removable batch, and when the bytes differ
-// as well the reason names both.
+// Row 1 sits above row 3 because both can hold and the stricter class must win:
+// --include-patched may say "I know I am discarding local work", never "work
+// nobody could look at". Row 2 sits ABOVE the diverging rows the flag acts on:
+// work whose files PROVE it is ours exists in no other tree. It requires a
+// DIVERGENCE (pruneDivergence), which is load-bearing: without it a stale
+// ${FILESDIR} reference in an ebuild both trees share would refuse an identical
+// package, and 66 of the 74 packages the live plan removes are identical.
+// Row 3 above row 4: identical bytes never promote a declared package into the
+// removable batch.
 func classifyPrune(result CompareResult, content Content, includePatched bool) pruneDecision {
 	if content.Result == ContentUnverifiable {
-		// content.Reason is passed through verbatim rather than rephrased: R2.3 asks
-		// the operator to be told WHICH of the two unverifiable reasons applies, and
+		// content.Reason is passed through verbatim rather than rephrased: the
+		// operator must be told WHICH of the two unverifiable reasons applies, and
 		// a reason reworded per call site cannot be recognised in a report.
 		return refusedPrune(content.Reason)
 	}
@@ -843,10 +793,10 @@ func classifyPrune(result CompareResult, content Content, includePatched bool) p
 }
 
 // provedPruneReason says why a proved package is refused, and NAMES THE FILE
-// that proves it (R6.2).
+// that proves it.
 //
 // The file is the whole of what this reason adds. "Something of ours is in this
-// package" is what the plan already said before R6; what the operator cannot get
+// package" is what a plain divergence already says; what the operator cannot get
 // anywhere else is the one name that settles it — a patch our ebuild applies and
 // ::gentoo does not ship for that package cannot have been inherited from
 // ::gentoo. It is spelled package-relative ("files/<name>") because the line
@@ -864,8 +814,8 @@ func provedPruneReason(result CompareResult) string {
 	if result.ProvedBy == "" {
 		// Unreachable through proveAuthorship, which fills both fields from the same
 		// answer — but results arrive as STRUCTS, and a struct can be built by
-		// anything. A proof with no file to name still refuses: R6.2 is owed an
-		// answer either way, and of the two ways to be wrong here only one of them
+		// anything. A proof with no file to name still refuses: a proved package
+		// is owed a refusal either way, and of the two ways to be wrong here only one of them
 		// deletes something.
 		return "the divergence is proved to originate in the overlay, but the proving file was not recorded (this is a bug in the prune planner)"
 	}
@@ -883,7 +833,7 @@ func provedPruneReason(result CompareResult) string {
 // Both halves are there because the operator confirming a diverging batch is
 // being asked to discard both: the declaration says why the copy is ours, the
 // content says what is currently in it. When the content is identical the
-// declaration may well be stale — but that is 025's finding to report, so this
+// declaration may well be stale — but that is compare's finding to report, so this
 // reason does not editorialise about it.
 func patchedPruneReason(result CompareResult, content Content) string {
 	reason := "declared patched"
@@ -902,7 +852,7 @@ func patchedPruneReason(result CompareResult, content Content) string {
 // prunePackageInventory lists what removing dir would take: every version in it,
 // and every file under it as a path relative to dir.
 //
-// It answers R1.4 for one package and nothing else — no comparison, no
+// It says exactly what would go, for one package and nothing else — no comparison, no
 // judgement. The two traversals are deliberate: listPruneEbuilds owns the rule
 // for what counts as a version, and duplicating that rule inside the walk would
 // give the plan a second, drifting definition of the same thing.
@@ -928,7 +878,7 @@ func prunePackageInventory(dir, pkg string) (versions, files []string, err error
 // two runs over the same tree print the same list.
 //
 // Everything is listed, including Manifest, metadata.xml and the whole files/
-// tree: what the COMPARISON ignores (R3.4) and what the REMOVAL deletes are
+// tree: what the COMPARISON ignores and what the REMOVAL deletes are
 // different sets, and this is the second one.
 //
 // A symlink is listed by its path and never followed — removing the package
@@ -978,7 +928,7 @@ type PruneResult struct {
 	Plan PrunePlan
 
 	// Removed is true only when os.RemoveAll returned without error. It is the
-	// caller's authority to delete the package's registry entries (design D7):
+	// caller's authority to delete the package's registry entries:
 	// the entry goes only for a package whose directory actually went.
 	Removed bool
 
@@ -995,32 +945,19 @@ type PruneResult struct {
 
 // ExecutePrune carries out the removals the plan authorised, and no others.
 //
-// It takes the WHOLE batch, Refused included, because the caller has one batch
-// and no reason to split it. Eligible is the authorisation; the BUCKET IS NOT. A
-// loop that walked every bucket and removed what it found would delete exactly
-// the packages the run refused — the worst bug this file can have — so the test
-// is on the plan's own permission and never on the field it was filed under.
+// It takes the WHOLE batch, Refused included. Eligible is the authorisation; the
+// BUCKET IS NOT — a loop removing by bucket would delete exactly the packages the
+// run refused, the worst bug this file can have.
 //
-// A plan that is not Eligible produces NO result. The results are a record of
-// ATTEMPTS: the plan report has already told the operator about the refused
-// packages and why (R1.4), and the CLI turns any result carrying an Err into a
-// non-zero exit (R5.5). Emitting a refusal here as a failed result would make
-// every run that merely SAW a non-redundant package exit non-zero, which says
-// "something went wrong" about a scan that worked perfectly.
+// A plan that is not Eligible produces NO result: results record ATTEMPTS, and
+// the CLI turns any Err into a non-zero exit, so a refusal reported as a failure
+// would fail every run that merely SAW a non-redundant package.
 //
-// One failure records and continues (R5.5). A batch that aborts halfway leaves
-// the overlay in a state no plan described — some packages gone, some not, and
-// nothing on screen saying where the line was drawn. Every attempt gets its own
-// result and the caller decides the exit code.
-//
-// It returns no error of its own, for the reason PlanPrune and PruneVerification
-// do not: the answer is per package, and a single error return would either hide
-// the successes or invite a caller to read a nil as "all of them went".
-//
-// It does not touch packages.toml. The registry edit happens once, afterwards, in
-// the CLI, and only for the atoms whose directory actually went (design D7) —
-// internal/overlay does not know what TOML is, which is the layer rule 025
-// established.
+// One failure records and continues: a batch aborting halfway leaves the overlay
+// in a state no plan described. It returns no error of its own, because the
+// answer is per package and one error would hide the successes. It does not
+// touch packages.toml: the CLI edits the registry afterwards, only for the atoms
+// whose directory actually went, since internal/overlay does not know TOML.
 func ExecutePrune(batch PruneBatch, opts PruneOptions) []PruneResult {
 	// The root is resolved ONCE, and the per-plan guard measures every target
 	// against that one answer. Re-resolving it per package would not make the check
@@ -1033,7 +970,8 @@ func ExecutePrune(batch PruneBatch, opts PruneOptions) []PruneResult {
 	//
 	// Its failure is still reported per plan, because the caller counts failed
 	// attempts and "the root was unusable" is a different report from "nothing was
-	// planned" (R1.5's distinction, one layer down).
+	// planned" — the same "nothing examined" vs "nothing qualified" distinction
+	// PlanPrune draws.
 	root, rootErr := pruneOverlayRoot(opts.OverlayPath)
 
 	// Every bucket is walked, in a fixed order, so that two runs over the same
@@ -1088,11 +1026,11 @@ func pruneOverlayRoot(overlayPath string) (string, error) {
 }
 
 // executePrunePlan removes one package directory, after proving that the path it
-// is about to hand os.RemoveAll is the package the plan named (R5.1).
+// is about to hand os.RemoveAll is the package the plan named.
 //
 // The proof is redone here even though PlanPrune built the same path from the
-// overlay scan, and even though D2 keeps registry keys out of path construction
-// everywhere else. That is not distrust of the planner. The plan arrives as a
+// overlay scan, and even though registry keys are kept out of path
+// construction everywhere else. That is not distrust of the planner. The plan arrives as a
 // STRUCT, and a struct can be built by anything: Category and Package are two
 // strings on it, and nothing in the type system says whoever filled them walked
 // the overlay. SplitPackageKey now refuses a "." or ".." half, but the structure
@@ -1107,7 +1045,7 @@ func executePrunePlan(root string, plan PrunePlan) PruneResult {
 		return PruneResult{Plan: plan, Err: err}
 	}
 
-	// One RemoveAll on the package DIRECTORY, which is R5.1 entire: every ebuild,
+	// One RemoveAll on the package DIRECTORY, which is the whole removal: every ebuild,
 	// Manifest, metadata.xml and the whole files/ tree go with it. PrunePlan.Files
 	// is a report of what that costs and is never joined back into a path — walking
 	// it would rebuild, file by file, a path this function just finished proving.
@@ -1161,7 +1099,7 @@ func prunePackageTarget(root string, plan PrunePlan) (string, error) {
 		return "", fmt.Errorf("%s/%s is a symlink, not a package directory; the comparison that authorised this removal was about the tree it points at, which is not what deleting the link would remove", plan.Category, plan.Package)
 	}
 	if !info.IsDir() {
-		// The plan describes a directory and R5.1 removes one. Whatever this is, the
+		// The plan describes a directory and the removal takes one. Whatever this is, the
 		// evidence collected about it was collected about something else.
 		return "", fmt.Errorf("%s/%s is not a directory (mode %s)", plan.Category, plan.Package, info.Mode())
 	}
@@ -1181,12 +1119,9 @@ func prunePackageTarget(root string, plan PrunePlan) (string, error) {
 		return "", fmt.Errorf("cannot place %s/%s relative to the overlay root %s: %w", plan.Category, plan.Package, root, err)
 	}
 
-	// The comparison has to be on the RESOLVED target against the RESOLVED root,
-	// never on the raw strings: filepath.Join already cleaned "../outside" away
-	// while building the path, so by the time anything can be compared the
-	// traversal is no longer visible as text — only as a location.
-	//
-	// All four conditions are load-bearing and none implies another:
+	// The comparison is on the RESOLVED target against the RESOLVED root, never
+	// the raw strings: filepath.Join already cleaned "../outside" away, so the
+	// traversal is visible only as a location. None of these implies another:
 	//
 	//   - TWO COMPONENTS is the shape of a Portage overlay. One is a category
 	//     directory, three is something inside a package, zero (rel == ".") is the

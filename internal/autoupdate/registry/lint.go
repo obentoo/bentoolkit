@@ -22,43 +22,24 @@ import (
 const RecordEndMarker = "# END"
 
 // CanonicalFieldOrder is the sequence in which a packages.toml record assigns
-// its fields. It is the single source of that order: the linter checks against
-// it (LintFieldOrder), the repair sorts by it, and `overlay analyze` emits by
-// it, so the generator and the linter agree by construction.
+// its fields — the single source the linter (LintFieldOrder), the repair and
+// `overlay analyze` all use, so generator and linter agree by construction.
 //
-// IT IS DERIVED FROM MEASUREMENT, NOT FROM TASTE. The sequence is the practice
-// the registry's 411 hand-written records already follow; it was read off them
-// rather than designed, and only two adjustments were made — the four `base_*`
-// siblings were grouped so a commit-tracked record declares its base source in
-// one block, and `comments` was pinned last because the record model already
-// requires it there (see PackageConfig.Comments and LintCommentsNotLast).
-// Measured against the real registry, that costs 13 records a reordering. A
-// prettier order — grouping by theme, alphabetising, moving `type` up next to
-// `parser` — would have cost 178. Do not "tidy" this list: every edit to it is a
-// churn bill payable in records, so change it only with a fresh measurement in
-// hand.
+// IT IS DERIVED FROM MEASUREMENT, NOT FROM TASTE: it was read off the registry's
+// 411 hand-written records, with the four `base_*` siblings grouped and
+// `comments` pinned last (see PackageConfig.Comments and LintCommentsNotLast).
+// That costs 13 records a reordering; a prettier order would have cost 178. Do
+// not "tidy" it: every edit is a churn bill payable in records, so change it only
+// with a fresh measurement in hand.
 //
-// One field was placed rather than read off the registry: `patched` sits
-// immediately after `type` because both classify the PACKAGE instead of
-// describing how to probe it, and `type`/`series` already form that block.
-// Inserting it cost zero record rewrites — no record carries the field yet —
-// and that zero is exactly why the position had to be chosen deliberately now:
-// the churn bill above falls due on every LATER move, once records do carry
-// it (R1.4).
+// `patched` sits right after `type` because both classify the PACKAGE rather
+// than describe how to probe it, and `disabled_by` right after `enabled` because
+// it names WHO wrote the `enabled = false` beside it. Both were placed while no
+// record carried them, so their positions cost nothing now and churn later.
 //
-// `disabled_by` was placed the same way and for the same kind of reason: it sits
-// immediately after `enabled` because it qualifies that key and nothing else —
-// it names WHO wrote the `enabled = false` it rides beside, so the two read as
-// one statement and splitting them reads as half of it (story 043, R1.1). It too
-// costs zero record rewrites today, no record carrying the field yet, which is
-// again why the position had to be chosen deliberately rather than later.
-//
-// It covers every `toml:` tag of PackageConfig exactly once, which
-// TestCanonicalFieldOrderCoversPackageConfig pins — a field missing from here
-// would silently stop being ordered at all. `binary` is deliberately absent: it
-// has no struct field, because the classifier is `type` (R1.1).
-//
-// Treat it as read-only; canonicalFieldRank below is built from it once.
+// It covers every `toml:` tag of PackageConfig exactly once, as
+// TestCanonicalFieldOrderCoversPackageConfig pins; `binary` (no struct field, the
+// classifier is `type`) is absent. Read-only: canonicalFieldRank is built from it.
 var CanonicalFieldOrder = []string{
 	"enabled", "disabled_by", "hold", "track",
 	"url", "mirrors", "parser", "path", "pattern", "selector", "xpath", "script",
@@ -119,22 +100,21 @@ const (
 //
 // The pair exists because one rule can carry two repairs: a record declaring the
 // retired `binary` is one finding (LintLegacyBinary), but the fix is a rewrite
-// when nothing else classifies the package (R1.2) and a plain deletion when
-// `type` is already there (R1.3). Encoding that in the message text would force
+// when nothing else classifies the package and a plain deletion when `type` is
+// already there. Encoding that in the message text would force
 // the repair to string-match prose, so it is encoded here instead.
 const (
 	// FixNone marks an issue that is reported and never repaired. It is the
 	// zero value, so every rule that offers no repair says so by default.
 	FixNone = ""
-	// FixBinaryToType rewrites `binary = true` as `type = "bin"` (R1.2).
+	// FixBinaryToType rewrites `binary = true` as `type = "bin"`.
 	FixBinaryToType = "binary-to-type"
-	// FixDropBinary deletes the `binary` line, leaving `type` untouched (R1.3).
+	// FixDropBinary deletes the `binary` line, leaving `type` untouched.
 	FixDropBinary = "drop-binary"
-	// FixDropEnabled deletes a redundant `enabled = true` line (R2.2). It is
+	// FixDropEnabled deletes a redundant `enabled = true` line. It is
 	// never produced for `enabled = false`, which carries real information.
 	FixDropEnabled = "drop-enabled"
-	// FixReorderFields sorts the record's assignments into CanonicalFieldOrder
-	// (R3.2).
+	// FixReorderFields sorts the record's assignments into CanonicalFieldOrder.
 	FixReorderFields = "reorder-fields"
 )
 
@@ -153,8 +133,8 @@ type LintIssue struct {
 	// Fix is the repair `--lint --fix` would apply, one of the Fix* identifiers
 	// above. FixNone (the zero value) means the issue is reported only — either
 	// because the rule deliberately declines to guess (legacy-base cannot know
-	// where upstream versions itself, R6.1; unknown-field would write a value
-	// into a field nobody meant, R4.2) or because the violation needs a human
+	// where upstream versions itself; unknown-field would write a value into a
+	// field nobody meant) or because the violation needs a human
 	// edit. Read this rather than the message when deciding what to do.
 	Fix string
 }
@@ -202,9 +182,9 @@ func LintPackagesConfig(log *slog.Logger, overlayPath string) ([]LintIssue, erro
 	if err != nil {
 		// An unknown key is a lint finding in its own right, not merely a reason
 		// the file would not load: reported per record it reads like every other
-		// rule and says which of 411 entries to open (R4.1). It stays a returned
+		// rule and says which of 411 entries to open. It stays a returned
 		// error too, because the semantic checks below need a config that could
-		// not be built. No repair is offered — see UnknownKeysError (R4.2).
+		// not be built. No repair is offered — see UnknownKeysError.
 		var unknown *UnknownKeysError
 		if errors.As(err, &unknown) {
 			for _, k := range unknown.Keys {
@@ -277,37 +257,21 @@ var prereleaseSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc)\d*`)
 // lintUntrackedReleaseLines reports entries whose package directory carries more
 // than one release line while the entry declares neither `series` nor a `:slot`.
 //
-// It exists because that combination fails silently and looks like success.
-// selectCurrentEbuild takes the directory's HIGHEST version as "the current
-// one", so once a newer line lands beside an older one, every release of the
-// older line compares older than the current version and the entry reports
-// "up to date" forever — the line simply stops being maintained. The overlay hit
-// exactly this: 85 GStreamer packages carried a 1.29.x development ebuild beside
-// nothing else, and the 1.28.5 stable release could never be picked up because
-// 1.28.5 < 1.29.2.
+// That combination fails silently and looks like success: selectCurrentEbuild
+// takes the HIGHEST version as current, so every release of an older line
+// compares older and the entry reports "up to date" forever. The overlay hit
+// exactly this: 85 GStreamer packages carried a 1.29.x development ebuild, and
+// the 1.28.5 stable release could never be picked up. Two lines in one directory
+// are legitimate; leaving them undeclared is not. The fix is one entry per line,
+// each with its own `series` and a distinct "@label".
 //
-// Two lines in one directory are perfectly legitimate (a stable line beside a
-// testing one); what is not legitimate is leaving it undeclared. The fix is one
-// entry per line, each with its own `series` and a distinct "@label".
-//
-// Deliberately conservative to stay useful, on two counts. Revisions and
-// snapshot suffixes of the SAME line (1.28.4 next to 1.28.5-r1) are not
-// reported, because keeping the previous version around is ordinary overlay
-// hygiene. Neither are two lines that merely SUCCEED each other: bentoolkit
-// itself ships 0.15.3 beside 0.16.0, which is one line mid-rotation, not two
-// maintained in parallel — warning there would bury the real finding under a
-// warning on almost every directory.
-//
-// What distinguishes the real case is the pre-release suffix. A line kept in
-// parallel on purpose is the unstable one and says so: libreoffice-26.2.5.2
-// beside libreoffice-26.8.0.1_pre, zed-bin-1.13.1 beside zed-bin-1.14.1_pre.
-// So the rule fires only when one line carries _alpha/_beta/_pre/_rc and
-// another does not — the shape of a stable line coexisting with a testing one.
-// Note _p is excluded on purpose: it marks a post-release snapshot, so two _p
-// lines are two snapshot lines rather than a stable/unstable pair.
-//
-// An unreadable directory yields no issue — the linter must not invent findings
-// from a failed stat.
+// It stays conservative to stay useful: revisions and snapshots of the SAME line
+// (1.28.4 beside 1.28.5-r1) and lines that merely SUCCEED each other (0.15.3
+// beside 0.16.0, mid-rotation) are not reported. It fires only when one line
+// carries _alpha/_beta/_pre/_rc and another does not — a stable line beside a
+// testing one, like zed-bin-1.13.1 beside zed-bin-1.14.1_pre. _p is excluded: it
+// marks a post-release snapshot. An unreadable directory yields no issue — the
+// linter must not invent findings from a failed stat.
 func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig) []LintIssue {
 	var issues []LintIssue
 
@@ -545,42 +509,23 @@ type orderedField struct {
 }
 
 // lintRecordFields reports the four field-set rules of one record: the retired
-// `binary` key (R1.2, R1.3), a redundant `enabled = true` (R2.1), an assignment
-// order that is not canonical (R3.2), and a commit-tracked entry whose base
-// version has no declared source (R6.1).
+// `binary` key, a redundant `enabled = true`, an assignment order that is not
+// canonical, and a commit-tracked entry whose base version has no declared source.
 //
-// All four live in the text scanner rather than beside ValidatePackageConfig,
-// for reasons that differ per rule but converge:
+// All four live in the text scanner: `binary` has no struct field, a redundant
+// `enabled = true` parses the same as none, and the parser discards order; a
+// `track = "commit"` record without `base_from` is legal (documented legacy
+// behaviour), so it is reported rather than failing the load. Each also owes the
+// maintainer a line number, which only the scan has.
 //
-//   - `binary` has no struct field at all (R1.1), so the parsed config cannot
-//     see it; only the raw text can.
-//   - `enabled = true` and `enabled` absent parse to the same behaviour, and the
-//     order of assignments is discarded by the parser outright.
-//   - `track = "commit"` without `base_from` IS visible to the parser, and could
-//     have gone into ValidatePackageConfig — but that function's contract is
-//     "this record is invalid", and such a record is perfectly legal: it is the
-//     documented legacy behaviour two entries still rely on. Failing the load
-//     over a risk is not the same as reporting it.
-//
-// And every one of them owes the maintainer a line number out of ~5850, which
-// only the scan has.
-//
-// The order check runs over the EFFECTIVE field list — the sequence the record
-// will have once the repairs above are applied — not over the literal one. That
-// matters in both directions. A `binary` line that becomes `type = "bin"` is
-// ranked as `type`, so net-misc/nxplayer (…aux_var, aux_pattern, binary…) is
-// reported: after migration its `type` would sit two ranks too late, and a
-// repair that reorders a record the lint never flagged is a repair nobody
-// approved. Conversely a deleted line (a redundant `binary` or `enabled = true`)
-// is dropped before ranking, so it cannot manufacture a deviation that the
-// repair then "fixes" by removing the line anyway. The consequence worth
-// stating: `--lint --fix` followed by `--lint` reports nothing, which is the
-// property that makes the repair trustworthy.
-//
-// A key in neither CanonicalFieldOrder nor the retired set is skipped rather
-// than ranked last: it already fails the load and is reported as
-// LintUnknownField, and a second finding about where the typo SITS would be
-// noise.
+// The order check ranks the EFFECTIVE field list — the record after the repairs
+// above — not the literal one. A `binary` that becomes `type = "bin"` is ranked
+// as `type`, so a record the repair would reorder is flagged first; a deleted
+// line is dropped before ranking, so it cannot manufacture a deviation. Hence
+// `--lint --fix` followed by `--lint` reports nothing, which is what makes the
+// repair trustworthy. A key in neither CanonicalFieldOrder nor the retired set is
+// skipped: it already fails the load as LintUnknownField, and a finding about
+// where the typo sits would be noise.
 func lintRecordFields(rec *recordLintState) []LintIssue {
 	if rec == nil || len(rec.fields) == 0 {
 		return nil
@@ -677,7 +622,7 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 		prevName = f.canonical
 	}
 
-	// No repair is offered on purpose (R6.1): which source applies depends on
+	// No repair is offered on purpose: which source applies depends on
 	// where upstream versions itself, which only a human reading that upstream
 	// knows.
 	//

@@ -11,7 +11,7 @@ import (
 // newRootCmd builds a complete, freshly wired `bentoo` command tree.
 //
 // Every command in the tree is produced by a constructor, so two calls share no
-// command object and no flag state. That is the whole point (S046-R8.4): cobra
+// command object and no flag state. That is the whole point: cobra
 // keeps a flag's parsed value and its Changed bit ON the command, so a suite
 // that drove one shared tree would let one case's --ui or --distdir survive into
 // the next, and prove nothing about either.
@@ -33,7 +33,7 @@ func newRootCmd() *cobra.Command {
 
 // newRootCmdWith builds the same tree as newRootCmd with d as its dependencies.
 // d reaches every constructor that owns a seam, so a test that substitutes a
-// field of its own d changes this tree alone (story 060, R6.1, R6.5).
+// field of its own d changes this tree alone.
 func newRootCmdWith(d *deps) *cobra.Command {
 	var (
 		verboseFlag bool
@@ -52,8 +52,8 @@ func newRootCmdWith(d *deps) *cobra.Command {
 		// SilenceUsage below: cobra consults the ROOT's copy of both fields
 		// whichever command ran. This one stops cobra printing the error it
 		// is about to return from Execute(), which func execute already prints —
-		// with both printers live every refusal is stated twice, and R3.6
-		// allows exactly once. func execute is left the single owner.
+		// with both printers live every refusal is stated twice, and it
+		// must be stated exactly once. func execute is left the single owner.
 		//
 		// It is not the same decision as the one below, because the two
 		// fields silence different things. SilenceUsage governs the usage
@@ -81,7 +81,7 @@ func newRootCmdWith(d *deps) *cobra.Command {
 			// Publish this tree's flag values to the package variables the run
 			// functions read, before any of them runs.
 			verbose, quiet, noColor = verboseFlag, quietFlag, noColorFlag
-			// R3.2: an unusable --ui stops ANY command before it does work,
+			// An unusable --ui stops ANY command before it does work,
 			// naming the set it accepts. Here, once per invocation, rather than
 			// inside each command that happens to render — a rejection that
 			// only some commands perform is a rejection the operator has to
@@ -97,12 +97,12 @@ func newRootCmdWith(d *deps) *cobra.Command {
 			if _, _, err := report.ResolveMode(report.ModeInputs{Flag: autoupdateUI}); err != nil {
 				// Returned, not printed: cobra stops before RunE only if the
 				// error travels back to it. Printing here and continuing would
-				// satisfy the message half of R3.2 and lose the half that
+				// deliver the message and lose the half that
 				// matters — that NOTHING runs.
 				return err
 			}
 
-			// Story 062: the invocation's one logger (R5.1), its level from
+			// The invocation's one logger, its level from
 			// the flags and BENTOO_LOG_LEVEL, its JSON file opened here. The
 			// file is closed by PersistentPostRunE on a successful return. cobra
 			// skips the post-run hooks when RunE fails, and func execute still
@@ -143,7 +143,7 @@ func newRootCmdWith(d *deps) *cobra.Command {
 	// TestAllDoesNotChangeActions forbids — a display flag must not appear
 	// where the run's actions are wired.
 	//
-	// Story 046 R3.1: the three report flags are declared ONCE, here, and are
+	// The three report flags are declared ONCE, here, and are
 	// honoured wherever a report exists. They were on `overlay autoupdate` alone,
 	// which made every other report-producing command a command the operator had
 	// to guess about. The help texts are carried across verbatim — they document
@@ -221,10 +221,10 @@ func subCommand(parent *cobra.Command, name string) *cobra.Command {
 //
 // They exist so that the constructor conversion did not have to rewrite the
 // package's existing tests in the same change. Nothing in production reads them
-// — production goes through rootCmd — and a later story can delete this block
+// — production goes through rootCmd — and a later change can delete this block
 // once the tests it serves are moved onto the harness newRootCmd now makes
 // possible. `overlay prune` has no variable here because nothing references one,
-// and `overlay autoupdate` has none since story 060 moved its tests onto
+// and `overlay autoupdate` has none because its tests moved onto
 // testAutoupdateCmd.
 //
 // Go orders these by dependency, not by line: rootCmd is built first, then the

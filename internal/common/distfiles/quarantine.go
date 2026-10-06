@@ -43,104 +43,25 @@ const quarantineStamp = "20060102T150405Z"
 // worker's evidence would overwrite the other's.
 var quarantineSeq atomic.Uint64
 
-// Quarantine implements D3. Before pkgdev is invoked, every distfile the new
-// version expects is looked at in the resolved distdir, and any one that is
-// present but cannot be verified is moved aside instead of being reused.
+// Quarantine runs before pkgdev: every distfile the new version expects is
+// looked at in the resolved distdir, and one that is present but cannot be
+// verified is moved aside instead of being reused. Portage's default
+// FETCHCOMMAND writes straight to the final name, so a killed fetch leaves a
+// TRUNCATED file there; on a bump the current Manifest does not list it, and
+// the next run would digest it and the overlay publish that checksum.
 //
-// # Why this is needed at all
+// An absent name needs nothing. A present name listed in manifestNames (the
+// DIST filenames of the CURRENT Manifest) is reused as is. A present unlisted
+// name is renamed to a sibling quarantine name and reported: moved, not
+// deleted, because the host's directory is not ours and a move is recoverable.
+// It returns each file's NEW name (the original is its prefix). On an error the
+// caller must not run pkgdev; what was moved still comes back. A failed
+// inspection fails closed rather than meaning absent.
 //
-// It is the price of the distdir being the host's real DISTDIR rather than a
-// directory this run made. Portage's default FETCHCOMMAND writes straight to
-// ${DISTDIR}/${FILE} with no temporary name, so a fetch killed midway leaves a
-// TRUNCATED file under the FINAL name. On a version bump the package's current
-// Manifest does not yet list that filename, so nothing downstream holds a size
-// or a checksum to compare it against, and the next run digests whatever is on
-// disk. This overlay commits and pushes on its own, so that checksum is
-// published before anyone looks at it (R2.2).
-//
-// # The three cases
-//
-//  1. Absent — nothing to do.
-//  2. Present AND listed in the package's current Manifest — a known,
-//     previously verified distfile. It is left exactly as it is, which is
-//     R2.1's reuse: the download is skipped because the file is already there
-//     and something has already vouched for it.
-//  3. Present and NOT listed — unverifiable by construction. It is renamed to a
-//     sibling quarantine name and reported, so pkgdev fetches cleanly.
-//
-// Case 3 moves rather than deletes because the directory is the host's, not
-// ours (R2.5): a file we cannot prove we created is not ours to destroy, and a
-// moved file is recoverable while a deleted one is not. Misclassifying is
-// therefore an inconvenience instead of data loss. Nothing here changes a mode
-// or an owner — not on the directory, not on the files — for the same reason:
-// a rename carries the file's own metadata across untouched, which is precisely
-// why it is the operation used.
-//
-// # Arguments and return
-//
-// distdir is the resolved directory (see Resolve). manifestNames are the
-// filenames on the DIST lines of the package's CURRENT Manifest, i.e. what is
-// already verified — ParseManifestDistFilenames produces exactly this list.
-// expected are the distfile names the NEW version needs; on a bump those are
-// typically absent from manifestNames, which is why a file already sitting
-// under one of them is unverifiable.
-//
-// The returned slice holds the NEW name of each file that was moved, not the
-// old one. That is deliberate: the quarantine name has the original filename as
-// its prefix, so one string tells the caller both WHAT was moved and WHERE it
-// went, and a report line built from it is enough to find the file again in a
-// directory holding thousands of others. This package is a library and never
-// logs; the caller reports what these names say.
-//
-// An error is fatal for the package and the caller must not go on to pkgdev
-// after one: the point of this function is that an unverifiable file must not be
-// digested, and a file we failed to move aside is still sitting there. Whatever
-// was moved before the failure comes back alongside the error, because it was
-// still moved and the operator still needs to hear about it. Being unable to
-// even determine a file's state is treated the same way — an inspection that
-// fails is not an absence, so it fails closed rather than assuming there is
-// nothing there.
-//
-// # Untrusted names
-//
-// Every name, from manifestNames and expected alike, is reduced with
-// filepath.Base before it is joined to distdir: DIST names come out of a parsed
-// file and the expected names out of a resolved version, so both are untrusted
-// input, and this directory is shared with the system package manager, where a
-// traversal would write outside a directory the tool does not own. Base
-// neutralises traversal by construction — "../../etc/passwd" becomes "passwd" —
-// and the results of Base that are not filenames at all are refused lexically,
-// before the filesystem is touched, because filepath.Join(distdir, "..") is the
-// distdir's PARENT and renaming that would move /var/cache. Both sides are
-// reduced with the same rule, so the "is it listed" comparison stays honest.
-//
-// # Symlinks and directories
-//
-// The lookup is os.Lstat and the move is os.Rename, so a symlink is never
-// followed: both act on the link itself. That matters because
-// PrepopulateFromCache puts symlinks into this very directory. A symlink under
-// an expected name the Manifest does not list is quarantined like anything else
-// — what it points at would be digested and we cannot verify it — and moving it
-// moves the LINK, leaving the read-only cache file it points to untouched. A
-// dangling one is quarantined too, which is why this is Lstat and not Stat:
-// Stat reports a dangling link as absent and would leave it in place under the
-// very name pkgdev is about to fetch.
-//
-// A directory found under an expected name is left alone. A distfile is a file,
-// a distdir may hold subdirectories that belong to the host (git3-src and the
-// like), and moving one aside is not this function's business.
-//
-// # Concurrency
-//
-// os.Rename is atomic within one filesystem, so two workers that reach the same
-// file cannot both move it: one wins and the other's rename fails with ENOENT,
-// which is read as "already gone" and reported as nothing moved. Their
-// destination names cannot collide either (see quarantineInfix and
-// quarantineSeq). What is NOT atomic is the Lstat-then-Rename sequence around
-// it: a file that appears between the two calls is not seen on this pass, and
-// one that disappears is skipped. Neither corrupts anything — the window is a
-// missed observation, not a wrong write — and closing it is the per-distfile
-// lock of D4, not this function's job.
+// Names are untrusted and reduced with distfileName (Base, then a lexical
+// refusal of "..", "." and "/") before joining. Lookup is os.Lstat and the move
+// os.Rename, so symlinks, dangling ones included, are moved, never followed;
+// directories are left alone. A concurrent rename's loser sees ENOENT.
 func Quarantine(distdir string, manifestNames, expected []string) ([]string, error) {
 	if distdir == "" {
 		// filepath.Join("", name) resolves against the WORKING directory, so a
@@ -164,7 +85,7 @@ func Quarantine(distdir string, manifestNames, expected []string) ([]string, err
 			continue
 		}
 		if _, listed := verified[name]; listed {
-			// Case 2: already verified, so leave it. This is R2.1's reuse.
+			// Already verified, so leave it and reuse it.
 			continue
 		}
 
@@ -172,7 +93,7 @@ func Quarantine(distdir string, manifestNames, expected []string) ([]string, err
 		info, err := os.Lstat(path)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				// Case 1: nothing there, so nothing to protect against.
+				// Absent: nothing there, so nothing to protect against.
 				continue
 			}
 			return moved, fmt.Errorf("failed to inspect distfile %q in %s: %w", name, distdir, err)
@@ -181,7 +102,7 @@ func Quarantine(distdir string, manifestNames, expected []string) ([]string, err
 			continue
 		}
 
-		// Case 3: present, unlisted, therefore unverifiable.
+		// Present and unlisted, therefore unverifiable.
 		quarantined := quarantineName(name)
 		if err := os.Rename(path, filepath.Join(distdir, quarantined)); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {

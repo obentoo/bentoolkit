@@ -9,29 +9,23 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
-// This file is the command half of `--mark-auto-disabled`, the one-shot
-// migration story 043 R1.5 asks for. internal/autoupdate/disable_origin_migration.go
-// decides what qualifies and writes it; this shows a human the decision and
-// gates the write.
+// This file is the command half of `--mark-auto-disabled`, a one-shot
+// migration. registry.PlanAutoDisableMigration decides what qualifies; this
+// shows a human the decision and gates the write. packages.toml lives in an
+// overlay that auto-commits and pushes, so a write made unattended is a write
+// PUBLISHED unattended: print the whole plan, gate the write, then stamp.
 //
-// The split is the one `--lint --fix` already uses, and for the same reason.
-// packages.toml lives in an overlay that auto-commits and pushes, so a write
-// made unattended is a write PUBLISHED unattended — a wrong migration is not a
-// local mistake to undo before anyone notices, it is a released one. Hence:
-// print the whole plan, gate the write, and only then stamp.
+// The gates are the existing ones, not a third set: the same --yes flag, the
+// same deps.registryPromptIsInteractive probe (stdin AND stdout must be
+// terminals) and the same deps.confirmRegistryWrite seam that guard the
+// post-check version pins and the lint repair. Three idioms for "may I
+// publish?" in one command would be two too many.
 //
-// The gates are story 021's, not a third set: the same --yes flag, the same
-// deps.registryPromptIsInteractive probe (stdin AND stdout must be terminals) and the
-// same deps.confirmRegistryWrite seam that guard the post-check version pins and
-// the lint repair. Three idioms for "may I publish?" in one command would be two
-// too many.
-//
-// WHY THIS RUNS AT ALL. R1.3 made an absent `disabled_by` mean "a human decided,
-// leave it alone" — the fail-safe direction, and the one that protects
-// dev-libs/icu-compat and media-libs/libjxl-compat the instant the code lands.
-// Its price is that the ~90 entries the checker auto-disabled BEFORE the field
-// existed look identical on disk to those two pins, so they stop reconciling
-// too. This command pays that price once and then has nothing left to do.
+// WHY THIS RUNS AT ALL. An absent `disabled_by` means "a human decided, leave
+// it alone" — the fail-safe direction, which protects dev-libs/icu-compat and
+// media-libs/libjxl-compat. Its price is that the ~90 entries the checker
+// auto-disabled BEFORE the field existed look identical on disk to those pins,
+// so they stop reconciling too. This command pays that price once.
 
 // runMarkAutoDisabled handles --mark-auto-disabled: it plans the migration over
 // the parsed registry, prints the whole plan, and stamps `disabled_by = "auto"`

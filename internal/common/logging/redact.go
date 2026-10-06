@@ -13,7 +13,7 @@ import (
 const mask = "***"
 
 // credentialWords are the trailing key segments that mark an attribute's value
-// as a credential whatever the value is (R4.5).
+// as a credential whatever the value is.
 var credentialWords = []string{"token", "password", "secret", "api_key", "apikey", "authorization"}
 
 // redactingHandler scrubs every resolved secret from a record before handing it
@@ -126,7 +126,7 @@ func newScrubber(resolved []string) scrubber {
 	}
 	// Longest first, whatever order the caller gave: a shorter secret inside a
 	// longer one must not be replaced first and leave the longer one's
-	// fragments behind (R4.3).
+	// fragments behind.
 	slices.SortStableFunc(secrets, func(a, b string) int { return len(b) - len(a) })
 	return scrubber{secrets: secrets}
 }

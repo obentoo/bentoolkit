@@ -3,7 +3,7 @@
 // reads the message pkgdev printed: this file exists BECAUSE that message is
 // not evidence. The host this defect was measured on runs LC_MESSAGES=pt_BR,
 // so "Cannot write to" is a string that appears only when a child process
-// happens to inherit a C locale (M5). A classifier built on it answers
+// happens to inherit a C locale. A classifier built on it answers
 // "repairable" the moment that stops being true — silently, and wrongly.
 //
 // Every branch below is therefore an observation of state: a probe that either
@@ -28,7 +28,7 @@ import (
 // machine, not on the ebuild: the distdir stopped being writable, its
 // filesystem ran out of room, or the fetch left an empty artefact behind.
 //
-// It is the gate D6 keys on. An LLM fixer handed such a failure has no repair
+// It is what the fixer gate keys on. An LLM fixer handed such a failure has no repair
 // available to it — its only reachable conclusion is that SRC_URI is wrong —
 // so it edits a correct ebuild in a repository that commits and pushes on its
 // own. Callers test this with errors.Is; the original error is always wrapped
@@ -37,7 +37,7 @@ var ErrManifestEnvironment = errors.New("manifest step failed on the environment
 
 // The reason a verdict was reached, wrapped next to ErrManifestEnvironment.
 // They are unexported because no caller outside this package needs to branch on
-// them: D6's gate keys on ErrManifestEnvironment alone, and the reason is there
+// them: the fixer gate keys on ErrManifestEnvironment alone, and the reason is there
 // for the operator reading the message — and for the test that pins WHICH check
 // fired when more than one would have. Export one only when a caller genuinely
 // has to distinguish them.
@@ -49,8 +49,8 @@ var (
 )
 
 // minimumUsableFreeBytes is the floor this classifier compares free space
-// against, and it is a deliberate under-approximation of D5's "the size still
-// needed".
+// against, and it is a deliberate under-approximation of "the size the fetch
+// still needed".
 //
 // That size is not knowable here. The only authority on how many bytes a
 // distfile still needs is the server that serves it, and this code runs after
@@ -62,14 +62,14 @@ var (
 //
 // The consequence, stated plainly because it is the point: a 2 GiB tarball that
 // exhausted a filesystem with 100 MiB free is classified REPAIRABLE, and the
-// fixer runs on it. That is R3.5's bargain — a wrong classification must cost a
+// fixer runs on it. That is the bargain — a wrong classification must cost a
 // wasted fixer invocation, never a lost capability — so the floor errs low on
 // purpose. Raising it would start turning genuine ebuild failures into
 // "environment" and would gate away a repair that exists.
 const minimumUsableFreeBytes = 1 << 20 // 1 MiB
 
 // SpaceFunc reports how many bytes are still available to the INVOKING user on
-// the filesystem backing dir. It is the seam that makes D5's full-filesystem
+// the filesystem backing dir. It is the seam that makes the full-filesystem
 // branch testable without filling a real disk.
 //
 // Contract:
@@ -79,7 +79,7 @@ const minimumUsableFreeBytes = 1 << 20 // 1 MiB
 //     ours and must not be counted;
 //   - a non-nil error means the question could not be answered. It does NOT
 //     mean "no space". ClassifyManifestFailure treats an unanswerable check as
-//     no evidence and moves on (R3.5), because a classifier that manufactured
+//     no evidence and moves on, because a classifier that manufactured
 //     an "environment" verdict out of a failed statfs would gate away a repair
 //     on the strength of knowing nothing.
 type SpaceFunc func(dir string) (uint64, error)
@@ -123,77 +123,34 @@ var defaultSpaceQuery SpaceFunc = availableSpace
 
 // ClassifyManifestFailure decides whether err — the error a failed `pkgdev
 // manifest` returned — is an environment failure or a repairable one, by
-// running D5's checks against observable state, in D5's order:
+// checking observable state in this order (an unwritable distdir explains an
+// empty artefact, so the cause is named before its symptom):
 //
 //  1. distdir no longer writable (the pre-flight probe, repeated)  -> environment
 //  2. free space below the floor any fetch needs                   -> environment
 //  3. an expected artefact present with zero length                -> environment
 //  4. none of the above                                            -> repairable
 //
-// The order is normative, not incidental: an unwritable distdir explains an
-// empty artefact, so reporting the artefact instead would name a symptom and
-// hide its cause.
+// For 1-3 it returns an error wrapping both ErrManifestEnvironment and err, so
+// the operator still reads what pkgdev printed. For 4 it returns err untouched,
+// the same value, so a caller testing it for something else keeps finding it.
 //
-// # What it returns
-//
-// For the first three it returns an error wrapping BOTH ErrManifestEnvironment
-// — which is what D6's gate tests with errors.Is — and err itself, so the
-// operator still reads what pkgdev printed even though the fixer never runs.
-// For the fourth it returns err UNTOUCHED: the same error value, not a re-wrap,
-// so a caller that already tests the manifest error for something else keeps
-// finding it, and today's behaviour is bit-for-bit unchanged on the path this
-// story does not want to alter.
-//
-// # Where it falls through, and why every fall-through goes the same way
-//
-// R3.5 makes "uncertain" mean "repairable": a check that cannot be answered is
-// no evidence, and no amount of no-evidence adds up to "environment". So each
-// of these leaves the verdict to the next check, and none of them can produce
-// one:
-//
-//   - err is nil — there is no failure to classify, and the state of a distdir
-//     says nothing about a step that did not fail. Returns nil.
-//   - distdir is empty — every check is unanswerable, and check 3 would be
-//     worse than useless: filepath.Join("", name) resolves against the WORKING
-//     directory, so it would inspect files nobody asked about and could reach an
-//     "environment" verdict from a stray empty file in the overlay. Refused up
-//     front, as Probe, Quarantine and RecordFetchScope refuse it.
-//   - space is nil — normalised to defaultSpaceQuery, the real statfs query,
-//     NOT skipped. A nil seam in production must not silently disable a safety
-//     check; a caller that forgets to pass one gets the real query, and only a
-//     caller that deliberately injects a refusing SpaceFunc turns the check off.
-//   - the space query returns an error — treated as unanswerable. Nothing is
-//     logged about it (a library returns errors, it does not log them) and
-//     nothing is lost: the original error is returned intact.
-//   - an expected name does not reduce to a filename, or cannot be inspected —
-//     skipped. "We could not find out" is not "it is empty".
-//
-// # What check 2 can and cannot detect
-//
-// It cannot detect "this particular distfile did not fit", because the size it
-// would have to compare against does not exist offline (see
-// minimumUsableFreeBytes). It detects only a filesystem that has nothing left
-// for anyone. In practice check 1 usually fires first on such a filesystem —
-// the probe's own write gets ENOSPC — so check 2 is the case where a tiny write
-// still succeeds while the filesystem is effectively full.
-//
-// # Untrusted names
-//
-// expected holds distfile NAMES, not paths, and they come from a resolved
-// version, so they are untrusted input. Each is reduced to a single filename
-// before it is joined to distdir, by the same rule internal/common/distfiles
-// applies to the names it quarantines and cleans up (see distfileEntryName).
-// Otherwise "../../etc/passwd" would have this function reaching outside the
-// directory it was asked about and reading an unrelated empty file as a verdict.
-//
-// It never panics: a nil err, an empty distdir, a nil expected slice and a nil
-// space are all defined states above. It never writes anything except the
-// probe file distfiles.Probe creates and removes, and it never logs.
+// "Uncertain" means "repairable": a check that cannot be answered (an empty
+// distdir, a failing space query, an uninspectable name) is no evidence and
+// falls through. A nil space uses the real statfs query rather than skipping.
+// expected holds untrusted distfile NAMES, each reduced to one filename before
+// the join. It never panics, never logs, and writes only Probe's own file.
 func ClassifyManifestFailure(distdir string, err error, expected []string, space SpaceFunc) error {
 	if err == nil {
+		// No failure to classify: a distdir's state says nothing about a step
+		// that did not fail.
 		return nil
 	}
 	if distdir == "" {
+		// Every check is unanswerable, and check 3 would be worse: joining ""
+		// resolves against the WORKING directory, so a stray empty file in the
+		// overlay could produce an "environment" verdict. Probe, Quarantine and
+		// RecordFetchScope refuse an empty distdir the same way.
 		return err
 	}
 
@@ -206,7 +163,12 @@ func ClassifyManifestFailure(distdir string, err error, expected []string, space
 		return fmt.Errorf("%w: %w (the manifest step reported: %w)", ErrManifestEnvironment, probeErr, err)
 	}
 
-	// Check 2 — is there room left for anything at all?
+	// Check 2 — is there room left for anything at all? It cannot detect "this
+	// distfile did not fit" (that size is unknowable offline, see
+	// minimumUsableFreeBytes), only a filesystem with nothing left for anyone.
+	// Check 1 usually fires first there, so this is the case where a tiny write
+	// still succeeds. A nil seam gets the real query so a forgotten argument
+	// cannot disable the check; a query error is no evidence and is not logged.
 	if space == nil {
 		space = defaultSpaceQuery
 	}
@@ -225,8 +187,12 @@ func ClassifyManifestFailure(distdir string, err error, expected []string, space
 	// and its size means nothing here. A symlink is one PrepopulateFromCache
 	// left pointing into the read-only cache: its own size is the length of the
 	// target path, and following it would ask about a file this run neither
-	// created nor fetched. Both are left to the next check, which is the
-	// fall-through R3.5 asks for.
+	// created nor fetched. Both are left to the next check, as any uncertain
+	// answer is.
+	//
+	// Each name is untrusted (it comes from a resolved version) and is reduced
+	// to one filename by the rule internal/common/distfiles applies, so
+	// "../../etc/passwd" cannot reach outside distdir and read as a verdict.
 	for _, raw := range expected {
 		name, ok := distfileEntryName(raw)
 		if !ok {
@@ -246,7 +212,7 @@ func ClassifyManifestFailure(distdir string, err error, expected []string, space
 	}
 
 	// Check 4 — nothing observable says the machine is at fault, so the ebuild
-	// still might be, and today's repair path stays open (R3.5). The error goes
+	// still might be, and today's repair path stays open. The error goes
 	// back exactly as it arrived.
 	return err
 }
@@ -255,22 +221,17 @@ func ClassifyManifestFailure(distdir string, err error, expected []string, space
 // classifier is willing to join to the distdir, and reports whether what is
 // left names a file at all.
 //
-// filepath.Base neutralises traversal by construction, but it does not answer
-// "is this a filename": it yields "." for an empty path, leaves "." and ".."
-// alone, and returns the separator for "/". Joining any of those to the distdir
-// names a DIRECTORY rather than a file in it, and a directory is never a
-// zero-length artefact — so refusing them lexically keeps check 3 asking the
-// question it claims to ask.
+// filepath.Base neutralises traversal but does not answer "is this a
+// filename": it yields "." for "", keeps "." and "..", and returns the
+// separator for "/". Each of those joined to the distdir names a DIRECTORY,
+// never a zero-length artefact, so they are refused lexically.
 //
-// This duplicates the unexported distfileName in internal/common/distfiles, on
-// purpose and with a cost that is worth naming. The two must agree: that
-// package decides which names it quarantines and cleans up, and a classifier
-// that inspected a different set of names than the one those functions manage
-// would be observing the wrong file. Exporting it there would widen a shared
-// package's API for a read-only consumer, and that package's files belong to
-// another sub-task of this story. Two copies with this note is the cheaper
-// trade at two call sites; a third consumer is where it should be exported and
-// this copy deleted.
+// This duplicates the unexported distfileName in internal/common/distfiles on
+// purpose. The two must agree — that package decides which names it quarantines
+// and cleans up, and a classifier inspecting a different set would observe the
+// wrong file — but exporting it would widen a shared package's API for one
+// read-only consumer. A third consumer is where it should be exported and this
+// copy deleted.
 //
 // The separator scan is written out rather than reached for in strings so this
 // file needs no text-searching import at all — see the file header.

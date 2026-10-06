@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 func TestRunSnapshotApply_RendersConf(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRunSnapshotApply_RendersConf(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{}
+	td.snapshotRunner = &snapshottest.MockRunner{}
 
 	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	if exited {
@@ -32,7 +32,7 @@ func TestRunSnapshotApply_InvalidConfigExits1(t *testing.T) {
 	// Unknown driver fails the enum check before detection, so no PATH stubs.
 	writeSnapshotConfig(t, "[engine]\ndriver = \"zfs\"\nsubvolumes = [\"/home\"]\n")
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{}
+	td.snapshotRunner = &snapshottest.MockRunner{}
 
 	code, exited := exitOf(runSnapshotApply(snapshotApplyCmd, nil, td))
 	if !exited || code != 1 {
@@ -44,7 +44,7 @@ func TestRunSnapshotApply_DryRunNoWrite(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{}
+	td.snapshotRunner = &snapshottest.MockRunner{}
 
 	origDryRun := snapshotApplyDryRun
 	snapshotApplyDryRun = true
@@ -77,7 +77,7 @@ on_calendar = "daily"
 func TestRunSnapshotApply_DryRunPrintsPlanZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh", "systemctl")
 	dir, _ := writeSnapshotConfig(t, applyScheduleTOML)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 

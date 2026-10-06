@@ -17,9 +17,9 @@ var (
 )
 
 // teaReporter implements Reporter by translating each call into the matching
-// tea.Msg and forwarding it through the program's goroutine-safe Send (design
-// §5, AD3). It holds no mutable state, so it is trivially safe to call from the
-// parallel manifest workers (R7.4): every method is a pure construct-and-forward.
+// tea.Msg and forwarding it through the program's goroutine-safe Send. It
+// holds no mutable state, so it is trivially safe to call from the
+// parallel manifest workers: every method is a pure construct-and-forward.
 type teaReporter struct {
 	s sender
 }

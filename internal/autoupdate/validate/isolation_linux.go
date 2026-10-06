@@ -34,8 +34,8 @@ const netNSProbeTimeout = 10 * time.Second
 // — it is reaped and discarded, and its output goes to io.Discard.
 //
 // The binary launched is this one, with --version. Any binary would do; using
-// our own removes a dependency on some other executable being at a known path
-// (design D6). Under `go test` os.Executable() is the test binary, which is
+// our own removes a dependency on some other executable being at a known path.
+// Under `go test` os.Executable() is the test binary, which is
 // exactly why probeNetNS is a seam: no test calls this.
 func attemptNetNS() error {
 	self, err := os.Executable()
@@ -43,11 +43,11 @@ func attemptNetNS() error {
 		return fmt.Errorf("locating this executable to probe with: %w", err)
 	}
 
-	// ProbeIsolation takes no context by design (D6): it answers a question
+	// ProbeIsolation takes no context by design: it answers a question
 	// about THIS process rather than about a request, so the probe owns its own
 	// deadline. netNSProbeTimeout bounds the child, and nothing here outlives
 	// the call.
-	ctx, cancel := context.WithTimeout(context.Background(), netNSProbeTimeout) // SAFE: no caller context by design (D6); bounded by netNSProbeTimeout
+	ctx, cancel := context.WithTimeout(context.Background(), netNSProbeTimeout) // SAFE: no caller context by design; bounded by netNSProbeTimeout
 	defer cancel()
 
 	// The only "variable" here is our own path from os.Executable(). Nothing

@@ -20,7 +20,7 @@ func TestSnapperEngine_CreateDerivesPath(t *testing.T) {
 		t.Run(tc.sv, func(t *testing.T) {
 			lc := &logCapture{}
 			warns := lc.all
-			mock := &MockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
+			mock := &mockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
 				return []byte(tc.out), nil
 			}}
 			e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)
@@ -52,7 +52,7 @@ func TestSnapperEngine_CreateUnparseableNumberWarns(t *testing.T) {
 		t.Run(strings.TrimSpace(out), func(t *testing.T) {
 			lc := &logCapture{}
 			warns := lc.all
-			mock := &MockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
+			mock := &mockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
 				return []byte(out), nil
 			}}
 			e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)

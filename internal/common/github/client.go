@@ -64,7 +64,7 @@ func NewClient() *Client {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 			// A redirect to another host or to plain http must not carry the
-			// token (S052-R4.6).
+			// token.
 			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
@@ -278,7 +278,7 @@ func (c *Client) saveToCache(category, pkg string, versions []string) {
 
 	cacheFile := c.cacheFilePath(category, pkg)
 	// Cache files use fileutil.CacheFileMode (0600, owner-only) because they
-	// may hold sensitive upstream metadata. (R9.1, R9.3)
+	// may hold sensitive upstream metadata.
 	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode)
 }
 
@@ -292,7 +292,7 @@ func (c *Client) ClearCache() error {
 
 // GetRateLimitInfo returns current rate limit status. The request is bound to
 // ctx: cancelling it aborts the lookup in flight, and the returned error wraps
-// ctx.Err() (R1.7, R3.8).
+// ctx.Err().
 func (c *Client) GetRateLimitInfo(ctx context.Context) (remaining int, resetTime time.Time, err error) {
 	url := fmt.Sprintf("%s/rate_limit", c.BaseURL)
 

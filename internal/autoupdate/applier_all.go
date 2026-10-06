@@ -11,35 +11,19 @@ import (
 // failures (an Apply returning a non-nil error). It is the concurrency seam of
 // `bentoo overlay autoupdate --apply all` (cmd/bentoo runApplyAll).
 //
-// It runs serially for either of two reasons. With compile == true the compile
-// step prompts for confirmation and runs under sudo, and interleaving those
-// across goroutines would scramble the prompts. Since story 033 it is also
-// serial when any of these bumps resolves to a validation depth above `options`
-// (D14) — a rule about machine resources rather than about prompts, and the
-// reason it is asked of the Applier: the depth a bump gets is the applier's
-// decision, and a second copy of that logic here would be a copy that drifts.
+// It runs serially when compile is set (the compile step prompts under sudo,
+// and interleaved prompts would scramble) or when any bump resolves to a
+// validation depth above `options` (concurrent builds contend for machine
+// resources; the Applier decides the depth, so the rule is asked of it).
+// Otherwise a worker pool of concurrency workers, clamped to [1, len(updates)],
+// overlaps each Apply's network-bound `pkgdev manifest`. That is safe because
+// the Applier's pending list and reporter are mutex-guarded, each Apply works
+// in its own package directory, and workers write distinct result indices.
 //
-// Otherwise the applies are dispatched across a bounded worker pool (mirroring
-// overlay.RegenerateManifests) so each Apply's slow, network-bound `pkgdev
-// manifest` step overlaps. concurrency caps the live workers and is clamped to
-// [1, len(updates)].
-//
-// Concurrency safety: the Applier's pending list and reporter are mutex-guarded,
-// each Apply's file work is scoped to its own package directory, and workers
-// write results to distinct slice indices — so beyond the atomic failure tally
-// no additional locking is needed.
-//
-// Cancellation (audit B8): every Apply receives ctx, and an Apply on a done ctx
-// returns at once with a failed result wrapping ctx.Err() before it touches the
-// overlay. So once ctx ends, every package not yet begun still gets its own
-// non-nil result, in input order, and counts as a failure — no package after
-// the cancel is applied, and the loop needs no second check or early break
-// (a break would leave nil results).
-//
-// Story 079: a bump that requires another pending bump runs in a later wave
-// (applyWaves), after the one it requires has finished, so the requirement
-// gate of the later wave sees what the earlier one published. A batch with no
-// `requires` is a single wave and runs exactly as before.
+// Every Apply receives ctx and returns a failed result at once on a done ctx,
+// so after a cancel each unstarted package still gets a non-nil, failed result
+// in input order; an early break would leave nil results instead. A bump that requires another pending bump runs in a later
+// wave (applyWaves), so its requirement gate sees what the earlier one published.
 func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile bool, concurrency int) ([]*ApplyResult, int) {
 	results := make([]*ApplyResult, len(updates))
 	serial := compile || a.SerialApplyRequired(updates)
@@ -62,13 +46,13 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 // applyWave applies the entries of updates named by wave, writing each result
 // at its original index in results, and returns how many failed.
 func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave []int, results []*ApplyResult, compile, serial bool, concurrency int) int {
-	// Serial when the compile step will prompt and escalate, and — since story
-	// 033 — when ANY of these bumps resolves to a depth that starts a build
-	// (D14). The second rule has nothing to do with prompts: concurrent builds
-	// contend for CPU and for space under PORTAGE_TMPDIR, measured at 60 MB for
-	// one gst configure, and a worker pool multiplies that on a machine that was
-	// never asked. Depths none and options keep the pool, which is every run whose
-	// bumps are revisions and patches.
+	// Serial when the compile step will prompt and escalate, and when ANY of
+	// these bumps resolves to a depth that starts a build. The second rule has
+	// nothing to do with prompts: concurrent builds contend for CPU and for space
+	// under PORTAGE_TMPDIR, measured at 60 MB for one gst configure, and a worker
+	// pool multiplies that on a machine that was never asked. Depths none and
+	// options keep the pool, which is every run whose bumps are revisions and
+	// patches.
 	if serial {
 		failures := 0
 		for _, i := range wave {

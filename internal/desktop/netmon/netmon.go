@@ -1,5 +1,5 @@
 // Package netmon reports whether NetworkManager considers the machine online
-// and the connection metered, and when either of those changes (S072-R3).
+// and the connection metered, and when either of those changes.
 // Policy (skip, fetch, log) is the caller's: this package only reports.
 package netmon
 
@@ -66,7 +66,7 @@ type Monitor struct {
 }
 
 // Absent returns a Monitor for a process with no system bus: Allowed always
-// reports NMAbsent and Changed never fires (R3.4).
+// reports NMAbsent and Changed never fires.
 func Absent() *Monitor {
 	return &Monitor{log: slog.New(slog.DiscardHandler), changed: make(chan struct{}, 1)}
 }
@@ -100,7 +100,7 @@ func New(sys *dbus.Conn, log *slog.Logger) *Monitor {
 }
 
 // Changed fires after NetworkManager reports a change to Connectivity or
-// Metered (R3.3). Changes that arrive before the receiver reads coalesce into
+// Metered. Changes that arrive before the receiver reads coalesce into
 // one. The channel is never closed.
 func (m *Monitor) Changed() <-chan struct{} {
 	return m.changed
@@ -108,9 +108,8 @@ func (m *Monitor) Changed() <-chan struct{} {
 
 // Allowed reads NetworkManager's Connectivity and Metered properties.
 // Connectivity none, portal or limited is offline; unknown (checking disabled)
-// and full are online (R3.2). Metered yes or guess-yes is metered (R3.1).
-// NetworkManager not on the bus is a Verdict with NMAbsent, not an error
-// (R3.4).
+// and full are online. Metered yes or guess-yes is metered.
+// NetworkManager not on the bus is a Verdict with NMAbsent, not an error.
 func (m *Monitor) Allowed(ctx context.Context) (Verdict, error) {
 	if m.conn == nil {
 		return Verdict{NMAbsent: true}, nil

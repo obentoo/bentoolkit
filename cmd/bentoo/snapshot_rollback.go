@@ -13,7 +13,7 @@ var (
 	// snapshotRollbackYes is --yes/-y: skip the destructive-rollback confirm prompt.
 	snapshotRollbackYes bool
 	// snapshotRollbackDryRun is --dry-run: print the destructive action without
-	// performing it — no subprocess and no confirm prompt (008 R2.3).
+	// performing it — no subprocess and no confirm prompt.
 	snapshotRollbackDryRun bool
 )
 
@@ -46,7 +46,7 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 	id := args[0]
 
 	// Rollback is destructive: load AND validate the config (drivers + deps) so an
-	// unknown driver or missing binary fails fast before any subprocess (R5.1, G3).
+	// unknown driver or missing binary fails fast before any subprocess.
 	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
 		log.Error("snapshot rollback: failed", "err", err)
@@ -54,7 +54,7 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	if snapshotRollbackDryRun {
-		// 008 R2.3: preview only — nothing runs: no snapshot.Rollback, no
+		// Preview only — nothing runs: no snapshot.Rollback, no
 		// subprocess, and the confirm gate is never consulted.
 		output.PrintInfo("dry-run: would run snapper rollback to snapshot %s — the system boots from it on next reboot", id)
 		return nil
@@ -74,10 +74,10 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 		output.PrintSuccess("rollback to snapshot %s started — reboot to complete", id)
 	case errors.Is(err, snapshot.ErrRollbackDeclined):
 		// Declining a destructive rollback is a clean abort, not a failure: report
-		// it and return nil — no exit status — so the exit code stays 0 (R3.2).
+		// it and return nil — no exit status — so the exit code stays 0.
 		output.PrintInfo("rollback declined")
 	default:
-		// Includes ErrRollbackUnsupported (R3.3): a refused engine is a hard error.
+		// Includes ErrRollbackUnsupported: a refused engine is a hard error.
 		log.Error("snapshot rollback: failed", "err", err)
 		return exitWith(1)
 	}

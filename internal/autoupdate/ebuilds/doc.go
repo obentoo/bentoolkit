@@ -5,5 +5,5 @@
 //
 // It walks directories and parses ebuild files; version parsing and comparison
 // live in internal/common/ebuild. It sits at the bottom of the autoupdate
-// package graph and imports no other autoupdate package (story 061).
+// package graph and imports no other autoupdate package.
 package ebuilds

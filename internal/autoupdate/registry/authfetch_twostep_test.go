@@ -10,16 +10,16 @@ import (
 )
 
 // TestREADMEExampleIsAConfigThisParserAccepts reads the documented record out of
-// the README and puts it through the real loader and the real parser.
+// docs/autoupdate.md and puts it through the real loader and the real parser.
 //
 // A documented example nobody executes is a plausible-looking string: the
 // previous draft of this one used backslash line continuations, which TOML does
 // not have, and it read perfectly well. An operator who copies a broken example
 // discovers it as a failed sweep.
 func TestREADMEExampleIsAConfigThisParserAccepts(t *testing.T) {
-	readme, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	readme, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "autoupdate.md"))
 	if err != nil {
-		t.Fatalf("reading README.md: %v", err)
+		t.Fatalf("reading docs/autoupdate.md: %v", err)
 	}
 
 	const marker = `meta = { fetch_url = "https://vendor.example`
@@ -31,7 +31,7 @@ func TestREADMEExampleIsAConfigThisParserAccepts(t *testing.T) {
 		}
 	}
 	if line == "" {
-		t.Fatalf("the README no longer carries the documented two-step meta example (looked for %q);\n"+
+		t.Fatalf("docs/autoupdate.md no longer carries the documented two-step meta example (looked for %q);\n"+
 			"if it was renamed or moved, move this guard with it rather than deleting it", marker)
 	}
 

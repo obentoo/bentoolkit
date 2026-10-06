@@ -10,42 +10,23 @@ import (
 )
 
 // realignAllowedTools is the tool allow-list for the reviewing model, and it
-// holds NOTHING THAT WRITES (R4.5).
+// holds NOTHING THAT WRITES: the overlay repository auto-commits and pushes
+// within minutes, so a model that could write a file could publish an
+// unreviewed ebuild before anyone read it, going around the staged tree.
 //
-// The reason is the same one story 033's D7 gives, and it is not abstract here:
-// the overlay repository auto-commits and pushes within minutes, so a model that
-// could write a file could publish an unreviewed ebuild before anyone read it.
-// The staged tree of group 7 is the only boundary between a bad proposal and a
-// published one, and a tool that writes goes around it.
+// On the list: Read opens ONE more file than the two the request carries — the
+// eclass ::gentoo delegates to, which is issue #33's whole finding (our ebuild
+// took 85 build options into its own hand) — and Grep and Glob find that file
+// without the caller naming it. All three only read.
 //
-// What is on the list, and why each earns its place:
-//
-//   - Read opens ONE more file than the two the request already carries: the
-//     eclass ::gentoo delegates to. That is issue #33's whole finding — our
-//     ebuild dropped `gstreamer-meson` and took 85 build options into our own
-//     hand — and whether the divergence is still justified is a question about
-//     what that eclass carries TODAY, which is a file on disk.
-//   - Grep and Glob are how that file is found without the caller having to
-//     name it. Both only read.
-//
-// What is deliberately absent:
-//
-//   - Bash, for exactly the reason Write is absent: `bash -c 'echo > x'` writes,
-//     and an allow-list that admits a shell has narrowed nothing. Even the
-//     registry fixer, which must confirm an upstream page, holds no Bash — it
-//     fetches through host-scoped WebFetch (`var registryFixAllowedTools` in the
-//     autoupdate package); this review reads two local files and needs no process
-//     at all.
-//   - WebFetch and every other network tool. R1.4 puts the whole of this review
-//     in the local tree, and a verdict grounded in a page fetched at review time
-//     could not be reproduced by the operator checking it.
+// Deliberately absent: Bash, because `bash -c 'echo > x'` writes and a list
+// that admits a shell has narrowed nothing (even the registry fixer holds no
+// Bash); and WebFetch with every other network tool, because this review is
+// local and a verdict grounded in a page fetched at review time could not be
+// reproduced by the operator checking it.
 //
 // It is a FUNCTION returning a fresh slice rather than a package var, so the
-// list cannot be widened at a distance: a var would be one `append` in an
-// unrelated file away from holding Write, and that append would be invisible to
-// every reader of this comment.
-//
-// _Requirements: R4, R4.5_
+// list cannot be widened at a distance by an `append` in an unrelated file.
 func realignAllowedTools() []string {
 	return []string{"Read", "Grep", "Glob"}
 }
@@ -54,26 +35,18 @@ func realignAllowedTools() []string {
 // package, at which version of ours, and the two ebuilds that differ.
 //
 // It carries the two files' BYTES and no measurement of them, exactly as
-// ReviewRequest does and for the same reason: a prompt assembled from the SIZE
-// of a difference would be a computation on that size, which R1.3 forbids
+// ReviewRequest does: a prompt assembled from the SIZE of a difference would be
+// a computation on that size, which is forbidden
 // (compare_diff_counts_fence_test.go).
 //
-// The BASELINE side is ::gentoo's ebuild as ResolveBaseline named it — which
-// need not be at our version, and usually is not. That is the difference between
-// this and ReviewRequest.Theirs: the content check refuses two different versions
-// on purpose, while R2.1 says the baseline comparison happens regardless of the
-// version relationship.
-//
-// Version is OURS. The baseline's own version is not carried, and does not need
-// to be: how far the baseline is from us is a deterministic answer this package
-// already has (Baseline.Distance) and already prints beside the verdict
-// (baselineDistanceProse), so the operator reads the distance from the report
-// rather than from a model that was told about it.
+// The BASELINE side is ::gentoo's ebuild as ResolveBaseline named it, which need
+// not be at our version: unlike the content check, the baseline comparison
+// happens regardless of the version relationship. Version is OURS; how far the
+// baseline is from us is already known (Baseline.Distance) and printed beside
+// the verdict, so the operator reads it from the report rather than from a model.
 //
 // The two byte slices are also what the verdict cache keys on, so the request
 // holds precisely what the answer depends on and nothing else.
-//
-// _Requirements: R4, R4.1, R4.2_
 type RealignRequest struct {
 	// Category, Package and Version identify the package for the reviewer's
 	// prose. They are NOT part of the cache's index: the verdict is a reading of
@@ -87,11 +60,11 @@ type RealignRequest struct {
 }
 
 // RealignNote is a model's judgement of one undeclared divergence: whether it is
-// still justified and why (R4.1), and the baseline text that would replace it
-// when it is not (R4.2).
+// still justified and why, and the baseline text that would replace it
+// when it is not.
 //
 // It is COMMENTARY and nothing else. Nothing that decides a Verdict or an exit
-// code may read what this becomes on the result (R4.3), which is the fence
+// code may read what this becomes on the result, which is the fence
 // realign_reviewer_test.go holds over RealignVerdict — one mechanism decides,
 // the other comments, and a disagreement between them stays legible only while
 // that holds.
@@ -99,8 +72,6 @@ type RealignRequest struct {
 // The JSON tags exist because the verdict cache persists this type
 // (review_cache.go). They are the same lowercase names the CLI adapter in cmd/
 // decodes from the model's reply, so one spelling serves both.
-//
-// _Requirements: R4, R4.1, R4.2_
 type RealignNote struct {
 	// Justified is the model's answer: does the divergence still earn its place?
 	//
@@ -108,13 +79,13 @@ type RealignNote struct {
 	// honest: a note with no reason says nothing at all (realignNoteSpeaks), so
 	// "false" can never arrive by default and be read as a judgement.
 	Justified bool `json:"justified"`
-	// Why is the model's reason, in its own words (R4.1). A verdict without one
+	// Why is the model's reason, in its own words. A verdict without one
 	// is an instruction rather than an input — "not justified" with nothing
 	// behind it cannot be checked, argued with, or acted on — so a note that
 	// carries no Why is treated as no note.
 	Why string `json:"why"`
 	// BaselineText is the ::gentoo text that would replace the divergence when
-	// the model judges it unjustified (R4.2). It is a PROPOSAL printed on a
+	// the model judges it unjustified. It is a PROPOSAL printed on a
 	// terminal: nothing here writes it into an ebuild, because the overlay
 	// auto-commits and a write would be a publish.
 	//
@@ -130,25 +101,18 @@ type RealignNote struct {
 // ebuilds and returns a bool and two strings.
 //
 // It is declared HERE, in the consumer, for the reason DivergenceReviewer is:
-// holding an autoupdate type would create the import edge 025 R2.4 and D8b keep
-// absent in both directions, and review_test.go fences it. The only production
-// implementation is an adapter over the `claude` CLI, and it belongs in cmd/,
-// which already imports both halves.
+// holding an autoupdate type would create an import edge kept absent in both
+// directions (review_test.go fences it). The only production implementation is
+// an adapter over the `claude` CLI in cmd/, which already imports both halves.
 //
-// It is a SECOND interface rather than a second method on DivergenceReviewer
-// because the two questions are separately answerable and separately refusable:
-// `--no-review` turns off the commentary, `--realign` turns on the judgement, and
-// one interface would make an implementation of either promise both.
+// It is a SECOND interface rather than a method on DivergenceReviewer because
+// `--no-review` turns off the commentary and `--realign` turns on the
+// judgement; one interface would make an implementation of either promise both.
 //
-// The CONTEXT is the caller's, so a cancelled compare aborts an in-flight review.
-// The per-invocation TIMEOUT belongs to the adapter, which knows what it is
-// invoking — autoupdate.ClaudeCodeClient already wraps every call in one.
-//
-// A nil RealignReviewer is not an error anywhere: it is how a run that asked for
-// no verdicts, and a machine with no `claude` on PATH, reach one no-op path
-// instead of two conditions in cmd/ that could disagree.
-//
-// _Requirements: R4, R4.1_
+// The CONTEXT is the caller's, so a cancelled compare aborts an in-flight
+// review; the per-invocation TIMEOUT belongs to the adapter. A nil
+// RealignReviewer is not an error anywhere: a run that asked for no verdicts
+// and a machine with no `claude` on PATH reach one no-op path.
 type RealignReviewer interface {
 	ReviewRealignment(ctx context.Context, req RealignRequest) (RealignNote, error)
 }
@@ -177,32 +141,23 @@ const realignBaselineTextCap = 240
 const realignCandidateReadingLead = "a model's reading, check it before accepting: "
 
 // needsRealignVerdict reports whether one result's divergence is a question for
-// the model: undeclared, or declared with a reason that has run out (R3.1, R3.3,
-// D7).
+// the model: undeclared, or declared with a reason that has run out.
 //
-// This is the FILTER, and the filter is the whole cost control. 237 packages of
-// full ebuild diff is not a prompt anyone should pay for, and what decides who
-// pays is the declaration: a decision with a reason beside it is not re-litigated
-// on every run, and asking anyway is what would make the first run's bill
-// permanent.
+// This is the FILTER, and the filter is the whole cost control: 237 packages of
+// full ebuild diff is not a prompt anyone should pay for, and a decision with a
+// reason beside it is not re-litigated on every run.
 //
-// A package ::gentoo carries no version of is never asked about (R1.3): there is
-// nothing to realign towards, and 84 of the overlay's 321 packages are in that
-// state. It is the FIRST condition for that reason — it is a fact about ::gentoo,
-// while everything below is a fact about our ebuild.
+// A package ::gentoo carries no version of is never asked about — there is
+// nothing to realign towards — and that is checked FIRST because it is a fact
+// about ::gentoo, while the rest is a fact about our ebuild.
 //
-// It deliberately does NOT consult isUndeclaredDivergence. That predicate reads
-// Verified, which the content check leaves at NotVerified whenever the two
-// versions differ (resolvePackagePaths) — and R2.1 removes exactly that
-// precondition from the baseline comparison. Reusing it would silence the review
-// on every package where ::gentoo has moved on, which is the case the review
-// exists for.
+// It deliberately does NOT consult isUndeclaredDivergence: that predicate reads
+// Verified, which stays NotVerified whenever the two versions differ, and
+// reusing it would silence the review on every package where ::gentoo has moved
+// on — the case the review exists for.
 //
-// On today's overlay this admits everything, because zero declarations exist.
-// That is not the filter failing; it is the price of nothing having been written
-// down, and R3.5's candidate declarations are what the first run buys with it.
-//
-// _Requirements: R3.1, R3.3, R4, R4.1, R1.3_
+// On today's overlay this admits everything, because zero declarations exist;
+// the candidate declarations are what the first run buys with that price.
 func needsRealignVerdict(r CompareResult) bool {
 	if !r.Baseline.Found {
 		return false
@@ -214,7 +169,7 @@ func needsRealignVerdict(r CompareResult) bool {
 // stands — that is, whether one of them is unexpired.
 //
 // Expiry is READ, never computed here: EvaluateDeclarations decides it against
-// the ::gentoo tree (R3.3), so a caller that skipped that pass hands in
+// the ::gentoo tree, so a caller that skipped that pass hands in
 // declarations with Expired false throughout and every one of them is read as
 // standing — which is exactly what the parser's own output means.
 func realignDeclarationHolds(declared []DeclaredDivergence) bool {
@@ -227,77 +182,24 @@ func realignDeclarationHolds(declared []DeclaredDivergence) bool {
 }
 
 // AnnotateRealignVerdicts attaches a model's judgement to every undeclared or
-// expired divergence the report holds: whether it is still justified and why
-// (R4.1), and the ::gentoo text that would replace it when it is not (R4.2).
+// expired divergence: whether it is still justified and why, and the ::gentoo
+// text that would replace it when it is not. A nil reviewer returns at once.
 //
-// A NIL REVIEWER RETURNS IMMEDIATELY, which is the point of the parameter's type:
-// a run that asked for no verdicts and a machine with no `claude` on PATH reach
-// one no-op path instead of two conditions in cmd/ that could disagree.
+// It returns NO ERROR: an unreachable model is exit 0, because the
+// deterministic half of the report is complete without one, and
+// formatRealignSummary says the verdicts are missing. Every failure is a way of
+// HAVING NO VERDICT, left EMPTY and counted, never read as "justified". Like
+// AnnotateBaseline, it ends by rebuilding report.Findings.
 //
-// # It returns NO ERROR, and that is R4.4 — but it does leave its FINDINGS behind
+// Cost (237 packages and zero declarations on the first run) is bounded by ONE
+// model call per package, the cache keyed on the two files' content, and the
+// number printed BEFORE the pass starts. It is SEQUENTIAL: inside the comparison
+// it would inherit ten-way concurrency — ten concurrent `claude` processes and a
+// report order that depends on which finished first.
 //
-// An unreachable model is EXIT 0 (D9). The deterministic half of the report — the
-// baseline, the structural axes, the declarations, the reduction — is complete
-// and useful without a model; only the verdicts are missing, and the one thing
-// the run owes the operator is to say so, which formatRealignSummary does. A pass
-// that returned an error would hand the caller something to exit on, and an
-// overlay whose model was briefly unreachable would fail a pipeline for a reason
-// that has nothing to do with the overlay.
-//
-// What it does NOT leave to a renderer is what it established. Like
-// AnnotateBaseline, it finishes by asking EstablishFindings to rebuild
-// report.Findings, so the model's readings are values the caller holds the
-// moment the pass returns rather than strings somebody has to know to print
-// (S046-R5.1).
-//
-// Every failure here is a way of HAVING NO VERDICT — a reviewer that errored, ran
-// out of time, answered with nothing usable, or an ebuild that moved underneath
-// the run — and a missing verdict must never look like a verdict of "justified".
-// It is left EMPTY and counted, never invented.
-//
-// # The cost, and the three things that bound it
-//
-// The measured overlay has 237 packages with a ::gentoo counterpart and zero
-// declarations, so this filter admits all of them on the first run. Three
-// mechanisms keep that from being absurd (D7):
-//
-//   - ONE MODEL CALL PER PACKAGE. The reviewer is asked once, about the pair of
-//     files, and never a second time inside the run.
-//   - THE CACHE, keyed on the content of those two files (review_cache.go), so a
-//     pair neither side has touched is never re-asked. It is what makes the
-//     second run cheap, which is the only reason the first one's price is
-//     payable.
-//   - THE NUMBER IS PRINTED BEFORE THE PASS STARTS. A cost that only becomes
-//     visible while it is being paid is not a cost anybody agreed to.
-//
-// It is SEQUENTIAL, like AnnotateReviews and for the same reason: inside the
-// comparison it would inherit ten-way concurrency, which here means ten
-// concurrent `claude` processes and a report whose order depends on which
-// finished first.
-//
-// # It runs after the baseline review, and runs it if nobody has
-//
-// The filter reads Baseline.Found and Declarations, which AnnotateBaseline
-// writes. Rather than silently judging nothing when the caller forgot, this runs
-// that pass — it is deterministic, local and idempotent, so the only difference
-// between doing it here and having had it done is which line of the caller it
-// happened on. A report that HAS been annotated is left alone, so no run pays for
-// the walk twice.
-//
-// # It writes NO FILE (R3.6, R4.2)
-//
-// The baseline text it prints is a PROPOSAL for the operator to apply. The
-// overlay repository auto-commits and pushes within minutes, so an ebuild
-// rewritten here would be published before anyone could read it — which is the
-// whole reason group 7 stages a realignment and gates it instead.
-//
-// # Nothing it writes decides anything (R4.3)
-//
-// It writes exactly one field per result, RealignVerdict, plus two run-level
-// counters, and reads no Verdict, no Status and no count. Zero those three and
-// the rendering is byte-identical to the one the comparison produced.
-//
-// _Requirements: R4, R4.1, R4.2, R4.3, R4.4, R4.5_
+// It runs AnnotateBaseline first when the report is not annotated yet. It
+// writes NO FILE — the overlay auto-commits, so the baseline text is a proposal
+// — and decides nothing: RealignVerdict per result plus two run counters.
 func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev RealignReviewer, prov provider.Provider, opts CompareOptions) {
 	if report == nil || rev == nil {
 		return
@@ -325,7 +227,7 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 		return
 	}
 
-	// THE BILL, STATED BEFORE IT IS PAID (D7). "At most" is the honest word: the
+	// THE BILL, STATED BEFORE IT IS PAID. "At most" is the honest word: the
 	// cache answers some of these for free, and a pair that turns out to be
 	// byte-identical is not a divergence to judge at all.
 	//
@@ -335,7 +237,7 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	// this pass is about to make — and a bill has to arrive before the money is
 	// spent. The report cannot carry it, because the report is printed when the
 	// pass has finished; by then the cost has been paid and the operator has
-	// agreed to nothing (D7).
+	// agreed to nothing.
 	log := opts.logger()
 	log.Info("overlay: compared packages carry a divergence nothing declares; the realignment review will make at most that many model calls, one per package — fewer where neither ebuild has changed since the last run",
 		"divergences", len(pending), "packages", len(report.Results))
@@ -451,7 +353,7 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	}
 
 	// And the verdicts reach the caller as FINDINGS, not only as a field on each
-	// result (S046-R5.1). Until this call they exist as RealignVerdict strings a
+	// result. Until this call they exist as RealignVerdict strings a
 	// renderer has to know to look at, so a consumer walking report.Findings —
 	// an export, a count, a second renderer — is told a model judged nothing.
 	//
@@ -496,7 +398,7 @@ func realignBaselineIsAnnotated(report *CompareReport) bool {
 // It does NOT go through resolvePackagePaths, and that is the one thing to
 // notice about it. That resolver refuses two different versions on purpose — it
 // exists to compare like with like — while the baseline is most interesting
-// precisely when ::gentoo is at another version, and R2.1 says the content is
+// precisely when ::gentoo is at another version, and the content is
 // compared regardless of the version relationship. So our side is named from
 // what the scan found (ourBaselineEbuild, the same one AnnotateBaseline used) and
 // ::gentoo's side is the path ResolveBaseline already chose and the report
@@ -550,22 +452,18 @@ func realignNoteSpeaks(note RealignNote) bool {
 	return strings.TrimSpace(note.Why) != ""
 }
 
-// formatRealignVerdict renders one note as the sentence the report prints
-// (R4.1, R4.2).
+// formatRealignVerdict renders one note as the sentence the report prints.
 //
 // Both halves are the model's own text, flattened onto one line: the report's
 // STRUCTURE is its lines, so prose carrying a newline would print a second line
 // indistinguishable from a finding this tool stands behind.
 //
 // The whole judgement is composed into the ONE field the fence watches
-// (RealignVerdict, R4.3) rather than spread across two. A second field holding
-// the baseline text would sit outside that fence, and the guarantee "nothing
-// that decides a Verdict reads the model's opinion" would then hold for half of
-// the opinion.
+// (RealignVerdict) rather than spread across two, so "nothing that decides a
+// Verdict reads the model's opinion" holds for all of the opinion.
 //
 // An unjustified verdict with no replacement text SAYS SO rather than printing
-// nothing: R4.2 asks for the text, and silence where it should be would read as
-// "the divergence can simply be dropped".
+// nothing, which would read as "the divergence can simply be dropped".
 //
 // The repository is named through axisBaselineLabel, this package's one spelling
 // of "::gentoo" in a finding, so the label here and the one on an axis line
@@ -584,33 +482,22 @@ func formatRealignVerdict(note RealignNote) string {
 }
 
 // CandidateDeclarationsWithVerdict is CandidateDeclarations enriched with the
-// model's reading, which is task 3.3's proposal finished where the model already
-// is (R3.5, R4.1).
+// model's reading, finishing the candidate proposal where the model already is.
 //
-// The split between the two is deliberate and runs the other way from how it
-// looks. CandidateDeclarations builds a block from the axis and the deterministic
-// finding ALONE — no model, no reviewer, no provider in its signature — because
-// group 3 declares no dependency on group 5 and because under `--no-review` there
-// is no reading in existence, so a candidate that needed one would be
-// unsatisfiable on the run that most needs the output. This adds to that; it does
-// not move it. Called on a result with no verdict it returns exactly what
-// CandidateDeclarations returned.
+// CandidateDeclarations builds a block from the axis and the deterministic
+// finding ALONE — no model in its signature — because under `--no-review` no
+// reading exists, and a candidate that needed one would be unsatisfiable on the
+// run that most needs it. This adds to that; called on a result with no
+// verdict it returns exactly what CandidateDeclarations returned.
 //
-// What the enrichment buys is the half a deterministic candidate cannot state.
-// The block says WHAT diverges — "ours passes 85 build options, ::gentoo's passes
-// 2" — and the reason that is acceptable is what a maintainer has to write. The
-// model's reading is a first draft of that sentence, and it is labelled as one:
-// realignCandidateReadingLead says whose words follow, because the candidate is
-// text somebody is invited to paste into an ebuild, where it becomes the recorded
-// reason a divergence exists.
+// The block says WHAT diverges; the reason that is acceptable is what a
+// maintainer has to write, and the model's reading is a first draft of it,
+// labelled by realignCandidateReadingLead because the candidate is text
+// somebody may paste into an ebuild as the recorded reason.
 //
-// It takes the whole result rather than the three fields it reads so that a
-// renderer, which is holding exactly one of these, cannot pair one package's axes
-// with another's verdict.
-//
-// It writes NOTHING (R3.6). Like everything else in this file it returns text.
-//
-// _Requirements: R3, R3.5, R3.6, R4.1_
+// It takes the whole result so a renderer cannot pair one package's axes with
+// another's verdict. It writes NOTHING; like everything else in this file it
+// returns text.
 func CandidateDeclarationsWithVerdict(r CompareResult) []string {
 	candidates := CandidateDeclarations(r.Axes, r.Declarations)
 

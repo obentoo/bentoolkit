@@ -21,7 +21,7 @@ var (
 	ErrOverlayInvalidStructure = errors.New("overlay structure is invalid")
 	ErrGitUserNotConfigured    = errors.New("git user is not configured: set user.name and user.email in ~/.gitconfig or bentoo config")
 	// ErrOverrideMissingReason marks a per-package validation override that
-	// states a depth but not why (S033-R2.5). It is a sentinel so a caller can
+	// states a depth but not why. It is a sentinel so a caller can
 	// match the class of problem; the wrapped message always names the package.
 	ErrOverrideMissingReason = errors.New("per-package validate override has no reason")
 )
@@ -32,15 +32,15 @@ type Config struct {
 	Git          GitConfig              `yaml:"git"`
 	Autoupdate   AutoupdateConfig       `yaml:"autoupdate,omitempty"`
 	Repositories map[string]*RepoConfig `yaml:"repositories,omitempty"`
-	// UI is the global rendering policy (S044-R3.1). It sits at the top level
+	// UI is the global rendering policy. It sits at the top level
 	// rather than under `autoupdate` because it governs every command that
 	// reports progress — `autoupdate` and `overlay manifest` today — and a key
 	// that has to be repeated per command is a key that ends up set in one
 	// place and forgotten in the other.
 	UI UIConfig `yaml:"ui,omitempty"`
-	// Notice configures `bentoo notice` (S071-R4, R6.1).
+	// Notice configures `bentoo notice`.
 	Notice NoticeConfig `yaml:"notice,omitempty"`
-	// Tray configures bentoo-tray (S072-R11.1).
+	// Tray configures bentoo-tray.
 	Tray TrayConfig `yaml:"tray,omitempty"`
 }
 
@@ -48,34 +48,25 @@ type Config struct {
 // half of a notice.
 type NoticeConfig struct {
 	// SitePath is the site repository's root; the notice YAML goes under
-	// <site_path>/src/content/notices/. Empty means "print the YAML instead"
-	// (S071-R4.2). A leading `~/` is expanded by GetNoticeSitePath.
+	// <site_path>/src/content/notices/. Empty means "print the YAML instead".
+	// A leading `~/` is expanded by GetNoticeSitePath.
 	SitePath string `yaml:"site_path,omitempty"`
 }
 
 // UIConfig is the `ui:` block: how a long-running command renders itself.
 type UIConfig struct {
-	// Mode is the renderer to use: auto, plain, inline or fullscreen
-	// (S044-R3.1) — the same four words the --ui flag and the BENTOO_UI
-	// environment variable accept, so a value that works in one works in the
-	// others.
+	// Mode is the renderer to use: auto, plain, inline or fullscreen — the
+	// same four words the --ui flag and the BENTOO_UI environment variable
+	// accept, so a value that works in one works in the others.
 	//
-	// IT IS NEITHER VALIDATED NOR DEFAULTED HERE. Both omissions are the
-	// design and not an oversight:
-	//
-	//   - No validation. internal/common/report.ResolveMode owns the legal set
-	//     and names it in its rejection message (R3.9). A loader that checked
-	//     the value too would be a second place keeping that list, and two
-	//     lists disagree eventually. So the value is stored VERBATIM — the same
-	//     treatment ValidatePackageOverride.Depth gets for validate.ParseDepth
-	//     — and the import runs the other way: this package does not depend on
-	//     report.
-	//
-	//   - No default. The empty string means the operator said NOTHING, which
-	//     must stay distinguishable from an explicit `mode: auto` (R3.7): a run
-	//     that was never configured has to behave exactly as it did before this
-	//     key existed, and nothing downstream could check that if the loader
-	//     answered "auto" for both.
+	// It is neither validated nor defaulted here, by design:
+	//   - No validation: internal/common/report.ResolveMode owns the legal set
+	//     and names it in its rejection message; a second list here would
+	//     drift. The value is stored verbatim, and this package does not
+	//     depend on report.
+	//   - No default: the empty string means the operator said nothing, which
+	//     must stay distinguishable from an explicit `mode: auto` so an
+	//     unconfigured run behaves exactly as before this key existed.
 	Mode string `yaml:"mode,omitempty"`
 }
 
@@ -112,43 +103,37 @@ type AutoupdateConfig struct {
 	Search      SearchConfig `yaml:"search"`       // Search provider configuration
 	// Distdir is the directory `pkgdev manifest` is given as --distdir on the
 	// autoupdate path — the same name and the same meaning the `overlay
-	// manifest` command's --distdir already has (S030-R1.3). Unset (the
+	// manifest` command's --distdir already has. Unset (the
 	// default) means the host's own DISTDIR is used, which is what
 	// `portageq distdir` reports.
 	Distdir string `yaml:"distdir,omitempty"`
 	// DistfilesCache is the read-only distfiles cache consulted before a
-	// download, again under the name `overlay manifest` already uses
-	// (S030-R1.3). Unset means the built-in default (/var/cache/distfiles).
+	// download, again under the name `overlay manifest` already uses.
+	// Unset means the built-in default (/var/cache/distfiles).
 	// The cache is only ever read from: files are symlinked into the working
 	// distdir, never written back.
 	DistfilesCache string `yaml:"distfiles_cache,omitempty"`
-	// Validate is the staged-bump validation policy (S033-R2). It is nested
+	// Validate is the staged-bump validation policy. It is nested
 	// here rather than at the top level because everything it governs happens
 	// during an autoupdate.
 	Validate ValidateConfig `yaml:"validate,omitempty"`
-	// Review is the budget one `overlay compare` divergence review runs under
-	// (S048-R3.4). It is nested here rather than in a top-level `compare:`
+	// Review is the budget one `overlay compare` divergence review runs
+	// under. It is nested here rather than in a top-level `compare:`
 	// block — where the name would fit better — because a top-level block has
 	// to be mirrored into probeConfig by hand and a nested one inherits that
 	// mirror for free. ReviewConfig carries the whole of that reasoning.
 	Review ReviewConfig `yaml:"review,omitempty"`
 }
 
-// ValidateConfig is the staged-bump validation policy: how much of a bump gets
-// checked before it is published, and on whose stated authority a package gets
-// checked less (S033-R2).
+// ValidateConfig is the staged-bump validation policy: how much of a bump is
+// checked before publishing, and on whose stated authority a package gets less.
 //
-// WHY IT LIVES HERE AND NOT IN THE OVERLAY'S packages.toml (S033-D10).
-// packages.toml sits inside the overlay, which auto-commits and publishes, and
-// a key there that runs ahead of the installed binary silently DISABLES the
-// record carrying it. A policy deciding how much a bump is validated would then
-// switch itself off without a word — the one failure mode it must not have. In
-// this file the same typo is a line on stderr from the strict re-decode in
-// LoadFrom and the run continues.
+// It lives here, not in the overlay's packages.toml, where a key ahead of the
+// installed binary silently disables its record; here a typo is a stderr line
+// from the strict re-decode in LoadFrom and the run continues.
 //
-// Every default is answered by a getter and never by a struct literal, so an
-// absent block, a half-written block and a nil pointer all resolve to the same
-// documented table:
+// Every default comes from a getter, never a struct literal, so an absent
+// block, a half-written block and a nil pointer all resolve to:
 //
 //	depths.revision    options     depths.series     configure
 //	depths.patch       options     depths.major      configure
@@ -156,8 +141,7 @@ type AutoupdateConfig struct {
 //	review             false       fix_on_failure    false
 //	timeout            3600 (seconds)
 //
-// `compile` is never a default. The ladder's expensive rung is reached through
-// --depth/--compile or a per-package override that states its reason, because
+// `compile` is never a default (only --depth/--compile or a reasoned override):
 // validating everything at compile depth does not become expensive, it becomes
 // ignored.
 type ValidateConfig struct {
@@ -168,19 +152,19 @@ type ValidateConfig struct {
 	// RequireIsolation makes a compile gate SKIP rather than run unisolated,
 	// so a pass never claims a fidelity it did not have. It defaults to false
 	// because `unshare --net` is denied on ordinary hosts, and a default of
-	// true would turn every build gate into a SKIPPED (S033-R6.6, D11 — story
-	// 031's --require-isolation default, unchanged now that it has a key).
+	// true would turn every build gate into a SKIPPED (the --require-isolation
+	// default, unchanged now that it has a key).
 	RequireIsolation bool `yaml:"require_isolation,omitempty"`
 	// RequireProof refuses to publish a bump whose validation could not reach
 	// the depth policy asked for. It defaults to false: an ordinary
 	// workstation rarely holds every build dependency, so a default of true
-	// would refuse most bumps for a reason that says nothing about them
-	// (S033-D6, R3.12). The unreached depth is reported either way.
+	// would refuse most bumps for a reason that says nothing about them.
+	// The unreached depth is reported either way.
 	RequireProof bool `yaml:"require_proof,omitempty"`
 	// Review and FixOnFailure are the two LLM capabilities, and they are
 	// TRI-STATE on purpose. The capabilities are enabled by --llm; this
-	// configuration can only SUBTRACT from that flag, never add to it
-	// (R7.1/R7.2). A plain bool cannot express "leave it to the flag" and
+	// configuration can only SUBTRACT from that flag, never add to it.
+	// A plain bool cannot express "leave it to the flag" and
 	// "switch this one back off" as different things, so an unset key stays
 	// nil and only an explicit `review: false` disables. GetReview reports the
 	// configured value alone (false unless the file says true); the flag layer
@@ -196,16 +180,16 @@ type ValidateConfig struct {
 	// hangs an unattended sweep. Unset or non-positive means the default.
 	Timeout int `yaml:"timeout,omitempty"`
 	// Packages holds per-package overrides, keyed by category/name. An
-	// override supplies the depth to use and the reason it is used (R2.4); an
-	// override with no reason is reported invalid, naming the package (R2.5),
+	// override supplies the depth to use and the reason it is used; an
+	// override with no reason is reported invalid, naming the package,
 	// because an override is the one input that can quietly reduce how much a
 	// bump is checked.
 	//
 	// The packages nobody wants to build from source ship AS ORDINARY ENTRIES
 	// in this map (see DefaultPackageOverrides), not as a hardcoded tier list,
-	// so R2.4 and R2.5 reach them exactly as they reach anything an operator
-	// writes — and so the report that says why a bump was not validated can
-	// quote their reason like any other.
+	// so the reason rules reach them exactly as they reach anything an
+	// operator writes — and so the report that says why a bump was not
+	// validated can quote their reason like any other.
 	Packages map[string]ValidatePackageOverride `yaml:"packages,omitempty"`
 }
 
@@ -233,8 +217,8 @@ type ValidateDepths struct {
 // depth to use for this package and the reason for using it.
 //
 // Both fields are reported beside the outcome, so a bump validated at a
-// shallower depth than its class calls for can always say on whose authority
-// (R2.4).
+// shallower depth than its class calls for can always say on whose
+// authority.
 type ValidatePackageOverride struct {
 	// Depth is a rung of the validation ladder, spelled exactly as
 	// internal/autoupdate/validate.ParseDepth accepts it: none, options,
@@ -250,44 +234,30 @@ type ValidatePackageOverride struct {
 }
 
 // ReviewConfig is the `autoupdate.review` block: the budget one `overlay
-// compare` divergence review runs under (S048-R3).
+// compare` divergence review runs under.
 //
-// IT IS NOT autoupdate.validate.review, which is a different key doing a
-// different job — a tri-state bool deciding WHETHER the staged-bump validation
-// asks a model at all. This block decides HOW LONG one review of a divergence
-// between two ebuilds may take before it is cut off. Neither reads the other.
+// It is not autoupdate.validate.review, the tri-state bool deciding WHETHER
+// staged-bump validation asks a model at all; this block decides HOW LONG one
+// review may take before it is cut off. Neither reads the other.
 //
-// WHY IT IS NOT A TOP-LEVEL `compare:` BLOCK, which is where a review run by
-// `overlay compare` belongs semantically. probeConfig lists Config's top-level
-// keys BY HAND: a block missing from that list makes every command print "field
-// <key> not found in type config.probeConfig" on stderr while loading the value
-// anyway, and no test catches it. probeConfig reuses AutoupdateConfig verbatim,
-// so a key nested here inherits the mirror for free (S048-R3.4).
+// It is not a top-level `compare:` block because probeConfig lists Config's
+// top-level keys by hand, and a block missing there makes every command print
+// "field <key> not found in type config.probeConfig" on stderr; probeConfig
+// reuses AutoupdateConfig verbatim, so a nested key inherits the mirror. It is
+// not under autoupdate.llm because the compare path deliberately ignores that
+// block (cmd/bentoo's reviewLLMConfig), so a budget there would go unread.
 //
-// WHY IT IS NOT UNDER autoupdate.llm, where the name would suggest. The compare
-// path deliberately ignores the operator's llm block and asks the CLI with a
-// fixed subscription shape carrying no credential (cmd/bentoo's
-// reviewLLMConfig). A budget nested in a block that this path refuses to read
-// would be a key the operator sets correctly and the code declines to see.
-//
-// The cost is stated rather than hidden: the key is off by one command. It is
-// paid because the client the budget configures is internal/autoupdate's, and
-// because the alternative trades an awkward name for a stderr warning on every
-// command that nothing would have caught (S048-D3).
-//
-// The default is answered by a getter and never by a struct literal, so an
-// absent block, a half-written block and a nil pointer all resolve to the same
-// documented table:
+// The default comes from a getter, never a struct literal, so an absent block,
+// a half-written block and a nil pointer all resolve to:
 //
 //	timeout    DefaultReviewTimeout (seconds)
 type ReviewConfig struct {
 	// Timeout bounds one review invocation, in SECONDS — the same unit and
 	// shape as cache_ttl, http_timeout and autoupdate.validate.timeout, because
 	// YAML has no duration literal and an int of seconds is what this file
-	// already speaks (S048-R3.3). Unset, zero or negative means the default: a
-	// budget of zero seconds would kill every review the instant it started,
-	// which is the failure this key exists to bound and not a way to configure
-	// it (S048-R3.2).
+	// already speaks. Unset, zero or negative means the default: a budget of
+	// zero seconds would kill every review the instant it started, which is
+	// the failure this key exists to bound and not a way to configure it.
 	Timeout int `yaml:"timeout,omitempty"`
 }
 
@@ -501,7 +471,7 @@ func LoadFrom(path string) (*Config, error) {
 		fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, perr)
 	}
 
-	// Migration diagnostics (R4): a config still carrying a secret that this
+	// Migration diagnostics: a config still carrying a secret that this
 	// release no longer reads gets exactly one actionable warning per key,
 	// emitted here in LoadFrom so it always precedes any later SaveTo that would
 	// silently drop the key. The secret VALUE is never printed.
@@ -626,7 +596,7 @@ func (c *Config) getOverlayPathWithValidation(validate bool) (string, error) {
 }
 
 // GetNoticeSitePath returns notice.site_path with a leading `~/` expanded to
-// the home directory (S071-R4.6), or "" when the key is unset. Only a leading
+// the home directory, or "" when the key is unset. Only a leading
 // `~/` is expanded: `~other/` names another user's home and a tilde anywhere
 // else is an ordinary character, so both are returned unchanged.
 func (c *Config) GetNoticeSitePath() (string, error) {
@@ -837,13 +807,13 @@ func (c *AutoupdateConfig) GetDistfilesCache() string {
 	return strings.TrimSpace(c.DistfilesCache)
 }
 
-// The default depth for each bump class (S033-R2). revision and patch are the
+// The default depth for each bump class. revision and patch are the
 // cheap, frequent bumps and stop at the static gate; series and major cross a
 // boundary upstream chose to mark, so they earn a configure. No class defaults
 // to compile — see ValidateConfig's doc comment.
 //
 // THEY DID NOT MOVE WHEN THE INSTALL RUNG WAS ADDED, and that is a decision
-// rather than an omission (S042-R1.4). Adding a rung is a capability; promoting
+// rather than an omission. Adding a rung is a capability; promoting
 // a default is a cost decision belonging to whoever pays for the hours, and an
 // operator who upgrades the binary without reading the changelog must find
 // yesterday's sweep costing what it cost yesterday. `install` is reached by
@@ -905,16 +875,15 @@ func depthOrDefault(configured, fallback string) string {
 }
 
 // GetRequireIsolation reports whether a compile gate must SKIP rather than run
-// unisolated. False by default, and false through a nil receiver: this is story
-// 031's --require-isolation default, unchanged now that it also has a key
-// (S033-R6.6).
+// unisolated. False by default, and false through a nil receiver: this is the
+// --require-isolation default, unchanged now that it also has a key.
 func (c *ValidateConfig) GetRequireIsolation() bool {
 	return c != nil && c.RequireIsolation
 }
 
 // GetRequireProof reports whether a bump whose validation could not reach the
 // policy depth must be refused rather than published with the unreached depth
-// named. False by default (S033-D6).
+// named. False by default.
 func (c *ValidateConfig) GetRequireProof() bool {
 	return c != nil && c.RequireProof
 }
@@ -973,7 +942,7 @@ func (c *ValidateConfig) GetTimeout() time.Duration {
 // per package, in a stable (sorted) order so a diagnostic does not reshuffle
 // between runs.
 //
-// The rule enforced here is R2.5: an override must state its reason. It is
+// The rule enforced here: an override must state its reason. It is
 // reported, never fatal — the same treatment an unknown key gets — so one bad
 // entry cannot cost the operator the rest of the file.
 //
@@ -1008,9 +977,9 @@ func (c *ValidateConfig) OverrideErrors() []error {
 //
 // These are the packages whose from-source build costs hours that an unattended
 // sweep would otherwise spend without being asked. They are ORDINARY overrides
-// carrying ordinary reasons — not a hardcoded tier list — so R2.4 (report the
-// reason beside the outcome) and R2.5 (an override needs a reason) apply to them
-// exactly as to anything an operator writes, and so an operator overrides one by
+// carrying ordinary reasons — not a hardcoded tier list — so the reason is
+// reported beside the outcome and is required, exactly as for anything an
+// operator writes, and so an operator overrides one by
 // writing the same package key with a depth and a reason of their own.
 func DefaultPackageOverrides() map[string]ValidatePackageOverride {
 	return map[string]ValidatePackageOverride{
@@ -1061,70 +1030,31 @@ func (c *ValidateConfig) normalize() {
 // DefaultReviewTimeout is the default budget for one `overlay compare`
 // divergence review, in seconds.
 //
-// IT IS THE NUMBER THAT GOVERNS THE REVIEW — not internal/autoupdate's
-// DefaultClaudeCodeTimeout. The client takes a caller-supplied budget whenever
-// that budget is positive, and GetTimeout below never returns anything else, so
-// once the compare path passes this value the client's own default is only the
-// fallback for a caller that passes none. Tuning the review means tuning this
-// constant, or the key that defaults to it.
+// This, not internal/autoupdate's DefaultClaudeCodeTimeout, governs the
+// review: the client uses any positive caller budget and GetTimeout never
+// returns anything else. Tune this constant, or the key that defaults to it.
 //
-// WHERE 300 COMES FROM (S048-R2.2). Measured 2026-09-06 23:39 to 2026-09-07
-// 00:39 -03:00, on Linux 7.2.3-gentoo-dist x86_64 with Go go1.27.1 and claude
-// CLI 2.1.263, by running `bentoo overlay compare --realign` over the
-// maintainer's own overlay — 268 packages — with the budget raised to 1800s so
-// that nothing was cut short and the real cost was visible. 126 invocations:
-// 122 ran to completion, 4 exited non-zero, and NOT ONE reached the deadline.
-// The 122 that succeeded are the population a budget has to cover, and they
-// spread like this, in seconds:
+// 300 is measured: `bentoo overlay compare --realign` over a 268-package
+// overlay with the budget raised to 1800s gave 126 invocations, 122 successes,
+// none reaching the deadline. The successes spread, in seconds:
 //
 //	min 7.4 · p50 14.3 · p90 64.8 · p95 76.6 · p99 112.0 · max 124.6
 //
-// The case that drove the value is that maximum: one review costing 124.6s,
-// which the previous 120s ceiling cut off by 4.6 seconds. That is the entire
-// measured harm of the old number — one review lost out of 122 — and it is also
-// why the old number was the worst kind of wrong. It sat just inside the
-// distribution: close enough to look adequate, low enough to take the tail off.
-// The longest invocation of the whole run, 178.8s, is deliberately NOT counted
-// here; it exited non-zero, and a call that fails for its own reason is not a
-// call a larger budget would have saved.
-//
-// 300 is 2.4x the largest measured success and 2.7x the p99 of that same
-// population, and the headroom is deliberate rather than fitted to the single
-// reading that forced the change. The distribution is heavily skewed — half
-// the reviews finish inside 15s, the slowest tenth take over four times that —
-// so a ceiling set just above one run's maximum is a ceiling fitted to one
-// sample of a long tail. 180 would have lost nothing measured either; what 300
-// buys over it costs nothing on this data, because no invocation in the run
-// reached its deadline at all. The budget stays finite on purpose: the point is
-// not to remove the deadline — a review that genuinely hangs must still end —
-// but to stop the deadline landing inside the normal distribution.
-//
-// WHAT THE MEASUREMENT DOES NOT ESTABLISH (S048-R2.3). The observation that
-// opened this story — 2026-08-27, five undeclared-divergence reviews submitted,
-// ZERO returning a reading, every one dying at the deadline — is NOT reproduced
-// by the run above. That run is overwhelmingly realignment reviews, which are
-// cheap; the overlay held only three undeclared divergences when it was
-// measured, and the duration log records an outcome and an elapsed time but not
-// the PACKAGE, so the expensive population cannot be separated back out of the
-// data. Three explanations fit both observations — a different population, a
-// changed CLI or model, or different load — and this measurement tells none of
-// them apart.
-//
-// So 300 is supported for the population that was measured, and it is NOT
-// established that it fixes the 2026-08-27 case. Raising it further to cover a
-// case nobody has measured would reintroduce the unmeasured constant this story
-// was opened to remove, wearing a bigger number; what would settle it is a run
-// that reproduces that failure.
+// The old 120s cut off the 124.6s review. 300 is 2.4x the largest success,
+// headroom for a skewed long tail; it stays finite so a hung review still ends.
+// It is NOT established that 300 fixes the earlier case of undeclared-
+// divergence reviews all dying at the deadline: the run was mostly cheap
+// realignment reviews, and the duration log does not record the package.
 const DefaultReviewTimeout = 300
 
 // GetTimeout returns the review budget as a duration, defaulting to
 // DefaultReviewTimeout when unset or non-positive. The stored key is an int of
 // seconds and the duration is what the caller needs; this getter is the one
-// place the conversion happens (S048-R3.1, S048-R3.3).
+// place the conversion happens.
 //
 // A nil receiver answers the default exactly as an absent block does: the
 // config is threaded through call sites that predate this block, and a getter
-// that panicked there would turn an unwritten key into a crash (S048-R3.2).
+// that panicked there would turn an unwritten key into a crash.
 func (c *ReviewConfig) GetTimeout() time.Duration {
 	if c == nil || c.Timeout <= 0 {
 		return DefaultReviewTimeout * time.Second

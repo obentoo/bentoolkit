@@ -53,7 +53,7 @@ func NewGitHubProvider(repoInfo *RepositoryInfo) (*GitHubProvider, error) {
 			Timeout:   30 * time.Second,
 			Transport: httpx.BuildTransport(),
 			// A redirect to another host or to plain http must not carry the
-			// token (S052-R4.6).
+			// token.
 			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
@@ -277,7 +277,7 @@ func (p *GitHubProvider) saveToCache(category, pkg string, versions []string) {
 
 // GetRateLimitInfo returns current rate limit status. The request is bound to
 // ctx: cancelling it aborts the lookup in flight, and the returned error wraps
-// ctx.Err() (R1.7, R3.8).
+// ctx.Err().
 func (p *GitHubProvider) GetRateLimitInfo(ctx context.Context) (remaining int, resetTime time.Time, err error) {
 	url := fmt.Sprintf("%s/rate_limit", p.BaseURL)
 

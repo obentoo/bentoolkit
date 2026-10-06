@@ -44,7 +44,7 @@ var ErrUnreadable = errors.New("secrets: file present but unreadable")
 // belongs to. The scope is carried by the entry itself and is never inferred
 // from its position in the chain, so dropping the user-scope entry (see pathsFn)
 // cannot promote the system file to user scope and turn its by-design EACCES
-// into a hard error (D2/D4).
+// into a hard error.
 type scopedPath struct {
 	name string // filesystem location of the secrets file
 	user bool   // true = user-scope file; false = system-scope file
@@ -90,7 +90,7 @@ func Paths() []string {
 // UserPath returns the location of the user-scope secrets file — the one an
 // unprivileged user can actually create and chmod 600 — and whether the chain
 // has one at all. When $HOME is unresolvable pathsFn drops the user-scope entry
-// entirely (D4) and UserPath reports ("", false).
+// entirely and UserPath reports ("", false).
 //
 // Callers building a "put your secret here" message MUST use this instead of
 // Paths()[0]. Paths mirrors the RESOLUTION ORDER, so index 0 is the user file
@@ -122,11 +122,11 @@ func UserPath() (string, bool) {
 //
 // The environment is consulted first: a non-empty os.Getenv(name) (trimmed) is
 // returned without touching any file; an empty or whitespace-only value is
-// treated as unset and falls through. A missing file is a miss, never an error
-// (D1). A present-but-unreadable user-scope file — including EISDIR or a
+// treated as unset and falls through. A missing file is a miss, never an error.
+// A present-but-unreadable user-scope file — including EISDIR or a
 // permission failure — yields ErrUnreadable so a chmod-000 token can never
 // silently degrade to "anonymous"; a permission error on the root-owned
-// system-scope file is instead a silent miss (D2).
+// system-scope file is instead a silent miss.
 func Lookup(name string) (value string, found bool, err error) {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		record(v)
@@ -136,7 +136,7 @@ func Lookup(name string) (value string, found bool, err error) {
 	// Every entry carries its own scope, and that tag — never the entry's
 	// position in the chain — drives the error mapping (see lookupInFile). When
 	// $HOME is unresolvable the user-scope entry is absent altogether and the
-	// system file is searched alone, still as system scope (D4).
+	// system file is searched alone, still as system scope.
 	for _, p := range pathsFn() {
 		v, hit, err := lookupInFile(p.name, name, p.user)
 		if err != nil {
@@ -191,11 +191,11 @@ func Resolved() []string {
 }
 
 // lookupInFile reads and parses one secrets file. userScope selects the error
-// mapping: an absent file is always a miss (D1); on the user-scope file any
+// mapping: an absent file is always a miss; on the user-scope file any
 // other read failure (EISDIR, EACCES, ...) becomes ErrUnreadable so it cannot
 // silently degrade to "anonymous"; on a system-scope file a permission error is
 // a silent miss because /etc/bentoo/secrets is root-owned 0600 by design and a
-// normal user always gets EACCES (D2).
+// normal user always gets EACCES.
 func lookupInFile(path, name string, userScope bool) (string, bool, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is one of the two fixed secrets files from pathsFn: the user's config directory or /etc/bentoo/secrets
 	if err != nil {
@@ -215,9 +215,9 @@ func lookupInFile(path, name string, userScope bool) (string, bool, error) {
 
 // parseSecrets returns the value for name from ".env"-style data. It preserves
 // the semantics promoted from autoupdate.readSecretFromFile and adds two design
-// rules: a leading "export " is stripped (D7) and a blank value is a miss
+// rules: a leading "export " is stripped and a blank value is a miss
 // (found=false), mirroring the env-empty rule. The FIRST occurrence of the key
-// wins (D6). The value is split on the FIRST '=' (so "A=b=c==" keeps "b=c==")
+// wins. The value is split on the FIRST '=' (so "A=b=c==" keeps "b=c==")
 // and matched surrounding quotes are trimmed. Lines without an '=' are skipped.
 func parseSecrets(data []byte, name string) (string, bool) {
 	for _, line := range strings.Split(string(data), "\n") {
@@ -259,7 +259,7 @@ func (stderrLogger) Warn(format string, args ...interface{}) {
 var warnLogger Logger = stderrLogger{}
 
 // looseWarnOnce guards the loose-mode warning so it is emitted at most once per
-// process (D5): a group/world-accessible secrets file is a real risk worth
+// process: a group/world-accessible secrets file is a real risk worth
 // surfacing, but repeating it on every read would be noise. It is a *sync.Once
 // rather than a value so a test can hand the package a fresh guard and make the
 // "at most once" assertion real; a sync.Once value could not be reassigned
@@ -268,7 +268,7 @@ var looseWarnOnce = new(sync.Once)
 
 // warnIfLoose emits a single warning when the file at path is group- or
 // world-accessible (mode & 0o077 != 0). It names the path and mode but never the
-// file's contents (R6.1), and never blocks the read (D5). The warning is routed
+// file's contents, and never blocks the read. The warning is routed
 // through the package's Logger seam instead of written straight to os.Stderr:
 // the seam keeps this package clear of an internal/common/logging import cycle
 // while letting a test observe both the text and the once-per-process count.

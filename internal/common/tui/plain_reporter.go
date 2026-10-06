@@ -11,12 +11,12 @@ import (
 var _ Reporter = (*plainReporter)(nil)
 
 // plainReporter implements Reporter for non-TTY / opt-out runs by writing
-// deterministic, single-line records to an io.Writer (design §5, R2.2/R2.3).
+// deterministic, single-line records to an io.Writer.
 //
 // It NEVER emits an ANSI escape (0x1b) or a carriage return: in-place ("\r")
 // child updates are collapsed into full, newline-terminated lines. Every write
-// is mutex-guarded because the parallel manifest workers call concurrently
-// (R7.4), mirroring the existing LogReporter.
+// is mutex-guarded because the parallel manifest workers call concurrently,
+// mirroring the existing LogReporter.
 //
 // In-place TaskLine updates (eol=false) are rate-limited per task id to at most
 // one line per throttle duration so a chatty progress stream does not flood the

@@ -181,8 +181,8 @@ func runCommit(cmd *cobra.Command, args []string) error {
 }
 
 // commitOverlay runs overlay.Commit under the process-wide context, which the
-// first SIGINT, SIGTERM or SIGHUP cancels while overlay commit runs
-// (S054-R5.8). The first signal also restores the default action, so a
+// first SIGINT, SIGTERM or SIGHUP cancels while overlay commit runs. The
+// first signal also restores the default action, so a
 // confirmation prompt that is waiting on stdin still ends on the second one.
 func commitOverlay(cmd *cobra.Command, cfg *config.Config, message string) error {
 	return overlay.Commit(commandContext(cmd), cfg, message)

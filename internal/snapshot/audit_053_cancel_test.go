@@ -14,7 +14,7 @@ func TestArchiveShipper_DeleteRunsAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	deleted, deleteCtxErr := false, error(nil)
-	mr := &MockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
+	mr := &mockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		switch {
 		case name == "btrfs":
 			return nil, ctx.Err()

@@ -16,94 +16,51 @@ import (
 // This file is the whole of what `--depth` adds to `overlay compare`: the
 // refusal for an invocation with nothing to prove, the plan, the one
 // confirmation that covers the run, and the pass that puts each proposal up
-// story 033's ladder (R7.3).
+// the validation ladder.
 //
-// # Why it is separate from overlay_compare_realign.go
+// It is separate from overlay_compare_realign.go because that file promises
+// "NOTHING HERE WRITES A FILE" — the overlay auto-commits and pushes within
+// minutes — while proving DOES write: a staged copy of the realigned ebuild, its
+// eclasses and its profiles, under <configDir>/staging.
 //
-// That file opens with "NOTHING HERE WRITES A FILE", and it means it — the
-// candidate declarations and the baseline text a model proposes are printed for
-// a maintainer to paste, never written, because the overlay auto-commits and
-// pushes within minutes. Proving DOES write: a staged copy of the realigned
-// ebuild, its eclasses and its profiles, under <configDir>/staging. Folding this
-// into that file would have left its first sentence false for whoever read it
-// next, which is the sort of drift a promise like that does not survive.
+// Writing into the PUBLISHED overlay is realign.Promote's alone, reached only
+// through offerRealignPublish (overlay_compare_promote.go): per package, only on
+// a proof at least one gate read, and only on a maintainer's yes in a terminal.
+// The confirmation below buys a BUILD; "yes, spend the machine time" is not
+// "yes, publish it".
 //
-// Writing into the PUBLISHED overlay is realign.Promote's alone, and it happens
-// only through offerRealignPublish (overlay_compare_promote.go): per package,
-// only on a proof at least one gate actually read, and only on a maintainer's
-// yes given in a terminal. The confirmation below buys a BUILD, and "yes, spend
-// the machine time" is not "yes, publish it" (design D8 — the model proposes,
-// the gates prove, the maintainer approves, and no two of the three are
-// collapsed; D8c is the shape of the third question).
-//
-// # Where the text goes, and why not through the logger
-//
-// STDOUT, through fmt and output/*, exactly as overlay_validate.go states the
-// rule: the invocation's logger (story 062) writes diagnostics to stderr, so a
-// plan on one stream and a build result on the other lose their ordering the
-// moment either is redirected — and the ordering is the requirement here. R7.3
-// is "the plan BEFORE the first build starts", which is only readable as one
-// sequence in one stream.
-//
-// _Requirements: R7, R7.3_
+// All text goes to STDOUT through fmt and output/*, not the logger (stderr): the
+// plan must come BEFORE the first build starts, and that order is only readable
+// as one sequence on one stream.
 
 // The prover is the realignProve field of deps (deps.go), so no build ever
-// runs in a test.
+// runs in a test. Its type IS realign.Prove's signature, not an adapter over
+// it, so a change to either stops defaultDeps compiling instead of quietly
+// changing what a realignment is proved by. Driving the real one from a test
+// would need a real `ebuild … clean compile` — a network fetch, a writable
+// DISTDIR and portage on the host.
 //
-// It IS realign.Prove and not an adapter over it, on the discipline
-// internal/realign already applies to story 033's two entry points: the
-// field's type is the function's signature, so a change to either stops
-// defaultDeps compiling instead of quietly changing what a realignment is
-// proved by. Driving
-// the real one from a test would mean a real `ebuild … clean compile` — a network
-// fetch, a writable DISTDIR and portage on the host — which this story's
-// constraints forbid a test to need.
-//
-// The y/N question is the confirmRealignPlan field of deps, defaulting to the
-// single confirmation helper this package already uses. confirmAction reads
-// os.Stdin and answers "no" on any read error, so an EOF is a decline rather
-// than an accident.
-//
-// _Requirements: R7, R7.3_
+// The y/N question is the confirmRealignPlan field of deps, defaulting to
+// confirmAction, which reads os.Stdin and answers "no" on any read error, so an
+// EOF is a decline rather than an accident.
 
 // compareDepthPreflight reports why THIS INVOCATION cannot honour the `--depth`
-// it was given, or nil when it can (R7.3).
+// it was given, or nil when it can. It returns rather than logs, so a test can
+// assert it; runCompare is the one place that logs it before failing the run.
 //
-// It is a returned value rather than a log line for the reason realignPreflight
-// states beside it: a returned error is the shape a test can assert and a
-// caller can wrap or log, and runCompare is the one place that logs it, through
-// the invocation's logger, before failing the run.
+// An empty depthFlag is the default and is accepted with or without `--realign`
+// (`--realign` alone is report-only). It is compared EXACTLY, untrimmed: that is
+// the only value cobra produces for an unpassed flag, and anything else was typed
+// and is judged by validate.ParseDepth.
 //
-// # No --depth at all is not a refusal, it is the shipped run
+// --depth without --realign is refused rather than ignored: no baseline is read,
+// so nothing is a candidate, and a command that quietly built nothing would read
+// as one that built everything and found no problem.
 //
-// The empty string is the default and is accepted with or without `--realign`:
-// `--realign` alone is report-only, which is what Stage 1 shipped and what every
-// group-6 test asserts. The empty string is compared EXACTLY, with no trimming,
-// because that is the only value cobra produces for a flag nobody passed —
-// anything else was typed, and validate.ParseDepth (which trims and folds
-// nothing, on purpose) is the right judge of it.
-//
-// # --depth without --realign is refused rather than ignored
-//
-// There is nothing to prove: without `--realign` no baseline is read, so no
-// realignment is proposed, so no ebuild is a candidate for building. A command
-// that quietly did nothing with `--depth=compile` would be indistinguishable
-// from one that built everything and found no problem — which is the worse of
-// the two silences, since it reads as evidence.
-//
-// # A depth that builds nothing is refused too, and this is the honest one
-//
-// validate.RunBuildGates returns "an empty list, not a hollow pass" for every
-// depth below DepthPatches, so `--depth=none` and `--depth=options` would stage
-// a tree for every candidate, gate none of them, and report a proof of nothing.
-// realign.Promote already refuses to publish on an empty gate list — approval
-// would otherwise be the only authority that ever spoke — so such a run cannot
-// lead anywhere, and letting the operator pay for it first would be charging for
-// a receipt. The comparison is against the LADDER's ordering, which Depth
-// documents as its contract, rather than against a list of names that could fall
-// out of step with it.
-//
-// _Requirements: R7, R7.3_
+// A depth below DepthPatches is refused too: RunBuildGates returns an empty list
+// there and realign.Promote refuses to publish on an empty gate list, so the run
+// could lead nowhere and the operator would pay for staging first. The check
+// uses the ladder's ordering, which Depth documents as its contract.
 func compareDepthPreflight(depthFlag string, realign bool) error {
 	if depthFlag == "" {
 		return nil
@@ -142,8 +99,6 @@ func compareDepthPreflight(depthFlag string, realign bool) error {
 // what the plan prints and what `--depth` accepts: Depth.String and ParseDepth
 // are exact inverses, so a plan naming a rung is naming one the operator can ask
 // for again.
-//
-// _Requirements: R7, R7.3_
 type realignPlan struct {
 	Atoms []string
 	Depth string
@@ -163,8 +118,6 @@ type realignPlan struct {
 // that has no business being rebuilt, and a count cannot be checked against
 // anything. The depth is named for the same reason — the depth IS the cost, and
 // a plan that omits it asks for consent to an unstated amount of machine time.
-//
-// _Requirements: R7, R7.3_
 func realignPlanLines(plan realignPlan) []string {
 	if len(plan.Atoms) == 0 {
 		return nil
@@ -187,8 +140,8 @@ func realignPlanLines(plan realignPlan) []string {
 // is this short on purpose — see realignPlanLines.
 //
 // Through output/* rather than logger, because logger writes to stderr: the plan
-// and the build results below it are one sequence, and R7.3 is a statement about
-// their ORDER.
+// and the build results below it are one sequence, and what matters is their
+// ORDER.
 func printRealignPlan(plan realignPlan) {
 	for _, line := range realignPlanLines(plan) {
 		output.Info.Println(line)
@@ -197,29 +150,22 @@ func printRealignPlan(plan realignPlan) {
 
 // confirmRealignPlan takes ONE confirmation covering the whole run.
 //
-// The three gates are confirmSweep's, in the same order and for the same reason:
-// --yes proceeds unattended because the operator asked for that in so many words;
-// an interactive terminal is asked; anything else says how to proceed and proves
-// nothing. deps.registryPromptIsInteractive requires BOTH a stdin and a stdout TTY, so
-// `yes | bentoo overlay compare --realign --depth=compile` cannot answer for a
-// human — a readable stdin full of consent nobody typed is exactly what a check
-// on stdin alone accepts.
+// The three gates are confirmSweep's, in the same order: --yes proceeds
+// unattended because the operator asked for that in so many words; an
+// interactive terminal is asked; anything else says how to proceed and proves
+// nothing. deps.registryPromptIsInteractive requires BOTH a stdin and a stdout
+// TTY, so `yes | bentoo overlay compare --realign --depth=compile` cannot answer
+// for a human.
 //
-// ONE confirmation and not one per package: that is the difference between one
-// decision and 237 of them, and a prompt per package trains the operator to
-// answer without reading.
+// ONE confirmation and not one per package: a prompt per package trains the
+// operator to answer without reading.
 //
-// The refusal NAMES --yes. A gate that cannot be passed is a dead end, and a run
-// in CI, a pipeline or a cron job is exactly where this arm is reached — the
-// operator has to be told there is a way through, or the feature is unusable
-// anywhere it would be most useful. It is the caller's business that declining is
-// exit 0: nothing failed, a decision was taken (D9).
+// The refusal NAMES --yes, because CI, pipelines and cron jobs are exactly where
+// this arm is reached, and a gate with no way through is a dead end. Declining is
+// exit 0 (the caller's business): nothing failed, a decision was taken.
 //
-// The plan itself is NOT printed here; printRealignPlan has already done it, on
-// the same split displaySweepPlan and confirmSweep already use. So --yes buys
-// past the prompt and never past the plan.
-//
-// _Requirements: R7, R7.3_
+// The plan itself is printed by printRealignPlan, not here, so --yes skips the
+// prompt and never the plan.
 func confirmRealignPlan(plan realignPlan, d *deps) bool {
 	if compareYes {
 		output.Warning.Printf("  --yes given: proving %d realignment(s) without a prompt.\n", len(plan.Atoms))
@@ -246,33 +192,23 @@ type realignCandidate struct {
 }
 
 // realignIsCandidate is the rule, and it is deliberately DETERMINISTIC: it reads
-// the baseline the review resolved and the content comparison's own finding, and
-// nothing a model said. A candidate set that depended on a model having been
-// reachable would differ between two runs of the same command on the same
-// overlay, and `--no-review` would silently prove a different set from a plain
-// run.
-//
-// Three conditions, each carrying its own reason:
+// the baseline the review resolved and the content comparison's own finding,
+// never what a model said, so `--no-review` proves the same set as a plain run.
 //
 //   - ::gentoo carries the package (Baseline.Found) and its baseline was
-//     readable (no Unexamined, and a path to read). A package ::gentoo does not
-//     carry has nothing to realign towards — 84 of the overlay's 321.
-//   - THE BASELINE IS AT OUR OWN VERSION (Distance == 0). A baseline at a
-//     different version is never proposed, and this is the load-bearing half of
-//     the rule: adopting another version's ebuild changes which version we ship,
-//     which is a BUMP and not a realignment. Those packages are reported and
-//     never proved.
+//     readable (no Unexamined, and a path to read): without one there is
+//     nothing to realign towards.
+//   - THE BASELINE IS AT OUR OWN VERSION (Distance == 0). Adopting another
+//     version's ebuild changes which version we ship — a BUMP, not a
+//     realignment — so those packages are reported and never proved.
 //   - the two ebuilds differ and no registry entry says why. A declared
-//     divergence is a decision somebody already took, with a reason written down;
-//     re-proposing it every run is how a declaration stops being read.
+//     divergence is a decision already taken; re-proposing it every run is how
+//     a declaration stops being read.
 //
-// The last condition is spelled here rather than borrowed because
-// internal/overlay's own isUndeclaredDivergence is unexported. It is the same two
-// fields in the same order, and it must stay that way: the report warns about
-// exactly this set, and a rule that drifted would propose a build for a package
-// the report never flagged.
-//
-// _Requirements: R7, R7.3_
+// The last condition restates internal/overlay's unexported
+// isUndeclaredDivergence and must stay in step with it: the report warns about
+// exactly this set, and a drifted rule would build a package the report never
+// flagged.
 func realignIsCandidate(r overlay.CompareResult) bool {
 	if !r.Baseline.Found || r.Baseline.Distance != 0 {
 		return false
@@ -288,8 +224,8 @@ func realignIsCandidate(r overlay.CompareResult) bool {
 //
 // # The proposed ebuild is ::gentoo's own bytes, verbatim
 //
-// Read from Baseline.Path and passed through untouched. That makes R5.5 —
-// publish the exact bytes that were proved — true by construction rather than by
+// Read from Baseline.Path and passed through untouched. That makes publishing
+// the exact bytes that were proved true by construction rather than by
 // resemblance, and it makes the word "realign" mean what it says: the proposal is
 // not a merge, a patch or a model's rewrite, it is the baseline file. Anything
 // derived would be a file no gate had read and no maintainer had compared.
@@ -301,8 +237,6 @@ func realignIsCandidate(r overlay.CompareResult) bool {
 // it would be the easy choice. It is returned instead so the caller prints it in
 // sequence with the plan, on the same stream: a package silently missing from a
 // plan is a package the operator believes was proved.
-//
-// _Requirements: R7, R7.3_
 func realignCandidates(report *overlay.CompareReport) (candidates []realignCandidate, dropped []string) {
 	if report == nil {
 		return nil, nil
@@ -339,19 +273,18 @@ func realignCandidates(report *overlay.CompareReport) (candidates []realignCandi
 	return candidates, dropped
 }
 
-// proveRealignments is R7.3 end to end: plan, ask once, and only then build.
+// proveRealignments is the `--depth` pass end to end: plan, ask once, and only
+// then build.
 //
 // The ORDER IS THE SAFETY PROPERTY, exactly as runSweep states it for the sweep —
 // plan, print, confirm, execute — and the prover is not entered at all when the
 // confirmation is declined, so a declined run has built nothing and staged
 // nothing.
 //
-// It never touches the exit code (D9). Declining is not a failure, a FAILED gate
+// It never touches the exit code. Declining is not a failure, a FAILED gate
 // is an answer rather than a crash, and even an unplaceable staging root leaves
 // the review's own report — which is complete and useful without any of this —
 // to speak for the run.
-//
-// _Requirements: R7, R7.3_
 func proveRealignments(ctx context.Context, report *overlay.CompareReport, overlayPath string, d *deps) {
 	// Unreachable: compareDepthPreflight parsed the very same string before the
 	// run started and refused it there. Handled anyway, and handled by RETURNING,
@@ -365,7 +298,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	}
 
 	// The SAME staging root `overlay autoupdate --apply` and `overlay validate
-	// --depth` stage under (S033-D1), asked of the one function that spells it, so
+	// --depth` stage under, asked of the one function that spells it, so
 	// a tree one command proves is a tree the others can find. It is deliberately
 	// neither under the overlay — where `--clean` deletes any ebuild no registry
 	// pin claims, staged trees included — nor under /tmp, where a failure could not
@@ -394,25 +327,20 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	}
 
 	// The policy and the log directory, resolved ONCE for the whole pass and the
-	// same way `overlay validate --depth` resolves them (S039-R1.3, R1.4). Per
-	// candidate would be the same three answers re-derived N times, and the first
-	// place two of them could differ inside one run.
+	// same way `overlay validate --depth` resolves them: per candidate would
+	// re-derive the same answers N times, and give two of them a place to differ.
 	//
-	// It sits BELOW the "nothing to prove" return, which is where the sibling
-	// command's own `if depth > validate.DepthOptions` puts it: the only thing
-	// either resolution can say out loud is that logs will not be retained, and
-	// saying it to an operator who is about to be told there is nothing to prove
-	// describes a cost no run of theirs is going to pay. Still above the loop,
-	// though — that is not negotiable, it is why there is a block here at all.
+	// It sits BELOW the "nothing to prove" return, as in the sibling command: the
+	// only thing either resolution can say out loud is that logs will not be
+	// retained, which is noise to an operator about to be told there is nothing
+	// to prove. Still above the loop — that is why there is a block here at all.
 	//
 	// requireIsolation is read from the SAME key `overlay autoupdate` reads
-	// (autoupdate.validate.require_isolation), because the gates it governs are
-	// the same gates. A config that could not be loaded leaves it false, which is
-	// the shipped behaviour of every command that builds with the key unset — the
-	// run is not refused over a missing config file, it simply carries no policy
-	// to apply. The overlay path is NOT taken from here: this function was handed
-	// one, and taking a second answer for the same question is how a run proves
-	// one overlay and reports on another.
+	// (autoupdate.validate.require_isolation), because the gates are the same. A
+	// config that could not be loaded leaves it false — the shipped behaviour
+	// with the key unset; the run is not refused over a missing config file. The
+	// overlay path is NOT taken from here: this function was handed one, and a
+	// second answer is how a run proves one overlay and reports on another.
 	var requireIsolation bool
 	// The config alone: no overlay selection runs here, so the run's "using the
 	// overlay checkout at …" notice is not repeated for a path this ignores.
@@ -449,7 +377,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			Overlay:     overlayPath,
 			StagingRoot: stagingRoot,
 			Depth:       depth,
-			// The composition design D1 puts in cmd/bentoo and nowhere else:
+			// The composition that lives in cmd/bentoo and nowhere else:
 			// validate accepts only what a caller supplies, autoupdate owns
 			// Manifest GENERATION, and this is the one layer that imports both.
 			// A realignment is a SAME-VERSION edit — it bumps nothing, so no
@@ -461,14 +389,14 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			RequireIsolation: requireIsolation,
 			LogDir:           logDir,
 			// Distdir is left EMPTY, and that is a decision rather than an
-			// oversight (S039-R3.2). `overlay compare` registers no --distdir
+			// oversight. `overlay compare` registers no --distdir
 			// flag, and the sibling command's answer comes from exactly that
 			// flag and from nowhere else — validate.Options.Distdir states it
 			// outright: there is no configured rung between the flag and the
 			// host, "the command passes --distdir here or nothing". So there is
 			// no resolved directory to carry here, and the two ways to pretend
-			// otherwise are both worse than empty: a new flag is a CLI surface
-			// this sub-task was told not to invent, and reading some other key
+			// otherwise are both worse than empty: a new flag is new CLI surface
+			// this command deliberately lacks, and reading some other key
 			// would make `overlay compare --depth` build against a directory
 			// `overlay validate --depth` would not have used. Empty sets no
 			// DISTDIR on the child, so the build reads the host's own
@@ -511,8 +439,8 @@ func realignPlanAtoms(candidates []realignCandidate) []string {
 // read it, which "every gate passed" would satisfy only vacuously; and a gate
 // that spoke is the run working, whatever it said.
 //
-// Passing gates are reported as a PERMISSION TO ASK and never as a result: R5.3
-// needs a maintainer's approval as well, and this run asks for none. The wording
+// Passing gates are reported as a PERMISSION TO ASK and never as a result:
+// publishing needs a maintainer's approval as well, and this run asks for none. The wording
 // says so, because "proved" left alone reads as "done".
 func printRealignProof(name string, proof realign.Proof, err error) {
 	if err != nil {

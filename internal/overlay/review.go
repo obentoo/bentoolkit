@@ -20,74 +20,43 @@ import (
 var reviewCacheDirFor = defaultReviewCacheDir
 
 // AnnotateReviews attaches a model's reading to every undeclared divergence the
-// report holds (R5.1) — where the difference came from, what it does, and, when
-// it is ours, the `patched` text that would declare it (R5.2-R5.4).
+// report holds — where the difference came from, what it does, and, when it is
+// ours, the `patched` text that would declare it.
 //
-// A NIL REVIEWER RETURNS IMMEDIATELY, and that is the point of the parameter's
-// type. `--no-review` (R5.6) and "no `claude` on PATH" (R5.5) are two ways of
-// having no reviewer, and a nil one gives them a single no-op path instead of
-// two conditions in cmd/ that could disagree.
+// A NIL REVIEWER RETURNS IMMEDIATELY: `--no-review` and "no `claude` on PATH"
+// then share one no-op path instead of two conditions in cmd/ that could
+// disagree. It runs AFTER CompareWithProvider and SEQUENTIALLY, so commentary
+// order never depends on which of ten concurrent `claude` processes finished
+// first; if that grows too slow, the answer is a bounded worker pool.
 //
-// It runs AFTER CompareWithProvider returns and is SEQUENTIAL. Inside the
-// comparison it would inherit ten-way concurrency, which here means ten
-// concurrent `claude` processes and a report whose commentary order depends on
-// which review finished first. Eight invocations at a few seconds each is the
-// measured overlay's whole cost, and if that ever stops being acceptable the
-// answer is a bounded worker pool, not moving this back inside the comparison.
+// It returns NOTHING. Every failure is a way of having no reading: the row
+// records ReadingFailed, the deterministic report goes out unchanged, and the
+// exit status does not move. It warns about no review outcome — each is a fact
+// on the row already — only about the cache having nowhere to live, a fact about
+// this machine that belongs to no row.
 //
-// It returns NOTHING, exactly as AnnotateAuthorship does. Every failure here is
-// a way of having no reading — a reviewer that errored, ran out of time, or
-// answered with nothing usable — and all of them are answered the same way: the
-// affected row records ReadingFailed and the deterministic report goes out
-// unchanged (R5.5). None is fatal and none changes the exit status: the report
-// the operator asked for is already complete without the commentary.
-//
-// It WARNS ABOUT NO REVIEW OUTCOME (S047-R4.2). Every one of those outcomes is
-// now a fact on the result — Reading — and therefore a row the operator is
-// already reading; a warning above the report that repeated it would be noise
-// printed above the thing it duplicates, and a library that formats for an
-// operator is the boundary story 046 closed. The one warning left here is about
-// the CACHE having nowhere to live, which is a fact about this machine and
-// belongs to no row.
-//
-// Nothing it writes can change a Verdict, a count or the grouping (R5.8). It
-// writes exactly two fields — Review and Reading — onto results the comparison
-// has finished with, and reads no other.
-//
-// It writes NO FILE (R5.4). The declaration it may attach is a PROPOSAL for the
-// operator to apply: the overlay repository auto-commits and pushes within
-// minutes, so a declaration written here would be published before anyone could
-// read it.
-//
-// _Requirements: R5.1, R5.2, R5.3, R5.4, R5.5, R5.8, S047-R3.3, S047-R3.4,
-// S047-R4.1, S047-R4.2_
+// It writes only Review and Reading, so it cannot change a Verdict, a count or
+// the grouping. It writes NO FILE: the declaration is a PROPOSAL, because the
+// overlay repository auto-commits and pushes within minutes.
 func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer DivergenceReviewer, prov provider.Provider, opts CompareOptions) {
 	if report == nil || reviewer == nil {
 		return
 	}
 
-	// The findings R5.1 submits, collected BEFORE anything is opened. The
-	// predicate is the report's own (isUndeclaredDivergence, compare.go), so the
-	// set the model sees cannot drift from the set the report reports on; and
-	// knowing the set is empty here is what keeps a run with nothing to review
-	// from touching the cache at all — and therefore from warning about one.
+	// The findings to submit, collected BEFORE anything is opened. The predicate
+	// is the report's own (isUndeclaredDivergence), so the set the model sees
+	// cannot drift from the set the report reports on, and an empty set keeps the
+	// run from touching — or warning about — the cache at all.
 	//
-	// The same walk RE-ASSERTS ReadingNotComparable on the results the CONTENT
-	// CHECK REFUSED (S047-R3.3), by calling the one function that states that
-	// rule — noteContentRefusal, in compare.go, beside the check that refuses.
+	// The same walk RE-ASSERTS ReadingNotComparable on pairs the content check
+	// refused, through noteContentRefusal. It re-asserts rather than decides:
+	// deciding here was a bug, because a machine without `claude` returns above
+	// and its refused pairs then read as "nobody asked". The producer records
+	// them; this call covers a report some other caller assembled, and can write
+	// no value but the one already there.
 	//
-	// It re-asserts rather than decides, because deciding here was a bug: this
-	// function returns above when the reviewer is nil, and a machine without
-	// `claude` on PATH has no reviewer without anyone having narrowed anything.
-	// Six of the measured run's eleven redundant packages are refused pairs, and
-	// on such a machine all six read as "nobody asked" — the exact conflation
-	// this vocabulary exists to remove. So the producer records them now, and
-	// the call kept here covers a report some other caller assembled; it writes
-	// the value that is already there and can write no other.
-	//
-	// It cannot collide with the pending set below. isUndeclaredDivergence
-	// requires VerifiedDiffers and noteContentRefusal acts on NotVerified, so no
-	// result is in both.
+	// No result is in both sets: isUndeclaredDivergence requires VerifiedDiffers
+	// and noteContentRefusal acts on NotVerified.
 	var pending []int
 	for i := range report.Results {
 		if isUndeclaredDivergence(report.Results[i]) {
@@ -110,11 +79,11 @@ func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer Diverg
 	// resolves the operator's configured review timeout — the
 	// `autoupdate.review.timeout` key, falling back to config.DefaultReviewTimeout
 	// when it is unset, zero or negative — and sets that value on the client it
-	// builds (S048-R3.1). Naming a number here would name one this package cannot
+	// builds. Naming a number here would name one this package cannot
 	// see and a configuration file can move.
 	//
 	// A second deadline here would be a second thing to tune for one round trip,
-	// and R5.5's "exceeds its timeout" needs none — an expired deadline surfaces
+	// and "exceeds its timeout" needs none — an expired deadline surfaces
 	// as an error from ReviewDivergence and is handled below with every other
 	// error.
 
@@ -142,8 +111,8 @@ func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer Diverg
 			// cannot arrive.
 			//
 			// EVERY REMAINING PENDING RESULT is marked, not only the one the loop
-			// stopped on (S047-R4.1: the state is recorded on EACH CompareResult,
-			// not on the ones the loop happened to reach). Leaving the rest at the
+			// stopped on: the state is recorded on EACH CompareResult, not on the
+			// ones the loop happened to reach. Leaving the rest at the
 			// zero would say "nobody asked" about reviews this run DID request and
 			// then abandoned — the exact conflation this field exists to remove —
 			// and ReadingFailed is "a reading was attempted and did not come
@@ -170,7 +139,7 @@ func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer Diverg
 			continue
 		}
 
-		// A cached note is the same question already answered (R5.7): the key is
+		// A cached note is the same question already answered: the key is
 		// the two files' content, so while neither has changed the answer cannot
 		// have. An entry that says nothing is treated as a miss — a hand-edited or
 		// half-written one must not suppress a question forever, and nothing here
@@ -186,13 +155,11 @@ func AnnotateReviews(ctx context.Context, report *CompareReport, reviewer Diverg
 		}
 
 		// ONE branch for both ways of not getting an answer. A reply that parsed
-		// and said nothing — no classification (R5.2 unanswered) or no summary
-		// (R5.3 unanswered) — leaves the operator exactly where an error does, and
-		// R5.5's four failures are one answer to them; two branches here would be
-		// two spellings of one state, and the pair could then drift.
+		// and said nothing — no classification or no summary — leaves the operator
+		// exactly where an error does; two branches here would be two spellings of
+		// one state, and the pair could then drift.
 		//
-		// The STATE stays one (story 047, requirement 5.5). WHY it failed is a
-		// separate field, ReviewFailure, set beside it, so the operator is told
+		// The STATE stays one. WHY it failed is a separate field, ReviewFailure, set beside it, so the operator is told
 		// the cause without the state being split into several.
 		note, err := reviewer.ReviewDivergence(ctx, req)
 		if err != nil || !reviewNoteSpeaks(note) {
@@ -254,8 +221,8 @@ func reviewRequestFor(result CompareResult, prov provider.Provider, opts Compare
 //
 // It is the ONE definition of "unusable", shared by the pass that attaches a
 // note and the renderer that prints one, so a note the annotator accepted can
-// never be one the report ignores. A note needs both halves: R5.2 asks which
-// side the divergence came from and R5.3 asks what it does, and a reply missing
+// never be one the report ignores. A note needs both halves — which side the
+// divergence came from and what it does — and a reply missing
 // either has answered neither — OriginUnknown is the value that means "nobody
 // said", not a classification.
 //
@@ -265,30 +232,17 @@ func reviewNoteSpeaks(note ReviewNote) bool {
 }
 
 // DivergenceReviewer is the seam through which a model's reading of one
-// divergence reaches this package. It is the whole of what internal/overlay
-// knows about an LLM: a function that takes two ebuilds and returns three
-// strings.
+// divergence reaches this package: all internal/overlay knows about an LLM.
 //
 // It is declared HERE, in the consumer, rather than as a method on
-// autoupdate.LLMProvider, for two separate reasons that both bind. A method on
-// LLMProvider would force openai.go and ollama.go to implement a review they
-// will never serve; and holding one would make this package name an autoupdate
-// type, which is the import edge 025 R2.4 keeps absent in BOTH directions
-// (review_test.go fences it). The project already has the shape for a capability
-// declared by its consumer — provider.PackageDirProvider, which
-// resolvePackagePaths discovers by type assertion — and this follows it.
+// autoupdate.LLMProvider: a method there would force openai.go and ollama.go to
+// implement a review they never serve, and holding one would make this package
+// import autoupdate — an edge kept absent in BOTH directions (review_test.go
+// fences it). The production adapter lives in cmd/, which imports both halves.
 //
-// The only production implementation is an adapter over
-// autoupdate.NewClaudeCodeClient, and it lives in
-// cmd/bentoo/overlay_compare_review.go: cmd/ already imports both halves, so the
-// one new edge sits where an edge already exists.
-//
-// The CONTEXT is the caller's. A review is a network round trip behind a CLI, so
-// a cancelled compare must abort it rather than hold the run open — the same
-// spine CompareWithProvider's ctx carries through the comparison itself.
-//
-// A nil DivergenceReviewer is not an error anywhere. It is how `--no-review`
-// (R5.6) and an absent `claude` CLI (R5.5) reach one no-op path instead of two.
+// The CONTEXT is the caller's, so a cancelled compare aborts the review rather
+// than holding the run open. A nil DivergenceReviewer is not an error anywhere:
+// it is how `--no-review` and an absent `claude` CLI reach one no-op path.
 //
 // An implementation that knows WHY a review failed says so by wrapping one of
 // ErrReviewTimedOut, ErrReviewCouldNotStart, ErrReviewExitedNonZero or
@@ -302,8 +256,8 @@ type DivergenceReviewer interface {
 // ReviewRequest is one divergence put to a reviewer: which package, at which
 // version, and the two ebuilds that differ.
 //
-// It carries the two files' BYTES and never the line counts beside them. That is
-// R1.3 held at the type: a prompt assembled from the SIZE of a difference would
+// It carries the two files' BYTES and never the line counts beside them, held at
+// the type: a prompt assembled from the SIZE of a difference would
 // be a computation on that size, which is exactly what the counts may never feed
 // — see compare_diff_counts_fence_test.go, which fences DiffAdded/DiffRemoved to
 // the one function that fills them and the one that prints them.
@@ -313,7 +267,7 @@ type DivergenceReviewer interface {
 type ReviewRequest struct {
 	// Category, Package and Version identify the package for the reviewer's
 	// prose. They are NOT part of the cache's index: the classification is a
-	// reading of the two files, and R5.7 keys it on their content alone.
+	// reading of the two files, keyed on their content alone.
 	Category, Package, Version string
 	// Ours and Theirs are the two ebuilds at Version — ours from the overlay,
 	// theirs from ::gentoo — read through resolvePackagePaths, the one path
@@ -323,7 +277,7 @@ type ReviewRequest struct {
 }
 
 // ReviewNote is a model's reading of one divergence: COMMENTARY, printed beside
-// a finding, and never an input to anything the report decides (R5.8). The same
+// a finding, and never an input to anything the report decides. The same
 // package grouping, the same Verdicts and the same removal recommendations hold
 // whether or not a review ran.
 //
@@ -332,8 +286,8 @@ type ReviewRequest struct {
 // report text — they reach no shell and no command, and Declaration is capped on
 // the line the way PatchedReason is (patchedReasonCap).
 //
-// Nothing here is ever written to a file. R5.4 PROPOSES declaration text and the
-// operator applies it: the overlay repository auto-commits and pushes within
+// Nothing here is ever written to a file. The review PROPOSES declaration text
+// and the operator applies it: the overlay repository auto-commits and pushes within
 // minutes, so a declaration written by this program would be published before
 // anyone could read it.
 //
@@ -341,19 +295,19 @@ type ReviewRequest struct {
 // (review_cache.go), and they are the same three lowercase names the CLI adapter
 // in cmd/ decodes from the model's reply, so one spelling serves both.
 type ReviewNote struct {
-	// Origin is where the divergence came from, as the model read it (R5.2).
+	// Origin is where the divergence came from, as the model read it.
 	Origin ReviewOrigin `json:"origin"`
-	// Summary is one line saying what the divergence does (R5.3).
+	// Summary is one line saying what the divergence does.
 	Summary string `json:"summary"`
-	// Declaration is proposed `patched` text for the registry (R5.4). It is
+	// Declaration is proposed `patched` text for the registry. It is
 	// empty unless Origin is OriginOverlay: there is nothing of ours to declare
 	// about a change that is not ours. It is a PROPOSAL — text on a terminal,
 	// never a file.
 	Declaration string `json:"declaration"`
 }
 
-// ReviewOrigin is which side a divergence came from, as the model classified it
-// (R5.2). It is the model's reading and not a finding of this package's own:
+// ReviewOrigin is which side a divergence came from, as the model classified
+// it. It is the model's reading and not a finding of this package's own:
 // Authorship, next door, is what the overlay's CONTENT proves, and the two are
 // deliberately different types so a classification can never be mistaken for a
 // proof.
@@ -366,13 +320,13 @@ const (
 	// reads as "nothing was said" rather than as a classification.
 	//
 	// This is the same argument AuthorshipUnproved makes as its own zero value,
-	// and here it has a second edge: R5.4 attaches a proposed `patched`
+	// and here it has a second edge: the review attaches a proposed `patched`
 	// declaration to an OVERLAY-origin note. Had OriginOverlay been the zero
 	// value, every un-reviewed finding would both accuse us of the change and
 	// invite a declaration of it.
 	OriginUnknown ReviewOrigin = iota
 	// OriginOverlay means the divergence is work of ours, carried on top of
-	// ::gentoo's ebuild. This is the classification R5.4 proposes a declaration
+	// ::gentoo's ebuild. This is the classification a declaration is proposed
 	// for.
 	OriginOverlay
 	// OriginUpstream means ::gentoo moved and our copy did not — the in-place
@@ -429,7 +383,7 @@ func (o ReviewOrigin) MarshalText() ([]byte, error) {
 // miss, ask again. That costs one request. Degrading to OriginUnknown would
 // instead keep a note whose classification has been erased — and, with no
 // expiry, keep it forever — while printing no proposed declaration for a
-// divergence that may well be ours (R5.4).
+// divergence that may well be ours.
 func (o *ReviewOrigin) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "unknown":
@@ -463,8 +417,7 @@ var (
 )
 
 // ReviewFailure is why a review did not come back. It sits BESIDE
-// Reading == ReadingFailed and never splits that state (story 047,
-// requirement 5.5). Its zero value, ReviewFailureNone, is every result whose
+// Reading == ReadingFailed and never splits that state. Its zero value, ReviewFailureNone, is every result whose
 // review did not fail.
 type ReviewFailure int
 

@@ -4,5 +4,5 @@
 // removes records, and migrates auto-disabled entries.
 //
 // It imports fetch and ebuilds and nothing above them; the parsers, the LLM
-// fixers and the update core build on it (story 061).
+// fixers and the update core build on it.
 package registry

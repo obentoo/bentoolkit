@@ -1,5 +1,5 @@
 // Package dbusx opens bentoo-tray's private D-Bus connections and owns its
-// well-known bus name (S072-R1).
+// well-known bus name.
 package dbusx
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// BusName is the well-known name a running bentoo-tray owns (R1.1).
+// BusName is the well-known name a running bentoo-tray owns.
 const BusName = "org.obentoo.BentooTray"
 
 // defaultSystemBusAddress is the system bus address the D-Bus specification
@@ -31,7 +31,7 @@ const signalBuffer = 64
 // standard $XDG_RUNTIME_DIR/bus socket. Unlike dbus.ConnectSessionBus this
 // never autolaunches a bus (a tray on a bus of its own would be invisible) and
 // never rewrites the process environment. Every error names the address it
-// tried (R1.3).
+// tried.
 //
 // ctx bounds only the connect (dial, auth, Hello); once SessionBus returns,
 // the connection lives until it is closed or the bus goes away.
@@ -133,7 +133,7 @@ func (o *Owner) watch(signals <-chan *dbus.Signal) {
 	}
 }
 
-// Acquire requests BusName without queueing (R1.1, R1.2). It returns true
+// Acquire requests BusName without queueing. It returns true
 // when this connection is the primary owner, including when it already was.
 // Another owner is not an
 // error: Acquire returns false, and because the request is not queued, this
@@ -166,7 +166,7 @@ func (o *Owner) Release() error {
 }
 
 // Lost is closed when the connection is gone: the bus died, or the connection
-// was closed (R1.5).
+// was closed.
 func (o *Owner) Lost() <-chan struct{} {
 	return o.lost
 }

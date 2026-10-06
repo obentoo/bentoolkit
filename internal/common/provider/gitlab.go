@@ -54,7 +54,7 @@ func NewGitLabProvider(repoInfo *RepositoryInfo) (*GitLabProvider, error) {
 			Timeout:   30 * time.Second,
 			Transport: httpx.BuildTransport(),
 			// A redirect to another host or to plain http must not carry the
-			// token (S052-R4.6).
+			// token.
 			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
@@ -92,15 +92,15 @@ func parseGitLabURL(rawURL string) (baseURL, projectPath string, err error) {
 		return "", "", fmt.Errorf("%w: parsing GitLab repository URL: %w", ErrInvalidRepoURL, err)
 	}
 	// The PRIVATE-TOKEN is sent to this base URL, so anything but https would
-	// carry it in cleartext (S052-R6.1). The check lives here, at construction,
+	// carry it in cleartext. The check lives here, at construction,
 	// not at request time: tests point BaseURL at a plain-http httptest server
-	// after construction, and that must keep working (S052-R9.6).
+	// after construction, and that must keep working.
 	//
 	// The URL in the error is rebuilt from scheme, host and path only, because
 	// the error is logged. url.URL.Redacted masks the password alone, so a
 	// token given as the username (http://TOKEN@host/g/p) would survive it,
 	// and so would one in the opaque form (http:TOKEN@host/g/p, where User is
-	// nil) or in a ?private_token= query (S052-R6.1).
+	// nil) or in a ?private_token= query.
 	if parsed.Scheme != "https" {
 		shown := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
 		return "", "", fmt.Errorf("%w: GitLab repository URL %s uses %q; https is required so the PRIVATE-TOKEN is never sent in cleartext",
@@ -300,7 +300,7 @@ func (p *GitLabProvider) saveToCache(category, pkg string, versions []string) {
 
 	cacheFile := p.cacheFilePath(category, pkg)
 	// Cache files use fileutil.CacheFileMode (0600, owner-only) because they
-	// may hold sensitive upstream metadata. (R9.1, R9.3)
+	// may hold sensitive upstream metadata.
 	_ = os.WriteFile(cacheFile, data, fileutil.CacheFileMode)
 }
 

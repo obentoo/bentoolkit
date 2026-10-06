@@ -14,7 +14,7 @@ import (
 var ErrAffects = errors.New("invalid --affects value")
 
 var (
-	// cpRe and slotRe are the site schema's patterns (site story 002). The
+	// cpRe and slotRe are the site's notice schema patterns. The
 	// slot pattern has no `/` on purpose: a subslot is refused, because the
 	// feed and the tray compare the slot only and would silently drop it.
 	cpRe   = regexp.MustCompile(`^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$`)
@@ -27,8 +27,8 @@ var (
 
 // ParseAffects parses one --affects value,
 // `<category>/<package>[:<slot>][ <range>[,<range>…]]`, where a range is an
-// operator from <, <=, =, >=, > immediately followed by a Gentoo version
-// (R1.5). A rejection quotes the value and the part that failed.
+// operator from <, <=, =, >=, > immediately followed by a Gentoo version.
+// A rejection quotes the value and the part that failed.
 func ParseAffects(s string) (Affects, error) {
 	fail := func(part, why string) (Affects, error) {
 		return Affects{}, fmt.Errorf("--affects %q: %q %s: %w", s, part, why, ErrAffects)

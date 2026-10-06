@@ -9,14 +9,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// tailCap is the exact capacity of each task's bounded tail ring (R1.5). Once a
+// tailCap is the exact capacity of each task's bounded tail ring. Once a
 // task has committed tailCap lines, the oldest is evicted as a new one arrives,
 // so the rendered tail never exceeds the last tailCap committed lines (plus the
 // current live line, if any).
 const tailCap = 10
 
 // Glyphs used in history and active rows. They are fixed code points so the
-// ANSI-stripped View is deterministic and matches R1.4 exactly.
+// ANSI-stripped View is deterministic and matches the documented frame exactly.
 const (
 	glyphOK   = "✓" // U+2713
 	glyphFail = "✗" // U+2717
@@ -24,8 +24,8 @@ const (
 
 // Styles for the frame. lipgloss emits color escapes only when the active
 // profile supports color: under NO_COLOR / a dumb terminal the rendered text is
-// the plain glyph, so the ANSI-stripped View is byte-identical either way (C3,
-// NO_COLOR honored). These are package-level so View allocates no styles per
+// the plain glyph, so the ANSI-stripped View is byte-identical either way
+// (NO_COLOR honored). These are package-level so View allocates no styles per
 // frame.
 var (
 	styleHeader  = lipgloss.NewStyle().Bold(true)
@@ -37,8 +37,8 @@ var (
 )
 
 // task is a single active unit of work. Tasks are held in an ordered slice so
-// each renders in its own region and two tasks never share a rendered line
-// (R1.3). The tail ring is a fixed-size buffer of committed lines; live holds
+// each renders in its own region and two tasks never share a rendered line.
+// The tail ring is a fixed-size buffer of committed lines; live holds
 // the in-progress (eol=false) line that has not yet been committed.
 type task struct {
 	id       string
@@ -55,7 +55,7 @@ type task struct {
 }
 
 // commit pushes a finished line into the bounded tail ring, evicting the oldest
-// entry when the ring is already full (R1.5).
+// entry when the ring is already full.
 func (t *task) commit(line string) {
 	if t.ring == nil {
 		t.ring = make([]string, tailCap)
@@ -72,7 +72,7 @@ func (t *task) commit(line string) {
 
 // tailLines returns the committed ring lines in order (oldest first), followed
 // by the current live line if one is present. This is the visible tail for the
-// task (R1.5): up to tailCap committed lines plus at most one live line.
+// task: up to tailCap committed lines plus at most one live line.
 func (t *task) tailLines() []string {
 	out := make([]string, 0, t.ringLen+1)
 	for i := 0; i < t.ringLen; i++ {
@@ -85,7 +85,7 @@ func (t *task) tailLines() []string {
 }
 
 // historyEntry is a terminal task rendered above the active block as a one-line
-// ✓/✗ summary (R1.4).
+// ✓/✗ summary.
 type historyEntry struct {
 	ok      bool
 	label   string
@@ -95,14 +95,14 @@ type historyEntry struct {
 // model is the single tea.Model backing the live TUI. It holds an ordered set
 // of active tasks, a history of completed tasks, a log scrollback, an overall
 // done/total counter, and one shared spinner that animates every active task in
-// lockstep. View composes these inline (no alt-screen — C3): the program owns
+// lockstep. View composes these inline (no alt-screen): the program owns
 // the screen; the model only returns a multi-line string.
 type model struct {
 	header    string
 	total     int
 	completed int
 
-	tasks   []*task          // ordered active tasks (R1.3)
+	tasks   []*task          // ordered active tasks
 	index   map[string]*task // id -> active task, for O(1) event routing
 	history []historyEntry
 	logs    []string
@@ -114,10 +114,10 @@ type model struct {
 	// cancel is the caller's cancellation hook (the signal/cancel chain that
 	// cancels the operation context and kills child processes). It is injected
 	// via withCancel so Ctrl-C reconciles with the EXISTING cancellation rather
-	// than the model owning SIGINT itself (AD9). May be nil.
+	// than the model owning SIGINT itself. May be nil.
 	cancel func()
 
-	// confirmPending records an in-flight yes/no confirmation (AD5, R4.2). When
+	// confirmPending records an in-flight yes/no confirmation. When
 	// set, View renders confirmPrompt with a [y/n] hint and Update intercepts a
 	// y/n keypress to answer on confirmReply. Both are cleared once answered.
 	confirmPending bool
@@ -126,7 +126,7 @@ type model struct {
 }
 
 // withCancel injects the caller's cancellation hook and returns the model so the
-// call can be chained at construction. Ctrl-C invokes this hook (AD9, R5.1).
+// call can be chained at construction. Ctrl-C invokes this hook.
 func (m *model) withCancel(cancel func()) *model {
 	m.cancel = cancel
 	return m
@@ -156,7 +156,7 @@ func (m *model) Init() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Ctrl-C reconciles with the caller's cancellation (AD9, R5.1): invoke
+		// Ctrl-C reconciles with the caller's cancellation: invoke
 		// the injected cancel synchronously so the operation context is cancelled
 		// and child processes are killed, then quit. Bubble Tea installs no signal
 		// handler here (WithoutSignalHandler), so this is the only path that turns
@@ -167,7 +167,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		// In-UI confirmation (AD5, R4.2): while a confirm is pending, a y/n key
+		// In-UI confirmation: while a confirm is pending, a y/n key
 		// answers it and clears the prompt. Ctrl-C above keeps precedence; any
 		// other key while pending is ignored (the prompt stays). The reply is sent
 		// non-blocking so a full or absent reply channel never stalls the UI.
@@ -250,7 +250,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // answerConfirm delivers the user's yes/no decision on the pending reply channel
-// and clears the pending confirm (AD5, R4.2). The send is non-blocking so a full
+// and clears the pending confirm. The send is non-blocking so a full
 // or already-drained channel never stalls the UI; with the buffered reply channel
 // Confirm uses, the value always lands.
 func (m *model) answerConfirm(v bool) {
@@ -266,7 +266,7 @@ func (m *model) answerConfirm(v bool) {
 }
 
 // finishTask moves a task out of the ordered active set into history and bumps
-// the completed counter (R1.4). CapturedOutput is intentionally not rendered.
+// the completed counter. CapturedOutput is intentionally not rendered.
 func (m *model) finishTask(msg TaskDoneMsg) {
 	t := m.index[msg.ID]
 	if t == nil {
@@ -289,7 +289,7 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 	m.completed++
 }
 
-// View implements tea.Model. It composes the frame inline (no alt-screen, C3):
+// View implements tea.Model. It composes the frame inline (no alt-screen):
 //
 //	<header>  <done>/<total>
 //	<history lines, ✓/✗ above>
@@ -301,14 +301,14 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 func (m *model) View() string {
 	var b strings.Builder
 
-	// Header with overall done/total (R1.4) when a denominator is known.
+	// Header with overall done/total when a denominator is known.
 	if m.total > 0 {
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s  %d/%d", m.header, m.completed, m.total)))
 	} else {
 		b.WriteString(styleHeader.Render(m.header))
 	}
 
-	// History block (✓/✗), above the active tasks (R1.4).
+	// History block (✓/✗), above the active tasks.
 	for _, h := range m.history {
 		glyph, gs := glyphOK, styleOK
 		if !h.ok {
@@ -324,7 +324,7 @@ func (m *model) View() string {
 
 	// Active task blocks. Each task is its own region: a header row carrying the
 	// spinner glyph + label (+ optional [stage]), then its bounded tail indented
-	// beneath it, so two tasks never share a rendered line (R1.3).
+	// beneath it, so two tasks never share a rendered line.
 	spin := m.spinner.View()
 	for _, t := range m.tasks {
 		b.WriteByte('\n')
@@ -344,7 +344,7 @@ func (m *model) View() string {
 		}
 	}
 
-	// Log scrollback, if any stray writes were routed here (AD6).
+	// Log scrollback, if any stray writes were routed here.
 	for _, l := range m.logs {
 		b.WriteByte('\n')
 		b.WriteString(l)
@@ -356,7 +356,7 @@ func (m *model) View() string {
 		b.WriteString(styleSummary.Render(m.batchSummary))
 	}
 
-	// Pending in-UI confirmation (AD5, R4.2): render the prompt with a [y/n] hint
+	// Pending in-UI confirmation: render the prompt with a [y/n] hint
 	// so the decision is made inside the frame instead of reading os.Stdin behind
 	// the program. The line is removed once answered (answerConfirm clears it).
 	if m.confirmPending {

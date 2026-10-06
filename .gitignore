@@ -1,4 +1,4 @@
-# Binário compilado
+# Compiled binaries
 /bentoo
 /bentoo-tray
 *.exe
@@ -6,7 +6,7 @@
 *.so
 *.dylib
 
-# Arquivos de teste e cobertura
+# Test and coverage output
 *.test
 coverage*.out
 cov.out
@@ -16,7 +16,7 @@ coverage.html
 # Build
 build/
 
-# Dependências vendorizadas
+# Vendored dependencies
 vendor/
 
 # Epic planning artifacts (stories/design/tasks/drafts) — never versioned.
@@ -24,7 +24,7 @@ vendor/
 # that symlink as a file, which a directory-only pattern lets through.
 .epic
 
-# Arquivos de IDE/editor
+# IDE and editor files
 .idea/
 .vscode/
 .cursor/
@@ -40,10 +40,10 @@ vendor/
 *.swp
 *.swo
 
-# Arquivos de sistema
+# OS files
 .DS_Store
 
-# Variáveis de ambiente
+# Environment files
 .env
 .env.local
 .tab/

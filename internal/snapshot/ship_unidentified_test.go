@@ -30,7 +30,7 @@ func s053AssertUnidentifiedErr(t *testing.T, err error, ship string) {
 func TestArchiveShipper_Send_RefusesUnidentified(t *testing.T) {
 	for name, snap := range s053Unidentified {
 		t.Run(name, func(t *testing.T) {
-			mr := &MockRunner{}
+			mr := &mockRunner{}
 			ps := &fakeParentStore{last: Snapshot{ID: "41", Subvolume: "/home", Path: "/home/.snapshots/41/snapshot"}, ok: true}
 			a := &archiveShipper{name: "offsite", remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 			_, err := a.Send(t.Context(), snap)
@@ -44,7 +44,7 @@ func TestArchiveShipper_Send_RefusesUnidentified(t *testing.T) {
 		})
 	}
 	t.Run("identified snapshot still ships", func(t *testing.T) {
-		mr := &MockRunner{}
+		mr := &mockRunner{}
 		a := &archiveShipper{name: "offsite", remote: "r:bkt", mode: "full", compress: "zstd", run: mr, parents: &fakeParentStore{}}
 		if _, err := a.Send(t.Context(), Snapshot{ID: "0", Subvolume: "/home", Path: "/home/.snapshots/0/snapshot"}); err != nil {
 			t.Fatalf("Send(identified) = %v, want nil", err)
@@ -59,7 +59,7 @@ func TestArchiveShipper_Send_RefusesUnidentified(t *testing.T) {
 func TestResticShipper_Send_RefusesUnidentified(t *testing.T) {
 	for name, snap := range s053Unidentified {
 		t.Run(name, func(t *testing.T) {
-			mr := &MockRunner{}
+			mr := &mockRunner{}
 			fm := &fakeMounter{path: "/mnt/snap.ro"}
 			r := &resticShipper{name: "vault", repo: "/srv/restic", passwordFile: "/etc/bentoo/restic.pw", mount: fm, run: mr}
 			_, err := r.Send(t.Context(), snap)
@@ -74,7 +74,7 @@ func TestResticShipper_Send_RefusesUnidentified(t *testing.T) {
 	}
 	t.Run("identified snapshot still mounts", func(t *testing.T) {
 		fm := &fakeMounter{path: "/mnt/snap.ro"}
-		r := &resticShipper{name: "vault", repo: "/srv/restic", passwordFile: "/etc/bentoo/restic.pw", mount: fm, run: &MockRunner{}}
+		r := &resticShipper{name: "vault", repo: "/srv/restic", passwordFile: "/etc/bentoo/restic.pw", mount: fm, run: &mockRunner{}}
 		if _, err := r.Send(t.Context(), Snapshot{ID: "0", Subvolume: "/home", Path: "/home/.snapshots/0/snapshot"}); err != nil {
 			t.Fatalf("Send(identified) = %v, want nil", err)
 		}

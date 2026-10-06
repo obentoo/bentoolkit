@@ -1,6 +1,6 @@
 // Package portal opens a notice's URL in the user's browser: through the
 // desktop portal's OpenURI when it answers, through xdg-open when it
-// definitely did not act (S072-R7).
+// definitely did not act.
 package portal
 
 import (
@@ -38,7 +38,7 @@ const (
 	responseFailed    = 2
 )
 
-// fallbackCommand is the program run when the portal did not act (R7.2).
+// fallbackCommand is the program run when the portal did not act.
 const fallbackCommand = "xdg-open"
 
 // portalTimeout bounds the wait for the OpenURI reply. A D-Bus call cannot be
@@ -65,22 +65,22 @@ const signalBuffer = 16
 const cleanupTimeout = 2 * time.Second
 
 // ErrURLRefused is returned by Open for a URL that is not https on exactly
-// the allowed host, or whose query or fragment is not well-formed (R7.3).
+// the allowed host, or whose query or fragment is not well-formed.
 // Nothing is opened.
 var ErrURLRefused = errors.New("URL refused")
 
 // ErrCancelled is returned by Open when the user dismissed the portal's
 // application chooser. Nothing was opened, so the notice is not to be marked
-// read (R7.4), and xdg-open is not run: the user chose not to open it.
+// read, and xdg-open is not run: the user chose not to open it.
 var ErrCancelled = errors.New("opening cancelled by the user")
 
 // ErrRefusedByPolicy is returned by Open when the portal refused the call by
 // policy (an administrator's lockdown). Nothing was opened, and xdg-open is
-// not run: that would bypass the policy (R7.5).
+// not run: that would bypass the policy.
 var ErrRefusedByPolicy = errors.New("opening refused by the desktop portal's policy")
 
 // notAllowedError is the D-Bus error name of a policy refusal. It is matched
-// exactly: a name that only resembles it is any other failure (R7.2).
+// exactly: a name that only resembles it is any other failure.
 const notAllowedError = "org.freedesktop.portal.Error.NotAllowed"
 
 // RunFunc runs the program name with args, without a shell.
@@ -135,7 +135,7 @@ type Opener struct {
 
 // New returns an Opener that opens only https URLs whose host (with its port,
 // if any) equals allowedHost, compared case-insensitively. An empty
-// allowedHost refuses every URL (the feed URL itself was refused, R2.9). A nil
+// allowedHost refuses every URL (the feed URL itself was refused). A nil
 // log discards; a nil run is ExecRun.
 func New(conn *dbus.Conn, allowedHost string, log *slog.Logger, run func(ctx context.Context, name string, args ...string) error) *Opener {
 	if log == nil {
@@ -150,18 +150,18 @@ func New(conn *dbus.Conn, allowedHost string, log *slog.Logger, run func(ctx con
 // Open opens rawURL.
 //
 // A URL that is not https on the allowed host, or is malformed, returns
-// ErrURLRefused and nothing runs (R7.3; the caller, which knows the notice
-// ID, logs the WARN). Otherwise the portal's OpenURI is asked to open it,
-// with token as the activation token when it is not empty (R7.1).
+// ErrURLRefused and nothing runs (the caller, which knows the notice ID,
+// logs the WARN). Otherwise the portal's OpenURI is asked to open it,
+// with token as the activation token when it is not empty.
 //
 // xdg-open runs, with the URL as its only argument, only when the portal
 // definitely did not act: the call got a D-Bus error reply (no portal, no
-// such method...) or the portal answered the request with a failure (R7.2).
+// such method...) or the portal answered the request with a failure.
 // It then fails only when xdg-open fails too, with both causes joined. When
 // the portal's fate is unknown (no reply in time), Open returns an error and
 // does not fall back. A dismissed chooser returns ErrCancelled; a refusal by
 // policy (org.freedesktop.portal.Error.NotAllowed) returns ErrRefusedByPolicy
-// and never falls back (R7.5).
+// and never falls back.
 func (o *Opener) Open(ctx context.Context, rawURL, token string) error {
 	target, err := o.check(rawURL)
 	if err != nil {

@@ -55,13 +55,12 @@ import (
 // specifics — which directory, and what the operating system said — travel in
 // the wrapped error Probe or Resolve builds around it.
 //
-// The two conditions share one sentinel because R1.4 groups them ("does not
-// exist, cannot be created, or is not writable") and because every caller acts
-// on them identically: fail the manifest step naming the path, and do not hand
-// the failure to the LLM fixer (R3.1). Splitting them would make the gate in
+// The two conditions share one sentinel because they are one condition ("does
+// not exist, cannot be created, or is not writable") and every caller acts on
+// them identically: fail the manifest step naming the path, and do not hand
+// the failure to the LLM fixer. Splitting them would make the gate in
 // internal/autoupdate ask two questions to reach one answer, and a gate that
-// misses a rung invokes an agent against a machine fault — the defect S030
-// exists to remove.
+// misses a rung invokes an agent against a machine fault.
 var ErrDistdirNotWritable = errors.New("distdir is not writable")
 
 // ErrUnsupportedHomeForm is returned (wrapped) for a path whose first element is
@@ -75,7 +74,7 @@ var ErrUnsupportedHomeForm = errors.New("unsupported home directory form")
 //
 //   - the default for the --distfiles-cache flag: the read-only portage cache
 //     consulted to skip re-downloading distfiles already on disk;
-//   - the last resort of Resolve's precedence (R1.2) — used only when the host
+//   - the last resort of Resolve's precedence — used only when the host
 //     cannot be asked where its DISTDIR is.
 //
 // internal/overlay re-exports it as DefaultDistfilesCache so the CLI keeps the
@@ -99,8 +98,7 @@ type Dir struct {
 	// Path is the absolute path pkgdev is given as --distdir.
 	Path string
 	// Created reports whether this process created the directory for this
-	// run. It is the whole of R1.5: only a directory we made is a directory
-	// we may remove.
+	// run: only a directory we made is a directory we may remove.
 	//
 	// What counts as "we made it" differs between the two entry points, and
 	// the difference is deliberate — each matches the promise its command
@@ -113,7 +111,7 @@ type Dir struct {
 	//     find again next run, and it may well be the host's own DISTDIR.
 	//   - Resolve sets Created for any path it had to create, because on that
 	//     path the directory was chosen by this process rather than named by
-	//     the user (D2). A directory this run conjured is one it must take
+	//     the user. A directory this run conjured is one it must take
 	//     away again.
 	Created bool
 }
@@ -133,46 +131,24 @@ func (d Dir) Cleanup() {
 }
 
 // Resolve returns the directory the autoupdate path gives pkgdev as --distdir,
-// chosen by D2's precedence — highest first:
+// by this precedence, highest first:
 //
-//  1. explicit — the --distdir flag, the same flag name `overlay manifest`
-//     uses and with the same meaning (R1.3);
+//  1. explicit — the --distdir flag, with `overlay manifest`'s meaning;
 //  2. configured — autoupdate.distdir from the config file;
-//  3. the DISTDIR the host's own package manager reports at runtime
-//     (`portageq distdir`), which is the default (R1.2);
+//  3. the DISTDIR the host's package manager reports (`portageq distdir`);
 //  4. DefaultCache, and only when that query cannot be answered.
 //
-// os.TempDir() is consulted nowhere in that list, and removing it is the whole
-// reason this function exists (R1.1). The defect it replaces hardcoded the
-// distdir to a temporary directory, which on the machine that hit it is a 31 GB
-// tmpfs: every distfile a sweep fetched was written into RAM on a host already
-// deep into swap, and the large ones died with wget's "Cannot write to '…'
-// (Success)" — the disguise ENOSPC wears on tmpfs. A distdir has to be backed
-// by a disk, and the host already names one.
+// os.TempDir() is nowhere in that list on purpose: on the host that hit the
+// defect it is a 31 GB tmpfs, and large fetches died there with wget's
+// "Cannot write to '…' (Success)", the disguise ENOSPC wears on tmpfs. A
+// directory that already existed has Created = false; only a path this call
+// made is Created (stricter than ResolveOrTemp, see Dir.Created).
 //
-// Created follows D2 literally here: a directory that already existed is used
-// as-is with Created = false, and only a path this call had to make gets
-// Created = true, so Cleanup removes exactly what this run conjured and nothing
-// else. That is STRICTER than ResolveOrTemp, on purpose — see Dir.Created.
-//
-// Resolution ends with Probe, the pre-flight of D5: the chosen directory is not
-// returned until it has been proved writable. There is deliberately NO fallback
-// branch here — a directory that fails the probe is returned as an error naming
-// it, never swapped for another one. Falling back is precisely the defect this
-// story removes: the code being replaced retreated to a temporary directory,
-// which on the host measured is a 31 GB tmpfs (M2). See Probe for why the answer
-// depends on the invoking user's groups rather than on the path.
-//
-// On failure — whether the directory could not be created or could not be
-// written to — the returned Dir carries the chosen Path with Created = false:
-// Cleanup stays a no-op, and the caller can name the directory it could not
-// prepare in the diagnostic instead of failing anonymously (R1.4). A non-nil
-// error means the path is for the message only; it is never a directory to use.
-//
-// ctx bounds the host query on the third rung. A done ctx is not an unanswered
-// rung: falling through to DefaultCache would create and probe a directory the
-// host never named, and report an interrupt as ErrDistdirNotWritable. So the
-// cancellation is returned instead, wrapped with %w.
+// The chosen directory is returned only after Probe proved it writable, with
+// NO fallback: retreating elsewhere is the defect being removed. On failure the
+// Dir carries the chosen Path, for the message only, with Created = false. A
+// done ctx on the host-query rung returns the cancellation wrapped with %w
+// rather than falling through to DefaultCache.
 func Resolve(ctx context.Context, explicit, configured string) (Dir, error) {
 	candidate := explicit
 	if candidate == "" {
@@ -191,11 +167,10 @@ func Resolve(ctx context.Context, explicit, configured string) (Dir, error) {
 	abs, created, err := expandAndCreate(candidate)
 	if err != nil {
 		// Carries the same sentinel Probe raises, because "this machine cannot
-		// give us a usable distdir" is one condition to act on and R1.4 states
-		// it as one. The wrap lives HERE and not in expandAndCreate, which
-		// ResolveOrTemp shares: `overlay manifest`'s behaviour is frozen by the
-		// Unchanged Behavior section, and a sentinel appearing in its errors
-		// would be a change to it.
+		// give us a usable distdir" is one condition to act on. The wrap lives
+		// HERE and not in expandAndCreate, which ResolveOrTemp shares:
+		// `overlay manifest`'s errors must stay as they are, and a sentinel
+		// appearing in them would be a change to it.
 		return Dir{Path: abs}, fmt.Errorf("%w: %w", ErrDistdirNotWritable, err)
 	}
 	if err := Probe(abs); err != nil {
@@ -206,38 +181,21 @@ func Resolve(ctx context.Context, explicit, configured string) (Dir, error) {
 
 // Locate reports the distdir to READ from, and whether there is one at all.
 //
-// # Why this exists next to Resolve rather than inside it
+// Resolve's two side effects are wrong for a read-only gate: expandAndCreate
+// CREATES the directory and Probe WRITES into it. A gate that only opens
+// archives on disk needs no write permission, so a portage-owned DISTDIR the
+// user cannot write is usable to it; and a DISTDIR that does not exist is an
+// ANSWER ("nothing here to read"), not a directory to create.
 //
-// Resolve answers a different question — "where does this host keep its
-// distfiles, and may we write there" — and answers it with two side effects:
-// expandAndCreate CREATES the directory, and Probe PROVES it writable by
-// writing a file into it. Both are right for `overlay manifest`, which is about
-// to download into that directory. Both are wrong for a read-only gate.
-//
-// A gate that only opens archives already on disk needs no write permission, so
-// a DISTDIR owned by portage and not writable by the invoking user is perfectly
-// usable to it — and this repository has already had to remove three tests that
-// assumed otherwise. Nor may it conjure a directory: a DISTDIR that does not
-// exist is an ANSWER ("there is nothing here to read"), which the caller turns
-// into an outcome that says so, rather than a directory to create and then find
-// empty.
-//
-// So this shares Resolve's PRECEDENCE — explicit, then configured, then the
-// host's own `portageq distdir` — and shares nothing else. There is deliberately
-// no DefaultCache rung and no temporary-directory fallback: each would name a
-// directory holding no distfiles and turn "I could not look" into "I looked and
-// found nothing", which is the class of silent pass this gate exists to remove.
-//
-// Do not fold this back into Resolve (design D2). They differ in exactly the two
-// side effects that matter, and unifying them would either stop the manifest
-// step creating its distdir or start the validate gate writing to one it was
-// asked only to read.
+// So Locate shares Resolve's precedence (explicit, configured, then the host's
+// `portageq distdir`) and nothing else. It has no DefaultCache rung and no
+// temporary fallback: each would turn "I could not look" into "I looked and
+// found nothing". Do not fold it back into Resolve.
 //
 // found is false when no rung named a candidate, when the candidate does not
-// exist, or when it is not a directory. A Stat error other than not-exist is
-// false too: the caller's question is "can I read here", not "why not".
-//
-// ctx bounds the host query on the last rung, exactly as it does for Resolve.
+// exist or is not a directory, or on any other Stat error: the caller's
+// question is "can I read here", not "why not". ctx bounds the host query on
+// the last rung, as it does for Resolve.
 func Locate(ctx context.Context, explicit, configured string) (string, bool) {
 	candidate := explicit
 	if candidate == "" {
@@ -306,7 +264,7 @@ var probeSeq atomic.Uint64
 
 // probePayload is written into the probe file instead of leaving it empty,
 // because "the directory accepted an inode" and "the filesystem accepted bytes"
-// are different questions and this story exists because of the second one. On a
+// are different questions and the defect behind Probe is the second one. On a
 // full tmpfs the create succeeds and the write is what fails with ENOSPC — the
 // error wget reported as "Cannot write to '…' (Success)".
 const probePayload = "bentoo distdir writability probe\n"
@@ -315,43 +273,20 @@ const probePayload = "bentoo distdir writability probe\n"
 // inside it and removing it again. It returns nil when the directory is usable
 // and an error wrapping ErrDistdirNotWritable when it is not.
 //
-// This is R3.1's pre-flight. It runs before pkgdev is invoked, so a distdir the
-// invoking user cannot write to is an environment failure reported at once,
-// rather than a download failure handed to an LLM fixer that cannot repair a
-// filesystem permission.
+// It runs before pkgdev, so an unwritable distdir is an environment failure
+// reported at once, not a download failure handed to an LLM fixer that cannot
+// repair a permission. The default is the host's DISTDIR, portage:portage
+// 0775, so writability depends on the invoking user's GROUPS; where they lack
+// portage the answer must be this error naming the directory, never a retreat
+// to somewhere writable such as a tmpfs.
 //
-// Why this is not a theoretical check: the default distdir is the host's own
-// DISTDIR, which on a Gentoo system is portage:portage 0775 (M2). Whether it is
-// writable is therefore a property of the invoking user's GROUPS, not of the
-// path. On the machine this story was measured on the user is in group portage
-// and the default works; on a host where they are not, the very same default is
-// unwritable — and the answer there must be this error, naming the directory.
-// Retreating to somewhere writable, which is what the code being replaced did,
-// lands the download in a tmpfs and reintroduces the defect (R1.4).
-//
-// The probe file is named for this process and this call, is written with mode
-// 0600, and is removed by the same call that created it — including when the
-// write fails. Its name is built here and never derived from external input, so
-// it cannot be steered outside dir. Concurrent calls, from any number of
-// goroutines or processes, never choose the same name and so never disturb each
-// other; the classifier added later re-uses Probe for exactly that reason.
-//
-// The file is opened without O_EXCL on purpose. A predecessor killed between
-// creating and removing its probe can leave one behind, and a later process that
-// happens to reuse its PID would otherwise be told a perfectly writable
-// directory is not writable. Overwriting a file that can only be our own name
-// is both safe and self-healing.
-//
-// The open does carry O_NOFOLLOW. Without it, a symlink planted at the name the
-// next probe will use made the O_TRUNC truncate whatever it pointed at; now the
-// open fails with ELOOP, which is reported as ErrDistdirNotWritable naming dir,
-// and the link — and its target — are left exactly as they were. The deferred
-// removal is registered only after a successful open, so it never unlinks a name
-// that was not this call's file.
-//
-// An empty dir is refused rather than probed: filepath.Join would resolve the
-// probe against the working directory, which is not the directory anyone asked
-// about, and writing there would answer the wrong question.
+// The probe file's name is built from the PID and a counter, never from input,
+// so concurrent calls never collide. It is opened 0600 without O_EXCL, so a
+// leftover from a killed predecessor with a reused PID does not read as
+// unwritable, but with O_NOFOLLOW, so a planted symlink fails with ELOOP and
+// its target is untouched. The file is removed by the same call, including when
+// the write fails. An empty dir is refused: filepath.Join would probe the
+// working directory.
 func Probe(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("%w: no distdir was resolved", ErrDistdirNotWritable)
@@ -392,7 +327,7 @@ func Probe(dir string) error {
 //
 // None of those is an error. "Unanswered" is a legitimate state — a non-portage
 // host has no portageq at all — and its consequence is the next rung of the
-// precedence, not a failed run (R1.2). Requiring an absolute path is what keeps
+// precedence, not a failed run. Requiring an absolute path is what keeps
 // a diagnostic, a warning or a stray word from being mistaken for a directory:
 // a relative path is meaningless here anyway, since we do not know portage's
 // working directory.
@@ -404,30 +339,19 @@ func hostDistdir(ctx context.Context) string {
 
 // TempRoot returns the directory a THROWAWAY distdir should be created under —
 // the host's own PORTAGE_TMPDIR — or "" when the question cannot be answered.
-//
-// "" is not a failure and not a sentinel: it is exactly what os.MkdirTemp takes
-// to mean "use os.TempDir()", so a caller writes
+// "" is exactly what os.MkdirTemp reads as "use os.TempDir()", so
 //
 //	os.MkdirTemp(distfiles.TempRoot(ctx), "…")
 //
-// and gets the disk-backed answer where one exists and today's behaviour where
-// it does not.
+// is disk-backed where possible and today's behaviour elsewhere.
 //
-// # Why this exists next to Resolve rather than inside it
-//
-// Resolve answers "where does this host KEEP its distfiles" (R1.2) and its
-// answer is shared, persistent and not ours to delete. This answers a different
-// question — "where may we make a directory that is ours, that we will delete,
-// and that must not be RAM". The LLM manifest fixer needs the second: it is
-// given a private distdir so its self-verification never touches the system
-// DISTDIR, and that privacy is the point, so Resolve's answer would be wrong.
-//
-// What was wrong was the ROOT. os.MkdirTemp("") means os.TempDir(), which on the
-// host S030 was measured on is a 31 GB tmpfs — the same defect R1.1 removes from
-// the manifest step, on a second path the story's tasks did not reach. Note that
-// reading the environment is not enough: PORTAGE_TMPDIR is set in make.conf and
-// is NOT exported into an ordinary user process, so os.Getenv returns "" here
-// and would silently land back on the tmpfs. Only portageq can answer.
+// Resolve's answer is shared, persistent and not ours to delete; this one is a
+// directory that is ours, will be deleted, and must not be RAM. The LLM
+// manifest fixer needs it for a private distdir. os.TempDir() on the measured
+// host is a 31 GB tmpfs, the same defect Resolve removes from the manifest
+// step. PORTAGE_TMPDIR is set in make.conf and NOT exported to a user process,
+// so os.Getenv would return "" and land back on the tmpfs: only portageq can
+// answer.
 func TempRoot(ctx context.Context) string {
 	return portageqPath(ctx, "envvar", "PORTAGE_TMPDIR")
 }
@@ -442,7 +366,7 @@ func TempRoot(ctx context.Context) string {
 //
 // None of those is an error. "Unanswered" is a legitimate state — a non-portage
 // host has no portageq at all — and its consequence is the caller's next rung,
-// not a failed run (R1.2). Requiring an absolute path is what keeps a
+// not a failed run. Requiring an absolute path is what keeps a
 // diagnostic, a warning or a stray word from being mistaken for a directory: a
 // relative path is meaningless here anyway, since we do not know portage's
 // working directory.
@@ -625,33 +549,17 @@ func ParseManifestDistFilenames(manifestPath string) []string {
 // sibling: the same names for a file that can be read, and the read failure
 // itself for one that cannot.
 //
-// # Why it exists
+// ParseManifestDistFilenames answers an unreadable Manifest with nil, which is
+// indistinguishable from "readable, and declaring no DIST". That is wrong for a
+// caller whose empty slice is AUTHORITATIVE ("this package publishes no
+// archive"): it would report "I could not look" as a fact. It is one read, not
+// a probe plus a parse, because a Manifest replaced between two reads would
+// answer for two different files.
 //
-// ParseManifestDistFilenames answers a missing or unreadable Manifest with nil,
-// and nil is indistinguishable from "readable, and declaring no DIST". That is
-// the right answer for prepopulation, which reads both as "nothing to reuse".
-// It is the wrong answer for a caller whose empty slice is AUTHORITATIVE — "I
-// looked, this package publishes no archive" (S037-D2) — because it lets "I
-// could not look" be reported as a fact nothing ever measured.
-//
-// Callers that needed the distinction were recovering it with a probe: read the
-// file once and discard the data, only to learn it was readable, then parse it
-// again. The distinction belongs at the source instead, and this is it.
-//
-// # Why one read rather than two
-//
-// A probe and a parse are two reads of a path, not two reads of a file. A
-// Manifest replaced between them answers one question about one file and another
-// about a different one, and the caller cannot tell that it happened. One read
-// cannot disagree with itself that way.
-//
-// # Why the error travels unwrapped
-//
-// Each call site already has a sentence of its own for this failure, kept to the
-// byte because operators read those reports (S039-R5.3, and namingFailure's own
-// wording from S037-R3.5). Adding a layer here would reword every one of them.
-// Unwrapped also keeps errors.Is(err, fs.ErrNotExist) answerable by callers that
-// distinguish an absent Manifest from an unreadable one.
+// The error travels unwrapped: each call site words this failure itself, to
+// the byte, because operators read those reports. Unwrapped also keeps
+// errors.Is(err, fs.ErrNotExist) answerable for callers that tell an absent
+// Manifest from an unreadable one.
 func ReadManifestDistFilenames(manifestPath string) ([]string, error) {
 	body, err := os.ReadFile(manifestPath) //nolint:gosec // G304: manifestPath is <package dir>/Manifest in the user's overlay or staged tree, under a package directory a confined key or the overlay scan names
 	if err != nil {
@@ -688,32 +596,17 @@ func PrepopulateFromCache(distdir, cacheDir string, names []string) int {
 // ManifestDistLines keeps the DIST records of a Manifest and drops everything
 // else, each surviving line byte-for-byte.
 //
-// # Why a caller wants this
+// A staged validation tree holds one candidate ebuild and none of the
+// package's other files, so the published Manifest's EBUILD, AUX and MISC
+// records name files it does not have. Only the DIST records describe what the
+// two trees genuinely share: the upstream archive. (A non-thin repository still
+// refuses a candidate with no EBUILD record; staging imposes thin-manifests for
+// that half.)
 //
-// A staged validation tree holds one candidate ebuild, no metadata.xml and none
-// of the package's siblings. The published Manifest's EBUILD, AUX and MISC
-// records all name files that tree does not have, so handing it over whole
-// describes a repository that does not exist. Only the DIST records describe
-// something the staged tree genuinely shares with the published one: the
-// upstream archive on disk.
-//
-// This is NOT what makes such a tree buildable on its own — a non-thin
-// repository refuses a candidate carrying no EBUILD record of its own, whatever
-// the Manifest says. Staging imposes thin-manifests for that. This is the other
-// half: not handing over records that describe absent files.
-//
-// # Why lines and not a parser
-//
-// A Manifest is line-oriented and its record type is the first field, so a line
-// is kept or it is not — and a kept line is the bytes that were read. Portage
-// verifies these digests against the archive it finds, so a DIST line that
-// survived a round-trip through some intermediate form is a line the build
-// fails on. The trailing newline is re-established rather than preserved per
-// line, which is the one normalisation here and the one no digest is read
-// through.
-//
-// Empty in, or no DIST record found, yields nil: a Manifest naming no archive
-// has answered, and its caller reads nil as "this describes nothing".
+// Lines, not a parser: Portage verifies these digests, so a kept line must be
+// the bytes that were read. The trailing newline is re-established rather than
+// preserved per line, the one normalisation, and no digest is read through it.
+// Empty in, or no DIST record found, yields nil: "this describes nothing".
 func ManifestDistLines(body []byte) []byte {
 	var kept []string
 	// The SAME test the name-producing answers apply, because it is literally

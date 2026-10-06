@@ -94,29 +94,19 @@ type ManifestOptions struct {
 	// the caller is about to receive. Nil closes the batch with no wording at
 	// all, which is what `overlay autoupdate` already passes today.
 	//
-	// # It is a function because the words are the CALLER's and the numbers
-	// are the run's
+	// It is a function because the words are the CALLER's and the numbers are
+	// the run's: nothing is known to summarize until the last worker has
+	// finished, inside this package, so the run supplies the facts when it has
+	// them and the caller supplies the wording it chose.
 	//
-	// A plain string field could not carry a summary: nothing is known to
-	// summarize until the last worker has finished, which is inside this
-	// package. A function lets the run supply the facts at the moment it has
-	// them and the caller supply the wording it chose, without either one
-	// holding the other's half (S046-R5.1, S046-R5.2; design.md D5).
-	//
-	// # Why a library that must not choose wording still relays some
-	//
-	// The alternative — this package stops calling BatchDone and the caller
-	// makes the call itself — splits a bracket: BatchStart is emitted inside
-	// the run, so a batch opened here and closed out there stays open on every
-	// path a caller forgets, and the Reporter's consumers would have to grow a
-	// case for a run that never ends. Unchanged Behavior 3 of story 046 is
-	// exactly that those consumers do not move. R5.2 governs who chose the
-	// WORDS, not who ended the run.
+	// The library still relays the call because BatchStart is emitted inside
+	// the run: a batch opened here and closed by the caller would stay open on
+	// every path a caller forgets, and the Reporter's consumers would need a
+	// case for a run that never ends.
 	//
 	// The four paths that return before the worker loop — an empty selection, a
 	// preview, and the two pre-flight refusals — open no batch, so they never
-	// reach this at all. A --dry-run in particular emits no lifecycle event of
-	// any kind, which is why a summary composer never has to answer for one.
+	// reach this at all; a --dry-run emits no lifecycle event of any kind.
 	Summary func(ManifestResult) string
 }
 
@@ -136,34 +126,19 @@ func (o *ManifestOptions) summarize(result ManifestResult) string {
 }
 
 // ManifestResult collects per-package results of a regeneration run, and is the
-// value a caller asks how the run went (S046-R1.5).
+// value a caller asks how the run went.
 //
-// # The counts are derived, not stored
+// Ok and Failed are methods over Updates rather than stored fields: two copies
+// of one fact drift (a target appended without the counter makes the summary
+// disagree with the list under it), and derived they cannot. They exist as
+// values because a "%d ok, %d failed" sentence pushed through the Reporter
+// cannot be counted, exported, or rendered again in another mode; the sentence
+// is composed FROM them now.
 //
-// Ok and Failed are methods over Updates rather than fields set beside it. A
-// pair of stored counters is a second copy of what the rows already say, and two
-// copies of one fact are two things to keep in agreement: a target appended
-// without the counter being touched makes the summary disagree with the list
-// printed under it, and nothing catches it because both numbers still look
-// plausible. Derived, they cannot drift.
-//
-// # Why the counts exist at all
-//
-// The run used to state them in exactly one place — inside a sentence handed to
-// the Reporter, "%d ok, %d failed" — which is a report squeezed through a
-// progress channel (design.md D5). Nothing downstream can count that sentence,
-// export it, or render it a second time in another mode. They are values the
-// caller holds now, and the sentence is composed FROM them rather than instead
-// of them.
-//
-// # NotEvaluated and Interrupted ARE stored, and the asymmetry is the point
-//
-// Ok and Failed are questions about the ROWS, so the rows can answer them and a
-// stored copy could only disagree. "How much of the plan did this run never get
-// to" is a question about the RUN, and no row can answer it: a target the run
-// never reached contributes nothing to look at, which is exactly what makes it
-// missing. So the two facts that only the run knows are set by the run, once,
-// where it knows them (S046-R1.4).
+// NotEvaluated and Interrupted ARE stored, and the asymmetry is the point: they
+// are questions about the RUN, which no row can answer — a target the run never
+// reached contributes nothing to look at. So the run sets them, once, where it
+// knows them.
 type ManifestResult struct {
 	// Updates is one entry per target the run FINISHED EVALUATING, in the order
 	// the targets were given.
@@ -244,8 +219,8 @@ func (r ManifestResult) Failed() int {
 //
 // Error gets the bare cause because the formatters print the atom in front of
 // it; Err gets the same cause wrapped with %w AND with the atom, because an
-// error that travels on its own has to name the target it belongs to (S046-R5.1,
-// and the repository's Go convention: an error without the identifier that
+// error that travels on its own has to name the target it belongs to (the
+// repository's Go convention: an error without the identifier that
 // triggered it is unactionable). Callers that want to add context wrap the cause
 // before passing it, so the two fields stay in step whatever it says.
 func (u *ManifestUpdate) fail(cause error) {
@@ -339,38 +314,16 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 // fresh file is produced (clean regeneration). The backup is restored on
 // failure. opts.Keep skips this step.
 //
-// pkgdev output is captured per job and surfaced through opts.Reporter as
-// TaskStart/TaskLine/TaskDone events, bracketed by BatchStart/BatchDone. If
-// Reporter is nil it is normalized to tui.Noop(), so the call is silent — and
-// silent costs the caller nothing, because the reporter is a view of the run
-// and not the run's result: every fact about how it went is in the returned
-// ManifestResult, each failure as an unwrappable Err and as the Output its
-// command printed, and the ok/failed counts a method call away (S046-R5.1).
+// pkgdev output is surfaced through opts.Reporter as TaskStart/TaskLine/TaskDone
+// events, bracketed by BatchStart/BatchDone; a nil Reporter is silent at no
+// cost, because every fact about the run is in the returned ManifestResult. The
+// returned Updates preserve the order of the input targets.
 //
-// The returned Updates preserve the order of the input targets, even when
-// workers complete out of order.
-//
-// # Cancelling ctx stops the run and does not fail what it never reached
-//
-// Workers stop PULLING from the queue once the context is done, and a target
-// that was still running when the cancellation arrived contributes no row
-// either. Both are counted in ManifestResult.NotEvaluated, and Interrupted says
-// the run was cut short even when that count is zero (S046-R1.4).
-//
-// The alternative — letting the loop drain the queue against a dead context, so
-// every remaining target comes back with "context canceled" — is what this
-// function used to do, and it is a report full of failures the operator caused
-// by asking the run to stop. Nothing was learned about those packages; saying so
-// is the whole of R1.4.
-//
-// # It returns a ManifestResult now, not the bare slice
-//
-// The slice was enough while the only facts were per target. A run also
-// establishes two things about ITSELF — how far it got, and whether it was cut
-// short — and neither can be read off a list of what it did reach. Handing back
-// the value that holds all three keeps them travelling together; a caller
-// wrapping the slice by hand could only wrap what it was given, and would have
-// to guess the rest from lengths it no longer knows.
+// Cancelling ctx stops the run and does not fail what it never reached: workers
+// stop PULLING from the queue, a target still running contributes no row, both
+// are counted in NotEvaluated, and Interrupted is set even when that count is
+// zero. Draining the queue against a dead context would report failures the
+// operator caused by asking the run to stop.
 func RegenerateManifests(ctx context.Context, overlayPath string, targets []ManifestUpdate, opts *ManifestOptions) ManifestResult {
 	if opts == nil {
 		opts = &ManifestOptions{}
@@ -451,7 +404,7 @@ func RegenerateManifests(ctx context.Context, overlayPath string, targets []Mani
 	}
 
 	// Normalize the reporter once so workers can emit unconditionally. A nil
-	// reporter becomes a no-op (R3.3), matching the previous silent behavior.
+	// reporter becomes a no-op, matching the previous silent behavior.
 	rep := opts.Reporter
 	if rep == nil {
 		rep = tui.Noop()
@@ -483,7 +436,7 @@ func RegenerateManifests(ctx context.Context, overlayPath string, targets []Mani
 				// failure — a package reported as broken because the operator
 				// asked the run to stop. Leaving the queue undrained is what
 				// makes "never reached" a real state instead of a fabricated
-				// verdict (S046-R1.4).
+				// verdict.
 				if ctx.Err() != nil {
 					return
 				}
@@ -514,7 +467,7 @@ func RegenerateManifests(ctx context.Context, overlayPath string, targets []Mani
 
 	// The run's own account of how far it got, taken once, here — the only
 	// place that knows both how many targets were handed in and which of them
-	// came back with something to say (S046-R1.4).
+	// came back with something to say.
 	result := ManifestResult{Updates: updates, Interrupted: ctx.Err() != nil}
 	if result.Interrupted {
 		result.Updates, result.NotEvaluated = evaluatedOnly(updates, evaluated)
@@ -522,32 +475,16 @@ func RegenerateManifests(ctx context.Context, overlayPath string, targets []Mani
 
 	// The batch closes on a sentence this package did not write. The facts are
 	// the run's and go out whole; the wording is whatever the caller chose, and
-	// a caller that chose none gets an empty close rather than one invented here
-	// (design.md D5, S046-R5.2).
+	// a caller that chose none gets an empty close rather than one invented here.
+	// A sentence composed inside a library is a finding that left as text:
+	// nothing downstream can count it, export it, or draw it again in another
+	// mode.
 	//
-	// # What moved is the WORDING, and it is not what sub-task 5.1 moved
-	//
-	// 5.1 moved where the numbers come from: Ok and Failed are methods over the
-	// rows now, not a pair of counters kept for one sentence. The format string
-	// stayed, which left this package still deciding how a run LOOKS — and a
-	// sentence composed inside a library is a finding that left as text, so
-	// nothing downstream can count it, export it, or draw it a second time in
-	// another mode. That is the defect D5 names, and moving the numbers did not
-	// touch it.
-	//
-	// # The argument for keeping it here survives the move, on the other side
-	//
-	// What stood here said the sentence is one more reader of the numbers rather
-	// than the only place they exist, so the live region and the report cannot
-	// disagree about how the run went. That is true and it is preserved: the
-	// composer is handed the very value the caller builds its report from, so
-	// both readings still come off one set of rows. What it did not answer is
-	// who chooses the words — which is the question R5.2 asks, and the reason
-	// the composer is now the caller's.
-	//
-	// On an interrupted run the value carries what the run established rather
-	// than what it was handed, so a summary composed from it counts the same
-	// targets the report lists.
+	// The composer is handed the very value the caller builds its report from,
+	// so the live region and the report still read one set of rows and cannot
+	// disagree about how the run went. On an interrupted run that value carries
+	// what the run established rather than what it was handed, so a summary
+	// composed from it counts the same targets the report lists.
 	rep.BatchDone(opts.summarize(result))
 
 	return result
@@ -594,7 +531,7 @@ func evaluatedOnly(updates []ManifestUpdate, evaluated []bool) (kept []ManifestU
 // also Err — the cause wrapped with %w and with this target's atom — and
 // Output, the bytes its pkgdev printed. Those two are the target's share of
 // what the run learned, and writing them here is what lets a report built after
-// the loop say why a package failed without re-running it (S046-R5.1, R5.2).
+// the loop say why a package failed without re-running it.
 //
 // It is invoked from a worker goroutine; concurrent calls write to distinct
 // slice indices, so no lock is required for the result and the added fields
@@ -633,9 +570,9 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 	}
 
 	// Stream pkgdev output through a StreamCapture: it tails live lines to the
-	// reporter while keeping a verbatim copy for the error path (R7.1). Each
+	// reporter while keeping a verbatim copy for the error path. Each
 	// worker owns its own StreamCapture but they all forward to the same rep,
-	// which is goroutine-safe (R7.4).
+	// which is goroutine-safe.
 	sc := tui.NewStreamCapture(rep, id, tui.StreamStdout)
 	if cacheDir != "" && len(distNames) > 0 {
 		reused := distfiles.PrepopulateFromCache(distdir, cacheDir, distNames)
@@ -653,7 +590,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 	// as any process pkgdev spawned still holds it. Measured at 30s against a
 	// child that sleeps 30s, from a cancel delivered at 300ms — which is a run
 	// that cannot report, because the report is assembled before it is rendered
-	// (R1.3) and there is nothing to assemble until this returns. See
+	// and there is nothing to assemble until this returns. See
 	// procgroup.KillGroupNow for what it does and what it costs.
 	procgroup.KillGroupNow(cmd)
 
@@ -668,7 +605,7 @@ func runOneManifest(ctx context.Context, overlayPath, distdir, cacheDir string, 
 		// it could not fetch or verify — so it is attached to the target before
 		// the reporter is told anything. The report the caller assembles later
 		// then holds the same bytes the live region showed, instead of the live
-		// region being the only place they ever existed (S046-R5.2).
+		// region being the only place they ever existed.
 		u.Output = sc.Captured()
 
 		cause := runErr
@@ -728,28 +665,18 @@ func RegenerateManifestsForScope(ctx context.Context, cfg *config.Config, scope 
 
 // FormatManifestResult renders a ManifestResult for display.
 //
-// It has had NO production caller since sub-task 5.2 moved `overlay manifest`
-// onto the report envelope: the counts are values the run hands back
-// (ManifestResult.Ok/Failed) and the rendering moved to internal/common/report
-// (S046-R5.1). Nothing outside its own three tests calls it.
+// It has had NO production caller since `overlay manifest` moved onto the
+// report envelope: the counts are values the run hands back
+// (ManifestResult.Ok/Failed) and the rendering moved to internal/common/report.
+// Nothing outside its own three tests calls it.
 //
 // It stays because four comments elsewhere cite what it DOES as the canonical
-// reading, and deleting the function would leave all four pointing at nothing:
-//
-//   - rename.go, on ManifestUpdate.Error — the field carries no atom because
-//     this formatter and FormatRenameResult both write "<category>/<package>: "
-//     immediately before it, so an atom in the field would print twice.
-//   - cmd/bentoo/overlay_manifest.go — records logger.Info over this function
-//     as the sentence story 046 replaced.
-//   - cmd/bentoo/overlay_manifest_report.go, on buildManifestReport — cites the
-//     dry-run branch below being answered BEFORE any count is taken as the
-//     order that avoids reporting every previewed package as failed.
-//   - the same comment, on a nil result — cites the reading a nil gets here,
-//     "No packages processed" and not a crash, beside the one
-//     report.Run.Sections gives a nil payload.
-//
-// So removing it is a change to those four comments first and to this function
-// second; the orphaning is recorded rather than acted on.
+// reading: rename.go on ManifestUpdate.Error (the atom this formatter prints
+// before it); cmd/bentoo/overlay_manifest.go (logger.Info over this function as
+// the sentence that was replaced); and cmd/bentoo/overlay_manifest_report.go on
+// buildManifestReport, twice — the dry-run branch answered BEFORE any count is
+// taken, and the "No packages processed" reading of a nil result. Removing it
+// is a change to those four comments first and to this function second.
 func FormatManifestResult(result *ManifestResult, dryRun bool) string {
 	var sb strings.Builder
 

@@ -20,7 +20,7 @@ var _ terminalController = (*Program)(nil)
 
 // RunAttached runs an interactive child command with the real terminal handed
 // back to it, so a sudo/doas password prompt is read on the actual TTY rather
-// than swallowed by the running program (R4.1, AD5).
+// than swallowed by the running program.
 //
 // The terminal is released before the child starts and restored afterwards.
 // Restore is best-effort: it runs via defer so the terminal is reclaimed even
@@ -52,7 +52,7 @@ func RunAttached(tc terminalController, cmd *exec.Cmd) error {
 }
 
 // ConfirmMsg asks the model to render an in-UI yes/no prompt and deliver the
-// answer on Reply. It is the in-band confirmation path (AD5): the y/N decision
+// answer on Reply. It is the in-band confirmation path: the y/N decision
 // is a key prompt rendered by the model rather than a read of os.Stdin behind
 // the running program. Reply should be a buffered (cap >= 1) channel so the
 // model's non-blocking send always lands.
@@ -62,7 +62,7 @@ type ConfirmMsg struct {
 }
 
 // Confirm asks the running program for a yes/no decision and blocks until the
-// user answers (R4.2). It sends a ConfirmMsg carrying a buffered reply channel
+// user answers. It sends a ConfirmMsg carrying a buffered reply channel
 // so the model can answer without blocking, then waits for that answer.
 func (p *Program) Confirm(prompt string) bool {
 	reply := make(chan bool, 1)

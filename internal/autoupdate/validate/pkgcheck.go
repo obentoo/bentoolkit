@@ -26,33 +26,21 @@ const qaTimeout = 2 * time.Minute
 // PkgcheckFindings collects the QA findings pkgcheck reports for one package,
 // beside the option gate and without touching its verdict.
 //
-// The return is (findings, outcome, reason), and the reason is non-empty
-// exactly when the outcome is SKIPPED. That is the same invariant the option
-// gate keeps, applied to the QA half: "pkgcheck found nothing" and "pkgcheck
-// did not run" are different answers, and a report that renders them alike is
-// the silent pass this story exists to remove.
+// The reason is non-empty exactly when the outcome is SKIPPED: "pkgcheck found
+// nothing" and "pkgcheck did not run" are different answers, and rendering them
+// alike is a silent pass.
 //
-// # Why --cache=-git
+// --cache=-git, because pkgcheck's GitAddon raises on this overlay's history: it
+// prints a traceback to STDERR, writes nothing to stdout and EXITS 0, so every
+// scan looks clean. Disabling it costs only the git-history checks (commit
+// messages, dropped blockers), none of which say whether an ebuild matches its
+// source.
 //
-// This was measured, not assumed. pkgcheck's GitAddon raises on this overlay's
-// history: it prints a Python traceback to STDERR, writes nothing to stdout and
-// EXITS 0. Three scans during design looked like clean packages for that
-// reason, and design.md D7 recorded the record shape as unobserved because of
-// it. With the git cache off, the same scans report findings immediately.
-//
-// Disabling it costs the git-history checks only — commit messages, blockers
-// dropped upstream — none of which say anything about whether an ebuild matches
-// the source it points at. Silently losing every finding costs everything.
-//
-// # Why the exit code is not the verdict
-//
-// Measured on the installed pkgcheck: it exits 0 with findings AND 0 for an
-// atom the repository does not hold. The code carries almost nothing, so a
-// non-zero one means something genuinely abnormal — and even then, records that
-// did arrive are reported rather than discarded, because findings on stdout are
-// findings whatever the process did afterwards.
-//
-// Findings are carried at Gate "qa" so Report.ExitCode can exclude them (D8).
+// The exit code is not the verdict: pkgcheck exits 0 with findings AND for an
+// atom the repository does not hold. Records that did arrive are reported even
+// after a non-zero exit, because findings on stdout are findings whatever the
+// process did afterwards. Findings are carried at Gate "qa" so Report.ExitCode
+// can exclude them.
 func PkgcheckFindings(ctx context.Context, pkgDir, atom string) ([]Finding, Outcome, string) {
 	if _, err := lookPath("pkgcheck"); err != nil {
 		return nil, OutcomeSkipped, "pkgcheck was not found on PATH, so no QA findings were collected"

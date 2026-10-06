@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // TestRunSnapshotStatus_PerStageTimersAndSpace: 008 R5.1 — status reports the
@@ -29,7 +30,7 @@ func TestRunSnapshotStatus_PerStageTimersAndSpace(t *testing.T) {
 		t.Fatalf("seed last run: %v", err)
 	}
 
-	mock := &snapshot.MockRunner{
+	mock := &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			if name == "systemctl" && len(args) > 0 && args[0] == "list-timers" {
 				return []byte("NEXT LEFT LAST PASSED UNIT ACTIVATES\n" +
@@ -92,7 +93,7 @@ func TestRunSnapshotStatus_ReadsResultAndTimer(t *testing.T) {
 		t.Fatalf("seed last run: %v", err)
 	}
 
-	mock := &snapshot.MockRunner{
+	mock := &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte("enabled\n"), nil
 		},

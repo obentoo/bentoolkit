@@ -51,8 +51,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 		// Plain text, by the same call runStatus documents at length: the library
 		// composes what was staged, this command shows it, and nothing here
-		// re-applies the colour overlay.FormatStatus used to decide for it
-		// (S046-R5.2).
+		// re-applies the colour overlay.FormatStatus used to decide for it.
 		uiInfo(overlay.FormatStatus(statuses))
 	}
 

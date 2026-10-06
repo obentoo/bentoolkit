@@ -13,7 +13,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Fetch identity (S024-R1.1 … S024-R1.4)
+// Fetch identity
 // -----------------------------------------------------------------------------
 
 // KeySeparator joins the raw URL to the header digest inside a cache key. A NUL
@@ -22,88 +22,45 @@ import (
 // and impersonate another identity's header term.
 const KeySeparator = "\x00"
 
-// BodyKey derives the identity that two upstream reads must share before either
-// may be handed the other's bytes: the URL about to be requested, plus a digest
-// of the headers the record declared (S024-R1.1). Two reads land on one key only
-// when the requests they would issue are byte-identical; anything else gets its
-// own key, and therefore its own fetch.
+// BodyKey derives the identity two upstream reads must share before either may
+// be handed the other's bytes: rawURL + NUL + hex(sha256(canonicalHeaders(headers))).
+// Two reads share a key only when the requests they would issue are
+// byte-identical. The URL is carried verbatim, so identity follows the URL
+// actually requested and no registry edit can leave the key disagreeing with it.
 //
-// The shape is rawURL + NUL + hex(sha256(canonicalHeaders(headers))). The URL is
-// carried verbatim rather than hashed because identity is derived from the URL
-// that is actually about to be requested: no record has to declare that it
-// shares a source with another record, and no registry edit can leave the key
-// disagreeing with reality (S024-R1.4).
+// Collapsing wrongly hands one entry another entry's bytes. Range is the sharp
+// edge: the checker accepts a 206, and a 206 fragment handed to a caller that
+// asked for the whole file looks like a successful read of a truncated document.
+// Keying on the declared headers makes that impossible by construction.
 //
-// Getting this wrong in the collapsing direction is not a lost optimisation — it
-// is one entry silently receiving another entry's bytes. The Range case is the
-// sharp edge. A record may ask for a window near the front of a large file, and
-// the checker deliberately accepts the resulting 206 (S020-R1.1). A 206 fragment
-// handed to a caller that asked for the whole file does not look like a failure;
-// it looks like a successful read of a truncated document, and every downstream
-// parser would treat it as one. Keying on the declared headers makes that
-// impossible by construction (S024-R1.3).
-//
-// The header term is hashed so that a key is safe to log at DEBUG. Today
-// cfg.Headers holds the literal TOML text with ${VAR} placeholders still
-// unexpanded — SubstituteEnvVars runs later, inside applyHeaders, at
-// request-build time — so no key contains a credential. Hashing removes the need
-// to keep re-verifying that as the registry grows: safe by construction rather
-// than by care.
-//
-// Deliberately absent from the key, each with the tripwire that would force it in:
-//
-//   - the client's default headers (User-Agent): fixed for the Checker's whole
-//     lifetime, so they cannot distinguish two reads. Tripwire: a per-package
-//     User-Agent override.
-//   - the GitHub token: applied only when isGitHubAPIURL(url) holds, which is a
-//     function of the URL, and the URL IS in the key — so the token cannot vary
-//     while the key stays put. Tripwire: per-package tokens.
-//   - ${VAR} expansions: the environment does not change mid-run, so the
-//     unexpanded text and the expanded value are in one-to-one correspondence.
-//     Tripwire: expansion from a live source.
-//
-// If any tripwire fires, this key must be rebuilt from the *effective* header set
-// that applyHeaders produces, not from the declared one.
-//
-// bodyKey has no error path: every input is already a string, and a nil map is a
-// valid way to say "this record declares no headers".
+// The header term is hashed so a key is safe to log at DEBUG by construction
+// (today ${VAR} placeholders are still unexpanded here). Deliberately absent from
+// the key: the client's default headers (fixed per Checker), the GitHub token (a
+// function of the URL, which is in the key) and ${VAR} expansions (the
+// environment is fixed mid-run). A per-package User-Agent, per-package tokens or
+// live expansion would force the key onto the effective header set applyHeaders
+// produces. A nil map is a valid "no headers declared".
 func BodyKey(rawURL string, headers map[string]string) string {
 	digest := sha256.Sum256([]byte(canonicalHeaders(headers)))
 	return rawURL + KeySeparator + hex.EncodeToString(digest[:])
 }
 
 // canonicalHeaders renders a declared header map as sorted "Name: value\n"
-// lines. It is what makes two records that wrote the same headers differently
-// resolve to a single fetch (S024-R1.2).
+// lines, so two records that wrote the same headers differently resolve to a
+// single fetch.
 //
-// Exactly two things are normalised:
+// The NAME is trimmed and passed through textproto.CanonicalMIMEHeaderKey, as
+// setHeader does when it builds the request. The trim is load-bearing:
+// CanonicalMIMEHeaderKey leaves input with a leading space untouched, so
+// " accept" would otherwise key apart from "Accept". The ORDER is fixed by
+// sorting whole lines, because Go randomises map iteration; sorting lines rather
+// than names keeps a map holding two spellings of one name stable. The VALUE is
+// never touched: "Application/JSON" and "application/json" are different bytes
+// on the wire. Nil and empty maps both render to "", one key for "no headers".
 //
-//   - the NAME is trimmed and passed through textproto.CanonicalMIMEHeaderKey,
-//     the same pair of steps setHeader applies when it builds the request, so a
-//     map spelling a header "accept" keys identically to one spelling it
-//     "Accept". The trim is load-bearing rather than cosmetic:
-//     CanonicalMIMEHeaderKey returns its input untouched when it contains a
-//     character no header name may hold, and a leading space is such a
-//     character — so " accept" would otherwise key apart from "Accept" while
-//     producing the very same request.
-//   - the ORDER is fixed by sorting the finished lines, because Go randomises
-//     map iteration. Without the sort the same map yields a different key on
-//     nearly every call, which would defeat the cache rather than corrupt it.
-//
-// The VALUE is opaque and is never touched: "Application/JSON" and
-// "application/json" are different bytes on the wire, so they are different
-// fetches. Sorting whole lines rather than names also keeps the rendering stable
-// in the pathological case where one map holds two spellings of one header name.
-//
-// A nil map and an empty map both render to the empty string, so "no headers
-// declared" has exactly one representation and therefore exactly one key.
-//
-// Known, and deliberately left open: a value containing a newline could spell a
-// second line and so collide with a two-header map. It is not a body-confusion
-// vector, because net/http refuses to issue such a request at all ("invalid
-// header field value"), so the colliding record could never have fetched
-// anything of its own to be confused about. A length-prefixed encoding would
-// close it, at the cost of a canonical form no one can read.
+// Known and left open: a value containing a newline could collide with a
+// two-header map, but net/http refuses to send such a request, so the colliding
+// record could never fetch anything to be confused about.
 func canonicalHeaders(headers map[string]string) string {
 	// len covers nil and empty alike, which is what collapses "no headers" onto
 	// a single representation and therefore a single key.
@@ -122,7 +79,7 @@ func canonicalHeaders(headers map[string]string) string {
 }
 
 // -----------------------------------------------------------------------------
-// Single-flight join (S024-R2.1, S024-R2.3, S024-R2.4, S024-R6.1)
+// Single-flight join
 // -----------------------------------------------------------------------------
 
 // bodyEntry is one key's state. done is closed exactly once: by the leader — the
@@ -134,7 +91,7 @@ func canonicalHeaders(headers map[string]string) string {
 // and a refused admission both delete the key. So a waiter released with
 // ok == true always finds a usable body, and ok == false always means "fetch it
 // yourself" — never "the request you wanted failed", which would make one
-// record's outcome depend on another's (S024-R3.1).
+// record's outcome depend on another's.
 //
 // body and ok are written once, by the leader, before close(done), and are read
 // only after done has been observed closed — either by receiving from it or by
@@ -161,9 +118,9 @@ func (e *bodyEntry) settled() bool {
 }
 
 // BodyCacheStats is DEBUG-level observability, and the assertion surface tests
-// use to prove a request was or was not issued (S024-R6.1). Counts are per
-// bodyCache, and a bodyCache lives exactly as long as one Checker, so these are
-// per-run figures that are never carried across invocations (S024-R2.4).
+// use to prove a request was or was not issued. Counts are per bodyCache, and a
+// bodyCache lives exactly as long as one Checker, so these are per-run figures
+// that are never carried across invocations.
 type BodyCacheStats struct {
 	Hits       int // served from a retained body
 	Joins      int // waited on an in-flight fetch
@@ -176,8 +133,7 @@ type BodyCacheStats struct {
 // BodyCache deduplicates response bodies within the lifetime of one Checker —
 // that is, one command invocation. It is not persisted and has no TTL: a run is
 // short enough that an upstream endpoint is treated as immutable for its
-// duration, which is the same assumption every concurrent HTTP client makes
-// (S024-R2.4).
+// duration, which is the same assumption every concurrent HTTP client makes.
 //
 // It knows nothing about HTTP, packages or the registry: it is handed a key and
 // a function that produces bytes. That is what keeps its concurrency contract
@@ -223,55 +179,24 @@ func (c *BodyCache) Snapshot() BodyCacheStats {
 }
 
 // Do returns the body for key, fetching it at most once across concurrent
-// callers (S024-R2.1). fetch is invoked by the first caller to arrive; callers
-// that arrive while that fetch is in flight wait for its result instead of
-// issuing their own (S024-R2.3); callers that arrive after it completed are
-// served from the retained body with no fetch and no rate-limit wait.
+// callers: the first caller to arrive leads and calls fetch, callers arriving
+// while it is in flight wait for its result, and later callers are served the
+// retained body with no fetch and no rate-limit token.
 //
-// Three states per key, and the transitions are the whole contract:
+// THIS FUNCTION TAKES NO LOCK, and the mutex is never held across fetch or the
+// wait: a lock held there would pass every test while serialising all records
+// behind one network round trip. Each locking helper (classify, publish,
+// countRefetch, retain) is short and holds neither a fetch nor a wait. The wait
+// is bounded by the parent ctx, never a per-operation timeout: queue time charged
+// to an HTTP deadline once failed packages before any request was issued.
 //
-//	absent    -> become the leader: publish an in-flight entry, call fetch,
-//	             then admit or discard the body
-//	in flight -> wait on the leader's channel, bounded by ctx
-//	done      -> return the retained bytes, no fetch, no token
+// An error is neither cached nor shared: a waiter released by a failed leader
+// fetches on its own. No outcome is logged — a cold cache misses on every read;
+// the counters are the observability surface, and the caller logs its failures.
 //
-// THE MUTEX IS NEVER HELD ACROSS fetch, AND NEVER ACROSS THE WAIT. It guards
-// only the classification (classify) and the publication (publish), both of
-// which are map operations measured in nanoseconds. This is the one property no
-// assertion in this package can catch: a do that held the lock across the call
-// would satisfy every test — one fetch, shared bytes, correct counters — while
-// serialising all 411 records behind a single 6-second network round trip,
-// which is precisely the queue this cache exists to remove. So the code is
-// arranged to make it checkable rather than merely asserted: THIS FUNCTION
-// TAKES NO LOCK AT ALL, and every helper that does — classify, publish,
-// countRefetch, retain — is small enough to read whole and contains neither a
-// fetch nor a wait.
-//
-// The wait is bounded by ctx alone — the parent context, never the caller's
-// per-operation timeout. That is the policy the rate-limiter wait already
-// follows, and for the same reason: waiting behind another caller is queue time,
-// and charging queue time to an HTTP deadline is what once made packages sharing
-// a host fail before a single request had been issued.
-//
-// A shared fetch is an optimisation, never a coupling: an error is neither
-// cached nor shared, so a waiter released by a failed leader fetches on its own
-// rather than inheriting a failure it did not cause (S024-R3.1).
-//
-// NO OUTCOME HERE IS EVER LOGGED — not a miss, not a failure, not a refetch
-// (S024-R6.3). A miss is the normal state of a cold cache, and one line per read
-// across 411 records would bury the warnings that matter. The counters in
-// bodyCacheStats are the whole observability surface; the caller that owns the
-// failed request logs it, once, where it already did before this cache existed.
-//
-// THE RETURNED SLICE IS SHARED, NOT COPIED, AND IS READ-ONLY. Every caller of
-// one identity receives the same backing array, so mutating it would corrupt
-// what every other record sees. This holds today for every consumer downstream
-// of fetchContent — parseJSON, parseRegex, goquery and htmlquery all read
-// without mutating — and it is stated here because it is the one invariant a
-// future caller could break silently: nothing would fail loudly, one package
-// would simply start reporting another package's version. Copying per waiter
-// would restore exactly the memory cost the cache exists to remove, so the
-// contract is the mechanism, not an optimisation on top of one.
+// THE RETURNED SLICE IS SHARED AND READ-ONLY: a mutation would silently make one
+// package report another's version, and copying per waiter would restore the
+// memory cost the cache removes.
 func (c *BodyCache) Do(ctx context.Context, key string, fetch func() ([]byte, error)) ([]byte, error) {
 	entry, how := c.classify(key)
 
@@ -287,7 +212,7 @@ func (c *BodyCache) Do(ctx context.Context, key string, fetch func() ([]byte, er
 		case <-entry.done:
 		case <-ctx.Done():
 			// The run itself is over — a SIGINT, or the parent deadline. Return
-			// WITHOUT issuing a request of our own (S024-R5.1), and carry the
+			// WITHOUT issuing a request of our own, and carry the
 			// RAW context error as the cause rather than replacing it, exactly
 			// as the rate-limiter wait does at checker.go:1692. The wrapper says
 			// what was being waited for; errors.Is(err, context.Canceled) and
@@ -389,7 +314,7 @@ var errFetchPanicked = errors.New("the leading fetch panicked")
 // the queue this cache exists to remove.
 //
 // The deferred publication is the guarantee that no waiter can outlive its
-// leader (S024-R3.5). A panic inside fetch — from the fetch itself or from
+// leader. A panic inside fetch — from the fetch itself or from
 // anything it calls — would otherwise unwind straight past the publication and
 // leave every waiter blocked on a channel nobody will ever close: not a wrong
 // answer but a hung run, which is worse, because a hung run reports nothing at
@@ -419,7 +344,7 @@ func (c *BodyCache) lead(key string, entry *bodyEntry, fetch func() ([]byte, err
 // fetchAlone is lead's counterpart: the caller fetches for itself rather than
 // for everyone. It is the one path that leaves the join, taken by a waiter a
 // failed leader released and by the arriveAlone guard, and it is deliberately
-// the pre-story behaviour byte for byte — sharing is an optimisation, and where
+// the uncached behaviour byte for byte — sharing is an optimisation, and where
 // it does not apply, nothing else changes.
 //
 // The count is taken once, before the fetch and whatever the fetch then returns,
@@ -442,7 +367,7 @@ func (c *BodyCache) fetchAlone(key string, fetch func() ([]byte, error)) ([]byte
 
 // countRefetch records that a caller left the join to issue a request of its
 // own, because the entry it found had FAILED: the leader's error is not the
-// waiter's, so the waiter pays for its own fetch (S024-R3.1).
+// waiter's, so the waiter pays for its own fetch.
 //
 // It is called at most once per do call, which is a contract rather than an
 // implementation detail. A waiter that could rejoin — loop back into do and wait
@@ -492,25 +417,21 @@ func (c *BodyCache) retain(key string, body []byte) {
 }
 
 // The retention limits a real run uses, in bytes. They bound MEMORY, never
-// correctness: a body over a limit is still fetched and still returned to its
-// caller unchanged, it is simply not kept (S024-R4.2).
+// correctness: a body over a limit is still fetched and returned to its caller
+// unchanged, it is simply not kept.
 //
-// Both figures come from measuring the registry rather than from taste (story
-// assumption A4), and the measurement is recorded here because it is the only
-// thing that makes them reviewable:
+// Both figures come from measuring the registry:
 //
-//   - 2 MiB per body — the most widely shared body in the registry, the 170-way
-//     GStreamer tags listing, measures 33.7 KB: some sixty times under the cap,
-//     so the deduplication this cache exists for is nowhere near it. The largest
-//     payload the registry knows of, www-misc/warsaw at ~8.2 MB, is declared by
-//     exactly ONE record — retaining it would save no fetch at all while costing
-//     more memory than everything else in the run put together.
+//   - 2 MiB per body — the most widely shared body, the 170-way GStreamer tags
+//     listing, measures 33.7 KB, some sixty times under the cap. The largest
+//     payload, www-misc/warsaw at ~8.2 MB, is declared by exactly ONE record, so
+//     retaining it would save no fetch while costing more than the rest combined.
 //   - 64 MiB total — the 230 distinct URLs at tens of KB each land near ~10 MB,
 //     so this is a ceiling on pathology, not a working figure.
 //
-// The numbers are therefore comfortable rather than tuned, and A4 asks for them
-// to be confirmed against a real run's counters — Oversize and BudgetFull both
-// staying at zero — before they are treated as settled.
+// They are comfortable rather than tuned: confirm them against a real run's
+// counters (Oversize and BudgetFull staying at zero) before treating them as
+// settled.
 const (
 	// DefaultFetchCachePerBody is the largest response body a run will retain
 	// for reuse, in bytes: 2 MiB (2097152).
@@ -535,45 +456,22 @@ func NewDefaultBodyCache() *BodyCache {
 
 // admitLocked reports whether a freshly fetched body may be RETAINED for callers
 // that have not arrived yet, and charges it against the run budget when it may.
-// It is the one question both retention paths ask — publish, for the body a
-// leader shared, and retain, for a body fetched outside the join — so the limits
-// have exactly one home and cannot drift apart.
+// Both retention paths (publish and retain) ask it, so the limits have one home.
 //
-// ADMISSION IS ABOUT MEMORY, NEVER ABOUT CORRECTNESS. Whatever this returns, the
-// body has already been fetched and is already on its way back to its caller
-// byte for byte: neither limit can make a fetch fail, be skipped, or be
-// truncated. A refusal costs exactly one later fetch of that identity and
-// nothing else (S024-R4.2), which is why the call sites express it by forgetting
-// the key (publish deletes it, retain declines to insert one) rather than by
-// altering what anybody receives.
+// ADMISSION IS ABOUT MEMORY, NEVER CORRECTNESS: the body is already on its way
+// back to its caller byte for byte, and a refusal costs one later fetch of that
+// identity — which is why call sites express it by forgetting the key.
 //
-// Both bounds are INCLUSIVE, matching "at most" in S024-R4.1: a body of exactly
-// perBody bytes is retained, and so is one that exactly fills what is left of
-// the budget.
+// Both bounds are INCLUSIVE ("at most"). The per-body cap is asked FIRST, so a
+// body breaking both is recorded as Oversize: that limit would refuse it even in
+// an empty cache, so it is the one an operator would have to change.
 //
-// The per-body cap is asked FIRST, so a body that breaks both limits is recorded
-// as Oversize. That is the limit that would have refused it even in an empty
-// cache, and therefore the one an operator would have to change (S024-R6.2);
-// blaming the budget would send them to raise a number that was never the
-// obstacle.
+// THERE IS NO EVICTION: a run is bounded, and evicting the 170-way GStreamer body
+// for a one-off would trade 169 avoided fetches for one. Nor is there a latch: a
+// smaller body that fits after a refusal is still admitted, so the outcome does
+// not depend on the order records are checked in.
 //
-// THERE IS NO EVICTION, deliberately. When the budget is reached admission stops
-// and everything already retained is kept (S024-R4.3). A run is bounded, so
-// there is no long tail to reclaim — and evicting the 170-way GStreamer body to
-// make room for a one-off would invert the point of the cache, trading 169
-// avoided fetches for one.
-//
-// "Admission stops" is a consequence of the test, not a latch: a body refused
-// for want of room does not close the door behind it, so a smaller one arriving
-// afterwards that genuinely fits is still admitted. Latching would refuse bodies
-// the budget can hold — spending the run's remaining memory on nothing — and
-// would make the outcome depend on the order the records happen to be checked
-// in, which is exactly what a bound on memory should not do.
-//
-// The caller holds c.mu: the decision reads and charges the shared budget, and
-// that has to be atomic with the map write it governs. Two admissions racing for
-// the last free bytes would otherwise both see room and both take it, leaving
-// used above budget with no way to notice.
+// The caller holds c.mu, so two admissions cannot both take the last free bytes.
 func (c *BodyCache) admitLocked(body []byte) bool {
 	// int is never wider than int64 on any platform Go targets, so this
 	// conversion widens and cannot overflow. Neither can the sum below: used is
@@ -604,7 +502,7 @@ func (c *BodyCache) publish(key string, entry *bodyEntry, body []byte, err error
 	defer c.mu.Unlock()
 
 	if err != nil {
-		// A failure is neither retained nor shared (S024-R3.1, S024-R3.2).
+		// A failure is neither retained nor shared.
 		// Removing the key leaves the next arrival to become a leader in turn
 		// rather than inherit a corpse, and leaves the waiters, released with ok
 		// still false, to fetch on their own — so no entry ever fails because of

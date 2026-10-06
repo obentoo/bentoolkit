@@ -53,8 +53,8 @@ const manifestFixWaitDelay = 10 * time.Second
 // let it rewrite the ebuild; `func agentPermissionArgs` scopes all three to the
 // package directory. Bash is granted for pkgdev alone, so the agent can
 // self-verify the manifest without an open shell, and WebFetch — scoped there to
-// the package's upstream hosts — is how it confirms a real asset name
-// (S051-R2.2, S051-R3.1, S051-R3.2). There is no curl, wget, cat or ls: the
+// the package's upstream hosts — is how it confirms a real asset name. There
+// is no curl, wget, cat or ls: the
 // agent reaches the network only through WebFetch's host rules. Anything
 // outside this set is refused by the CLI without an interactive prompt
 // (dontAsk), which keeps the run non-interactive WITHOUT resorting to
@@ -109,8 +109,7 @@ type ManifestFixRequest struct {
 	DistDir string
 	// UpstreamURLs are the package's registry URL and FallbackURL, when the
 	// caller holds a config for it. Their hosts, with the hosts of the http(s)
-	// URLs in ManifestError, are the only ones the agent's WebFetch reaches
-	// (S051-R3.5).
+	// URLs in ManifestError, are the only ones the agent's WebFetch reaches.
 	UpstreamURLs []string
 }
 
@@ -122,22 +121,21 @@ type ManifestFixResult struct {
 	Summary string
 	// CostUSD is the reported spend for the invocation, when the CLI provides it.
 	CostUSD float64
-	// Model is the exact string this invocation passed to the CLI's --model
-	// (S030-R4.1). It records what RAN, not what was configured: an empty
+	// Model is the exact string this invocation passed to the CLI's --model.
+	// It records what RAN, not what was configured: an empty
 	// cfg.Model resolves to DefaultClaudeCodeModel and that resolved value is
 	// what lands here.
 	Model string
 	// ModelIsAlias reports that Model is one of the CLI's aliases ("sonnet",
 	// "opus") rather than a pinned identifier ("claude-opus-4-8"). It matters
 	// because an alias resolves to a DIFFERENT model over time, so a record
-	// that omits it implies a precision it does not have (S030-R4.2). Derived
+	// that omits it implies a precision it does not have. Derived
 	// from isModelAlias — the single rule shared with the registry fixer.
 	ModelIsAlias bool
 	// DeniedTools names the tools the CLI refused during a run that nonetheless
 	// ended successfully — `WebFetch(host)` or a bare tool name, never the
-	// refused call's input (S051-R5.1). A caller whose re-check then fails
-	// quotes them, because a refusal is the likeliest reason the fix fell short
-	// (S051-R5.2).
+	// refused call's input. A caller whose re-check then fails quotes them,
+	// because a refusal is the likeliest reason the fix fell short.
 	DeniedTools []string
 }
 
@@ -161,7 +159,7 @@ const pinnedModelPrefix = "claude-"
 // pinned) produces a record that implies more precision than it has — "opus"
 // today and "opus" in six months are different models, and a record that did not
 // say "alias" invites exactly the wrong conclusion when someone audits a bad
-// edit months later. S030-R4.2's harm is the second one, so the predicate errs
+// edit months later. The second harm is the one that matters, so the predicate errs
 // toward "alias".
 func isModelAlias(model string) bool {
 	m := strings.TrimSpace(model)
@@ -176,13 +174,13 @@ func isModelAlias(model string) bool {
 // RETURNS the string, `main` and the handlers decide to print it.
 //
 //	"claude-opus-4-8" -> `model "claude-opus-4-8"`
-//	"opus"            -> `model alias "opus"`   (S030-R4.2: the word "alias" IS the point)
+//	"opus"            -> `model alias "opus"`   (the word "alias" IS the point)
 //	""                -> `model unknown`        (the fixer reported none)
 //
 // It derives the alias flag from isModelAlias itself instead of taking it as an
 // argument, so the phrase can never contradict the ModelIsAlias flag on the
 // result it was rendered from. The model string is its ONLY input, so no key,
-// token or credential can reach its output (S030-R4.3).
+// token or credential can reach its output.
 func FormatModelUsed(model string) string {
 	m := strings.TrimSpace(model)
 	switch {
@@ -337,9 +335,8 @@ func NewClaudeCodeFixer(cfg llm.LLMConfig, opts ...ClaudeCodeFixerOption) (*Clau
 // because they are bentoo-generated text, not untrusted page content. The agent is
 // scoped to req.PkgDir via --add-dir and the permission block of
 // `func agentPermissionArgs`: manifestFixAllowedTools with Read/Edit confined to
-// that directory, and WebFetch to the package's upstream hosts plus GitHub
-// (S051-R2.3, S051-R3.3, S051-R3.5). A PkgDir the rules cannot carry safely is
-// an error, and nothing is spawned (S051-R2.8).
+// that directory, and WebFetch to the package's upstream hosts plus GitHub. A
+// PkgDir the rules cannot carry safely is an error, and nothing is spawned.
 func (f *ClaudeCodeFixer) buildFixArgs(instruction string, req ManifestFixRequest) ([]string, error) {
 	hosts := llm.UpstreamHosts(f.logger(), req.Package, append(append([]string(nil), req.UpstreamURLs...), llm.UpstreamURLsIn(req.ManifestError)...)...)
 	perms, err := llm.AgentPermissionArgs(llm.AgentPermissions{
@@ -429,10 +426,8 @@ func truncateDiagnostic(s string) string {
 // invent URLs; verify the real upstream release path; finish with a one-line
 // summary).
 //
-// It was called buildFixInstruction until story 033 gave the BUILD fixer
-// (build_fixer.go) that name for its own instruction builder: "build" there names
-// the failing gate, not the verb. Go has no overloading, so the manifest one is
-// now spelled out — which is the clearer name of the two anyway.
+// The BUILD fixer (build_fixer.go) owns buildFixInstruction — "build" there
+// names the failing gate, not the verb — so the manifest one is spelled out.
 func buildManifestFixInstruction(req ManifestFixRequest) string {
 	var sb strings.Builder
 	sb.WriteString("You are fixing a Gentoo ebuild whose manifest generation failed during an automated version bump. ")
@@ -467,10 +462,10 @@ func buildManifestFixInstruction(req ManifestFixRequest) string {
 }
 
 // exitCodeString renders a process exit status for an error message by
-// extracting the numeric code from an *exec.ExitError (AD5: errors.As +
+// extracting the numeric code from an *exec.ExitError (errors.As +
 // ExitCode). Both call sites sit behind the claudeExitedNonZero outcome, which
-// classifyClaudeFailure returns only where couldNotStart was already false
-// (S040-R5.6, S048-R1.3) — so an ExitError is guaranteed present by the time
+// classifyClaudeFailure returns only where couldNotStart was already false —
+// so an ExitError is guaranteed present by the time
 // this runs. The fallback keeps the cause text visible anyway rather than
 // trusting that guarantee with a blank.
 func exitCodeString(runErr error) string {
@@ -482,51 +477,39 @@ func exitCodeString(runErr error) string {
 }
 
 // formatFixerError builds the single, bounded error returned by every terminal
-// failure path of FixManifest. Funneling all four former fmt.Errorf sites through
-// one formatter guarantees each failure carries a consistent, complete set of
-// signals and removes the class of bug where one branch forgets one (the empty
-// "claude fixer failed (success): " was exactly that).
+// failure path of FixManifest, so each failure carries a consistent, complete set
+// of signals (one branch once forgot one and printed an empty
+// "claude fixer failed (success): "). classifyClaudeFailure decides the first
+// three cases; this function only supplies the fixer's words, and every sentence
+// says "claude fixer" because it speaks for the fixers. In precedence order:
 //
-// The first three cases below are no longer decided here: classifyClaudeFailure
-// decides them, and this function only supplies the fixer's words for the answer
-// it gets (S048-R1.3). What is shared with the review path is that order and
-// nothing else — every sentence below still says "claude fixer" because it
-// speaks for the fixers, and the four spawn sites that funnel through it read
-// exactly the messages they did before (S048-R4.2).
+//   - ctxErr (cancelled or deadline elapsed), over any exit-code framing;
+//   - a run error with no *exec.ExitError: the process could not start, so there
+//     is no exit code to print ("could not start: <cause>");
+//   - a non-zero exit with a self-reported success envelope, as an explicit
+//     contradiction ("exited N but reported success"), never an empty tail;
+//   - a generic non-zero exit, with the parsed subtype when available;
+//   - an explicit error envelope (is_error) with its subtype;
+//   - a parse failure (non-JSON stdout).
 //
-// It reports, in precedence order:
-//
-//   - ctxErr (caller context cancelled or deadline elapsed) — AD4/S009-R1.3, takes
-//     precedence over any exit-code framing;
-//   - a run error carrying no *exec.ExitError — the process could not start, so
-//     there is no exit code to print and the failure is said as what it is
-//     ("could not start: <cause>") — S040-R5.6;
-//   - a non-zero exit paired with a self-reported success envelope as an explicit
-//     contradiction ("exited N but reported success") — AD3/S009-R1.2, never an empty
-//     tail;
-//   - a generic non-zero exit (with the parsed subtype when available) — S009-R1.1;
-//   - an explicit error envelope (is_error) with its subtype — S009-R1.5;
-//   - a parse failure (non-JSON stdout) — S009-R1.4.
-//
-// It then appends, each bounded by truncateDiagnostic: the envelope errors, the
-// result text, the captured stderr, and — on a parse failure — the raw stdout
-// (S009-R1.4). The returned error always wraps ErrLLMRequestFailed (S009-R3.1). The API key
-// is never one of its inputs, so it can never appear in the output (S009-R2.2).
+// It then appends, each bounded by truncateDiagnostic, the envelope errors, the
+// result, the stderr and, on a parse failure, the raw stdout. The error wraps
+// ErrLLMRequestFailed; the API key is never an input, so it never appears.
 func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
 	var sb strings.Builder
 
 	// One classification, consulted once, so the branches below choose only their
 	// wording. claudeRanToCompletion — both errors nil — reaches neither of the
 	// three cases that name it and falls through to the envelope/parse cases,
-	// which is where a zero exit with a bad answer belongs (S048-R1.3).
+	// which is where a zero exit with a bad answer belongs.
 	outcome := llm.ClassifyClaudeFailure(ctxErr, runErr)
 
 	switch {
 	case outcome == llm.ClaudeCutShort:
-		// AD4/S009-R1.3: cancellation or deadline takes precedence over exit framing.
+		// Cancellation or deadline takes precedence over exit framing.
 		fmt.Fprintf(&sb, "claude fixer aborted: %v", ctxErr)
 	case outcome == llm.ClaudeCouldNotStart:
-		// S040-R5.6: the process never ran, so there is no exit code to print.
+		// The process never ran, so there is no exit code to print.
 		// Rendering the raw error where a number was promised produced the
 		// measured garble "failed: exit chdir …: no such file or directory" — an
 		// operator reads that as a corrupted exit code, not as what it was. The
@@ -535,20 +518,20 @@ func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr 
 		// reported anything: an envelope here would be stale bytes.
 		fmt.Fprintf(&sb, "claude fixer could not start: %v", runErr)
 	case outcome == llm.ClaudeExitedNonZero && jsonErr == nil && !env.IsError && env.Subtype == "success":
-		// AD3/S009-R1.2: non-zero exit but a self-reported success envelope.
+		// Non-zero exit but a self-reported success envelope.
 		fmt.Fprintf(&sb, "claude fixer exited %s but reported success (subtype=%s)",
 			exitCodeString(runErr), env.Subtype)
 	case outcome == llm.ClaudeExitedNonZero:
-		// S009-R1.1: generic non-zero exit (envelope may or may not have parsed).
+		// Generic non-zero exit (envelope may or may not have parsed).
 		fmt.Fprintf(&sb, "claude fixer failed: exit %s", exitCodeString(runErr))
 		if jsonErr == nil && env.Subtype != "" {
 			fmt.Fprintf(&sb, " (subtype=%s)", env.Subtype)
 		}
 	case env.IsError:
-		// S009-R1.5: explicit error envelope on a zero exit.
+		// Explicit error envelope on a zero exit.
 		fmt.Fprintf(&sb, "claude fixer reported error (subtype=%s)", env.Subtype)
 	default:
-		// S009-R1.4: zero exit but stdout did not parse as JSON.
+		// Zero exit but stdout did not parse as JSON.
 		sb.WriteString("claude fixer emitted non-JSON output")
 	}
 
@@ -559,10 +542,10 @@ func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr 
 		sb.WriteString("; errors: ")
 		sb.WriteString(strings.Join(env.Errors, "; "))
 	}
-	// The tools the CLI refused, by name — never by input (S051-R5.1). A refusal
-	// is the likeliest reason a scoped agent stopped short, and nothing retries
-	// with more: the operator widens nothing either, because no setting exists
-	// that could (S051-R5.3).
+	// The tools the CLI refused, by name — never by input. A refusal is the
+	// likeliest reason a scoped agent stopped short, and nothing retries with
+	// more: the operator widens nothing either, because no setting exists that
+	// could.
 	if labels := llm.RefusedToolLabels(env.PermissionDenials); len(labels) > 0 {
 		sb.WriteString("; refused tools: ")
 		sb.WriteString(strings.Join(labels, ", "))
@@ -576,7 +559,7 @@ func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr 
 		sb.WriteString(truncateDiagnostic(s))
 	}
 	// On a parse failure the raw stdout is the one artifact needed to see what the
-	// CLI actually printed (S009-R1.4).
+	// CLI actually printed.
 	if jsonErr != nil && strings.TrimSpace(stdout) != "" {
 		sb.WriteString("\nstdout: ")
 		sb.WriteString(truncateDiagnostic(stdout))
@@ -618,7 +601,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 
 	// The child environment is the agent allow-list (childEnv), plus what pkgdev
 	// needs and no other agent gets: the parent's PORTAGE_* and exactly one
-	// DISTDIR, the writable one this request computed (S051-R1.3). Bare injects
+	// DISTDIR, the writable one this request computed. Bare injects
 	// the API key solely via env (never argv/logs); non-bare carries none, so the
 	// CLI uses its logged-in session.
 	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{Portage: true, DistDir: req.DistDir})
@@ -635,11 +618,10 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 
 	// Every terminal failure funnels through formatFixerError so each carries the
 	// full, bounded set of signals (exit code or cancellation cause, subtype,
-	// result, stderr, and raw stdout on a parse failure). The success path below
-	// is unchanged (S009-UB1). runCtx.Err() captures both a timeout (DeadlineExceeded)
+	// result, stderr, and raw stdout on a parse failure). runCtx.Err() captures both a timeout (DeadlineExceeded)
 	// and a parent cancellation (Canceled), since runCtx derives from ctx.
 	if runErr != nil || jsonErr != nil || env.IsError {
-		// The model record travels on the FAILURE path too: S030-R4.1 records what
+		// The model record travels on the FAILURE path too: it records what
 		// was invoked, and an invocation that failed still spent a model call and
 		// may have left a half-finished edit behind.
 		return ManifestFixResult{
@@ -662,7 +644,7 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 // regardless of the host PATH.
 var lookPath = exec.LookPath
 
-// claudeAvailable reports whether the `claude` CLI is resolvable on PATH (S003-R6.1).
+// claudeAvailable reports whether the `claude` CLI is resolvable on PATH.
 func claudeAvailable() bool {
 	_, err := lookPath("claude")
 	return err == nil

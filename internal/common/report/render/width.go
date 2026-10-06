@@ -5,8 +5,8 @@
 // # It is the presentation side of the split, and that is why it may import lipgloss
 //
 // The model holds facts about a run and carries no width, no padding and no
-// escape sequence; a test there enforces that it imports nothing that renders
-// (D1). This package is the other half of that boundary, so measuring and
+// escape sequence; a test there enforces that it imports nothing that renders.
+// This package is the other half of that boundary, so measuring and
 // styling belong here and nowhere upstream of here.
 //
 // # Nothing here declares a width
@@ -14,7 +14,7 @@
 // Every width in this package is either measured from the values a run actually
 // produced, or read from the device the report is being printed to. The one
 // number that is written down is the width assumed when the device cannot be
-// reached at all, and it is documented as such (S044-R6.3, S044-R6.5).
+// reached at all, and it is documented as such.
 package render
 
 import (
@@ -28,10 +28,10 @@ import (
 
 const (
 	// fallbackTerminalWidth is the width assumed when nothing can say what the
-	// real one is (S044-R6.5): 80 cells.
+	// real one is: 80 cells.
 	//
 	// This is an assumption about a device that could not be reached, not a
-	// field width — the distinction is the whole of S044-R6.3. A field width decides
+	// field width. A field width decides
 	// how a value is laid out and can be measured instead; there is nothing to
 	// measure when the far end is a log file, a pipe or a CI job with no
 	// terminal at all, and a renderer that refused to print without an answer
@@ -52,31 +52,17 @@ const (
 )
 
 // columnWidth is the width a column needs in order to hold every one of values:
-// the widest of them, in display cells (R6.1).
+// the widest of them, in display cells.
 //
-// # The answer is computed, not typed
+// It is computed, not typed: a width typed into a format string (the %-45s this
+// replaced) is too narrow the moment one value outgrows it and too wide on every
+// run that never comes close, and the right width depends on the values THIS
+// run produced.
 //
-// This replaces a hand-written %-45s. A width typed into a format string is
-// wrong in both directions at once — too narrow the moment one value outgrows
-// it, and too wide on every run that never comes close — and neither error is
-// visible when the format string is written, because the width that is correct
-// depends on the values THIS run produced. That is knowable only after the run
-// has produced them. A column that happens to be wide enough for today's
-// package list is not a measured column; it is a lucky one, and it stays lucky
-// only until the list changes.
-//
-// # Cells, because bytes and runes both answer a different question
-//
-// "日本語" is 9 bytes and 3 runes, and a terminal gives it 6 columns. An escape
-// sequence is the mirror case: bytes and runes, and no column at all. Only cell
-// width describes what the reader will actually see, which is the only width a
-// column can be aligned to (R6.2, D6). lipgloss.Width is that measurement.
-//
-// # Zero for an empty run
-//
-// A run with nothing in it has no column to align, so the width is 0 rather
-// than some minimum: padding a table with no rows would print whitespace
-// nobody asked for.
+// It counts cells, because bytes and runes answer a different question: "日本語"
+// is 9 bytes and 3 runes and takes 6 columns, and an escape sequence takes
+// none. lipgloss.Width measures cells. A run with nothing in it answers 0 rather
+// than a minimum, so a table with no rows prints no padding.
 func columnWidth(values []string) int {
 	widest := 0
 	for _, value := range values {
@@ -86,38 +72,19 @@ func columnWidth(values []string) int {
 }
 
 // shorten returns s reduced to at most cells display columns, marking the cut
-// so the reader can see one happened (S044-R6.4).
+// so the reader can see one happened.
 //
-// # The limit is hard
-//
-// A row one cell too wide wraps, and a wrapped row does not merely look untidy:
-// it throws off every column to its right for the rest of the table. Preventing
-// that is the only reason a width limit exists, so the mark counts against the
-// budget like everything else the reader sees — cutting at cells and then
-// appending an ellipsis would overflow by exactly the mark.
-//
-// # What already fits comes back untouched
-//
-// Byte for byte, with nothing appended. Shortening a value that fits would
-// discard detail for no gain, and the loss is not recoverable downstream: the
-// model still holds the full string, but once a renderer has cut it the cut is
-// all the reader gets (R7.4).
-//
-// # A cut is always visible
-//
-// A silently trimmed atom reads as a real one, and an operator who copies
-// "media-plugins/gst-plugins-adaptivede" into a command gets an error the
-// report caused. Below one cell there is no room even for the mark, so nothing
+// The limit is hard: a row one cell too wide wraps and throws off every column
+// to its right, so the ellipsis counts against the budget. What already fits
+// comes back byte for byte, because once a renderer cuts, the cut is all the
+// reader gets. A cut is always visible — a silently trimmed atom reads as a
+// real one and gets copied into a failing command — and below one cell nothing
 // is printed rather than something misleading.
 //
-// # Why ansi.Truncate does the counting
-//
-// It is the same measuring code lipgloss.Width uses — lipgloss.Width is
-// ansi.StringWidth per line — so shorten and columnWidth cannot disagree about
-// the same string. Being grapheme- and escape-aware, it never lands a cut
-// inside a wide character or inside an escape sequence: a severed escape is
-// printed literally by the terminal, which is a corrupted row rather than a
-// shortened one. It inserts no line break, which is the other half of S044-R6.4.
+// ansi.Truncate does the counting because lipgloss.Width uses the same
+// measurement, so shorten and columnWidth cannot disagree. It never cuts inside
+// a wide character or an escape sequence (a severed escape is printed
+// literally), and it inserts no line break.
 func shorten(s string, cells int) string {
 	// Stated here rather than delegated. ansi.Truncate happens to return "" for
 	// a budget too small to hold the tail, but it does not document that, and a
@@ -133,25 +100,17 @@ func shorten(s string, cells int) string {
 // terminalWidth is how many display cells one line may occupy before the
 // terminal wraps it.
 //
-// It always answers a width and never an error (S044-R6.5). There is no second place
-// to ask, so an error would give the caller nothing to do but give up, and a
-// report that refuses to print because it could not size a column is a worse
-// outcome than one printed at the wrong size.
+// It always answers a width and never an error: there is no second place to
+// ask, and a report printed at the wrong size beats one that refuses to print.
+// Sources, in the order of how much each knows about where the output goes:
 //
-// Three sources, in the order of how much each actually knows about where the
-// output is going:
-//
-//  1. COLUMNS, when it holds a positive number. It is the POSIX override and
-//     the only way to pin a width from outside the process — a CI job or an
-//     operator capturing output to a file wants a width that has nothing to do
-//     with whatever device happens to be attached.
-//  2. The device behind stdout, asked directly. stdout is where the report
-//     goes, so it is the one whose width matters; a terminal on stderr or stdin
-//     says nothing about a stdout that was redirected.
+//  1. COLUMNS, when it holds a positive number: the POSIX override, and the
+//     only way for a CI job or a captured run to pin a width from outside.
+//  2. The device behind stdout, asked directly: stdout is where the report
+//     goes, and a terminal on stderr says nothing about a redirected stdout.
 //  3. fallbackTerminalWidth, when neither answered.
 //
-// Under `go test` stdout is a pipe, so the second source fails and the third is
-// what runs — the fallback is exercised for real rather than simulated.
+// Under `go test` stdout is a pipe, so the fallback is exercised for real.
 func terminalWidth() int {
 	if cols, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && cols > 0 {
 		return cols
@@ -171,12 +130,10 @@ func terminalWidth() int {
 
 // ColumnWidth is columnWidth, exported.
 //
-// This story replaces the four typed widths in the check path and leaves three
-// standing — overlay prune, the autoupdate sweep, and the drift printer. They
-// are outside its scope, not outside its argument: each is the same number
-// typed by the same hand with the same defect. Exporting the measurement means
-// whoever touches those files next has the replacement in reach instead of a
-// reason to type a width again.
+// Three typed widths still stand outside the check path — overlay prune, the
+// autoupdate sweep, and the drift printer — each with the same defect.
+// Exporting the measurement means whoever touches those files next has the
+// replacement in reach instead of a reason to type a width again.
 //
 // It must stay a thin call. A wrapper that drifted would hand those callers a
 // different answer than this package's own renderer uses, leaving two columns

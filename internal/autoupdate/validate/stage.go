@@ -34,23 +34,23 @@ const stagedFileMode fs.FileMode = 0o600
 const stagedRepoPrefix = "bentoolkit-staging"
 
 // stagedMasters is the only masters line a staged tree ever declares. See the
-// D2 note on Stage for why the published overlay is deliberately NOT a master.
+// masters note on Stage for why the published overlay is deliberately NOT a master.
 const stagedMasters = "masters = gentoo"
 
 // carriedRepoDirs are the overlay directories copied wholesale into the staged
-// tree so that the candidate can resolve what the published overlay defines
-// (R3.8): the eclasses it inherits and the profiles that describe the
-// repository. Design M-C measured them at 32 KB and 56 KB, which is what makes
-// copying them per package-version a non-question.
+// tree so that the candidate can resolve what the published overlay defines:
+// the eclasses it inherits and the profiles that describe the repository. They
+// measured 32 KB and 56 KB, which is what makes copying them per
+// package-version a non-question.
 var carriedRepoDirs = []string{"eclass", "profiles"}
 
 // carriedLayoutKeys are the layout.conf properties that travel from the
 // published overlay into the staged one, in this order.
 //
 // It is a whitelist, not a filter, and that is the point: copying the source
-// layout wholesale would carry `masters` (which D2 replaces) and could carry a
-// `repo-name` (which would reinstate the duplicate name the staged tree exists
-// to avoid). These change how Portage digests and reads a repository, so a
+// layout wholesale would carry `masters` (which stagedMasters replaces) and
+// could carry a `repo-name` (which would reinstate the duplicate name the staged
+// tree exists to avoid). These change how Portage digests and reads a repository, so a
 // staged tree that dropped them would validate a bump under rules the published
 // overlay does not use. A key the source does not set is not invented here: its
 // absence is carried too, so the staged repository falls back to exactly the
@@ -60,40 +60,22 @@ var carriedRepoDirs = []string{"eclass", "profiles"}
 var carriedLayoutKeys = []string{"sign-manifests", "profile-formats"}
 
 // stagedThinManifests is imposed on every staged tree rather than carried from
-// the overlay, and it is the one place this repository's rule of "validate under
-// the published tree's own rules" is deliberately broken.
+// the overlay — the one place the rule "validate under the published tree's own
+// rules" is deliberately broken.
 //
-// # What the carried absence did (measured against Portage 3.14's source)
+// Carrying Portage's default (thin-manifests=false) made the staged tree
+// NON-THIN, and digestcheck.py then requires every .ebuild in the package
+// directory to carry an EBUILD record in the Manifest, failing under `strict` (a
+// default FEATURE). The staged Manifest describes distfiles only, so the tree
+// was refused before any phase and every build gate reported SKIPPED for a
+// package that would have built. Filtering the Manifest to DIST lines trips the
+// same check; leaving it unfiltered trips FileNotFound on files Stage never
+// copies. The carried property IS the defect.
 //
-// Portage's default is thin-manifests=false. Carrying that absence meant the
-// staged tree was a NON-THIN repository, and digestcheck.py then does more than
-// verify distfile digests: past line 88 it walks the package directory and
-// requires every .ebuild it finds to carry an EBUILD record in the Manifest,
-// returning 0 under `strict` — which is in Portage's default FEATURES and which
-// doebuild.py passes. The staged tree's Manifest describes distfiles and nothing
-// else, by construction, so the candidate ebuild has no EBUILD record and the
-// tree is refused before any phase marker. Every build gate then reports SKIPPED
-// for a package that would have built.
-//
-// Filtering the Manifest down to DIST lines does not fix this and neither does
-// leaving it unfiltered: the first trips the missing-EBUILD check, the second
-// trips FileNotFound on records naming files Stage never copies. The property
-// being carried IS the defect.
-//
-// # Why imposing it is right rather than merely convenient
-//
-// A staged tree is a synthetic single-use repository whose entire purpose is to
-// run build phases against one candidate. It holds exactly one ebuild, no
-// metadata.xml and none of the package's siblings — a shape no published
-// repository has, and a shape the non-thin checks are meaningless against: they
-// exist to catch a file added to a real package directory without being
-// digested, and nothing can be added to this one.
-//
-// What thin does NOT relax is the part that matters here: the DIST digests are
-// still verified against the archive on disk, above the early return. So the
-// guarantee this whole story rests on — the build reads the archive the Manifest
-// names — is untouched. What is dropped is bookkeeping about repository files,
-// which this tree has no meaningful version of.
+// Imposing it is right: a staged tree holds one ebuild and nothing else to
+// digest, so the non-thin checks are meaningless against it. Thin still verifies
+// the DIST digests against the archive on disk, so the build still reads the
+// archive the Manifest names.
 const stagedThinManifests = "thin-manifests = true"
 
 // ErrStageUnpreparable reports that a staged tree could not be built, whatever
@@ -101,7 +83,7 @@ const stagedThinManifests = "thin-manifests = true"
 // write into, a disk that filled halfway through the copy.
 //
 // IT IS A SENTINEL SO THE CALLER CAN RECOGNISE THE FAILURE BY TYPE, and that is
-// not tidiness. What the caller does with it is R3.10 — withdraw the bump from
+// not tidiness. What the caller does with it is withdraw the bump from
 // promotion (see PromotionDecision) — so a caller that recognised it by matching
 // message text would keep working exactly until somebody improved the wording,
 // at which point unvalidated bumps would quietly start publishing again.
@@ -116,25 +98,21 @@ var ErrStageUnpreparable = errors.New("the staged tree could not be prepared")
 // StageRequest is everything Stage needs to materialise one candidate.
 //
 // Overlay is the published overlay the staged tree is built FROM. Staging only
-// ever reads it (R3.1); the candidate is never written there, which is the whole
-// point of validating somewhere else.
+// ever reads it; the candidate is never written there, which is the whole point
+// of validating somewhere else.
 //
-// StagingRoot is the directory the staged trees live under. Stage does not
-// choose it — the caller does, in production <configDir>/staging (design D1).
-// A function that picked its own root could not be pointed elsewhere for a dry
-// run, and the path is the only place the retention rule is recorded: there is
-// no index file and no lock, which is what lets several packages be staged
-// concurrently without coordination.
+// StagingRoot is the directory the staged trees live under, chosen by the caller
+// (in production <configDir>/staging) so a dry run can point it elsewhere. The
+// path is the only place the retention rule is recorded — no index file, no
+// lock — which lets several packages be staged concurrently.
 //
 // Key is the registry key: category/package, possibly carrying ":slot" or
-// "@label" — e.g. "media-plugins/gst-plugins-qt6" or "app-editors/zed-bin@preview".
-// The content paths inside the staged tree derive from its suffix-stripped form
-// (splitContentAtom); the stage root and the repository name keep the full key.
-// Version is the PV, e.g. "1.29.2"; together they name the ebuild file.
+// "@label" — e.g. "app-editors/zed-bin@preview". Content paths derive from its
+// suffix-stripped form (splitContentAtom); the stage root and the repository
+// name keep the full key. Version is the PV; together they name the ebuild file.
 //
-// EbuildBytes is the candidate's body, written verbatim. Staging must not
-// reformat or regenerate what the gates are about to judge, or a gate result
-// would describe a file that never existed anywhere else.
+// EbuildBytes is the candidate's body, written verbatim: a reformatted body
+// would make a gate result describe a file that never existed anywhere else.
 type StageRequest struct {
 	Overlay, StagingRoot, Key, Version string
 	EbuildBytes                        []byte
@@ -142,74 +120,29 @@ type StageRequest struct {
 
 // Stage builds a self-consistent single-package Portage repository holding one
 // candidate ebuild and returns its root, <StagingRoot>/<category>/<package>/
-// <version> (R3, R3.1). The returned directory is itself a repository: it
-// carries the overlay's eclass/ and profiles/, a metadata/layout.conf, its own
-// profiles/repo_name, and the candidate at <category>/<package>/
-// <package>-<version>.ebuild.
+// <version>: eclass/ and profiles/ copied from the overlay, metadata/layout.conf,
+// its own profiles/repo_name, and <category>/<package>/<package>-<version>.ebuild.
 //
-// THE TREE MAY NEVER LIVE UNDER THE OVERLAY ROOT, AND THAT IS NOT A PREFERENCE.
-// ScanOverlay walks the overlay category/package deep (run.go:64, and again
-// through selectTargets at run.go:107) and Reconcile reports every ebuild no
-// registry pin claims as an UnclaimedEbuild, which PlanOverlaySweep turns into a
-// deletion candidate (sweep.go:404-422). A staged candidate parked anywhere
-// under the overlay root is by construction unclaimed — the registry pins the
-// published version, not the one being proved. So `overlay autoupdate --clean`
-// would delete the staging directory, and `overlay validate` would report the
-// candidate as a defect of the published overlay. The staging tree would be
-// eaten by the very tool that created it. Stage therefore refuses a StagingRoot
-// that resolves inside the overlay rather than trusting its callers to remember.
+//   - It refuses a StagingRoot inside the overlay: a staged candidate there is an
+//     unclaimed ebuild that `overlay autoupdate --clean` would delete.
+//   - It masters onto gentoo with local COPIES of eclass/ and profiles/, never
+//     onto the overlay, whose deployed /var/db/repos copy lags by a sync cycle.
+//   - Its repo_name is unique per package-version (two repositories with one name
+//     conflict) and written AFTER the profiles/ copy, which would clobber it.
+//   - Restaging replaces the tree at the same path, which is why the applier's
+//     copyEbuild, refusing an existing destination, is not reused.
+//   - No Manifest and no other version travels; Run writes Options.StagedManifest
+//     into the tree before the build gates, as only the caller knows its bytes.
 //
-// WHY THE STAGED TREE MASTERS ONTO gentoo AND NOT ONTO THE OVERLAY (design D2).
-// Naming the overlay as a master would resolve it through repos.conf to
-// /var/db/repos/bentoo — the DEPLOYED copy, which syncs from origin and so lags
-// the working tree by however long the commit/push/sync cycle takes. Validating
-// a new ebuild against a stale eclass is the same class of error as validating
-// it against the wrong tarball, which story 031 already had to fix once. Hence
-// `masters = gentoo` plus local COPIES of eclass/ and profiles/: the eclasses
-// the candidate inherits are then the ones in the tree being validated, byte for
-// byte, and nothing about the answer depends on when the last sync ran.
-//
-// WHY THE STAGED repo_name DIFFERS, AND WHY IT IS WRITTEN LAST. The published
-// repository's name is already registered with Portage, and two repositories
-// answering to one name is a repository-level conflict, not a cosmetic clash.
-// The staged name is derived from the package and version, so it is unique per
-// staged tree and points at the bump under test when it shows up in tool output.
-// It is written AFTER the profiles/ copy on purpose: the copy brings the
-// overlay's own repo_name with it and would otherwise clobber the staged one,
-// re-creating the exact conflict this avoids.
-//
-// RESTAGING REPLACES (R3.7). Staging the same package and version again removes
-// the retained tree and rebuilds it, returning the same path. Retention is one
-// tree per package-version and the path is what expresses it, so a second
-// attempt must not accumulate a second directory. This is also why the applier's
-// copyEbuild is not reused for the candidate: `(*Applier).copyEbuild` in
-// applier.go refuses an existing destination with ErrEbuildExists, the exact
-// opposite of the rule here,
-// and would hard-fail on the second staging of the same bump.
-//
-// WHAT STAGING DELIBERATELY DOES NOT COPY. The published package directory's
-// Manifest does not travel: it describes the tarballs of the versions already
-// published and has no entry for the candidate's. The tree therefore leaves here
-// WITHOUT one, and the content is supplied through Options.StagedManifest — the
-// seam whose bytes Run materialises inside this tree, after Stage and before the
-// build gates run (S037-R2.1, design D3). Staging does not reach for it itself
-// because the two callers need different bytes: a same-version run wants the
-// published Manifest verbatim, a bump wants the generated one, and only the
-// caller knows which it is. Nothing else in the package directory travels
-// either, including the previously published ebuilds — a single-package
-// repository holding one version is what makes a gate's answer unambiguous.
-//
-// EVERY FAILURE IS ONE FAILURE (R3.9). Whatever goes wrong, Stage returns an
-// error wrapping ErrStageUnpreparable and an EMPTY path — never a half-made tree
-// handed back alongside the error saying it is half-made, because a path handed
-// back is a path somebody will build in.
+// Every failure wraps ErrStageUnpreparable and returns an EMPTY path, because a
+// path handed back is a path somebody will build in.
 func Stage(req StageRequest) (string, error) {
 	stagedRoot, err := stage(req)
 	if err != nil {
 		// The sentinel is applied HERE, at the single boundary, rather than at
-		// each of the fourteen error returns inside stage. Both spellings satisfy
-		// R3.9 today; only this one still satisfies it after the fifteenth is
-		// added, because it leaves no site where the sentinel can be forgotten.
+		// each of the fourteen error returns inside stage. Both spellings make every
+		// failure one failure today; only this one still does after the fifteenth
+		// is added, because it leaves no site where the sentinel can be forgotten.
 		// The wrapped cause keeps its own words — including the path it could not
 		// prepare — so the type is for the caller and the message is for the
 		// operator, and neither is paying for the other.
@@ -231,14 +164,14 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", fmt.Errorf("staging %s-%s: no overlay given to copy eclasses and profiles from", req.Key, version)
 	}
 	if stagingRoot == "" {
-		return "", fmt.Errorf("staging %s-%s: no staging root given; Stage never picks one, because the path is where the retention rule is recorded (D1)", req.Key, version)
+		return "", fmt.Errorf("staging %s-%s: no staging root given; Stage never picks one, because the path is where the retention rule is recorded", req.Key, version)
 	}
 	if len(req.EbuildBytes) == 0 {
 		return "", fmt.Errorf("staging %s-%s: no ebuild body given; an empty candidate stages a tree whose gates fail for a reason that has nothing to do with the bump", req.Key, version)
 	}
 
 	// The key is split TWICE, because a registry key has two roles and each
-	// split answers for one of them (design D4). splitContentAtom answers role
+	// split answers for one of them. splitContentAtom answers role
 	// B: the category and package that name the staged repository's CONTENT —
 	// the package directory, the ebuild filename, files/ — which must be free of
 	// a key's ":slot" or "@label" suffix because Portage accepts neither
@@ -249,7 +182,7 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 	// Role A's other half in this function: the repository NAME derives from the
-	// SUFFIXED package (R5.4), so two release lines of one package staged at the
+	// SUFFIXED package, so two release lines of one package staged at the
 	// same version never answer to one repository name — a duplicate name is a
 	// repository-level conflict in Portage regardless of which two repositories
 	// collide. stagedRepoName folds the ':' or '@' to '_', which is what keeps
@@ -274,8 +207,8 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 	}
 
 	// Through StagedTreePath rather than joined here, so that the layout a
-	// promoting run looks a retained tree up by (R10.1) and the layout this
-	// function creates are the same line of code.
+	// promoting run looks a retained tree up by and the layout this function
+	// creates are the same line of code.
 	stagedRoot, err = StagedTreePath(stagingRoot, req.Key, version)
 	if err != nil {
 		return "", err
@@ -284,7 +217,7 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 
-	// R3.7: replace, never accumulate. RemoveAll on a path that does not exist
+	// Replace, never accumulate. RemoveAll on a path that does not exist
 	// is a no-op, so the first staging and every restaging take one code path.
 	if err := os.RemoveAll(stagedRoot); err != nil {
 		return "", fmt.Errorf("removing the retained staged tree %s: %w", stagedRoot, err)
@@ -293,7 +226,7 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 
-	// R3.8: the eclasses and profiles of the published overlay, resolvable from
+	// The eclasses and profiles of the published overlay, resolvable from
 	// the staged tree because they are in it.
 	for _, dir := range carriedRepoDirs {
 		if err := carryRepoDir(filepath.Join(overlayRoot, dir), filepath.Join(stagedRoot, dir)); err != nil {
@@ -306,7 +239,7 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 	}
 
 	// After the profiles/ copy, never before: see the repo_name note above. The
-	// SUFFIXED package, never the content one — see the split at the top (R5.4).
+	// SUFFIXED package, never the content one — see the split at the top.
 	if err := writeStagedRepoName(stagedRoot, suffixedPkg, version); err != nil {
 		return "", err
 	}
@@ -315,8 +248,8 @@ func stage(req StageRequest) (stagedRoot string, err error) {
 		return "", err
 	}
 
-	// The package's own files/ travels with the candidate. R3.8 names eclasses
-	// and profiles because those are the REPOSITORY-level resources a staged
+	// The package's own files/ travels with the candidate. eclass/ and profiles/
+	// are carried because those are the REPOSITORY-level resources a staged
 	// tree has to resolve; ${FILESDIR} is the PACKAGE-level one, and the patch
 	// gate cannot tell the difference.
 	//
@@ -360,29 +293,19 @@ func splitStagedAtom(atom string) (category, pkg string, err error) {
 // the staged repository's CONTENT, dropping any ":slot" or "@label" suffix
 // first.
 //
-// A registry key has two roles, and this function answers only the second
-// (design D4). Role A is the retention identity — the stage root under which
-// one key's trees are retained and replaced — and it KEEPS the suffix, so slot
-// 4.1 and slot 6 of one package never collapse into one tree; that is
-// splitStagedAtom's answer, above. Role B is everything Portage READS inside
-// the staged repository — the package directory, the ebuild filename, files/,
-// the Manifest — and every atom handed to a Portage tool. Portage accepts
-// neither ':' nor '@' in a package name, so role B must be the suffix-stripped
-// key.
+// A registry key has two roles. Role A, the retention identity (the stage root
+// under which one key's trees are retained), KEEPS the suffix so slot 4.1 and
+// slot 6 never collapse into one tree; that is splitStagedAtom. Role B is
+// everything Portage READS — the package directory, the ebuild filename, files/,
+// the Manifest, every atom handed to a Portage tool — and Portage accepts
+// neither ':' nor '@' in a package name.
 //
 // The strip mirrors splitPkgAtom (internal/autoupdate/ebuild_select.go), which
-// the PROMOTING side already derives its paths from: everything from the first
-// '@' goes (the label; a slot may precede it, as in "cat/pkg:4.1@stable"), then
-// everything from the first ':' (the slot). The two sides converging on one
-// rule is the whole fix — the failure this closes was exactly their
-// disagreement, content staged under the suffixed name while every later gate
-// chdir-failed into the clean directory that never existed.
-//
-// A ':' or '@' that SURVIVES the strip is refused here, by name (R5.3). With
-// the strip as written that residue is unreachable — but "unreachable" is a
-// property of today's strip, not of this function. The day someone reorders or
-// narrows the strip, the leak fails at this seam, immediately and named, not as
-// a ghost directory three gates later.
+// the promoting side derives its paths from: everything from the first '@',
+// then everything from the first ':'. When the two sides disagreed, every later
+// gate chdir-failed into a directory that never existed. A ':' or '@' that
+// SURVIVES the strip is refused here by name, so a future change to the strip
+// fails at this seam rather than as a ghost directory three gates later.
 func splitContentAtom(key string) (category, pkg string, err error) {
 	stripped := strings.TrimSpace(key)
 	if i := strings.IndexByte(stripped, '@'); i >= 0 {
@@ -561,8 +484,8 @@ func copyRegularFile(src, dst string) (err error) {
 	return nil
 }
 
-// writeStagedLayout writes the staged metadata/layout.conf: the masters line D2
-// requires, followed by the properties carried from the published overlay.
+// writeStagedLayout writes the staged metadata/layout.conf: the stagedMasters
+// line, followed by the properties carried from the published overlay.
 //
 // A published overlay with no layout.conf carries nothing, which is correct
 // rather than lenient — there is nothing to disagree with.
@@ -706,40 +629,26 @@ var buildGates = map[Depth]string{
 }
 
 // SkippedGates reports one SKIPPED gate, carrying reason, for every build gate
-// depth d covers — and for no other gate (R3.9).
+// depth d covers — and for no other gate.
 //
-// It is EXPORTED because the applier is a second caller (S033-12.1): the
-// dependency pre-check decides, before anything is spawned, that this host
-// cannot answer, and the set of gates that then owe an outcome must be the same
-// set RunBuildGates would have reported. A caller assembling that list itself
-// would be a second walk of the ladder, and the bug would be a gate reported
-// when it skips and absent when it runs.
+// It is EXPORTED because the applier's dependency pre-check is a second caller:
+// the gates that owe an outcome when this host cannot answer must be the set
+// RunBuildGates would have reported. Which gates those are is eachBuildGate's
+// answer, shared with the runner, so the set a depth owes an outcome for does
+// not depend on whether the run happened. THE LADDER IS CUMULATIVE: a
+// compile-deep request reports patches, configure AND compile, each said out
+// loud, because an unreported gate is indistinguishable from one that passed. A
+// depth below DepthPatches yields nothing: an options-deep run needed no tree.
 //
-// It is the gate-level analogue of report.go's skippedResult, down to taking the
-// reason as a required argument instead of leaving it a settable field: that is
-// how "SKIPPED always carries a reason" stays structural rather than remembered.
-//
-// THE LADDER IS CUMULATIVE, so a compile-deep request whose tree never appeared
-// reports patches, configure AND compile — three gates that were going to run and
-// now cannot, each said out loud, because an unreported gate is indistinguishable
-// from one that passed. Which gates those are is eachBuildGate's answer, shared
-// with the runner that reports them when they DO run: the set a depth owes an
-// outcome for must not depend on whether the run happened.
-//
-// A depth below DepthPatches covers no build gate and correctly yields nothing:
-// an options-deep run never needed a staged tree, so nothing was taken from it.
-//
-// IT LEAVES THE CAUSE UNRECORDED, and its SIGNATURE IS FIXED. Callers outside
-// this package hold it, so a cause cannot be bolted on as a third parameter
-// without breaking them — and one of those callers (the applier's dependency
-// probe) genuinely knows its cause. declinedGates is the sibling that takes one;
-// this stays the spelling for a producer that does not know, and
-// DeclineUnrecorded is exactly that: today's answer, unchanged.
+// The reason is a required argument, as in report.go's skippedResult, so
+// "SKIPPED always carries a reason" stays structural. The SIGNATURE IS FIXED
+// because callers outside this package hold it: declinedGates is the sibling
+// that names a cause, and this passes DeclineUnrecorded.
 func SkippedGates(d Depth, reason string) []GateResult {
 	return declinedGates(d, reason, DeclineUnrecorded)
 }
 
-// declinedGates is SkippedGates with the cause named (S039-R2.1).
+// declinedGates is SkippedGates with the cause named.
 //
 // It is unexported and SkippedGates delegates to it, rather than the two being
 // written out separately, so that "which gates does this depth owe an outcome
@@ -755,67 +664,22 @@ func declinedGates(d Depth, reason string, cause DeclineCause) []GateResult {
 
 // PromotionDecision answers the one question that must be settled before a bump
 // is written into the published overlay: may this candidate be promoted, and if
-// not, why not. It is pure — no filesystem, no clock, no process — so the rule
-// can be asserted directly instead of only through a real promotion.
+// not, why not. It is pure, so the rule can be asserted directly.
 //
-// # Why this exists, rather than "no gate FAILED" written at the call site
+// A bump is promoted when every deciding gate reports PASS or SKIPPED — but a
+// staging failure skips every build gate, so "nothing failed" alone would
+// publish a candidate no gate ever read. A staging failure (stageErr) therefore
+// WITHDRAWS the bump, and so does a list where nothing passed and a gate
+// declined over the CANDIDATE (GateResult.Declined). A skip because THIS HOST
+// could not answer — a missing dependency, no privilege to build — still
+// promotes with the unreached depth named; refusing it would stop publishing on
+// most workstations. A cause nobody recorded is not read as the candidate's
+// (see DeclineUnrecorded).
 //
-// R3.3 promotes once every gate up to the selected depth reports PASS OR
-// SKIPPED. R3.9 turns a staging failure into SKIPPED for every build gate. Put
-// those two side by side with nothing in between and a bump whose tree could
-// never be built satisfies R3.3 VACUOUSLY: every build gate skipped, therefore
-// nothing failed, therefore publish — and the overlay that auto-commits and
-// pushes receives a candidate no gate ever read. R3.4 forbids that from the
-// other direction: what is published is what was validated, and here nothing
-// was. So a staging failure does not merely skip, it WITHDRAWS the bump (R3.10).
-//
-// FOR A LONG TIME THIS SAID SO AND DID NOT DO IT (S039-R2.1). stageErr was the
-// only branch that refused anything, and stageErr is only ever non-nil when
-// Stage itself failed. Every OTHER way a gate list can measure nothing about the
-// candidate — a Manifest that could not be produced or written, a tree staged by
-// a caller that reports the fault as a skip rather than as an error — arrived
-// here with stageErr nil and every deciding gate SKIPPED, and was answered
-// `true`. The vacuity the paragraph above describes is now DENIED rather than
-// merely described.
-//
-// # And why that does not become "any skip blocks promotion"
-//
-// A gate skipped because THIS HOST could not answer — an unsatisfied dependency,
-// no privilege to build — is precisely the case R3.3 exists to allow, and R3.12
-// promotes that bump with the depth it did not reach named. Only stageErr
-// withdraws it. The argument list is the distinction: a skip is data about a
-// gate, a staging failure is an error about the tree every gate needed, and they
-// arrive separately for exactly that reason.
-//
-// THAT SPLIT IS NOW A FIELD RATHER THAN A SENTENCE. GateResult.Declined carries
-// it from the producer that knows it to here, and the two sides are one rule:
-// S039-R2.1 refuses a list that measured nothing about the CANDIDATE, S033-R3.12
-// promotes a list that measured nothing because THIS MACHINE could not answer.
-// Read as one flat rule — "every deciding gate SKIPPED, therefore refuse" —
-// `overlay autoupdate --apply` stops publishing on every workstation that does
-// not hold the bump's build dependencies, which is most of them. It is the same
-// conflation unbuildableHereReason (D1(c)) exists to prevent, one level up: a
-// host that lacks a dependency is not an ebuild that fails to build.
-//
-// A cause nobody recorded is NOT read as the candidate's. See DeclineUnrecorded
-// for why that fail-open is deliberate: the refusal names a known vacuity, and
-// each producer that learns to name its cause tightens the rule.
-//
-// # What this deliberately does NOT decide
-//
-// Whether the gates COVER the selected depth. It is not given the depth, so a
-// gate that never ran and was never appended is invisible here; producing one
-// GateResult per covered gate belongs to whoever ran them, and skippedGates is
-// how a staging failure discharges it. Judging a list is a different question
-// from judging whether the list was assembled.
-//
-// The QA gate is skipped over for the same reason Report.ExitCode and
-// WorstOutcome skip it (D8): the overlay carries pre-existing pkgcheck findings
-// that have nothing to do with any bump, and letting them decide promotion would
-// stop every bump in the tree on a metadata.xml DOCTYPE typo.
-//
-// The bool is the decision; the string only ever explains it, and is non-empty
-// in BOTH directions so that no caller can read a promotion out of an empty
+// It does not judge whether the gates COVER the selected depth: it is not given
+// the depth. The QA gate never decides, as in Report.ExitCode, or pre-existing
+// pkgcheck findings would stop every bump. The string explains the bool and is
+// non-empty in BOTH directions, so no caller reads a promotion out of an empty
 // reason.
 func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 	if stageErr != nil {
@@ -835,7 +699,7 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 	for _, gate := range gates {
 		if gate.Gate == GateQA {
 			// The one gate that never decides — the same exclusion, for the same
-			// D8 reason, that Report.ExitCode and WorstOutcome already make. It
+			// reason, that Report.ExitCode and WorstOutcome already make. It
 			// is excluded in BOTH directions: a QA PASS is not evidence either,
 			// or one metadata.xml verdict would stand in for a build nobody ran.
 			continue
@@ -857,7 +721,7 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 	case len(failed) > 0:
 		return false, fmt.Sprintf("not promoted: %s reported FAILED", gateList(failed))
 	case len(skipped) > 0 && len(passed) == 0 && candidateDeclined:
-		// R2.1. The sentence names the VACUITY, not the gates: an operator told
+		// The sentence names the VACUITY, not the gates: an operator told
 		// "the patches, configure, compile gates reported SKIPPED" goes looking
 		// for three problems when there is one — nothing ran. It also stays well
 		// clear of the FAILED wording above, because the two send that operator
@@ -867,7 +731,7 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 	case len(skipped) > 0:
 		return true, fmt.Sprintf("promoted: every gate reported PASS or SKIPPED, and %s did not run — see each gate's own reason", gateList(skipped))
 	default:
-		// Also the DEPTH-NONE shape (R2.5): a run that was never meant to build
+		// Also the DEPTH-NONE shape: a run that was never meant to build
 		// covers no build gate, so the deciding list is EMPTY and lands here.
 		// Nothing declined, because nothing was asked — which is why the vacuity
 		// branch keys on a skip that named the candidate rather than on the

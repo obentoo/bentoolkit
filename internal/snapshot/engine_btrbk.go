@@ -17,12 +17,12 @@ import (
 const DefaultBtrbkConfPath = "/etc/bentoo/btrbk.conf"
 
 // btrbkEngine drives btrbk. Snapshot creation/pruning/listing shell out via the
-// Runner seam; the destructive work stays inside btrbk (AD1). The engine does not
+// Runner seam; the destructive work stays inside btrbk. The engine does not
 // write the conf itself — that is done at `apply`/`run` time (writeBtrbkConf) so
 // Create/Prune/List remain pure subprocess calls and fully mockable.
 type btrbkEngine struct {
 	cfg      EngineConfig
-	targets  []string // ssh remote targets contributed by shippers (AD5)
+	targets  []string // ssh remote targets contributed by shippers
 	run      Runner
 	confPath string
 	log      *slog.Logger // nil discards; set by newEngine
@@ -42,15 +42,15 @@ func newBtrbkEngine(cfg EngineConfig, targets []string, run Runner) *btrbkEngine
 
 func (e *btrbkEngine) Name() string { return "btrbk" }
 
-// Create runs `btrbk run <subvolume>` against the rendered conf (R2.2). The
+// Create runs `btrbk run <subvolume>` against the rendered conf. The
 // snapshot (and any configured send) is performed by btrbk; a non-zero exit is
-// wrapped with ErrEngineFailed so the Manager can record a failed stage (§6).
+// wrapped with ErrEngineFailed so the Manager can record a failed stage.
 //
 // btrbk run prints nothing a caller can address the new snapshot by, so a
 // second call, `btrbk -c <conf> --format=raw list latest <subvolume>`, resolves
-// its Path and ID (053 R1.2). When that listing fails, is empty or names more
+// its Path and ID. When that listing fails, is empty or names more
 // than one snapshot, the snapshot is returned unidentified with one warning and
-// a nil error (053 R1.3): btrbk run succeeded, and btrbk may already have
+// a nil error: btrbk run succeeded, and btrbk may already have
 // shipped it over ssh. Only the ships that need a Path refuse it.
 func (e *btrbkEngine) Create(ctx context.Context, subvolume string) (Snapshot, error) {
 	args := []string{"-c", e.confPath, "run", subvolume}
@@ -91,7 +91,7 @@ func (e *btrbkEngine) resolveLatest(ctx context.Context, subvolume string) (path
 var errMalformed = errors.New("malformed btrbk raw row")
 
 // parseBtrbkLatestRaw extracts the snapshot paths from
-// `btrbk --format=raw list latest` output (053 R1.2). Each row is
+// `btrbk --format=raw list latest` output. Each row is
 // `format="latest"` followed by key='value' pairs, every value written by
 // btrbk's quoteshell, which closes the quote, writes an escaped \' and reopens
 // it for every ' inside a value. Rows whose type contains "snapshot" and carry
@@ -162,8 +162,8 @@ func parseBtrbkRawRow(line string) (map[string]string, error) {
 	}
 }
 
-// Prune runs `btrbk clean <subvolume>` (R2.3). Retention is delegated to btrbk via
-// the conf's snapshot_preserve/target_preserve directives (AD6), so the policy
+// Prune runs `btrbk clean <subvolume>`. Retention is delegated to btrbk via
+// the conf's snapshot_preserve/target_preserve directives, so the policy
 // argument is accepted but not re-applied here.
 func (e *btrbkEngine) Prune(ctx context.Context, subvolume string, _ Retention) ([]Snapshot, error) {
 	args := []string{"-c", e.confPath, "clean", subvolume}
@@ -173,7 +173,7 @@ func (e *btrbkEngine) Prune(ctx context.Context, subvolume string, _ Retention) 
 	return nil, nil
 }
 
-// List runs `btrbk list <subvolume>` and parses the output into snapshots (R5.4).
+// List runs `btrbk list <subvolume>` and parses the output into snapshots.
 func (e *btrbkEngine) List(ctx context.Context, subvolume string) ([]Snapshot, error) {
 	out, err := e.run.Run(ctx, "btrbk", []string{"-c", e.confPath, "list", subvolume}, nil)
 	if err != nil {
@@ -183,8 +183,8 @@ func (e *btrbkEngine) List(ctx context.Context, subvolume string) ([]Snapshot, e
 }
 
 // ListRemote lists the backups present on the btrbk targets via
-// `btrbk -c <conf> list backups` (008 R5.2). Targets are the ssh ship entries
-// folded into btrbk.conf (AD5), so target-side enumeration belongs to this
+// `btrbk -c <conf> list backups`. Targets are the ssh ship entries
+// folded into btrbk.conf, so target-side enumeration belongs to this
 // engine; with no targets configured there is no remote and no subprocess runs.
 // Rows are parsed with the same first-field-absolute-path logic as List. The
 // Subvolume attribution is left empty: a target holds backups of every
@@ -228,7 +228,7 @@ func parseBtrbkList(out []byte, subvolume string) []Snapshot {
 }
 
 // renderBtrbkConf renders a btrbk.conf from the engine config, retention policy,
-// and any ssh targets (R2, R2.2, R2.3, AD5, AD6). Retention counts map to btrbk's
+// and any ssh targets. Retention counts map to btrbk's
 // snapshot_preserve/target_preserve grammar; zero counts are omitted.
 func renderBtrbkConf(cfg EngineConfig, targets []string) string {
 	var b strings.Builder

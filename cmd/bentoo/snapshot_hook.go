@@ -52,7 +52,7 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 
 	if snapshotHookUninstall {
 		// Deliberately NO config load: uninstall must succeed even with a
-		// broken or absent snapshot.toml (R4.2).
+		// broken or absent snapshot.toml.
 		if err := snapshot.UninstallEmergeHook(); err != nil {
 			log.Error("snapshot hook: failed", "err", err)
 			return exitWith(1)
@@ -62,14 +62,14 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 	}
 
 	// --install: load AND validate the config so an unknown driver or a missing
-	// snapper binary fails fast before anything is written (R5.1, G3).
+	// snapper binary fails fast before anything is written.
 	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
 		log.Error("snapshot hook: failed", "err", err)
 		return exitWith(1)
 	}
 	// The hook script shells out to snapper for its pre/post pairs, so any
-	// other engine is refused — with nothing written (R4.1).
+	// other engine is refused — with nothing written.
 	if cfg.Engine.Driver != "snapper" {
 		log.Error(`snapshot hook: the emerge hook shells out to snapper and requires engine.driver = "snapper"`,
 			"engine", cfg.Engine.Driver)

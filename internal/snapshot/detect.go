@@ -7,12 +7,12 @@ import (
 )
 
 // ErrDriverUnavailable is returned when an active driver's binary is absent from
-// PATH. The message names the Portage package to install (R6.1).
+// PATH. The message names the Portage package to install.
 var ErrDriverUnavailable = errors.New("snapshot driver dependency missing")
 
 // lookPath is the injectable binary-resolution seam (defaults to exec.LookPath),
-// overridable in tests so detection is deterministic regardless of host PATH
-// (R6.2), mirroring internal/autoupdate's lookPath seam.
+// overridable in tests so detection is deterministic regardless of host PATH,
+// mirroring internal/autoupdate's lookPath seam.
 var lookPath = exec.LookPath
 
 // driverDep is the binary a driver needs and the Portage package that provides it.
@@ -32,7 +32,7 @@ func driverBinary(kind, name string) (driverDep, bool) {
 			return driverDep{"btrbk", "app-backup/btrbk"}, true
 		case "snapper":
 			// Gentoo ships snapper in app-backup/ (verified in ::gentoo), so the
-			// actionable error names app-backup/snapper (R5.1).
+			// actionable error names app-backup/snapper.
 			return driverDep{"snapper", "app-backup/snapper"}, true
 		}
 	case "ship":
@@ -56,7 +56,7 @@ func driverBinary(kind, name string) (driverDep, bool) {
 
 // detectDriver verifies the binary backing the (kind, name) driver is on PATH.
 // A missing binary yields an actionable ErrDriverUnavailable naming the Portage
-// package; an unknown driver is a no-op here (R6.1).
+// package; an unknown driver is a no-op here.
 func detectDriver(kind, name string) error {
 	dep, ok := driverBinary(kind, name)
 	if !ok {

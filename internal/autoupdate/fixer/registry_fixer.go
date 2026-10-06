@@ -1,27 +1,23 @@
 package fixer
 
 // registry_fixer.go implements RegistryFixer, the agentic counterpart of
-// ManifestFixer (manifest_fixer.go) for repairing a package's autoupdate
-// REGISTRY entry — its `[section]` in .autoupdate/packages.toml — rather than an
-// ebuild manifest. Where the manifest fixer is scoped to a package directory and
-// fixes a SRC_URI/manifest breakage, this fixer is scoped to the .autoupdate
-// config directory (--add-dir + cwd = ConfigDir) and asked to repair a version
-// EXTRACTION breakage: a url/parser/pattern/selector/path that no longer matches
-// upstream. Its tool allowlist is deliberately narrower — Read/Edit/Write plus
-// WebFetch, scoped to the entry's own hosts, to confirm the real upstream shape —
-// and it has NO Bash at all, because a registry repair never builds anything.
+// ManifestFixer for repairing a package's autoupdate REGISTRY entry — its
+// `[section]` in .autoupdate/packages.toml — rather than an ebuild manifest. It
+// is scoped to the .autoupdate config directory (--add-dir + cwd = ConfigDir)
+// and asked to repair a version EXTRACTION breakage: a url/parser/pattern/
+// selector/path that no longer matches upstream. Its allowlist is deliberately
+// narrower — Read/Edit/Write plus WebFetch scoped to the entry's own hosts — and
+// has NO Bash at all, because a registry repair never builds anything.
 //
-// It mirrors ClaudeCodeFixer exactly for the auth/model/seam/bare/key-injection/
+// It mirrors ClaudeCodeFixer for the auth/model/seam/bare/key-injection/
 // envelope/error mechanics: only the request/result types, the allowlist, the
-// system guidance, the -p instruction builder, and the --add-dir/cwd target are
-// new. The envelope (claudeCodeEnvelope), formatFixerError, resolveBare,
-// claudeAvailable, DefaultClaudeCodeModel, DefaultManifestFixTimeout, the
-// manifestFix* wait-delay/turn constants, ErrClaudeCodeUnavailable, isModelAlias
-// (the single alias rule behind both results' ModelIsAlias flag), and the
-// lookPath seam are all reused from the package, never redefined.
+// system guidance, the -p instruction builder and the --add-dir/cwd target are
+// new. formatFixerError, resolveBare, claudeAvailable, the manifestFix* constants,
+// isModelAlias (the single alias rule behind both results' ModelIsAlias flag)
+// and the lookPath seam are reused, never redefined.
 //
-// As with the manifest fixer, a nil error is NOT proof the entry now extracts: the
-// caller re-runs its own check to confirm.
+// As with the manifest fixer, a nil error is NOT proof the entry now extracts:
+// the caller re-runs its own check to confirm.
 
 import (
 	"bytes"
@@ -45,10 +41,10 @@ import (
 // `func agentPermissionArgs` scopes them to the config directory. WebFetch lets it
 // confirm the REAL upstream shape (the actual JSON path, the actual HTML the
 // selector must match) so the fix is grounded rather than guessed, and reaches
-// only the hosts of the entry's url and fallback_url plus GitHub (S051-R3.3,
-// S051-R3.4). It is deliberately narrower than manifestFixAllowedTools: a
+// only the hosts of the entry's url and fallback_url plus GitHub. It is
+// deliberately narrower than manifestFixAllowedTools: a
 // registry repair never builds or manifests anything, so it gets NO Bash at all
-// — no pkgdev, and no curl, which would reach any host (S051-R3.1). Anything
+// — no pkgdev, and no curl, which would reach any host. Anything
 // outside this set is refused by the CLI without an interactive prompt
 // (dontAsk), keeping the run non-interactive WITHOUT
 // --dangerously-skip-permissions.
@@ -102,18 +98,17 @@ type RegistryFixResult struct {
 	Summary string
 	// CostUSD is the reported spend for the invocation, when the CLI provides it.
 	CostUSD float64
-	// Model is the exact string this invocation passed to the CLI's --model
-	// (S030-R4.1), i.e. the RESOLVED model, not the configured one.
+	// Model is the exact string this invocation passed to the CLI's --model,
+	// i.e. the RESOLVED model, not the configured one.
 	Model string
 	// ModelIsAlias reports that Model is a CLI alias ("sonnet", "opus") rather
-	// than a pinned identifier (S030-R4.2). Derived from isModelAlias — the same
+	// than a pinned identifier. Derived from isModelAlias — the same
 	// single rule the manifest fixer uses, never a second copy.
 	ModelIsAlias bool
 	// DeniedTools names the tools the CLI refused during a run that nonetheless
 	// ended successfully — `WebFetch(host)` or a bare tool name, never the
-	// refused call's input (S051-R5.1). A caller whose re-check then fails
-	// quotes them, because a refusal is the likeliest reason the fix fell short
-	// (S051-R5.2).
+	// refused call's input. A caller whose re-check then fails quotes them,
+	// because a refusal is the likeliest reason the fix fell short.
 	DeniedTools []string
 }
 
@@ -262,10 +257,10 @@ func NewClaudeCodeRegistryFixer(cfg llm.LLMConfig, opts ...RegistryFixerOption) 
 // page content. The agent is scoped to req.ConfigDir via --add-dir and the
 // permission block of `func agentPermissionArgs`: registryFixAllowedTools with
 // Read/Edit confined to that directory and WebFetch to the hosts of the entry's
-// url and fallback_url plus GitHub (S051-R2.3, S051-R3.3, S051-R3.4). A URL in
+// url and fallback_url plus GitHub. A URL in
 // FetchError is NOT a registry host: the page that failed may have redirected
 // anywhere. A ConfigDir the rules cannot carry safely is an error, and nothing is
-// spawned (S051-R2.8).
+// spawned.
 func (f *ClaudeCodeRegistryFixer) buildRegistryFixArgs(instruction string, req RegistryFixRequest) ([]string, error) {
 	var urls []string
 	if req.Config != nil {
@@ -417,7 +412,7 @@ func (f *ClaudeCodeRegistryFixer) FixRegistry(ctx context.Context, req RegistryF
 	// (DeadlineExceeded) and a parent cancellation (Canceled).
 	if runErr != nil || jsonErr != nil || env.IsError {
 		// As in FixManifest, the model record travels on the failure path too:
-		// S030-R4.1 records what was invoked, not only what succeeded.
+		// it records what was invoked, not only what succeeded.
 		return RegistryFixResult{
 			Model:        f.model,
 			ModelIsAlias: isModelAlias(f.model),

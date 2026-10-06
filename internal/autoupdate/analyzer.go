@@ -159,9 +159,8 @@ type Analyzer struct {
 	llmTimeout time.Duration
 	// analyzeFn is the per-package analysis AnalyzeAll runs in each worker.
 	// NewAnalyzer binds it to Analyze; it is a seam for in-package tests only,
-	// which replace it to hold, count or panic inside a worker (story 054,
-	// S054-R6.1 to S054-R6.4). No option sets it. The ctx it receives is the
-	// AnalyzeAll call's own.
+	// which replace it to hold, count or panic inside a worker. No option sets
+	// it. The ctx it receives is the AnalyzeAll call's own.
 	analyzeFn func(ctx context.Context, pkg string, opts AnalyzeOptions) (*AnalyzeResult, error)
 	// log receives the analyzer's diagnostics. Set via WithAnalyzerLogger;
 	// NewAnalyzer leaves it discarding when the option is absent.
@@ -394,7 +393,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 
 		// Carry the ebuild-level binary detection already done by
 		// ExtractEbuildMetadata into the suggested record, so a binary package
-		// is suggested (and saved) as type = "bin" (R8.2). Only "bin" is
+		// is suggested (and saved) as type = "bin". Only "bin" is
 		// written: an absent type means "auto-detect from the ebuild", which is
 		// exactly what the checker's resolveType does for a source package, so
 		// pinning type = "source" would add a redundant claim the maintainer
@@ -499,14 +498,14 @@ func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte,
 	}
 	defer resp.Body.Close()
 
-	// 200 alone is accepted here (S019-R3.2, S019-UB2). The analyzer never declares a
+	// 200 alone is accepted here. The analyzer never declares a
 	// Range, so unlike the checker it has no 206 to honour: a 206 at this call
 	// site could only be unsolicited, and its body is a fragment the version
 	// parser would read as a complete, successful answer.
 	//
 	// readBodyForStatus does the status check, the body read and the
-	// translation of an http.MaxBytesReader overflow into ErrResponseTooLarge
-	// (S019-R3.1, S001-R11.3); the cap itself is imposed upstream by GetWithContext at
+	// translation of an http.MaxBytesReader overflow into ErrResponseTooLarge;
+	// the cap itself is imposed upstream by GetWithContext at
 	// httpx.MaxBodyBytes, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
 	content, err := fetch.ReadBodyForStatus(resp, http.StatusOK)
@@ -650,28 +649,21 @@ func detectJSONPath(content []byte) string {
 	return ""
 }
 
-// AnalyzeAll analyzes all packages without schemas.
-// It processes packages in parallel with a maximum of 3 concurrent analyses.
+// AnalyzeAll analyzes all packages without schemas, at most 3 at a time.
 //
-// It returns a BatchResult: successfully analyzed packages land in Items, while
-// a per-package failure is recorded in Failures keyed by the package name and
-// the batch continues with the remaining packages. A failure to enumerate the
-// packages is surfaced as a single synthetic Failures entry, which yields a
-// total-failure exit code.
+// It returns a BatchResult: analyzed packages land in Items, a per-package
+// failure is recorded in Failures keyed by package name and the batch goes on.
+// A failure to enumerate the packages is a single synthetic Failures entry,
+// which yields a total-failure exit code.
 //
-// The pool follows CheckAll's model (story 054):
-//   - a slot is taken BEFORE a worker goroutine starts, so at most 3 analyses
-//     run at once and a package still waiting for its turn holds no goroutine
-//     (S054-R6.1);
-//   - once ctx is done, no package
-//     that has not yet taken a slot is started: each is recorded in Failures
-//     with an error wrapping the context's error, and the analyses already
-//     running are left to finish (S054-R6.2);
-//   - a panic in one package's analysis is recovered and recorded as that
-//     package's failure, its text carrying "panic: <value>", so it neither
-//     stops the other packages nor crashes the process (S054-R6.3);
-//   - Items are sorted by Package, so their order does not depend on which
-//     analysis finished first (S054-R6.4).
+// The pool follows CheckAll's model:
+//   - a slot is taken BEFORE a worker starts, so at most 3 analyses run at
+//     once and a package waiting for its turn holds no goroutine;
+//   - once ctx is done, no package without a slot is started: each is recorded
+//     in Failures wrapping the context's error, and running analyses finish;
+//   - a panic in one analysis is recovered as that package's failure ("panic:
+//     <value>"), so it neither stops the others nor crashes the process;
+//   - Items are sorted by Package, independent of which analysis finished first.
 //
 // Every write to the shared BatchResult is mutex-guarded, and it is returned
 // only after every worker goroutine has joined (wg.Wait), so callers may
@@ -858,7 +850,7 @@ func (a *Analyzer) SaveSchema(pkg string, schema *registry.PackageConfig) error 
 //
 // Records are written one at a time, in sorted key order, each rendered by
 // RenderRecord — the same function `overlay analyze` prints its suggestion with,
-// so the file this produces is the file the linter accepts (R8). Going through
+// so the file this produces is the file the linter accepts. Going through
 // the TOML encoder instead is what used to break that: it ordered fields by
 // struct declaration, turned a populated headers/meta into a sub-table the
 // record scanner read as a phantom record, and wrote `timeout = 0` into every

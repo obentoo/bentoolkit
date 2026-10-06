@@ -54,7 +54,7 @@ func s053EmailTo(t *testing.T, addr string) emailNotifier {
 	}
 	cfg := EmailConfig{To: []string{"ops@example.org"}, From: "bentoo@example.org"}
 	cfg.SMTP.Host, cfg.SMTP.Port = host, port
-	return emailNotifier{cfg: cfg, runner: &MockRunner{}}
+	return emailNotifier{cfg: cfg, runner: &mockRunner{}}
 }
 
 type s053OKEngine struct{}

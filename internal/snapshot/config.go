@@ -24,7 +24,7 @@ import (
 )
 
 // Config is the parsed snapshot.toml. The engine produces snapshots, each ship
-// replicates them, notify reports the outcome (no-op until story 005), and
+// replicates them, notify reports the outcome, and
 // schedule installs the systemd timer that drives `bentoo snapshot run`.
 type Config struct {
 	Engine   EngineConfig   `toml:"engine"`
@@ -65,16 +65,16 @@ type ShipConfig struct {
 	Type   string `toml:"type"`
 	Target string `toml:"target,omitempty"`
 
-	// restic shipper (R1). Repo is the restic repository URL; PasswordFile is the
-	// path to the repo password (kept out of the file itself, R1.2); Compression
-	// maps to restic's --compression (R1.3); MountStrategy selects how the snapshot
+	// restic shipper. Repo is the restic repository URL; PasswordFile is the
+	// path to the repo password (kept out of the file itself); Compression
+	// maps to restic's --compression; MountStrategy selects how the snapshot
 	// is exposed to the restic backup (e.g. bind vs read-only mount).
 	Repo          string `toml:"repo,omitempty"`
 	PasswordFile  string `toml:"password_file,omitempty"`
 	Compression   string `toml:"compression,omitempty"`
 	MountStrategy string `toml:"mount_strategy,omitempty"`
 
-	// archive shipper (R2). Remote is the rclone remote target (remote:path); Mode
+	// archive shipper. Remote is the rclone remote target (remote:path); Mode
 	// selects full vs incremental archiving; Compress selects the stream codec
 	// applied before upload.
 	Remote   string `toml:"remote,omitempty"`
@@ -82,11 +82,10 @@ type ShipConfig struct {
 	Compress string `toml:"compress,omitempty"`
 }
 
-// NotifyConfig selects and configures notification backends (story 005; email added
-// in story 008). On filters which run outcomes notify — a subset of {"success",
-// "failure"}; an empty On means failure only (see shouldNotify). Each sub-table, when
-// populated, activates one driver; the configured drivers fan out behind the Notifier
-// interface (R4).
+// NotifyConfig selects and configures notification backends. On filters which
+// run outcomes notify — a subset of {"success", "failure"}; an empty On means
+// failure only (see shouldNotify). Each sub-table, when populated, activates one
+// driver; the configured drivers fan out behind the Notifier interface.
 type NotifyConfig struct {
 	On           []string           `toml:"on,omitempty"`
 	Ntfy         NtfyConfig         `toml:"ntfy,omitempty"`
@@ -95,51 +94,51 @@ type NotifyConfig struct {
 	Email        EmailConfig        `toml:"email,omitempty"`
 }
 
-// NtfyConfig configures the ntfy driver (R1). URL is the topic URL. The auth token
+// NtfyConfig configures the ntfy driver. URL is the topic URL. The auth token
 // is not a config field: it resolves from BENTOO_NTFY_TOKEN via the secrets chain
 // (env → user file → system file) and, when set, is sent via the Authorization
-// header and is never logged (R1.3).
+// header and is never logged.
 type NtfyConfig struct {
 	URL string `toml:"url,omitempty"`
 }
 
-// HealthchecksConfig configures the healthchecks.io driver (R2). PingURL is the base
+// HealthchecksConfig configures the healthchecks.io driver. PingURL is the base
 // check URL (success → base, failure → /fail); Start optionally pings /start before
-// the run (R2.3).
+// the run.
 type HealthchecksConfig struct {
 	PingURL string `toml:"ping_url,omitempty"`
 	Start   bool   `toml:"start,omitempty"`
 }
 
-// WebhookConfig configures the generic webhook driver (R3). URL receives a POST with
-// the serialized RunResult; Headers are applied to the request (R3.2). Header values
-// holding secrets are never logged (R6.3).
+// WebhookConfig configures the generic webhook driver. URL receives a POST with
+// the serialized RunResult; Headers are applied to the request. Header values
+// holding secrets are never logged.
 type WebhookConfig struct {
 	URL     string            `toml:"url,omitempty"`
 	Headers map[string]string `toml:"headers,omitempty"`
 }
 
-// EmailConfig configures the email driver (008 R1). A non-empty To activates the
+// EmailConfig configures the email driver. A non-empty To activates the
 // driver; From is the sender header. With SMTP.Host unset the message is piped to
 // the local sendmail binary; setting SMTP.Host switches the transport to direct
-// SMTP via stdlib net/smtp (008 R1.1, A1).
+// SMTP via stdlib net/smtp.
 type EmailConfig struct {
 	To   []string   `toml:"to,omitempty"`
 	From string     `toml:"from,omitempty"`
 	SMTP SMTPConfig `toml:"smtp,omitempty"`
 }
 
-// SMTPConfig is the optional SMTP transport of the email driver (008 R1.1). Host
+// SMTPConfig is the optional SMTP transport of the email driver. Host
 // selects SMTP over local sendmail and is joined with Port as host:port. Host,
 // Port and User stay in snapshot.toml because they are configuration, not
-// secrets (017 R2.2).
+// secrets.
 //
 // The password is deliberately NOT a field here: it resolves from
 // BENTOO_SMTP_PASSWORD via the secrets chain (env → user file → system file) and
-// is never read from snapshot.toml (017 R1.1, R2.1). PLAIN auth is enabled only
+// is never read from snapshot.toml. PLAIN auth is enabled only
 // when User is set AND that lookup yields a non-empty value; either one missing
-// means the message is sent unauthenticated (017 R1.2). The resolved password is
-// never placed in argv, error strings, or logs (008 R1.3).
+// means the message is sent unauthenticated. The resolved password is
+// never placed in argv, error strings, or logs.
 type SMTPConfig struct {
 	Host string `toml:"host,omitempty"`
 	Port int    `toml:"port,omitempty"`
@@ -147,7 +146,7 @@ type SMTPConfig struct {
 }
 
 // shouldNotify reports whether a run with the given outcome should notify, given
-// the configured `on` filter (R4.3). The outcome is "failure" when failed, else
+// the configured `on` filter. The outcome is "failure" when failed, else
 // "success"; notification fires only when that outcome is listed in on. An empty on
 // defaults to notifying on failure only.
 func shouldNotify(on []string, failed bool) bool {
@@ -277,9 +276,9 @@ var legacySMTPPasswordKey = toml.Key{"notify", "email", "smtp", "password"}
 // decodes and this diagnostic goes quiet on its own.
 //
 // This is deliberately NOT the mechanism internal/common/config uses for the
-// same job. There, yaml.v3 offers no equivalent, so story 015 had to strict-
-// re-decode into a dedicated probeConfig (and work around a yaml-inline panic,
-// 015 D-03). BurntSushi/toml exposes undecoded keys natively, so no probe struct
+// same job. There, yaml.v3 offers no equivalent, so that package has to
+// strict-re-decode into a dedicated probeConfig (and work around a yaml-inline
+// panic). BurntSushi/toml exposes undecoded keys natively, so no probe struct
 // is needed here. The two are not worth "unifying" — the shapes differ only
 // because the underlying libraries do.
 func hasLegacySMTPPassword(md toml.MetaData) bool {
@@ -300,7 +299,7 @@ func hasLegacySMTPPassword(md toml.MetaData) bool {
 // root-owned /etc/bentoo/secrets. That is not a hypothetical here — this loader
 // runs as root under the systemd timer, exactly where $HOME goes missing — and it
 // fails silently (Paths() is never empty), leaving the user with a plausible path
-// they cannot write (F-H). With no user-scope path the env var is named alone.
+// they cannot write. With no user-scope path the env var is named alone.
 func smtpPasswordDestination() string {
 	if path, ok := secrets.UserPath(); ok {
 		return fmt.Sprintf("Move it to %s as `%s=<value>` (chmod 600)", path, smtpPasswordEnv)
@@ -309,14 +308,14 @@ func smtpPasswordDestination() string {
 }
 
 // warnLegacySMTPPassword emits the migration warning for a snapshot.toml still
-// carrying the removed SMTP password (R3.1) — exactly once per load, naming the
+// carrying the removed SMTP password — exactly once per load, naming the
 // dead key, where the value belongs, the env-var name, and the consequence of
-// doing nothing. It mirrors the config.yaml diagnostic of story 015 task 5.2.
+// doing nothing. It mirrors the config.yaml diagnostic of internal/common/config.
 // The password VALUE is never read or printed.
 //
-// With a logger (story 062) the warning is one WARN record carrying the path,
+// With a logger the warning is one WARN record carrying the path,
 // the dead key and where the value belongs; with a nil logger — func LoadFrom,
-// a caller that holds none — it keeps its pre-062 bare line on stderr.
+// a caller that holds none — it keeps its bare line on stderr.
 func warnLegacySMTPPassword(log *slog.Logger, path string) {
 	if log != nil {
 		log.Warn("snapshot.toml carries a key that is no longer read; SMTP mail is sent unauthenticated until it is deleted",
@@ -346,7 +345,7 @@ func LoadFrom(path string) (*Config, error) {
 }
 
 // LoadFromWith is LoadFrom reporting the migration warning on log, the
-// invocation's logger (story 062, R5.2). A nil log keeps LoadFrom's bare
+// invocation's logger. A nil log keeps LoadFrom's bare
 // stderr line.
 func LoadFromWith(path string, log *slog.Logger) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own --config flag or the XDG config path FindConfigPath resolved
@@ -361,9 +360,9 @@ func LoadFromWith(path string, log *slog.Logger) (*Config, error) {
 	}
 
 	// Emitted here in LoadFrom, the single entry point for reading snapshot.toml,
-	// so the warning necessarily precedes anything a caller does with the result
-	// (R3.3). The load itself still succeeds and the password is simply treated as
-	// absent (R3.2).
+	// so the warning necessarily precedes anything a caller does with the result.
+	// The load itself still succeeds and the password is simply treated as
+	// absent.
 	if hasLegacySMTPPassword(md) {
 		warnLegacySMTPPassword(log, path)
 	}
@@ -371,7 +370,7 @@ func LoadFromWith(path string, log *slog.Logger) (*Config, error) {
 }
 
 // ErrInvalidConfigValue is returned by Validate when a value that reaches
-// btrbk.conf or a systemd unit carries a control character (053 R7.1). A
+// btrbk.conf or a systemd unit carries a control character. A
 // newline there would inject a directive of the file's own grammar.
 var ErrInvalidConfigValue = errors.New("invalid snapshot config value")
 
@@ -389,7 +388,7 @@ func hasControl(s string) bool {
 
 // checkControlCharacters rejects a control character in every value that
 // renderBtrbkConf or the systemd unit templates interpolate, naming the key
-// (with its index) and quoting the value (053 R7.1).
+// (with its index) and quoting the value.
 func (c *Config) checkControlCharacters() error {
 	type field struct{ key, value string }
 	fields := make([]field, 0, len(c.Engine.Subvolumes)+len(c.Ship)+5)
@@ -419,17 +418,17 @@ func (c *Config) checkControlCharacters() error {
 
 // ErrShipEngineMismatch is returned by Validate when a ship type cannot work
 // with the configured engine: ssh shipping is btrbk's own transfer, so snapper
-// cannot perform it (053 R3.1).
+// cannot perform it.
 var ErrShipEngineMismatch = errors.New("ship type not supported by engine")
 
-// Validate checks the config before any side effect (R1.3, R1.4, AD4). It fails
+// Validate checks the config before any side effect. It fails
 // hard with ErrInvalidDriver on an unknown engine.driver, ship.type, or
 // schedule.backend; warns-but-continues on non-fatal issues (empty subvolumes);
-// and verifies each active driver's binary is on PATH via detect (R6.1).
+// and verifies each active driver's binary is on PATH via detect.
 //
 // Order matters: every enum is checked first, so an unknown driver string is
 // reported before — and independently of — any missing-binary detection, and
-// both happen before the command writes any file (G3).
+// both happen before the command writes any file.
 //
 // Validate logs nothing: it is ValidateWith(nil), and a nil logger discards.
 func (c *Config) Validate() error {
@@ -437,7 +436,7 @@ func (c *Config) Validate() error {
 }
 
 // ValidateWith is Validate with its non-fatal warnings sent to log; a nil log
-// discards them (R5.3). The verdict is the same as Validate's: log changes only
+// discards them. The verdict is the same as Validate's: log changes only
 // where the warnings go.
 func (c *Config) ValidateWith(log *slog.Logger) error {
 	log = logging.OrDiscard(log)
@@ -466,7 +465,7 @@ func (c *Config) ValidateWith(log *slog.Logger) error {
 
 	// snapper never receives the ssh targets (only btrbk folds them into its
 	// conf), so an ssh ship under snapper would report success while sending
-	// nothing. Refused here, ahead of binary detection (053 R3.1, R3.2).
+	// nothing. Refused here, ahead of binary detection.
 	if c.Engine.Driver == "snapper" {
 		for i, sh := range c.Ship {
 			if sh.Type == "ssh" {
@@ -480,7 +479,7 @@ func (c *Config) ValidateWith(log *slog.Logger) error {
 	}
 
 	// Non-fatal: an empty subvolume list means nothing is snapshotted, but it is
-	// not an error (the autoupdate validate-and-warn pattern, R1.4).
+	// not an error (the autoupdate validate-and-warn pattern).
 	if len(c.Engine.Subvolumes) == 0 {
 		log.Warn("snapshot: engine.subvolumes is empty; nothing will be snapshotted")
 	}

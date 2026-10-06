@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Errors of ReadBody (R2.3 to R2.5).
+// Errors of ReadBody.
 var (
 	ErrNoEditor     = errors.New("no editor: pass --body-file, or set VISUAL or EDITOR")
 	ErrEditorFailed = errors.New("the editor failed")
@@ -33,7 +33,7 @@ const scissorsLine = "# ------------------------ >8 ------------------------"
 
 // editorInstructions prefills the temporary file. Nothing but instructions is
 // written above the scissors line and nothing below it, so saving the file
-// untouched is an empty body (R2.4).
+// untouched is an empty body.
 const editorInstructions = `# Write the notice body in this file. Lines starting with '#' above the
 # line that follows are dropped; everything below it is kept as written,
 # lines starting with '#' included. Separate paragraphs with a blank line;
@@ -42,7 +42,7 @@ const editorInstructions = `# Write the notice body in this file. Lines starting
 ` + scissorsLine + "\n"
 
 // TerminalRunner runs the editor on the user's terminal. It never goes through
-// a shell (R2.6), and it stays in bentoo's process group on purpose: an
+// a shell, and it stays in bentoo's process group on purpose: an
 // interactive editor that is moved out of the foreground group loses the
 // terminal's signals and its job control.
 func TerminalRunner(ctx context.Context, name string, args ...string) error {
@@ -51,7 +51,7 @@ func TerminalRunner(ctx context.Context, name string, args ...string) error {
 	return cmd.Run() // EditBody wraps it with the editor's name
 }
 
-// ReadBody returns the notice body (R2): the content of bodyFile when it is
+// ReadBody returns the notice body: the content of bodyFile when it is
 // given, otherwise what the user writes in $VISUAL, else $EDITOR (see
 // editedText). env reads the environment (os.Getenv in production).
 func ReadBody(ctx context.Context, bodyFile string, env func(string) string, run Runner) (string, error) {
@@ -168,7 +168,7 @@ func trimBlankLines(s string) string {
 
 // NewBodyEditor returns the BodyEditor `notice revise` uses: the current text,
 // below the instructions and the scissors line, opened in $VISUAL or $EDITOR.
-// Saved untouched, it comes back unchanged, `#` lines included (R5.6).
+// Saved untouched, it comes back unchanged, `#` lines included.
 func NewBodyEditor(env func(string) string, run Runner) BodyEditor {
 	return func(ctx context.Context, current string) (string, error) {
 		return EditBody(ctx, editorInstructions+current+"\n", env, run)

@@ -11,32 +11,22 @@ import (
 )
 
 // This file is the publish half of `--depth`: the per-package question and the
-// one call that writes into the published overlay (design D8c). It is separate
-// from overlay_compare_depth.go for the same reason that file is separate from
-// overlay_compare_realign.go — each file's first paragraph states what it may
-// write, and "stages under <configDir>/staging" and "replaces a published
-// ebuild" are different promises.
+// one call that writes into the published overlay. It is separate from
+// overlay_compare_depth.go because "stages under <configDir>/staging" and
+// "replaces a published ebuild" are different promises about what may be written.
 //
-// # Three properties, none negotiable
+// PER PACKAGE: a publication is a judgement about one artefact (every gate can
+// pass and reverting can still be wrong), so there is ONE question per proved
+// package, naming its atom.
 //
-// PER PACKAGE: the build confirmation is one decision about machine time; a
-// publication is a judgement about one artefact (Promote's own nodejs example:
-// every gate can pass and reverting can still be wrong). ONE question per
-// proved package, naming its atom.
+// ON EVIDENCE ONLY: an all-SKIPPED proof satisfies validate.PromotionDecision by
+// design, but nothing read the tree — as when `ebuild` dies in setup on a staged
+// tree without a Manifest — and a question the evidence cannot support is never
+// put to the maintainer.
 //
-// ON EVIDENCE ONLY: an all-SKIPPED proof satisfies validate.PromotionDecision —
-// SKIPPED is acceptable there by design — but nothing read the tree, and a
-// question the evidence cannot support is never put to the maintainer. On this
-// host that is today's common case: staging carries no Manifest, so `ebuild`
-// dies in setup and every gate skips (story 033's 2026-08-10 measurement,
-// re-confirmed 2026-08-16; story 037 owns the seam that makes these gates run).
-//
-// NO FLAG REACHES IT: `--yes` covers the build prompt and nothing else; a
-// non-interactive run is told to re-run in a terminal. realign.Promote takes
-// `approved bool` precisely so the asking stays here, and the only path to
-// `true` is a human answering the question.
-//
-// _Requirements: R5, R5.3, R5.4, R5.5, R7_
+// NO FLAG REACHES IT: `--yes` covers the build prompt only; a non-interactive run
+// is told to re-run in a terminal. realign.Promote takes `approved bool` so the
+// asking stays here, and the only path to `true` is a human answering.
 
 // The publisher, the per-package y/N question and the terminal probe that
 // gates it are the realignPromote, confirmRealignPublish and
@@ -57,10 +47,11 @@ func realignProofCarriesEvidence(proof realign.Proof) bool {
 	return false
 }
 
-// offerRealignPublish puts D8's third authority its question for one package,
-// and on a yes calls realign.Promote with the same proposal and proof the
-// ladder produced — the identity R5.5 asks for, held by handing over the very
-// values rather than anything re-derived.
+// offerRealignPublish puts the maintainer — the third authority, after the model
+// and the gates — its question for one package, and on a yes calls
+// realign.Promote with the same proposal and proof the ladder produced, so the
+// published bytes are exactly the proved ones: the very values are handed over
+// rather than anything re-derived.
 //
 // The caller has already established that the proof PASSED and that its gate
 // list is non-empty; what is decided here is whether the evidence supports a

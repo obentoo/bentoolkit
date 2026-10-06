@@ -70,11 +70,11 @@ func listArchiveMembers(ctx context.Context, archive string) ([]string, error) {
 // rather than merely careful: nothing is ever written to disk, so archive path
 // traversal has no surface to act on instead of being something a check must
 // catch. It is also why a validate run leaves the overlay byte-identical by
-// construction rather than by discipline (R1.5, R5.9).
+// construction rather than by discipline.
 //
 // # One member per call, deliberately
 //
-// design.md D4 describes the invocation as `tar -xOf <archive> <member>…`, and
+// The design describes the invocation as `tar -xOf <archive> <member>…`, and
 // tar does accept several. The output of that form is the members' bytes
 // CONCATENATED with no separator and in tar's storage order, so a caller cannot
 // tell where one file ends and the next begins — and the caller here has to,

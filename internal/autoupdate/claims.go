@@ -42,9 +42,9 @@ type claim struct {
 
 // resolveClaims returns one claim per registry entry whose atom is atom,
 // resolving each through selectCurrentEbuild so slot and series filtering has
-// exactly one implementation (design D2). Re-deriving either filter here would
-// give the sweep a second, drifting notion of which ebuild belongs to an entry —
-// and this one deletes files.
+// exactly one implementation. Re-deriving either filter here would give the
+// sweep a second, drifting notion of which ebuild belongs to an entry — and this
+// one deletes files.
 //
 // Every matching entry claims, including a disabled or held one. That is
 // deliberate and the opposite of what the linter does: a linter must not invent
@@ -52,15 +52,12 @@ type claim struct {
 // delete the ebuild that entry is parked on. "enabled = false" means "stop
 // checking upstream", never "this ebuild is disposable".
 //
-// An entry that resolves to nothing is NOT an error here. selectCurrentEbuild's
-// sentinels (ErrNoEbuildFound, ErrSlotNotFound, ErrSeriesNotFound) all describe
-// an entry that currently holds no ebuild, which is a fact about that one entry
-// and leaves the rest of the directory perfectly plannable; it is recorded as an
-// empty claim.Version. The error that MUST stop a plan is the directory being
-// unreadable, and that one is raised by planSweep, which does the read.
-//
-// Keys are visited in sorted order so the result — and every verdict derived
-// from it — is stable across runs.
+// An entry that resolves to nothing is NOT an error: selectCurrentEbuild's
+// sentinels describe one entry holding no ebuild, which leaves the rest of the
+// directory plannable, so it is recorded as an empty claim.Version. The error
+// that MUST stop a plan — an unreadable directory — is raised by planSweep,
+// which does the read. Keys are visited in sorted order so every verdict
+// derived from the result is stable across runs.
 func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) []claim {
 	// Normalise the target: a caller holding a registry key must get the same
 	// answer as one holding a bare atom, and neither may reach a path with its
@@ -81,7 +78,7 @@ func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]registr
 		c := claim{Key: key, Pin: cfg.Version}
 		// The single selection authority: it splits the key itself, applies the
 		// ":slot" filter by reading SLOT= and the `series` filter by regex, and
-		// skips live ebuilds (UB2).
+		// skips live ebuilds.
 		if cand, err := ebuilds.SelectCurrentEbuild(log, overlayPath, key, cfg.Series); err == nil {
 			c.Version = cand.Version
 		}
@@ -100,18 +97,16 @@ func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]registr
 // tell them apart because only one of them has an entry to name:
 //
 //   - Blocked != "" — an entry claims this directory but declares no pin, and
-//     Blocked names it (R5.1). Report it as "entry X has no version".
+//     Blocked names it. Report it as "entry X has no version".
 //   - Blocked == "" && len(WouldRemove) > 0 — NO registry entry claims this
 //     directory at all. There is no key to name, so Blocked stays empty.
 //     Report it as "no entry claims this directory".
 //
-// Both leave Remove empty and put the candidates in WouldRemove. The pairing
-// discriminates only when there WAS something to consider: a directory nothing
-// claims but that has nothing removable either (a single ebuild, held by the
-// R4.3 floor) is indistinguishable from an ordinary no-op plan — which is
-// harmless, since both delete nothing.
+// Both leave Remove empty and put the candidates in WouldRemove. An unclaimed
+// directory with nothing removable (a single ebuild, held by the last-release
+// floor) looks like an ordinary no-op plan — harmless, since both delete nothing.
 type sweepPlan struct {
-	// Keep maps a kept version to the entry key claiming it (R6.1). An empty
+	// Keep maps a kept version to the entry key claiming it. An empty
 	// value means the version is kept by a rule rather than by an entry — the
 	// live-ebuild rule or the last-non-live floor — since a registry key is
 	// never itself empty. It is empty when no entry claims the directory:
@@ -124,95 +119,37 @@ type sweepPlan struct {
 	Remove []string
 	// WouldRemove lists the versions the sweep would have deleted had it not
 	// been blocked, ascending. Empty on an unblocked plan — a caller reads
-	// Remove there. Exists because R5.1 requires a blocked directory to report
+	// Remove there. Exists because a blocked directory must still report
 	// its candidates, which Remove (mandated empty when blocked) cannot carry.
 	//
 	// It is computed under exactly the rules Remove is: live ebuilds excluded,
-	// pinned versions kept, and the R4.3 floor respected — so it is a report of
-	// what would really have happened, not a raw difference.
+	// pinned versions kept, and the last-release floor respected — so it is a
+	// report of what would really have happened, not a raw difference.
 	WouldRemove []string
-	// Blocked names the entry that lacks a pin; non-empty means remove nothing
-	// (R5.1). It is empty in the no-entry-claims case, which is also a block —
+	// Blocked names the entry that lacks a pin; non-empty means remove nothing.
+	// It is empty in the no-entry-claims case, which is also a block —
 	// see the type comment for how to tell the two apart.
 	Blocked string
 }
 
 // planSweep computes the plan without touching the filesystem beyond reading
-// the directory. Live -9999 ebuilds are always kept and never appear in Remove.
+// the directory. The rules, in this order:
 //
-// The rules, applied in this order:
+//  1. One claiming entry without a pin blocks the whole directory, and Blocked
+//     names it: guessing which ebuild is unclaimed deletes maintained lines.
+//  2. NO entry claiming the directory blocks it too: a registry that failed to
+//     match is the least-informed state, and a file-deleting default must not be
+//     permissive there. Blocked stays empty — there is no entry to name.
+//  3. Every live -9999 ebuild is kept: selection ignores them, so no pin can.
+//  4. Every version a claiming entry HOLDS — the union of its pin and the version
+//     it resolves to, as unclaimedIn computes it — is kept; other non-live go.
+//  5. If that would leave no non-live ebuild, the highest one is kept instead.
 //
-//  1. R5.1/D3 — one claiming entry without a pin blocks the whole directory.
-//     Nothing is removed and Blocked names it. Guessing which ebuild is the
-//     unclaimed one is the failure mode that deletes a maintained release line,
-//     so the plan refuses to guess: 89 of the overlay's 93 multi-ebuild
-//     directories are deliberate, one ebuild per entry.
-//  2. D3 again — NO entry claiming the directory blocks it too. Zero claims is
-//     the least-informed state there is, and R4.1 read literally would license
-//     removing everything but the newest ebuild from a directory the registry
-//     simply failed to match. That is the same disaster as rule 1 (a maintained
-//     release line deleted) reached without any pin being wrong: an atom-to-key
-//     mismatch, a registry that loaded empty, a filter that selected nothing.
-//     A file-deleting default does not get to be permissive in its least
-//     informed state. Blocked stays empty here — there is no entry to name.
-//  3. The live rule — every -9999 ebuild is kept, whatever the pins say. This is
-//     NOT UB2: UB2 is about selection ignoring live ebuilds when choosing an
-//     entry's current version. Here selection has already ignored them, which is
-//     precisely why no pin can ever claim one, which is precisely why they need
-//     a preservation rule of their own or the sweep would delete every one.
-//  4. R4.1 — every version a claiming entry HOLDS and that is present on disk is
-//     kept, recorded against the entry holding it; everything else non-live is
-//     removed. "Holds" is the union of both halves of a claim — the version the
-//     entry PINS and the version it RESOLVES to — exactly as unclaimedIn
-//     computes it. See "Why the resolved half" below: that half is what stops a
-//     batch apply deleting the release line it created seconds earlier.
-//  5. R4.3 — if that would leave the directory with no non-live ebuild at all,
-//     the highest one is dropped from the removal list and kept instead. A
-//     directory emptied of releases is unrecoverable from the overlay alone; a
-//     stale ebuild left behind is not.
-//
-// Rules 3 to 5 are computed whether or not the plan is blocked; a block only
-// decides whether the result lands in Remove or in WouldRemove. That is what
-// makes the blocked report trustworthy: it is the same calculation, not a
-// looser second one.
-//
-// A pin naming a version that is not on disk keeps nothing and is not reported
-// as kept — the report must not claim a file that is not there. What happens to
-// the directory then depends on what the entry still resolves to: some OTHER
-// ebuild, which rule 4's resolved half keeps in that entry's name, or nothing at
-// all, in which case rule 5 is the only thing between the directory and being
-// emptied. Either way the drift (registry says 2.0.0, overlay has 1.0.0) is what
-// a later reconciliation is meant to repair.
-//
-// An unreadable — or absent — package directory is an error, never an empty
-// plan: an empty plan reads as "nothing to keep", which is one caller away from
-// "remove everything".
-//
-// # Why the resolved half
-//
-// An entry that resolves to a file is holding it, pin or no pin. That is this
-// package's stated rule — unclaimedIn says so in as many words and takes the
-// same union — and rule 4 is the one place that used to ignore it, which is
-// exactly the place that deletes files.
-//
-// `--apply all --clean` builds ONE Applier whose registry snapshot is taken at
-// construction and never reloaded, and cleanPackageDir freshens the pin of the
-// entry being applied ONLY (sweepConfigs). So while @dev is being applied, its
-// @stable sibling is planned against the pin the run STARTED with — which the
-// @stable apply, moments earlier in the same command, has already made stale.
-// Claiming by pin alone, that sibling's brand-new ebuild is held by nobody and
-// goes straight into Remove: UB3 broken, Success still true, no CleanWarning
-// printed, and the registry left pinning a file that no longer exists. Reverse
-// the order and it is the dev line that dies instead; either order loses one.
-// The identical drift is reachable without a batch — R4.4 deliberately tolerates
-// a failed pin write, and any out-of-band bump (a hand edit, pkgdev, a `git
-// pull` of the overlay from another machine) leaves the same stale pin behind.
-//
-// So the keep-set is deliberately wider than R4.1 read literally, in the same
-// direction and for the same reason rule 2 is: keeping one ebuild too many costs
-// a directory that stays dirty one more run, keeping one too few costs a
-// maintained release line — and 90 directories in the overlay have one to lose.
-// Do not "simplify" it back to the pin alone.
+// Rules 3-5 run whether or not the plan is blocked; a block only routes the
+// result to WouldRemove instead of Remove, so the blocked report is the same
+// calculation. A pin naming a version not on disk keeps nothing. An unreadable
+// or absent directory is an error, never an empty plan ("nothing to keep" is
+// one caller away from "remove everything").
 func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) (sweepPlan, error) {
 	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
@@ -233,10 +170,17 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	// Rule 1: collect what each entry holds, and the first entry that can say
 	// nothing about what it holds.
 	claims := resolveClaims(log, overlayPath, cfgs, atom)
-	// heldBy maps a version to the entry holding it — by pin OR by resolution,
-	// see rule 4. It is deliberately NOT named pinnedBy: the pin is only half of
-	// what an entry holds, and treating it as the whole is the bug that deleted
-	// the sibling release line a batch apply had just created.
+	// heldBy maps a version to the entry holding it — by pin OR by resolution
+	// (rule 4); it is deliberately NOT named pinnedBy. Pin alone is not enough:
+	// `--apply all --clean` builds ONE Applier whose registry snapshot is never
+	// reloaded, and cleanPackageDir freshens only the applied entry's pin
+	// (sweepConfigs). So while @dev is applied, its @stable sibling is planned
+	// against a pin the @stable apply moments earlier made stale, and by pin
+	// alone its brand-new ebuild would be removed while the registry still pins
+	// it. A failed pin write or any out-of-band bump (hand edit, pkgdev, a `git
+	// pull`) leaves the same drift. Keeping one ebuild too many costs a dirty
+	// directory for one run; one too few costs a maintained release line. Do not
+	// "simplify" this back to the pin alone.
 	heldBy := make(map[string]string)
 	// Claims arrive in key order, so first-writer-wins below is stable across
 	// runs rather than a map-iteration coin flip.
@@ -245,7 +189,7 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 			if plan.Blocked == "" {
 				plan.Blocked = c.Key
 			}
-			// R5.1/D3: a pinless entry blocks the whole directory, so its
+			// A pinless entry blocks the whole directory, so its
 			// resolved version is not collected either. Nothing is at risk —
 			// a blocked plan removes nothing — and collecting it would only
 			// shrink the candidate list the block is required to REPORT.
@@ -327,7 +271,7 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 		candidates = nil
 	}
 
-	// R5.1 and its no-entry twin: report the candidates, delete nothing.
+	// Rule 1 and its no-entry twin, rule 2: report the candidates, delete nothing.
 	if plan.Blocked != "" || len(claims) == 0 {
 		plan.WouldRemove = candidates
 		return plan, nil
@@ -342,7 +286,7 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 }
 
 // DivergenceKind classifies one disagreement between the registry and the
-// overlay. The three kinds are R3.1's three classes and they are NOT
+// overlay. The three kinds are NOT
 // interchangeable: only StalePin carries a version the reconciliation may
 // write, so a consumer that builds a write batch MUST switch on the kind rather
 // than map every divergence to Key -> Disk.
@@ -356,7 +300,7 @@ const (
 	// Pin is empty for the whole first reconciliation: all 409 records are
 	// pinless right now, so an enabled entry that resolves to an ebuild diverges
 	// from its (absent) pin. That is deliberate and load-bearing — it is exactly
-	// the ~317-entry bulk fill of A1, and the only class the write batch is
+	// the ~317-entry first bulk fill, and the only class the write batch is
 	// built from. A caller wording the prompt can still tell the two apart
 	// (Pin == "" reads "pin 317 entries for the first time", Pin != "" reads
 	// "correct N stale pins"); the reconciliation itself does not, because the
@@ -377,10 +321,10 @@ const (
 	// select: the package was removed, or its ":slot"/`series` filter matches
 	// nothing there.
 	//
-	// Disk is always empty, so there is nothing to write (UB4: the registry
-	// never holds a version that is not on disk) and reporting it is the whole
-	// of the action. The existing orphan reconciliation, not this one, is what
-	// acts on a removed package (R3.5).
+	// Disk is always empty, so there is nothing to write (the registry never
+	// holds a version that is not on disk) and reporting it is the whole of the
+	// action. The existing orphan reconciliation, not this one, is what acts on
+	// a removed package.
 	NoEbuild
 )
 
@@ -413,7 +357,7 @@ type Divergence struct {
 	// the directory for UnclaimedEbuild — see that constant for why. Either way
 	// it is identity only: never build a path from it, always split it first.
 	Key string
-	// Kind is which of R3.1's three classes this is.
+	// Kind is which of the three classes this is.
 	Kind DivergenceKind
 	// Pin is the version the registry declares (PackageConfig.Version), empty
 	// when the entry has no pin — which is every entry today.
@@ -425,63 +369,23 @@ type Divergence struct {
 }
 
 // Reconcile compares every enabled entry's pin against the ebuild it resolves
-// to on disk, for the whole registry, and returns the divergences in R3.1's
-// three classes.
+// to on disk, for the whole registry, and returns the divergences in three
+// classes: StalePin, UnclaimedEbuild and NoEbuild.
 //
-// # Why this returns data instead of writing it
+// It only ever reads. The registry is a published artifact — the overlay
+// auto-commits and pushes, so a wrong pin is a released one — so the caller
+// shows the whole set, takes ONE confirmation for all of it, leaves
+// packages.toml byte-identical on "no" and refuses to write from a non-TTY
+// without --yes. Nothing here should ever start writing packages.toml.
 //
-// The registry is a published artifact. ~/Projetos/git/bentoo auto-commits and
-// pushes, so an unattended write reaches origin within minutes — a wrong pin is
-// not a local mistake to be fixed before anyone sees it, it is a released one.
-// That is why this function only ever reads: it hands the whole divergence set
-// back so a caller can show it and take ONE confirmation covering all of it
-// (R3.2), leave packages.toml byte-identical when the answer is no (R3.3), and
-// refuse to write at all from a non-TTY without --yes (R3.4). Nothing here
-// touches packages.toml, and nothing here should ever start to.
-//
-// # What is compared, and what is skipped
-//
-// A disabled (enabled = false) entry is skipped: the existing overlay-driven
-// status reconciliation in CheckAll owns it, and S021-R3.5 requires this to
-// leave it alone. A held (hold = true) entry is NOT skipped — see the skip
-// itself for why the two were never the same reason (S026-R3.2). A disabled
-// entry's ebuild is NOT thereby unclaimed — a switched-off entry still holds
-// its file (see resolveClaims) — so the unclaimed scan below counts every entry
-// of a directory, disabled ones included, while only enabled ones can be the
-// SUBJECT of a divergence. The two functions differ deliberately on this point;
-// do not unify them.
-//
-// Resolution goes through selectCurrentEbuild, so ":slot" and `series` are
-// filtered by the one implementation the checker and the sweep use (D2). Its
-// sentinels — ErrNoEbuildFound, ErrSlotNotFound, ErrSeriesNotFound — are facts
-// about one entry rather than failures, and they are precisely R3.1's third
-// class, so they land in NoEbuild. Any OTHER error is a directory that could not
-// be read: that entry is skipped with a warning naming it, and NO divergence is
-// invented from it. A fabricated divergence here becomes a fabricated pin in the
-// registry, published.
-//
-// The pin is compared to the resolved version as an exact string, not through
-// ebuild.CompareVersions, because an exact string is what the sweep matches on
-// (planSweep's heldBy map). A pin the sweep cannot match keeps no file, so
-// declaring it "not stale" because it compares equal would leave the registry
-// pinning a version that does not protect its ebuild.
-//
-// The result is sorted, so the prompt a maintainer reads is the same list in the
-// same order on two consecutive runs and a diff between them means the overlay
-// changed.
-//
-// # Cost
-//
-// One directory read per enabled entry for the resolution, one per distinct
-// directory for the unclaimed scan, and one more per entry of that directory to
-// collect its claims: roughly 2-3 readdir per enabled entry, not the single one
-// design.md's performance note assumes. That note asks for the checker's
-// CheckResult data to be reused instead, which this signature cannot do — it
-// takes no results — and which would not remove the scan anyway: CheckResult
-// carries a resolved CurrentVersion but never the directory listing that
-// UnclaimedEbuild is computed from.
-//
-// What it skips is warned about to log; nil discards the warnings.
+// Only enabled entries can be the SUBJECT of a divergence, but the unclaimed
+// scan counts every entry of a directory: a switched-off entry still holds its
+// file. Resolution goes through selectCurrentEbuild; its not-found sentinels
+// land in NoEbuild, and any other error skips that entry with a warning — a
+// fabricated divergence would become a fabricated, published pin. The result is
+// sorted, so two runs differ only when the overlay did. It costs about 2-3
+// readdir per enabled entry; CheckResult could not replace the scan, as it
+// carries no directory listing. Skips are warned about to log; nil discards them.
 func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig) []Divergence {
 	log = logging.OrDiscard(log)
 	var divs []Divergence
@@ -493,19 +397,19 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	for _, key := range slices.Sorted(maps.Keys(cfgs)) {
 		cfg := cfgs[key]
 		// enabled = false is the ONLY skip here, and the two conditions this
-		// once bundled were never the same reason (S026-R3.2):
+		// once bundled were never the same reason:
 		//
 		//   - a disabled entry is skipped because there is nothing to record —
 		//     that flag is the checker's own bookkeeping for "the ebuild
 		//     vanished from the overlay" — and the overlay-driven status
-		//     reconciliation in CheckAll owns the entry (S026-R3.1, S021-R3.5);
+		//     reconciliation in CheckAll owns the entry;
 		//   - a HELD entry is skipped by the CHECKER, which must not auto-bump
 		//     it. That is a statement about fetching a new version, and it says
 		//     nothing about recording the one already on disk: hold means
 		//     "present, but do not auto-bump", so the file IS there and writing
 		//     down which version it is second-guesses no maintainer decision.
-		//     It is therefore compared like any other entry (S026-R1.1) and its
-		//     hold is never written back (S026-R2.1).
+		//     It is therefore compared like any other entry and its hold is
+		//     never written back.
 		if !cfg.IsEnabled() {
 			continue
 		}
@@ -518,6 +422,9 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 		cand, err := ebuilds.SelectCurrentEbuild(log, overlayPath, key, cfg.Series)
 		switch {
 		case err == nil:
+			// An exact string, not ebuild.CompareVersions: the sweep matches pins
+			// exactly (planSweep's heldBy), so a pin that merely compares equal
+			// protects no file and must still be reported stale.
 			if cand.Version != cfg.Version {
 				divs = append(divs, Divergence{
 					Key: key, Kind: StalePin, Pin: cfg.Version, Disk: cand.Version,
@@ -621,7 +528,7 @@ func StalePinBatch(divs []Divergence) map[string]string {
 // pins that actually need writing. An entry that resolves to a file is holding
 // it, pin or no pin.
 //
-// Live -9999 ebuilds are never reported: selection skips them (UB2), so no pin
+// Live -9999 ebuilds are never reported: selection skips them, so no pin
 // can ever name one, so "no entry claims it" is true of every live ebuild in the
 // overlay and means nothing. Reporting them would put the one file that cannot
 // be restored by re-fetching a release at the top of a removal candidate list.
@@ -642,7 +549,7 @@ func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.
 	}
 
 	// Claims are collected from EVERY entry of the atom, disabled and held
-	// included: R3.5 says a switched-off entry is not a divergence to report,
+	// included: a switched-off entry is not a divergence to report,
 	// not that its ebuild belongs to nobody. resolveClaims is the one place that
 	// knows who holds what; re-deriving it here would give the report a second,
 	// drifting answer to that question.

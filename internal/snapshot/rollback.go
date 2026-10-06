@@ -6,30 +6,30 @@ import (
 	"fmt"
 )
 
-// rollback.go is the snapshot ROLLBACK entry point (story 007 T2.1, R3).
+// rollback.go is the snapshot ROLLBACK entry point.
 // Rollback is snapper-specific: it delegates to `snapper rollback <id>`, which
 // makes a read-write copy of snapshot <id> the new default subvolume so the
-// system boots into it on the next reboot (R3.1). The engine guard fires FIRST
-// (R3.3): a non-snapper engine is refused before the operator is even prompted.
+// system boots into it on the next reboot. The engine guard fires FIRST: a
+// non-snapper engine is refused before the operator is even prompted.
 // Because a rollback rewires the running system it is gated behind operator
-// confirmation unless --yes is given (R3.2), mirroring restore.go's gate. The
-// snapper subprocess goes through opts.Run (R6.1).
+// confirmation unless --yes is given, mirroring restore.go's gate. The
+// snapper subprocess goes through opts.Run.
 //
 // The CLI verb that wires this up is cmd/bentoo/snapshot_rollback.go.
 
 // ErrRollbackDeclined is returned when the operator does not approve a
-// destructive rollback at the confirm prompt (R3.2). When this is returned,
+// destructive rollback at the confirm prompt. When this is returned,
 // NOTHING has run — the gate fires before any subprocess. Mirrors
 // ErrRestoreDeclined.
 var ErrRollbackDeclined = errors.New("rollback declined by operator")
 
-// ErrRollbackUnsupported is returned when the active engine is not snapper
-// (R3.3): `snapper rollback` has no btrbk equivalent, so rollback is refused
+// ErrRollbackUnsupported is returned when the active engine is not snapper:
+// `snapper rollback` has no btrbk equivalent, so rollback is refused
 // outright with a clear message rather than approximated.
 var ErrRollbackUnsupported = errors.New("rollback requires the snapper engine")
 
 // RollbackOptions configures a Rollback. Yes/Confirm gate the destructive
-// action (R3.2); Run is the subprocess seam (R6.1). Conventions mirror
+// action; Run is the subprocess seam. Conventions mirror
 // RestoreOptions: nil Confirm → defaultConfirmFunc, nil Run → defaultRunner().
 type RollbackOptions struct {
 	Yes     bool        // --yes: skip the confirm prompt
@@ -37,25 +37,25 @@ type RollbackOptions struct {
 	Run     Runner      // nil → defaultRunner()
 }
 
-// Rollback rolls the system back to snapshot id via `snapper rollback` (R3.1).
+// Rollback rolls the system back to snapshot id via `snapper rollback`.
 // The ORDER is the contract:
 //
-//  1. ENGINE GUARD (R3.3): a non-snapper cfg.Engine.Driver is refused with
+//  1. ENGINE GUARD: a non-snapper cfg.Engine.Driver is refused with
 //     ErrRollbackUnsupported BEFORE the confirm gate — the operator is never
 //     prompted to approve an action that cannot run.
-//  2. CONFIRM GATE (R3.2): unless opts.Yes, the operator must approve; a
+//  2. CONFIRM GATE: unless opts.Yes, the operator must approve; a
 //     decline returns ErrRollbackDeclined and NO subprocess runs.
 //  3. EXECUTE: `snapper -c root rollback <id>` through opts.Run. A system
 //     rollback always targets the canonical "root" snapper config
 //     (snapperConfigName("/")) — rolling back is only meaningful for the
 //     root filesystem.
 func Rollback(ctx context.Context, cfg *Config, id string, opts RollbackOptions) error {
-	// 1. Engine guard FIRST (R3.3).
+	// 1. Engine guard FIRST.
 	if cfg.Engine.Driver != "snapper" {
 		return fmt.Errorf("%w: active engine is %q", ErrRollbackUnsupported, cfg.Engine.Driver)
 	}
 
-	// 2. Confirm gate (R3.2): BEFORE any subprocess. A declined rollback is a no-op.
+	// 2. Confirm gate: BEFORE any subprocess. A declined rollback is a no-op.
 	if !opts.Yes {
 		confirm := opts.Confirm
 		if confirm == nil {
@@ -67,7 +67,7 @@ func Rollback(ctx context.Context, cfg *Config, id string, opts RollbackOptions)
 		}
 	}
 
-	// 3. Execute (R3.1) through the Runner seam (R6.1).
+	// 3. Execute through the Runner seam.
 	run := opts.Run
 	if run == nil {
 		run = defaultRunner()

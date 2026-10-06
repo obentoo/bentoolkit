@@ -8,15 +8,15 @@ import (
 
 // maxLineBytes bounds the live-line buffer the emitter assembles for a single
 // unterminated line. A pathological child that never emits "\n" or "\r" must not
-// grow this buffer without limit (AD8); once a line reaches this size the current
+// grow this buffer without limit; once a line reaches this size the current
 // content is flushed as an in-place (eol=false) update and assembly restarts. The
 // capture buffer still receives every byte, so the flush changes nothing that
 // Captured() returns.
 const maxLineBytes = 64 * 1024
 
 // MaxCapturedBytes is how much child output is kept for an error message: the
-// LAST 64 KiB (S054-R7.1). Before this bound a child that wrote 200 MB had all
-// 200 MB kept in memory and pasted into its error (audit finding B10).
+// LAST 64 KiB. Before this bound a child that wrote 200 MB had all
+// 200 MB kept in memory and pasted into its error.
 const MaxCapturedBytes = 64 << 10
 
 // Tail returns s unchanged when it is at most MaxCapturedBytes long. Otherwise
@@ -24,9 +24,9 @@ const MaxCapturedBytes = 64 << 10
 // how many earlier bytes were dropped — the shape Captured() has past the bound.
 // The cut is by bytes, so the kept text may start mid-line or mid-rune.
 //
-// It is for text pasted into a message (S054-R7.2), never for a transcript
+// It is for text pasted into a message, never for a transcript
 // something still has to judge: the build verdict reads every phase marker of
-// the whole transcript (S054-R7.3).
+// the whole transcript.
 func Tail(s string) string {
 	return keepTail(s, 0)
 }
@@ -46,19 +46,19 @@ func keepTail(s string, dropped int) string {
 }
 
 // StreamCapture is the streaming capture seam that replaces exec's CombinedOutput
-// for long subprocesses (AD4). It implements io.Writer, so it can be assigned to
+// for long subprocesses. It implements io.Writer, so it can be assigned to
 // cmd.Stdout / cmd.Stderr, and tees every write into two sinks:
 //
 //   - capture: an in-memory copy of the most recent output, returned by
-//     Captured() for the error path (the "Output: %s on failure" contract,
-//     S010-R7.1). It keeps the last MaxCapturedBytes verbatim and counts the
-//     bytes it dropped before them (S054-R7.1);
+//     Captured() for the error path (the "Output: %s on failure" contract).
+//     It keeps the last MaxCapturedBytes verbatim and counts the
+//     bytes it dropped before them;
 //   - a line emitter that splits the stream into lines and forwards each update
-//     to the Reporter as a TaskLine event (R1.1). It treats "\r" as an in-place
-//     line replacement (R1.2) and "\r\n" as a single terminator.
+//     to the Reporter as a TaskLine event. It treats "\r" as an in-place
+//     line replacement and "\r\n" as a single terminator.
 //
 // All mutable state is guarded by a mutex so a single StreamCapture is safe to
-// drive from an os/exec copy goroutine and passes -race (R7.4).
+// drive from an os/exec copy goroutine and passes -race.
 type StreamCapture struct {
 	r      Reporter
 	id     string
@@ -96,7 +96,7 @@ func (c *StreamCapture) Write(p []byte) (int, error) {
 	if _, err := c.capture.Write(p); err != nil {
 		return 0, err
 	}
-	// Past twice the bound, drop the front down to the bound (S054-R7.1).
+	// Past twice the bound, drop the front down to the bound.
 	// Dropping only then, not on every write, keeps the cost amortised: each
 	// drop follows at least MaxCapturedBytes of new output, and between writes
 	// the buffer never holds more than 2*MaxCapturedBytes. Captured() cuts the
@@ -131,7 +131,7 @@ func (c *StreamCapture) Write(p []byte) (int, error) {
 		default:
 			c.cur = append(c.cur, b)
 			if len(c.cur) >= maxLineBytes {
-				// Bound the live-line buffer for an unterminated line (AD8).
+				// Bound the live-line buffer for an unterminated line.
 				c.emitLocked(false)
 			}
 		}
@@ -141,9 +141,9 @@ func (c *StreamCapture) Write(p []byte) (int, error) {
 }
 
 // Captured returns the child output kept for the error path. Up to
-// MaxCapturedBytes written, it is every byte, byte-identical (S054-R8.6). Past
+// MaxCapturedBytes written, it is every byte, byte-identical. Past
 // that, it is the last MaxCapturedBytes bytes, preceded by one line stating how
-// many earlier bytes were dropped (S054-R7.1) — the same text Tail would make of
+// many earlier bytes were dropped — the same text Tail would make of
 // the whole output. Reading it neither consumes nor re-truncates the capture.
 func (c *StreamCapture) Captured() string {
 	c.mu.Lock()

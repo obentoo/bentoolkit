@@ -27,31 +27,31 @@ func TestArchivePipeStages_FullSend(t *testing.T) {
 
 	// Stage 1: btrfs send, no -p, ends with the snapshot path.
 	s1 := stages[0]
-	if s1.name != "btrfs" {
-		t.Errorf("stage1 name = %q, want btrfs", s1.name)
+	if s1.Name != "btrfs" {
+		t.Errorf("stage1 name = %q, want btrfs", s1.Name)
 	}
-	if slices.Contains(s1.args, "-p") {
-		t.Errorf("stage1 args %v must not contain -p on a full send", s1.args)
+	if slices.Contains(s1.Args, "-p") {
+		t.Errorf("stage1 args %v must not contain -p on a full send", s1.Args)
 	}
-	if !slices.Contains(s1.args, "send") {
-		t.Errorf("stage1 args %v missing send", s1.args)
+	if !slices.Contains(s1.Args, "send") {
+		t.Errorf("stage1 args %v missing send", s1.Args)
 	}
-	if !slices.Contains(s1.args, snap.Path) {
-		t.Errorf("stage1 args %v missing snapshot path %q", s1.args, snap.Path)
+	if !slices.Contains(s1.Args, snap.Path) {
+		t.Errorf("stage1 args %v missing snapshot path %q", s1.Args, snap.Path)
 	}
 
 	// Stage 2: compressor reading stdin → stdout.
-	if stages[1].name != "zstd" {
-		t.Errorf("stage2 name = %q, want zstd", stages[1].name)
+	if stages[1].Name != "zstd" {
+		t.Errorf("stage2 name = %q, want zstd", stages[1].Name)
 	}
 
 	// Stage 3: rclone rcat <remote>/<obj>.
 	s3 := stages[2]
-	if s3.name != "rclone" {
-		t.Errorf("stage3 name = %q, want rclone", s3.name)
+	if s3.Name != "rclone" {
+		t.Errorf("stage3 name = %q, want rclone", s3.Name)
 	}
-	if !slices.Contains(s3.args, "rcat") {
-		t.Errorf("stage3 args %v missing rcat", s3.args)
+	if !slices.Contains(s3.Args, "rcat") {
+		t.Errorf("stage3 args %v missing rcat", s3.Args)
 	}
 	// The upload destination is pinned EXACTLY, and by TWO assertions that bite
 	// different regressions. A `HasPrefix(remote+"/")` check would not: it is
@@ -64,7 +64,7 @@ func TestArchivePipeStages_FullSend(t *testing.T) {
 	//     any separator it chose. This is what catches a change to the JOIN.
 	//  2. A literal, which catches a change INSIDE either half — a regression
 	//     the composition in (1) would silently follow.
-	dest := s3.args[len(s3.args)-1]
+	dest := s3.Args[len(s3.Args)-1]
 	if want := "gdrive:bentoo-backups/" + ArchivePrefix(snap.Subvolume) + "/" + ArchiveObjectLeaf(snap.ID); dest != want {
 		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
 	}
@@ -84,25 +84,25 @@ func TestArchivePipeStages_Incremental(t *testing.T) {
 	stages := archivePipeStages(snap, parent, "gdrive:bentoo-backups", "zstd")
 
 	s1 := stages[0]
-	pIdx := slices.Index(s1.args, "-p")
+	pIdx := slices.Index(s1.Args, "-p")
 	if pIdx < 0 {
-		t.Fatalf("stage1 args %v missing -p on incremental send", s1.args)
+		t.Fatalf("stage1 args %v missing -p on incremental send", s1.Args)
 	}
-	if pIdx+1 >= len(s1.args) || s1.args[pIdx+1] != parent {
-		t.Fatalf("stage1 args %v: -p not followed by parent path %q", s1.args, parent)
+	if pIdx+1 >= len(s1.Args) || s1.Args[pIdx+1] != parent {
+		t.Fatalf("stage1 args %v: -p not followed by parent path %q", s1.Args, parent)
 	}
-	pathIdx := slices.Index(s1.args, snap.Path)
+	pathIdx := slices.Index(s1.Args, snap.Path)
 	if pathIdx < 0 {
-		t.Fatalf("stage1 args %v missing snapshot path %q", s1.args, snap.Path)
+		t.Fatalf("stage1 args %v missing snapshot path %q", s1.Args, snap.Path)
 	}
 	if pIdx >= pathIdx {
-		t.Errorf("stage1 args %v: -p (at %d) must come before snap path (at %d)", s1.args, pIdx, pathIdx)
+		t.Errorf("stage1 args %v: -p (at %d) must come before snap path (at %d)", s1.Args, pIdx, pathIdx)
 	}
 
 	// Stage 3 destination, pinned exactly (see FullSend for why the composed
 	// form deliberately avoids ArchiveObjectName).
 	s3 := stages[2]
-	dest := s3.args[len(s3.args)-1]
+	dest := s3.Args[len(s3.Args)-1]
 	if want := "gdrive:bentoo-backups/" + ArchivePrefix(snap.Subvolume) + "/" + ArchiveObjectLeaf(snap.ID); dest != want {
 		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
 	}
@@ -111,7 +111,7 @@ func TestArchivePipeStages_Incremental(t *testing.T) {
 	}
 
 	full := archivePipeStages(snap, "", "gdrive:bentoo-backups", "zstd")
-	if fullDest := full[2].args[len(full[2].args)-1]; dest != fullDest {
+	if fullDest := full[2].Args[len(full[2].Args)-1]; dest != fullDest {
 		t.Errorf("incremental dest %q != full-send dest %q — the parent must not leak into the remote key",
 			dest, fullDest)
 	}
@@ -125,12 +125,12 @@ func TestArchivePipeStages_Incremental(t *testing.T) {
 // prefix is never folded into the filename.
 func TestArchivePipeStages_DefaultCompressor(t *testing.T) {
 	stages := archivePipeStages(Snapshot{ID: "x", Subvolume: "root", Path: "/s/x"}, "", "r:bkt", "")
-	if stages[1].name != "zstd" {
-		t.Errorf("default compressor = %q, want zstd", stages[1].name)
+	if stages[1].Name != "zstd" {
+		t.Errorf("default compressor = %q, want zstd", stages[1].Name)
 	}
 
 	s3 := stages[2]
-	dest := s3.args[len(s3.args)-1]
+	dest := s3.Args[len(s3.Args)-1]
 	if want := "r:bkt/" + ArchivePrefix("root") + "/" + ArchiveObjectLeaf("x"); dest != want {
 		t.Errorf("stage3 dest = %q, want %q — the key is <remote>/<prefix>/<leaf> (R3.1)", dest, want)
 	}
@@ -139,10 +139,10 @@ func TestArchivePipeStages_DefaultCompressor(t *testing.T) {
 	}
 }
 
-// markerRunner is a MockRunner-style scripted Runner that returns a per-stage
+// markerRunner is a mockRunner-style scripted Runner that returns a per-stage
 // marker stdout keyed by the command name, so the pipe-chaining test can prove
 // each stage's stdin equals the previous stage's stdout.
-func markerRunner(t *testing.T, mr *MockRunner, markers map[string][]byte) {
+func markerRunner(t *testing.T, mr *mockRunner, markers map[string][]byte) {
 	t.Helper()
 	mr.RunFunc = func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 		out, ok := markers[name]
@@ -154,12 +154,12 @@ func markerRunner(t *testing.T, mr *MockRunner, markers map[string][]byte) {
 }
 
 // TestArchiveShipper_Send_PipeChaining asserts Send drives exactly one pipe
-// through the Runner's piper seam, with 3 stages in order (btrfs send →
-// compressor → rclone rcat) (R2.1, 053 R5.1). MockRunner's Pipe chains the stages
+// through the Runner's Piper seam, with 3 stages in order (btrfs send →
+// compressor → rclone rcat) (R2.1, 053 R5.1). mockRunner's Pipe chains the stages
 // through Run, so each stage's recorded stdin still equals the previous stage's
 // stdout; the production execRunner streams them through OS pipes instead.
 func TestArchiveShipper_Send_PipeChaining(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	markerRunner(t, mr, map[string][]byte{
 		"btrfs":  []byte("BTRFS_STREAM"),
 		"zstd":   []byte("ZSTD_STREAM"),
@@ -212,7 +212,7 @@ func TestArchiveShipper_Send_PipeChaining(t *testing.T) {
 // (the rclone upload) fails the whole ship and Send returns that error (R2.3).
 func TestArchiveShipper_Send_StageFailureFailsShip(t *testing.T) {
 	rcatErr := errors.New("rclone: quota exceeded")
-	mr := &MockRunner{
+	mr := &mockRunner{
 		RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 			if name == "rclone" {
 				return nil, rcatErr
@@ -235,7 +235,7 @@ func TestArchiveShipper_Send_CtxCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel before running so the first stage observes Done immediately.
 
-	mr := &MockRunner{
+	mr := &mockRunner{
 		RunFunc: func(ctx context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			select {
 			case <-ctx.Done():
@@ -309,7 +309,7 @@ func captureWarn(t *testing.T, a *archiveShipper) (warnings func() []string) {
 func TestArchiveShipper_Send_Incremental(t *testing.T) {
 	parent := Snapshot{ID: "p1", Path: "/snap/home.p1"}
 	ps := &fakeParentStore{last: parent, ok: true}
-	mr := &MockRunner{} // nil RunFunc → all stages succeed
+	mr := &mockRunner{} // nil RunFunc → all stages succeed
 	a := &archiveShipper{remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 
 	snap := Snapshot{ID: "home.2026", Subvolume: "/home", Path: "/snaps/home.2026"}
@@ -350,7 +350,7 @@ func TestArchiveShipper_Send_Incremental(t *testing.T) {
 // report Incremental=false, and still record THIS snap as the new head.
 func TestArchiveShipper_Send_AbsentParentFallback(t *testing.T) {
 	ps := &fakeParentStore{ok: false}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 
 	warnings := captureWarn(t, a)
@@ -383,7 +383,7 @@ func TestArchiveShipper_Send_AbsentParentFallback(t *testing.T) {
 // snap as the new head.
 func TestArchiveShipper_Send_FullModeAlwaysFull(t *testing.T) {
 	ps := &fakeParentStore{last: Snapshot{ID: "p1", Path: "/snap/home.p1"}, ok: true}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "full", compress: "zstd", run: mr, parents: ps}
 
 	warnings := captureWarn(t, a)
@@ -415,7 +415,7 @@ func TestArchiveShipper_Send_FullModeAlwaysFull(t *testing.T) {
 func TestArchiveShipper_Send_RecordOnlyOnSuccess(t *testing.T) {
 	stageErr := errors.New("rclone: quota exceeded")
 	ps := &fakeParentStore{last: Snapshot{ID: "p1", Path: "/snap/home.p1"}, ok: true}
-	mr := &MockRunner{
+	mr := &mockRunner{
 		RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 			if name == "rclone" {
 				return nil, stageErr
@@ -440,7 +440,7 @@ func TestArchiveShipper_Send_RecordOnlyOnSuccess(t *testing.T) {
 func TestArchiveShipper_Send_StoreReadError(t *testing.T) {
 	readErr := errors.New("parents: corrupt record")
 	ps := &fakeParentStore{lastErr: readErr}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	a := &archiveShipper{remote: "r:bkt", mode: "incremental", compress: "zstd", run: mr, parents: ps}
 
 	_, err := a.Send(t.Context(), Snapshot{ID: "x", Subvolume: "/home", Path: "/s/x"})
@@ -547,12 +547,12 @@ func scriptedLsjson(objs []rcloneObject) []byte {
 	return []byte(b.String())
 }
 
-// archivePruneRunner scripts a MockRunner for the prune integration tests: the
+// archivePruneRunner scripts a mockRunner for the prune integration tests: the
 // pipe stages (btrfs/zstd/rclone rcat) succeed; `rclone lsjson` returns the
 // scripted listing; `rclone deletefile` succeeds and is recorded via Calls. An
 // optional lsjsonErr forces the listing call to fail (non-fatal-prune test).
-func archivePruneRunner(listing []rcloneObject, lsjsonErr error) *MockRunner {
-	return &MockRunner{
+func archivePruneRunner(listing []rcloneObject, lsjsonErr error) *mockRunner {
+	return &mockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			if name == "rclone" && len(args) > 0 {
 				switch args[0] {
@@ -779,7 +779,7 @@ func (m *mapParentStore) Record(subvol, ship string, snap Snapshot) error {
 
 var _ parentStore = (*mapParentStore)(nil)
 
-// growingArchiveRunner scripts a MockRunner over a remote whose CONTENT CHANGES
+// growingArchiveRunner scripts a mockRunner over a remote whose CONTENT CHANGES
 // — the one thing archivePruneRunner cannot do, since it returns one fixed
 // listing to every lsjson call:
 //
@@ -798,7 +798,7 @@ var _ parentStore = (*mapParentStore)(nil)
 // changes. Access is single-goroutine — runPipe runs the stages sequentially
 // through this one Runner — so no locking is needed.
 type growingArchiveRunner struct {
-	*MockRunner
+	*mockRunner
 	remote  string
 	modTime time.Time        // ModTime stamped on the next rcat upload
 	objects []rcloneObject   // remote content; Name is the key RELATIVE to the remote root
@@ -812,7 +812,7 @@ type growingArchiveRunner struct {
 }
 
 func newGrowingArchiveRunner(remote string) *growingArchiveRunner {
-	g := &growingArchiveRunner{MockRunner: &MockRunner{}, remote: remote}
+	g := &growingArchiveRunner{mockRunner: &mockRunner{}, remote: remote}
 	g.RunFunc = func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		if name != "rclone" || len(args) == 0 {
 			return []byte("stream"), nil // btrfs / compressor stages succeed
@@ -883,13 +883,13 @@ func (g *growingArchiveRunner) remove(key string) {
 }
 
 // deleteTargets returns the RAW `rclone deletefile <target>` arguments a
-// MockRunner recorded. It does NOT truncate to the last path segment, and that is
+// mockRunner recorded. It does NOT truncate to the last path segment, and that is
 // the entire point: once the key carries a per-subvolume prefix,
 // "<remote>/old.zst", "<remote>/-home/old.zst" and "<remote>/-home/-home/old.zst"
 // all truncate to "old.zst", so a basename assertion cannot tell a correct
 // re-join from a dropped or a doubled prefix. It REPLACED a truncating helper for
 // that reason; assert on the full argument (R1.3).
-func deleteTargets(calls []RunnerCall) []string {
+func deleteTargets(calls []runnerCall) []string {
 	var out []string
 	for _, c := range calls {
 		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "deletefile" {
@@ -900,11 +900,11 @@ func deleteTargets(calls []RunnerCall) []string {
 }
 
 // lsjsonTargets returns the RAW `rclone lsjson <target>` path arguments a
-// MockRunner recorded, in call order. It is what pins WHICH slice of the remote a
+// mockRunner recorded, in call order. It is what pins WHICH slice of the remote a
 // prune considered: the post-ship prune must list one subvolume's prefix
 // directory, never the remote root, and that argument is the whole mechanism —
 // objects outside it are not spared by a check, they are never candidates (R1.1).
-func lsjsonTargets(calls []RunnerCall) []string {
+func lsjsonTargets(calls []runnerCall) []string {
 	var out []string
 	for _, c := range calls {
 		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "lsjson" {
@@ -944,7 +944,7 @@ func recordHead(t *testing.T, ps *mapParentStore, subvol, ship string, snap Snap
 // either as the exact remote key, or by carrying head's snapshot ID, which
 // catches the deletion under any key layout. It asserts the head SURVIVES, never
 // the shape of the comparison that spares it (R6.2).
-func assertHeadNotDeleted(t *testing.T, calls []RunnerCall, remote string, head Snapshot, why string) {
+func assertHeadNotDeleted(t *testing.T, calls []runnerCall, remote string, head Snapshot, why string) {
 	t.Helper()
 	headObject := remote + "/" + ArchiveObjectName(head.Subvolume, head.ID)
 	for _, target := range deleteTargets(calls) {
@@ -1187,7 +1187,7 @@ func isDirListing() []rcloneObject {
 // assertions on the full deletefile argument. Truncating to the basename would
 // hide a prefix dropped, doubled or re-joined wrong, which is exactly the class
 // of defect the scoping introduced the risk of (R1.3).
-func assertIsDirEntriesFiltered(t *testing.T, calls []RunnerCall, deleteBase string) {
+func assertIsDirEntriesFiltered(t *testing.T, calls []runnerCall, deleteBase string) {
 	t.Helper()
 	targets := deleteTargets(calls)
 

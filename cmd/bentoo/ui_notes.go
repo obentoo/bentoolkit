@@ -6,11 +6,11 @@ import (
 )
 
 // This file is the output boundary for the lines a command prints AS ITS
-// ANSWER on stderr (story 062, R6 and the Constraint "Boundary with
-// internal/common/output").
+// ANSWER on stderr, as distinct from internal/common/output and from the
+// diagnostic logger.
 //
-// Before story 062 internal/common/logger printed the bare message to stderr,
-// and several commands used it as a UI printer: the overlay init wizard, the
+// internal/common/logger used to print the bare message to stderr, and several
+// commands used it as a UI printer: the overlay init wizard, the
 // status, rename, push, pull and commit result displays, the "Found N
 // packages" count lines and the "use --clone" guidance. Those lines are not
 // diagnostics. A user reads them as the command's answer, as a prompt, or as
@@ -22,8 +22,7 @@ import (
 //
 // Everything that reports a failure, a degraded path, a skip or progress
 // detail stays on the invocation's slog logger (logging.FromContext), and so
-// does every error line that precedes a failing exit (the story 058/062
-// boundary). Callers format their own text with fmt.Sprintf.
+// does every error line that precedes a failing exit. Callers format their own text with fmt.Sprintf.
 
 // uiInfo prints msg as a bare line on stderr, unless --quiet was given.
 func uiInfo(msg string) { uiNote(msg) }

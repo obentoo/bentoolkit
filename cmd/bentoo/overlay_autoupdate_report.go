@@ -12,25 +12,19 @@ import (
 
 // checkEnvelope puts one check run's facts inside the envelope every exported
 // document carries: the schema version, the kind of run that produced it, the
-// reader's label for it, and how far down its plan the run got (R4.1, R1.4).
+// reader's label for it, and how far down its plan the run got.
 //
-// # It is the ONE place this command builds a report.Run
+// It is the ONE place this command builds a report.Run. The kind and schema
+// version are fixed per COMMAND rather than per run: a kind that varied with
+// what a run found would be a discriminator nobody could filter on, and a
+// schema version typed at each producer leaves several places to find on the
+// day it changes. One construction site makes both true by construction.
 //
-// The two values it stamps unconditionally are fixed per COMMAND rather than
-// per run. A kind that varied with what a run found would be a discriminator
-// nobody could filter on, and a schema version typed at each producer is the
-// same defect as a column width typed into a format string: several places to
-// find on the day it changes, and nothing that fails when one is missed. One
-// construction site makes both true by construction instead of by agreement
-// between call sites.
-//
-// # Complete and NotEvaluated are ARGUMENTS, never read off the payload
-//
-// Deriving them — len(Results) against len(Plan) — is a different rule wearing
-// the same answer: it reads any report whose result list is shorter than its
-// plan as interrupted, including one a caller built by hand to describe a run
-// that never validated. Completeness is established by the run that did the
-// work, and it travels from there to here.
+// Complete and NotEvaluated are ARGUMENTS, never read off the payload.
+// Deriving them — len(Results) against len(Plan) — would read any report whose
+// result list is shorter than its plan as interrupted, including one built by
+// hand to describe a run that never validated. Completeness is established by
+// the run that did the work, and it travels from there to here.
 func checkEnvelope(payload report.AutoupdateCheck, complete bool, notEvaluated int) report.Run {
 	return report.Run{
 		Schema: report.SchemaVersion,
@@ -57,20 +51,13 @@ func checkEnvelope(payload report.AutoupdateCheck, complete bool, notEvaluated i
 // nothing by design. Every one of them established the same two things: no
 // facts, and no gap.
 //
-// # It is COMPLETE, and the empty plan is why
+// It is COMPLETE because nothing was planned, so nothing was left unreached; a
+// false would draw the `Run Interrupted` block over a run that finished.
 //
-// Nothing was planned, so nothing was left unreached, which is precisely what
-// Complete means (S045-R4.2). A false here would draw the `Run Interrupted`
-// block over a run that finished, telling an operator their run was cut short
-// when it was not.
-//
-// # The payload is the ZERO value, and the nil slices in it are the point
-//
-// A nil slice reaches the JSON export as null and an empty one as [], and the
-// two say different things: the first is a producer that established nothing,
-// the second one that established an empty list. This run validated nothing, so
-// the absence is carried rather than replaced with an invented empty collection
-// (S045-R4.1, S045-R4.3).
+// The payload is the ZERO value, and its nil slices are the point: a nil slice
+// reaches the JSON export as null and an empty one as [], and the first says
+// the producer established nothing. This run validated nothing, so the absence
+// is carried rather than replaced with an invented empty collection.
 func nothingValidated() report.Run {
 	// Nothing was planned, so nothing was left unreached: complete, with a gap
 	// of zero.
@@ -80,34 +67,20 @@ func nothingValidated() report.Run {
 // checkPayload is this command's own facts, read back out of the run that
 // carries them.
 //
-// # The type assertion belongs HERE and nowhere below
+// The type assertion belongs HERE and nowhere below: report.Run.Payload is an
+// interface so that nothing in internal/common/report or its renderers has to
+// name a concrete payload, and cmd/bentoo is where this payload is BUILT, so it
+// already knows the concrete type.
 //
-// report.Run.Payload is an interface precisely so that nothing in
-// internal/common/report, and nothing in its renderers, has to name a concrete
-// payload — a type switch over payloads is the edit-per-kind that interface
-// exists to prevent (R7.4). cmd/bentoo is the other side of that seam: it is
-// where this command's payload is BUILT, so it is the one place that already
-// knows which concrete type is in there.
-//
-// # A payload of another type answers the zero value, and SAYS SO
-//
-// checkEnvelope is the only writer of that field today, so the assertion
-// cannot fail yet — but checkReport takes a report.Run of ANY kind, and tasks
-// 5, 6 and 8 of this story add three more of them. A manifest or snapshot run
-// reaching here would merge into a zero payload, and the operator would then
-// be told "No packages configured for autoupdate" about a run that scanned
-// plenty: wrong output, and nothing in the code that would have had to be
-// edited for it to happen.
-//
-// So it is reported rather than discarded. Debug, not Warn, because it is
-// unreachable in a real run and a line an operator cannot act on is noise; the
-// kind that arrived is what makes it actionable when it is not.
-//
-// The zero value is still returned. It reads as "nothing scanned, nothing
-// planned", which routes presentCheckReport to its silent arm — and a report is
-// the thing an operator gets INSTEAD of a crash (R1.4), so reading one must not
-// be the moment the crash arrives. report.Run.Sections tolerates a nil payload
-// for the same reason.
+// A payload of another type answers the zero value, and SAYS SO. checkEnvelope
+// is the only writer today, but checkReport takes a report.Run of ANY kind; a
+// manifest or snapshot run reaching here would tell the operator "No packages
+// configured for autoupdate" about a run that scanned plenty. It is logged at
+// Debug, not Warn, because it is unreachable in a real run and a line an
+// operator cannot act on is noise. The zero value is still returned — "nothing
+// scanned, nothing planned", the silent arm of presentCheckReport — because a
+// report is what an operator gets INSTEAD of a crash, so reading one must not
+// be the moment the crash arrives.
 func checkPayload(log *slog.Logger, run report.Run) report.AutoupdateCheck {
 	payload, ok := run.Payload.(report.AutoupdateCheck)
 	if !ok {
@@ -118,39 +91,25 @@ func checkPayload(log *slog.Logger, run report.Run) report.AutoupdateCheck {
 }
 
 // buildReport turns one run's plan and the results its gates produced into the
-// run it reports, whole, before anything is printed (R1, R1.3, R1.4).
+// run it reports, whole, before anything is printed.
 //
 // This is the seam between the producer and the view: internal/common/report
 // must not import internal/autoupdate, so the conversion from validate's types
 // into the model's primitive facts happens here and nowhere else.
 //
-// # results is positionally aligned to plan.Entries
+// results[i] is the answer for plan.Entries[i] — the caller's contract, and what
+// makes the tally reconcilable: each row is classified against ITS OWN plan
+// entry rather than a lookup that could miss. A short results slice is a run
+// that stopped part way, reported as such (Complete, NotEvaluated).
 //
-// results[i] is the answer for plan.Entries[i]. That is the caller's contract
-// and it is what makes the tally reconcilable — each planned package is
-// classified against ITS OWN plan entry, so `Skipped` and `Reason` are read
-// from the entry the row is counted against rather than from a lookup that
-// could miss. A short results slice is a run that stopped part way, and it is
-// reported as such (Complete, NotEvaluated) rather than silently reconciling.
+// Scanned is left to the caller: this function never sees the scan, and a nil
+// Scanned reaches the JSON export as null rather than as an invented empty list.
 //
-// # Scanned is left to the caller
-//
-// This function is handed the plan and its results; it never sees the scan. A
-// nil Scanned therefore says "the producer did not fill this in", which the
-// JSON export deliberately carries through as null rather than rewriting into
-// an empty list. Whoever holds the scan results assigns them.
-//
-// # The whole run comes back, envelope included
-//
-// "How far down the plan the run got" is established right here, and this is
-// the one place it is established — so this is where it is stated, on the
-// envelope that carries it rather than on the payload, which would carry it a
-// second time and let one document disagree with itself about the run it
-// describes (D1). Handing back the payload alone would leave those two facts to
-// travel beside it as a second value, and every function between here and the
-// render would then thread a pair that nothing could look up from the report.
+// The whole run comes back, envelope included, because "how far down the plan
+// the run got" is established here and only here; stating it on the payload
+// too would let one document disagree with itself about the run it describes.
 func buildReport(plan validationPlan, results []validate.EbuildResult) report.Run {
-	// planned is R5.5's denominator, named once. It is the number every count
+	// planned is the tally's denominator, named once. It is the number every count
 	// below is taken against — the tally reconciles against the PLAN, never
 	// against the rows, because a package that produced no row still had to be
 	// counted somewhere.
@@ -193,32 +152,22 @@ func buildReport(plan validationPlan, results []validate.EbuildResult) report.Ru
 }
 
 // scannedFacts is what the version check found, as the model spells it — the
-// half of the report buildReport is never handed (see its "Scanned is left to
-// the caller" note).
+// half of the report buildReport is never handed.
 //
-// # It is a translation and nothing else
+// It is a translation and nothing else: no package is filtered, no order is
+// changed and no condition is decided here. PackageResult's four bools are
+// mutually exclusive by property of the SCAN, so copying them across preserves
+// that; collapsing them into one state here would make this a second place the
+// run's conditions are decided (the renderer's `condition` already reads them).
 //
-// No package is filtered, no order is changed and no condition is decided here.
-// PackageResult carries four independent bools whose mutual exclusivity is a
-// property of the SCAN — one condition established per package — so copying
-// them across preserves that property, while collapsing them into a single
-// state here would make this a second place the run's conditions are decided.
-// The renderer already has that logic (render's own `condition`), reading the
-// same four bools.
+// UpstreamVersion becomes CandidateVersion: the producer names the field by
+// where the value came from, the model by what it IS — the version this run
+// would move to, as in planEntryFacts.
 //
-// # UpstreamVersion becomes CandidateVersion
-//
-// The producer names the field by where the value came from; the model names it
-// by what it IS — the version this run would move to. The rename happens at
-// this boundary for the same reason From/Version become
-// CurrentVersion/CandidateVersion in planEntryFacts.
-//
-// # The error crosses as its text, in full
-//
-// The model holds facts and has no behaviour, so it carries a string rather
-// than an error. It is never shortened or reworded: the sentence is exactly
-// what the scan reported, which is what makes it actionable — and a nil error
-// is the empty string, never "<nil>".
+// The error crosses as its text, in full: the model holds facts and has no
+// behaviour, so it carries a string. It is never shortened or reworded, which
+// is what keeps it actionable, and a nil error is the empty string, never
+// "<nil>".
 func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 	facts := make([]report.PackageResult, 0, len(results))
 
@@ -247,63 +196,24 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 }
 
 // checkReport is the ONE report a `--check` run produces: what the scan found,
-// joined with whatever the validation contributed (S045-R1.1, S045-R1.2, D1).
+// joined with whatever the validation contributed.
 //
 // Both entry paths of runCheck go through it — the batch scan with the half
 // runPendingValidation handed back, the single package with nothingValidated's
-// run, because that path validates nothing — so "one report per run" is a
-// property of this function rather than of two call sites kept in agreement.
+// run — so "one report per run" is a property of this function rather than of
+// two call sites kept in agreement. The envelope's identity is stamped by
+// buildReport or nothingValidated; this function joins a half onto a run.
 //
-// Every caller hands it a run BUILT here in the adapter, by buildReport or by
-// nothingValidated, which is what leaves the envelope's identity — the schema,
-// the kind, the title — stamped in exactly one place. This function joins a
-// half onto a run; it does not name one.
+// This is the single place both halves are in hand: buildReport never sees the
+// scan and runPendingValidation returns a nil Scanned. Filling Scanned on both
+// sides would make the join a question of which copy wins.
 //
-// # The two halves meet here and nowhere else
-//
-// buildReport is never handed the scan (see its "Scanned is left to the caller"
-// note) and runPendingValidation deliberately returns a nil Scanned, so this is
-// the single place both are in hand. Filling it on both sides would turn the
-// join into a question of which copy wins; leaving it nil would export
-// `"scanned": null` and draw an empty version-check section.
-//
-// # A run that planned nothing is COMPLETE
-//
-// An empty plan left nothing unevaluated, which is precisely what Complete
-// means (S045-R4.2), and a false there would draw the `Run Interrupted` block
-// over a run that finished — telling the operator that a run which had nothing
-// to do was cut short.
-//
-// The condition is read off the PLAN rather than off the --llm option: an operator
-// can decline the confirmation with `--llm` set, and that run validated nothing
-// either. It agrees with the producer instead of overriding it — both
-// buildReport and nothingValidated already answer complete for an empty plan
-// (reached == len(plan.Entries) is 0 == 0) — so on every path this command
-// takes today the branch below changes nothing. What it still covers is a run
-// assembled by hand, which is the only way one can arrive here saying it was
-// interrupted over a plan it never had.
-//
-// # The two envelope facts pass through, and are corrected in exactly one case
-//
-// A short results slice is the case that matters: the plan is non-empty, the
-// branch below does not fire, and the run stays incomplete with the count
-// buildReport established. Only a run with NO plan is overridden, and it is
-// overridden to the one answer that is true of it — nothing was planned, so
-// nothing was left unreached.
-//
-// # It never invents a section
-//
-// Plan, Results and Tally are left exactly as the validation half had them, so
-// a scan-only report CARRIES no plan entry, no result row and a zero tally
-// (S045-R4.1) — and the JSON export carries that absence rather than an
-// invented empty collection (S045-R4.3).
-//
-// What a renderer then does with an empty half is the renderer's decision and
-// not this function's: today each of those three sections states its own
-// emptiness in a single line ("No pending update to validate.") rather than
-// omitting its heading. Nothing here should ever start deciding that — a
-// producer that pruned sections to suit one screen would be the second place
-// the run's contents are decided.
+// A run that planned nothing is COMPLETE: a false would draw the `Run
+// Interrupted` block over a run that had nothing to do. The condition is read
+// off the PLAN rather than off --llm, because an operator can decline the
+// confirmation with `--llm` set. A short results slice keeps the incomplete
+// count buildReport established. Plan, Results and Tally are left as the
+// validation half had them; a producer must never prune sections for a screen.
 func checkReport(log *slog.Logger, scanned []autoupdate.CheckResult, validated report.Run) report.Run {
 	joined := validated
 
@@ -325,7 +235,7 @@ func checkReport(log *slog.Logger, scanned []autoupdate.CheckResult, validated r
 // become CurrentVersion/CandidateVersion there — because the model names a
 // version by what it IS rather than by where the producer's struct kept it.
 // Reason crosses untouched: shortening it is a rendering decision, and doing it
-// at this boundary would make it a loss of data instead (R7.4).
+// at this boundary would make it a loss of data instead.
 func planEntryFacts(entry validationPlanEntry) report.PlanEntry {
 	return report.PlanEntry{
 		Package:          entry.Package,
@@ -353,9 +263,9 @@ func planEntryFacts(entry validationPlanEntry) report.PlanEntry {
 // # SameReasonAsPlan is decided here
 //
 // Here is where both strings are in hand. A renderer computing it would have to
-// go looking for this row's plan entry and compare the text a second time,
-// which is the second derivation R1.3 forbids and which would disagree with the
-// model the day either side changes.
+// go looking for this row's plan entry and compare the text a second time — a
+// second derivation of the same fact, which would disagree with the model the
+// day either side changes.
 func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult) report.ValidationRow {
 	// entry.Depth, not reportedDepth: the question is whether the depth the
 	// POLICY selected was measured. reportedDepth prefers what the runner
@@ -380,42 +290,29 @@ func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult)
 }
 
 // decidingGateFacts reduces one result's gates to the facts Classify reads, and
-// drops the QA gate on the way (R5.4).
+// drops the QA gate on the way.
 //
-// # The QA gate MUST NOT reach Classify
+// The QA gate MUST NOT reach Classify — the precondition Classify's doc comment
+// records and cannot enforce. Classify uses len(gates) as the denominator for
+// Proved, mirroring validate.EbuildResult.WorstOutcome, which skips GateQA (as
+// Report.ExitCode does). Left in, the QA gate would make the denominator one too
+// large on every package pkgcheck spoke about; on a host where pkgcheck crashes
+// on every package, every Proved would silently become Inconclusive. Dropping
+// the gate, rather than marking it non-deciding, keeps the denominator right.
 //
-// This is the precondition Classify's doc comment records and cannot enforce.
-// Classify uses len(gates) as the denominator for Proved, mirroring
-// validate.EbuildResult.WorstOutcome — and WorstOutcome skips GateQA before it
-// counts anything (D8, the same exclusion Report.ExitCode makes). Leaving the
-// QA gate in the slice would make the denominator one too large on every
-// package pkgcheck spoke about. On a host where pkgcheck does not work — this
-// one, where it crashes on every package of the overlay for a pre-existing
-// reason nobody can disable — that is EVERY package, and every Proved would
-// silently become Inconclusive across the whole overlay, breaking R5.7 without
-// a single error message. Dropping the gate, rather than marking it
-// non-deciding, is what keeps the denominator right.
+// Deciding means "participated in the verdict". A declined gate is SKIPPED: it
+// arrives Deciding false and contributes no pass, which leaves a half-measured
+// package Inconclusive instead of Proved.
 //
-// # Deciding means "participated in the verdict"
-//
-// A gate that declined is SKIPPED: it was planned, it was asked, and it said
-// nothing. It arrives Deciding false and contributes no pass, which is what
-// leaves a half-measured package Inconclusive instead of Proved. Marking a
-// declined gate as deciding would make Proved unreachable, since Proved needs
-// every gate in the slice to have passed.
-//
-// # The cause is the typed value, never a sentence (R5.4)
-//
-// GateResult.Declined is a validate.DeclineCause, and it crosses as its plain
-// string value. The gate's Reason says the same thing in prose, and prose gets
-// reworded; a rewording that moved a package from one column to another is
-// exactly what R5.4 forbids. skipReason still reads those sentences, but only
-// to produce the human line — never to decide a column.
+// The cause is the typed value, never a sentence: GateResult.Declined crosses
+// as its plain string value. The gate's Reason says the same in prose, and a
+// rewording must never move a package between columns; skipReason reads those
+// sentences only to produce the human line.
 func decidingGateFacts(gates []validate.GateResult, selectedDepth string) []report.GateFact {
 	facts := make([]report.GateFact, 0, len(gates))
 
 	// The depth->gate mapping is resolved HERE and travels as a bool, because
-	// internal/common/report must not import internal/autoupdate (D2). This is
+	// internal/common/report must not import internal/autoupdate. This is
 	// the same crossing Cause makes as a plain string.
 	//
 	// A depth that does not parse, or one no gate stands for, marks nothing:
@@ -476,11 +373,11 @@ func rowReason(outcome report.Outcome, result validate.EbuildResult, entry valid
 // WHAT IT DOES COST is the structure: the model has no per-finding type, so a
 // machine reader gets one string where it could have had a list. Joining is not
 // shortening — no finding is dropped and no detail is truncated, which is what
-// R7.4 actually forbids — and one line is what the model's Reason field is, so
-// a Markdown table cell and a terminal detail line both take it as they stand.
-// Giving findings their own type on ValidationRow is the alternative, and it is
-// a change to internal/common/report that only pays for itself once a renderer
-// is written to print them per finding.
+// must never happen at this boundary — and one line is what the model's Reason
+// field is, so a Markdown table cell and a terminal detail line both take it as
+// they stand. Giving findings their own type on ValidationRow is the
+// alternative, and it is a change to internal/common/report that only pays for
+// itself once a renderer is written to print them per finding.
 func failureDetail(result validate.EbuildResult) string {
 	var details []string
 
@@ -493,13 +390,13 @@ func failureDetail(result validate.EbuildResult) string {
 	return strings.Join(details, "; ")
 }
 
-// countInExactlyOneColumn adds one package to the tally (R5.5).
+// countInExactlyOneColumn adds one package to the tally.
 //
 // Exactly one counter is incremented per call, whatever it is handed. The
 // default is Inconclusive rather than a silent no-op so that an outcome this
 // switch has not been taught about still lands somewhere and still reconciles —
 // "the toolkit did not establish which column this belongs in" is a limitation
-// of the toolkit, which is what Inconclusive means (R5.6). A no-op would drop
+// of the toolkit, which is what Inconclusive means. A no-op would drop
 // the package out of the tally, and Reconciles would report the loss without
 // anyone being able to see which package went missing.
 func countInExactlyOneColumn(tally *report.Tally, outcome report.Outcome) {

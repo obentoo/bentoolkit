@@ -6,20 +6,12 @@ import "strings"
 // declares in an option file. Reference:
 // https://mesonbuild.com/Builtin-options.html
 //
-// # Why this table has to be right, in both directions
-//
-// A built-in this table MISSES is compared against the archive's declarations,
-// finds nothing, and becomes a FALSE ERROR. That is the worse direction: the
-// first false error is what gets a gate switched off, and then every true one
-// goes unread too. Measured against the live overlay on 2026-08-07, exactly two
-// ebuilds pass a built-in, both `-Db_ndebug=`.
-//
-// A table too WIDE is the mirror failure — a real project option swallowed by
-// an over-eager rule is never compared, so a removed upstream option passes
-// unnoticed and the gate silently stops doing its job. That is why the compiler
-// rules below are anchored to Meson's actual language list instead of matching
-// any name that happens to end in `_args`: `option('extra_args')` is a name a
-// project may legitimately declare.
+// The table must be right in both directions. A built-in it MISSES finds no
+// declaration and becomes a false error — the worse failure, since the first
+// false error gets a gate switched off. A table too WIDE swallows a real
+// project option, so a removed upstream option passes unnoticed. That is why
+// the compiler rules are anchored to Meson's language list rather than to any
+// name ending in `_args`: `option('extra_args')` is a legitimate project name.
 //
 // Keep this in sync with the reference above when Meson adds an option.
 
@@ -63,7 +55,7 @@ var compilerSuffixes = []string{
 }
 
 // isBuiltInOption reports whether a passed option name is one Meson defines
-// itself, and therefore one no option file will ever declare (R2.4).
+// itself, and therefore one no option file will ever declare.
 //
 // The name given here is already stripped of any `<subproject>:` prefix: a
 // built-in addressed at a subproject is still a built-in, and comparing it

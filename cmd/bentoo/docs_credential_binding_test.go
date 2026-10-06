@@ -12,7 +12,7 @@ import (
 // rule, and no example pairs ${GITHUB_TOKEN} with a non-GitHub host; the
 // CHANGELOG records the breaking change and its migration.
 func TestREADME_DocumentsCredentialHostBinding(t *testing.T) {
-	readme := readRepoDoc(t, "README.md")
+	readme := readDocSet(t)
 
 	section := sectionFrom(readme, "### Headers and environment variables")
 	if section == "" {

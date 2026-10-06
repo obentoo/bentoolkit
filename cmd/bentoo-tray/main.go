@@ -1,5 +1,5 @@
-// Command bentoo-tray is the session tray that announces bentoo notices
-// (story 072). This file is the process boundary only: signals, the logger,
+// Command bentoo-tray is the session tray that announces bentoo notices.
+// This file is the process boundary only: signals, the logger,
 // the configuration, the wiring of the adapters and the exit code. Every
 // decision lives in internal/tray.
 package main
@@ -36,24 +36,24 @@ import (
 	"github.com/obentoo/bentoolkit/internal/tray/state"
 )
 
-// Exit codes (design.md "cmd/bentoo-tray/main.go").
+// Exit codes.
 const (
-	exitOK      = 0 // clean stop, or another instance already runs (R1.2, R1.4)
-	exitStartup = 1 // startup failure: bus unreachable, name request, unreadable state (R1.3)
-	exitBusLost = 2 // the session bus went away while running (R1.5)
+	exitOK      = 0 // clean stop, or another instance already runs
+	exitStartup = 1 // startup failure: bus unreachable, name request, unreadable state
+	exitBusLost = 2 // the session bus went away while running
 )
 
-// Fixed system paths the tray reads; it never writes any of them (R4.5).
+// Fixed system paths the tray reads; it never writes any of them.
 const (
 	reposConf  = "/etc/portage/repos.conf"
 	repoName   = "bentoo"
 	newsUnread = "/var/lib/gentoo/news/news-bentoo.unread"
 )
 
-// newsPoll is how often the news reader stats the unread list (R4.1).
+// newsPoll is how often the news reader stats the unread list.
 const newsPoll = time.Minute
 
-// logLevelEnv selects the log level (R13.2).
+// logLevelEnv selects the log level.
 const logLevelEnv = "BENTOO_TRAY_LOG_LEVEL"
 
 func main() {
@@ -185,7 +185,7 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 
 // newFeed builds the feed fetcher for feedURL and the hosts derived from it:
 // feedHost for the news notices' URLs, allowedHost for the URLs the portal
-// may open. A refused URL (R2.9) yields a nil interface, so the App runs on
+// may open. A refused URL yields a nil interface, so the App runs on
 // the offline news alone, and an empty allowedHost, so nothing is opened.
 func newFeed(log *slog.Logger, feedURL string) (fetcher tray.FeedFetcher, feedHost, allowedHost string) {
 	if u, err := url.Parse(feedURL); err == nil {
@@ -199,7 +199,7 @@ func newFeed(log *slog.Logger, feedURL string) (fetcher tray.FeedFetcher, feedHo
 	return f, feedHost, feedHost
 }
 
-// statePath is $XDG_STATE_HOME/bentoo-notices/state.json (R10.1).
+// statePath is $XDG_STATE_HOME/bentoo-notices/state.json.
 func statePath(getenv func(string) string) (string, error) {
 	dir := xdg.StateHome(getenv, getenv("HOME"))
 	if !filepath.IsAbs(dir) {

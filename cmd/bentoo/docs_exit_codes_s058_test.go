@@ -9,8 +9,6 @@ package main
 // Red on arrival: the section documents overlay autoupdate only.
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,13 +36,9 @@ func s058MarkdownSection(doc, title string) string {
 }
 
 func TestS058ReadmeDocumentsTheExitCodeContract(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	section := s058MarkdownSection(string(data), "Exit codes")
+	section := s058MarkdownSection(readDocSet(t), "Exit codes")
 	if strings.TrimSpace(section) == "" {
-		t.Fatal(`README.md has no "Exit codes" section`)
+		t.Fatal(`the documentation set has no "Exit codes" section`)
 	}
 	lower := strings.ToLower(section)
 	for _, want := range []string{

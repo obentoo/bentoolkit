@@ -18,8 +18,8 @@ func s053LatestRow(typ, subvolume string) string {
 		"' target_url='ssh://h/b' status='up-to-date'"
 }
 
-func s053BtrbkListMock(out string, listErr error) *MockRunner {
-	return &MockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
+func s053BtrbkListMock(out string, listErr error) *mockRunner {
+	return &mockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		if name == "btrbk" && slices.Contains(args, "list") {
 			return []byte(out), listErr
 		}
@@ -28,7 +28,7 @@ func s053BtrbkListMock(out string, listErr error) *MockRunner {
 }
 
 // s053BtrbkCreate runs Create on a btrbk engine logging to log (nil discards).
-func s053BtrbkCreate(t *testing.T, mock *MockRunner, log *slog.Logger) Snapshot {
+func s053BtrbkCreate(t *testing.T, mock *mockRunner, log *slog.Logger) Snapshot {
 	t.Helper()
 	e := newBtrbkEngine(EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}, nil, mock)
 	e.confPath = "/etc/bentoo/btrbk.conf"
