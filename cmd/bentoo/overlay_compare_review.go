@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -90,8 +90,8 @@ type claudeAsker interface {
 // It takes NO context: the client stores none (story 059), and each AskJSON
 // call receives the context of the review that makes it.
 func newClaudeCodeAsker(log *slog.Logger, budget time.Duration) (claudeAsker, error) {
-	client, err := autoupdate.NewClaudeCodeClient(reviewLLMConfig(),
-		autoupdate.WithClaudeCodeTimeout(budget), autoupdate.WithClaudeCodeLogger(log))
+	client, err := llm.NewClaudeCodeClient(reviewLLMConfig(),
+		llm.WithClaudeCodeTimeout(budget), llm.WithClaudeCodeLogger(log))
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +115,8 @@ func newClaudeCodeAsker(log *slog.Logger, budget time.Duration) (claudeAsker, er
 // The model is left unset so it follows autoupdate's own default (sonnet), which
 // is the one place that decision is made for every `claude` invocation this
 // program issues.
-func reviewLLMConfig() autoupdate.LLMConfig {
-	return autoupdate.LLMConfig{Bare: "false"}
+func reviewLLMConfig() llm.LLMConfig {
+	return llm.LLMConfig{Bare: "false"}
 }
 
 // compareDivergenceReviewer answers "what reviewer should this compare run use?"
@@ -169,7 +169,7 @@ func compareDivergenceReviewer(log *slog.Logger, noReview bool, budget time.Dura
 func newDivergenceReviewer(log *slog.Logger, budget time.Duration, d *deps) (overlay.DivergenceReviewer, error) {
 	asker, err := d.newClaudeAsker(log, budget)
 	if err != nil {
-		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
+		if errors.Is(err, llm.ErrClaudeCodeUnavailable) {
 			return nil, nil
 		}
 		return nil, err
@@ -261,15 +261,15 @@ func (r *claudeDivergenceReviewer) ReviewDivergence(ctx context.Context, req ove
 // outcome.
 func reviewOutcome(err error) error {
 	switch {
-	case errors.Is(err, autoupdate.ErrClaudeTimedOut):
+	case errors.Is(err, llm.ErrClaudeTimedOut):
 		return overlay.ErrReviewTimedOut
-	case errors.Is(err, autoupdate.ErrClaudeCouldNotStart):
+	case errors.Is(err, llm.ErrClaudeCouldNotStart):
 		return overlay.ErrReviewCouldNotStart
-	case errors.Is(err, autoupdate.ErrClaudeExitedNonZero):
+	case errors.Is(err, llm.ErrClaudeExitedNonZero):
 		return overlay.ErrReviewExitedNonZero
-	case errors.Is(err, autoupdate.ErrClaudeUnusableOutput):
+	case errors.Is(err, llm.ErrClaudeUnusableOutput):
 		return overlay.ErrReviewUnusableReply
-	case errors.Is(err, autoupdate.ErrClaudeStopped):
+	case errors.Is(err, llm.ErrClaudeStopped):
 		return context.Canceled
 	}
 	return nil

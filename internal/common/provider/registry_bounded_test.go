@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // registryBodyServer streams a 200 body of exactly size bytes.
@@ -56,10 +56,10 @@ func seedEselectFallback(t *testing.T) []byte {
 // the cap and is cached whole.
 func TestRegistryDownloadBodyCapped(t *testing.T) {
 	t.Run("over the cap", func(t *testing.T) {
-		reg := newTestRegistry(t, registryBodyServer(t, httputil.MaxBodyBytes+1))
+		reg := newTestRegistry(t, registryBodyServer(t, httpx.MaxBodyBytes+1))
 		err := reg.Sync(context.Background())
-		if !errors.Is(err, httputil.ErrResponseTooLarge) {
-			t.Errorf("Sync() = %v, want errors.Is(err, httputil.ErrResponseTooLarge)", err)
+		if !errors.Is(err, httpx.ErrResponseTooLarge) {
+			t.Errorf("Sync() = %v, want errors.Is(err, httpx.ErrResponseTooLarge)", err)
 		}
 		if _, statErr := os.Stat(reg.XMLPath); !os.IsNotExist(statErr) {
 			t.Errorf("cache file %s exists after an over-cap download (stat: %v); want none written", reg.XMLPath, statErr)
@@ -82,13 +82,13 @@ func TestRegistryDownloadBodyCapped(t *testing.T) {
 	})
 
 	t.Run("exactly at the cap", func(t *testing.T) {
-		reg := newTestRegistry(t, registryBodyServer(t, httputil.MaxBodyBytes))
+		reg := newTestRegistry(t, registryBodyServer(t, httpx.MaxBodyBytes))
 		if err := reg.Sync(context.Background()); err != nil {
-			t.Fatalf("Sync() = %v for a body of exactly %d bytes", err, httputil.MaxBodyBytes)
+			t.Fatalf("Sync() = %v for a body of exactly %d bytes", err, httpx.MaxBodyBytes)
 		}
 		info, err := os.Stat(reg.XMLPath)
-		if err != nil || info.Size() != httputil.MaxBodyBytes {
-			t.Errorf("cache file stat = %v, %v; want %d bytes", info, err, httputil.MaxBodyBytes)
+		if err != nil || info.Size() != httpx.MaxBodyBytes {
+			t.Errorf("cache file stat = %v, %v; want %d bytes", info, err, httpx.MaxBodyBytes)
 		}
 	})
 }

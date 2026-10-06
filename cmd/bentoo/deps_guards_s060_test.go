@@ -22,16 +22,16 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
 // s060CountingFixer records how often the registry fix was offered and taken.
 type s060CountingFixer struct{ calls atomic.Int32 }
 
-func (f *s060CountingFixer) FixRegistry(context.Context, autoupdate.RegistryFixRequest) (autoupdate.RegistryFixResult, error) {
+func (f *s060CountingFixer) FixRegistry(context.Context, fixer.RegistryFixRequest) (fixer.RegistryFixResult, error) {
 	f.calls.Add(1)
-	return autoupdate.RegistryFixResult{}, errors.New("s060 counting fixer edits nothing")
+	return fixer.RegistryFixResult{}, errors.New("s060 counting fixer edits nothing")
 }
 
 // TestS060GuardDepsRegistryFixOfferedOnlyOnATerminal is R3.1: with a usable
@@ -47,10 +47,10 @@ func TestS060GuardDepsRegistryFixOfferedOnlyOnATerminal(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			fixer := &s060CountingFixer{}
+			countingFixer := &s060CountingFixer{}
 			var asked atomic.Int32
 			c := newTestCLI(t, withDeps(func(d *deps) {
-				d.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+				d.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (fixer.RegistryFixer, error) { return countingFixer, nil }
 				d.checkInteractive = func() bool { asked.Add(1); return interactive }
 			}))
 			const pkg = "app-misc/probe"
@@ -75,7 +75,7 @@ func TestS060GuardDepsRegistryFixOfferedOnlyOnATerminal(t *testing.T) {
 			if asked.Load() == 0 {
 				t.Fatalf("checkInteractive was never consulted: the fix gate did not run through the tree's deps\nstderr: %s", stderr)
 			}
-			got := fixer.calls.Load()
+			got := countingFixer.calls.Load()
 			if interactive && got == 0 {
 				t.Errorf("a terminal and a usable fixer, yet the registry fix was never offered (R3.1)\nstderr: %s", stderr)
 			}

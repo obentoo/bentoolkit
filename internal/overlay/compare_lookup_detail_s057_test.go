@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -51,7 +53,7 @@ func TestComparedDetailNamesTheLookupCause(t *testing.T) {
 		"cat/limited": limited, "cat/multiline": multiline, "cat/long": long,
 	}}
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true}
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{
 		{Category: "cat", Package: "limited", LatestVersion: "1.0"},
 		{Category: "cat", Package: "multiline", LatestVersion: "1.0"},
 		{Category: "cat", Package: "long", LatestVersion: "1.0"},

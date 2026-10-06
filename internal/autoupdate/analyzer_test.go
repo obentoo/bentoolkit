@@ -20,6 +20,11 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
 
@@ -30,7 +35,7 @@ import (
 // createTestAnalyzer creates an analyzer with fast rate limiting for tests
 func createTestAnalyzer(t *testing.T, tmpDir string, opts ...AnalyzerOption) (*Analyzer, error) { //nolint:unused // test helper
 	// Create fast rate limiter for testing
-	rateLimiter := NewRateLimiter()
+	rateLimiter := fetch.NewRateLimiter()
 	// Set very high limits to effectively disable rate limiting in tests
 	rateLimiter.SetLLMLimit(rate.Inf, 1000)
 
@@ -41,7 +46,7 @@ func createTestAnalyzer(t *testing.T, tmpDir string, opts ...AnalyzerOption) (*A
 }
 
 // setFastHTTPLimit sets a fast HTTP limit for a specific server URL
-func setFastHTTPLimit(rateLimiter *RateLimiter, serverURL string) {
+func setFastHTTPLimit(rateLimiter *fetch.RateLimiter, serverURL string) {
 	parsed, err := url.Parse(serverURL)
 	if err == nil {
 		rateLimiter.SetHTTPLimit(parsed.Host, rate.Inf, 1000)
@@ -49,8 +54,8 @@ func setFastHTTPLimit(rateLimiter *RateLimiter, serverURL string) {
 }
 
 // createFastRateLimiter creates a rate limiter with fast limits for all common domains
-func createFastRateLimiter() *RateLimiter {
-	rateLimiter := NewRateLimiter()
+func createFastRateLimiter() *fetch.RateLimiter {
+	rateLimiter := fetch.NewRateLimiter()
 	rateLimiter.SetLLMLimit(rate.Inf, 1000)
 	// Pre-set common domains
 	rateLimiter.SetHTTPLimit("github.com", rate.Inf, 1000)
@@ -137,7 +142,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -180,7 +185,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 	// Property: Provided URL takes precedence over discovered sources
 	properties.Property("provided URL takes precedence over discovered sources", prop.ForAll(
 		func(providedURL, githubURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: githubURL,
 			}
@@ -201,7 +206,7 @@ SRC_URI="https://github.com/example/test/archive/v1.0.0.tar.gz"
 	// Property: Provided URL has priority 0 (highest)
 	properties.Property("provided URL has priority 0", prop.ForAll(
 		func(providedURL string) bool {
-			meta := &EbuildMetadata{
+			meta := &ebuilds.EbuildMetadata{
 				Package:  "app-misc/test",
 				Homepage: "https://example.com",
 			}
@@ -254,7 +259,7 @@ func TestBatchModeFiltering(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create packages with schemas
-			packagesWithSchema := make(map[string]PackageConfig)
+			packagesWithSchema := make(map[string]registry.PackageConfig)
 			for i := 0; i < numWithSchema; i++ {
 				pkgName := "app-misc/with-schema-" + string(rune('a'+i))
 				pkgDir := filepath.Join(tmpDir, "app-misc", "with-schema-"+string(rune('a'+i)))
@@ -263,7 +268,7 @@ func TestBatchModeFiltering(t *testing.T) {
 EAPI=8
 HOMEPAGE="https://example.com"
 `), 0644)
-				packagesWithSchema[pkgName] = PackageConfig{
+				packagesWithSchema[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api",
 					Parser: "json",
 					Path:   "version",
@@ -281,7 +286,7 @@ HOMEPAGE="https://example.com"
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: packagesWithSchema}
+			config := &registry.PackagesConfig{Packages: packagesWithSchema}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				return false
@@ -315,8 +320,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 			// Create analyzer with existing schema for this package
-			config := &PackagesConfig{
-				Packages: map[string]PackageConfig{
+			config := &registry.PackagesConfig{
+				Packages: map[string]registry.PackageConfig{
 					"app-misc/test": {
 						URL:    "https://example.com/api",
 						Parser: "json",
@@ -389,7 +394,7 @@ HOMEPAGE="https://example.com"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -439,7 +444,7 @@ HOMEPAGE="https://example.com"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -502,7 +507,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create analyzer with fast rate limiter and fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0, // No retries for faster test
 				Timeout:    5 * time.Second,
 			})
@@ -570,8 +575,8 @@ func TestNewAnalyzerCreatesComponents(t *testing.T) {
 func TestNewAnalyzerWithOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	customConfig := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	customConfig := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -599,8 +604,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 	// Create analyzer with existing schema
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -642,8 +647,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 	// Create analyzer with existing schema and fast rate limiter
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://old.example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -651,7 +656,7 @@ HOMEPAGE="https://example.com"
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, server.URL)
 
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -718,7 +723,7 @@ KEYWORDS="~amd64"
 			analyzer, err := NewAnalyzer(tmpDir,
 				WithAnalyzerConfigDir(t.TempDir()),
 				WithAnalyzerRateLimiter(rateLimiter),
-				WithAnalyzerHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{
+				WithAnalyzerHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 					MaxRetries: 0,
 					Timeout:    5 * time.Second,
 				})),
@@ -759,8 +764,8 @@ HOMEPAGE="https://example.com"
 	}
 
 	// Create analyzer with one schema
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/with-schema": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -797,7 +802,7 @@ func TestSaveSchema(t *testing.T) {
 		t.Fatalf("NewAnalyzer failed: %v", err)
 	}
 
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		URL:    "https://example.com/api",
 		Parser: "json",
 		Path:   "version",
@@ -886,7 +891,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1017,7 +1022,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1113,7 +1118,7 @@ HOMEPAGE="`+server.URL+`"
 			setFastHTTPLimit(rateLimiter, server.URL)
 
 			// Create fast HTTP client
-			httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+			httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -1211,7 +1216,7 @@ func TestAnalyzeAll_ReturnsBatchResult(t *testing.T) {
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, okServer.URL)
 	setFastHTTPLimit(rateLimiter, failServer.URL)
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
@@ -1311,10 +1316,10 @@ func TestSchemaPreservation(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create existing schemas
-			existingSchemas := make(map[string]PackageConfig)
+			existingSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numExisting; i++ {
 				pkgName := "app-misc/existing-" + string(rune('a'+i))
-				existingSchemas[pkgName] = PackageConfig{
+				existingSchemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1322,7 +1327,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: existingSchemas}
+			config := &registry.PackagesConfig{Packages: existingSchemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1330,7 +1335,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Save a new schema
-			newSchema := &PackageConfig{
+			newSchema := &registry.PackageConfig{
 				URL:    "https://example.com/new",
 				Parser: "json",
 				Path:   "tag_name",
@@ -1341,7 +1346,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1394,10 +1399,10 @@ func TestSchemaPreservation(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create existing schemas
-			existingSchemas := make(map[string]PackageConfig)
+			existingSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numExisting; i++ {
 				pkgName := "app-misc/existing-" + string(rune('a'+i))
-				existingSchemas[pkgName] = PackageConfig{
+				existingSchemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1405,7 +1410,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: existingSchemas}
+			config := &registry.PackagesConfig{Packages: existingSchemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1413,7 +1418,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Update the first schema
-			updatedSchema := &PackageConfig{
+			updatedSchema := &registry.PackageConfig{
 				URL:     "https://example.com/updated",
 				Parser:  "regex",
 				Pattern: `v(\d+\.\d+\.\d+)`,
@@ -1424,7 +1429,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1489,10 +1494,10 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Save multiple schemas one by one
-			savedSchemas := make(map[string]PackageConfig)
+			savedSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numSaves; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
-				schema := &PackageConfig{
+				schema := &registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1505,7 +1510,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1560,14 +1565,14 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create schemas with various configurations
-			schemas := make(map[string]PackageConfig)
+			schemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numPackages; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
 				switch i % 3 {
 				case 0:
 					// JSON parser. The classifier alternates so the round-trip
 					// covers both an explicit type and an absent one.
-					jsonCfg := PackageConfig{
+					jsonCfg := registry.PackageConfig{
 						URL:    "https://example.com/api/" + string(rune('a'+i)),
 						Parser: "json",
 						Path:   "version",
@@ -1578,14 +1583,14 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 					schemas[pkgName] = jsonCfg
 				case 1:
 					// Regex parser
-					schemas[pkgName] = PackageConfig{
+					schemas[pkgName] = registry.PackageConfig{
 						URL:     "https://example.com/releases/" + string(rune('a'+i)),
 						Parser:  "regex",
 						Pattern: `v(\d+\.\d+\.\d+)`,
 					}
 				case 2:
 					// HTML parser
-					schemas[pkgName] = PackageConfig{
+					schemas[pkgName] = registry.PackageConfig{
 						URL:      "https://example.com/download/" + string(rune('a'+i)),
 						Parser:   "html",
 						Selector: ".version",
@@ -1594,7 +1599,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Create analyzer with schemas
-			config := &PackagesConfig{Packages: schemas}
+			config := &registry.PackagesConfig{Packages: schemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1611,7 +1616,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1660,10 +1665,10 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create schemas
-			schemas := make(map[string]PackageConfig)
+			schemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numPackages; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
-				schemas[pkgName] = PackageConfig{
+				schemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1671,7 +1676,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Create analyzer with schemas
-			config := &PackagesConfig{Packages: schemas}
+			config := &registry.PackagesConfig{Packages: schemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1696,7 +1701,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload and save again
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1726,7 +1731,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 
 			// Content should be identical (or at least equivalent when parsed)
 			// Note: TOML encoding may produce different ordering, so we compare parsed content
-			var firstParsed, secondParsed map[string]PackageConfig
+			var firstParsed, secondParsed map[string]registry.PackageConfig
 			if _, err := toml.Decode(string(firstContent), &firstParsed); err != nil {
 				t.Logf("Failed to parse first content: %v", err)
 				return false
@@ -1768,7 +1773,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create a complex schema with all fields
-			complexSchema := PackageConfig{
+			complexSchema := registry.PackageConfig{
 				URL:             "https://api.github.com/repos/test/test/releases",
 				Parser:          "json",
 				Path:            "[0].tag_name",
@@ -1798,7 +1803,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload config
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1867,7 +1872,7 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 	defer os.Chmod(cacheDir, 0755)
 
 	// Verify Set() actually fails (confirms test premise)
-	schema := &PackageConfig{Parser: "json", Path: "tag_name"}
+	schema := &registry.PackageConfig{Parser: "json", Path: "tag_name"}
 	setErr := cache.Set("test-pkg", schema, "https://example.com")
 	if setErr == nil {
 		t.Skip("cannot make cache.Set fail in this environment (may be root or different OS)")
@@ -1887,15 +1892,17 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 // caller-supplied SchemaAnalysis. It is used to drive invalid LLM output into
 // the analyzer's save path.
 type patternLLMStub struct {
-	analysis *SchemaAnalysis
+	analysis *llm.SchemaAnalysis
 }
 
 func (s *patternLLMStub) ExtractVersion(_ context.Context, _ []byte, _ string) (string, error) {
 	return "", nil
 }
-func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
+
+func (s *patternLLMStub) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*llm.SchemaAnalysis, error) {
 	return s.analysis, nil
 }
+
 func (s *patternLLMStub) GetModel() string { return "pattern-stub" }
 
 // captureInfoLogs returns a capture of Info-level records (the logCapture type
@@ -2021,7 +2028,7 @@ func TestValidateXPath(t *testing.T) {
 					t.Errorf("validateXPath(%q) = nil, want error", tc.xpath)
 					return
 				}
-				if !errors.Is(err, ErrInvalidXPath) {
+				if !errors.Is(err, parse.ErrInvalidXPath) {
 					t.Errorf("validateXPath(%q): error %v does not wrap ErrInvalidXPath", tc.xpath, err)
 				}
 			} else if err != nil {
@@ -2065,14 +2072,14 @@ func TestAnalyzer_RejectsInvalidLLMOutput(t *testing.T) {
 	}
 
 	// LLM returns a regex schema with a backreference: invalid output.
-	llm := &patternLLMStub{analysis: &SchemaAnalysis{
+	llm := &patternLLMStub{analysis: &llm.SchemaAnalysis{
 		ParserType: "regex",
 		Pattern:    `(\d+)\1`,
 	}}
 
 	rateLimiter := createFastRateLimiter()
 	setFastHTTPLimit(rateLimiter, server.URL)
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})
 
 	analyzer, err := NewAnalyzer(tmpDir,
 		WithAnalyzerLLMClient(llm),
@@ -2130,7 +2137,7 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 	// reaches the store as an older build would have written it.
 	const pkg = "app-misc/legacy"
 	cache.Entries[pkg] = AnalysisCacheEntry{
-		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+)\1`},
+		Schema:    &registry.PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+)\1`},
 		Timestamp: time.Now(),
 		URL:       "https://example.com",
 	}
@@ -2140,7 +2147,7 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 
 	// Sanity: a sound entry must survive Get unaffected.
 	cache.Entries["app-misc/good"] = AnalysisCacheEntry{
-		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+\.\d+)`},
+		Schema:    &registry.PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+\.\d+)`},
 		Timestamp: time.Now(),
 		URL:       "https://example.com",
 	}
@@ -2250,7 +2257,7 @@ func TestFetchContentFromURL_ViaHelper(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(tt.handler))
 			defer server.Close()
 
-			client := NewRetryableHTTPClientWithConfig(RetryConfig{
+			client := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 				MaxRetries: 0,
 				Timeout:    5 * time.Second,
 			})
@@ -2280,7 +2287,7 @@ func TestFetchContentFromURL_ViaHelper(t *testing.T) {
 			if tt.wantStatus && !strings.Contains(err.Error(), "returned status") {
 				t.Errorf("error %q does not name the offending status", err)
 			}
-			if tt.wantOverflow && !errors.Is(err, ErrResponseTooLarge) {
+			if tt.wantOverflow && !errors.Is(err, fetch.ErrResponseTooLarge) {
 				t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
 			}
 		})

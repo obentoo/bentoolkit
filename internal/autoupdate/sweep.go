@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -62,7 +65,7 @@ type sweeper struct {
 	reporter tui.Reporter
 	// configs is read for the optional [meta] block that drives an
 	// authenticated distfile fetch. A nil map simply disables that path.
-	configs map[string]PackageConfig
+	configs map[string]registry.PackageConfig
 	// distdir and configuredDistdir are the two configurable rungs of
 	// distfiles.Resolve's precedence (S030-D2): the --distdir flag and the
 	// autoupdate.distdir config key. Both are empty today, and two empty
@@ -99,7 +102,7 @@ func withSweeperReporter(r tui.Reporter) sweeperOption {
 	return func(s *sweeper) { s.reporter = r }
 }
 
-func withSweeperConfigs(cfgs map[string]PackageConfig) sweeperOption {
+func withSweeperConfigs(cfgs map[string]registry.PackageConfig) sweeperOption {
 	return func(s *sweeper) { s.configs = cfgs }
 }
 
@@ -154,7 +157,7 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 // split components, never from the raw key: a ":slot" or "@label" leaking into
 // a path is destructive here rather than merely wrong (S027-G4).
 func (s *sweeper) ebuildPath(pkg, version string) string {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return ""
 	}
@@ -291,7 +294,7 @@ func normaliseSweepTarget(overlayPath, target string) (atom, category string, er
 		return "", "", nil
 	}
 	if strings.Contains(target, "/") {
-		cat, pkgName, ok := splitPkgAtom(target)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(target)
 		if !ok {
 			return "", "", fmt.Errorf("%w: %q is not a category/package atom", ErrInvalidSweepTarget, target)
 		}
@@ -336,13 +339,13 @@ func dirMustExist(path string) error {
 // entry still holds its ebuild. Drop "media-plugins/gst-plugins-vpx@dev" while
 // keeping "@stable" and the dev line's ebuild becomes claimed by nobody — so
 // the sweep deletes a maintained release line (S027-G1).
-func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[string]PackageConfig {
+func scopeConfigs(cfgs map[string]registry.PackageConfig, atom, category string) map[string]registry.PackageConfig {
 	if atom == "" && category == "" {
 		return cfgs
 	}
-	scoped := make(map[string]PackageConfig, len(cfgs))
+	scoped := make(map[string]registry.PackageConfig, len(cfgs))
 	for key, cfg := range cfgs {
-		cat, pkgName, ok := splitPkgAtom(key)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok {
 			continue
 		}
@@ -366,9 +369,9 @@ func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[stri
 //
 // cfg is copied out of the map before the call because IsHeld has a pointer
 // receiver and a map value is not addressable.
-func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
+func atomHasHeldEntry(cfgs map[string]registry.PackageConfig, atom string) bool {
 	for key, cfg := range cfgs {
-		cat, pkgName, ok := splitPkgAtom(key)
+		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok || cat+"/"+pkgName != atom {
 			continue
 		}
@@ -404,7 +407,7 @@ func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
 // Nothing here touches the filesystem beyond reading directories.
 //
 // The registry's reconciliation reports what it skips to log; nil discards it.
-func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, target string) (SweepBatch, error) {
+func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (SweepBatch, error) {
 	atom, category, err := normaliseSweepTarget(overlayPath, target)
 	if err != nil {
 		return SweepBatch{}, err
@@ -503,7 +506,7 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]Pack
 // window the record depends on.
 func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...string) error {
 	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -780,7 +783,7 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 	if !ok {
 		return nil
 	}
-	spec, enabled, err := parseAuthFetchSpec(cfg.Meta)
+	spec, enabled, err := fetch.ParseAuthFetchSpec(cfg.Meta)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrManifestFailed, err)
 	}
@@ -792,13 +795,13 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 	// serial would otherwise log "serial via $" — a sentence stating that a
 	// credential came from an env var nobody named.
 	provenance := "no serial configured"
-	if spec.usesSerial() {
-		provenance = "serial via $" + spec.serialEnv
+	if spec.UsesSerial() {
+		provenance = "serial via $" + spec.SerialEnv
 	}
 	s.log.Info("authenticated fetch: downloading distfile",
 		"package", pkg, "version", version, "provenance", provenance)
 
-	dest, err := spec.fetchDistfile(ctx, version, distdir)
+	dest, err := spec.FetchDistfile(ctx, version, distdir)
 	if err != nil {
 		return err
 	}
@@ -870,9 +873,9 @@ func (s *sweeper) expectedDistfiles(pkg, pkgDir, pkgName string, manifestNames, 
 	// not reported here: prefetchAuthDistfile runs minutes later on the same
 	// config and fails the package with the message that belongs to it.
 	if cfg, ok := s.configs[pkg]; ok {
-		if spec, enabled, err := parseAuthFetchSpec(cfg.Meta); err == nil && enabled {
+		if spec, enabled, err := fetch.ParseAuthFetchSpec(cfg.Meta); err == nil && enabled {
 			for _, version := range versions {
-				add(spec.resolvedFilename(version))
+				add(spec.ResolvedFilename(version))
 			}
 		}
 	}
@@ -932,7 +935,7 @@ func otherEbuildVersions(pkgDir, pkgName string, versions []string) []string {
 // upstream release and not for the ebuild's revision of it: bumping foo-1.2.3-r1
 // does not rename foo-1.2.3.tar.gz.
 func baseVersion(version string) string {
-	return revisionSuffixRegex.ReplaceAllString(version, "")
+	return ebuilds.RevisionSuffixRegex.ReplaceAllString(version, "")
 }
 
 // substituteVersion rewrites one DIST name for a new version, and returns ""
@@ -1046,7 +1049,7 @@ type sweepOptions struct {
 	concurrency       int
 	execCommand       func(ctx context.Context, name string, arg ...string) *exec.Cmd
 	reporter          tui.Reporter
-	configs           map[string]PackageConfig
+	configs           map[string]registry.PackageConfig
 	distdir           string
 	configuredDistdir string
 	distfilesCache    string
@@ -1079,7 +1082,7 @@ func WithSweepReporter(r tui.Reporter) SweepOption {
 
 // WithSweepPackagesConfig supplies the registry, read only for the [meta] block
 // that drives an authenticated distfile fetch.
-func WithSweepPackagesConfig(cfgs map[string]PackageConfig) SweepOption {
+func WithSweepPackagesConfig(cfgs map[string]registry.PackageConfig) SweepOption {
 	return func(o *sweepOptions) { o.configs = cfgs }
 }
 

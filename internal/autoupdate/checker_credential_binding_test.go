@@ -12,6 +12,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 052, sub-task 1.3 — S052-R2.1, R2.2: a refused record fails alone,
@@ -61,7 +65,7 @@ func (h *cbHostTransport) total() int {
 
 // newCBChecker builds a Checker over packages, with each package's ebuild at
 // 1.0.0, a non-blocking rate limiter and the given HTTP client.
-func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *RetryableHTTPClient, opts ...CheckerOption) *Checker {
+func newCBChecker(t *testing.T, packages map[string]registry.PackageConfig, client *fetch.RetryableHTTPClient, opts ...CheckerOption) *Checker {
 	t.Helper()
 	tmp := t.TempDir()
 	overlay := filepath.Join(tmp, "overlay")
@@ -70,7 +74,7 @@ func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *Retry
 	}
 	all := append([]CheckerOption{
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithHTTPClient(client),
 		WithRateLimiter(&recordingRateLimiter{}),
 	}, opts...)
@@ -81,11 +85,11 @@ func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *Retry
 	return c
 }
 
-func regexPkg(u string, headers map[string]string) PackageConfig {
-	return PackageConfig{URL: u, Parser: "regex", Pattern: cbVersionPattern, Headers: headers}
+func regexPkg(u string, headers map[string]string) registry.PackageConfig {
+	return registry.PackageConfig{URL: u, Parser: "regex", Pattern: cbVersionPattern, Headers: headers}
 }
 
-func withFallback(p PackageConfig, fallback string) PackageConfig {
+func withFallback(p registry.PackageConfig, fallback string) registry.PackageConfig {
 	p.FallbackURL, p.FallbackParser, p.FallbackPattern = fallback, "regex", cbVersionPattern
 	return p
 }
@@ -119,9 +123,9 @@ func TestCheckAll_CredentialMismatchFailsOnlyThatPackage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewRetryableHTTPClient()
+	client := fetch.NewRetryableHTTPClient()
 	client.SetDelayFunc(func(time.Duration) {})
-	checker := newCBChecker(t, map[string]PackageConfig{
+	checker := newCBChecker(t, map[string]registry.PackageConfig{
 		"app-misc/leak": regexPkg(srv.URL+"/latest", map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}),
 		"app-misc/fine": regexPkg(srv.URL+"/fine", nil),
 		"app-misc/own":  regexPkg(srv.URL+"/own", map[string]string{"X-Api-Key": "${BENTOO_T}"}),
@@ -160,7 +164,7 @@ func TestCheckAll_CredentialMismatchFailsOnlyThatPackage(t *testing.T) {
 // cbCountingLLM counts ExtractVersion calls; every other LLMProvider method is
 // unreachable from the check path under test.
 type cbCountingLLM struct {
-	LLMProvider
+	llm.LLMProvider
 	calls atomic.Int64
 }
 
@@ -173,7 +177,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_example")
 
 	tr := &cbHostTransport{}
-	fake := NewRetryableHTTPClient()
+	fake := fetch.NewRetryableHTTPClient()
 	fake.SetHTTPClient(&http.Client{Transport: tr})
 	fake.SetDelayFunc(func(time.Duration) {})
 	llm := &cbCountingLLM{}
@@ -187,7 +191,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 	cfg.LLMPrompt = "extract the version"
 
 	version, err := checker.fetchUpstreamVersionRaw(t.Context(), "app-misc/leak", &cfg)
-	if !errors.Is(err, ErrCredentialHostMismatch) {
+	if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		t.Fatalf("fetchUpstreamVersionRaw = (%q, %v); want errors.Is(err, ErrCredentialHostMismatch)", version, err)
 	}
 	if n := tr.total(); n != 0 {
@@ -200,7 +204,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 	// Converse: an ordinary primary failure still falls back.
 	t.Run("a non-refusal primary failure still tries the fallback", func(t *testing.T) {
 		tr2 := &cbHostTransport{}
-		fake2 := NewRetryableHTTPClient()
+		fake2 := fetch.NewRetryableHTTPClient()
 		fake2.SetHTTPClient(&http.Client{Transport: tr2})
 		fake2.SetDelayFunc(func(time.Duration) {})
 		c2 := newRateLimitTestChecker(t, "https://unused.example/",

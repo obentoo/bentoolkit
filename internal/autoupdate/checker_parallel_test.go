@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -87,7 +89,7 @@ func buildParallelChecker(t *testing.T, numPkgs int, srvURL string, opts ...Chec
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	packages := make(map[string]PackageConfig, numPkgs)
+	packages := make(map[string]registry.PackageConfig, numPkgs)
 	names := make([]string, 0, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("cat-%03d/pkg-%03d", i, i)
@@ -98,7 +100,7 @@ func buildParallelChecker(t *testing.T, numPkgs int, srvURL string, opts ...Chec
 		// a checker running ten, measuring deduplication instead of the
 		// parallelism these tests are named for. Distinct URLs also match the
 		// live registry's shape: 230 distinct URLs across 411 records.
-		packages[name] = PackageConfig{
+		packages[name] = registry.PackageConfig{
 			URL:    fmt.Sprintf("%s/pkg-%03d", srvURL, i),
 			Parser: "json",
 			Path:   "version",
@@ -109,7 +111,7 @@ func buildParallelChecker(t *testing.T, numPkgs int, srvURL string, opts ...Chec
 
 	allOpts := append([]CheckerOption{
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 	}, opts...)
 
 	checker, err := NewChecker(overlayDir, allOpts...)
@@ -224,13 +226,13 @@ func TestCheckAll_PanicRecovery(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "config")
 
 	const panicPkg = "cat-panic/pkg-panic"
-	packages := map[string]PackageConfig{
+	packages := map[string]registry.PackageConfig{
 		panicPkg: {URL: panicSrv.URL, Parser: "json", Path: "version"},
 	}
 	createTestEbuild(t, overlayDir, panicPkg, "0.9.0")
 	for i := 0; i < numPkgs-1; i++ {
 		name := fmt.Sprintf("cat-%03d/pkg-%03d", i, i)
-		packages[name] = PackageConfig{URL: server.URL, Parser: "json", Path: "version"}
+		packages[name] = registry.PackageConfig{URL: server.URL, Parser: "json", Path: "version"}
 		createTestEbuild(t, overlayDir, name, "0.9.0")
 	}
 
@@ -239,7 +241,7 @@ func TestCheckAll_PanicRecovery(t *testing.T) {
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithRateLimiter(rl),
 		WithConcurrency(5),
 	)
@@ -344,15 +346,15 @@ func TestCheckAll_ResultsSorted(t *testing.T) {
 		names[i], names[j] = names[j], names[i]
 	})
 
-	packages := make(map[string]PackageConfig, len(names))
+	packages := make(map[string]registry.PackageConfig, len(names))
 	for _, name := range names {
-		packages[name] = PackageConfig{URL: server.URL, Parser: "json", Path: "version"}
+		packages[name] = registry.PackageConfig{URL: server.URL, Parser: "json", Path: "version"}
 		createTestEbuild(t, overlayDir, name, "0.9.0")
 	}
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithRateLimiter(unlimitedRateLimiter()),
 		WithConcurrency(8),
 	)

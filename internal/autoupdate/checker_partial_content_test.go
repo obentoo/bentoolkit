@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // TestFetchContent_AcceptsPartialContent asserts that a record declaring a Range
@@ -30,7 +32,7 @@ func TestFetchContent_AcceptsPartialContent(t *testing.T) {
 	checker := newContextTestChecker(t, server.URL)
 
 	headers := map[string]string{"Range": "bytes=0-2097151"}
-	content, err := checker.fetchContent(t.Context(), server.URL, headers, credentialScope{}, checker.operationTimeout(nil))
+	content, err := checker.fetchContent(t.Context(), server.URL, headers, fetch.CredentialScope{}, checker.operationTimeout(nil))
 	if err != nil {
 		t.Fatalf("fetchContent rejected a 206 response: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 
 			checker := newContextTestChecker(t, server.URL)
 
-			_, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+			_, err := checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil))
 			if err == nil {
 				t.Fatalf("fetchContent accepted status %d, want an error", status)
 			}
@@ -91,7 +93,7 @@ func TestFetchContent_RejectsNonSuccessStatuses(t *testing.T) {
 // canonicalises the name before it reaches the wire and Header.Get canonicalises
 // the lookup, so the gate never inspects the caller's headers map. An
 // unsolicited 206 (no Range) must fail safe with the status error, and a server
-// that ignores Range and streams past httputil.MaxBodyBytes must trip
+// that ignores Range and streams past httpx.MaxBodyBytes must trip
 // ErrResponseTooLarge now that GetWithHeadersContext caps the body.
 //
 // RED (before story 019): checker.go accepted 206 unconditionally, so "206
@@ -171,13 +173,13 @@ func TestFetchContent_RangeGated206(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(tt.handler))
 			defer server.Close()
 
-			client := NewRetryableHTTPClient()
+			client := fetch.NewRetryableHTTPClient()
 			client.SetHTTPClient(server.Client())
 			client.SetDelayFunc(func(time.Duration) {})
 
 			checker := newContextTestChecker(t, server.URL, WithHTTPClient(client))
 
-			content, err := checker.fetchContent(t.Context(), server.URL, tt.headers, credentialScope{}, checker.operationTimeout(nil))
+			content, err := checker.fetchContent(t.Context(), server.URL, tt.headers, fetch.CredentialScope{}, checker.operationTimeout(nil))
 
 			if !tt.wantErr {
 				if err != nil {
@@ -193,7 +195,7 @@ func TestFetchContent_RangeGated206(t *testing.T) {
 				t.Fatalf("fetchContent accepted %q, want an error", tt.name)
 			}
 			if tt.name == "server ignores Range and streams over the cap" {
-				if !errors.Is(err, ErrResponseTooLarge) {
+				if !errors.Is(err, fetch.ErrResponseTooLarge) {
 					t.Errorf("expected errors.Is(err, ErrResponseTooLarge), got: %v", err)
 				}
 				return
@@ -393,7 +395,7 @@ func TestFetchContent_ObservedRangeGate(t *testing.T) {
 				target = redirector.URL
 			}
 
-			client := NewRetryableHTTPClient()
+			client := fetch.NewRetryableHTTPClient()
 			client.SetHTTPClient(partial.Client())
 			client.SetDelayFunc(func(time.Duration) {})
 			if tt.defaultHeaders != nil {
@@ -402,7 +404,7 @@ func TestFetchContent_ObservedRangeGate(t *testing.T) {
 
 			checker := newContextTestChecker(t, target, WithHTTPClient(client))
 
-			content, err := checker.fetchContent(t.Context(), target, tt.headers, credentialScope{}, checker.operationTimeout(nil))
+			content, err := checker.fetchContent(t.Context(), target, tt.headers, fetch.CredentialScope{}, checker.operationTimeout(nil))
 
 			if observed.count() == 0 {
 				t.Fatalf("the 206 server was never reached; the case proves nothing about the gate")

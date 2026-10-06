@@ -15,6 +15,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestCheckPackageStripsUpstreamTagPrefix holds the check-result half: a GitHub
@@ -33,8 +35,8 @@ func TestCheckPackageStripsUpstreamTagPrefix(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "tag_name"},
 		},
 	}
@@ -78,8 +80,8 @@ func TestCheckPackageStoresStrippedVersionInPending(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "tag_name"},
 		},
 	}
@@ -107,27 +109,5 @@ func TestCheckPackageStoresStrippedVersionInPending(t *testing.T) {
 	}
 	if update.NewVersion != "1.0.1" {
 		t.Errorf("Expected pending NewVersion stripped to %q, got %q", "1.0.1", update.NewVersion)
-	}
-}
-
-// TestNormalizeUpstreamVersion pins the helper the checker and the validation
-// plan share, prefix by prefix, so the two callers cannot drift apart on what
-// "normalized" means.
-func TestNormalizeUpstreamVersion(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"v3.2.3", "3.2.3"},
-		{"V3.2.3", "3.2.3"},
-		{" v1.16.1 ", "1.16.1"},
-		{"release-2.0", "2.0"},
-		{"3.2.3", "3.2.3"},
-		{"b4938", "b4938"}, // not a recognised prefix: left for the comparability warning
-		{"", ""},
-	}
-	for _, c := range cases {
-		if got := NormalizeUpstreamVersion(c.in); got != c.want {
-			t.Errorf("NormalizeUpstreamVersion(%q) = %q, want %q", c.in, got, c.want)
-		}
 	}
 }

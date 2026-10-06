@@ -22,6 +22,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
@@ -41,10 +46,6 @@ type httpRateLimiter interface {
 
 // Error variables for checker errors
 var (
-	// ErrPackageNotFound is returned when a package is not found in the configuration
-	ErrPackageNotFound = errors.New("package not found in configuration")
-	// ErrNoEbuildFound is returned when no ebuild file is found for a package
-	ErrNoEbuildFound = errors.New("no ebuild file found for package")
 	// ErrFetchFailed is returned when fetching upstream version fails
 	ErrFetchFailed = errors.New("failed to fetch upstream version")
 	// ErrUpstreamUnreachable is wrapped beside ErrFetchFailed when the fetch
@@ -142,7 +143,7 @@ const DefaultOpTimeout = 30 * time.Second
 // the HTTP client; a zero/blank rc still yields a budget >= perReq. The backoff
 // is summed from backoffCeilingFor, the same ceiling the retry wait draws its
 // jitter below, so a jittered wait never exceeds what the budget allows for.
-func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
+func deriveOpTimeout(perReq time.Duration, rc fetch.RetryConfig) time.Duration {
 	maxRetries := rc.MaxRetries
 	if maxRetries < 0 {
 		maxRetries = 0
@@ -152,7 +153,7 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 
 	// Sum the longest wait the retry loop can take before each retry.
 	for i := 1; i <= maxRetries; i++ {
-		total += backoffCeilingFor(rc, i)
+		total += fetch.BackoffCeilingFor(rc, i)
 	}
 
 	return total + time.Second
@@ -161,7 +162,7 @@ func deriveOpTimeout(perReq time.Duration, rc RetryConfig) time.Duration {
 // operationTimeout resolves the per-operation budget for a package: the
 // per-package override (cfg.Timeout seconds) when set, otherwise the Checker's
 // global budget (c.opTimeout, derived from the configured per-request timeout).
-func (c *Checker) operationTimeout(cfg *PackageConfig) time.Duration {
+func (c *Checker) operationTimeout(cfg *registry.PackageConfig) time.Duration {
 	if cfg != nil && cfg.Timeout > 0 {
 		return time.Duration(cfg.Timeout) * time.Second
 	}
@@ -241,13 +242,13 @@ type Checker struct {
 	// overlayPath is the path to the overlay directory
 	overlayPath string
 	// config holds the packages configuration
-	config *PackagesConfig
+	config *registry.PackagesConfig
 	// typeFilter, when non-empty ("bin" or "source"), restricts CheckAll to
 	// packages of that resolved type. Empty checks every package. Set via
 	// WithTypeFilter.
 	typeFilter string
 	// cache manages version query caching
-	cache *Cache
+	cache *fetch.Cache
 	// pending manages pending updates
 	pending *PendingList
 	// llmClient handles LLM-based version extraction (optional). It is the
@@ -258,7 +259,7 @@ type Checker struct {
 	// interface (e.g. a (*ClaudeClient)(nil) boxed by a failed constructor)
 	// would defeat. WithLLMClient therefore rejects a nil argument, and the
 	// CLI wires it only on a successful, non-nil construction.
-	llmClient LLMProvider
+	llmClient llm.LLMProvider
 	// llmProviderConfigured records that the CLI attempted to configure an LLM
 	// provider for this run (autoupdate.llm.provider was non-empty), regardless
 	// of whether construction ultimately succeeded. It gates the "unused
@@ -269,7 +270,7 @@ type Checker struct {
 	// defaults false so existing direct callers are unaffected.
 	llmProviderConfigured bool
 	// httpClient handles HTTP requests with retry logic
-	httpClient *RetryableHTTPClient
+	httpClient *fetch.RetryableHTTPClient
 	// configDir is the directory for storing cache and pending files
 	configDir string
 	// opTimeout bounds a single outbound operation. Each fetch derives a child
@@ -318,7 +319,7 @@ type Checker struct {
 	// fetchContent then calls fetchContentUncached directly, which is the
 	// pre-story path byte for byte. NewChecker builds one in the struct literal
 	// below, so deduplication is on by default.
-	bodies *bodyCache
+	bodies *fetch.BodyCache
 
 	// hostSlots caps the requests in flight to one host (DefaultPerHostConcurrency
 	// unless WithPerHostConcurrency says otherwise). Nil means no cap.
@@ -353,7 +354,7 @@ func WithLogger(l *slog.Logger) CheckerOption {
 }
 
 // WithCache sets a custom cache for the checker
-func WithCache(cache *Cache) CheckerOption {
+func WithCache(cache *fetch.Cache) CheckerOption {
 	return func(c *Checker) error {
 		c.cache = cache
 		return nil
@@ -380,7 +381,7 @@ func WithPendingList(pending *PendingList) CheckerOption {
 // would pass `!= nil` and make fetchUpstreamVersion call ExtractVersion on a
 // nil receiver. Refusing nil here keeps llmClient an untyped nil when no usable
 // provider exists.
-func WithLLMClient(llm LLMProvider) CheckerOption {
+func WithLLMClient(llm llm.LLMProvider) CheckerOption {
 	return func(c *Checker) error {
 		if llm != nil {
 			c.llmClient = llm
@@ -405,7 +406,7 @@ func WithLLMProviderConfigured(configured bool) CheckerOption {
 }
 
 // WithHTTPClient sets a custom HTTP client for the checker
-func WithHTTPClient(client *RetryableHTTPClient) CheckerOption {
+func WithHTTPClient(client *fetch.RetryableHTTPClient) CheckerOption {
 	return func(c *Checker) error {
 		c.httpClient = client
 		return nil
@@ -435,7 +436,7 @@ func WithConfigDir(dir string) CheckerOption {
 }
 
 // WithPackagesConfig sets a custom packages configuration
-func WithPackagesConfig(config *PackagesConfig) CheckerOption {
+func WithPackagesConfig(config *registry.PackagesConfig) CheckerOption {
 	return func(c *Checker) error {
 		c.config = config
 		return nil
@@ -573,7 +574,7 @@ func WithFetchCache(enabled bool) CheckerOption {
 			return nil
 		}
 		if c.bodies == nil {
-			c.bodies = newDefaultBodyCache()
+			c.bodies = fetch.NewDefaultBodyCache()
 		}
 		return nil
 	}
@@ -599,7 +600,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		// simply sets the field back to nil — instead of a flag threaded through
 		// the fetch path. fetchContent then has one branch on one field, and the
 		// off state is the pre-story code verbatim.
-		bodies:    newDefaultBodyCache(),
+		bodies:    fetch.NewDefaultBodyCache(),
 		hostSlots: newHostSlots(DefaultPerHostConcurrency),
 	}
 
@@ -612,7 +613,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Load packages configuration if not provided
 	if checker.config == nil {
-		config, err := LoadPackagesConfig(overlayPath)
+		config, err := registry.LoadPackagesConfig(overlayPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load packages config: %w", err)
 		}
@@ -624,11 +625,11 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// the user-configured `autoupdate.cache_ttl` is honoured (S002-R2.1). When the
 	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
 	if checker.cache == nil {
-		cacheOpts := []CacheOption{}
+		cacheOpts := []fetch.CacheOption{}
 		if checker.cacheTTL > 0 {
-			cacheOpts = append(cacheOpts, WithTTL(checker.cacheTTL))
+			cacheOpts = append(cacheOpts, fetch.WithTTL(checker.cacheTTL))
 		}
-		cache, err := NewCache(checker.configDir, cacheOpts...)
+		cache, err := fetch.NewCache(checker.configDir, cacheOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize cache: %w", err)
 		}
@@ -646,7 +647,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Initialize HTTP client if not provided
 	if checker.httpClient == nil {
-		checker.httpClient = NewRetryableHTTPClient()
+		checker.httpClient = fetch.NewRetryableHTTPClient()
 	}
 	// The client reports through the checker's logger — an injected client
 	// too, since there is one logger per invocation. Without WithLogger the
@@ -687,7 +688,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
 	// have a nil rateLimiter: fetchContent unconditionally waits on it (S001-R10.3).
 	if checker.rateLimiter == nil {
-		checker.rateLimiter = NewRateLimiter()
+		checker.rateLimiter = fetch.NewRateLimiter()
 	}
 
 	// S003-R5.3 / S002-R4.2: a non-empty llm_prompt only drives --check when an LLM
@@ -746,9 +747,9 @@ func isUpstreamUnreachable(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	return errors.Is(err, ErrMaxRetriesExceeded) ||
-		errors.Is(err, ErrRequestTimeout) ||
-		errors.Is(err, ErrRetryAfterTooLong) ||
+	return errors.Is(err, fetch.ErrMaxRetriesExceeded) ||
+		errors.Is(err, fetch.ErrRequestTimeout) ||
+		errors.Is(err, fetch.ErrRetryAfterTooLong) ||
 		errors.Is(err, gobreaker.ErrOpenState) ||
 		errors.Is(err, gobreaker.ErrTooManyRequests) ||
 		errors.Is(err, context.DeadlineExceeded)
@@ -767,7 +768,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	// Get package configuration
 	pkgConfig, exists := c.config.Packages[pkg]
 	if !exists {
-		result.Error = fmt.Errorf("%w: %s", ErrPackageNotFound, pkg)
+		result.Error = fmt.Errorf("%w: %s", ebuilds.ErrPackageNotFound, pkg)
 		return result, result.Error
 	}
 
@@ -775,7 +776,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	// It used to check a held or disabled package like any other and queue its
 	// update in pending.json, so the maintainer's "do not auto-bump" held only
 	// for the full scan.
-	if reason := refusedBy(c.config.Packages, pkg); reason != "" {
+	if reason := registry.RefusedBy(c.config.Packages, pkg); reason != "" {
 		result.Skipped = reason
 		return result, nil
 	}
@@ -960,7 +961,7 @@ func (c *Checker) seriesFor(pkg string) string {
 // version, restricted to the slot when pkg's key carries a ":slot" suffix and to
 // the release line when the entry declares a `series`.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := ebuilds.SelectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -987,7 +988,7 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
-	if err := DisablePackagesInConfig(c.overlayPath, pkgs); err != nil {
+	if err := registry.DisablePackagesInConfig(c.overlayPath, pkgs); err != nil {
 		return err
 	}
 	disabled := false
@@ -998,7 +999,7 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 			// origin only where the record states none, so an entry that already
 			// names a human origin keeps it and stays out of the reconciliation.
 			if cfg.DisabledBy == "" {
-				cfg.DisabledBy = disabledByAuto
+				cfg.DisabledBy = registry.DisabledByAuto
 			}
 			c.config.Packages[pkg] = cfg
 		}
@@ -1031,7 +1032,7 @@ func (c *Checker) ReviveDisabled(pkgs []string) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
-	if err := EnablePackagesInConfig(c.overlayPath, pkgs); err != nil {
+	if err := registry.EnablePackagesInConfig(c.overlayPath, pkgs); err != nil {
 		return err
 	}
 	enabled := true
@@ -1065,8 +1066,8 @@ func (c *Checker) ReviveDisabled(pkgs []string) error {
 // question needs the overlay itself, and leaving it to CheckAll — where
 // getCurrentVersion is reachable — keeps this a pure function of the record, so
 // the policy can be read and tested without a fixture on disk.
-func reconcilesAutomatically(pkg PackageConfig) bool {
-	return !pkg.IsEnabled() && !pkg.IsHeld() && pkg.DisabledBy == disabledByAuto
+func reconcilesAutomatically(pkg registry.PackageConfig) bool {
+	return !pkg.IsEnabled() && !pkg.IsHeld() && pkg.DisabledBy == registry.DisabledByAuto
 }
 
 // frozenDisableMessage is the notice logFrozenDisables writes. The entries it
@@ -1078,7 +1079,7 @@ func reconcilesAutomatically(pkg PackageConfig) bool {
 // the fail-safe would introduce a silent regression of its own — every record
 // disabled before the field existed quietly stops reconciling.
 const frozenDisableMessage = "left package(s) disabled — the reconciliation clears only a disable it recorded itself, " +
-	"and these state no origin, so each reads as a deliberate decision; add disabled_by = \"" + disabledByAuto +
+	"and these state no origin, so each reads as a deliberate decision; add disabled_by = \"" + registry.DisabledByAuto +
 	"\" to any entry the checker should be free to re-enable when its ebuild returns"
 
 // logFrozenDisables writes the single line naming every entry the
@@ -1157,7 +1158,7 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 
 		// Split category/package the same way getCurrentVersion does, dropping
 		// any ":slot" suffix so the ::gentoo lookup below gets a real path.
-		category, pkgName, ok := splitPkgAtom(pkg)
+		category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 		if !ok {
 			notes = append(notes, fmt.Sprintf("%s: invalid package name format", pkg))
 			continue
@@ -1186,9 +1187,9 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		// one request per scan to say it.
 		if _, err := c.getCurrentVersion(pkg); err == nil {
 			continue // ebuild still present: disabled but not orphaned, skip silently
-		} else if errors.Is(err, ErrSlotNotFound) || errors.Is(err, ErrSeriesNotFound) {
+		} else if errors.Is(err, ebuilds.ErrSlotNotFound) || errors.Is(err, ebuilds.ErrSeriesNotFound) {
 			continue // the entry's filter selects no line: not an orphan, not a failure
-		} else if !errors.Is(err, ErrNoEbuildFound) {
+		} else if !errors.Is(err, ebuilds.ErrNoEbuildFound) {
 			notes = append(notes, fmt.Sprintf("%s: overlay lookup failed: %v", pkg, err))
 			continue
 		}
@@ -1260,7 +1261,7 @@ func maxGentooVersion(versions []string) string {
 // ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := ebuilds.SelectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1272,7 +1273,7 @@ func (c *Checker) currentEbuildPath(pkg string) (string, error) {
 // On any read error it defaults to "source", so an unreadable ebuild is never
 // silently dropped from a "source" filter (and a real fetch error surfaces
 // later through the normal check path).
-func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
+func (c *Checker) resolveType(pkg string, cfg *registry.PackageConfig) string {
 	if cfg.Type != "" {
 		return cfg.Type
 	}
@@ -1284,7 +1285,7 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 	if err != nil {
 		return "source"
 	}
-	if detectBinaryPackage(content) {
+	if ebuilds.DetectBinaryPackage(content) {
 		return "bin"
 	}
 	return "source"
@@ -1302,8 +1303,8 @@ func (c *Checker) resolveType(pkg string, cfg *PackageConfig) string {
 // otherwise order junk below every real version and silently report no update —
 // see ebuild.IsValidVersion).
 func (c *Checker) compareVersions(upstream, current string) (hasUpdate, comparable bool) {
-	u := stripVersionPrefix(strings.TrimSpace(upstream))
-	cur := stripVersionPrefix(strings.TrimSpace(current))
+	u := parse.StripVersionPrefix(strings.TrimSpace(upstream))
+	cur := parse.StripVersionPrefix(strings.TrimSpace(current))
 	if !ebuild.IsValidVersion(u) || !ebuild.IsValidVersion(cur) {
 		return false, false
 	}
@@ -1336,7 +1337,7 @@ func (c *Checker) addToPending(pkg, currentVersion, newVersion, commitHash, auxV
 // is not a failed check, and an entry queued by an earlier successful check
 // stays as it was. The value is fetched again on the next check, cache hit
 // included, so the bump resolves itself once upstream serves it.
-func heldBump(pkg string, cfg *PackageConfig, sha, aux string) error {
+func heldBump(pkg string, cfg *registry.PackageConfig, sha, aux string) error {
 	if cfg.CommitSHAPath != "" && sha == "" {
 		return fmt.Errorf("%w for %s: commit_sha_path %q resolved nothing, bump held until it resolves", ErrAuxUnresolved, pkg, cfg.CommitSHAPath)
 	}
@@ -1355,7 +1356,7 @@ func heldBump(pkg string, cfg *PackageConfig, sha, aux string) error {
 //
 // Commit-tracked packages (track="commit") resolve their SHA via fetchCommitInfo
 // instead and never reach this path.
-func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *PackageConfig, result *CheckResult) string {
+func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *registry.PackageConfig, result *CheckResult) string {
 	if cfg.CommitSHAPath == "" {
 		return ""
 	}
@@ -1366,7 +1367,7 @@ func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *PackageConfig, result 
 		}
 		return ""
 	}
-	sha, err := (&JSONParser{Path: cfg.CommitSHAPath}).Parse(content)
+	sha, err := (&parse.JSONParser{Path: cfg.CommitSHAPath}).Parse(content)
 	if err != nil {
 		if result.Error == nil {
 			result.Error = fmt.Errorf("failed to parse commit sha at %q: %w", cfg.CommitSHAPath, err)
@@ -1384,13 +1385,13 @@ func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *PackageConfig, result 
 // fetch/parse failure is recorded on result.Error and returns "", which makes
 // CheckPackage hold the bump (see heldBump) instead of queueing it with the
 // previous release's value.
-func (c *Checker) resolveAuxValue(ctx context.Context, cfg *PackageConfig, result *CheckResult) string {
+func (c *Checker) resolveAuxValue(ctx context.Context, cfg *registry.PackageConfig, result *CheckResult) string {
 	if cfg.AuxPattern == "" {
 		return ""
 	}
 	source, headers := cfg.URL, cfg.Headers
 	if cfg.AuxURL != "" {
-		source = strings.ReplaceAll(cfg.AuxURL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+		source = strings.ReplaceAll(cfg.AuxURL, fetch.VersionPlaceholder, url.PathEscape(result.UpstreamVersion))
 		headers = nonCredentialHeaders(cfg.Headers)
 	}
 	content, err := c.fetchContent(ctx, source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
@@ -1429,7 +1430,7 @@ func (c *Checker) resolveAuxValue(ctx context.Context, cfg *PackageConfig, resul
 // primary that is down holds the bump rather than reading another page. Any
 // entry that cannot be captured fails the whole set: the caller then holds the
 // bump instead of queueing a partial requirement set.
-func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *PackageConfig, result *CheckResult) (map[string]string, error) {
+func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *registry.PackageConfig, result *CheckResult) (map[string]string, error) {
 	if len(cfg.Requires) == 0 {
 		return nil, nil
 	}
@@ -1444,14 +1445,14 @@ func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *Pack
 		spec := cfg.Requires[atom]
 		source, headers := cfg.URL, cfg.Headers
 		if spec.URL != "" {
-			source = strings.ReplaceAll(spec.URL, versionPlaceholder, url.PathEscape(result.UpstreamVersion))
+			source = strings.ReplaceAll(spec.URL, fetch.VersionPlaceholder, url.PathEscape(result.UpstreamVersion))
 			headers = nonCredentialHeaders(cfg.Headers)
 		}
 		content, err := c.fetchContent(ctx, source, headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 		if err != nil {
 			return nil, fmt.Errorf("%w for %s requiring %s: fetching %s: %w", ErrRequirementUnresolved, pkg, atom, hostForError(source), err)
 		}
-		pattern := strings.ReplaceAll(spec.Pattern, versionPlaceholder, regexp.QuoteMeta(result.UpstreamVersion))
+		pattern := strings.ReplaceAll(spec.Pattern, fetch.VersionPlaceholder, regexp.QuoteMeta(result.UpstreamVersion))
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			return nil, fmt.Errorf("%w for %s requiring %s: pattern %q: %w", ErrRequirementUnresolved, pkg, atom, spec.Pattern, err)
@@ -1465,7 +1466,7 @@ func (c *Checker) resolveRequirements(ctx context.Context, pkg string, cfg *Pack
 		if !ebuild.IsValidVersion(version) {
 			return nil, fmt.Errorf("%w for %s requiring %s: captured %q is not a Gentoo version", ErrRequirementUnresolved, pkg, atom, version)
 		}
-		if spec.Pin == "~" && revisionSuffixRegex.MatchString(version) {
+		if spec.Pin == "~" && ebuilds.RevisionSuffixRegex.MatchString(version) {
 			return nil, fmt.Errorf("%w for %s requiring %s: captured %q carries a revision, which a ~ pin cannot match", ErrRequirementUnresolved, pkg, atom, version)
 		}
 		captured[atom] = version
@@ -1527,7 +1528,7 @@ var ebuildCommitRegex = regexp.MustCompile(
 // match to SUPPRESS an update, so an unreadable ebuild leaves the normal version
 // comparison in charge rather than silently freezing the package.
 func currentEbuildCommit(log *slog.Logger, overlayPath, pkg, series string) string {
-	best, err := selectCurrentEbuild(log, overlayPath, pkg, series)
+	best, err := ebuilds.SelectCurrentEbuild(log, overlayPath, pkg, series)
 	if err != nil || best.Path == "" {
 		return ""
 	}
@@ -1577,7 +1578,7 @@ type gitLabTag struct {
 // a strict ancestor test would reject the correct tag and fall seven releases
 // back. Highest-of-family matches what the release actually is for every package
 // this serves, and the exact-tag test below is precise regardless.
-func (c *Checker) resolveBaseFromTag(ctx context.Context, cfg *PackageConfig, headSHA string) (string, bool, error) {
+func (c *Checker) resolveBaseFromTag(ctx context.Context, cfg *registry.PackageConfig, headSHA string) (string, bool, error) {
 	content, err := c.fetchContent(ctx, cfg.BaseURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return "", false, fmt.Errorf("base version tags %s: %w", cfg.BaseURL, err)
@@ -1666,7 +1667,7 @@ func parseTagListing(content []byte) (names, shas []string, err error) {
 // and extracts the date, SHA, and — when CommitVersionPattern is set — the
 // highest base version found in commit titles since the last snapshot.
 // Called only when cfg.Track == "commit".
-func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *PackageConfig) (*commitInfo, error) {
+func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *registry.PackageConfig) (*commitInfo, error) {
 	content, err := c.fetchContent(ctx, cfg.URL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return nil, err
@@ -1674,18 +1675,18 @@ func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *PackageConfig) (*com
 
 	// Extract date of the latest commit (path points to [0].commit.committer.date
 	// or [0].committed_date, etc.) then apply transforms to get YYYYMMDD.
-	dateParser := &JSONParser{Path: cfg.Path}
+	dateParser := &parse.JSONParser{Path: cfg.Path}
 	raw, err := dateParser.Parse(content)
 	if err != nil {
 		return nil, fmt.Errorf("commit date: %w", err)
 	}
-	date := applyTransforms(c.logger(), raw, cfg.Transform)
+	date := parse.ApplyTransforms(c.logger(), raw, cfg.Transform)
 	if date == "" {
 		return nil, fmt.Errorf("commit date: empty after transform (raw: %q)", raw)
 	}
 
 	// Extract SHA of the latest commit.
-	shaParser := &JSONParser{Path: cfg.CommitSHAPath}
+	shaParser := &parse.JSONParser{Path: cfg.CommitSHAPath}
 	sha, err := shaParser.Parse(content)
 	if err != nil {
 		return nil, fmt.Errorf("commit sha: %w", err)
@@ -1748,7 +1749,7 @@ func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *PackageConfig) (*com
 // file moved, the branch was renamed, or upstream restructured its version
 // declaration. All three must be loud — a base that silently stops advancing
 // looks identical to one that is simply up to date.
-func (c *Checker) resolveBaseFromFile(ctx context.Context, cfg *PackageConfig) (string, error) {
+func (c *Checker) resolveBaseFromFile(ctx context.Context, cfg *registry.PackageConfig) (string, error) {
 	content, err := c.fetchContent(ctx, cfg.BaseURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
 		return "", fmt.Errorf("base version file %s: %w", cfg.BaseURL, err)
@@ -1800,7 +1801,7 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 		if err := json.Unmarshal(raw, &elem); err != nil {
 			continue
 		}
-		val, err := navigateJSONPath(elem, messageRelPath)
+		val, err := parse.NavigateJSONPath(elem, messageRelPath)
 		if err != nil {
 			continue
 		}
@@ -1832,7 +1833,7 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 // version for a record that declares a development channel. selectVersion also
 // applies it per candidate so "max" orders the final values; applySuffix is
 // idempotent, so the second pass is a no-op.
-func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *PackageConfig) (string, error) {
+func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *registry.PackageConfig) (string, error) {
 	version, err := c.fetchUpstreamVersionRaw(ctx, pkg, cfg)
 	if err != nil {
 		return "", err
@@ -1847,8 +1848,8 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *Pac
 	// operator confirms. Stripping before applySuffix keeps the suffix logic
 	// working on a bare version, and the strip is idempotent for entries whose
 	// transform already removed the prefix.
-	version = NormalizeUpstreamVersion(version)
-	version = applySuffix(c.logger(), version, cfg)
+	version = parse.NormalizeUpstreamVersion(version)
+	version = parse.ApplySuffix(c.logger(), version, cfg)
 
 	// An entry restricted to a release line must never report a version from
 	// another one: it would be compared against — and could bump — the ebuild of
@@ -1856,28 +1857,28 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *Pac
 	// per candidate; this covers the paths that yield a single value (first
 	// match, script, fallback, LLM). Failing loudly is the point: the entry's
 	// source moved, or its series is wrong, and both need a human.
-	if m := newSeriesMatcher(c.logger(), cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
+	if m := ebuilds.NewSeriesMatcher(c.logger(), cfg.Series); m.Active() && !m.Matches(parse.StripVersionPrefix(version)) {
 		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
-			ErrNoVersionFound, version, cfg.Series)
+			parse.ErrNoVersionFound, version, cfg.Series)
 	}
 	return version, nil
 }
 
 // fetchUpstreamVersionRaw fetches and parses the upstream version for a package.
 // It tries the primary URL/parser first, then fallback if configured, then LLM if available.
-func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *PackageConfig) (string, error) {
+func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *registry.PackageConfig) (string, error) {
 	// The script parser drives a headless browser itself, so it bypasses
 	// fetchContent/fetchAndParse entirely (and therefore transform/select, which
 	// the script handles in JS — see ValidatePackageConfig). It has no fallback
 	// or LLM stage: the script is the single source of truth.
 	if cfg.Parser == "script" {
-		return c.probeWithMirrors(cfg, func(m *PackageConfig) (string, error) {
+		return c.probeWithMirrors(cfg, func(m *registry.PackageConfig) (string, error) {
 			return c.parseLive(ctx, m)
 		})
 	}
 
 	// Try primary URL, then its mirrors
-	version, err := c.probeWithMirrors(cfg, func(m *PackageConfig) (string, error) {
+	version, err := c.probeWithMirrors(cfg, func(m *registry.PackageConfig) (string, error) {
 		return c.fetchAndParse(ctx, m.URL, m)
 	})
 	if err == nil {
@@ -1887,7 +1888,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 
 	// A credential refusal is a verdict on the record, not a failed source:
 	// neither the fallback nor the LLM stage may run after it (S052-R2.2).
-	if errors.Is(err, ErrCredentialHostMismatch) {
+	if errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		return "", fmt.Errorf("all version extraction methods failed: %w", err)
 	}
 
@@ -1926,7 +1927,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 func nonCredentialHeaders(headers map[string]string) map[string]string {
 	var out map[string]string
 	for name, value := range headers {
-		if isAllowedHeaderName(name) || containsCRLF(name) {
+		if fetch.IsAllowedHeaderName(name) || fetch.ContainsCRLF(name) {
 			continue
 		}
 		if out == nil {
@@ -1946,9 +1947,9 @@ func nonCredentialHeaders(headers map[string]string) map[string]string {
 // is a transport failure only if every attempt was one — a mirror timing out
 // must not hide that url itself answered with something the record cannot
 // read, which is the record's fault and the registry repair's business.
-func (c *Checker) probeWithMirrors(cfg *PackageConfig, probe func(*PackageConfig) (string, error)) (string, error) {
+func (c *Checker) probeWithMirrors(cfg *registry.PackageConfig, probe func(*registry.PackageConfig) (string, error)) (string, error) {
 	version, err := probe(cfg)
-	if err == nil || len(cfg.Mirrors) == 0 || errors.Is(err, ErrCredentialHostMismatch) {
+	if err == nil || len(cfg.Mirrors) == 0 || errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		return version, err
 	}
 
@@ -1996,8 +1997,8 @@ func (c *Checker) probeWithMirrors(cfg *PackageConfig, probe func(*PackageConfig
 //     (isAllowedHeaderName) is dropped, literal value or ${VAR} alike: the
 //     fallback host is deliberately outside the record's credential scope (see
 //     packageCredentialScope).
-func fallbackConfig(cfg *PackageConfig, pattern string) *PackageConfig {
-	return &PackageConfig{
+func fallbackConfig(cfg *registry.PackageConfig, pattern string) *registry.PackageConfig {
+	return &registry.PackageConfig{
 		Parser:     cfg.FallbackParser,
 		Path:       cfg.Path,
 		Pattern:    pattern,
@@ -2026,7 +2027,7 @@ func fallbackConfig(cfg *PackageConfig, pattern string) *PackageConfig {
 // The parser itself is built via NewParserFromConfig so every configured parser
 // type is supported — including "html", whose selector/xpath fields wire the
 // scrape plus optional regex post-processing (carried in Pattern).
-func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *PackageConfig) (string, error) {
+func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *registry.PackageConfig) (string, error) {
 	// Fetch content
 	content, err := c.fetchContent(ctx, rawURL, cfg.Headers, packageCredentialScope(cfg), c.operationTimeout(cfg))
 	if err != nil {
@@ -2035,7 +2036,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 
 	// select path: collect all candidates, transform each, then pick one.
 	if cfg.Select != "" && cfg.Select != "first" {
-		extractor, exErr := newSelectExtractor(cfg)
+		extractor, exErr := parse.NewSelectExtractor(cfg)
 		if exErr != nil {
 			return "", fmt.Errorf("failed to create select extractor: %w", exErr)
 		}
@@ -2044,10 +2045,10 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 			if cErr != nil {
 				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
 			}
-			best := selectVersion(c.logger(), cands, cfg)
+			best := parse.SelectVersion(c.logger(), cands, cfg)
 			if best == "" {
 				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
-					ErrNoVersionFound, len(cands), cfg.Select)
+					parse.ErrNoVersionFound, len(cands), cfg.Select)
 			}
 			return best, nil
 		}
@@ -2057,7 +2058,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 	}
 
 	// Create parser. NewParserFromConfig handles json/regex/html uniformly.
-	parser, err := NewParserFromConfig(cfg)
+	parser, err := parse.NewParserFromConfig(cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create parser: %w", err)
 	}
@@ -2067,7 +2068,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 	if err != nil {
 		return "", fmt.Errorf("failed to parse version: %w", err)
 	}
-	version = applyTransforms(c.logger(), version, cfg.Transform)
+	version = parse.ApplyTransforms(c.logger(), version, cfg.Transform)
 
 	return version, nil
 }
@@ -2085,7 +2086,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 // io.Closer); reusing one browser across the batch is a future optimization, but
 // the script-package count is tiny (the LibreOffice group), so launch cost is
 // acceptable and per-call isolation avoids shared-state concurrency hazards.
-func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, error) {
+func (c *Checker) parseLive(ctx context.Context, cfg *registry.PackageConfig) (string, error) {
 	scriptsDir := filepath.Join(c.overlayPath, ".autoupdate", "scripts")
 	body, err := resolveScript(cfg.Script, scriptsDir)
 	if err != nil {
@@ -2101,8 +2102,8 @@ func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, er
 	// The key cannot collide with an HTTP body's: it carries a prefix no URL has.
 	// The lookup precedes the rate-limit wait for the reason fetchContent's does.
 	digest := sha256.Sum256([]byte(body))
-	key := "script" + keySeparator + hex.EncodeToString(digest[:]) + keySeparator + bodyKey(cfg.URL, cfg.Headers)
-	out, err := c.bodies.do(ctx, key, func() ([]byte, error) {
+	key := "script" + fetch.KeySeparator + hex.EncodeToString(digest[:]) + fetch.KeySeparator + fetch.BodyKey(cfg.URL, cfg.Headers)
+	out, err := c.bodies.Do(ctx, key, func() ([]byte, error) {
 		v, err := c.evaluateLive(ctx, cfg, body)
 		return []byte(v), err
 	})
@@ -2111,7 +2112,7 @@ func (c *Checker) parseLive(ctx context.Context, cfg *PackageConfig) (string, er
 
 // evaluateLive renders cfg.URL in a headless browser and evaluates body there,
 // after the host's rate-limit token and connection slot.
-func (c *Checker) evaluateLive(ctx context.Context, cfg *PackageConfig, body string) (string, error) {
+func (c *Checker) evaluateLive(ctx context.Context, cfg *registry.PackageConfig, body string) (string, error) {
 	// Gate on the per-host rate limiter (same policy as fetchContent), waiting on
 	// the parent context so the wait is signal-cancellable and not charged to the
 	// per-operation timeout. Fail open on an unparseable URL.
@@ -2204,8 +2205,8 @@ func (c *Checker) evaluateLive(ctx context.Context, cfg *PackageConfig, body str
 // cache would let a later cancelled call succeed. The refusal keeps the raw
 // context error as its cause, so errors.Is(err, context.Canceled) and
 // errors.Is(err, context.DeadlineExceeded) hold for every caller.
-func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
-	if err := checkCredentialBinding(rawURL, headers, scope); err != nil {
+func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
+	if err := fetch.CheckCredentialBinding(rawURL, headers, scope); err != nil {
 		return nil, err
 	}
 
@@ -2217,7 +2218,7 @@ func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[s
 		return c.fetchContentUncached(ctx, rawURL, headers, scope, opTimeout)
 	}
 
-	return c.bodies.do(ctx, bodyKey(rawURL, headers), func() ([]byte, error) {
+	return c.bodies.Do(ctx, fetch.BodyKey(rawURL, headers), func() ([]byte, error) {
 		return c.fetchContentUncached(ctx, rawURL, headers, scope, opTimeout)
 	})
 }
@@ -2250,7 +2251,7 @@ func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[s
 // the Authorization token, and any TOML-declared headers on the wire. scope is
 // handed to that GET so the client re-checks the credential binding against the
 // package's hosts, not the request's own (S052-R1.4).
-func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, headers map[string]string, scope credentialScope, opTimeout time.Duration) ([]byte, error) {
+func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
 	// the per-request HTTP deadline: when many packages share a host, a queued
@@ -2293,7 +2294,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	opCtx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
 
-	resp, err := c.httpClient.getWithHeadersScopedContext(opCtx, rawURL, headers, scope)
+	resp, err := c.httpClient.GetWithHeadersScopedContext(opCtx, rawURL, headers, scope)
 	if err != nil {
 		// Name the host and the per-request cap so a timeout points the user at
 		// the slow endpoint and the knob to raise (autoupdate.http_timeout /
@@ -2334,7 +2335,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	// ErrResponseTooLarge (S019-R3.1, S019-R3.2, S001-R11.3). The cap is imposed upstream by
 	// GetWithHeadersContext, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
-	content, err := readBodyForStatus(resp, acceptedStatuses...)
+	content, err := fetch.ReadBodyForStatus(resp, acceptedStatuses...)
 	if err != nil {
 		return nil, err
 	}
@@ -2429,7 +2430,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	//   - enabled = false: always skipped, silently (no log, no count);
 	//   - hold = true: maintainer-held, skipped silently like a disabled entry;
 	//   - type filter (when active): keep only the matching bin/source class.
-	pkgs := make(map[string]PackageConfig, len(c.config.Packages))
+	pkgs := make(map[string]registry.PackageConfig, len(c.config.Packages))
 	for name, pkg := range c.config.Packages {
 		if !pkg.IsEnabled() || pkg.IsHeld() {
 			continue
@@ -2473,7 +2474,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		}
 
 		wg.Add(1)
-		go func(n string, p PackageConfig) {
+		go func(n string, p registry.PackageConfig) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			// A panic in CheckPackage (or anything it calls) must not crash
@@ -2490,7 +2491,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 
 			mu.Lock()
 			switch {
-			case err != nil && errors.Is(err, ErrNoEbuildFound):
+			case err != nil && errors.Is(err, ebuilds.ErrNoEbuildFound):
 				// The ebuild was removed from the overlay. Don't record a
 				// recurring failure: queue the package for auto-disable after
 				// the run and surface it as an informational result so it does
@@ -2575,19 +2576,19 @@ func (c *Checker) logFetchCacheStats() {
 		return
 	}
 
-	stats := c.bodies.snapshot()
+	stats := c.bodies.Snapshot()
 	c.logger().Debug("fetch cache",
 		"hits", stats.Hits, "joins", stats.Joins, "misses", stats.Misses, "refetches", stats.Refetches,
 		"not_retained_oversize", stats.Oversize, "not_retained_budget_full", stats.BudgetFull)
 }
 
 // Config returns the packages configuration.
-func (c *Checker) Config() *PackagesConfig {
+func (c *Checker) Config() *registry.PackagesConfig {
 	return c.config
 }
 
 // Cache returns the cache instance.
-func (c *Checker) Cache() *Cache {
+func (c *Checker) Cache() *fetch.Cache {
 	return c.cache
 }
 
@@ -2599,4 +2600,25 @@ func (c *Checker) Pending() *PendingList {
 // OverlayPath returns the overlay path.
 func (c *Checker) OverlayPath() string {
 	return c.overlayPath
+}
+
+// packageCredentialScope is the scope of a package record: the hostnames of
+// its url and base_url (S052-R1.4). An empty or unparseable field contributes
+// no host, so a record whose url cannot be read has no own host and any
+// BENTOO_* reference in it is refused. fallback_url is deliberately not a
+// scope host: a BENTOO_* credential stays with the record's primary source.
+func packageCredentialScope(cfg *registry.PackageConfig) fetch.CredentialScope {
+	var scope fetch.CredentialScope
+	if cfg == nil {
+		return scope
+	}
+	for _, raw := range []string{cfg.URL, cfg.BaseURL} {
+		if raw == "" {
+			continue
+		}
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			scope.OwnHosts = append(scope.OwnHosts, u.Hostname())
+		}
+	}
+	return scope
 }

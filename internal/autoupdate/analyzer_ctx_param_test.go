@@ -14,6 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
 
@@ -30,16 +34,16 @@ func analyzerCtx059Upstream(t *testing.T) *httptest.Server {
 func newAnalyzerCtx059(t *testing.T, overlayDir, upstreamURL string, opts ...AnalyzerOption) *Analyzer {
 	t.Helper()
 	// No waiting in the limiter: these tests are about contexts, not pacing.
-	rl := NewRateLimiter()
+	rl := fetch.NewRateLimiter()
 	rl.SetLLMLimit(rate.Inf, 1)
-	domain, err := extractDomain(upstreamURL)
+	domain, err := fetch.ExtractDomain(upstreamURL)
 	if err != nil {
 		t.Fatalf("extractDomain(%s): %v", upstreamURL, err)
 	}
 	rl.SetHTTPLimit(domain, rate.Inf, 1)
 	all := append([]AnalyzerOption{
 		WithAnalyzerConfigDir(t.TempDir()),
-		WithAnalyzerPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithAnalyzerPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 		WithAnalyzerOpTimeout(10 * time.Second),
 		WithAnalyzerRateLimiter(rl),
 	}, opts...)
@@ -108,9 +112,9 @@ func (l *analyzerCtx059LLM) ExtractVersion(ctx context.Context, content []byte, 
 	return "2.0.0", nil
 }
 
-func (l *analyzerCtx059LLM) AnalyzeContent(ctx context.Context, content []byte, meta *EbuildMetadata, hint string) (*SchemaAnalysis, error) {
+func (l *analyzerCtx059LLM) AnalyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string) (*llm.SchemaAnalysis, error) {
 	l.record(ctx)
-	return &SchemaAnalysis{ParserType: "json", Path: "version", Confidence: 0.9}, nil
+	return &llm.SchemaAnalysis{ParserType: "json", Path: "version", Confidence: 0.9}, nil
 }
 
 func (l *analyzerCtx059LLM) GetModel() string { return "ctx059" }

@@ -12,6 +12,8 @@ import (
 	"context"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 type compareCtx059Key struct{}
@@ -43,7 +45,7 @@ func (p *compareCtx059Provider) take() ([]any, []context.Context) {
 
 func TestCompareWithProviderPassesTheCallersContext(t *testing.T) {
 	prov := &compareCtx059Provider{}
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "cat", Package: "a", LatestVersion: "1.0"},
 		{Category: "cat", Package: "b", LatestVersion: "1.0"},
 		{Category: "cat", Package: "c", LatestVersion: "1.0"},

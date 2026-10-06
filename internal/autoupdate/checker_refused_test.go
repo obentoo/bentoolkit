@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestCheckPackageSkipsHeldAndDisabled pins that an explicit `--check <pkg>`
@@ -15,14 +17,14 @@ func TestCheckPackageSkipsHeldAndDisabled(t *testing.T) {
 	disabled := false
 	for _, tc := range []struct {
 		name       string
-		cfg        func(url string) PackageConfig
+		cfg        func(url string) registry.PackageConfig
 		wantReason string
 	}{
-		{"hold", func(url string) PackageConfig {
-			return PackageConfig{Hold: true, URL: url, Parser: "json", Path: "tag_name"}
+		{"hold", func(url string) registry.PackageConfig {
+			return registry.PackageConfig{Hold: true, URL: url, Parser: "json", Path: "tag_name"}
 		}, "hold = true"},
-		{"disabled", func(url string) PackageConfig {
-			return PackageConfig{Enabled: &disabled, URL: url, Parser: "json", Path: "tag_name"}
+		{"disabled", func(url string) registry.PackageConfig {
+			return registry.PackageConfig{Enabled: &disabled, URL: url, Parser: "json", Path: "tag_name"}
 		}, "enabled = false"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,7 +79,7 @@ func TestApplyRefusesDisabledPackage(t *testing.T) {
 	})
 
 	disabled := false
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {Enabled: &disabled, URL: "https://example.invalid/", Parser: "json", Path: "tag_name"},
 	}}
 

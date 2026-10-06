@@ -9,44 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
-
-// TestSplitPkgLabel covers the key form that lets one package carry several
-// entries. The label is identity only, so every path- and slot-aware consumer
-// must drop it.
-func TestSplitPkgLabel(t *testing.T) {
-	tests := []struct {
-		key      string
-		rest     string
-		label    string
-		atom     string
-		slot     string
-		category string
-		pkgName  string
-	}{
-		{"app-misc/hello", "app-misc/hello", "", "app-misc/hello", "", "app-misc", "hello"},
-		{"app-office/libreoffice@testing", "app-office/libreoffice", "testing", "app-office/libreoffice", "", "app-office", "libreoffice"},
-		{"net-libs/webkit-gtk:4.1", "net-libs/webkit-gtk:4.1", "", "net-libs/webkit-gtk", "4.1", "net-libs", "webkit-gtk"},
-		{"net-libs/webkit-gtk:4.1@lts", "net-libs/webkit-gtk:4.1", "lts", "net-libs/webkit-gtk", "4.1", "net-libs", "webkit-gtk"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			rest, label := splitPkgLabel(tt.key)
-			if rest != tt.rest || label != tt.label {
-				t.Fatalf("splitPkgLabel = (%q, %q), want (%q, %q)", rest, label, tt.rest, tt.label)
-			}
-			atom, slot := splitPkgSlot(tt.key)
-			if atom != tt.atom || slot != tt.slot {
-				t.Fatalf("splitPkgSlot = (%q, %q), want (%q, %q)", atom, slot, tt.atom, tt.slot)
-			}
-			cat, pn, ok := splitPkgAtom(tt.key)
-			if !ok || cat != tt.category || pn != tt.pkgName {
-				t.Fatalf("splitPkgAtom = (%q, %q, %v), want (%q, %q, true)", cat, pn, ok, tt.category, tt.pkgName)
-			}
-		})
-	}
-}
 
 // TestSelectCurrentEbuildSeries is the fix for the zed-bin bug: with a stable
 // and a preview ebuild side by side under one SLOT, an unfiltered scan returns
@@ -59,7 +25,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	}
 
 	t.Run("no series returns the directory's highest version", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, "")
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, "")
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -69,7 +35,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the stable line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.13\.`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.13\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -79,7 +45,7 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("series pins the preview line", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.14\.`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.14\.`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -89,19 +55,19 @@ func TestSelectCurrentEbuildSeries(t *testing.T) {
 	})
 
 	t.Run("a series matching nothing is a config error, not an orphan", func(t *testing.T) {
-		_, err := selectCurrentEbuild(nil, overlay, pkg, `^9\.`)
-		if !errors.Is(err, ErrSeriesNotFound) {
+		_, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^9\.`)
+		if !errors.Is(err, ebuilds.ErrSeriesNotFound) {
 			t.Fatalf("got %v, want ErrSeriesNotFound", err)
 		}
 		// Critically NOT ErrNoEbuildFound: that one makes the checker write
 		// enabled = false, turning a typo into a package that stops updating.
-		if errors.Is(err, ErrNoEbuildFound) {
+		if errors.Is(err, ebuilds.ErrNoEbuildFound) {
 			t.Fatal("a series typo must not be reported as a removed package")
 		}
 	})
 
 	t.Run("an uncompilable series does not narrow the scan", func(t *testing.T) {
-		got, err := selectCurrentEbuild(nil, overlay, pkg, `^(1\.13`)
+		got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^(1\.13`)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -121,89 +87,13 @@ func TestSelectCurrentEbuildSeriesIgnoresRevision(t *testing.T) {
 		createTestEbuild(t, overlay, pkg, v)
 	}
 
-	got, err := selectCurrentEbuild(nil, overlay, pkg, `^1\.8\.3$`)
+	got, err := ebuilds.SelectCurrentEbuild(nil, overlay, pkg, `^1\.8\.3$`)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
 	if got.Version != "1.8.3-r1" {
 		t.Fatalf("got %q, want %q", got.Version, "1.8.3-r1")
 	}
-}
-
-// TestSelectVersionSeries pins that upstream selection stays inside the line:
-// an index listing both series must not let the stable entry pick the testing
-// release.
-func TestSelectVersionSeries(t *testing.T) {
-	cands := []string{"26.2.4.1", "26.2.5.2", "26.8.0.1"}
-
-	stable := selectVersion(nil, cands, &PackageConfig{Select: "max", Series: `^26\.2\.`})
-	if stable != "26.2.5.2" {
-		t.Fatalf("stable entry selected %q, want %q", stable, "26.2.5.2")
-	}
-
-	testing_ := selectVersion(nil, cands, &PackageConfig{Select: "max", Series: `^26\.8\.`, Suffix: "_pre"})
-	if testing_ != "26.8.0.1_pre" {
-		t.Fatalf("testing entry selected %q, want %q", testing_, "26.8.0.1_pre")
-	}
-}
-
-// TestValidateDistinctEntries covers the cross-entry rule: two entries for one
-// package must each be able to say which ebuilds are its own.
-func TestValidateDistinctEntries(t *testing.T) {
-	base := PackageConfig{URL: "https://example.com/x", Parser: "json", Path: "version"}
-	with := func(series string) PackageConfig {
-		c := base
-		c.Series = series
-		return c
-	}
-
-	t.Run("distinct series accepted", func(t *testing.T) {
-		cfg := &PackagesConfig{Packages: map[string]PackageConfig{
-			"app-office/libreoffice@stable":  with(`^26\.2\.`),
-			"app-office/libreoffice@testing": with(`^26\.8\.`),
-		}}
-		if err := cfg.ValidateAll(nil); err != nil {
-			t.Fatalf("rejected: %v", err)
-		}
-	})
-
-	t.Run("distinct slots accepted", func(t *testing.T) {
-		cfg := &PackagesConfig{Packages: map[string]PackageConfig{
-			"net-libs/webkit-gtk:4.1": base,
-			"net-libs/webkit-gtk:6":   base,
-		}}
-		if err := cfg.ValidateAll(nil); err != nil {
-			t.Fatalf("rejected: %v", err)
-		}
-	})
-
-	t.Run("label alone is rejected", func(t *testing.T) {
-		cfg := &PackagesConfig{Packages: map[string]PackageConfig{
-			"app-office/libreoffice@stable":  base,
-			"app-office/libreoffice@testing": base,
-		}}
-		err := cfg.ValidateAll(nil)
-		if err == nil {
-			t.Fatal("two entries with no filter accepted")
-		}
-		if !strings.Contains(err.Error(), "same ebuilds") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("empty label is rejected", func(t *testing.T) {
-		cfg := base
-		if err := ValidatePackageConfig(nil, "app-office/libreoffice@", &cfg); !errors.Is(err, ErrInvalidPackageKey) {
-			t.Fatalf("got %v, want ErrInvalidPackageKey", err)
-		}
-	})
-
-	t.Run("uncompilable series is rejected", func(t *testing.T) {
-		cfg := with(`^(26\.2`)
-		if err := ValidatePackageConfig(nil, "app-office/libreoffice@stable", &cfg); err == nil {
-			t.Fatal("uncompilable series accepted")
-		}
-	})
 }
 
 // TestCheckPackageTwoSeries walks both entries of one package end to end: each
@@ -221,8 +111,8 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 	createTestEbuild(t, overlay, atom, "26.2.5.2")
 	createTestEbuild(t, overlay, atom, "26.8.0.1_pre")
 
-	entry := func(series, suffix string) PackageConfig {
-		return PackageConfig{
+	entry := func(series, suffix string) registry.PackageConfig {
+		return registry.PackageConfig{
 			URL:     server.URL,
 			Parser:  "regex",
 			Pattern: `href="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/"`,
@@ -232,7 +122,7 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 		}
 	}
 	stableKey, testingKey := atom+"@stable", atom+"@testing"
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		stableKey:  entry(`^26\.2\.`, ""),
 		testingKey: entry(`^26\.8\.`, "_pre"),
 	}}
@@ -298,7 +188,7 @@ func TestFetchUpstreamVersionOutsideSeries(t *testing.T) {
 	createTestEbuild(t, overlay, atom, "26.2.5.2")
 
 	key := atom + "@stable"
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		key: {URL: server.URL, Parser: "json", Path: "version", Series: `^26\.2\.`},
 	}}
 
@@ -346,7 +236,7 @@ func TestCleanPackageDirLeavesOtherSeries(t *testing.T) {
 
 	key := atom + "@stable"
 	applier, err := NewApplier(overlay, filepath.Join(tmp, "config"),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			key:           {URL: "https://example.com", Parser: "json", Path: "v", Series: `^26\.2\.`},
 			atom + "@dev": {URL: "https://example.com", Parser: "json", Path: "v", Series: `^26\.8\.`, Version: "26.8.0.1_pre"},
 		}}),

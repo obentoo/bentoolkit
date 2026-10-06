@@ -7,6 +7,10 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // This file is the ONE exported door onto the authenticated fetch.
@@ -91,7 +95,7 @@ type AuthDistfileResult struct {
 // ErrAmbiguousPackageKey and ErrNoAuthFetch describe the request, while
 // ErrAuthFetchSecretMissing and ErrAuthFetchFailed describe the download.
 func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRequest) (AuthDistfileResult, error) {
-	cfg, err := LoadPackagesConfig(req.OverlayPath)
+	cfg, err := registry.LoadPackagesConfig(req.OverlayPath)
 	if err != nil {
 		return AuthDistfileResult{}, err
 	}
@@ -101,7 +105,7 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 		return AuthDistfileResult{}, err
 	}
 
-	spec, enabled, err := parseAuthFetchSpec(pkgCfg.Meta)
+	spec, enabled, err := fetch.ParseAuthFetchSpec(pkgCfg.Meta)
 	if err != nil {
 		return AuthDistfileResult{}, err
 	}
@@ -111,18 +115,18 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
-		best, err := selectCurrentEbuild(log, req.OverlayPath, key, pkgCfg.Series)
+		best, err := ebuilds.SelectCurrentEbuild(log, req.OverlayPath, key, pkgCfg.Series)
 		if err != nil {
 			return AuthDistfileResult{}, fmt.Errorf("resolving the version to fetch for %s: %w", key, err)
 		}
 		version = best.Version
 	}
 
-	path, err := spec.fetchDistfile(ctx, version, req.DestDir)
+	path, err := spec.FetchDistfile(ctx, version, req.DestDir)
 	if err != nil {
 		return AuthDistfileResult{}, err
 	}
-	return AuthDistfileResult{Package: key, Version: version, Path: path, SerialEnv: spec.serialEnv}, nil
+	return AuthDistfileResult{Package: key, Version: version, Path: path, SerialEnv: spec.SerialEnv}, nil
 }
 
 // resolveRegistryKey turns what the user typed into the registry key of exactly
@@ -137,7 +141,7 @@ func FetchAuthDistfile(ctx context.Context, log *slog.Logger, req AuthDistfileRe
 // those records track different slots or different release lines, their
 // fetch_filename templates resolve against different versions, and picking one
 // would hand the operator a file for a version they are not installing.
-func resolveRegistryKey(cfg *PackagesConfig, want string) (string, PackageConfig, error) {
+func resolveRegistryKey(cfg *registry.PackagesConfig, want string) (string, registry.PackageConfig, error) {
 	want = strings.TrimSpace(want)
 	if pkgCfg, ok := cfg.Packages[want]; ok {
 		return want, pkgCfg, nil
@@ -145,7 +149,7 @@ func resolveRegistryKey(cfg *PackagesConfig, want string) (string, PackageConfig
 
 	var matches []string
 	for key := range cfg.Packages {
-		atom, _ := splitPkgSlot(key)
+		atom, _ := ebuilds.SplitPkgSlot(key)
 		if atom == want {
 			matches = append(matches, key)
 		}
@@ -156,11 +160,11 @@ func resolveRegistryKey(cfg *PackagesConfig, want string) (string, PackageConfig
 
 	switch len(matches) {
 	case 0:
-		return "", PackageConfig{}, fmt.Errorf("%s: %w", want, ErrPackageNotInRegistry)
+		return "", registry.PackageConfig{}, fmt.Errorf("%s: %w", want, ErrPackageNotInRegistry)
 	case 1:
 		return matches[0], cfg.Packages[matches[0]], nil
 	default:
-		return "", PackageConfig{}, fmt.Errorf("%s: %w: %s (name one of them)",
+		return "", registry.PackageConfig{}, fmt.Errorf("%s: %w: %s (name one of them)",
 			want, ErrAmbiguousPackageKey, strings.Join(matches, ", "))
 	}
 }

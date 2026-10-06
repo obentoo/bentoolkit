@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -45,7 +47,7 @@ type deps struct {
 	// checkInteractive asks whether stdin is interactive. Without them the
 	// registry-fix loop, and the overlay lock it must run under (S056-R4.6),
 	// could only be reached from a terminal with a configured claude CLI.
-	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (autoupdate.RegistryFixer, error)
+	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (fixer.RegistryFixer, error)
 	checkInteractive   func() bool
 	// resolveGentooProvider obtains the ::gentoo provider for the revive flows
 	// and for prune, so they can be driven with an on-disk fake.
@@ -60,7 +62,7 @@ type deps struct {
 	uiIsTerminal func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
-	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
+	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (autoupdate.SweepBatch, error)
 	sweepExecutor func(ctx context.Context, overlayPath string, batch autoupdate.SweepBatch, opts ...autoupdate.SweepOption) autoupdate.SweepReport
 	confirmSweep  func(prompt string) bool
 
@@ -137,13 +139,13 @@ type deps struct {
 // field of one never reaches another.
 func defaultDeps() *deps {
 	return &deps{
-		registryWriter:              autoupdate.SetPackageVersions,
+		registryWriter:              registry.SetPackageVersions,
 		confirmRegistryWrite:        confirmAction,
 		registryPromptIsInteractive: stdinAndStdoutAreTerminals,
 		checkRegistryFixer:          newConfiguredRegistryFixer,
 		checkInteractive:            stdinIsTerminal,
 		resolveGentooProvider:       resolveGentooProvider,
-		setVersionsForCheck:         autoupdate.SetPackageVersions,
+		setVersionsForCheck:         registry.SetPackageVersions,
 		uiIsTerminal:                output.IsTerminal,
 		sweepPlanner:                autoupdate.PlanOverlaySweep,
 		sweepExecutor:               autoupdate.ExecuteOverlaySweep,

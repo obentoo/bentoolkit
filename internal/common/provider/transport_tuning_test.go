@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // httpClientConstructor names a default-client constructor under test and
@@ -61,7 +61,7 @@ func providerHTTPClientConstructors() []httpClientConstructor {
 
 // assertTunedTransport fails t unless got is a non-nil *http.Transport whose
 // connection-pool and timeout fields match the want transport produced by
-// httputil.BuildTransport().
+// httpx.BuildTransport().
 func assertTunedTransport(t *testing.T, name string, got http.RoundTripper, want *http.Transport) {
 	t.Helper()
 
@@ -101,10 +101,10 @@ func assertTunedTransport(t *testing.T, name string, got http.RoundTripper, want
 }
 
 // TestAllHTTPClients_UseTunedTransport asserts that every provider HTTP-client
-// constructor wires the tuned transport from httputil.BuildTransport() into its
+// constructor wires the tuned transport from httpx.BuildTransport() into its
 // default *http.Client (R6.1, R6.3, design IP-3).
 func TestAllHTTPClients_UseTunedTransport(t *testing.T) {
-	want := httputil.BuildTransport()
+	want := httpx.BuildTransport()
 
 	for _, ctor := range providerHTTPClientConstructors() {
 		t.Run(ctor.name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestAllHTTPClients_UseTunedTransport(t *testing.T) {
 // reconstructed provider client gets a Transport with HTTP/2 disabled:
 // ForceAttemptHTTP2 == false and an empty (non-nil) TLSNextProto map (R6.2).
 func TestAllHTTPClients_HTTP2OptOut(t *testing.T) {
-	t.Setenv(httputil.EnvDisableHTTP2, "1")
+	t.Setenv(httpx.EnvDisableHTTP2, "1")
 
 	for _, ctor := range providerHTTPClientConstructors() {
 		t.Run(ctor.name, func(t *testing.T) {
@@ -137,13 +137,13 @@ func TestAllHTTPClients_HTTP2OptOut(t *testing.T) {
 				t.Fatalf("%s: Transport is %T, want *http.Transport", ctor.name, client.Transport)
 			}
 			if tr.ForceAttemptHTTP2 {
-				t.Errorf("%s: ForceAttemptHTTP2 = true, want false when %s=1", ctor.name, httputil.EnvDisableHTTP2)
+				t.Errorf("%s: ForceAttemptHTTP2 = true, want false when %s=1", ctor.name, httpx.EnvDisableHTTP2)
 			}
 			if tr.TLSNextProto == nil {
-				t.Errorf("%s: TLSNextProto is nil, want non-nil empty map when %s=1", ctor.name, httputil.EnvDisableHTTP2)
+				t.Errorf("%s: TLSNextProto is nil, want non-nil empty map when %s=1", ctor.name, httpx.EnvDisableHTTP2)
 			}
 			if len(tr.TLSNextProto) != 0 {
-				t.Errorf("%s: TLSNextProto has %d entries, want 0 when %s=1", ctor.name, len(tr.TLSNextProto), httputil.EnvDisableHTTP2)
+				t.Errorf("%s: TLSNextProto has %d entries, want 0 when %s=1", ctor.name, len(tr.TLSNextProto), httpx.EnvDisableHTTP2)
 			}
 		})
 	}

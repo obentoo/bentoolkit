@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	udiff "github.com/aymanbagabas/go-udiff"
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -36,8 +36,8 @@ import (
 // declined repair, a refused unattended write and a repair that left the
 // unrepairable findings behind all exit 1, and the pre-commit hook that runs
 // --lint next agrees with what this run just said.
-func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.LintIssue) error {
-	result, err := autoupdate.RepairPackagesConfig(overlayPath)
+func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIssue) error {
+	result, err := registry.RepairPackagesConfig(overlayPath)
 	if err != nil {
 		// RepairPackagesConfig has written nothing: it returns an error only when
 		// the repair ABORTED — the file could not be read or parsed, or the
@@ -103,7 +103,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 	// the file on disk can say whether the repair did what it claimed, and this
 	// is the run's own proof that `--lint --fix` followed by `--lint` is silent
 	// except for the findings no repair offers.
-	remaining, err := autoupdate.LintPackagesConfig(ar.log(), overlayPath)
+	remaining, err := registry.LintPackagesConfig(ar.log(), overlayPath)
 	if err != nil {
 		// Unreachable for a repair that passed the gate — it parses the rewrite
 		// before allowing it — so if it fires, the write is the suspect.
@@ -122,7 +122,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []autoupdate.Lint
 // repaired without knowing where upstream versions itself (R6.1) — so a run that
 // ended on "repaired!" while those remain would imply a clean registry that the
 // next --lint will contradict.
-func reportUnrepaired(remaining []autoupdate.LintIssue) error {
+func reportUnrepaired(remaining []registry.LintIssue) error {
 	if len(remaining) == 0 {
 		output.Success.Println("packages.toml: record model OK")
 		return nil
@@ -142,7 +142,7 @@ func reportUnrepaired(remaining []autoupdate.LintIssue) error {
 // The two facts belong in one sentence. "Nothing to repair" followed by "N
 // issues remain" reads as a contradiction to anyone who does not already know
 // that a rule may carry no repair; said together, the second explains the first.
-func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
+func summarizeUnrepaired(remaining []registry.LintIssue) error {
 	if len(remaining) == 0 {
 		output.Success.Println("packages.toml: record model OK")
 		return nil
@@ -162,7 +162,7 @@ func summarizeUnrepaired(remaining []autoupdate.LintIssue) error {
 // It reports whether the repair may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool {
+func (ar *autoupdateRun) confirmLintRepair(result *registry.RepairResult) bool {
 	repairs := totalRepairs(result)
 
 	if ar.opts.yes {
@@ -190,7 +190,7 @@ func (ar *autoupdateRun) confirmLintRepair(result *autoupdate.RepairResult) bool
 // report uses — the Fix* identifiers LintIssue.Fix carries — so the tally the
 // linter printed and the tally about to be written are read side by side. It
 // closes with the reason the confirmation below is not ceremony.
-func printRepairSummary(result *autoupdate.RepairResult) {
+func printRepairSummary(result *registry.RepairResult) {
 	actions := make([]string, 0, len(result.Actions))
 	for name := range result.Actions {
 		actions = append(actions, name)
@@ -211,7 +211,7 @@ func printRepairSummary(result *autoupdate.RepairResult) {
 // carry both a dropped `binary` line and a reorder. Reporting a record count
 // derived from this sum would overstate the blast radius; the per-action
 // breakdown above says which is which.
-func totalRepairs(result *autoupdate.RepairResult) int {
+func totalRepairs(result *registry.RepairResult) int {
 	n := 0
 	for _, count := range result.Actions {
 		n += count
@@ -227,7 +227,7 @@ func totalRepairs(result *autoupdate.RepairResult) int {
 // could not be rendered would kill the process from inside a library, on the one
 // path whose whole job is to show a human what is about to be published. Here it
 // is an error, and an error means write nothing.
-func repairDiff(result *autoupdate.RepairResult) (string, error) {
+func repairDiff(result *registry.RepairResult) (string, error) {
 	edits := udiff.Lines(result.Original, result.Repaired)
 	diff, err := udiff.ToUnified("a/packages.toml", "b/packages.toml", result.Original, edits, udiff.DefaultContextLines)
 	if err != nil {

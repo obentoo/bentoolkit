@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/fatih/color"
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -42,7 +42,7 @@ import (
 // migration, a refused unattended write, an exclusion list with a typo in it and
 // a plan that did not fully land all exit 1.
 func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
-	plan, err := autoupdate.PlanAutoDisableMigration(overlayPath, ar.opts.except)
+	plan, err := registry.PlanAutoDisableMigration(overlayPath, ar.opts.except)
 	if err != nil {
 		// Nothing has been written: the plan only reads. A registry that does not
 		// load cannot be migrated either, and failing here is the cheapest place
@@ -89,7 +89,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		return exitWith(1)
 	}
 
-	marked, err := autoupdate.MarkAutoDisabled(overlayPath, ar.opts.except)
+	marked, err := registry.MarkAutoDisabled(overlayPath, ar.opts.except)
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		ar.log().Error("failed to record the automatic origin", "err", err)
@@ -129,7 +129,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 // Enabled records are deliberately absent — some 320 of them state no origin
 // because they have no disable to explain, and listing them would bury the five
 // lines that matter.
-func printAutoDisableMigrationPlan(plan *autoupdate.AutoDisableMigration) {
+func printAutoDisableMigrationPlan(plan *registry.AutoDisableMigration) {
 	printAutoDisableGroup(output.Warning, fmt.Sprintf("%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:", len(plan.Mark)), plan.Mark)
 	printAutoDisableGroup(output.Info, fmt.Sprintf("%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:", len(plan.Excluded)), plan.Excluded)
 	printAutoDisableGroup(output.Info, fmt.Sprintf("%d already stamped — left as they are, which is what makes a re-run a no-op:", len(plan.AlreadyStamped)), plan.AlreadyStamped)
@@ -158,7 +158,7 @@ func printAutoDisableGroup(style *color.Color, heading string, pkgs []string) {
 // It reports whether the migration may be written, and prints WHY whenever the
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
-func (ar *autoupdateRun) confirmAutoDisableMigration(plan *autoupdate.AutoDisableMigration) bool {
+func (ar *autoupdateRun) confirmAutoDisableMigration(plan *registry.AutoDisableMigration) bool {
 	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
 
 	if ar.opts.yes {

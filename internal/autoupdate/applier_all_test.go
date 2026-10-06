@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestApplyAllConcurrentSuccess is the regression guard for the serial-apply
@@ -157,12 +159,12 @@ func TestApplyAllContinuesPastRejectedValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewPendingList: %v", err)
 			}
-			cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+			cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 			updates := make([]PendingUpdate, 0, len(values))
 			for i, v := range values {
 				pkg := fmt.Sprintf("cat/pkg%d", i)
 				createTestEbuildFileWithContent(t, overlayDir, pkg, "1.0.0", applyAllRejectedEbuild)
-				cfg.Packages[pkg] = PackageConfig{
+				cfg.Packages[pkg] = registry.PackageConfig{
 					Parser:     "regex",
 					URL:        "https://example.invalid/" + pkg,
 					Pattern:    `v([0-9.]+)`,

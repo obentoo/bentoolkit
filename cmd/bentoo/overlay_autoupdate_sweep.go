@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -40,7 +41,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 	// state in which planSweep refuses to remove anything. Failing loudly here
 	// is the honest outcome: the alternative is an empty batch that reads as
 	// "nothing to clean" when the truth is "nothing could be read".
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return failWith(1, fmt.Errorf("cannot sweep: %w", err))
 	}

@@ -37,6 +37,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s060Overlap counts how many callers are inside the exec seam at once. The
@@ -467,7 +469,7 @@ func TestS060ApplyAllClampsConcurrency(t *testing.T) {
 func TestS060ApplyAllCountsOnlyApplyErrorsAsFailures(t *testing.T) {
 	for _, concurrency := range []int{1, 3} {
 		t.Run(fmt.Sprintf("concurrency %d", concurrency), func(t *testing.T) {
-			held := &PackagesConfig{Packages: map[string]PackageConfig{
+			held := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 				"cat/pkg2": {Parser: "json", URL: "https://example.invalid/pkg2", Path: "version", Hold: true},
 			}}
 			b := newS060Batch(t, s060BatchSetup{

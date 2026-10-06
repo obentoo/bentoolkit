@@ -29,6 +29,8 @@ package overlay
 import (
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ src_install() {
 
 // goldenPair writes one package at one version on both sides and returns the
 // overlay root, a provider rooted at the ::gentoo side, and the PackageInfo.
-func goldenPair(t *testing.T, category, pkg, ourVersion, theirVersion, ours, theirs string) (string, *localRootedFakeProvider, PackageInfo) {
+func goldenPair(t *testing.T, category, pkg, ourVersion, theirVersion, ours, theirs string) (string, *localRootedFakeProvider, repo.PackageInfo) {
 	t.Helper()
 	// No model is reachable from any golden case. Both findings below are text
 	// comparisons, and a fixture that quietly needed a provider would be the
@@ -123,7 +125,7 @@ func goldenPair(t *testing.T, category, pkg, ourVersion, theirVersion, ours, the
 		root:     gentooRoot,
 		versions: map[string][]string{category + "/" + pkg: {theirVersion}},
 	}
-	return overlayRoot, prov, PackageInfo{
+	return overlayRoot, prov, repo.PackageInfo{
 		Category:      category,
 		Package:       pkg,
 		Versions:      []string{ourVersion},
@@ -140,7 +142,7 @@ func TestGoldenGstInheritIsFoundWithNoModel(t *testing.T) {
 	overlayRoot, prov, pkg := goldenPair(t, "media-libs", "gst-plugins-qt6", "1.29.2", "1.26.11", goldenGstOurs, goldenGstBaseline)
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, opts)
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{pkg}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}
@@ -259,7 +261,7 @@ func TestGoldenNodejsIsNotProposedForWholesaleRealignment(t *testing.T) {
 	overlayRoot, prov, pkg := goldenPair(t, "net-libs", "nodejs", "26.7.0", "26.7.0", goldenNodejsOurs, goldenNodejsBaseline)
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, opts)
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{pkg}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

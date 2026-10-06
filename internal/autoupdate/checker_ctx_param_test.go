@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 const checkerCtx059Pkg = "test-cat/ctx-pkg"
@@ -36,14 +38,14 @@ func newCheckerCtx059(t *testing.T, upstreamURL string, pkgs ...string) *Checker
 	t.Helper()
 	tmp := t.TempDir()
 	overlayDir := filepath.Join(tmp, "overlay")
-	cfg := map[string]PackageConfig{}
+	cfg := map[string]registry.PackageConfig{}
 	for _, pkg := range pkgs {
 		createTestEbuild(t, overlayDir, pkg, "1.0.0")
-		cfg[pkg] = PackageConfig{URL: upstreamURL, Parser: "json", Path: "version"}
+		cfg[pkg] = registry.PackageConfig{URL: upstreamURL, Parser: "json", Path: "version"}
 	}
 	c, err := NewChecker(overlayDir,
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: cfg}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: cfg}),
 		WithRateLimiter(unlimitedRateLimiter()),
 		WithOpTimeout(10*time.Second),
 	)
@@ -127,7 +129,7 @@ func TestCheckerEachCallIsBoundedByItsOwnContext(t *testing.T) {
 		disabled := false
 		c, err := NewChecker(t.TempDir(),
 			WithConfigDir(t.TempDir()),
-			WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+			WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 				orphan: {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled},
 			}}),
 			WithRateLimiter(unlimitedRateLimiter()),

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // libreofficeIndex mimics the archive directory listing the LibreOffice record
@@ -32,7 +34,7 @@ func TestCheckPackageAppliesSuffix(t *testing.T) {
 	pkg := "app-office/libreoffice"
 	createTestEbuild(t, overlayDir, pkg, "26.8.0.1_pre")
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {
 			URL:        server.URL,
 			Parser:     "regex",
@@ -83,7 +85,7 @@ func TestCheckPackageSuffixFiresOnPromotion(t *testing.T) {
 	pkg := "app-office/libreoffice"
 	createTestEbuild(t, overlayDir, pkg, "26.8.0.1_pre")
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {
 			URL:     server.URL,
 			Parser:  "regex",

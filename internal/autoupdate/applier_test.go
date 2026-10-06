@@ -18,6 +18,7 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
@@ -843,7 +844,7 @@ func TestApplyCleanRemovesOldEbuild(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierClean(true),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -1871,7 +1872,7 @@ func TestApplyRefusesHeldPackage(t *testing.T) {
 		Status:         StatusPending,
 	})
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {Hold: true, URL: "https://example.invalid/", Parser: "json", Path: "tag_name"},
 	}}
 
@@ -1923,7 +1924,7 @@ func TestApplyUnheldPackageStillApplies(t *testing.T) {
 		Status:         StatusPending,
 	})
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {URL: "https://example.invalid/", Parser: "json", Path: "tag_name"},
 	}}
 
@@ -1992,7 +1993,7 @@ func TestCleanPackageDirSweepsResidueAndRegeneratesManifestOnce(t *testing.T) {
 	var manifestRuns atomic.Int64
 	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
 		WithExecCommand(countingManifestSeam(&manifestRuns)),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -2050,7 +2051,7 @@ func TestCleanPackageDirNoRemovalSkipsManifest(t *testing.T) {
 	var manifestRuns atomic.Int64
 	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
 		WithExecCommand(countingManifestSeam(&manifestRuns)),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -2091,7 +2092,7 @@ func TestCleanPackageDirBlockedByPinlessSibling(t *testing.T) {
 	var manifestRuns atomic.Int64
 	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
 		WithExecCommand(countingManifestSeam(&manifestRuns)),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			stable: regEntry("", gstStableSeries),
 			dev:    regEntry("", gstDevSeries), // no pin: this is what blocks
 		}}),
@@ -2153,7 +2154,7 @@ func TestApplyCleanBlockedKeepsSuccessAndNamesEntry(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierClean(true),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			stable: regEntry("", gstStableSeries),
 			dev:    regEntry("", gstDevSeries),
 		}}),
@@ -2221,7 +2222,7 @@ func TestApplyCleanRemovalFailureWarnsButKeepsSuccess(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandLockDirAndSucceed(pkgDir)),
 		WithApplierClean(true),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -2335,7 +2336,7 @@ func TestCleanPackageDirVanishedCandidateIsNotPlanned(t *testing.T) {
 	var manifestRuns atomic.Int64
 	applier, err := NewApplier(overlayDir, filepath.Join(tmpDir, "config"),
 		WithExecCommand(countingManifestSeam(&manifestRuns)),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -2387,7 +2388,7 @@ func TestApplyCleanReportsKeptAndRemoved(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
 		WithApplierClean(true),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: regEntry("", ""),
 		}}),
 	)
@@ -2530,7 +2531,7 @@ func TestApply_SuccessWritesRegistryPin(t *testing.T) {
 			_, statErr := os.Stat(newEbuild)
 			ebuildExistsAtWri = statErr == nil
 			manifestsAtWrite = manifestRuns.Load()
-			return SetPackageVersions(overlayPath, pins)
+			return registry.SetPackageVersions(overlayPath, pins)
 		}),
 	)
 	if err != nil {
@@ -2588,7 +2589,7 @@ path = "version"
 	}
 
 	// The pin must also survive a reload, since that is how the sweep reads it.
-	cfg, err := LoadPackagesConfig(overlayDir)
+	cfg, err := registry.LoadPackagesConfig(overlayDir)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
@@ -2625,7 +2626,7 @@ func TestApply_ManifestFailureLeavesRegistryByteIdentical(t *testing.T) {
 		WithExecCommand(mockExecCommandFailure),
 		WithApplierSetVersionsFunc(func(overlayPath string, pins map[string]string) error {
 			writeCalls++
-			return SetPackageVersions(overlayPath, pins)
+			return registry.SetPackageVersions(overlayPath, pins)
 		}),
 	)
 	if err != nil {

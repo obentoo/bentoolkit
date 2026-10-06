@@ -2,19 +2,21 @@ package overlay
 
 import (
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // nilMapPackages is the mixed set every assertion below runs against: one
 // package per pre-existing Status value, so nothing about the old axis can
 // change unnoticed.
-func nilMapPackages() ([]PackageInfo, *fakeProvider) {
+func nilMapPackages() ([]repo.PackageInfo, *fakeProvider) {
 	prov := &fakeProvider{versions: map[string][]string{
 		"cat/behind": {"2.0"},
 		"cat/ahead":  {"2.0"},
 		"cat/level":  {"1.0"},
 		// cat/only is absent upstream on purpose.
 	}}
-	pkgs := []PackageInfo{
+	pkgs := []repo.PackageInfo{
 		{Category: "cat", Package: "behind", LatestVersion: "1.0"},
 		{Category: "cat", Package: "ahead", LatestVersion: "3.0"},
 		{Category: "cat", Package: "level", LatestVersion: "1.0"},

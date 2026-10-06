@@ -21,6 +21,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -54,8 +59,6 @@ const qaCheckTimeout = 2 * time.Minute
 
 // Error variables for applier errors
 var (
-	// ErrEbuildNotFound is returned when the source ebuild file is not found
-	ErrEbuildNotFound = errors.New("source ebuild file not found")
 	// ErrManifestFailed is returned when the manifest command fails
 	ErrManifestFailed = errors.New("manifest command failed")
 	// ErrCompileFailed is returned when the compile test fails
@@ -381,19 +384,19 @@ type Applier struct {
 	// the slot's `revision`; packages without either follow the normal
 	// pkgdev-from-SRC_URI path with a plain PV. Set via
 	// WithApplierPackagesConfig; nil disables authenticated fetching entirely.
-	configs map[string]PackageConfig
+	configs map[string]registry.PackageConfig
 	// fixer, when non-nil, is invoked when the manifest step fails: it drives an
 	// LLM agent to repair the ebuild (e.g. a SRC_URI whose URL convention changed
 	// between versions) before the Applier re-runs the manifest to confirm. Set
 	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
-	fixer ManifestFixer
+	fixer fixer.ManifestFixer
 	// buildFixer, when non-nil, is invoked when the build gate fails for a reason
 	// attributable to the ebuild (a patch that no longer applies, a configure
 	// option upstream dropped): it drives an LLM agent to repair the STAGED ebuild,
 	// after which the applier re-runs the same gate and that re-run — never the
 	// agent's self-report — decides the outcome (S033-R8.1, S033-R8.2). Set via
 	// WithApplierBuildFixer; nil keeps the original fail-fast behaviour.
-	buildFixer BuildFixer
+	buildFixer fixer.BuildFixer
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
@@ -454,7 +457,7 @@ type Applier struct {
 	// R7.5). Its proposal is advisory and one-way: validate.Escalate combines it
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
 	// nil skips the review entirely.
-	reviewer BumpReviewer
+	reviewer fixer.BumpReviewer
 	// lookPath answers "is this tool installed at all" for the build gates,
 	// which ask it before spawning so an absent Portage is reported as a named
 	// SKIP rather than as an opaque failure. It defaults to exec.LookPath and is
@@ -604,7 +607,7 @@ func WithApplierClean(clean bool) ApplierOption {
 // applier can honour a package's [meta] authenticated-fetch instructions before
 // running the manifest step. A nil config (or one without a matching package)
 // leaves the normal pkgdev-from-SRC_URI behaviour unchanged.
-func WithApplierPackagesConfig(cfg *PackagesConfig) ApplierOption {
+func WithApplierPackagesConfig(cfg *registry.PackagesConfig) ApplierOption {
 	return func(a *Applier) {
 		if cfg != nil {
 			a.configs = cfg.Packages
@@ -615,7 +618,7 @@ func WithApplierPackagesConfig(cfg *PackagesConfig) ApplierOption {
 // WithApplierFixer wires an LLM manifest fixer into the applier. When the manifest
 // step fails, the applier asks the fixer to repair the ebuild and then re-runs the
 // manifest to confirm. A nil fixer is ignored, preserving the fail-fast behaviour.
-func WithApplierFixer(fixer ManifestFixer) ApplierOption {
+func WithApplierFixer(fixer fixer.ManifestFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.fixer = fixer
@@ -633,7 +636,7 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 // provider that could not be constructed leaves the applier exactly as it was
 // rather than half-configured, so "no LLM was asked for" and "the LLM could not
 // be built" produce the same, predictable run.
-func WithApplierBuildFixer(fixer BuildFixer) ApplierOption {
+func WithApplierBuildFixer(fixer fixer.BuildFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.buildFixer = fixer
@@ -765,7 +768,7 @@ func WithApplierRequireProof(require bool) ApplierOption {
 // for the same reason: a provider that could not be constructed leaves the
 // applier as it was rather than half-configured, so "no LLM was asked for" and
 // "the LLM could not be built" produce the same, predictable run.
-func WithApplierBumpReviewer(reviewer BumpReviewer) ApplierOption {
+func WithApplierBumpReviewer(reviewer fixer.BumpReviewer) ApplierOption {
 	return func(a *Applier) {
 		if reviewer != nil {
 			a.reviewer = reviewer
@@ -832,7 +835,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	// so a caller that never passes WithApplierSetVersionsFunc gets the real
 	// raw-text write into <overlay>/.autoupdate/packages.toml (S021-R2.1).
 	if applier.setVersionsFn == nil {
-		applier.setVersionsFn = SetPackageVersions
+		applier.setVersionsFn = registry.SetPackageVersions
 	}
 
 	// Ensure logs directory exists
@@ -914,7 +917,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// `pkgdev manifest` rejects it with "does not follow correct package syntax".
 	// Validate up front so a non-version (or a string still invalid after
 	// stripping) fails with a clear error instead of a cryptic portage one.
-	newVersion := stripVersionPrefix(strings.TrimSpace(update.NewVersion))
+	newVersion := parse.StripVersionPrefix(strings.TrimSpace(update.NewVersion))
 	if !ebuild.IsValidVersion(newVersion) {
 		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
 		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
@@ -939,7 +942,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// manifest, compile, clean — has to run against the decorated version from
 	// here on. Validation stays on the bare upstream value above; the suffix is
 	// well-formed by construction.
-	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
+	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
 	result.NewVersion = newVersion
 
 	// Re-resolve the current version against the live overlay rather than
@@ -954,7 +957,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		// A slot that matches nothing is a config error, not an obsolete entry:
 		// the package is present, its key is wrong. Pruning would delete the
 		// pending record and report success-ish, hiding the typo. Fail loudly.
-		if errors.Is(err, ErrSlotNotFound) {
+		if errors.Is(err, ebuilds.ErrSlotNotFound) {
 			result.Error = err
 			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
 				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
@@ -1474,7 +1477,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	case errors.Is(err, os.ErrNotExist):
 		// Same sentinel copyEbuild reports, so a caller that recognises a missing
 		// source ebuild keeps recognising it on either path.
-		return candidatePaths{}, fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+		return candidatePaths{}, fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcPath)
 	case err != nil:
 		return candidatePaths{}, fmt.Errorf("failed to read source ebuild %s: %w", srcPath, err)
 	}
@@ -1629,7 +1632,7 @@ func applySummary(result *ApplyResult) string {
 // possibly-stale current_version. Returns ErrNoEbuildFound when the package
 // directory is absent or holds no parsable, non-live ebuild in the slot.
 func (a *Applier) resolveCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(a.logger(), a.overlayPath, pkg, a.configs[pkg].Series)
+	best, err := ebuilds.SelectCurrentEbuild(a.logger(), a.overlayPath, pkg, a.configs[pkg].Series)
 	if err != nil {
 		return "", err
 	}
@@ -1744,14 +1747,14 @@ func (a *Applier) sweeper() *sweeper {
 // entries are copied by value and only Version is rewritten — so the maps and
 // slices inside an entry are shared with a.configs and, like a.configs, only
 // ever read.
-func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]PackageConfig, bool) {
+func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]registry.PackageConfig, bool) {
 	entry, ok := a.configs[pkg] // nil-safe: a nil map yields the zero value and ok == false
 	if !ok {
 		// Nothing to overlay. a.configs is handed over unchanged (planSweep only
 		// reads it) and the caller refuses to delete anything in this case.
 		return a.configs, false
 	}
-	cfgs := make(map[string]PackageConfig, len(a.configs))
+	cfgs := make(map[string]registry.PackageConfig, len(a.configs))
 	for key, cfg := range a.configs {
 		cfgs[key] = cfg
 	}
@@ -1793,7 +1796,7 @@ func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
 		return
 	}
 
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return
 	}
@@ -1826,7 +1829,7 @@ func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
 // Destination: {category}/{package}/{package}-{newVersion}.ebuild
 func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 	// Parse package name
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -1844,7 +1847,7 @@ func (a *Applier) copyEbuild(pkg, oldVersion, newVersion string) error {
 
 	// Check source exists
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
-		return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcPath)
+		return fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcPath)
 	}
 
 	// Refuse to write over an ebuild that already exists. Overwriting it would
@@ -2159,14 +2162,14 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.reporter.TaskStage(pkg, "llm-fix")
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
-	fixRes, fixErr := a.fixer.FixManifest(ctx, ManifestFixRequest{
+	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
 		Package:       pkg,
 		Version:       version,
 		PkgDir:        pkgDir,
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
-		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
+		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
@@ -2198,7 +2201,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
 	result.Fixed = true
@@ -2210,9 +2213,9 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// word as a pinned identity. One string feeds both sinks so the operator's
 	// log and the TUI report can never drift apart.
 	fixLine := fmt.Sprintf("LLM fixer repaired %s-%s using %s: %s",
-		pkg, version, FormatModelUsed(fixRes.Model), fixRes.Summary)
+		pkg, version, fixer.FormatModelUsed(fixRes.Model), fixRes.Summary)
 	a.logger().Info("LLM fixer repaired the ebuild",
-		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
+		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
 	a.reporter.Log("info", fixLine)
 
 	// Advisory QA gate: the manifest re-run proves the distfile fetches and
@@ -2970,7 +2973,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
-	fixRes, fixErr := a.buildFixer.FixBuild(ctx, BuildFixRequest{
+	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
 		Gate:       compileGatePhase,
@@ -2982,7 +2985,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		Attempt: 1,
 	})
 	switch {
-	case errors.Is(fixErr, ErrBuildFixAttemptsExhausted):
+	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
 		// "We stopped on purpose" is different news from "the agent failed", and
 		// the operator acts on it differently: nothing is wrong with the machine.
 		return first.logPath, fmt.Errorf("%w (the build fixer stopped on purpose: %w)", first.err, fixErr)
@@ -3024,9 +3027,9 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	// (S030-R4.1/R4.2) — the same one string into both sinks that the manifest fix
 	// path uses, so the operator's log and the TUI report cannot drift apart.
 	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
-		pkg, version, FormatModelUsed(fixRes.Model), summary)
+		pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
 	a.logger().Info("LLM build fixer repaired the staged ebuild",
-		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", summary)
+		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)
 	return "", nil
 }
@@ -3202,7 +3205,7 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 	}
 
 	// Parse package name (same split+slot-stripping as the sibling helpers).
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return fmt.Errorf("invalid package name format: %s", pkg)
 	}
@@ -3219,7 +3222,7 @@ func (a *Applier) SeedFromGentoo(pkg, srcPkgDir, gentooVersion string) error {
 	srcEbuild := filepath.Join(srcPkgDir, ebuildName)
 	if _, err := os.Stat(srcEbuild); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrEbuildNotFound, srcEbuild)
+			return fmt.Errorf("%w: %s", ebuilds.ErrEbuildNotFound, srcEbuild)
 		}
 		return fmt.Errorf("failed to stat source ebuild %s: %w", srcEbuild, err)
 	}
@@ -3317,7 +3320,7 @@ func (a *Applier) MarkReenabled(pkg string) {
 
 // refusal is refusedBy with the run's re-enables applied.
 func (a *Applier) refusal(pkg string) string {
-	reason := refusedBy(a.configs, pkg)
+	reason := registry.RefusedBy(a.configs, pkg)
 	if reason == "enabled = false" {
 		a.reenabledMu.Lock()
 		defer a.reenabledMu.Unlock()

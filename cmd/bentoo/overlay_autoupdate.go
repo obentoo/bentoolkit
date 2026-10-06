@@ -21,6 +21,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -772,7 +775,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// hosts that dominate packages.toml), every other host at the conservative
 		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
 		// the ~220 GitHub/GitLab packages, making a large --concurrency pointless.
-		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
 		// Share one response across every record that declares the same URL — on
 		// by default (S024-R7.2). --no-fetch-cache turns it off, restoring one
 		// request per read exactly as before story 024, so a suspicious result can
@@ -838,7 +841,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		if err != nil {
 			// A removed ebuild is not a hard error: auto-disable the orphaned
 			// entry and report it as info so repeated runs stay quiet.
-			if errors.Is(err, autoupdate.ErrNoEbuildFound) {
+			if errors.Is(err, ebuilds.ErrNoEbuildFound) {
 				if derr := checker.DisableOrphans([]string{pkg}); derr != nil {
 					ar.log().Warn("failed to disable orphaned package", "package", pkg, "err", derr)
 				}
@@ -1056,7 +1059,7 @@ func stdinIsTerminal() bool {
 // declined prompt and a failed write all leave the check's exit code alone. The
 // check itself already succeeded; reconciliation is bookkeeping on top of it.
 func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		// Nothing to reconcile against. The check has already reported whatever
 		// this meant for the packages themselves, so this is a debug note, not a
@@ -1300,7 +1303,7 @@ func (ar *autoupdateRun) runList(configDir string) error {
 // With --fix it hands over to runLintFix after the report, which repairs what
 // the rules above can repair and then owns the exit code — see there.
 func (ar *autoupdateRun) runLint(overlayPath string) error {
-	issues, err := autoupdate.LintPackagesConfig(ar.log(), overlayPath)
+	issues, err := registry.LintPackagesConfig(ar.log(), overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
 	// parse — a missing marker is worth reporting alongside the syntax error.
 	for _, issue := range issues {
@@ -1333,7 +1336,7 @@ func (ar *autoupdateRun) runLint(overlayPath string) error {
 // printLintTally closes the report with a per-rule count: a registry
 // mid-migration reports the same rule hundreds of times, so the detail lines
 // above say WHERE and this says WHAT.
-func printLintTally(issues []autoupdate.LintIssue) {
+func printLintTally(issues []registry.LintIssue) {
 	counts := make(map[string]int, len(issues))
 	rules := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -1429,8 +1432,8 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 // missing or unparseable config is not fatal to --apply (only serial-gated
 // packages need it), so it logs a debug note and returns nil, leaving the
 // normal pkgdev-from-SRC_URI path intact for every package.
-func loadPackagesConfigForApply(log *slog.Logger, overlayPath string) *autoupdate.PackagesConfig {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+func loadPackagesConfigForApply(log *slog.Logger, overlayPath string) *registry.PackagesConfig {
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		log.Debug("apply: no usable packages.toml; authenticated fetch disabled", "err", err)
 		return nil
@@ -2016,7 +2019,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 		autoupdate.WithConcurrency(ar.opts.concurrency),
 		autoupdate.WithTypeFilter(ar.opts.only),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
-		autoupdate.WithRateLimiter(autoupdate.NewRateLimiter(autoupdate.WithTunedHostPolicies())),
+		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
 		// Same escape hatch as runCheck (S024-R7.1, R7.2). Setting it HERE is what
 		// covers all three revive Checkers at once — both listing paths and the
 		// apply path build their options through this helper — so the flag cannot

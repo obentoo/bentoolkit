@@ -16,6 +16,10 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -47,10 +51,10 @@ func TestCheckPackageFiltering(t *testing.T) {
 			defer server.Close()
 
 			// Create packages config with N packages
-			packages := make(map[string]PackageConfig)
+			packages := make(map[string]registry.PackageConfig)
 			for i := 0; i < numPackages; i++ {
 				pkgName := genTestPackageName(i)
-				packages[pkgName] = PackageConfig{
+				packages[pkgName] = registry.PackageConfig{
 					URL:    server.URL,
 					Parser: "json",
 					Path:   "version",
@@ -59,7 +63,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 				createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 			}
 
-			config := &PackagesConfig{Packages: packages}
+			config := &registry.PackagesConfig{Packages: packages}
 
 			// Create checker
 			checker, err := NewChecker(overlayDir,
@@ -105,14 +109,14 @@ func TestCheckPackageFiltering(t *testing.T) {
 			defer server.Close()
 
 			// Create packages config with multiple packages
-			packages := make(map[string]PackageConfig)
+			packages := make(map[string]registry.PackageConfig)
 			var targetPkg string
 			for i := 0; i < numPackages; i++ {
 				pkgName := genTestPackageName(i)
 				if i == targetIndex {
 					targetPkg = pkgName
 				}
-				packages[pkgName] = PackageConfig{
+				packages[pkgName] = registry.PackageConfig{
 					URL:    server.URL,
 					Parser: "json",
 					Path:   "version",
@@ -120,7 +124,7 @@ func TestCheckPackageFiltering(t *testing.T) {
 				createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 			}
 
-			config := &PackagesConfig{Packages: packages}
+			config := &registry.PackagesConfig{Packages: packages}
 
 			checker, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
@@ -182,14 +186,14 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			defer server.Close()
 
 			pkgName := "test-cat/test-pkg"
-			packages := map[string]PackageConfig{
+			packages := map[string]registry.PackageConfig{
 				pkgName: {
 					URL:    server.URL,
 					Parser: "json",
 					Path:   "version",
 				},
 			}
-			config := &PackagesConfig{Packages: packages}
+			config := &registry.PackagesConfig{Packages: packages}
 
 			// Create ebuild with current version
 			createTestEbuild(t, overlayDir, pkgName, currentVersion)
@@ -260,14 +264,14 @@ func TestVersionComparisonTriggersPending(t *testing.T) {
 			defer server.Close()
 
 			pkgName := "test-cat/test-pkg"
-			packages := map[string]PackageConfig{
+			packages := map[string]registry.PackageConfig{
 				pkgName: {
 					URL:    server.URL,
 					Parser: "json",
 					Path:   "version",
 				},
 			}
-			config := &PackagesConfig{Packages: packages}
+			config := &registry.PackagesConfig{Packages: packages}
 
 			// Create ebuild with current version
 			createTestEbuild(t, overlayDir, pkgName, currentVersion)
@@ -419,14 +423,14 @@ RESTRICT="bindist mirror strip"
 	tests := []struct {
 		name string
 		pkg  string
-		cfg  PackageConfig
+		cfg  registry.PackageConfig
 		want string
 	}{
-		{"explicit bin overrides source ebuild", "dev-libs/srcpkg", PackageConfig{Type: "bin"}, "bin"},
-		{"explicit source overrides bin ebuild", "app-editors/foo-bin", PackageConfig{Type: "source"}, "source"},
-		{"auto-detect source", "dev-libs/srcpkg", PackageConfig{}, "source"},
-		{"auto-detect bin", "app-editors/foo-bin", PackageConfig{}, "bin"},
-		{"missing ebuild defaults to source", "no/such-pkg", PackageConfig{}, "source"},
+		{"explicit bin overrides source ebuild", "dev-libs/srcpkg", registry.PackageConfig{Type: "bin"}, "bin"},
+		{"explicit source overrides bin ebuild", "app-editors/foo-bin", registry.PackageConfig{Type: "source"}, "source"},
+		{"auto-detect source", "dev-libs/srcpkg", registry.PackageConfig{}, "source"},
+		{"auto-detect bin", "app-editors/foo-bin", registry.PackageConfig{}, "bin"},
+		{"missing ebuild defaults to source", "no/such-pkg", registry.PackageConfig{}, "source"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -467,7 +471,7 @@ func TestNewCheckerCreatesComponents(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "config")
 
 	// Create minimal packages.toml
-	createTestPackagesConfig(t, overlayDir, map[string]PackageConfig{
+	createTestPackagesConfig(t, overlayDir, map[string]registry.PackageConfig{
 		"test-cat/test-pkg": {
 			URL:    "https://example.com/api",
 			Parser: "json",
@@ -516,10 +520,10 @@ func TestNewCheckerWithOptions(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "config")
 
 	// Create custom components
-	customCache, _ := NewCache(configDir)
+	customCache, _ := fetch.NewCache(configDir)
 	customPending, _ := NewPendingList(configDir)
-	customConfig := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	customConfig := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"test/pkg": {URL: "https://example.com", Parser: "json", Path: "v"},
 		},
 	}
@@ -551,8 +555,8 @@ func TestCheckPackageNotFound(t *testing.T) {
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"test/pkg": {URL: "https://example.com", Parser: "json", Path: "v"},
 		},
 	}
@@ -581,8 +585,8 @@ func TestCheckPackageNoEbuild(t *testing.T) {
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"test-cat/test-pkg": {URL: "https://example.com", Parser: "json", Path: "v"},
 		},
 	}
@@ -620,15 +624,15 @@ func TestCheckPackageUsesCache(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
 
 	// Create cache with entry
 	fixedNow := time.Date(2026, 1, 22, 12, 0, 0, 0, time.UTC)
-	cache, _ := NewCache(configDir, WithNowFunc(func() time.Time { return fixedNow }))
+	cache, _ := fetch.NewCache(configDir, fetch.WithNowFunc(func() time.Time { return fixedNow }))
 	cache.Set(pkgName, cachedVersion, "https://example.com")
 
 	checker, err := NewChecker(overlayDir,
@@ -674,15 +678,15 @@ func TestCheckPackageBypassesCache(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
 
 	// Create cache with entry
 	fixedNow := time.Date(2026, 1, 22, 12, 0, 0, 0, time.UTC)
-	cache, _ := NewCache(configDir, WithNowFunc(func() time.Time { return fixedNow }))
+	cache, _ := fetch.NewCache(configDir, fetch.WithNowFunc(func() time.Time { return fixedNow }))
 	cache.Set(pkgName, cachedVersion, server.URL)
 
 	checker, err := NewChecker(overlayDir,
@@ -728,8 +732,8 @@ func TestCheckPackageDetectsUpdate(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -777,8 +781,8 @@ func TestCheckPackageNoUpdate(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, version)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -822,8 +826,8 @@ func TestCheckPackageNotComparable(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -875,8 +879,8 @@ func TestCheckPackageStripsVPrefix(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -930,8 +934,8 @@ func TestCheckPackageHTMLParser(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {
 				URL:     server.URL,
 				Parser:  "html",
@@ -987,8 +991,8 @@ func TestFetchContentRateLimitNotChargedToOpTimeout(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -1028,7 +1032,7 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 	}))
 	defer server.Close()
 
-	packages := map[string]PackageConfig{
+	packages := map[string]registry.PackageConfig{
 		"cat1/pkg1": {URL: server.URL, Parser: "json", Path: "version"},
 		"cat2/pkg2": {URL: server.URL, Parser: "json", Path: "version"},
 		"cat3/pkg3": {URL: server.URL, Parser: "json", Path: "version"},
@@ -1038,7 +1042,7 @@ func TestCheckAllReturnsAllResults(t *testing.T) {
 		createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 	}
 
-	config := &PackagesConfig{Packages: packages}
+	config := &registry.PackagesConfig{Packages: packages}
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
@@ -1082,7 +1086,7 @@ func TestCheckAll_SkipsDisabledPackages(t *testing.T) {
 	disabled := false
 	const enabledPkg = "cat1/enabled"
 	const disabledPkg = "cat2/disabled"
-	packages := map[string]PackageConfig{
+	packages := map[string]registry.PackageConfig{
 		enabledPkg:  {URL: okServer.URL, Parser: "json", Path: "version"},
 		disabledPkg: {URL: failServer.URL, Parser: "json", Path: "version", Enabled: &disabled},
 	}
@@ -1092,7 +1096,7 @@ func TestCheckAll_SkipsDisabledPackages(t *testing.T) {
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -1138,7 +1142,7 @@ func TestCheckAll_ReturnsBatchResult(t *testing.T) {
 	defer failServer.Close()
 
 	const failingPkg = "cat3/pkg3"
-	packages := map[string]PackageConfig{
+	packages := map[string]registry.PackageConfig{
 		"cat1/pkg1": {URL: okServer.URL, Parser: "json", Path: "version"},
 		"cat2/pkg2": {URL: okServer.URL, Parser: "json", Path: "version"},
 		failingPkg:  {URL: failServer.URL, Parser: "json", Path: "version"},
@@ -1149,14 +1153,14 @@ func TestCheckAll_ReturnsBatchResult(t *testing.T) {
 	}
 
 	// Disable HTTP retries so the failing package fails fast.
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithHTTPClient(httpClient),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
@@ -1204,20 +1208,20 @@ func TestCheckAll_ErrorsOnStderr(t *testing.T) {
 
 	// Package names deliberately not in sorted order.
 	pkgNames := []string{"cat-z/zeta", "cat-a/alpha", "cat-m/mike"}
-	packages := make(map[string]PackageConfig, len(pkgNames))
+	packages := make(map[string]registry.PackageConfig, len(pkgNames))
 	for _, pkgName := range pkgNames {
-		packages[pkgName] = PackageConfig{URL: failServer.URL, Parser: "json", Path: "version"}
+		packages[pkgName] = registry.PackageConfig{URL: failServer.URL, Parser: "json", Path: "version"}
 		createTestEbuild(t, overlayDir, pkgName, "0.9.0")
 	}
 
-	httpClient := NewRetryableHTTPClientWithConfig(RetryConfig{
+	httpClient := fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{
 		MaxRetries: 0,
 		Timeout:    5 * time.Second,
 	})
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithHTTPClient(httpClient),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
@@ -1309,8 +1313,8 @@ func TestCheckPackageAddsToPending(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -1363,8 +1367,8 @@ func TestCheckPackageUpdatesCache(t *testing.T) {
 	// Create ebuild
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "version"},
 		},
 	}
@@ -1406,8 +1410,8 @@ func TestGetCurrentVersionHighest(t *testing.T) {
 	createTestEbuild(t, overlayDir, pkgName, "2.0.0")
 	createTestEbuild(t, overlayDir, pkgName, "1.5.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: "https://example.com", Parser: "json", Path: "v"},
 		},
 	}
@@ -1443,8 +1447,8 @@ func TestGetCurrentVersionSkipsLive(t *testing.T) {
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 	createTestEbuild(t, overlayDir, pkgName, "9999")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: "https://example.com", Parser: "json", Path: "v"},
 		},
 	}
@@ -1483,8 +1487,8 @@ func TestFetchUpstreamVersionFallback(t *testing.T) {
 	pkgName := "test-cat/test-pkg"
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {
 				URL:             server.URL,
 				Parser:          "json",
@@ -1520,7 +1524,7 @@ func TestFetchUpstreamVersionFallback(t *testing.T) {
 // =============================================================================
 
 // createTestPackagesConfig creates a packages.toml file in the overlay
-func createTestPackagesConfig(t *testing.T, overlayDir string, packages map[string]PackageConfig) {
+func createTestPackagesConfig(t *testing.T, overlayDir string, packages map[string]registry.PackageConfig) {
 	t.Helper()
 
 	configDir := filepath.Join(overlayDir, ".autoupdate")
@@ -1562,7 +1566,7 @@ func TestWithCacheTTL_Custom(t *testing.T) {
 	custom := 5 * time.Minute
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 		WithCacheTTL(custom),
 	)
 	if err != nil {
@@ -1583,14 +1587,14 @@ func TestWithCacheTTL_DefaultWhenAbsent(t *testing.T) {
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker failed: %v", err)
 	}
 
-	if got := checker.Cache().TTL; got != DefaultCacheTTL {
-		t.Errorf("Cache().TTL = %v, want default %v (R2.2)", got, DefaultCacheTTL)
+	if got := checker.Cache().TTL; got != fetch.DefaultCacheTTL {
+		t.Errorf("Cache().TTL = %v, want default %v (R2.2)", got, fetch.DefaultCacheTTL)
 	}
 }
 
@@ -1607,7 +1611,7 @@ func TestWithCacheTTL_RejectsNonPositive(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			_, err := NewChecker(overlayDir,
 				WithConfigDir(configDir),
-				WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+				WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 				WithCacheTTL(d),
 			)
 			if err == nil {
@@ -1631,7 +1635,7 @@ func TestNewChecker_WarnsOnUnusedLLMPrompt(t *testing.T) {
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		"cat-a/pkg-one":   {URL: "https://example.com/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
 		"cat-b/pkg-two":   {URL: "https://example.com/b", Parser: "json", Path: "v", LLMPrompt: "find latest"},
 		"cat-c/pkg-three": {URL: "https://example.com/c", Parser: "json", Path: "v"}, // no llm_prompt
@@ -1728,8 +1732,8 @@ func (f *fakeLLMProvider) ExtractVersion(_ context.Context, content []byte, prom
 	return f.version, f.err
 }
 
-func (f *fakeLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *EbuildMetadata, _ string) (*SchemaAnalysis, error) {
-	return &SchemaAnalysis{ParserType: "json"}, nil
+func (f *fakeLLMProvider) AnalyzeContent(_ context.Context, _ []byte, _ *ebuilds.EbuildMetadata, _ string) (*llm.SchemaAnalysis, error) {
+	return &llm.SchemaAnalysis{ParserType: "json"}, nil
 }
 
 func (f *fakeLLMProvider) GetModel() string { return "fake-model" }
@@ -1743,7 +1747,7 @@ func TestWithLLMClient_AcceptsFakeProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	fake := &fakeLLMProvider{version: "9.9.9"}
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 	checker, err := NewChecker(tmpDir,
 		WithConfigDir(filepath.Join(tmpDir, "config")),
 		WithPackagesConfig(cfg),
@@ -1764,7 +1768,7 @@ func TestWithLLMClient_AcceptsFakeProvider(t *testing.T) {
 func TestWithLLMClient_NilLeavesFieldNil(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 	checker, err := NewChecker(tmpDir,
 		WithConfigDir(filepath.Join(tmpDir, "config")),
 		WithPackagesConfig(cfg),
@@ -1801,8 +1805,8 @@ func TestFetchUpstreamVersion_UsesProviderWhenParseFails(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, currentVersion)
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			// json parser on non-JSON content fails, so the LLM fallback runs.
 			pkgName: {URL: server.URL, Parser: "json", Path: "version", LLMPrompt: "extract the version"},
 		},
@@ -1865,7 +1869,7 @@ func TestNewChecker_NoProviderConfigured_WarnsAndSkipsLLM(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkgName: {URL: server.URL, Parser: "json", Path: "version", LLMPrompt: "extract version"},
 	}}
 
@@ -1911,7 +1915,7 @@ func TestNewChecker_ProviderConfigured_SuppressesUnusedWarn(t *testing.T) {
 	overlayDir := filepath.Join(tmpDir, "overlay")
 
 	pkgName := "cat-a/pkg-one"
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkgName: {URL: "https://example.com/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
 	}}
 

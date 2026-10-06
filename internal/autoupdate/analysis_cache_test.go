@@ -8,6 +8,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -44,7 +45,7 @@ func TestAnalysisCacheTTL(t *testing.T) {
 			}
 
 			// Create a test schema
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -93,7 +94,7 @@ func TestAnalysisCacheTTL(t *testing.T) {
 			}
 
 			// Create a test schema
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -134,7 +135,7 @@ func TestAnalysisCacheTTL(t *testing.T) {
 				return false
 			}
 
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -179,7 +180,7 @@ func TestCacheBypass(t *testing.T) {
 			}
 
 			// Create a test schema
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -224,7 +225,7 @@ func TestCacheBypass(t *testing.T) {
 				return false
 			}
 
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -270,7 +271,7 @@ func TestCacheBypass(t *testing.T) {
 				return false
 			}
 
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   "version",
@@ -317,7 +318,7 @@ func TestAnalysisCacheSet(t *testing.T) {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
 	if err := cache.Set("app-misc/hello", schema, "https://example.com"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestAnalysisCacheSetPersistsToDisk(t *testing.T) {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
 	if err := cache.Set("app-misc/hello", schema, "https://example.com"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -366,7 +367,7 @@ func TestAnalysisCacheSave(t *testing.T) {
 
 	// Manually add entry without saving
 	cache.Entries["app-misc/test"] = AnalysisCacheEntry{
-		Schema:    &PackageConfig{URL: "https://test.com", Parser: "json"},
+		Schema:    &registry.PackageConfig{URL: "https://test.com", Parser: "json"},
 		Timestamp: cache.nowFunc(),
 		URL:       "https://test.com",
 	}
@@ -393,7 +394,7 @@ func TestAnalysisCacheDelete(t *testing.T) {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json"}
 	if err := cache.Set("app-misc/hello", schema, "https://example.com"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -418,7 +419,7 @@ func TestAnalysisCacheClear(t *testing.T) {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json"}
 	_ = cache.Set("app-misc/pkg1", schema, "https://example.com")
 	_ = cache.Set("app-misc/pkg2", schema, "https://example.com")
 
@@ -447,7 +448,7 @@ func TestAnalysisCacheLen(t *testing.T) {
 		t.Errorf("Expected Len=0 for empty cache, got %d", cache.Len())
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json"}
 	_ = cache.Set("app-misc/pkg1", schema, "https://example.com")
 	_ = cache.Set("app-misc/pkg2", schema, "https://example.com")
 
@@ -465,7 +466,7 @@ func TestAnalysisCacheCleanup(t *testing.T) {
 		t.Fatalf("NewAnalysisCache: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json"}
 
 	// Add fresh entry
 	cache.Entries["app-misc/fresh"] = AnalysisCacheEntry{
@@ -542,7 +543,7 @@ func TestAnalysisCacheWrite_FinalModeIs0600(t *testing.T) {
 		t.Fatalf("NewAnalysisCache failed: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
 	if err := cache.Set("app-misc/hello", schema, "https://example.com"); err != nil {
 		t.Fatalf("AnalysisCache.Set failed: %v", err)
 	}

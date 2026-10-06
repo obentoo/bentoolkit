@@ -13,12 +13,13 @@
 // here, which is what keeps this package free of an import edge to
 // internal/autoupdate". Putting the proving step in internal/overlay would have
 // overturned that boundary silently, and left that comment false for whoever read
-// it next. It would in fact not have compiled at all: validate imports
-// internal/overlay itself (run.go), so the edge back is a cycle — which is worth
-// knowing, because it means the boundary is not merely a convention somebody
-// could relax, and the error the compiler would give names neither of the reasons
-// above. cmd/bentoo is this codebase's other answer to "who joins these two"
-// (buildDivergenceMap is there for the same reason), and it works — at the price
+// it next. Until story 061 it would not even have compiled, because validate
+// imported internal/overlay for its overlay scanner. That scanner now lives in
+// internal/gentoo/repo, so the validate -> internal/overlay cycle no longer
+// exists. The package stays for the reason that still holds: internal/overlay
+// must not import internal/autoupdate. cmd/bentoo is this codebase's other
+// answer to "who joins these two" (buildDivergenceMap is there for the same
+// reason), and it works — at the price
 // of putting orchestration in the one layer that is hardest to test.
 //
 // So the composition gets a package of its own (design D8b). It imports

@@ -31,6 +31,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -68,7 +69,7 @@ func TestS060DepsSubstituteIsUsedOnlyInItsOwnTree(t *testing.T) {
 		gotPath string
 	)
 	d := defaultDeps()
-	d.sweepPlanner = func(_ *slog.Logger, overlayPath string, _ map[string]autoupdate.PackageConfig, _ string) (autoupdate.SweepBatch, error) {
+	d.sweepPlanner = func(_ *slog.Logger, overlayPath string, _ map[string]registry.PackageConfig, _ string) (autoupdate.SweepBatch, error) {
 		calls++
 		gotPath = overlayPath
 		return autoupdate.SweepBatch{}, errors.New(s060StubPlannerRefusal)
@@ -122,12 +123,12 @@ func TestS060DepsDefaultsAreTheProductionImplementations(t *testing.T) {
 		field     string
 		got, want any
 	}{
-		{"registryWriter", d.registryWriter, autoupdate.SetPackageVersions},
+		{"registryWriter", d.registryWriter, registry.SetPackageVersions},
 		{"confirmRegistryWrite", d.confirmRegistryWrite, confirmAction},
 		{"checkRegistryFixer", d.checkRegistryFixer, newConfiguredRegistryFixer},
 		{"checkInteractive", d.checkInteractive, stdinIsTerminal},
 		{"resolveGentooProvider", d.resolveGentooProvider, resolveGentooProvider},
-		{"setVersionsForCheck", d.setVersionsForCheck, autoupdate.SetPackageVersions},
+		{"setVersionsForCheck", d.setVersionsForCheck, registry.SetPackageVersions},
 		{"uiIsTerminal", d.uiIsTerminal, output.IsTerminal},
 		{"sweepPlanner", d.sweepPlanner, autoupdate.PlanOverlaySweep},
 		{"sweepExecutor", d.sweepExecutor, autoupdate.ExecuteOverlaySweep},

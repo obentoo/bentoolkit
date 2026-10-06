@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 )
 
@@ -148,9 +149,9 @@ const failThenInterruptible = `if [ ! -e "$1.first" ]; then : > "$1.first"; ` + 
 
 type editingBuildFixer struct{ calls atomic.Int32 }
 
-func (f *editingBuildFixer) FixBuild(context.Context, BuildFixRequest) (BuildFixResult, error) {
+func (f *editingBuildFixer) FixBuild(context.Context, fixer.BuildFixRequest) (fixer.BuildFixResult, error) {
 	f.calls.Add(1)
-	return BuildFixResult{Summary: "edited the staged ebuild"}, nil
+	return fixer.BuildFixResult{Summary: "edited the staged ebuild"}, nil
 }
 
 // TestCompileInterruptedReRunIsNotAFailedBuild is R3.5 on the authoritative

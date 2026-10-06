@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // This file pins R6: a divergence the overlay's own content PROVES is ours is
@@ -427,7 +429,7 @@ func TestPruneAuthorshipEndToEnd(t *testing.T) {
 	// would be refused at the verdict gate for a reason that has nothing to do
 	// with authorship.
 	report, err := CompareWithProvider(t.Context(),
-		[]PackageInfo{
+		[]repo.PackageInfo{
 			{Category: pruneAuthorshipCat, Package: provedPrunePkg, LatestVersion: provedPruneVersion},
 			{Category: pruneAuthorshipCat, Package: unprovedPkg, LatestVersion: provedPruneVersion},
 		},

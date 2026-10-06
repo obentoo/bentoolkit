@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
@@ -41,7 +43,7 @@ func refusalFixture(t *testing.T, locals map[string]string, upstream map[string]
 	const body = "EAPI=8\ninherit ecm\n"
 	overlayRoot, upstreamRoot := t.TempDir(), t.TempDir()
 	versions := map[string][]string{}
-	var packages []overlay.PackageInfo
+	var packages []repo.PackageInfo
 	divergence := map[string]overlay.Divergence{}
 
 	for atom, local := range locals {
@@ -50,7 +52,7 @@ func refusalFixture(t *testing.T, locals map[string]string, upstream map[string]
 		writeReviewEbuild(t, overlayRoot, category, pkg, local, body)
 		writeReviewEbuild(t, upstreamRoot, category, pkg, upstream[atom], body)
 		versions[atom] = []string{upstream[atom]}
-		packages = append(packages, overlay.PackageInfo{Category: category, Package: pkg, LatestVersion: local})
+		packages = append(packages, repo.PackageInfo{Category: category, Package: pkg, LatestVersion: local})
 		divergence[atom] = overlay.Divergence{}
 	}
 

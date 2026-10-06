@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
@@ -298,7 +300,7 @@ func ResolveManifestTargets(overlayPath string, scope ManifestScope) ([]Manifest
 		return []ManifestUpdate{{Category: scope.Category, Package: scope.Package}}, nil
 	}
 
-	scan, err := ScanOverlay(overlayPath)
+	scan, err := repo.ScanOverlay(overlayPath)
 	if err != nil {
 		return nil, fmt.Errorf("scanning overlay: %w", err)
 	}

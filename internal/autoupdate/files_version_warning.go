@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // filesdirVersionedRef matches a ${FILESDIR} path built from a version
@@ -25,13 +27,13 @@ var filesdirVersionedRef = regexp.MustCompile(`\$\{?FILESDIR\}?/[^"'\s]*\$\{?(P|
 // counts. Which of the two applies is a human's call. Like the ::gentoo
 // advisory it never fails the bump.
 func (a *Applier) warnIfFilesNameOldVersion(pkg, oldVersion, newVersion string) {
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return
 	}
 	pkgDir := filepath.Join(a.overlayPath, category, pkgName)
-	oldPV := revisionSuffixRegex.ReplaceAllString(oldVersion, "")
-	newPV := revisionSuffixRegex.ReplaceAllString(newVersion, "")
+	oldPV := ebuilds.RevisionSuffixRegex.ReplaceAllString(oldVersion, "")
+	newPV := ebuilds.RevisionSuffixRegex.ReplaceAllString(newVersion, "")
 	if oldPV == newPV {
 		return
 	}

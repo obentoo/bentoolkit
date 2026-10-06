@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
@@ -126,7 +127,7 @@ func (a *Applier) stagedInputsFor(pkg, currentVersion string, update *PendingUpd
 //
 // A bump declaring none of them answers the empty string, which is the ordinary
 // case and keeps the record free of a digest of nothing.
-func substitutionDigest(cfg PackageConfig, update *PendingUpdate) string {
+func substitutionDigest(cfg registry.PackageConfig, update *PendingUpdate) string {
 	if update == nil || (update.CommitHash == "" && update.AuxValue == "" && len(cfg.Requires) == 0 && len(update.Requires) == 0) {
 		return ""
 	}

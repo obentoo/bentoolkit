@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
@@ -352,7 +352,7 @@ func compareRealignReviewer(log *slog.Logger, noReview bool, budget time.Duratio
 func newRealignReviewer(log *slog.Logger, budget time.Duration, d *deps) (overlay.RealignReviewer, error) {
 	asker, err := d.newClaudeAsker(log, budget)
 	if err != nil {
-		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
+		if errors.Is(err, llm.ErrClaudeCodeUnavailable) {
 			return nil, nil
 		}
 		return nil, err

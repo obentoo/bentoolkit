@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // preconditionGateEnv is one staged bump, one unreadable key and the cache the
@@ -33,7 +35,7 @@ type preconditionGateEnv struct {
 	key string
 	// cache is opened over the applier's own config directory, so a record
 	// written through it is the record the applier reads.
-	cache *Cache
+	cache *fetch.Cache
 
 	watch          *promoteWatch
 	spawnsAtSetup  int
@@ -45,9 +47,9 @@ type preconditionGateEnv struct {
 // writes through a Cache of its own; without this a cleared record would still
 // be visible in env.cache and the flip test would pass over a package that was
 // never actually released.
-func (e *preconditionGateEnv) reopen(t *testing.T) *Cache {
+func (e *preconditionGateEnv) reopen(t *testing.T) *fetch.Cache {
 	t.Helper()
-	cache, err := NewCache(e.applierConfDir)
+	cache, err := fetch.NewCache(e.applierConfDir)
 	if err != nil {
 		t.Fatalf("reopening the cache: %v", err)
 	}
@@ -106,7 +108,7 @@ func preconditionGateFixture(t *testing.T) *preconditionGateEnv {
 		t.Fatalf("writing the fixture key: %v", err)
 	}
 
-	cache, err := NewCache(applier.configDir)
+	cache, err := fetch.NewCache(applier.configDir)
 	if err != nil {
 		t.Fatalf("opening the cache: %v", err)
 	}

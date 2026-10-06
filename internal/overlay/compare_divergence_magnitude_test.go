@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // This file pins the MAGNITUDE half of an undeclared-divergence finding: the
@@ -120,7 +122,7 @@ func TestDiffLineCountsStayBalancedOnLargeDiffs(t *testing.T) {
 // the counts reach the line the operator actually reads, in the orientation the
 // report claims: added is what OUR ebuild carries on top of ::gentoo's.
 func TestUndeclaredDivergenceCarriesMagnitude(t *testing.T) {
-	pkg := PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
+	pkg := repo.PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
 	silent := map[string]Divergence{"app-editors/zed": {}}
 
 	overlayRoot, upstreamRoot := t.TempDir(), t.TempDir()
@@ -165,7 +167,7 @@ func TestUndeclaredDivergenceCarriesMagnitude(t *testing.T) {
 // package whose bytes match must not carry a magnitude, and the caveat must not
 // appear where there is no finding to qualify.
 func TestUndeclaredDivergenceMagnitudeIsZeroWhenNothingDiffers(t *testing.T) {
-	pkg := PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
+	pkg := repo.PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
 	silent := map[string]Divergence{"app-editors/zed": {}}
 
 	overlayRoot, upstreamRoot := t.TempDir(), t.TempDir()
@@ -211,7 +213,7 @@ func TestUndeclaredDivergenceCaveatPrintsOncePerSection(t *testing.T) {
 		"app-editors/vim": {"1.0"},
 	}}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{
 		{Category: "app-editors", Package: "zed", LatestVersion: "1.0"},
 		{Category: "app-editors", Package: "vim", LatestVersion: "1.0"},
 	}, prov, CompareOptions{IncludeSynced: true, OverlayPath: overlayRoot, Divergence: silent})
@@ -341,7 +343,7 @@ func TestProvedAuthorshipReachesTheRenderedReport(t *testing.T) {
 		},
 	}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 		{Category: "kde-plasma", Package: "kwin", LatestVersion: "6.7.4"},
 	}, prov, opts)

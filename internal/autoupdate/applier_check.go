@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
@@ -50,7 +52,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		return checkSkipped(pkg, "", fmt.Sprintf("%s is no longer in the pending list, so there was nothing to validate", pkg))
 	}
 
-	newVersion := stripVersionPrefix(strings.TrimSpace(update.NewVersion))
+	newVersion := parse.StripVersionPrefix(strings.TrimSpace(update.NewVersion))
 	if !ebuild.IsValidVersion(newVersion) {
 		return checkSkipped(pkg, update.NewVersion, fmt.Sprintf(
 			"%q is not a version an ebuild filename can carry (from %q), so no gate could be run for %s", newVersion, update.NewVersion, pkg))
@@ -70,7 +72,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	} else if len(waiting) > 0 {
 		return checkSkipped(pkg, newVersion, fmt.Sprintf("waiting for %s, so no gate was run for %s", strings.Join(waiting, ", "), pkg))
 	}
-	newVersion = applyRevision(newVersion, a.configs[pkg].Revision)
+	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
 
 	currentVersion, err := a.resolveCurrentVersion(pkg)
 	if err != nil {

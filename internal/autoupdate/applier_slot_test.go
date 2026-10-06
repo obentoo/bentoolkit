@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestCopyEbuildRefusesExistingDestination pins the guard that keeps a copy from
@@ -78,7 +80,7 @@ func newWebkitSlotApplier(t *testing.T, slotKey string, revision int, newVersion
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(mockExecCommandSuccess),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			slotKey: {URL: "https://example.com", Parser: "regex", Revision: revision},
 		}}),
 	)

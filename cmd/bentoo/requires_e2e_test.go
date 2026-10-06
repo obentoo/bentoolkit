@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
@@ -91,11 +92,11 @@ func requiresPairRun(t *testing.T, staged bool) {
 		t.Fatalf("flutter Requires after the pending.json round trip = %v, want dev-lang/dart -> 3.14.0", updates[0].Requires)
 	}
 
-	records := map[string]autoupdate.PackageConfig{
+	records := map[string]registry.PackageConfig{
 		"dev-lang/dart@stable": {URL: "https://example.invalid/dart.json", Parser: "regex", Pattern: `"version":\s*"([^"]+)"`},
 		"dev-lang/flutter": {
 			URL: "https://example.invalid/releases_linux.json", Parser: "regex", Pattern: `"version":\s*"([^"]+)"`,
-			Requires: map[string]autoupdate.RequireSpec{
+			Requires: map[string]registry.RequireSpec{
 				"dev-lang/dart": {Pattern: `"dart_sdk_version":\s*"([^"]+)"`, Pin: "~"},
 			},
 		},
@@ -107,7 +108,7 @@ func requiresPairRun(t *testing.T, staged bool) {
 		}),
 		autoupdate.WithApplierDistdir(t.TempDir(), ""),
 		autoupdate.WithApplierGentooPath(gentoo),
-		autoupdate.WithApplierPackagesConfig(&autoupdate.PackagesConfig{Packages: records}),
+		autoupdate.WithApplierPackagesConfig(&registry.PackagesConfig{Packages: records}),
 	}
 	if staged {
 		opts = append(opts,

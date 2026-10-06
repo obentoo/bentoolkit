@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // A minimal ebuild whose SRC_URI basename matches the FileZilla Pro distfile.
@@ -73,14 +76,14 @@ func TestApplyLiveFileZillaPro(t *testing.T) {
 		t.Fatalf("pending.Add: %v", err)
 	}
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {URL: "https://x.test", Parser: "regex", Pattern: `(\d)`, Meta: map[string]string{
-			metaFetchMethod:      "post",
-			metaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",
-			metaFetchSerialEnv:   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
-			metaFetchSerialField: "key",
-			metaFetchFilename:    "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
-			metaFetchForm: "mail=&number=&platform=linux&platform_cli=win&platform_cli_nonpro=win&" +
+			fetch.MetaFetchMethod:      "post",
+			fetch.MetaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",
+			fetch.MetaFetchSerialEnv:   "BENTOO_FETCH_FILEZILLA_PRO_KEY",
+			fetch.MetaFetchSerialField: "key",
+			fetch.MetaFetchFilename:    "FileZilla_Pro_{version}_x86_64-linux-gnu.tar.xz",
+			fetch.MetaFetchForm: "mail=&number=&platform=linux&platform_cli=win&platform_cli_nonpro=win&" +
 				"platform_fzpes=win&download_program=Start download of FileZilla Pro",
 		}},
 	}}

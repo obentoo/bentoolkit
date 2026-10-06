@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 068, sub-task 2.1 — R2.1-R2.4, R5.1: --lint runs the same
@@ -30,10 +33,10 @@ path = "tag_name"
 
 // s068InvalidConfigIssues returns the invalid-config messages lint reported
 // for pkg.
-func s068InvalidConfigIssues(issues []LintIssue, pkg string) []string {
+func s068InvalidConfigIssues(issues []registry.LintIssue, pkg string) []string {
 	var out []string
 	for _, is := range issues {
-		if is.Package == pkg && is.Rule == LintInvalidConfig {
+		if is.Package == pkg && is.Rule == registry.LintInvalidConfig {
 			out = append(out, is.Message)
 		}
 	}
@@ -61,11 +64,11 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 	toml.WriteString("# END\n")
 	overlay := writeRegistry(t, toml.String())
 
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
-	issues, err := LintPackagesConfig(nil, overlay)
+	issues, err := registry.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -77,14 +80,14 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 			if len(got) != 1 {
 				t.Fatalf("lint reported %d invalid-config issues for %s, want 1: %q", len(got), pkg, got)
 			}
-			_, _, perr := parseAuthFetchSpec(cfg.Packages[pkg].Meta)
+			_, _, perr := fetch.ParseAuthFetchSpec(cfg.Packages[pkg].Meta)
 			if perr == nil {
 				t.Errorf("parseAuthFetchSpec accepted %s; the fixture expects a refusal", pkg)
 			} else if !strings.Contains(got[0], perr.Error()) {
 				t.Errorf("lint message %q does not carry the parser's text %q", got[0], perr.Error())
 			}
 			if pkg == "app-misc/leak" {
-				for _, needle := range []string{"GITHUB_TOKEN", metaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
+				for _, needle := range []string{"GITHUB_TOKEN", fetch.MetaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
 					if !strings.Contains(got[0], needle) {
 						t.Errorf("lint message %q does not name %q", got[0], needle)
 					}
@@ -101,8 +104,8 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 	})
 	t.Run("a fetch_* key without fetch_url keeps today's message", func(t *testing.T) {
 		got := s068InvalidConfigIssues(issues, "app-misc/notrigger")
-		if len(got) != 1 || !strings.Contains(got[0], ErrMetaFetchURLRequired.Error()) {
-			t.Errorf("lint reported %q, want one issue carrying %q", got, ErrMetaFetchURLRequired)
+		if len(got) != 1 || !strings.Contains(got[0], fetch.ErrMetaFetchURLRequired.Error()) {
+			t.Errorf("lint reported %q, want one issue carrying %q", got, fetch.ErrMetaFetchURLRequired)
 		}
 	})
 	t.Run("a valid record naming an unset BENTOO_FETCH_ variable is clean: lint never resolves", func(t *testing.T) {
@@ -127,11 +130,11 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 			s068Record("app-misc/fine", fmt.Sprintf(`fetch_url = %q, fetch_serial_env = "BENTOO_FETCH_OK_068"`, srv.URL+"/fine")+serial)+"\n# END\n",
 		"app-misc/leak/leak-1.0.ebuild", "app-misc/fine/fine-1.0.ebuild")
 
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
-	_, _, parserErr := parseAuthFetchSpec(cfg.Packages["app-misc/leak"].Meta)
+	_, _, parserErr := fetch.ParseAuthFetchSpec(cfg.Packages["app-misc/leak"].Meta)
 	if parserErr == nil {
 		t.Error("parseAuthFetchSpec accepted fetch_serial_env = \"GITHUB_TOKEN\"; want the R1 refusal")
 	}
@@ -143,7 +146,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 			return
 		}
 		msg := err.Error()
-		for _, needle := range []string{"GITHUB_TOKEN", metaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
+		for _, needle := range []string{"GITHUB_TOKEN", fetch.MetaFetchSerialEnv, "BENTOO_FETCH_GITHUB_TOKEN"} {
 			if !strings.Contains(msg, needle) {
 				t.Errorf("%s: %q does not name %q", path, msg, needle)
 			}
@@ -172,12 +175,12 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 		OverlayPath: overlay, Package: "app-misc/leak", Version: "1.0", DestDir: t.TempDir(),
 	})
 	check("distfile", distErr)
-	if distErr != nil && !errors.Is(distErr, ErrAuthFetchFailed) {
+	if distErr != nil && !errors.Is(distErr, fetch.ErrAuthFetchFailed) {
 		t.Errorf("distfile: %v is not ErrAuthFetchFailed", distErr)
 	}
 
 	// --lint.
-	issues, err := LintPackagesConfig(nil, overlay)
+	issues, err := registry.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}

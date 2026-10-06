@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 052, sub-task 1.3 — the two cases the Test Advisor could not reach
@@ -65,7 +68,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 	// base_url name other hosts — including a lookalike that merely starts with
 	// the request host. Unscoped, 127.0.0.1 would count as its own host and be
 	// sent.
-	for name, cfg := range map[string]*PackageConfig{
+	for name, cfg := range map[string]*registry.PackageConfig{
 		"url on another host":             {URL: "https://vendor.example/latest"},
 		"url and base_url on other hosts": {URL: "https://vendor.example/latest", BaseURL: "https://cdn.vendor.example/"},
 		"url on a lookalike of the host":  {URL: "https://127.0.0.1.nip.io/latest"},
@@ -75,7 +78,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 			srv, hits, _ := scopeTestServer(t)
 			checker := newRateLimitTestChecker(t, srv.URL, WithRateLimiter(&recordingRateLimiter{}))
 			_, err := checker.fetchContent(t.Context(), srv.URL+"/data", headers, packageCredentialScope(cfg), time.Second)
-			if !errors.Is(err, ErrCredentialHostMismatch) {
+			if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 				t.Fatalf("err = %v; want ErrCredentialHostMismatch", err)
 			}
 			for _, needle := range []string{"X-Api-Key", "BENTOO_T", "127.0.0.1"} {
@@ -97,7 +100,7 @@ func TestFetchContent_ScopedBentooBinding(t *testing.T) {
 	t.Run("sent: request host equals base_url host in another case and port", func(t *testing.T) {
 		srv, _, keys := scopeTestServer(t)
 		checker := newRateLimitTestChecker(t, srv.URL, WithRateLimiter(&recordingRateLimiter{}))
-		cfg := &PackageConfig{URL: "https://vendor.example/latest", BaseURL: "http://LOCALHOST:1/"}
+		cfg := &registry.PackageConfig{URL: "https://vendor.example/latest", BaseURL: "http://LOCALHOST:1/"}
 		if _, err := checker.fetchContent(t.Context(), localhostURL(t, srv.URL)+"/data", headers, packageCredentialScope(cfg), time.Second); err != nil {
 			t.Fatalf("fetch to the base_url host failed: %v", err)
 		}
@@ -120,7 +123,7 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 
 	// A record whose own host IS the listener fetches first; its body is
 	// admitted to the per-run cache.
-	own := packageCredentialScope(&PackageConfig{URL: target})
+	own := packageCredentialScope(&registry.PackageConfig{URL: target})
 	if _, err := checker.fetchContent(t.Context(), target, headers, own, time.Second); err != nil {
 		t.Fatalf("priming fetch failed: %v", err)
 	}
@@ -130,9 +133,9 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 
 	// A second record, bound elsewhere, asks for the same URL with the same
 	// declared headers: same cache key. It must be refused, not served.
-	foreign := packageCredentialScope(&PackageConfig{URL: "https://vendor.example/latest"})
+	foreign := packageCredentialScope(&registry.PackageConfig{URL: "https://vendor.example/latest"})
 	body, err := checker.fetchContent(t.Context(), target, headers, foreign, time.Second)
-	if !errors.Is(err, ErrCredentialHostMismatch) {
+	if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		t.Fatalf("fetchContent = (%q, %v); want ErrCredentialHostMismatch even with a cached body", body, err)
 	}
 	if body != nil {
@@ -146,17 +149,17 @@ func TestFetchContent_BindingCheckedBeforeBodyCache(t *testing.T) {
 func TestPackageCredentialScope(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		cfg  *PackageConfig
+		cfg  *registry.PackageConfig
 		want []string
 	}{
 		{"nil record", nil, nil},
-		{"url only", &PackageConfig{URL: "https://Vendor.example:8443/latest"}, []string{"Vendor.example"}},
-		{"url and base_url", &PackageConfig{URL: "https://a.example/x", BaseURL: "http://b.example/"}, []string{"a.example", "b.example"}},
-		{"fallback_url is not an own host", &PackageConfig{URL: "https://a.example/x", FallbackURL: "https://c.example/"}, []string{"a.example"}},
-		{"unparseable and empty fields contribute nothing", &PackageConfig{URL: "://broken", BaseURL: ""}, nil},
+		{"url only", &registry.PackageConfig{URL: "https://Vendor.example:8443/latest"}, []string{"Vendor.example"}},
+		{"url and base_url", &registry.PackageConfig{URL: "https://a.example/x", BaseURL: "http://b.example/"}, []string{"a.example", "b.example"}},
+		{"fallback_url is not an own host", &registry.PackageConfig{URL: "https://a.example/x", FallbackURL: "https://c.example/"}, []string{"a.example"}},
+		{"unparseable and empty fields contribute nothing", &registry.PackageConfig{URL: "://broken", BaseURL: ""}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := packageCredentialScope(tc.cfg).ownHosts; !slices.Equal(got, tc.want) {
+			if got := packageCredentialScope(tc.cfg).OwnHosts; !slices.Equal(got, tc.want) {
 				t.Errorf("ownHosts = %v, want %v", got, tc.want)
 			}
 		})

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -38,7 +40,7 @@ func mustJSON(t *testing.T, v any) []byte {
 // newTagChecker serves the commit list at /commits and the tag listing at
 // /tags, wiring cfg.URL and cfg.BaseURL to them. pinnedSHA, when non-empty, is
 // written into the current ebuild as EGIT_COMMIT.
-func newTagChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfig,
+func newTagChecker(t *testing.T, pkg, currentVersion string, cfg registry.PackageConfig,
 	commits, tags []byte, pinnedSHA string) *Checker {
 	t.Helper()
 	overlayDir := t.TempDir()
@@ -61,7 +63,7 @@ func newTagChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfig,
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -86,7 +88,7 @@ func newTagChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfig,
 	return checker
 }
 
-func tagCfg() PackageConfig {
+func tagCfg() registry.PackageConfig {
 	c := baseCommitCfg()
 	c.BaseFrom = "tag"
 	c.BaseTagPattern = `^v([0-9]+\.[0-9]+\.[0-9]+)$`

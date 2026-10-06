@@ -1,11 +1,9 @@
 package autoupdate
 
 import (
-	"errors"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // unsafePkgKeys are packages.toml keys whose category or package half is not
@@ -34,52 +32,14 @@ var unsafePkgKeys = []struct {
 // keeps each of them inside the overlay.
 func TestSplitPkgAtomRefusesNonElementHalves(t *testing.T) {
 	for _, tt := range unsafePkgKeys {
-		if cat, name, ok := splitPkgAtom(tt.key); ok {
+		if cat, name, ok := ebuilds.SplitPkgAtom(tt.key); ok {
 			t.Errorf("splitPkgAtom(%q) = (%q, %q, true), want refused", tt.key, cat, name)
 		}
-		if dir := pkgDirFor("/overlay", tt.key); dir != "" {
+		if dir := ebuilds.PkgDirFor("/overlay", tt.key); dir != "" {
 			t.Errorf("pkgDirFor(/overlay, %q) = %q, want \"\"", tt.key, dir)
 		}
 		if _, err := candidateIn("/overlay", tt.key, "1.0"); err == nil {
 			t.Errorf("candidateIn(/overlay, %q) accepted the key", tt.key)
-		}
-	}
-}
-
-// TestSplitPkgAtomKeepsWellFormedKeys guards the other direction: the hardening
-// must not refuse a real atom, and a well-formed key must still land one
-// category and one package below the overlay.
-func TestSplitPkgAtomKeepsWellFormedKeys(t *testing.T) {
-	for _, key := range []string{"app-misc/hello", "net-libs/webkit-gtk:4.1", "dev-lang/rust:1.89@stable", "dev-qt/qt6..compat"} {
-		cat, name, ok := splitPkgAtom(key)
-		if !ok {
-			t.Errorf("splitPkgAtom(%q) refused a well-formed key", key)
-			continue
-		}
-		dir := pkgDirFor("/overlay", key)
-		if rel, err := filepath.Rel("/overlay", dir); err != nil || rel != cat+"/"+name {
-			t.Errorf("pkgDirFor(/overlay, %q) = %q, want /overlay/%s/%s", key, dir, cat, name)
-		}
-	}
-}
-
-// TestValidatePackageConfigNamesRejectedPathElement pins the report a person
-// reads: the error wraps ErrInvalidPackageKey, names the package key, and
-// names the half that was refused.
-func TestValidatePackageConfigNamesRejectedPathElement(t *testing.T) {
-	for _, tt := range unsafePkgKeys {
-		cfg := PackageConfig{URL: "https://example.com/x", Parser: "json", Path: "version"}
-		err := ValidatePackageConfig(nil, tt.key, &cfg)
-		if !errors.Is(err, ErrInvalidPackageKey) {
-			t.Errorf("ValidatePackageConfig(nil, %q) = %v, want ErrInvalidPackageKey", tt.key, err)
-			continue
-		}
-		msg := err.Error()
-		if !strings.Contains(msg, "package "+tt.key+":") {
-			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the package", tt.key, msg)
-		}
-		if !strings.Contains(msg, strconv.Quote(tt.rejected)) {
-			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the rejected element %q", tt.key, msg, tt.rejected)
 		}
 	}
 }

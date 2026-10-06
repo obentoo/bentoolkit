@@ -25,6 +25,8 @@ package autoupdate
 import (
 	"reflect"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestS060StalePinBatchAReportOnlyKindNeverOverwritesAPin is the collapse
@@ -126,7 +128,7 @@ func TestS060StalePinBatchOverReconcile(t *testing.T) {
 	createTestEbuildFile(t, overlayDir, "net-misc/rclone", "1.71.1")
 	createTestEbuildFile(t, overlayDir, "net-misc/rclone", "1.9.0")
 
-	pkgs := map[string]PackageConfig{
+	pkgs := map[string]registry.PackageConfig{
 		"app-editors/neovim": {Parser: "json", URL: "https://example.invalid/neovim", Path: "version"},
 		"net-misc/rclone":    {Parser: "json", URL: "https://example.invalid/rclone", Path: "version", Version: "1.71.1"},
 	}
@@ -146,7 +148,7 @@ func TestS060StalePinBatchOverReconcile(t *testing.T) {
 	}
 
 	// Pin neovim as well: everything left is report-only, so the batch is nil.
-	pkgs["app-editors/neovim"] = PackageConfig{Parser: "json", URL: "https://example.invalid/neovim", Path: "version", Version: "0.11.1"}
+	pkgs["app-editors/neovim"] = registry.PackageConfig{Parser: "json", URL: "https://example.invalid/neovim", Path: "version", Version: "0.11.1"}
 	if got := StalePinBatch(Reconcile(nil, overlayDir, pkgs)); got != nil {
 		t.Errorf("with only report-only divergences StalePinBatch = %v, want nil (R2.3)", got)
 	}

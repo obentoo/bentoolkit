@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 )
@@ -133,7 +134,7 @@ func TestDisplayAnalyzeResultNoSchema(t *testing.T) {
 func TestDisplayAnalyzeResultValidated(t *testing.T) {
 	result := &autoupdate.AnalyzeResult{
 		Package: "net-misc/validated",
-		SuggestedSchema: &autoupdate.PackageConfig{
+		SuggestedSchema: &registry.PackageConfig{
 			URL:    "https://example.com",
 			Parser: "github",
 		},
@@ -148,7 +149,7 @@ func TestDisplayAnalyzeResultValidated(t *testing.T) {
 func TestDisplayAnalyzeResultVersionMismatch(t *testing.T) {
 	result := &autoupdate.AnalyzeResult{
 		Package: "net-misc/mismatch",
-		SuggestedSchema: &autoupdate.PackageConfig{
+		SuggestedSchema: &registry.PackageConfig{
 			URL:    "https://example.com",
 			Parser: "html",
 		},
@@ -164,7 +165,7 @@ func TestDisplayAnalyzeResultVersionMismatch(t *testing.T) {
 func TestDisplayAnalyzeResultNoExtractedVersion(t *testing.T) {
 	result := &autoupdate.AnalyzeResult{
 		Package: "net-misc/noextract",
-		SuggestedSchema: &autoupdate.PackageConfig{
+		SuggestedSchema: &registry.PackageConfig{
 			URL:    "https://example.com",
 			Parser: "pypi",
 		},
@@ -185,7 +186,7 @@ func TestDisplayBatchResultsMixed(t *testing.T) {
 	results := []autoupdate.AnalyzeResult{
 		{
 			Package: "net-misc/ok",
-			SuggestedSchema: &autoupdate.PackageConfig{
+			SuggestedSchema: &registry.PackageConfig{
 				URL:    "https://example.com",
 				Parser: "github",
 			},
@@ -200,7 +201,7 @@ func TestDisplayBatchResultsMixed(t *testing.T) {
 		},
 		{
 			Package: "net-misc/unvalidated",
-			SuggestedSchema: &autoupdate.PackageConfig{
+			SuggestedSchema: &registry.PackageConfig{
 				URL:    "https://example.com",
 				Parser: "html",
 			},
@@ -214,7 +215,7 @@ func TestDisplayBatchResultsMixed(t *testing.T) {
 
 // TestDisplaySchemaMinimal tests displaySchema with minimal config.
 func TestDisplaySchemaMinimal(t *testing.T) {
-	schema := &autoupdate.PackageConfig{
+	schema := &registry.PackageConfig{
 		URL:    "https://example.com",
 		Parser: "github",
 	}
@@ -223,7 +224,7 @@ func TestDisplaySchemaMinimal(t *testing.T) {
 
 // TestDisplaySchemaFull tests displaySchema with all optional fields.
 func TestDisplaySchemaFull(t *testing.T) {
-	schema := &autoupdate.PackageConfig{
+	schema := &registry.PackageConfig{
 		URL:              "https://example.com",
 		Parser:           "html",
 		Path:             "/releases",

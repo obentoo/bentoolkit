@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // seedWriteFile is a small test helper that creates parent dirs and writes
@@ -151,7 +153,7 @@ func TestSeedFromGentooMissingEbuild(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing source ebuild, got nil")
 	}
-	if !errors.Is(err, ErrEbuildNotFound) {
+	if !errors.Is(err, ebuilds.ErrEbuildNotFound) {
 		t.Errorf("expected error wrapping ErrEbuildNotFound, got %v", err)
 	}
 }

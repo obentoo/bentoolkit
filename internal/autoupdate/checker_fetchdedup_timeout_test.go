@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // =============================================================================
@@ -83,7 +85,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, leaderErr = checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, leaderBudget)
+		_, leaderErr = checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, leaderBudget)
 	}()
 
 	select {
@@ -95,20 +97,20 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		followerBody, followerErr = checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, followerBudget)
+		followerBody, followerErr = checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, followerBudget)
 	}()
 
 	// Prove the follower genuinely JOINED the in-flight fetch. Without this the
 	// test could pass by scheduling luck — a follower that arrived after the
 	// leader had already failed would simply become a leader itself and would
 	// have exercised nothing this test exists to check.
-	awaitCounter(t, checker, "Joins", func(s bodyCacheStats) int { return s.Joins },
+	awaitCounter(t, checker, "Joins", func(s fetch.BodyCacheStats) int { return s.Joins },
 		"the follower never joined the leader's in-flight fetch; the scenario under test did not happen")
 
 	// The follower has left the join and is issuing its OWN request, so the
 	// server may stop parking. Waiting for this counter rather than sleeping is
 	// what keeps the handoff deterministic.
-	awaitCounter(t, checker, "Refetches", func(s bodyCacheStats) int { return s.Refetches },
+	awaitCounter(t, checker, "Refetches", func(s fetch.BodyCacheStats) int { return s.Refetches },
 		"the leader's failure never released the follower to fetch on its own")
 	releaseServer()
 
@@ -135,7 +137,7 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 
 	// Exactly one caller left the join to fetch alone: the follower, once
 	// (S024-R3.1's "at most once per do call").
-	if stats := checker.bodies.snapshot(); stats.Refetches != 1 {
+	if stats := checker.bodies.Snapshot(); stats.Refetches != 1 {
 		t.Errorf("stats.Refetches = %d, want 1 — one follower, released once, fetching once", stats.Refetches)
 	}
 }
@@ -144,11 +146,11 @@ func TestCheckerFetchDedupFollowerKeepsItsOwnBudget(t *testing.T) {
 // test with reason if it never is. It polls rather than hooks because the
 // counters are the only observation point the cache offers, and a poll on an
 // in-memory integer costs nothing beside a network round trip.
-func awaitCounter(t *testing.T, c *Checker, name string, read func(bodyCacheStats) int, reason string) {
+func awaitCounter(t *testing.T, c *Checker, name string, read func(fetch.BodyCacheStats) int, reason string) {
 	t.Helper()
 
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
-		if read(c.bodies.snapshot()) >= 1 {
+		if read(c.bodies.Snapshot()) >= 1 {
 			return
 		}
 		time.Sleep(time.Millisecond) // polling: the named cache counter has reached 1

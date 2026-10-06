@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -65,7 +65,7 @@ func NewClient() *Client {
 			Timeout: 30 * time.Second,
 			// A redirect to another host or to plain http must not carry the
 			// token (S052-R4.6).
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
 	}
@@ -148,8 +148,8 @@ func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string)
 		return nil, fmt.Errorf("GitHub lookup %s/%s: %w", category, pkg, err)
 	}
 	// Cap every read of this body: an oversized or hostile response fails
-	// with httputil.ErrResponseTooLarge instead of exhausting memory.
-	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	// with httpx.ErrResponseTooLarge instead of exhausting memory.
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	// Handle rate limiting
@@ -174,7 +174,7 @@ func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string)
 		// The quoted error body is best-effort, except that an oversized one
 		// is reported as such rather than quoted.
 		body, readErr := io.ReadAll(resp.Body)
-		if readErr = httputil.ClassifyBodyReadError(readErr); errors.Is(readErr, httputil.ErrResponseTooLarge) {
+		if readErr = httpx.ClassifyBodyReadError(readErr); errors.Is(readErr, httpx.ErrResponseTooLarge) {
 			return nil, fmt.Errorf("reading GitHub error response for %s/%s: %w", category, pkg, readErr)
 		}
 		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
@@ -183,7 +183,7 @@ func (c *Client) fetchPackageVersions(ctx context.Context, category, pkg string)
 	// Parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading GitHub response for %s/%s: %w", category, pkg, httputil.ClassifyBodyReadError(err))
+		return nil, fmt.Errorf("reading GitHub response for %s/%s: %w", category, pkg, httpx.ClassifyBodyReadError(err))
 	}
 
 	var entries []ContentEntry
@@ -312,12 +312,12 @@ func (c *Client) GetRateLimitInfo(ctx context.Context) (remaining int, resetTime
 	if err != nil {
 		return 0, time.Time{}, fmt.Errorf("GitHub rate_limit request: %w", err)
 	}
-	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("reading GitHub rate_limit response: %w", httputil.ClassifyBodyReadError(err))
+		return 0, time.Time{}, fmt.Errorf("reading GitHub rate_limit response: %w", httpx.ClassifyBodyReadError(err))
 	}
 
 	var result struct {

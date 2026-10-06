@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -18,7 +18,7 @@ import (
 //
 // After sub-task 3.3, TWO constants can bound a review: config.DefaultReviewTimeout,
 // which the getter returns when the operator configured nothing, and
-// autoupdate.DefaultClaudeCodeTimeout, which the client falls back to when it is
+// llm.DefaultClaudeCodeTimeout, which the client falls back to when it is
 // handed no timeout option at all. Sub-task 4.2 writes a measurement into the
 // FIRST one, and that measurement is worth nothing if the second is what
 // actually governs. This guard is the statement that the review's budget comes
@@ -207,9 +207,9 @@ func TestAbsentReviewKeyRunsOnTheConfigDefaultBudget(t *testing.T) {
 				if got == 0 {
 					t.Errorf("invocation %d was constructed with a zero budget.\n"+
 						"autoupdate.WithClaudeCodeTimeout ignores a non-positive duration (claude_code.go:136), so a zero "+
-						"leaves autoupdate.DefaultClaudeCodeTimeout (%s) governing the review while the measurement "+
+						"leaves llm.DefaultClaudeCodeTimeout (%s) governing the review while the measurement "+
 						"S048-R2.2 asks for sits in config.DefaultReviewTimeout, read by nothing. %s",
-						i, autoupdate.DefaultClaudeCodeTimeout, tc.why)
+						i, llm.DefaultClaudeCodeTimeout, tc.why)
 					continue
 				}
 				if got != tc.want {
@@ -217,7 +217,7 @@ func TestAbsentReviewKeyRunsOnTheConfigDefaultBudget(t *testing.T) {
 						"The budget in force must come from the configuration layer — the constant whose documentation "+
 						"names the measurement and its date — and never from the client's own fallback (%s), which this "+
 						"story leaves to the four other claude invocation sites (S048-R2.2, S048-R2.3, S048-R4.2).",
-						i, got, tc.want, tc.why, autoupdate.DefaultClaudeCodeTimeout)
+						i, got, tc.want, tc.why, llm.DefaultClaudeCodeTimeout)
 				}
 			}
 		})

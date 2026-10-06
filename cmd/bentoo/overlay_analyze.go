@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
@@ -324,7 +325,7 @@ func displayBatchResults(results []autoupdate.AnalyzeResult) {
 // the shape packages.toml expects: the fields in canonical order, a comments
 // field, and the `# END` marker that closes a record (R8.1, R8.2).
 //
-// It renders through autoupdate.RenderRecord — the same function that writes the
+// It renders through registry.RenderRecord — the same function that writes the
 // registry — instead of assembling a map and handing it to the TOML encoder. The
 // map could not carry the order (Go map iteration is unordered, and the encoder
 // sorted what it got), and each field needed its own `if` here, so a field added
@@ -336,7 +337,7 @@ func displayBatchResults(results []autoupdate.AnalyzeResult) {
 // block, because the whole value of this output is that it can be pasted into
 // packages.toml verbatim: an indent would be carried into the doc field's own
 // text and onto the `# END` line.
-func displaySchema(pkg string, schema *autoupdate.PackageConfig) {
+func displaySchema(pkg string, schema *registry.PackageConfig) {
 	if schema == nil {
 		return
 	}
@@ -349,7 +350,7 @@ func displaySchema(pkg string, schema *autoupdate.PackageConfig) {
 		record.Comments = suggestedComments(pkg, schema)
 	}
 
-	fmt.Print(autoupdate.RenderRecord(pkg, &record))
+	fmt.Print(registry.RenderRecord(pkg, &record))
 }
 
 // suggestedComments seeds the doc field of a suggested record: the package name
@@ -362,7 +363,7 @@ func displaySchema(pkg string, schema *autoupdate.PackageConfig) {
 // pastes the record, which is why the second line asks for it in those words
 // rather than filling the space with prose that reads like documentation and is
 // not.
-func suggestedComments(pkg string, schema *autoupdate.PackageConfig) string {
+func suggestedComments(pkg string, schema *registry.PackageConfig) string {
 	source := schema.URL
 	if schema.Parser != "" {
 		if source == "" {

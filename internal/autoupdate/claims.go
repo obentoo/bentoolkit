@@ -4,10 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -57,19 +61,19 @@ type claim struct {
 //
 // Keys are visited in sorted order so the result — and every verdict derived
 // from it — is stable across runs.
-func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) []claim {
+func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) []claim {
 	// Normalise the target: a caller holding a registry key must get the same
 	// answer as one holding a bare atom, and neither may reach a path with its
 	// ":slot" or "@label" still attached.
-	category, pkgName, ok := splitPkgAtom(atom)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return nil
 	}
 	wantAtom := category + "/" + pkgName
 
 	var claims []claim
-	for _, key := range sortedKeys(cfgs) {
-		keyAtom, _ := splitPkgSlot(key) // drops "@label" too
+	for _, key := range slices.Sorted(maps.Keys(cfgs)) {
+		keyAtom, _ := ebuilds.SplitPkgSlot(key) // drops "@label" too
 		if keyAtom != wantAtom {
 			continue
 		}
@@ -78,7 +82,7 @@ func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]Package
 		// The single selection authority: it splits the key itself, applies the
 		// ":slot" filter by reading SLOT= and the `series` filter by regex, and
 		// skips live ebuilds (UB2).
-		if cand, err := selectCurrentEbuild(log, overlayPath, key, cfg.Series); err == nil {
+		if cand, err := ebuilds.SelectCurrentEbuild(log, overlayPath, key, cfg.Series); err == nil {
 			c.Version = cand.Version
 		}
 		claims = append(claims, c)
@@ -209,8 +213,8 @@ type sweepPlan struct {
 // a directory that stays dirty one more run, keeping one too few costs a
 // maintained release line — and 90 directories in the overlay have one to lose.
 // Do not "simplify" it back to the pin alone.
-func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) (sweepPlan, error) {
-	category, pkgName, ok := splitPkgAtom(atom)
+func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) (sweepPlan, error) {
+	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return sweepPlan{}, fmt.Errorf("cannot plan sweep: %q is not a category/package atom", atom)
 	}
@@ -219,7 +223,7 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConf
 	// than merely wrong.
 	pkgDir := filepath.Join(overlayPath, category, pkgName)
 
-	paths, err := findEbuilds(pkgDir)
+	paths, err := ebuilds.FindEbuilds(pkgDir)
 	if err != nil {
 		return sweepPlan{}, fmt.Errorf("cannot plan sweep for %s/%s: %w", category, pkgName, err)
 	}
@@ -478,7 +482,7 @@ type Divergence struct {
 // UnclaimedEbuild is computed from.
 //
 // What it skips is warned about to log; nil discards the warnings.
-func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig) []Divergence {
+func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig) []Divergence {
 	log = logging.OrDiscard(log)
 	var divs []Divergence
 	// Directories already scanned for unclaimed ebuilds, keyed by atom: several
@@ -486,7 +490,7 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConf
 	// each sibling that happens to live next to it.
 	scanned := make(map[string]bool)
 
-	for _, key := range sortedKeys(cfgs) {
+	for _, key := range slices.Sorted(maps.Keys(cfgs)) {
 		cfg := cfgs[key]
 		// enabled = false is the ONLY skip here, and the two conditions this
 		// once bundled were never the same reason (S026-R3.2):
@@ -505,13 +509,13 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConf
 		if !cfg.IsEnabled() {
 			continue
 		}
-		category, pkgName, ok := splitPkgAtom(key)
+		category, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok {
 			log.Warn("reconcile: skipping registry key: it is not a category/package atom", "key", key)
 			continue
 		}
 
-		cand, err := selectCurrentEbuild(log, overlayPath, key, cfg.Series)
+		cand, err := ebuilds.SelectCurrentEbuild(log, overlayPath, key, cfg.Series)
 		switch {
 		case err == nil:
 			if cand.Version != cfg.Version {
@@ -519,9 +523,9 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConf
 					Key: key, Kind: StalePin, Pin: cfg.Version, Disk: cand.Version,
 				})
 			}
-		case errors.Is(err, ErrNoEbuildFound),
-			errors.Is(err, ErrSlotNotFound),
-			errors.Is(err, ErrSeriesNotFound):
+		case errors.Is(err, ebuilds.ErrNoEbuildFound),
+			errors.Is(err, ebuilds.ErrSlotNotFound),
+			errors.Is(err, ebuilds.ErrSeriesNotFound):
 			divs = append(divs, Divergence{Key: key, Kind: NoEbuild, Pin: cfg.Version})
 		default:
 			// An unreadable directory, and nothing else: every "this entry holds
@@ -541,7 +545,7 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConf
 		// directory is absent, or — with no ":slot" and no `series` narrowing
 		// the search — because the directory holds no parsable non-live ebuild
 		// at all, and only such an ebuild can ever be reported as unclaimed.
-		if errors.Is(err, ErrNoEbuildFound) {
+		if errors.Is(err, ebuilds.ErrNoEbuildFound) {
 			continue
 		}
 		scanned[atom] = true
@@ -624,14 +628,14 @@ func StalePinBatch(divs []Divergence) map[string]string {
 //
 // An unreadable directory yields a warning and no divergences at all, never a
 // guess about what is in it.
-func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) []Divergence {
-	category, pkgName, ok := splitPkgAtom(atom)
+func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) []Divergence {
+	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return nil
 	}
 	// Built from the split components, never from the raw key.
 	pkgDir := filepath.Join(overlayPath, category, pkgName)
-	paths, err := findEbuilds(pkgDir)
+	paths, err := ebuilds.FindEbuilds(pkgDir)
 	if err != nil {
 		logging.OrDiscard(log).Warn("reconcile: skipping the unclaimed-ebuild scan", "atom", category+"/"+pkgName, "err", err)
 		return nil

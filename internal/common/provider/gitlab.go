@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 // GitLabProvider fetches package versions from GitLab API
@@ -52,10 +52,10 @@ func NewGitLabProvider(repoInfo *RepositoryInfo) (*GitLabProvider, error) {
 		UserAgent: "bentoolkit/1.0",
 		HTTPClient: &http.Client{
 			Timeout:   30 * time.Second,
-			Transport: httputil.BuildTransport(),
+			Transport: httpx.BuildTransport(),
 			// A redirect to another host or to plain http must not carry the
 			// token (S052-R4.6).
-			CheckRedirect: httputil.CredentialRedirectPolicy,
+			CheckRedirect: httpx.CredentialRedirectPolicy,
 		},
 		CacheTTL: 24 * time.Hour,
 	}
@@ -177,8 +177,8 @@ func (p *GitLabProvider) fetchPackageVersions(ctx context.Context, category, pkg
 		return nil, fmt.Errorf("GitLab lookup %s/%s: %w", category, pkg, err)
 	}
 	// Cap every read of this body: an oversized or hostile response fails
-	// with httputil.ErrResponseTooLarge instead of exhausting memory.
-	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	// with httpx.ErrResponseTooLarge instead of exhausting memory.
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	// Handle rate limiting
@@ -202,7 +202,7 @@ func (p *GitLabProvider) fetchPackageVersions(ctx context.Context, category, pkg
 		// The quoted error body is best-effort, except that an oversized one
 		// is reported as such rather than quoted.
 		body, readErr := io.ReadAll(resp.Body)
-		if readErr = httputil.ClassifyBodyReadError(readErr); errors.Is(readErr, httputil.ErrResponseTooLarge) {
+		if readErr = httpx.ClassifyBodyReadError(readErr); errors.Is(readErr, httpx.ErrResponseTooLarge) {
 			return nil, fmt.Errorf("reading GitLab error response for %s/%s: %w", category, pkg, readErr)
 		}
 		return nil, fmt.Errorf("%w: status %d: %s", ErrAPIError, resp.StatusCode, string(body))
@@ -211,7 +211,7 @@ func (p *GitLabProvider) fetchPackageVersions(ctx context.Context, category, pkg
 	// Parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading GitLab response for %s/%s: %w", category, pkg, httputil.ClassifyBodyReadError(err))
+		return nil, fmt.Errorf("reading GitLab response for %s/%s: %w", category, pkg, httpx.ClassifyBodyReadError(err))
 	}
 
 	var entries []GitLabTreeEntry

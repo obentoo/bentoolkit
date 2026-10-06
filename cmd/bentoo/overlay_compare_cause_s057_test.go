@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -98,17 +100,17 @@ func s057Compare(t *testing.T, withLookupError bool, rev overlay.DivergenceRevie
 		Divergence:    map[string]overlay.Divergence{},
 		Redact:        []string{s057Token},
 	}
-	var pkgs []overlay.PackageInfo
+	var pkgs []repo.PackageInfo
 	for i, name := range s057Diverging {
 		writeReviewEbuild(t, overlayRoot, "s057", name, "1.0", fmt.Sprintf("%sDESCRIPTION=\"ours %d\"\n", cmdReviewOurs, i))
 		writeReviewEbuild(t, upstreamRoot, "s057", name, "1.0", fmt.Sprintf("%sDESCRIPTION=\"theirs %d\"\n", cmdReviewTheirs, i))
 		base.versions["s057/"+name] = []string{"1.0"}
 		opts.Divergence["s057/"+name] = overlay.Divergence{}
-		pkgs = append(pkgs, overlay.PackageInfo{Category: "s057", Package: name, Versions: []string{"1.0"}, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "s057", Package: name, Versions: []string{"1.0"}, LatestVersion: "1.0"})
 	}
 	if withLookupError {
 		prov.errs["s057/limited"] = errS057Limited
-		pkgs = append(pkgs, overlay.PackageInfo{Category: "s057", Package: "limited", LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "s057", Package: "limited", LatestVersion: "1.0"})
 	}
 	rep, err := overlay.CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {

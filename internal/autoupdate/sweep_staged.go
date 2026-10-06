@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
@@ -159,7 +160,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// path it IS "", byte for byte what they always returned, and on the supplied
 	// path the directory is known before the first check runs, so there is no
 	// return here that could lose it.
-	_, pkgName, ok := splitPkgAtom(pkg)
+	_, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		return suppliedDistdir, fmt.Errorf("%w: invalid package name format: %s", ErrManifestFailed, pkg)
 	}

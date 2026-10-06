@@ -46,20 +46,23 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s060Fixer is a RegistryFixer that records its request and applies edit to
 // the overlay before answering.
 type s060Fixer struct {
 	calls   int
-	lastReq RegistryFixRequest
+	lastReq fixer.RegistryFixRequest
 	edit    func(t *testing.T)
-	result  RegistryFixResult
+	result  fixer.RegistryFixResult
 	err     error
 	t       *testing.T
 }
 
-func (f *s060Fixer) FixRegistry(_ context.Context, req RegistryFixRequest) (RegistryFixResult, error) {
+func (f *s060Fixer) FixRegistry(_ context.Context, req fixer.RegistryFixRequest) (fixer.RegistryFixResult, error) {
 	f.calls++
 	f.lastReq = req
 	if f.edit != nil {
@@ -68,7 +71,7 @@ func (f *s060Fixer) FixRegistry(_ context.Context, req RegistryFixRequest) (Regi
 	return f.result, f.err
 }
 
-var _ RegistryFixer = (*s060Fixer)(nil)
+var _ fixer.RegistryFixer = (*s060Fixer)(nil)
 
 // s060Registry is one overlay whose single entry fails to extract a version
 // until its JSON path is repaired to "version".
@@ -249,7 +252,7 @@ func TestS060RegistryFixRepairableFetchFailures(t *testing.T) {
 // it.
 func TestS060RegistryFixPassedKeepsTheEdit(t *testing.T) {
 	r := newS060Registry(t)
-	fixer := &s060Fixer{edit: r.editTo("version"), result: RegistryFixResult{Summary: "path repaired", Model: "claude-sonnet-4-5"}}
+	fixer := &s060Fixer{edit: r.editTo("version"), result: fixer.RegistryFixResult{Summary: "path repaired", Model: "claude-sonnet-4-5"}}
 
 	a := r.attempt(t, fixer, r.newChecker)
 
@@ -286,7 +289,7 @@ func TestS060RegistryFixPassedKeepsTheEdit(t *testing.T) {
 // restores the pre-attempt bytes AND file mode.
 func TestS060RegistryFixStillFailingLeavesTheDecisionToTheCaller(t *testing.T) {
 	r := newS060Registry(t)
-	fixer := &s060Fixer{edit: r.editTo("stillwrong"), result: RegistryFixResult{Summary: "tried", Model: "opus", DeniedTools: []string{"WebFetch(example.com)"}}}
+	fixer := &s060Fixer{edit: r.editTo("stillwrong"), result: fixer.RegistryFixResult{Summary: "tried", Model: "opus", DeniedTools: []string{"WebFetch(example.com)"}}}
 
 	a := r.attempt(t, fixer, r.newChecker)
 
@@ -342,7 +345,7 @@ func TestS060RegistryFixRevertsWhenTheFixerFails(t *testing.T) {
 func TestS060RegistryFixRevertsWhenTheCheckerCannotBeBuilt(t *testing.T) {
 	r := newS060Registry(t)
 	noChecker := errors.New("checker init failed")
-	fixer := &s060Fixer{edit: r.editTo("version"), result: RegistryFixResult{Summary: "ok", Model: "sonnet"}}
+	fixer := &s060Fixer{edit: r.editTo("version"), result: fixer.RegistryFixResult{Summary: "ok", Model: "sonnet"}}
 
 	a := r.attempt(t, fixer, func() (*Checker, error) { return nil, noChecker })
 
@@ -400,7 +403,7 @@ func TestS060RegistryFixSkipsWithoutWriting(t *testing.T) {
 			t.Errorf("the fixer ran %d time(s) on a registry that does not parse (R3.2)", fixer.calls)
 		}
 		assertStage(t, a, RegistryFixStageLoad)
-		_, loadErr := LoadPackagesConfig(r.overlayDir)
+		_, loadErr := registry.LoadPackagesConfig(r.overlayDir)
 		if loadErr == nil {
 			t.Fatal("fixture defect: the garbage registry loads")
 		}
@@ -438,7 +441,7 @@ func TestS060RegistryFixReportsAFailedRestore(t *testing.T) {
 	})
 	t.Run("explicit Revert", func(t *testing.T) {
 		r := newS060Registry(t)
-		fixer := &s060Fixer{edit: r.editTo("stillwrong"), result: RegistryFixResult{Summary: "tried"}}
+		fixer := &s060Fixer{edit: r.editTo("stillwrong"), result: fixer.RegistryFixResult{Summary: "tried"}}
 
 		a := r.attempt(t, fixer, r.newChecker)
 		if a.Status != RegistryFixStillFailing {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // The bump renames our own ebuild forward and never re-reads ::gentoo, which is
@@ -23,7 +25,7 @@ func gentooRereadFixture(t *testing.T, pkg, version, ourText, theirText string) 
 	overlay := filepath.Join(tmp, "overlay")
 	gentoo := filepath.Join(tmp, "gentoo")
 
-	category, pkgName, ok := splitPkgAtom(pkg)
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
 		t.Fatalf("splitPkgAtom(%q) failed", pkg)
 	}

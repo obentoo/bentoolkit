@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
 
@@ -91,24 +91,24 @@ func TestReviewAdaptersTranslateTheClaudeOutcome(t *testing.T) {
 		want    string // overlay sentinel word, "" = none
 	}{
 		// Hostile.
-		{"a stopped run is not a timeout", autoupdate.ErrClaudeStopped,
+		{"a stopped run is not a timeout", llm.ErrClaudeStopped,
 			"LLM API request failed: claude CLI was stopped before it answered", ""},
 		{"a bare request failure whose sentence says it ran out of time matches nothing", nil,
 			"LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered", ""},
 		// Benign: one outcome, one overlay sentinel.
-		{"timed out", autoupdate.ErrClaudeTimedOut,
+		{"timed out", llm.ErrClaudeTimedOut,
 			"LLM API request failed: claude CLI ran out of time: its 90s budget elapsed before it answered", "timed out"},
-		{"could not start", autoupdate.ErrClaudeCouldNotStart,
+		{"could not start", llm.ErrClaudeCouldNotStart,
 			"LLM API request failed: claude CLI could not start: fork/exec /usr/bin/claude: permission denied", "could not start"},
-		{"exited non-zero", autoupdate.ErrClaudeExitedNonZero,
+		{"exited non-zero", llm.ErrClaudeExitedNonZero,
 			"LLM API request failed: claude CLI failed: exit status 3", "exited non-zero"},
-		{"unusable output", autoupdate.ErrClaudeUnusableOutput,
+		{"unusable output", llm.ErrClaudeUnusableOutput,
 			"LLM API request failed: claude CLI emitted non-JSON output", "empty or unusable reply"},
 	}
 	for _, ad := range s057Adapters {
 		for _, tc := range cases {
 			t.Run(ad.name+"/"+tc.name, func(t *testing.T) {
-				errs := []error{autoupdate.ErrLLMRequestFailed}
+				errs := []error{llm.ErrLLMRequestFailed}
 				if tc.outcome != nil {
 					errs = append(errs, tc.outcome)
 				}
@@ -135,7 +135,7 @@ func TestReviewAdaptersTranslateTheClaudeOutcome(t *testing.T) {
 		// above asserts.
 		t.Run(ad.name+"/a stopped run reads as cancelled", func(t *testing.T) {
 			text := "LLM API request failed: claude CLI was stopped before it answered: context canceled"
-			cause := &s057ClaudeFailure{text: text, errs: []error{autoupdate.ErrLLMRequestFailed, autoupdate.ErrClaudeStopped}}
+			cause := &s057ClaudeFailure{text: text, errs: []error{llm.ErrLLMRequestFailed, llm.ErrClaudeStopped}}
 			err := ad.call(t, &fakeAsker{err: cause})
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("errors.Is(%q, context.Canceled) = false; a stopped run must read as cancelled", err)
@@ -169,17 +169,17 @@ func TestReviewAdaptersTranslateARealUnstartableClaude(t *testing.T) {
 
 	for _, ad := range s057Adapters {
 		t.Run(ad.name, func(t *testing.T) {
-			client, err := autoupdate.NewClaudeCodeClient(autoupdate.LLMConfig{},
-				autoupdate.WithClaudeCodeExecCommand(func(ctx context.Context, _ string, arg ...string) *exec.Cmd {
+			client, err := llm.NewClaudeCodeClient(llm.LLMConfig{},
+				llm.WithClaudeCodeExecCommand(func(ctx context.Context, _ string, arg ...string) *exec.Cmd {
 					return exec.CommandContext(ctx, missing, arg...)
 				}),
-				autoupdate.WithClaudeCodeTimeout(30*time.Second))
+				llm.WithClaudeCodeTimeout(30*time.Second))
 			if err != nil {
 				t.Fatalf("NewClaudeCodeClient: %v", err)
 			}
 			err = ad.call(t, client)
-			if !errors.Is(err, autoupdate.ErrClaudeCouldNotStart) {
-				t.Errorf("the real client's error %q does not match autoupdate.ErrClaudeCouldNotStart (sub-task 2.1 not in place?)", err)
+			if !errors.Is(err, llm.ErrClaudeCouldNotStart) {
+				t.Errorf("the real client's error %q does not match llm.ErrClaudeCouldNotStart (sub-task 2.1 not in place?)", err)
 			}
 			s057AssertOnly(t, err, "could not start")
 		})

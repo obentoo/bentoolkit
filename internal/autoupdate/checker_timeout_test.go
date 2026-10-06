@@ -7,6 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestDeriveOpTimeout verifies the per-operation budget is sized to fit every
@@ -14,7 +17,7 @@ import (
 // backoff, plus one second of slack. For the default retry config (3 retries,
 // 1s base, 4s cap) and a 30s per-request timeout that is 30×4 + (1+2+4) + 1.
 func TestDeriveOpTimeout(t *testing.T) {
-	rc := DefaultRetryConfig()
+	rc := fetch.DefaultRetryConfig()
 	got := deriveOpTimeout(30*time.Second, rc)
 	want := 30*4*time.Second + (1+2+4)*time.Second + time.Second // 128s
 	if got != want {
@@ -36,10 +39,10 @@ func TestOperationTimeout(t *testing.T) {
 	if got := checker.operationTimeout(nil); got != 40*time.Second {
 		t.Errorf("operationTimeout(nil) = %v, want global 40s", got)
 	}
-	if got := checker.operationTimeout(&PackageConfig{}); got != 40*time.Second {
+	if got := checker.operationTimeout(&registry.PackageConfig{}); got != 40*time.Second {
 		t.Errorf("operationTimeout(zero cfg) = %v, want global 40s", got)
 	}
-	if got := checker.operationTimeout(&PackageConfig{Timeout: 90}); got != 90*time.Second {
+	if got := checker.operationTimeout(&registry.PackageConfig{Timeout: 90}); got != 90*time.Second {
 		t.Errorf("operationTimeout(per-package 90) = %v, want 90s", got)
 	}
 }
@@ -76,9 +79,9 @@ func TestWithHTTPRequestTimeout_WiresAndDerives(t *testing.T) {
 func TestWithHTTPRequestTimeout_NoOpOnNonPositive(t *testing.T) {
 	checker := newContextTestChecker(t, "http://example.invalid", WithHTTPRequestTimeout(0))
 
-	if got := checker.httpClient.Config().Timeout; got != DefaultHTTPTimeout {
+	if got := checker.httpClient.Config().Timeout; got != fetch.DefaultHTTPTimeout {
 		t.Errorf("zero WithHTTPRequestTimeout changed client timeout to %v, want default %v",
-			got, DefaultHTTPTimeout)
+			got, fetch.DefaultHTTPTimeout)
 	}
 	if checker.opTimeout != DefaultOpTimeout {
 		t.Errorf("zero WithHTTPRequestTimeout changed opTimeout to %v, want default %v",
@@ -108,7 +111,7 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 
 	// Per-request cap of 150ms, no real backoff sleeps, and a 5s budget that
 	// leaves ample room for the retry.
-	client := NewRetryableHTTPClient()
+	client := fetch.NewRetryableHTTPClient()
 	client.SetHTTPClient(&http.Client{Timeout: 150 * time.Millisecond})
 	client.SetDelayFunc(func(time.Duration) {})
 
@@ -117,7 +120,7 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 		WithOpTimeout(5*time.Second),
 	)
 
-	content, err := checker.fetchContent(t.Context(), server.URL, nil, credentialScope{}, checker.operationTimeout(nil))
+	content, err := checker.fetchContent(t.Context(), server.URL, nil, fetch.CredentialScope{}, checker.operationTimeout(nil))
 	if err != nil {
 		t.Fatalf("expected the retry to recover from the first timeout, got error: %v", err)
 	}
@@ -126,19 +129,5 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&attempts); n < 2 {
 		t.Errorf("expected at least 2 attempts (timeout then retry), got %d", n)
-	}
-}
-
-// TestValidatePackageConfig_NegativeTimeout asserts a negative per-package
-// timeout is rejected, while zero (the "use global" sentinel) is accepted.
-func TestValidatePackageConfig_NegativeTimeout(t *testing.T) {
-	bad := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: -5}
-	if err := ValidatePackageConfig(nil, "cat/pkg", bad); err == nil {
-		t.Error("expected an error for a negative timeout, got nil")
-	}
-
-	ok := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: 0}
-	if err := ValidatePackageConfig(nil, "cat/pkg", ok); err != nil {
-		t.Errorf("zero timeout should be valid (use global), got: %v", err)
 	}
 }

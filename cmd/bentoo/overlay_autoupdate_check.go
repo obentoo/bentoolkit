@@ -47,6 +47,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -183,7 +184,7 @@ func planValidation(
 		// as major in the plan the operator confirms while the run executes it
 		// as patch — a plan that lies about its own cost.
 		class, note := validate.ClassifyForDepth(update.CurrentVersion,
-			autoupdate.NormalizeUpstreamVersion(update.NewVersion))
+			parse.NormalizeUpstreamVersion(update.NewVersion))
 
 		decision := validate.ResolveDepth(validate.DepthRequest{
 			Package: update.Package,

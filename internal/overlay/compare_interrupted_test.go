@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // TestCompareReportInterrupted guards CompareReport.Interrupted: the run-level
@@ -86,11 +88,11 @@ func TestCompareReportInterrupted(t *testing.T) {
 		// going when the cancel lands.
 		const numPkgs = 200
 		prov := &fakeProvider{hook: holdUntilCancelled(t), versions: map[string][]string{}}
-		pkgs := make([]PackageInfo, 0, numPkgs)
+		pkgs := make([]repo.PackageInfo, 0, numPkgs)
 		for i := 0; i < numPkgs; i++ {
 			name := fmt.Sprintf("pkg%03d", i)
 			prov.versions["cat/"+name] = []string{"1.0"}
-			pkgs = append(pkgs, PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
+			pkgs = append(pkgs, repo.PackageInfo{Category: "cat", Package: name, LatestVersion: "1.0"})
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +122,7 @@ func TestCompareReportInterrupted(t *testing.T) {
 	t.Run("a run cancelled before dispatch reports Interrupted", func(t *testing.T) {
 		// Same fixture shape as TestCompareWithProvider_ContextCancelledUpfront.
 		prov := &fakeProvider{versions: map[string][]string{}}
-		pkgs := []PackageInfo{
+		pkgs := []repo.PackageInfo{
 			{Category: "cat", Package: "a", LatestVersion: "1.0"},
 			{Category: "cat", Package: "b", LatestVersion: "1.0"},
 		}
@@ -157,7 +159,7 @@ func TestCompareReportInterrupted(t *testing.T) {
 			versions: map[string][]string{"cat/synced": {"1.0"}},
 			errs:     map[string]error{"cat/broken": errors.New("provider is down")},
 		}
-		pkgs := []PackageInfo{
+		pkgs := []repo.PackageInfo{
 			{Category: "cat", Package: "synced", LatestVersion: "1.0"},
 			{Category: "cat", Package: "absent", LatestVersion: "1.0"},
 			{Category: "cat", Package: "broken", LatestVersion: "1.0"},

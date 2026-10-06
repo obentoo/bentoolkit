@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -88,9 +90,9 @@ func writeVerifyEbuild(t *testing.T, root, category, pkg, version, body string) 
 // and note from, and asking of them replaces a case-insensitive search for the
 // word "stale" — which the caveat prose and a package name could both satisfy —
 // with a check on the finding's Kind.
-func verifyRun(t *testing.T, overlayRoot string, prov provider.Provider, pkg PackageInfo, div map[string]Divergence) (CompareResult, []Finding) {
+func verifyRun(t *testing.T, overlayRoot string, prov provider.Provider, pkg repo.PackageInfo, div map[string]Divergence) (CompareResult, []Finding) {
 	t.Helper()
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, CompareOptions{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{pkg}, prov, CompareOptions{
 		IncludeSynced:      true,
 		IncludeNotInRemote: true,
 		OverlayPath:        overlayRoot,
@@ -117,7 +119,7 @@ const (
 //
 // _Requirements: R4.1, R4.2, R4.3, R4.4, R4.5_
 func TestVerifyAgainstLocalContent(t *testing.T) {
-	pkg := PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
+	pkg := repo.PackageInfo{Category: "app-editors", Package: "zed", LatestVersion: "1.0"}
 
 	declared := map[string]Divergence{
 		"app-editors/zed": {Patched: true, Reason: "keeps our wayland patch", Entry: zedPatchedEntry},

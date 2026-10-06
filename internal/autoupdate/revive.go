@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -115,7 +117,7 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 		return ReviveOutcome{Package: pkg, Status: ReviveFailed, Detail: detail}
 	}
 
-	category, pkgName, ok := SplitPackageKey(pkg)
+	category, pkgName, ok := ebuilds.SplitPackageKey(pkg)
 	if !ok {
 		return failed(fmt.Sprintf("invalid package name %q (want category/package)", pkg))
 	}
@@ -144,7 +146,7 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 
 	// Re-enable the entry BEFORE checking: the checker skips disabled entries, so
 	// a still-disabled package would never produce a pending update.
-	if err := EnablePackagesInConfig(r.overlayPath, []string{pkg}); err != nil {
+	if err := registry.EnablePackagesInConfig(r.overlayPath, []string{pkg}); err != nil {
 		return failed(fmt.Sprintf("re-enable in packages.toml failed: %v", err))
 	}
 	// The shared Applier loaded packages.toml before this entry was enabled;

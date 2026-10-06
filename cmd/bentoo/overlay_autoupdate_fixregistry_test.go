@@ -37,6 +37,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 )
 
 // fakeRegistryFixer is a RegistryFixer test double that, on each call, runs onCall
@@ -46,23 +47,23 @@ type fakeRegistryFixer struct {
 	called  int
 	summary string
 	err     error
-	onCall  func(req autoupdate.RegistryFixRequest)
-	lastReq autoupdate.RegistryFixRequest
+	onCall  func(req fixer.RegistryFixRequest)
+	lastReq fixer.RegistryFixRequest
 }
 
-func (f *fakeRegistryFixer) FixRegistry(_ context.Context, req autoupdate.RegistryFixRequest) (autoupdate.RegistryFixResult, error) {
+func (f *fakeRegistryFixer) FixRegistry(_ context.Context, req fixer.RegistryFixRequest) (fixer.RegistryFixResult, error) {
 	f.called++
 	f.lastReq = req
 	if f.onCall != nil {
 		f.onCall(req)
 	}
 	if f.err != nil {
-		return autoupdate.RegistryFixResult{}, f.err
+		return fixer.RegistryFixResult{}, f.err
 	}
-	return autoupdate.RegistryFixResult{Summary: f.summary}, nil
+	return fixer.RegistryFixResult{Summary: f.summary}, nil
 }
 
-var _ autoupdate.RegistryFixer = (*fakeRegistryFixer)(nil)
+var _ fixer.RegistryFixer = (*fakeRegistryFixer)(nil)
 
 // regfixHarness builds a real overlay (ebuild + packages.toml) for one package whose
 // config initially FAILS extraction (path points at a missing JSON field), plus a
@@ -155,7 +156,7 @@ func TestPromptRegistryFixes_KeepOnPassingRecheck(t *testing.T) {
 
 	fixer := &fakeRegistryFixer{
 		summary: "changed path from nonexistent to version",
-		onCall: func(req autoupdate.RegistryFixRequest) {
+		onCall: func(req fixer.RegistryFixRequest) {
 			// Simulate the agent's edit: rewrite to a working JSON path.
 			h.writeConfig(t, "version")
 		},
@@ -207,7 +208,7 @@ func TestPromptRegistryFixes_RevertOnFailingRecheck(t *testing.T) {
 
 	fixer := &fakeRegistryFixer{
 		summary: "tried a different (still wrong) path",
-		onCall: func(req autoupdate.RegistryFixRequest) {
+		onCall: func(req fixer.RegistryFixRequest) {
 			// A different broken edit: still no matching field → re-check fails.
 			h.writeConfig(t, "still_wrong")
 		},
@@ -294,7 +295,7 @@ func TestPromptRegistryFixes_FixerErrorRestoresAndContinues(t *testing.T) {
 
 	fixer := &fakeRegistryFixer{
 		err: errors.New("claude budget exceeded"),
-		onCall: func(req autoupdate.RegistryFixRequest) {
+		onCall: func(req fixer.RegistryFixRequest) {
 			// The agent partially edited before erroring.
 			h.writeConfig(t, "partial_broken")
 		},

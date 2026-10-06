@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
 // filesFixture writes an overlay ebuild for pkg at version with ebuildText and
@@ -11,7 +13,7 @@ import (
 func filesFixture(t *testing.T, pkg, version, ebuildText string, files ...string) (*Applier, *recordingReporter) {
 	t.Helper()
 	applier, rep := gentooRereadFixture(t, pkg, version, ebuildText, "")
-	category, pkgName, _ := splitPkgAtom(pkg)
+	category, pkgName, _ := ebuilds.SplitPkgAtom(pkg)
 	for _, f := range files {
 		path := filepath.Join(applier.overlayPath, category, pkgName, "files", f)
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {

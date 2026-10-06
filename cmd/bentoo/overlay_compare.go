@@ -9,7 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -322,7 +325,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	// Scan local overlay
 	log.Info("Scanning Bentoo overlay", "path", overlayPath)
-	scanResult, err := overlay.ScanOverlay(overlayPath)
+	scanResult, err := repo.ScanOverlay(overlayPath)
 	if err != nil {
 		log.Error("scanning overlay: failed", "err", err)
 		return exitWith(1)
@@ -693,7 +696,7 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // hard dependency of a command that never had one. Absence from the map IS the
 // unknown state, so a nil map needs no special case downstream.
 //
-// Keys are split with autoupdate.SplitPackageKey, never by hand: its own doc
+// Keys are split with ebuilds.SplitPackageKey, never by hand: its own doc
 // comment names "a second, slot-blind copy of the split" as exactly the bug the
 // ":slot" suffix invites, and the path is hot — 90 of 321 registry atoms carry
 // more than one entry. So "net-libs/webkit-gtk:4.1" and
@@ -725,7 +728,7 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // to build a filesystem path: the verification step builds its path from the
 // scanned directory names instead. Keep it that way.
 func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overlay.Divergence, error) {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return nil, err
 	}
@@ -738,7 +741,7 @@ func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overla
 
 	divs := make(map[string]overlay.Divergence, len(keys))
 	for _, key := range keys {
-		category, name, ok := autoupdate.SplitPackageKey(key)
+		category, name, ok := ebuilds.SplitPackageKey(key)
 		if !ok {
 			log.Warn("registry key is not a category/package atom; skipping it", "key", key)
 			continue

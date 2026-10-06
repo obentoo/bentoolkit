@@ -9,16 +9,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // heldErrChecker is holdChecker with extra options: the aux-404-on-a-fresh-fetch
 // case needs the body cache off, because with it on the aux read reuses the
 // version page's body and never reaches the server a second time.
-func heldErrChecker(t *testing.T, overlayDir, configDir, pkg string, cfg PackageConfig, extra ...CheckerOption) *Checker {
+func heldErrChecker(t *testing.T, overlayDir, configDir, pkg string, cfg registry.PackageConfig, extra ...CheckerOption) *Checker {
 	t.Helper()
 	opts := append([]CheckerOption{
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	}, extra...)
 	c, err := NewChecker(overlayDir, opts...)
@@ -125,7 +127,7 @@ func TestCheckPackage_HeldBumpWrapsErrAuxUnresolved(t *testing.T) {
 		srv := newHoldServer(t, http.StatusOK, `{"version":"2.0.0"}`)
 		overlayDir, configDir := t.TempDir(), t.TempDir()
 		createTestEbuild(t, overlayDir, pkg, "1.0.0")
-		cfg := PackageConfig{Parser: "json", Path: "version", CommitSHAPath: "commitSha", URL: srv.srv.URL}
+		cfg := registry.PackageConfig{Parser: "json", Path: "version", CommitSHAPath: "commitSha", URL: srv.srv.URL}
 		result := checkForHold(t, heldErrChecker(t, overlayDir, configDir, pkg, cfg), pkg, true, false)
 		assertHeld(t, result)
 	})

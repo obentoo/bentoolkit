@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // newAuxTestChecker builds a Checker wired for direct resolveAuxValue calls:
@@ -16,7 +18,7 @@ func newAuxTestChecker(t *testing.T) *Checker {
 	t.Helper()
 	c, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -35,7 +37,7 @@ func TestResolveAuxValue_NoMatch(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := newAuxTestChecker(t)
-	cfg := &PackageConfig{URL: server.URL, AuxPattern: `(esr-bb[0-9]+)`}
+	cfg := &registry.PackageConfig{URL: server.URL, AuxPattern: `(esr-bb[0-9]+)`}
 	result := &CheckResult{}
 
 	if got := c.resolveAuxValue(t.Context(), cfg, result); got != "" {
@@ -51,7 +53,7 @@ func TestResolveAuxValue_NoMatch(t *testing.T) {
 func TestResolveAuxValue_EmptyPattern(t *testing.T) {
 	c := newAuxTestChecker(t)
 	result := &CheckResult{}
-	if got := c.resolveAuxValue(t.Context(), &PackageConfig{URL: "http://unused"}, result); got != "" {
+	if got := c.resolveAuxValue(t.Context(), &registry.PackageConfig{URL: "http://unused"}, result); got != "" {
 		t.Errorf("expected empty value for empty aux_pattern, got %q", got)
 	}
 	if result.Error != nil {
@@ -68,7 +70,7 @@ func TestResolveAuxValue_FetchError(t *testing.T) {
 
 	c := newAuxTestChecker(t)
 	result := &CheckResult{}
-	if got := c.resolveAuxValue(t.Context(), &PackageConfig{URL: url, AuxPattern: `(x)`}, result); got != "" {
+	if got := c.resolveAuxValue(t.Context(), &registry.PackageConfig{URL: url, AuxPattern: `(x)`}, result); got != "" {
 		t.Errorf("expected empty value on fetch error, got %q", got)
 	}
 	if result.Error == nil {
@@ -83,7 +85,7 @@ func TestResolveAuxSHA(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{}, result); got != "" || result.Error != nil {
+		if got := c.resolveAuxSHA(t.Context(), &registry.PackageConfig{}, result); got != "" || result.Error != nil {
 			t.Errorf("empty path: got %q err %v", got, result.Error)
 		}
 	})
@@ -97,7 +99,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		t.Cleanup(server.Close)
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != sha {
+		if got := c.resolveAuxSHA(t.Context(), &registry.PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != sha {
 			t.Errorf("success: got %q, want %q (err %v)", got, sha, result.Error)
 		}
 	})
@@ -109,7 +111,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		t.Cleanup(server.Close)
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != "" {
+		if got := c.resolveAuxSHA(t.Context(), &registry.PackageConfig{URL: server.URL, CommitSHAPath: "commitSha"}, result); got != "" {
 			t.Errorf("parse error: expected empty, got %q", got)
 		}
 		if result.Error == nil {
@@ -123,7 +125,7 @@ func TestResolveAuxSHA(t *testing.T) {
 		server.Close()
 		c := newAuxTestChecker(t)
 		result := &CheckResult{}
-		if got := c.resolveAuxSHA(t.Context(), &PackageConfig{URL: url, CommitSHAPath: "commitSha"}, result); got != "" {
+		if got := c.resolveAuxSHA(t.Context(), &registry.PackageConfig{URL: url, CommitSHAPath: "commitSha"}, result); got != "" {
 			t.Errorf("fetch error: expected empty, got %q", got)
 		}
 		if result.Error == nil {
@@ -157,7 +159,7 @@ parser = "json"
 path = "v"
 `
 	overlay, _ := writePackagesTOML(t, content)
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
@@ -184,7 +186,7 @@ path = "v"
 	}
 
 	// On-disk file flipped too (reload and re-check).
-	reloaded, err := LoadPackagesConfig(overlay)
+	reloaded, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -198,27 +200,6 @@ path = "v"
 	}
 }
 
-// TestExtractPackageAtom covers the atom-parsing helper across its branches:
-// leading operators, a version boundary, slot, USE flags, the no-slash case, and
-// a bare atom.
-func TestExtractPackageAtom(t *testing.T) {
-	cases := map[string]string{
-		">=dev-util/foo-1.2.3":   "dev-util/foo",
-		"=app-editors/vim-9.0":   "app-editors/vim",
-		"~net-misc/curl-8.1":     "net-misc/curl",
-		"dev-libs/openssl:0/3":   "dev-libs/openssl",
-		"x11-libs/gtk+[wayland]": "x11-libs/gtk+",
-		"sys-apps/portage":       "sys-apps/portage",
-		"noslash":                "",
-		"":                       "",
-	}
-	for atom, want := range cases {
-		if got := extractPackageAtom(atom); got != want {
-			t.Errorf("extractPackageAtom(%q) = %q, want %q", atom, got, want)
-		}
-	}
-}
-
 // TestOptionSetters exercises the small functional-option closures that are
 // otherwise only wired from cmd/ (and so show as uncovered): the checker's
 // config dir and rate limiter, the applier's packages config, and the analyzer's
@@ -226,7 +207,7 @@ func TestExtractPackageAtom(t *testing.T) {
 // loading) — the options still run inside the constructor's apply loop, which is
 // the point.
 func TestOptionSetters(t *testing.T) {
-	empty := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	empty := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 
 	if _, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),

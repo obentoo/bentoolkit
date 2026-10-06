@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
 )
@@ -36,7 +37,7 @@ type lockProbingFixer struct {
 	lockErr  error
 }
 
-func (f *lockProbingFixer) FixRegistry(_ context.Context, _ autoupdate.RegistryFixRequest) (autoupdate.RegistryFixResult, error) {
+func (f *lockProbingFixer) FixRegistry(_ context.Context, _ fixer.RegistryFixRequest) (fixer.RegistryFixResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -45,7 +46,7 @@ func (f *lockProbingFixer) FixRegistry(_ context.Context, _ autoupdate.RegistryF
 		lock.Release()
 	}
 	f.lockErr = err
-	return autoupdate.RegistryFixResult{}, errors.New("probe fixer edits nothing")
+	return fixer.RegistryFixResult{}, errors.New("probe fixer edits nothing")
 }
 
 // TestAutoupdateOverlayLock_HeldAcrossRegistryFixer: R4.6. A --check whose
@@ -71,9 +72,9 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 	filelock.Wait, filelock.Poll = 200*time.Millisecond, 10*time.Millisecond
 	t.Cleanup(func() { filelock.Wait, filelock.Poll = oldWait, oldPoll })
 
-	fixer := &lockProbingFixer{lockPath: filepath.Join(overlayDir, ".autoupdate.bentoo-lock")}
+	localFixer := &lockProbingFixer{lockPath: filepath.Join(overlayDir, ".autoupdate.bentoo-lock")}
 	td := defaultDeps()
-	td.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+	td.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (fixer.RegistryFixer, error) { return localFixer, nil }
 	td.checkInteractive = func() bool { return true }
 
 	// The prompt reads os.Stdin: answer "y" to the one package offered.
@@ -93,13 +94,13 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 
 	_ = runAutoupdate(auCmd, nil, auOpts, td)
 
-	fixer.mu.Lock()
-	defer fixer.mu.Unlock()
-	if fixer.calls == 0 {
+	localFixer.mu.Lock()
+	defer localFixer.mu.Unlock()
+	if localFixer.calls == 0 {
 		t.Fatal("the registry fixer was never offered the failing package; the test did not reach R4.6's subject")
 	}
-	if !errors.Is(fixer.lockErr, filelock.ErrLocked) {
-		t.Errorf("an Acquire of the overlay lock from inside the registry fixer returned %v, want filelock.ErrLocked: the fix loop ran outside the run's lock", fixer.lockErr)
+	if !errors.Is(localFixer.lockErr, filelock.ErrLocked) {
+		t.Errorf("an Acquire of the overlay lock from inside the registry fixer returned %v, want filelock.ErrLocked: the fix loop ran outside the run's lock", localFixer.lockErr)
 	}
 }
 

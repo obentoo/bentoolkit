@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -62,10 +64,10 @@ func newCheckerOverDistinctURLs(tb testing.TB, numPkgs int, limiter httpRateLimi
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	packages := make(map[string]PackageConfig, numPkgs)
+	packages := make(map[string]registry.PackageConfig, numPkgs)
 	for i := 0; i < numPkgs; i++ {
 		name := fmt.Sprintf("cat-%03d/pkg-%03d", i, i)
-		packages[name] = PackageConfig{
+		packages[name] = registry.PackageConfig{
 			// A DISTINCT path per package, which is what makes this fixture
 			// measure parallelism rather than deduplication (S024-R2.1). The
 			// per-package latency below is injected through the rate limiter,
@@ -86,7 +88,7 @@ func newCheckerOverDistinctURLs(tb testing.TB, numPkgs int, limiter httpRateLimi
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithRateLimiter(limiter),
 		WithConcurrency(concurrency),
 	)

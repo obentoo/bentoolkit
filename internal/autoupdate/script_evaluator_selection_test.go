@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // selSourceFile is one .go file of this package, parsed with comments.
@@ -348,7 +350,7 @@ func selScriptChecker(t *testing.T) (*Checker, string) {
 	createTestEbuild(t, overlay, pkg, "1.0.0")
 	c, err := NewChecker(overlay,
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: {URL: "https://example.invalid/releases", Parser: "script", Script: "latest()"},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),

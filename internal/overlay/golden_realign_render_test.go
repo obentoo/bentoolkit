@@ -2,6 +2,8 @@ package overlay
 
 import (
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 )
 
 // This file exists because a MUTATION SURVIVED sub-task 9.1's frozen fragment,
@@ -59,7 +61,7 @@ func TestNodejsClassificationIsAttributedToThePackageInTheReport(t *testing.T) {
 	overlayRoot, prov, pkg := goldenPair(t, "net-libs", "nodejs", "26.7.0", "26.7.0", goldenNodejsOurs, goldenNodejsBaseline)
 	opts := CompareOptions{IncludeSynced: true, IncludeNotInRemote: true, OverlayPath: overlayRoot}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{pkg}, prov, opts)
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{pkg}, prov, opts)
 	if err != nil {
 		t.Fatalf("CompareWithProvider returned %v, want nil", err)
 	}

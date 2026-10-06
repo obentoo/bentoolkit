@@ -11,6 +11,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/sony/gobreaker"
 )
 
@@ -42,7 +45,7 @@ func TestFallbackKeepsRecordFields(t *testing.T) {
 	pkg := "net-dns/bind-tools"
 	createTestEbuild(t, overlayDir, pkg, "1.8.3")
 
-	cfg := PackageConfig{
+	cfg := registry.PackageConfig{
 		URL:             primary.URL,
 		Parser:          "json",
 		Path:            "version",
@@ -73,7 +76,7 @@ func TestFallbackKeepsRecordFields(t *testing.T) {
 }
 
 func TestFallbackConfigKeepsTimeoutAndSuffix(t *testing.T) {
-	cfg := &PackageConfig{Timeout: 90, Suffix: "_beta", SuffixWhen: `^2\.`, FallbackParser: "regex"}
+	cfg := &registry.PackageConfig{Timeout: 90, Suffix: "_beta", SuffixWhen: `^2\.`, FallbackParser: "regex"}
 	got := fallbackConfig(cfg, "x")
 	if got.Timeout != 90 || got.Suffix != "_beta" || got.SuffixWhen != `^2\.` {
 		t.Errorf("fallbackConfig dropped fields: %+v", *got)
@@ -89,16 +92,16 @@ func TestIsUpstreamUnreachable(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"retries exhausted", fmt.Errorf("%w: tls: EOF", ErrMaxRetriesExceeded), true},
-		{"request timeout", fmt.Errorf("%w: i/o timeout", ErrRequestTimeout), true},
+		{"retries exhausted", fmt.Errorf("%w: tls: EOF", fetch.ErrMaxRetriesExceeded), true},
+		{"request timeout", fmt.Errorf("%w: i/o timeout", fetch.ErrRequestTimeout), true},
 		{"breaker open", fmt.Errorf("circuit breaker open: %w", gobreaker.ErrOpenState), true},
 		{"operation deadline", fmt.Errorf("request to x deadline exceeded: %w", context.DeadlineExceeded), true},
 		{"wrapped by the extraction chain", fmt.Errorf("all version extraction methods failed: %w",
-			fmt.Errorf("%w: connection reset", ErrMaxRetriesExceeded)), true},
-		{"host does not exist", fmt.Errorf("%w: %w", ErrMaxRetriesExceeded,
+			fmt.Errorf("%w: connection reset", fetch.ErrMaxRetriesExceeded)), true},
+		{"host does not exist", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded,
 			&net.DNSError{Err: "no such host", Name: "dowloads.isc.org", IsNotFound: true}), false},
-		{"cancelled by the operator", fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, context.Canceled), false},
-		{"no version in the page", ErrNoVersionFound, false},
+		{"cancelled by the operator", fmt.Errorf("%w: %w", fetch.ErrMaxRetriesExceeded, context.Canceled), false},
+		{"no version in the page", parse.ErrNoVersionFound, false},
 		{"plain error", errors.New("HTTP 404"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

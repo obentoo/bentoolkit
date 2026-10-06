@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // --check captures, for every requires entry, the version its pattern reads
@@ -52,7 +55,7 @@ func requiresCaptureServer(t *testing.T, body string) (*httptest.Server, *atomic
 // dev-lang/flutter-3.47.0, with the per-run body cache on and no retries.
 // HOME and XDG_CONFIG_HOME point at temp dirs so nothing reaches the real
 // state directory.
-func requiresCaptureChecker(t *testing.T, cfg PackageConfig) *Checker {
+func requiresCaptureChecker(t *testing.T, cfg registry.PackageConfig) *Checker {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", filepath.Join(tmp, "home"))
@@ -61,9 +64,9 @@ func requiresCaptureChecker(t *testing.T, cfg PackageConfig) *Checker {
 	createTestEbuild(t, overlayDir, requiresCapturePkg, "3.47.0")
 	c, err := NewChecker(overlayDir,
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{requiresCapturePkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{requiresCapturePkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+		WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 		WithFetchCache(true),
 	)
 	if err != nil {
@@ -73,8 +76,8 @@ func requiresCaptureChecker(t *testing.T, cfg PackageConfig) *Checker {
 }
 
 // requiresCaptureConfig is the flutter record reading its version from page.
-func requiresCaptureConfig(pageURL string, requires map[string]RequireSpec) PackageConfig {
-	return PackageConfig{
+func requiresCaptureConfig(pageURL string, requires map[string]registry.RequireSpec) registry.PackageConfig {
+	return registry.PackageConfig{
 		URL:      pageURL,
 		Parser:   "json",
 		Path:     "current_release.stable",
@@ -83,8 +86,8 @@ func requiresCaptureConfig(pageURL string, requires map[string]RequireSpec) Pack
 }
 
 // requiresCaptureFlutterSpec reads the Dart of the detected release object.
-func requiresCaptureFlutterSpec() RequireSpec {
-	return RequireSpec{Pattern: `"version":\s*"{version}",\s*"dart_sdk_version":\s*"([^"]+)"`, Pin: "~"}
+func requiresCaptureFlutterSpec() registry.RequireSpec {
+	return registry.RequireSpec{Pattern: `"version":\s*"{version}",\s*"dart_sdk_version":\s*"([^"]+)"`, Pin: "~"}
 }
 
 // TestRequiresCaptureFromTheDetectedReleaseObject: the captured Dart is the
@@ -95,7 +98,7 @@ func requiresCaptureFlutterSpec() RequireSpec {
 func TestRequiresCaptureFromTheDetectedReleaseObject(t *testing.T) {
 	page, hits := requiresCaptureServer(t, requiresCapturePage)
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+		map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 
 	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	if err != nil {
@@ -135,7 +138,7 @@ func TestRequiresCaptureFromTheDetectedReleaseObject(t *testing.T) {
 func TestRequiresCaptureOnTheCachedVersionPath(t *testing.T) {
 	page, _ := requiresCaptureServer(t, requiresCapturePage)
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+		map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 
 	if _, err := c.CheckPackage(t.Context(), requiresCapturePkg, true); err != nil {
 		t.Fatalf("CheckPackage (seed cache): %v", err)
@@ -185,7 +188,7 @@ func TestRequiresCaptureFromItsOwnURL(t *testing.T) {
 	}))
 	t.Cleanup(deps.Close)
 
-	cfg := requiresCaptureConfig(page.URL, map[string]RequireSpec{
+	cfg := requiresCaptureConfig(page.URL, map[string]registry.RequireSpec{
 		requiresCaptureAtom: {Pattern: `dart=([0-9.]+)`, URL: deps.URL + "/sdk/v{version}/deps.txt", Pin: "~"},
 	})
 	cfg.Headers = map[string]string{"Authorization": "Bearer literal", "User-Agent": "bentoo-test/1"}
@@ -250,14 +253,14 @@ func TestRequiresCaptureHeldWhenPatternMatchesNothing(t *testing.T) {
 		page, _ := requiresCaptureServer(t, `{"current_release": {"stable": "3.48.0"},
   "releases": [{"version": "3.47.0", "dart_sdk_version": "3.13.5"}, {"version": "3.48.0"}]}`)
 		c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-			map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+			map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 		result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 		requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom)
 	})
 
 	t.Run("one of two entries", func(t *testing.T) {
 		page, _ := requiresCaptureServer(t, requiresCapturePage)
-		c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL, map[string]RequireSpec{
+		c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL, map[string]registry.RequireSpec{
 			requiresCaptureAtom: requiresCaptureFlutterSpec(),
 			"dev-util/flutter-engine": {
 				Pattern: `"version":\s*"{version}",\s*"engine_version":\s*"([^"]+)"`,
@@ -278,7 +281,7 @@ func TestRequiresCaptureHeldOnAnInvalidVersion(t *testing.T) {
 			page, _ := requiresCaptureServer(t, `{"current_release": {"stable": "3.48.0"},
   "releases": [{"version": "3.48.0", "dart_sdk_version": "`+value+`"}]}`)
 			c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-				map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+				map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 			result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 			requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom, value)
 		})
@@ -289,7 +292,7 @@ func TestRequiresCaptureHeldOnAnInvalidVersion(t *testing.T) {
 			page, _ := requiresCaptureServer(t, `{"current_release": {"stable": "3.48.0"},
   "releases": [{"version": "3.48.0", "dart_sdk_version": "`+value+`"}]}`)
 			c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-				map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+				map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 			result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 			if err != nil || result.Error != nil {
 				t.Fatalf("CheckPackage: err=%v result.Error=%v", err, result.Error)

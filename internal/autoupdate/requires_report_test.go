@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -37,7 +39,7 @@ type requiresReportFixture struct {
 	gentoo  string
 	pending *PendingList
 	server  *httptest.Server
-	cfg     PackageConfig
+	cfg     registry.PackageConfig
 }
 
 func newRequiresReportFixture(t *testing.T, withRequires bool) *requiresReportFixture {
@@ -60,9 +62,9 @@ func newRequiresReportFixture(t *testing.T, withRequires bool) *requiresReportFi
 	}))
 	t.Cleanup(f.server.Close)
 
-	f.cfg = PackageConfig{URL: f.server.URL + "/releases_linux.json", Parser: "json", Path: "version"}
+	f.cfg = registry.PackageConfig{URL: f.server.URL + "/releases_linux.json", Parser: "json", Path: "version"}
 	if withRequires {
-		f.cfg.Requires = map[string]RequireSpec{
+		f.cfg.Requires = map[string]registry.RequireSpec{
 			"dev-lang/dart": {Pattern: `"version": "{version}",\s+"dart_sdk_version": "([^"]+)"`, Pin: "~"},
 		}
 	}
@@ -87,11 +89,11 @@ func (f *requiresReportFixture) check(t *testing.T) *CheckResult {
 	tmp := filepath.Dir(f.overlay)
 	c, err := NewChecker(f.overlay,
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{requiresReportPkg: f.cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{requiresReportPkg: f.cfg}}),
 		WithPendingList(f.pending),
 		WithGentooPath(f.gentoo),
 		WithRateLimiter(unlimitedRateLimiter()),
-		WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+		WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -280,10 +282,10 @@ func TestRequiresReportPendingIndependentOfCheckOrder(t *testing.T) {
 				t.Fatalf("pending list not empty at start: %+v", got)
 			}
 
-			cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+			cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 				"dev-lang/flutter": {
 					URL: flutterPage.URL + "/releases_linux.json", Parser: "json", Path: "version",
-					Requires: map[string]RequireSpec{
+					Requires: map[string]registry.RequireSpec{
 						"dev-lang/dart": {Pattern: `"version": "{version}",\s+"dart_sdk_version": "([^"]+)"`, Pin: "~"},
 					},
 				},
@@ -296,7 +298,7 @@ func TestRequiresReportPendingIndependentOfCheckOrder(t *testing.T) {
 				WithGentooPath(gentoo),
 				WithConcurrency(1),
 				WithRateLimiter(unlimitedRateLimiter()),
-				WithHTTPClient(NewRetryableHTTPClientWithConfig(RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
+				WithHTTPClient(fetch.NewRetryableHTTPClientWithConfig(fetch.RetryConfig{MaxRetries: 0, Timeout: 5 * time.Second})),
 			)
 			if err != nil {
 				t.Fatalf("NewChecker: %v", err)

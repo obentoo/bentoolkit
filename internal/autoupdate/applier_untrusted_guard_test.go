@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // untrustedFixture is one package ready for Apply: an ebuild at oldVersion that
@@ -75,7 +77,7 @@ func newUntrustedFixture(t *testing.T, update PendingUpdate) *untrustedFixture {
 // applier builds an Applier over the fixture; extra options are appended.
 func (f *untrustedFixture) applier(t *testing.T, extra ...ApplierOption) *Applier {
 	t.Helper()
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{f.pkg: {
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{f.pkg: {
 		Parser:     "regex",
 		URL:        "https://example.invalid/betterbird",
 		Pattern:    `Betterbird ([0-9.]+)`,

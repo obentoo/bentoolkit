@@ -5,7 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -131,13 +132,13 @@ func TestNewConfiguredLLMProvider(t *testing.T) {
 			name:      "unknown provider returns ErrLLMUnsupportedProvider",
 			cfg:       config.LLMConfig{Provider: "bogus"},
 			wantErr:   true,
-			wantErrIs: autoupdate.ErrLLMUnsupportedProvider,
+			wantErrIs: llm.ErrLLMUnsupportedProvider,
 		},
 		{
 			name:        "claude without API key returns ErrLLMAPIKeyMissing",
 			cfg:         config.LLMConfig{Provider: "claude", APIKeyEnv: claudeKeyEnv},
 			wantErr:     true,
-			wantErrIs:   autoupdate.ErrLLMAPIKeyMissing,
+			wantErrIs:   llm.ErrLLMAPIKeyMissing,
 			clearKeyEnv: true,
 		},
 	}
@@ -247,8 +248,8 @@ func TestNewConfiguredBumpReviewer_NonAgenticProviderYieldsATrueNil(t *testing.T
 // the way `== nil` does, every assertion above would pass vacuously — which is
 // the exact shape of the bug being tested for, one level up.
 func TestIsTrueNil_DistinguishesABoxedNil(t *testing.T) {
-	var typed *autoupdate.ClaudeCodeFixer //nolint:staticcheck // SA4023 related information: the concrete type IS the box the comparison below demonstrates. The nolint on the comparison itself does not cover the related-information diagnostic golangci-lint raises here.
-	var boxed autoupdate.ManifestFixer = typed
+	var typed *fixer.ClaudeCodeFixer //nolint:staticcheck // SA4023 related information: the concrete type IS the box the comparison below demonstrates. The nolint on the comparison itself does not cover the related-information diagnostic golangci-lint raises here.
+	var boxed fixer.ManifestFixer = typed
 
 	if boxed == nil { //nolint:staticcheck // demonstrating the trap is the point
 		t.Fatal("a boxed nil pointer compared equal to nil; this Go release has changed and the whole discipline needs revisiting")
@@ -257,7 +258,7 @@ func TestIsTrueNil_DistinguishesABoxedNil(t *testing.T) {
 		t.Error("isTrueNil did not see through the box; every nil assertion in this file would then pass vacuously")
 	}
 
-	var absent autoupdate.ManifestFixer
+	var absent fixer.ManifestFixer
 	if !isTrueNil(absent) {
 		t.Error("isTrueNil reported a genuinely nil interface as non-nil")
 	}

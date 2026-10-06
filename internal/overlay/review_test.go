@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -501,7 +503,7 @@ func reviewFixtureIn(t *testing.T, cacheDir string) (*CompareReport, provider.Pr
 		},
 	}
 
-	report, err := CompareWithProvider(t.Context(), []PackageInfo{
+	report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{
 		{Category: "kde-plasma", Package: "spectacle", LatestVersion: "6.7.4"},
 		{Category: "kde-plasma", Package: "kwin", LatestVersion: "6.7.4"},
 		{Category: "app-editors", Package: "zed", LatestVersion: "1.0"},
@@ -911,7 +913,7 @@ func TestAnnotateReviews(t *testing.T) {
 			Divergence:    map[string]Divergence{"dev-libs/alpha": {}, "dev-libs/beta": {}},
 			Logger:        warnLog,
 		}
-		report, err := CompareWithProvider(t.Context(), []PackageInfo{
+		report, err := CompareWithProvider(t.Context(), []repo.PackageInfo{
 			{Category: "dev-libs", Package: "alpha", LatestVersion: "1.0"},
 			{Category: "dev-libs", Package: "beta", LatestVersion: "1.0"},
 		}, prov, opts)

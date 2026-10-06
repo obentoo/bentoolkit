@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obentoo/bentoolkit/internal/common/httputil"
+	"github.com/obentoo/bentoolkit/internal/common/httpx"
 )
 
 const (
@@ -127,7 +127,7 @@ type RepositoryRegistry struct {
 // newRegistryHTTPClient is the client every registry download uses unless one
 // was injected.
 func newRegistryHTTPClient() *http.Client {
-	return &http.Client{Timeout: registryHTTPTimeout, Transport: httputil.BuildTransport()}
+	return &http.Client{Timeout: registryHTTPTimeout, Transport: httpx.BuildTransport()}
 }
 
 // client returns the injected HTTP client, or the default timed one when none
@@ -199,7 +199,7 @@ func (r *RepositoryRegistry) download(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching registry %s: %w", r.url, err)
 	}
-	resp.Body = http.MaxBytesReader(nil, resp.Body, httputil.MaxBodyBytes)
+	resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -210,7 +210,7 @@ func (r *RepositoryRegistry) download(ctx context.Context) ([]byte, error) {
 	// the cache.
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading registry %s: %w", r.url, httputil.ClassifyBodyReadError(err))
+		return nil, fmt.Errorf("reading registry %s: %w", r.url, httpx.ClassifyBodyReadError(err))
 	}
 
 	if err := os.WriteFile(r.XMLPath, data, 0o600); err != nil {

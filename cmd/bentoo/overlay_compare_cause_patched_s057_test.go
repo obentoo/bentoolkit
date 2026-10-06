@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
+
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
@@ -47,13 +49,13 @@ func s057CompareDeclared(t *testing.T) *overlay.CompareReport {
 		Divergence:    map[string]overlay.Divergence{"s057/declfail": declared, "s057/declok": declared},
 		Redact:        []string{s057Token},
 	}
-	var pkgs []overlay.PackageInfo
+	var pkgs []repo.PackageInfo
 	for _, name := range []string{"declfail", "declok"} {
 		// The two sides DIFFER, so the declaration is live, not stale.
 		writeReviewEbuild(t, overlayRoot, "s057", name, "1.0", fmt.Sprintf("%sDESCRIPTION=\"ours %s\"\n", cmdReviewOurs, name))
 		writeReviewEbuild(t, upstreamRoot, "s057", name, "1.0", fmt.Sprintf("%sDESCRIPTION=\"theirs %s\"\n", cmdReviewTheirs, name))
 		base.versions["s057/"+name] = []string{"1.0"}
-		pkgs = append(pkgs, overlay.PackageInfo{Category: "s057", Package: name, Versions: []string{"1.0"}, LatestVersion: "1.0"})
+		pkgs = append(pkgs, repo.PackageInfo{Category: "s057", Package: name, Versions: []string{"1.0"}, LatestVersion: "1.0"})
 	}
 	rep, err := overlay.CompareWithProvider(t.Context(), pkgs, prov, opts)
 	if err != nil {

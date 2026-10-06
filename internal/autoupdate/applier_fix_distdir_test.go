@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 )
 
 // --- sub-task 2.1 — the staged manifest accepts a supplied distdir ----------
@@ -181,10 +183,10 @@ func filepathHasPrefix(path, root string) bool {
 // fail for the reason this test exists, which is how story 035 shipped green
 // over this same bug.
 func TestGateReadsTheDistdirTheFixFetched(t *testing.T) {
-	applier, fixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
+	applier, manifestFixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
 
 	var fetched string
-	fixer.onCall = func(req ManifestFixRequest) {
+	manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
 		// Stand in for the agent's own `pkgdev manifest --distdir`: the bytes
 		// land in the private directory the fixer was handed, and the Manifest it
 		// writes is COMPLETE — which is exactly why the re-check then downloads
@@ -223,9 +225,9 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			applier, fixer, _ := newGateApplier(t, tc.recheck(), gatePkg{"a/b", "1.0", "2.0"})
+			applier, manifestFixer, _ := newGateApplier(t, tc.recheck(), gatePkg{"a/b", "1.0", "2.0"})
 			var dir string
-			fixer.onCall = func(req ManifestFixRequest) {
+			manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
 				dir = req.DistDir
 				// Non-empty, because an empty directory would be removed by a
 				// code path that never owned it and the assertion would hold for
@@ -253,10 +255,10 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 // to remove — with the shared distdir, which does hold something, right there
 // unread. This is the row that stops the fix from becoming the bug's mirror image.
 func TestAnEmptyFixDistdirStillFallsBack(t *testing.T) {
-	applier, fixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
+	applier, manifestFixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
 
 	var fetched string
-	fixer.onCall = func(req ManifestFixRequest) {
+	manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
 		// The repair succeeds WITHOUT fetching: it rewrote SRC_URI to a name
 		// already digested, so its private directory stays empty.
 		fetched = req.DistDir

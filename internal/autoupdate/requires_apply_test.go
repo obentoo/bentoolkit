@@ -29,6 +29,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
@@ -92,7 +93,7 @@ type requiresApplyFixture struct {
 	staging  string // "" unless the fixture was asked to stage
 	pending  *PendingList
 	exec     *execRecorder
-	cfg      PackageConfig
+	cfg      registry.PackageConfig
 	ebuild   string
 	oldBytes []byte
 }
@@ -130,9 +131,9 @@ func newRequiresApplyFixture(t *testing.T, opt requiresApplyOptions) *requiresAp
 	createTestEbuildFileWithContent(t, f.overlay, requiresApplyPkg, requiresApplyOld, f.ebuild)
 	f.oldBytes = []byte(f.ebuild)
 
-	f.cfg = PackageConfig{URL: "https://example.com/releases_linux.json", Parser: "json", Path: "version"}
+	f.cfg = registry.PackageConfig{URL: "https://example.com/releases_linux.json", Parser: "json", Path: "version"}
 	if !opt.noSpec {
-		f.cfg.Requires = map[string]RequireSpec{
+		f.cfg.Requires = map[string]registry.RequireSpec{
 			requiresApplyAtom: {Pattern: `"version": "{version}",\s+"dart_sdk_version": "([^"]+)"`, Pin: "~"},
 		}
 	}
@@ -164,7 +165,7 @@ func (f *requiresApplyFixture) applier(t *testing.T, extra ...ApplierOption) *Ap
 	t.Helper()
 	opts := []ApplierOption{
 		WithApplierPendingList(f.pending),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{requiresApplyPkg: f.cfg}}),
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{requiresApplyPkg: f.cfg}}),
 		WithApplierGentooPath(f.gentoo),
 		WithExecCommand(f.exec.command),
 		WithConfirmFunc(func(string) bool { return true }),
