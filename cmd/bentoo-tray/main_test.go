@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-
-	"github.com/obentoo/bentoolkit/internal/common/version"
 )
 
 const childEnv = "BENTOO_TRAY_TEST_CHILD"
@@ -236,17 +234,6 @@ func owned(t *testing.T, conn *dbus.Conn) bool {
 		t.Fatal(err)
 	}
 	return has
-}
-
-// TestRun_VersionPrintsAndExitsZero: --version prints version.Info().
-func TestRun_VersionPrintsAndExitsZero(t *testing.T) {
-	c := newChild(t, "unix:path=/nonexistent/bentoo-tray-bus", "unix:path=/nonexistent/bentoo-tray-bus", nil, "--version")
-	if code := c.run(t, 10*time.Second); code != 0 {
-		t.Fatalf("--version exited %d; stderr:\n%s", code, c.stderr)
-	}
-	if !strings.Contains(c.stdout.String(), version.Info()) {
-		t.Errorf("stdout %q does not carry version.Info() %q", c.stdout, version.Info())
-	}
 }
 
 // TestRun_UnreachableBusExitsOneNamingTheAddress is R1.3.

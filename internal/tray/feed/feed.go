@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/httpx"
-	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/obentoo/bentoolkit/internal/notices"
+	trayversion "github.com/obentoo/bentoolkit/internal/tray/version"
 )
 
 const (
@@ -102,9 +102,10 @@ func DefaultClient() *http.Client {
 	}
 }
 
-// DefaultUserAgent returns "bentoo-tray/<version>".
+// DefaultUserAgent returns "bentoo-tray/<tray version>", the version the tray
+// reports for itself rather than the bentoolkit release it ships in.
 func DefaultUserAgent() string {
-	return "bentoo-tray/" + version.Short()
+	return "bentoo-tray/" + trayversion.Version()
 }
 
 // Fetch GETs the feed, sending etag as If-None-Match when it is not empty.
