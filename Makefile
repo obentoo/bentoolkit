@@ -173,6 +173,49 @@ audit-ctx:
 		echo "audit-ctx: no naked context.Background() in internal/autoupdate or internal/overlay"; \
 	fi
 
+# Audit production comments and strings: comments must stand on their own for a
+# reader who has no access to the gitignored planning notes, so a tracker ID
+# (S058, S042-D7, R4.4, "(D9)", "sub-task 13.4", "story 060") in a non-test Go
+# file fails, and so does a run of 20+ consecutive // lines unless it is the
+# package doc comment directly above the package clause. A false positive is
+# fixed by rewording the line: there is no allowlist. A missing directory is an
+# error, never a clean result.
+AUDIT_COMMENTS_DIRS ?= cmd internal
+AUDIT_COMMENTS_MAX_BLOCK := 20
+AUDIT_COMMENTS_ID_RE := -e '\bS[0-9]{3}\b' \
+	-e '\bS[0-9]{3}-[A-Z]+[0-9]+' \
+	-e '\b[A-Z][0-9]{1,2}(\.[0-9]+)+\b' \
+	-e '\([^)]*\b[A-HQRT][0-9]{1,2}\b[^)]*\)' \
+	-e '\b[Ss]ub-?tasks? [0-9]+(\.[0-9]+)?\b' \
+	-e '\b[Ss]tor(y|ies) [0-9]{3}\b'
+
+.PHONY: audit-comments
+audit-comments:
+	@set -eu; \
+	for dir in $(AUDIT_COMMENTS_DIRS); do \
+		if [ ! -d "$$dir" ]; then echo "audit-comments: $$dir: no such directory" >&2; exit 2; fi; \
+	done; \
+	files="$$(find $(AUDIT_COMMENTS_DIRS) -type f -name '*.go' ! -name '*_test.go' | LC_ALL=C sort)"; \
+	ids=""; blocks=""; \
+	if [ -n "$$files" ]; then \
+		ids="$$(printf '%s\n' "$$files" | xargs -d '\n' grep -nHE $(AUDIT_COMMENTS_ID_RE) -- | sed -E 's/^([^:]+:[0-9]+):/\1: tracker ID: /' || true)"; \
+		blocks="$$(printf '%s\n' "$$files" | xargs -d '\n' awk -v max=$(AUDIT_COMMENTS_MAX_BLOCK) ' \
+			function flush(next_line) { \
+				if (run >= max && next_line !~ /^package[ \t]/) printf "%s:%d: comment block of %d lines\n", bfile, start, run; \
+				run = 0 \
+			} \
+			FNR == 1 && NR > 1 { flush("") } \
+			/^[ \t]*\/\// { if (run == 0) { start = FNR; bfile = FILENAME }; run++; next } \
+			{ flush($$0) } \
+			END { flush("") }')"; \
+	fi; \
+	if [ -n "$$ids$$blocks" ]; then \
+		[ -z "$$ids" ] || printf '%s\n' "$$ids"; \
+		[ -z "$$blocks" ] || printf '%s\n' "$$blocks"; \
+		exit 1; \
+	fi; \
+	echo "audit-comments: no tracker IDs and no comment block of $(AUDIT_COMMENTS_MAX_BLOCK)+ lines in $(AUDIT_COMMENTS_DIRS)"
+
 # Security audit
 .PHONY: audit
 audit: audit-ctx
