@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -44,7 +45,7 @@ func NewProvider(repoInfo *RepositoryInfo, forceClone bool) (Provider, error) {
 
 // ResolveRepository resolves a repository name to its full info.
 // Priority: config repos > registry > error.
-func ResolveRepository(name string, configRepos map[string]*RepositoryInfo, registry *RepositoryRegistry) (*RepositoryInfo, error) {
+func ResolveRepository(ctx context.Context, name string, configRepos map[string]*RepositoryInfo, registry *RepositoryRegistry) (*RepositoryInfo, error) {
 	if configRepos != nil {
 		if repo, ok := configRepos[name]; ok {
 			return repo.Clone(), nil
@@ -52,7 +53,7 @@ func ResolveRepository(name string, configRepos map[string]*RepositoryInfo, regi
 	}
 
 	if registry != nil {
-		info, err := registry.Resolve(name)
+		info, err := registry.Resolve(ctx, name)
 		if err == nil {
 			return info, nil
 		}
@@ -66,7 +67,7 @@ func ResolveRepository(name string, configRepos map[string]*RepositoryInfo, regi
 
 // ListAvailableRepositories returns a sorted list of all available repository names
 // from both config and registry sources, deduplicated.
-func ListAvailableRepositories(configRepos map[string]*RepositoryInfo, registry *RepositoryRegistry) []string {
+func ListAvailableRepositories(ctx context.Context, configRepos map[string]*RepositoryInfo, registry *RepositoryRegistry) []string {
 	seen := make(map[string]bool)
 	var repos []string
 
@@ -78,7 +79,7 @@ func ListAvailableRepositories(configRepos map[string]*RepositoryInfo, registry 
 	}
 
 	if registry != nil {
-		if names, err := registry.List(); err == nil {
+		if names, err := registry.List(ctx); err == nil {
 			for _, name := range names {
 				if !seen[name] {
 					seen[name] = true

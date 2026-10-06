@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -244,7 +245,7 @@ func TestRegistry_FreshDownload(t *testing.T) {
 	defer server.Close()
 
 	reg := newTestRegistry(t, server)
-	names, err := reg.List()
+	names, err := reg.List(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -271,7 +272,7 @@ func TestRegistry_CachedFileSkipsDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := reg.List()
+	_, err := reg.List(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -297,7 +298,7 @@ func TestRegistry_ExpiredCacheRedownloads(t *testing.T) {
 	oldTime := time.Now().Add(-25 * time.Hour)
 	os.Chtimes(reg.XMLPath, oldTime, oldTime)
 
-	_, err := reg.List()
+	_, err := reg.List(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestRegistry_SyncForcesDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := reg.Sync(); err != nil {
+	if err := reg.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync error: %v", err)
 	}
 	if hits != 1 {
@@ -353,7 +354,7 @@ func TestRegistry_DownloadFailureFallsBackToEselect(t *testing.T) {
 		url:      server.URL,
 	}
 
-	names, err := reg.List()
+	names, err := reg.List(context.Background())
 	if err != nil {
 		t.Fatalf("expected fallback to work, got error: %v", err)
 	}
@@ -369,7 +370,7 @@ func TestRegistry_ResolveKnownRepo(t *testing.T) {
 	defer server.Close()
 
 	reg := newTestRegistry(t, server)
-	info, err := reg.Resolve("gentoo")
+	info, err := reg.Resolve(context.Background(), "gentoo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -391,7 +392,7 @@ func TestRegistry_ResolveUnknown(t *testing.T) {
 	defer server.Close()
 
 	reg := newTestRegistry(t, server)
-	_, err := reg.Resolve("nonexistent")
+	_, err := reg.Resolve(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for unknown repo")
 	}
@@ -404,7 +405,7 @@ func TestRegistry_ListReturnsSorted(t *testing.T) {
 	defer server.Close()
 
 	reg := newTestRegistry(t, server)
-	names, err := reg.List()
+	names, err := reg.List(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

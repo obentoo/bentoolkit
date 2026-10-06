@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -105,7 +106,7 @@ func TestResolveRepository(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			repo, err := ResolveRepository(tc.repoName, tc.configRepos, tc.registry)
+			repo, err := ResolveRepository(context.Background(), tc.repoName, tc.configRepos, tc.registry)
 
 			if tc.wantErr {
 				if err == nil {
@@ -135,7 +136,7 @@ func TestListAvailableRepositories(t *testing.T) {
 		"custom": {Name: "custom"},
 	}
 
-	repos := ListAvailableRepositories(configRepos, registry)
+	repos := ListAvailableRepositories(context.Background(), configRepos, registry)
 
 	expected := map[string]bool{
 		"gentoo":     true,
@@ -169,7 +170,7 @@ func TestListAvailableRepositories_Deduplicated(t *testing.T) {
 		"gentoo": {Name: "gentoo", URL: "/local/gentoo"},
 	}
 
-	repos := ListAvailableRepositories(configRepos, registry)
+	repos := ListAvailableRepositories(context.Background(), configRepos, registry)
 
 	count := 0
 	for _, r := range repos {
@@ -187,7 +188,7 @@ func TestListAvailableRepositories_NilRegistry(t *testing.T) {
 		"test": {Name: "test"},
 	}
 
-	repos := ListAvailableRepositories(configRepos, nil)
+	repos := ListAvailableRepositories(context.Background(), configRepos, nil)
 	if len(repos) != 1 || repos[0] != "test" {
 		t.Errorf("expected [test], got %v", repos)
 	}

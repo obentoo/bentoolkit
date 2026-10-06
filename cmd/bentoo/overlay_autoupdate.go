@@ -1264,8 +1264,13 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
 func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
-	prov, err := ar.deps.resolveGentooProvider(ar.log(), cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
+		// Interrupted: the --check run reports its own interruption, and a
+		// "skipped" warning here would only repeat it under another name.
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		ar.log().Warn("revivable-orphan scan skipped", "err", err)
 		return
 	}
@@ -2050,7 +2055,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 // owns prov.Close() and decides whether a resolution error is fatal
 // (runRevive/runReviveList exit non-zero; the --revivable add-on to --check only
 // warns and skips the report).
-func resolveGentooProvider(log *slog.Logger, cfg *config.Config) (provider.Provider, error) {
+func resolveGentooProvider(ctx context.Context, log *slog.Logger, cfg *config.Config) (provider.Provider, error) {
 	configRepos := convertConfigRepos(log, cfg)
 
 	registry, err := provider.NewRepositoryRegistry()
@@ -2058,8 +2063,13 @@ func resolveGentooProvider(log *slog.Logger, cfg *config.Config) (provider.Provi
 		return nil, fmt.Errorf("failed to initialize repository registry: %w", err)
 	}
 
-	repoInfo, err := provider.ResolveRepository("gentoo", configRepos, registry)
+	repoInfo, err := provider.ResolveRepository(ctx, "gentoo", configRepos, registry)
 	if err != nil {
+		// An interrupted registry fetch is not a missing repository: say so, and
+		// keep context.Canceled in the chain for the callers.
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("%s: %w", registryInterruptedMsg, err)
+		}
 		return nil, fmt.Errorf("repository 'gentoo' not found: %w", err)
 	}
 
@@ -2095,7 +2105,7 @@ func (ar *autoupdateRun) runReviveList(ctx context.Context, overlayPath, configD
 		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
-	prov, err := ar.deps.resolveGentooProvider(ar.log(), cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -2168,7 +2178,7 @@ func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pen
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
 func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
-	prov, err := ar.deps.resolveGentooProvider(ar.log(), cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
 		return failWith(1, err)
 	}

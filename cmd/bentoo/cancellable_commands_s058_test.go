@@ -359,6 +359,8 @@ type s058CancellableOutcome struct {
 	signaled bool
 	sig      syscall.Signal
 	output   string
+	// afterSignal is how long the child ran after its SIGINT was sent.
+	afterSignal time.Duration
 }
 
 // s058InterruptChild starts the real tree with args in a re-exec'd child,
@@ -421,12 +423,13 @@ poll:
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatalf("signalling the child: %v", err)
 	}
+	signalled := time.Now()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
 		t.Fatalf("bentoo %s was still running 30s after its first SIGINT (waiting on %s):\n%s", strings.Join(args, " "), ready, output())
 	}
-	o := s058CancellableOutcome{ready: ready, output: output()}
+	o := s058CancellableOutcome{ready: ready, output: output(), afterSignal: time.Since(signalled)}
 	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 		o.signaled, o.sig, o.code = true, ws.Signal(), -1
 	} else {
@@ -444,8 +447,14 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 type s058CancellablePin struct {
 	command string // the command path, as in cancellableCommands
 	args    []string
-	want    int  // the exit code measured at 6be73ec (e051559 for the notice commands)
+	want    int  // the exit code measured at the row's baseline (see baseline)
 	killed  bool // measured at 6be73ec: terminated by the signal itself
+	// within, when not zero, bounds the time from the SIGINT to the exit;
+	// zero leaves only the harness's own 30 s deadline.
+	within time.Duration
+	// baseline names where want was measured; empty means 6be73ec
+	// (e051559 for the notice commands).
+	baseline string
 	// setup, when not nil, prepares the overlay for this command alone.
 	setup func(t *testing.T, overlay string)
 }
@@ -496,10 +505,12 @@ func s058CancellablePins() []s058CancellablePin {
 		{command: "notice new", args: []string{"notice", "new", "--type", "news", "--severity", "info",
 			"--title", "s058", "--summary", "s058 summary.", "--name", "s058", "--published", "2026-09-28"}, want: 1},
 		{command: "notice revise", args: []string{"notice", "revise", s058NoticeID}, want: 1, setup: s058WriteNoticeItem},
+		// Pinned by story 070, each waiting on the repository registry
+		// download: at 6be73ec both were still running 30 s after the SIGINT,
+		// so the bound is what fails a fix that waits out the client timeout.
+		{command: "overlay compare", args: []string{"overlay", "compare"}, want: 1, within: 5 * time.Second, baseline: "story 070"},
+		{command: "overlay prune", args: []string{"overlay", "prune"}, want: 1, within: 5 * time.Second, baseline: "story 070"},
 		// Not pinned, with the reason measured at 6be73ec:
-		//   overlay compare, overlay prune — interrupted while a network peer
-		//     never answers, both were still running 30 s after the SIGINT;
-		//     their interrupted run has no code to pin in bounded time.
 		//   overlay staged clean — waits on no external program; with nothing
 		//     staged it returns 0 before anything can be interrupted.
 		//   snapshot restore — refuses before any wait without a configured
@@ -528,15 +539,21 @@ func TestS058CancellableCommandsKeepTheirInterruptedCodes(t *testing.T) {
 			t.Parallel()
 			o := s058InterruptChild(t, pin.args, pin.setup)
 			label := "bentoo " + strings.Join(pin.args, " ")
+			baseline := pin.baseline
+			if baseline == "" {
+				baseline = "6be73ec (e051559 for the notice commands)"
+			}
 			switch {
 			case pin.killed && !o.signaled:
 				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT; at 6be73ec it installed no signal context and was killed by the signal (R4.6):\n%s", label, o.ready, o.code, o.output)
 			case !pin.killed && o.signaled:
-				t.Errorf("%s (waiting on %s) was killed by its first %v; at 6be73ec (e051559 for the notice commands) its signal context was cancelled and it exited %d (R4.7, R4.8):\n%s", label, o.ready, o.sig, pin.want, o.output)
+				t.Errorf("%s (waiting on %s) was killed by its first %v; at %s its signal context was cancelled and it exited %d (R4.7, R4.8):\n%s", label, o.ready, o.sig, baseline, pin.want, o.output)
 			case !pin.killed && o.code != pin.want:
-				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT, want %d, the code measured at 6be73ec (e051559 for the notice commands) (R4.8):\n%s", label, o.ready, o.code, pin.want, o.output)
+				t.Errorf("%s (waiting on %s) exited %d after its first SIGINT, want %d, the code measured at %s (R4.8):\n%s", label, o.ready, o.code, pin.want, baseline, o.output)
 			case pin.killed && o.sig != syscall.SIGINT:
 				t.Errorf("%s was killed by %v, want SIGINT", label, o.sig)
+			case pin.within > 0 && o.afterSignal > pin.within:
+				t.Errorf("%s (waiting on %s) exited %v after its first SIGINT, want within %v (S070-R5.2):\n%s", label, o.ready, o.afterSignal, pin.within, o.output)
 			}
 		})
 	}

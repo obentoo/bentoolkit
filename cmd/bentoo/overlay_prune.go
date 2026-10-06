@@ -276,7 +276,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		return nil
 	}
 
-	prov, err := d.resolveGentooProvider(logging.FromContext(ctx), cfg)
+	prov, err := d.resolveGentooProvider(ctx, logging.FromContext(ctx), cfg)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  %v\n", err)
 		return exitWith(1)
